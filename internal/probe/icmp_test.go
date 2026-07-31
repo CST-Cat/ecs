@@ -88,3 +88,39 @@ func TestIPerfUDPJSONFields(t *testing.T) {
 		t.Fatalf("lost percent = %f", sum.LostPercent)
 	}
 }
+
+// TCP 与 ICMP 严重背离说明握手被本地代理代答，必须报警而不是把数字当真。
+//
+// 这个判定来自一次真实观测：同一个 IP 的 ICMP 往返 227 ms、TCP 握手 2.7 ms，
+// 相差两个数量级，成因是网关上的透明代理代答 TCP 而不处理 ICMP。
+func TestTCPLikelyIntercepted(t *testing.T) {
+	realICMP := icmpStats{Available: true, AvgMS: 227, LossPercent: 0}
+	if !tcpLikelyIntercepted(100*time.Microsecond, realICMP) {
+		t.Fatal("0.1ms TCP 对 227ms ICMP 必须判为被截获")
+	}
+	if !tcpLikelyIntercepted(3*time.Millisecond, realICMP) {
+		t.Fatal("3ms TCP 对 227ms ICMP 必须判为被截获")
+	}
+	// 同量级是正常的：TCP 握手与 ICMP echo 都只花一个往返。
+	if tcpLikelyIntercepted(230*time.Millisecond, realICMP) {
+		t.Fatal("同量级的 TCP 与 ICMP 不能判为被截获")
+	}
+	if tcpLikelyIntercepted(60*time.Millisecond, realICMP) {
+		t.Fatal("5 倍以内的差异属于正常波动")
+	}
+
+	// 缺证据一律不判：没有 ICMP、ICMP 全丢、目标在本地网络都不足以下结论。
+	for name, icmp := range map[string]icmpStats{
+		"ICMP 不可用": {Available: false, AvgMS: 227},
+		"ICMP 全丢":  {Available: true, AvgMS: 227, LossPercent: 100},
+		"本地目标":     {Available: true, AvgMS: 0.5, LossPercent: 0},
+	} {
+		if tcpLikelyIntercepted(10*time.Microsecond, icmp) {
+			t.Fatalf("%s 时不应下截获结论", name)
+		}
+	}
+	// TCP 全部失败（中位数为 0）时没有可比对象。
+	if tcpLikelyIntercepted(0, realICMP) {
+		t.Fatal("没有成功的 TCP 样本时不能下结论")
+	}
+}

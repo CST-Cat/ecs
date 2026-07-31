@@ -59,6 +59,29 @@ func resolveEndpoint(ctx context.Context, address string) (string, time.Duration
 	return net.JoinHostPort(addresses[0].Unmap().String(), port), elapsed, nil
 }
 
+// tcpInterceptRatio 是判定 TCP 建连被本地截获的倍数阈值。
+//
+// TCP 三次握手与 ICMP echo 都只花一个网络往返，对同一个 IP 应当在同一量级。
+// 当 TCP 中位数比 ICMP 平均值小到数倍以上时，握手几乎不可能真的到达目标：
+// 常见成因是本机或网关上的透明代理、TPROXY 重定向、加速器和企业中间盒——
+// 它们代答 TCP 而不处理 ICMP。此时 TCP 数字反映的是到代理的距离。
+const tcpInterceptRatio = 5
+
+// tcpLikelyIntercepted 判断 TCP 建连延迟是否与同目标的 ICMP 往返严重背离。
+//
+// 只在 ICMP 确实拿到样本、且目标不在本地网络时判断；缺证据一律返回 false，
+// 绝不把普通的网络波动说成代理截获。
+func tcpLikelyIntercepted(tcpMedian time.Duration, icmp icmpStats) bool {
+	if !icmp.Available || icmp.LossPercent >= 100 || icmp.AvgMS <= 1 {
+		return false
+	}
+	tcpMS := float64(tcpMedian) / float64(time.Millisecond)
+	if tcpMS <= 0 {
+		return false
+	}
+	return icmp.AvgMS/tcpMS >= tcpInterceptRatio
+}
+
 func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	result := model.NewResult("latency", "网络延迟")
@@ -133,6 +156,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	var best time.Duration
 	var bestName string
 	allFailed := true
+	var intercepted []string
 	for _, item := range collected {
 		median := medianDuration(item.Values)
 		p95 := percentileDuration(item.Values, 0.95)
@@ -180,6 +204,9 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 				Method: "icmp-echo-v1", HigherIsBetter: model.BoolPtr(false),
 			})
 		}
+		if tcpLikelyIntercepted(median, item.ICMP) {
+			intercepted = append(intercepted, item.Endpoint.Name)
+		}
 	}
 	result.Tables = []model.Table{table}
 	if allFailed {
@@ -204,6 +231,16 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		)
 	} else {
 		result.Notes = append(result.Notes, "系统没有可用的 ping，本次只有 TCP 建连延迟；ecs 不会用 TCP 数字冒充 ICMP 结果。")
+	}
+	if len(intercepted) > 0 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"%s 的 TCP 建连延迟不到同目标 ICMP 往返的 1/%d：握手几乎不可能真的到达目标，"+
+				"通常是本机或网关上的透明代理、TPROXY 重定向或加速器代答了 TCP。"+
+				"此时 TCP 列反映的是到代理的距离，不能当作本机到目标的链路延迟；"+
+				"ICMP 列不经代理，更接近真实往返。",
+			strings.Join(intercepted, "、"), tcpInterceptRatio,
+		))
 	}
 	result.Finish(start)
 	return result

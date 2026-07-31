@@ -22,6 +22,13 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: false
+      # 标准基准适配器的测试跑真实的 fio / sysbench / iperf3，不使用脚本替身。
+      # 替身只能证明解析器认得自己造出来的输出，证明不了它认得工具的真实输出。
+      - name: Install benchmark tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
+          fio --version && sysbench --version && iperf3 --version | head -1
       - run: go test ./...
       - run: go vet ./...
       - run: go build ./cmd/ecs
@@ -36,6 +43,10 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - name: Install benchmark tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
       - run: go test -race ./...
 
   cross:

@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -132,36 +136,25 @@ func TestFIOJSONHelpers(t *testing.T) {
 	}
 }
 
-// writeFIOAdapter 写一个假 fio，--enghelp 只报告 engine，其余调用返回固定 JSON。
+// requireTool 返回真实基准工具的路径。
 //
-// engine 决定被测的是哪条真实路径：libaio 是绝大多数 VPS 的实际情况，psync 是
-// 精简发行版缺少 libaio 时的降级路径。两条都必须有用例覆盖。
-func writeFIOAdapter(t *testing.T, directory, engine string) string {
+// 这些测试跑真实的 fio / sysbench / iperf3，不使用脚本替身：替身只能证明解析器
+// 认得它自己造出来的输出，证明不了它认得工具的真实输出。CI 会安装这三个工具，
+// 因此在 CI 上缺失一律直接失败，避免测试静默跳过后仍然显示为绿。
+func requireTool(t *testing.T, name string) string {
 	t.Helper()
-	helper := filepath.Join(directory, "fio")
-	script := `#!/bin/sh
-case "$*" in
-  *--enghelp*)
-    printf '%s\n' '` + engine + `'
-    exit 0
-    ;;
-esac
-printf '%s\n' '{"fio version":"fio-test","jobs":[
-{"jobname":"seqwrite","error":0,"write":{"bw_bytes":104857600,"iops":100}},
-{"jobname":"seqread","error":0,"read":{"bw_bytes":209715200,"iops":200}},
-{"jobname":"randread","error":0,"read":{"bw_bytes":4096000,"iops":1000,"clat_ns":{"percentile":{"95.000000":2000000}}}},
-{"jobname":"randwrite","error":0,"write":{"bw_bytes":2048000,"iops":500,"clat_ns":{"percentile":{"95.000000":3000000}}}},
-{"jobname":"mix4k","error":0,"read":{"bw_bytes":2097152,"iops":512},"write":{"bw_bytes":1048576,"iops":256}},
-{"jobname":"mix1m","error":0,"read":{"bw_bytes":52428800,"iops":50},"write":{"bw_bytes":52428800,"iops":50}}
-]}'
-`
-	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	path, err := exec.LookPath(name)
+	if err == nil {
+		return path
 	}
-	return helper
+	if os.Getenv("CI") != "" {
+		t.Fatalf("%s 未安装：CI 必须以真实工具运行标准基准测试", name)
+	}
+	t.Skipf("%s 未安装，跳过真实基准测试；安装：apt-get install -y sysbench fio iperf3", name)
+	return ""
 }
 
-func fioFieldValue(result model.Result, key string) string {
+func resultField(result model.Result, key string) string {
 	for _, field := range result.Fields {
 		if field.Key == key {
 			return field.Value
@@ -170,53 +163,114 @@ func fioFieldValue(result model.Result, key string) string {
 	return ""
 }
 
-// libaio 是真实 VPS 上的主路径：队列深度必须真实生效，成绩按 QD32/QD64 标注。
-func TestRunFIODiskWithAsyncEngine(t *testing.T) {
+// 探测结果必须真的出自 fio --enghelp 的可用列表，而不是猜的。
+func TestDetectFIOEngineAgreesWithEnghelp(t *testing.T) {
+	fioPath := requireTool(t, "fio")
+	engine := detectFIOEngine(context.Background(), fioPath)
+	if !engine.Detected {
+		t.Fatalf("engine detection failed on a working fio: %+v", engine)
+	}
+
+	output, err := exec.Command(fioPath, "--enghelp").CombinedOutput()
+	if err != nil {
+		t.Fatalf("fio --enghelp: %v", err)
+	}
+	available := make(map[string]bool)
+	for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
+		available[strings.TrimSpace(line)] = true
+	}
+	if !available[engine.Name] {
+		t.Fatalf("detected engine %q is not in fio --enghelp: %v", engine.Name, output)
+	}
+	// AsyncQueue 决定报告里标注的队列深度，标错会让 QD1 成绩冒充 QD64。
+	if want := engine.Name == "io_uring" || engine.Name == "libaio"; engine.AsyncQueue != want {
+		t.Fatalf("engine %q AsyncQueue = %v, want %v", engine.Name, engine.AsyncQueue, want)
+	}
+	// 优先级必须是 io_uring > libaio > psync。
+	if available["io_uring"] && engine.Name != "io_uring" {
+		t.Fatalf("io_uring is available but %q was chosen", engine.Name)
+	}
+	if !available["io_uring"] && available["libaio"] && engine.Name != "libaio" {
+		t.Fatalf("libaio is available but %q was chosen", engine.Name)
+	}
+	t.Logf("fio %s 探测到引擎 %s（异步=%v）", fioPath, engine.Name, engine.AsyncQueue)
+}
+
+// 真实 fio 端到端：报告标注的队列深度必须与实际生效的引擎能力一致。
+//
+// 断言写成不变式而不是硬编码某个引擎名——同一份代码在有 io_uring 的内核、
+// 只有 libaio 的内核和只有 psync 的精简发行版上都必须自洽。
+func TestRunFIODiskWithRealFIO(t *testing.T) {
+	fioPath := requireTool(t, "fio")
 	directory := t.TempDir()
-	helper := writeFIOAdapter(t, directory, "libaio")
 	cfg, err := config.Defaults(config.ProfileQuick)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.DiskPath = directory
 	cfg.DiskMiB = 16
-	result := runFIODisk(context.Background(), Environment{Config: cfg}, helper)
-	if result.Status != "ok" {
+	engine := detectFIOEngine(context.Background(), fioPath)
+	result := runFIODisk(context.Background(), Environment{Config: cfg}, fioPath)
+	if result.Status != model.StatusOK {
 		t.Fatalf("fio result = %+v", result)
 	}
-	if !strings.Contains(result.Summary, "100.0 MiB/s") {
-		t.Fatalf("fio summary = %q", result.Summary)
+
+	if got := resultField(result, "ioengine"); !strings.Contains(got, engine.Name) {
+		t.Fatalf("ioengine field = %q, want it to name %q", got, engine.Name)
+	}
+	if got := resultField(result, "version"); !strings.HasPrefix(got, "fio-") {
+		t.Fatalf("fio version field = %q", got)
+	}
+	if got := resultField(result, "binary_sha256"); len(got) != 64 {
+		t.Fatalf("fio SHA-256 = %q", got)
 	}
 
-	// 探测到异步引擎后必须真的请求高队列深度，否则测到的是 QD1 成绩。
-	arguments := fioFieldValue(result, "arguments")
-	for _, expected := range []string{"--ioengine=libaio", "--iodepth=32", "--iodepth=64"} {
-		if !strings.Contains(arguments, expected) {
-			t.Fatalf("libaio args missing %q: %s", expected, arguments)
-		}
-	}
-	if engine := fioFieldValue(result, "ioengine"); !strings.Contains(engine, "libaio") || !strings.Contains(engine, "异步") {
-		t.Fatalf("ioengine field = %q", engine)
-	}
-
-	// 方法名必须体现实际生效的队列深度，否则不同 QD 的成绩会被混为一谈。
 	methods := make(map[string]string, len(result.Measurements))
 	for _, measurement := range result.Measurements {
 		methods[measurement.Key] = measurement.Method
+		if measurement.Value <= 0 {
+			t.Fatalf("real fio produced a non-positive value: %+v", measurement)
+		}
 	}
-	if got := methods["fio_random_read_4k_iops"]; !strings.Contains(got, "qd32") {
-		t.Fatalf("random read method = %q, want qd32", got)
-	}
-	if got := methods["fio_mixed_4k_read_mib_s"]; !strings.Contains(got, "qd64") {
-		t.Fatalf("mixed method = %q, want qd64", got)
-	}
-	for _, note := range result.Notes {
-		if strings.Contains(note, "队列深度对它无效") {
-			t.Fatalf("async engine must not be labelled as synchronous: %q", note)
+	arguments := resultField(result, "arguments")
+	randomMethod := methods["fio_random_read_4k_iops"]
+	mixedMethod := methods["fio_mixed_4k_read_mib_s"]
+	if engine.AsyncQueue {
+		for _, expected := range []string{"--iodepth=32", "--iodepth=64"} {
+			if !strings.Contains(arguments, expected) {
+				t.Fatalf("async engine %q must request %s: %s", engine.Name, expected, arguments)
+			}
+		}
+		if !strings.Contains(randomMethod, "qd32") || !strings.Contains(mixedMethod, "qd64") {
+			t.Fatalf("async methods = %q / %q, want qd32 / qd64", randomMethod, mixedMethod)
+		}
+		if !strings.Contains(resultField(result, "ioengine"), "异步") {
+			t.Fatalf("async engine must be labelled as such: %q", resultField(result, "ioengine"))
+		}
+		for _, note := range result.Notes {
+			if strings.Contains(note, "队列深度对它无效") {
+				t.Fatalf("async engine must not be labelled synchronous: %q", note)
+			}
+		}
+	} else {
+		if strings.Contains(arguments, "--iodepth=32") || strings.Contains(arguments, "--iodepth=64") {
+			t.Fatalf("sync engine %q must not request a queue depth: %s", engine.Name, arguments)
+		}
+		if !strings.Contains(randomMethod, "qd1") || !strings.Contains(mixedMethod, "qd1") {
+			t.Fatalf("sync methods = %q / %q, want qd1", randomMethod, mixedMethod)
+		}
+		downgradeNoted := false
+		for _, note := range result.Notes {
+			if strings.Contains(note, "队列深度对它无效") {
+				downgradeNoted = true
+			}
+		}
+		if !downgradeNoted {
+			t.Fatalf("sync engine must disclose the queue-depth downgrade: %+v", result.Notes)
 		}
 	}
 
-	// 四项基础指标 + 两个 P95 + 两档混合各读写两项。
+	// 四项基础指标 + 两个 P95 + quick 档两档混合各读写两项。
 	if len(result.Measurements) != 10 {
 		t.Fatalf("fio measurements = %d: %+v", len(result.Measurements), result.Measurements)
 	}
@@ -238,53 +292,7 @@ func TestRunFIODiskWithAsyncEngine(t *testing.T) {
 	}
 }
 
-// 精简发行版没有 libaio 时退到 psync：队列深度对同步引擎无效，
-// 参数和方法名都必须按实际生效的 QD1 标注，不能照抄请求值。
-func TestRunFIODiskDowngradesSynchronousEngine(t *testing.T) {
-	directory := t.TempDir()
-	helper := writeFIOAdapter(t, directory, "psync")
-	cfg, err := config.Defaults(config.ProfileQuick)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.DiskPath = directory
-	cfg.DiskMiB = 16
-	result := runFIODisk(context.Background(), Environment{Config: cfg}, helper)
-	if result.Status != "ok" {
-		t.Fatalf("fio result = %+v", result)
-	}
-
-	arguments := fioFieldValue(result, "arguments")
-	if !strings.Contains(arguments, "--ioengine=psync") {
-		t.Fatalf("psync args = %s", arguments)
-	}
-	if strings.Contains(arguments, "--iodepth=32") || strings.Contains(arguments, "--iodepth=64") {
-		t.Fatalf("psync must not request an async queue depth: %s", arguments)
-	}
-	if engine := fioFieldValue(result, "ioengine"); !strings.Contains(engine, "同步") {
-		t.Fatalf("ioengine field = %q", engine)
-	}
-
-	for _, measurement := range result.Measurements {
-		if measurement.Key != "fio_random_read_4k_iops" {
-			continue
-		}
-		if !strings.Contains(measurement.Method, "qd1") {
-			t.Fatalf("synchronous random read method = %q, want qd1", measurement.Method)
-		}
-	}
-	downgradeNoted := false
-	for _, note := range result.Notes {
-		if strings.Contains(note, "队列深度对它无效") {
-			downgradeNoted = true
-		}
-	}
-	if !downgradeNoted {
-		t.Fatalf("psync run must disclose the queue-depth downgrade: %+v", result.Notes)
-	}
-}
-
-func TestSysbenchParsersAndAdapters(t *testing.T) {
+func TestSysbenchParsers(t *testing.T) {
 	cpuOutput := `
 CPU speed:
     events per second:  1234.50
@@ -299,54 +307,28 @@ Latency (ms):
 	if rate := memoryRateToMiB(2, "GiB"); rate != 2048 {
 		t.Fatalf("memory rate = %f", rate)
 	}
+}
 
-	directory := t.TempDir()
-	helper := filepath.Join(directory, "sysbench")
-	// cpu 分支里的 sleep 让压测窗口跨过真实的挂钟时间：/proc/stat 是 jiffies
-	// 计数，瞬时返回的假脚本会让前后两次采样完全相同，steal 增量就无从计算。
-	script := `#!/bin/sh
-case "$*" in
-  *--version*)
-    printf '%s\n' 'sysbench 1.0.20'
-    ;;
-  *cpu*)
-    sleep 0.2
-    case "$*" in
-      *--threads=1*) rate=100 ;;
-      *) rate=800 ;;
-    esac
-    printf '%s\n' "CPU speed:
-    events per second:  $rate
-General statistics:
-    total number of events:              1000
-Latency (ms):
-         95th percentile:                        1.25"
-    ;;
-  *memory*)
-    case "$*" in
-      *--memory-oper=read*) rate=4096 ;;
-      *) rate=2048 ;;
-    esac
-    printf '%s\n' "1024.00 MiB transferred ($rate MiB/sec)"
-    ;;
-esac
-`
-	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+// 真实 sysbench 端到端：解析器必须认得当前安装版本的实际输出格式。
+func TestRunSysbenchWithRealBinary(t *testing.T) {
+	sysbenchPath := requireTool(t, "sysbench")
 	cfg, err := config.Defaults(config.ProfileQuick)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.CPUTime = 100 * time.Millisecond
-	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, helper)
+	cfg.CPUTime = time.Second
+
+	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, sysbenchPath)
 	// 宿主机 steal 高时降级为 warning 是正确行为，只有 error 才算失败。
-	if cpu.Status == "error" || cpu.Methodology.Kind != "standard-benchmark" {
+	if cpu.Status == model.StatusError || cpu.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
 	}
-	cpuKeys := make(map[string]bool, len(cpu.Measurements))
+	cpuValues := make(map[string]float64, len(cpu.Measurements))
 	for _, measurement := range cpu.Measurements {
-		cpuKeys[measurement.Key] = true
+		cpuValues[measurement.Key] = measurement.Value
+		if strings.Contains(measurement.Key, "efficiency") {
+			t.Fatalf("CPU must not emit derived score: %+v", measurement)
+		}
 	}
 	// steal 缺失在 Linux 上就是 bug：/proc/stat 必然可读，读不到说明采样逻辑坏了。
 	for _, required := range []string{
@@ -354,18 +336,34 @@ esac
 		"sysbench_cpu_multi_events_s",
 		"cpu_steal_percent_during_test",
 	} {
-		if !cpuKeys[required] {
+		if _, ok := cpuValues[required]; !ok {
 			t.Fatalf("sysbench CPU missing %q: %+v", required, cpu.Measurements)
 		}
 	}
-	for _, measurement := range cpu.Measurements {
-		if strings.Contains(measurement.Key, "efficiency") {
-			t.Fatalf("CPU must not emit derived score: %+v", measurement)
-		}
+	if cpuValues["sysbench_cpu_single_events_s"] <= 0 {
+		t.Fatalf("real sysbench returned a non-positive event rate: %+v", cpu.Measurements)
 	}
-	memory := runSysbenchMemory(context.Background(), Environment{Config: cfg}, helper)
-	if memory.Status != "ok" || memory.Methodology.Kind != "standard-benchmark" || len(memory.Measurements) != 4 {
+	if steal := cpuValues["cpu_steal_percent_during_test"]; steal < 0 || steal > 100 {
+		t.Fatalf("steal percentage out of range: %f", steal)
+	}
+	if version := resultField(cpu, "version"); !strings.Contains(strings.ToLower(version), "sysbench") {
+		t.Fatalf("sysbench version field = %q", version)
+	}
+	if len(cpu.TextBlocks) == 0 || !strings.Contains(cpu.TextBlocks[0].Content, "events per second") {
+		t.Fatalf("raw sysbench output was not preserved: %+v", cpu.TextBlocks)
+	}
+
+	memory := runSysbenchMemory(context.Background(), Environment{Config: cfg}, sysbenchPath)
+	if memory.Status != model.StatusOK || memory.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench memory result = %+v", memory)
+	}
+	if len(memory.Measurements) != 4 {
+		t.Fatalf("sysbench memory measurements = %d: %+v", len(memory.Measurements), memory.Measurements)
+	}
+	for _, measurement := range memory.Measurements {
+		if measurement.Value <= 0 {
+			t.Fatalf("real sysbench memory returned a non-positive rate: %+v", measurement)
+		}
 	}
 }
 
@@ -390,27 +388,58 @@ func TestStealSamplingReadsProcStat(t *testing.T) {
 	}
 }
 
-func TestRunIPerfWithLocalJSONAdapter(t *testing.T) {
-	directory := t.TempDir()
-	helper := filepath.Join(directory, "iperf3")
-	script := `#!/bin/sh
-case "$*" in
-  *--version*)
-    printf '%s\n' 'iperf 3.16'
-    exit 0
-    ;;
-esac
-printf '%s\n' '{
-  "start":{"connected":[{"local_host":"192.0.2.2","remote_host":"192.0.2.1"}]},
-  "end":{
-    "sum_sent":{"seconds":1,"bytes":12500000,"bits_per_second":100000000,"retransmits":2},
-    "sum_received":{"seconds":1,"bytes":12000000,"bits_per_second":96000000}
-  }
-}'
-`
-	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+// startIPerf3Server 在回环地址上起一个真实 iperf3 服务端，返回它监听的端口。
+//
+// 用真实服务端而不是伪造 JSON：iperf3 的 JSON 字段名在版本间有过变化，
+// 只有让真实服务端产出报文才能证明解析器跟得上当前安装的版本。
+func startIPerf3Server(t *testing.T, path string) int {
+	t.Helper()
+	// 先让内核分配一个空闲端口再交给 iperf3，避免固定端口在开发机上撞车。
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatal(err)
 	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	server := exec.CommandContext(ctx, path, "-s", "-B", "127.0.0.1", "-p", strconv.Itoa(port))
+	// 输出必须被消费，否则管道写满会把服务端卡住；内容本身不用于判断就绪。
+	server.Stdout = io.Discard
+	server.Stderr = io.Discard
+	if err := server.Start(); err != nil {
+		cancel()
+		t.Fatalf("启动 iperf3 服务端: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = server.Wait()
+	})
+
+	// iperf3 的 "Server listening" 横幅在输出重定向到管道时会被 stdio 全缓冲
+	// 卡住，端口却已经在监听了，所以只能轮询端口而不是扫描输出。
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		connection, err := net.DialTimeout("tcp", address, time.Second)
+		if err == nil {
+			_ = connection.Close()
+			// 让 iperf3 处理完这个探测用的空连接，再把端口交给被测代码。
+			time.Sleep(300 * time.Millisecond)
+			return port
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("iperf3 服务端在 %s 上未进入监听状态", address)
+	return 0
+}
+
+// 真实 iperf3 端到端：逐节点、逐方向的原值必须被保留，不做任何聚合。
+func TestRunIPerfWithRealServer(t *testing.T) {
+	iperfPath := requireTool(t, "iperf3")
+	port := startIPerf3Server(t, iperfPath)
 	cfg, err := config.Defaults(config.ProfileQuick)
 	if err != nil {
 		t.Fatal(err)
@@ -418,18 +447,124 @@ printf '%s\n' '{
 	cfg.SpeedThreads = 2
 	cfg.IPerfDuration = time.Second
 	cfg.IPerfTargets = []config.IPerfEndpoint{{
-		Name: "test", Host: "example.com", PortStart: 5201, PortEnd: 5201, Location: "local", Networks: "IPv4",
+		Name: "loopback", Host: "127.0.0.1", PortStart: port, PortEnd: port,
+		Location: "local", Networks: "IPv4",
 	}}
-	result := runIPerfSpeed(context.Background(), Environment{Config: cfg}, helper)
-	if result.Status != "ok" || result.Methodology.Kind != "standard-benchmark" || len(result.Measurements) != 2 {
+
+	result := runIPerfSpeed(context.Background(), Environment{Config: cfg}, iperfPath)
+	if result.Status != model.StatusOK || result.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("iperf result = %+v", result)
 	}
-	if result.Measurements[0].Value != 96 {
-		t.Fatalf("iperf Mbps = %+v", result.Measurements)
+	// 一个节点、一个协议族、上传与下载两个方向。
+	if len(result.Measurements) != 2 {
+		t.Fatalf("iperf measurements = %d: %+v", len(result.Measurements), result.Measurements)
 	}
+	directions := make(map[string]float64, 2)
 	for _, measurement := range result.Measurements {
 		if strings.Contains(measurement.Key, "median") || strings.Contains(measurement.Key, "average") {
 			t.Fatalf("iperf3 must preserve per-target values: %+v", measurement)
 		}
+		if measurement.Value <= 0 {
+			t.Fatalf("real iperf3 returned a non-positive throughput: %+v", measurement)
+		}
+		switch {
+		case strings.HasSuffix(measurement.Key, "_upload_mbps"):
+			directions["upload"] = measurement.Value
+		case strings.HasSuffix(measurement.Key, "_download_mbps"):
+			directions["download"] = measurement.Value
+		}
 	}
+	if len(directions) != 2 {
+		t.Fatalf("both directions must be recorded: %+v", result.Measurements)
+	}
+	if version := resultField(result, "version"); !strings.Contains(strings.ToLower(version), "iperf") {
+		t.Fatalf("iperf3 version field = %q", version)
+	}
+	if got := resultField(result, "threads"); got != "2" {
+		t.Fatalf("iperf3 threads field = %q", got)
+	}
+}
+
+// full 档的 UDP 丢包与抖动同样走真实 iperf3。
+func TestRunIPerfUDPWithRealServer(t *testing.T) {
+	iperfPath := requireTool(t, "iperf3")
+	port := startIPerf3Server(t, iperfPath)
+	result := runIPerfUDP(context.Background(), iperfPath, "127.0.0.1", port, "IPv4", "10M", 2)
+	if !result.Available {
+		t.Fatalf("real iperf3 UDP run failed: %+v", result)
+	}
+	if result.Packets <= 0 {
+		t.Fatalf("UDP packet count = %d", result.Packets)
+	}
+	if result.LostPercent < 0 || result.LostPercent > 100 {
+		t.Fatalf("UDP loss out of range: %f", result.LostPercent)
+	}
+	if result.JitterMS < 0 {
+		t.Fatalf("UDP jitter must not be negative: %f", result.JitterMS)
+	}
+	if result.Mbps <= 0 {
+		t.Fatalf("UDP throughput = %f", result.Mbps)
+	}
+}
+
+// 真实 ping：统计行的解析必须对本机安装的 ping 实现成立。
+//
+// 只断言在 iputils 与 busybox 上都成立的不变式，不假设某一种实现——
+// 这正是四段/三段两条正则要覆盖的差异。
+func TestRunICMPPingAgainstLoopback(t *testing.T) {
+	requireTool(t, pingCommand)
+	stats := runICMPPing(context.Background(), "127.0.0.1", 3, 2*time.Second)
+	if !stats.Available {
+		// 容器与部分 CI 会禁止 ICMP。这时必须给出明确错误，
+		// 而不是静默返回一组零值冒充测量结果。
+		if stats.Err == nil {
+			t.Fatal("ICMP 不可用却没有报告错误")
+		}
+		t.Skipf("本机不允许 ICMP，已按设计降级：%v", stats.Err)
+	}
+	if stats.LossPercent != 0 {
+		t.Fatalf("回环不应丢包：%f%%", stats.LossPercent)
+	}
+	if stats.AvgMS <= 0 {
+		t.Fatalf("解析出的平均往返为 %f，说明统计行没被正确解析", stats.AvgMS)
+	}
+	if !(stats.MinMS <= stats.AvgMS && stats.AvgMS <= stats.MaxMS) {
+		t.Fatalf("min/avg/max 不自洽：%+v", stats)
+	}
+	// busybox 不报告标准差，此时必须留空而不是填 0 冒充测量值。
+	if stats.StdDevKnown && stats.StdDevMS < 0 {
+		t.Fatalf("标准差为负：%f", stats.StdDevMS)
+	}
+	t.Logf("真实 ping 解析结果 min=%.3f avg=%.3f max=%.3f 标准差可用=%v",
+		stats.MinMS, stats.AvgMS, stats.MaxMS, stats.StdDevKnown)
+}
+
+// 真实 traceroute：跳点解析必须对本机安装的实现成立。
+func TestRouteEngineTracesLoopback(t *testing.T) {
+	engine := detectRouteEngine(context.Background())
+	if engine.Path == "" {
+		requireTool(t, "traceroute")
+	}
+	if engine.SHA256 == "" || len(engine.SHA256) != 64 {
+		t.Fatalf("路由引擎缺少可复核的 SHA-256：%+v", engine)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output, err := runRouteCommand(ctx, engine, "127.0.0.1", 5)
+	clean := sanitizeCommandOutput(output)
+	if clean == "" {
+		t.Fatalf("%s 没有产生任何输出：%v", engine.Name, err)
+	}
+	hops := extractTraceHops(engine.Name, clean)
+	if len(hops) == 0 {
+		t.Fatalf("%s 的输出解析不出跳点：\n%s", engine.Name, clean)
+	}
+	if hops[0] != "127.0.0.1" {
+		t.Fatalf("第一跳 = %q，want 127.0.0.1；原始输出：\n%s", hops[0], clean)
+	}
+	if count := routeHopCount(engine.Name, clean); count < 1 {
+		t.Fatalf("跳数统计 = %d：\n%s", count, clean)
+	}
+	t.Logf("真实 %s 解析出 %d 跳", engine.Name, len(hops))
 }
