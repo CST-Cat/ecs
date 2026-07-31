@@ -13,6 +13,8 @@ usage() {
   printf '%s\n' \
     "ecs installer — downloads one release asset and verifies SHA-256" \
     "" \
+    "ecs only supports Linux (amd64, arm64, armv7, 386, s390x, riscv64, ppc64le)." \
+    "" \
     "Usage: ./install.sh [--from /path/to/ecs] [--install-dir DIR] [--version VERSION] [--with-benchmarks]" \
     "" \
     "Environment:" \
@@ -112,10 +114,6 @@ install_benchmark_tools() {
     as_root apk add sysbench fio iperf3 traceroute
   elif command -v pacman >/dev/null 2>&1; then
     as_root pacman -Sy --noconfirm sysbench fio iperf3 traceroute
-  elif command -v pkg >/dev/null 2>&1; then
-    as_root pkg install -y sysbench fio iperf3
-  elif command -v brew >/dev/null 2>&1; then
-    brew install sysbench fio iperf3
   else
     printf '%s\n' "no supported package manager found; install sysbench fio iperf3 traceroute manually" >&2
     exit 1
@@ -132,10 +130,10 @@ fi
 
 os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
 machine=$(uname -m | tr '[:upper:]' '[:lower:]')
-case "$os_name" in
-  linux|darwin|freebsd) ;;
-  *) printf 'unsupported operating system: %s\n' "$os_name" >&2; exit 1 ;;
-esac
+if [ "$os_name" != "linux" ]; then
+  printf 'ecs only supports Linux; detected: %s\n' "$os_name" >&2
+  exit 1
+fi
 case "$machine" in
   x86_64|amd64) arch=amd64 ;;
   aarch64|arm64) arch=arm64 ;;
@@ -145,13 +143,6 @@ case "$machine" in
   riscv64) arch=riscv64 ;;
   ppc64le) arch=ppc64le ;;
   *) printf 'unsupported architecture: %s\n' "$machine" >&2; exit 1 ;;
-esac
-
-case "${os_name}/${arch}" in
-  linux/amd64|linux/arm64|linux/armv7|linux/386|linux/s390x|linux/riscv64|linux/ppc64le) ;;
-  darwin/amd64|darwin/arm64) ;;
-  freebsd/amd64|freebsd/arm64) ;;
-  *) printf 'no release asset is built for %s/%s\n' "$os_name" "$arch" >&2; exit 1 ;;
 esac
 
 asset="${program}_${os_name}_${arch}.tar.gz"

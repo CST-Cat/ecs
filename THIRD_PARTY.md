@@ -1,10 +1,10 @@
 # Third-party components and services
 
-`ecs` 的 Go 依赖仍只有标准库。IP 质量模块采用 [xykt/IPQuality](https://github.com/xykt/IPQuality) 的多源覆盖、字段映射与风险分段思路，项目因此整体按 AGPL-3.0-only 发布；归属和差异见 [NOTICE](NOTICE)。
+`ecs` 只面向 Linux，Go 依赖仍只有标准库。IP 质量模块采用 [xykt/IPQuality](https://github.com/xykt/IPQuality) 的多源覆盖、字段映射与风险分段思路，项目因此整体按 AGPL-3.0-only 发布；归属和差异见 [NOTICE](NOTICE)。
 
 ## 可选本地程序
 
-这些程序由用户预先安装，或通过安装器的显式 `--with-benchmarks` 选项交给系统包管理器安装。`ecs` 仅以独立进程调用，不随发行包分发：
+这些程序由用户预先安装，或通过安装器的显式 `--with-benchmarks` 选项交给 Linux 发行版的包管理器安装。`ecs` 仅以独立进程调用，不随发行包分发：
 
 | 程序 | 用途 | 上游 | 许可证 | ecs 行为 |
 | --- | --- | --- | --- | --- |
@@ -12,8 +12,8 @@
 | fio | Direct I/O 磁盘测试 | [axboe/fio](https://github.com/axboe/fio) | GPL-2.0 | 磁盘模块唯一基准引擎；解析 JSON；记录参数、版本与 SHA-256 |
 | iperf3 | TCP 多流上传/反向下载 | [ESnet/iperf](https://github.com/esnet/iperf) | BSD-3-Clause | standard/full 的网络吞吐唯一基准；解析逐节点 JSON 原值；记录节点、参数、版本与 SHA-256 |
 | NextTrace | 带节点信息的路由追踪 | [nxtrace/NTrace-core](https://github.com/nxtrace/NTrace-core) | GPL-3.0 | 仅在路由模块启用且本机存在时调用；强制 JSON、无启动横幅；记录参数与 SHA-256 |
-| traceroute / tracepath / tracert | 基础路由追踪 | 操作系统发行方 | 随系统而异 | NextTrace 不存在时使用；路径快照 12 跳、三网回程 20 跳；不经过 shell |
-| ping | ICMP 往返与丢包 | 操作系统发行方 | 随系统而异 | `latency` 模块的 ICMP 列；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
+| traceroute / tracepath | 基础路由追踪 | 操作系统发行方 | 随发行版而异 | NextTrace 不存在时使用；路径快照 12 跳、三网回程 20 跳；不经过 shell |
+| ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
 
 默认安装不会触碰包管理器。`install.sh --with-benchmarks` 是用户明确授权后的便捷入口；它安装发行版提供的软件包，不从随机镜像下载裸二进制，也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版上传行为不作为默认依赖。
 

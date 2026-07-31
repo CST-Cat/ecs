@@ -22,6 +22,7 @@ mkdir -p "$dist_dir"
 find "$dist_dir" -mindepth 1 -maxdepth 1 -type f -name 'ecs_*' -delete
 find "$dist_dir" -mindepth 1 -maxdepth 1 -type f -name 'checksums.txt' -delete
 
+# ecs 只面向 Linux VPS，发布目标随之收敛到 Linux 架构。
 targets=(
   "linux amd64"
   "linux arm64"
@@ -30,12 +31,6 @@ targets=(
   "linux s390x"
   "linux riscv64"
   "linux ppc64le"
-  "freebsd amd64"
-  "freebsd arm64"
-  "darwin amd64"
-  "darwin arm64"
-  "windows amd64"
-  "windows arm64"
 )
 
 for target in "${targets[@]}"; do
@@ -46,9 +41,6 @@ for target in "${targets[@]}"; do
   fi
   stage=$(mktemp -d "${TMPDIR:-/tmp}/ecs-package.XXXXXX")
   binary="$stage/ecs"
-  if [[ "$goos" == "windows" ]]; then
-    binary="$stage/ecs.exe"
-  fi
   echo "building $suffix"
   (
     cd "$repo_root"
@@ -56,23 +48,16 @@ for target in "${targets[@]}"; do
       "$go_command" build -trimpath -ldflags "$ldflags" -o "$binary" ./cmd/ecs
   )
   cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
-  if [[ "$goos" == "windows" ]]; then
-    (
-      cd "$stage"
-      zip -q "$dist_dir/ecs_${suffix}.zip" ecs.exe LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
-    )
-  else
-    tar -C "$stage" -czf "$dist_dir/ecs_${suffix}.tar.gz" ecs LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
-  fi
+  tar -C "$stage" -czf "$dist_dir/ecs_${suffix}.tar.gz" ecs LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
   rm -rf "$stage"
 done
 
 (
   cd "$dist_dir"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum ecs_*.tar.gz ecs_*.zip > checksums.txt
+    sha256sum ecs_*.tar.gz > checksums.txt
   else
-    shasum -a 256 ecs_*.tar.gz ecs_*.zip > checksums.txt
+    shasum -a 256 ecs_*.tar.gz > checksums.txt
   fi
 )
 

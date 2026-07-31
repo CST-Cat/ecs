@@ -116,7 +116,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 nexttrace、traceroute、tracepath 或 tracert")
+		result.Skip("未发现 nexttrace、traceroute 或 tracepath")
 		result.Notes = append(result.Notes, "安装 traceroute 或 NextTrace 后重跑即可识别三网回程线路。")
 		result.Finish(start)
 		return result

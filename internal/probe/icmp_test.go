@@ -2,58 +2,59 @@ package probe
 
 import (
 	"encoding/json"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestPingArgumentsPerPlatform(t *testing.T) {
+func TestPingArguments(t *testing.T) {
 	args := strings.Join(pingArguments("1.1.1.1", 4, 2*time.Second), " ")
 	if !strings.Contains(args, "1.1.1.1") {
 		t.Fatalf("ping args lost the host: %s", args)
 	}
-	switch runtime.GOOS {
-	case "windows":
-		// Windows 用 -n 表示次数、-w 表示毫秒超时。
-		if !strings.Contains(args, "-n 4") || !strings.Contains(args, "-w 2000") {
-			t.Fatalf("windows ping args = %s", args)
+	// iputils 与 busybox 的 -W 都以秒计，不能传毫秒值。
+	for _, expected := range []string{"-n", "-q", "-c 4", "-W 2"} {
+		if !strings.Contains(args, expected) {
+			t.Fatalf("ping args missing %q: %s", expected, args)
 		}
-	case "darwin", "freebsd", "netbsd", "openbsd":
-		// BSD 系的 -W 是毫秒。
-		if !strings.Contains(args, "-c 4") || !strings.Contains(args, "-W 2000") {
-			t.Fatalf("bsd ping args = %s", args)
-		}
-	default:
-		// Linux 的 -W 是秒。
-		if !strings.Contains(args, "-c 4") || !strings.Contains(args, "-W 2") {
-			t.Fatalf("linux ping args = %s", args)
-		}
+	}
+	// 不足一秒必须进位：-W 0 会被 ping 当成"不等待"。
+	sub := strings.Join(pingArguments("1.1.1.1", 1, 300*time.Millisecond), " ")
+	if !strings.Contains(sub, "-W 1") {
+		t.Fatalf("sub-second timeout must round up to 1s: %s", sub)
 	}
 }
 
 func TestPingStatisticsParsing(t *testing.T) {
-	// Linux iputils 的输出格式。
-	linux := `--- 1.1.1.1 ping statistics ---
+	// iputils 的输出格式：min/avg/max/mdev 四段。
+	iputils := `--- 1.1.1.1 ping statistics ---
 5 packets transmitted, 5 received, 0% packet loss, time 4005ms
 rtt min/avg/max/mdev = 10.100/12.300/15.200/1.800 ms`
-	if match := pingLossPattern.FindStringSubmatch(linux); len(match) != 2 || match[1] != "0" {
-		t.Fatalf("linux loss = %v", match)
+	if match := pingLossPattern.FindStringSubmatch(iputils); len(match) != 2 || match[1] != "0" {
+		t.Fatalf("iputils loss = %v", match)
 	}
-	rtt := pingRTTPattern.FindStringSubmatch(linux)
+	rtt := pingRTTPattern.FindStringSubmatch(iputils)
 	if len(rtt) != 5 || rtt[2] != "12.300" {
-		t.Fatalf("linux rtt = %v", rtt)
+		t.Fatalf("iputils rtt = %v", rtt)
 	}
 
-	// macOS/BSD 用 stddev 且丢包带小数。
-	bsd := `--- 1.1.1.1 ping statistics ---
+	// busybox ping（Alpine 等精简镜像的默认实现）只有三段，且丢包带小数。
+	busybox := `--- 1.1.1.1 ping statistics ---
 5 packets transmitted, 4 packets received, 20.0% packet loss
-round-trip min/avg/max/stddev = 10.1/12.3/15.2/1.8 ms`
-	if match := pingLossPattern.FindStringSubmatch(bsd); len(match) != 2 || match[1] != "20.0" {
-		t.Fatalf("bsd loss = %v", match)
+round-trip min/avg/max = 10.1/12.3/15.2 ms`
+	if match := pingLossPattern.FindStringSubmatch(busybox); len(match) != 2 || match[1] != "20.0" {
+		t.Fatalf("busybox loss = %v", match)
 	}
-	if rtt := pingRTTPattern.FindStringSubmatch(bsd); len(rtt) != 5 || rtt[3] != "15.2" {
-		t.Fatalf("bsd rtt = %v", rtt)
+	if rtt := pingRTTPattern.FindStringSubmatch(busybox); rtt != nil {
+		t.Fatalf("four-field pattern must not match a three-field line: %v", rtt)
+	}
+	rtt = pingRTTThreePattern.FindStringSubmatch(busybox)
+	if len(rtt) != 4 || rtt[3] != "15.2" {
+		t.Fatalf("busybox rtt = %v", rtt)
+	}
+	// 三段回退不能误吞四段统计行的后三个数。
+	if match := pingRTTThreePattern.FindStringSubmatch(iputils); match != nil {
+		t.Fatalf("three-field fallback must not match an iputils line: %v", match)
 	}
 
 	// 完全不可达时没有 rtt 行，但丢包率仍可解析。
@@ -64,6 +65,9 @@ round-trip min/avg/max/stddev = 10.1/12.3/15.2/1.8 ms`
 	}
 	if rtt := pingRTTPattern.FindStringSubmatch(unreachable); rtt != nil {
 		t.Fatalf("unreachable output must not yield rtt: %v", rtt)
+	}
+	if rtt := pingRTTThreePattern.FindStringSubmatch(unreachable); rtt != nil {
+		t.Fatalf("unreachable output must not yield a three-field rtt: %v", rtt)
 	}
 }
 

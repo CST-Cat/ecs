@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/model"
 )
 
 func TestBuildDNSQuery(t *testing.T) {
@@ -70,8 +70,8 @@ func TestHelpers(t *testing.T) {
 	if got := routeHopCount("nexttrace", `{"Hops":[[{"TTL":1}],[],[{"TTL":3}]]}`); got != 2 {
 		t.Fatalf("nexttrace hops = %d", got)
 	}
-	if got := parseHumanBytes("1.5G"); got != 1610612736 {
-		t.Fatalf("bytes = %d", got)
+	if got := parseUintDefault("2048", 0); got != 2048 {
+		t.Fatalf("uint = %d", got)
 	}
 }
 
@@ -132,16 +132,17 @@ func TestFIOJSONHelpers(t *testing.T) {
 	}
 }
 
-func TestRunFIODiskWithLocalJSONAdapter(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test helper uses /bin/sh")
-	}
-	directory := t.TempDir()
+// writeFIOAdapter 写一个假 fio，--enghelp 只报告 engine，其余调用返回固定 JSON。
+//
+// engine 决定被测的是哪条真实路径：libaio 是绝大多数 VPS 的实际情况，psync 是
+// 精简发行版缺少 libaio 时的降级路径。两条都必须有用例覆盖。
+func writeFIOAdapter(t *testing.T, directory, engine string) string {
+	t.Helper()
 	helper := filepath.Join(directory, "fio")
 	script := `#!/bin/sh
 case "$*" in
   *--enghelp*)
-    printf '%s\n' 'psync'
+    printf '%s\n' '` + engine + `'
     exit 0
     ;;
 esac
@@ -157,6 +158,22 @@ printf '%s\n' '{"fio version":"fio-test","jobs":[
 	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	return helper
+}
+
+func fioFieldValue(result model.Result, key string) string {
+	for _, field := range result.Fields {
+		if field.Key == key {
+			return field.Value
+		}
+	}
+	return ""
+}
+
+// libaio 是真实 VPS 上的主路径：队列深度必须真实生效，成绩按 QD32/QD64 标注。
+func TestRunFIODiskWithAsyncEngine(t *testing.T) {
+	directory := t.TempDir()
+	helper := writeFIOAdapter(t, directory, "libaio")
 	cfg, err := config.Defaults(config.ProfileQuick)
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +187,35 @@ printf '%s\n' '{"fio version":"fio-test","jobs":[
 	if !strings.Contains(result.Summary, "100.0 MiB/s") {
 		t.Fatalf("fio summary = %q", result.Summary)
 	}
+
+	// 探测到异步引擎后必须真的请求高队列深度，否则测到的是 QD1 成绩。
+	arguments := fioFieldValue(result, "arguments")
+	for _, expected := range []string{"--ioengine=libaio", "--iodepth=32", "--iodepth=64"} {
+		if !strings.Contains(arguments, expected) {
+			t.Fatalf("libaio args missing %q: %s", expected, arguments)
+		}
+	}
+	if engine := fioFieldValue(result, "ioengine"); !strings.Contains(engine, "libaio") || !strings.Contains(engine, "异步") {
+		t.Fatalf("ioengine field = %q", engine)
+	}
+
+	// 方法名必须体现实际生效的队列深度，否则不同 QD 的成绩会被混为一谈。
+	methods := make(map[string]string, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		methods[measurement.Key] = measurement.Method
+	}
+	if got := methods["fio_random_read_4k_iops"]; !strings.Contains(got, "qd32") {
+		t.Fatalf("random read method = %q, want qd32", got)
+	}
+	if got := methods["fio_mixed_4k_read_mib_s"]; !strings.Contains(got, "qd64") {
+		t.Fatalf("mixed method = %q, want qd64", got)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, "队列深度对它无效") {
+			t.Fatalf("async engine must not be labelled as synchronous: %q", note)
+		}
+	}
+
 	// 四项基础指标 + 两个 P95 + 两档混合各读写两项。
 	if len(result.Measurements) != 10 {
 		t.Fatalf("fio measurements = %d: %+v", len(result.Measurements), result.Measurements)
@@ -192,10 +238,53 @@ printf '%s\n' '{"fio version":"fio-test","jobs":[
 	}
 }
 
-func TestSysbenchParsersAndAdapters(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test helper uses /bin/sh")
+// 精简发行版没有 libaio 时退到 psync：队列深度对同步引擎无效，
+// 参数和方法名都必须按实际生效的 QD1 标注，不能照抄请求值。
+func TestRunFIODiskDowngradesSynchronousEngine(t *testing.T) {
+	directory := t.TempDir()
+	helper := writeFIOAdapter(t, directory, "psync")
+	cfg, err := config.Defaults(config.ProfileQuick)
+	if err != nil {
+		t.Fatal(err)
 	}
+	cfg.DiskPath = directory
+	cfg.DiskMiB = 16
+	result := runFIODisk(context.Background(), Environment{Config: cfg}, helper)
+	if result.Status != "ok" {
+		t.Fatalf("fio result = %+v", result)
+	}
+
+	arguments := fioFieldValue(result, "arguments")
+	if !strings.Contains(arguments, "--ioengine=psync") {
+		t.Fatalf("psync args = %s", arguments)
+	}
+	if strings.Contains(arguments, "--iodepth=32") || strings.Contains(arguments, "--iodepth=64") {
+		t.Fatalf("psync must not request an async queue depth: %s", arguments)
+	}
+	if engine := fioFieldValue(result, "ioengine"); !strings.Contains(engine, "同步") {
+		t.Fatalf("ioengine field = %q", engine)
+	}
+
+	for _, measurement := range result.Measurements {
+		if measurement.Key != "fio_random_read_4k_iops" {
+			continue
+		}
+		if !strings.Contains(measurement.Method, "qd1") {
+			t.Fatalf("synchronous random read method = %q, want qd1", measurement.Method)
+		}
+	}
+	downgradeNoted := false
+	for _, note := range result.Notes {
+		if strings.Contains(note, "队列深度对它无效") {
+			downgradeNoted = true
+		}
+	}
+	if !downgradeNoted {
+		t.Fatalf("psync run must disclose the queue-depth downgrade: %+v", result.Notes)
+	}
+}
+
+func TestSysbenchParsersAndAdapters(t *testing.T) {
 	cpuOutput := `
 CPU speed:
     events per second:  1234.50
@@ -213,12 +302,15 @@ Latency (ms):
 
 	directory := t.TempDir()
 	helper := filepath.Join(directory, "sysbench")
+	// cpu 分支里的 sleep 让压测窗口跨过真实的挂钟时间：/proc/stat 是 jiffies
+	// 计数，瞬时返回的假脚本会让前后两次采样完全相同，steal 增量就无从计算。
 	script := `#!/bin/sh
 case "$*" in
   *--version*)
     printf '%s\n' 'sysbench 1.0.20'
     ;;
   *cpu*)
+    sleep 0.2
     case "$*" in
       *--threads=1*) rate=100 ;;
       *) rate=800 ;;
@@ -248,15 +340,20 @@ esac
 	}
 	cfg.CPUTime = 100 * time.Millisecond
 	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, helper)
-	if cpu.Status != "ok" || cpu.Methodology.Kind != "standard-benchmark" {
+	// 宿主机 steal 高时降级为 warning 是正确行为，只有 error 才算失败。
+	if cpu.Status == "error" || cpu.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
 	}
-	// steal 只在能读到 /proc/stat 的平台出现，所以按 key 断言而不是按数量。
 	cpuKeys := make(map[string]bool, len(cpu.Measurements))
 	for _, measurement := range cpu.Measurements {
 		cpuKeys[measurement.Key] = true
 	}
-	for _, required := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
+	// steal 缺失在 Linux 上就是 bug：/proc/stat 必然可读，读不到说明采样逻辑坏了。
+	for _, required := range []string{
+		"sysbench_cpu_single_events_s",
+		"sysbench_cpu_multi_events_s",
+		"cpu_steal_percent_during_test",
+	} {
 		if !cpuKeys[required] {
 			t.Fatalf("sysbench CPU missing %q: %+v", required, cpu.Measurements)
 		}
@@ -272,10 +369,28 @@ esac
 	}
 }
 
-func TestRunIPerfWithLocalJSONAdapter(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test helper uses /bin/sh")
+// steal 采样必须夹住压测窗口，且累计口径与增量口径分开。
+func TestStealSamplingReadsProcStat(t *testing.T) {
+	sample, ok := readCPUTimes()
+	if !ok || sample.Total == 0 {
+		t.Fatalf("/proc/stat is unreadable on Linux: sample=%+v ok=%v", sample, ok)
 	}
+	if _, known := cumulativeStealPercent(sample); !known {
+		t.Fatal("cumulative steal must be derivable from a valid sample")
+	}
+	before := cpuTimeSample{Total: 1000, Steal: 10}
+	after := cpuTimeSample{Total: 2000, Steal: 60}
+	percent, ok := stealPercent(before, after)
+	if !ok || percent != 5 {
+		t.Fatalf("steal delta = %f, ok = %v, want 5", percent, ok)
+	}
+	// 计数器倒退（宿主机重启、cgroup 迁移）时不能编造数字。
+	if _, ok := stealPercent(after, before); ok {
+		t.Fatal("a shrinking counter must not yield a steal percentage")
+	}
+}
+
+func TestRunIPerfWithLocalJSONAdapter(t *testing.T) {
 	directory := t.TempDir()
 	helper := filepath.Join(directory, "iperf3")
 	script := `#!/bin/sh

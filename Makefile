@@ -27,10 +27,11 @@ cross:
 	mkdir -p dist
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_amd64 ./cmd/ecs
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_arm64 ./cmd/ecs
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_freebsd_amd64 ./cmd/ecs
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_darwin_amd64 ./cmd/ecs
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_darwin_arm64 ./cmd/ecs
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_windows_amd64.exe ./cmd/ecs
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_armv7 ./cmd/ecs
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_386 ./cmd/ecs
+	CGO_ENABLED=0 GOOS=linux GOARCH=s390x $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_s390x ./cmd/ecs
+	CGO_ENABLED=0 GOOS=linux GOARCH=riscv64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_riscv64 ./cmd/ecs
+	CGO_ENABLED=0 GOOS=linux GOARCH=ppc64le $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/ecs_linux_ppc64le ./cmd/ecs
 
 clean:
 	rm -rf bin dist

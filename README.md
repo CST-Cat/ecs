@@ -4,7 +4,7 @@
 
 `ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出终端、Markdown 和独立 HTML 报告。所有性能成绩只读取 sysbench、fio、iperf3 的结果；项目不实现 CPU、内存、磁盘或网络吞吐替代分数，也不生成并行效率、跨节点平均值或综合跑分等自算成绩。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
 
-> 当前处于首个开发版本。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、三网回程、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
+> 当前处于首个开发版本，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、三网回程、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
 ## 为什么再做一个
 
@@ -26,7 +26,12 @@
 
 ## 快速开始
 
-需要 Go 1.22 或更高版本：
+`ecs` **只支持 Linux**。VPS 几乎全是 Linux 发行版，因此项目不保留 macOS、Windows 或
+BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台都成立"，真实生产路径反而
+测不到。发布二进制覆盖 Linux 的 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、
+`ppc64le`。
+
+从源码构建需要 Go 1.22 或更高版本：
 
 ```bash
 go build -trimpath -o ecs ./cmd/ecs
@@ -59,7 +64,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ECS_REPOSITORY=owner/ecs ./install.sh --with-benchmarks
 ```
 
-默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman/pkg/Homebrew 安装 sysbench、fio、iperf3 和 traceroute。远程仓库尚未确定，因此项目没有硬编码一个虚假的下载地址。
+默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3 和 traceroute。远程仓库尚未确定，因此项目没有硬编码一个虚假的下载地址。
 
 ## 常用命令
 
@@ -266,7 +271,7 @@ make build
 make cross
 ```
 
-`scripts/package.sh VERSION` 会生成多系统/多架构压缩包和 `checksums.txt`。GitHub Actions 同时在最低 Go 1.22 和当前稳定版测试，并在 `v*` 标签上生成 Release。
+`scripts/package.sh VERSION` 会生成 Linux 七个架构的压缩包和 `checksums.txt`。GitHub Actions 同时在最低 Go 1.22 和当前稳定版测试，并在 `v*` 标签上生成 Release。
 
 ## 调研与取舍
 

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +49,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 nexttrace、traceroute、tracepath 或 tracert")
+		result.Skip("未发现 nexttrace、traceroute 或 tracepath")
 		result.Notes = append(result.Notes, "ecs 不会静默下载外部二进制；安装 NextTrace 后重跑即可获得更完整的路由标注。")
 		result.Finish(start)
 		return result
@@ -116,18 +115,13 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 func detectRouteEngine(ctx context.Context) routeEngine {
-	candidates := []string{"nexttrace", "traceroute", "tracepath"}
-	if runtime.GOOS == "windows" {
-		candidates = []string{"nexttrace.exe", "tracert.exe"}
-	}
-	for _, name := range candidates {
+	for _, name := range []string{"nexttrace", "traceroute", "tracepath"} {
 		path, err := exec.LookPath(name)
 		if err != nil {
 			continue
 		}
 		version := ""
-		engineName := strings.TrimSuffix(name, ".exe")
-		if engineName != "nexttrace" {
+		if name != "nexttrace" {
 			for _, args := range [][]string{{"--version"}, {"-V"}} {
 				commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 				command := exec.CommandContext(commandCtx, path, args...)
@@ -139,7 +133,7 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 				}
 			}
 		}
-		return routeEngine{Name: engineName, Path: path, Version: version, SHA256: binarySHA256(path)}
+		return routeEngine{Name: name, Path: path, Version: version, SHA256: binarySHA256(path)}
 	}
 	return routeEngine{}
 }
@@ -173,8 +167,6 @@ func routeCommandArgs(engine routeEngine, target string, maxHops int) []string {
 		return []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", target}
 	case "tracepath":
 		return []string{"-n", "-m", hops, target}
-	case "tracert":
-		return []string{"-d", "-h", hops, "-w", "1000", target}
 	default:
 		return []string{"-n", "-m", hops, "-q", "1", "-w", "1", target}
 	}

@@ -119,7 +119,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	if missing > 3 {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "当前平台限制了部分系统信息读取；缺失字段不会影响其余测试。")
+		result.Notes = append(result.Notes, "部分 /proc、/sys 或 DMI 字段不可读（常见于容器与精简镜像）；缺失字段不会影响其余测试。")
 	}
 	if snapshot.Allowance.Limited() {
 		result.Notes = append(result.Notes, fmt.Sprintf(
@@ -148,7 +148,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 // describeSteal 给出可读的 steal 描述。
 func describeSteal(s systemSnapshot) string {
 	if !s.StealKnown {
-		return "n/a（仅 Linux 提供 /proc/stat）"
+		return "unavailable（/proc/stat 不可读）"
 	}
 	return fmt.Sprintf("%.2f %%", s.StealPercent)
 }
@@ -157,7 +157,7 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 	hostname, _ := os.Hostname()
 	s := systemSnapshot{
 		Hostname:       hostname,
-		OS:             runtime.GOOS,
+		OS:             "linux",
 		Arch:           runtime.GOARCH,
 		LogicalCPUs:    runtime.NumCPU(),
 		PhysicalCores:  runtime.NumCPU(),
@@ -173,21 +173,12 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 		Allowance:      detectCPUAllowance(),
 	}
 
-	switch runtime.GOOS {
-	case "linux":
-		collectLinuxSystem(&s)
-	case "darwin":
-		collectDarwinSystem(ctx, &s)
-	case "freebsd", "openbsd", "netbsd":
-		collectBSDSystem(ctx, &s)
-	case "windows":
-		collectWindowsSystem(ctx, &s)
-	}
+	collectLinuxSystem(&s)
 	if kernel := commandOutput(ctx, "uname", "-sr"); kernel != "" {
 		s.Kernel = kernel
 	}
 	if s.Kernel == "" {
-		s.Kernel = runtime.GOOS
+		s.Kernel = "linux"
 	}
 	collectDisk(ctx, diskPath, &s)
 	return s
@@ -278,92 +269,7 @@ func collectLinuxSystem(s *systemSnapshot) {
 	}
 }
 
-func collectDarwinSystem(ctx context.Context, s *systemSnapshot) {
-	if value := commandOutput(ctx, "sw_vers", "-productVersion"); value != "" {
-		s.OS = "macOS " + value
-	}
-	s.CPUModel = fallback(commandOutput(ctx, "sysctl", "-n", "machdep.cpu.brand_string"), s.CPUModel)
-	if s.CPUModel == "unknown" {
-		s.CPUModel = fallback(commandOutput(ctx, "sysctl", "-n", "hw.model"), s.CPUModel)
-	}
-	s.PhysicalCores = parseIntDefault(commandOutput(ctx, "sysctl", "-n", "hw.physicalcpu"), s.LogicalCPUs)
-	s.LogicalCPUs = parseIntDefault(commandOutput(ctx, "sysctl", "-n", "hw.logicalcpu"), s.LogicalCPUs)
-	s.MemoryTotal = parseUintDefault(commandOutput(ctx, "sysctl", "-n", "hw.memsize"), 0)
-	if vmStat := commandOutput(ctx, "vm_stat"); vmStat != "" {
-		pageSize := uint64(4096)
-		header := strings.Split(vmStat, "\n")[0]
-		headerFields := strings.Fields(header)
-		for index, field := range headerFields {
-			if field == "bytes)" && index > 0 {
-				pageSize = parseUintDefault(headerFields[index-1], pageSize)
-			}
-		}
-		var availablePages uint64
-		for _, line := range strings.Split(vmStat, "\n")[1:] {
-			key, value, ok := strings.Cut(line, ":")
-			if !ok {
-				continue
-			}
-			switch strings.TrimSpace(key) {
-			case "Pages free", "Pages inactive", "Pages speculative":
-				availablePages += parseUintDefault(strings.TrimSuffix(strings.TrimSpace(value), "."), 0)
-			}
-		}
-		s.MemoryFree = availablePages * pageSize
-	}
-	if swapUsage := commandOutput(ctx, "sysctl", "-n", "vm.swapusage"); swapUsage != "" {
-		fields := strings.Fields(swapUsage)
-		if len(fields) >= 3 {
-			s.SwapTotal = parseHumanBytes(fields[2])
-		}
-	}
-	if freq := parseUintDefault(commandOutput(ctx, "sysctl", "-n", "hw.cpufrequency"), 0); freq > 0 {
-		s.CPUFrequency = fmt.Sprintf("%.0f MHz", float64(freq)/1e6)
-	}
-	features := strings.ToLower(commandOutput(ctx, "sysctl", "-n", "machdep.cpu.features"))
-	if strings.Contains(" "+features+" ", " aes ") {
-		s.AES = "available"
-	} else if runtime.GOARCH == "arm64" {
-		s.AES = "available"
-	}
-	s.Virtualization = "none/host"
-	if load := commandOutput(ctx, "sysctl", "-n", "vm.loadavg"); load != "" {
-		s.Load = strings.Trim(load, "{} ")
-	}
-	if boot := commandOutput(ctx, "sysctl", "-n", "kern.boottime"); boot != "" {
-		if idx := strings.Index(boot, "sec = "); idx >= 0 {
-			value := boot[idx+6:]
-			if end := strings.Index(value, ","); end >= 0 {
-				if sec, err := strconv.ParseInt(strings.TrimSpace(value[:end]), 10, 64); err == nil {
-					s.Uptime = formatDuration(time.Since(time.Unix(sec, 0)))
-				}
-			}
-		}
-	}
-}
-
-func collectBSDSystem(ctx context.Context, s *systemSnapshot) {
-	s.OS = fallback(commandOutput(ctx, "uname", "-srv"), s.OS)
-	s.CPUModel = fallback(commandOutput(ctx, "sysctl", "-n", "hw.model"), s.CPUModel)
-	s.PhysicalCores = parseIntDefault(commandOutput(ctx, "sysctl", "-n", "hw.ncpu"), s.LogicalCPUs)
-	s.MemoryTotal = parseUintDefault(commandOutput(ctx, "sysctl", "-n", "hw.physmem"), 0)
-	s.Virtualization = fallback(commandOutput(ctx, "sysctl", "-n", "kern.vm_guest"), "unknown")
-}
-
-func collectWindowsSystem(ctx context.Context, s *systemSnapshot) {
-	s.OS = fallback(os.Getenv("OS"), "Windows")
-	s.CPUModel = fallback(os.Getenv("PROCESSOR_IDENTIFIER"), s.CPUModel)
-	s.Virtualization = "unknown"
-	output := commandOutput(ctx, "wmic", "ComputerSystem", "get", "TotalPhysicalMemory", "/value")
-	if _, value, ok := strings.Cut(output, "="); ok {
-		s.MemoryTotal = parseUintDefault(strings.TrimSpace(value), 0)
-	}
-}
-
 func collectDisk(ctx context.Context, diskPath string, s *systemSnapshot) {
-	if runtime.GOOS == "windows" {
-		return
-	}
 	output := commandOutput(ctx, "df", "-Pk", diskPath)
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) < 2 {
@@ -493,49 +399,12 @@ func readTrimmed(path, fallbackValue string) string {
 	return value
 }
 
-func parseIntDefault(value string, defaultValue int) int {
-	number, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil {
-		return defaultValue
-	}
-	return number
-}
-
 func parseUintDefault(value string, defaultValue uint64) uint64 {
 	number, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
 	if err != nil {
 		return defaultValue
 	}
 	return number
-}
-
-func parseHumanBytes(value string) uint64 {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	multiplier := float64(1)
-	suffix := value[len(value)-1]
-	switch suffix {
-	case 'K', 'k':
-		multiplier = 1024
-	case 'M', 'm':
-		multiplier = 1024 * 1024
-	case 'G', 'g':
-		multiplier = 1024 * 1024 * 1024
-	case 'T', 't':
-		multiplier = 1024 * 1024 * 1024 * 1024
-	default:
-		suffix = 0
-	}
-	if suffix != 0 {
-		value = value[:len(value)-1]
-	}
-	number, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return 0
-	}
-	return uint64(number * multiplier)
 }
 
 func fallback(value, defaultValue string) string {

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -66,10 +65,6 @@ func (e fioEngine) EffectiveDepth(requested int) int {
 // "engine libaio not loadable" 失败。这里用 fio --enghelp 读取真实可用列表，
 // 按 io_uring -> libaio -> psync 的顺序回退。
 func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
-	if runtime.GOOS != "linux" {
-		// psync 在所有平台都可用，非 Linux 平台不做异步引擎假设。
-		return fioEngine{Name: "psync", AsyncQueue: false, Detected: true}
-	}
 	helpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(helpCtx, fioPath, "--enghelp")

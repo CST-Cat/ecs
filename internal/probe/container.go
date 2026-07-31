@@ -66,17 +66,15 @@ func detectCPUAllowance() cpuAllowance {
 	}
 	allowance.Threads = allowance.Visible
 
-	if runtime.GOOS == "linux" {
-		if quota, source, ok := cgroupCPUQuota(); ok && quota > 0 {
-			allowance.Quota = quota
-			allowance.Source = source
-			threads := int(math.Ceil(quota))
-			if threads < 1 {
-				threads = 1
-			}
-			if threads < allowance.Threads {
-				allowance.Threads = threads
-			}
+	if quota, source, ok := cgroupCPUQuota(); ok && quota > 0 {
+		allowance.Quota = quota
+		allowance.Source = source
+		threads := int(math.Ceil(quota))
+		if threads < 1 {
+			threads = 1
+		}
+		if threads < allowance.Threads {
+			allowance.Threads = threads
 		}
 	}
 	// sysbench 对线程数没有硬上限，但超过几百个线程只会放大调度噪声。
@@ -143,9 +141,6 @@ func cgroupV1CPUQuota() (float64, bool) {
 
 // cgroupMemoryLimit 返回 cgroup 内存上限；0 表示没有限制或无法读取。
 func cgroupMemoryLimit() (uint64, string, bool) {
-	if runtime.GOOS != "linux" {
-		return 0, "", false
-	}
 	for _, candidate := range []struct {
 		base string
 		file string
@@ -224,9 +219,6 @@ type cpuTimeSample struct {
 // 字段顺序为 user nice system idle iowait irq softirq steal guest guest_nice，
 // steal 是索引 7。内核较旧时可能没有 steal 列，此时按 0 处理并照常返回。
 func readCPUTimes() (cpuTimeSample, bool) {
-	if runtime.GOOS != "linux" {
-		return cpuTimeSample{}, false
-	}
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {
 		return cpuTimeSample{}, false
