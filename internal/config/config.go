@@ -32,6 +32,7 @@ var ModuleOrder = []string{
 	"ports",
 	"media",
 	"route",
+	"backtrace",
 }
 
 type Endpoint struct {
@@ -47,6 +48,44 @@ type IPerfEndpoint struct {
 	PortEnd   int    `json:"port_end"`
 	Location  string `json:"location,omitempty"`
 	Networks  string `json:"networks,omitempty"`
+	// Region 用于按地区裁剪节点集，避免长档位把所有公共节点跑一遍。
+	Region string `json:"region,omitempty"`
+}
+
+// iperfNodePool 是 YABS 公共节点清单里长期可用的一批 iperf3 服务器。
+//
+// 这些节点由第三方免费提供，随时可能繁忙、限速、换端口或下线；ecs 只复用清单，
+// 不保证可用性。standard 档按地区各取一个，full 档跑全部。
+func iperfNodePool() []IPerfEndpoint {
+	return []IPerfEndpoint{
+		{Name: "Clouvider", Host: "lon.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "London, UK (10G)", Networks: "IPv4|IPv6", Region: "europe"},
+		{Name: "Eranium", Host: "ams.speedtest.eranium.net", PortStart: 5200, PortEnd: 5209, Location: "Amsterdam, NL (10G)", Networks: "IPv4|IPv6", Region: "europe"},
+		{Name: "Leaseweb", Host: "speedtest.fra1.de.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Frankfurt, DE (10G)", Networks: "IPv4|IPv6", Region: "europe"},
+
+		{Name: "Clouvider", Host: "nyc.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "New York, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
+		{Name: "Clouvider", Host: "la.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "Los Angeles, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
+		{Name: "Leaseweb", Host: "speedtest.nyc1.us.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "New York, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
+
+		{Name: "Leaseweb", Host: "speedtest.sin1.sg.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Singapore, SG (10G)", Networks: "IPv4|IPv6", Region: "asia"},
+		{Name: "Leaseweb", Host: "speedtest.tyo1.jp.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Tokyo, JP (10G)", Networks: "IPv4|IPv6", Region: "asia"},
+	}
+}
+
+// selectIPerfTargets 按地区各取前 perRegion 个节点，保持地区覆盖均衡。
+func selectIPerfTargets(perRegion int) []IPerfEndpoint {
+	if perRegion < 1 {
+		return nil
+	}
+	counts := make(map[string]int)
+	var selected []IPerfEndpoint
+	for _, node := range iperfNodePool() {
+		if counts[node.Region] >= perRegion {
+			continue
+		}
+		counts[node.Region]++
+		selected = append(selected, node)
+	}
+	return selected
 }
 
 type Runtime struct {
@@ -70,6 +109,7 @@ type Runtime struct {
 	DNSResolvers     []Endpoint
 	LatencyTargets   []Endpoint
 	RouteTargets     []Endpoint
+	BacktraceTargets []Endpoint
 }
 
 type Estimate struct {
@@ -101,6 +141,7 @@ type File struct {
 	DNSResolvers     []Endpoint      `json:"dns_resolvers,omitempty"`
 	LatencyTargets   []Endpoint      `json:"latency_targets,omitempty"`
 	RouteTargets     []Endpoint      `json:"route_targets,omitempty"`
+	BacktraceTargets []Endpoint      `json:"backtrace_targets,omitempty"`
 }
 
 func Defaults(profile string) (Runtime, error) {
@@ -114,11 +155,7 @@ func Defaults(profile string) (Runtime, error) {
 		Formats:          []string{"json", "md", "html"},
 		DiskPath:         ".",
 		HTTPTimeout:      10 * time.Second,
-		IPerfTargets: []IPerfEndpoint{
-			{Name: "Clouvider", Host: "lon.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "London, UK (10G)", Networks: "IPv4|IPv6"},
-			{Name: "Leaseweb", Host: "speedtest.sin1.sg.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Singapore, SG (10G)", Networks: "IPv4|IPv6"},
-			{Name: "Leaseweb", Host: "speedtest.nyc1.us.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "New York, US (10G)", Networks: "IPv4|IPv6"},
-		},
+		IPerfTargets:     selectIPerfTargets(1),
 		DNSResolvers: []Endpoint{
 			{Name: "Cloudflare", Address: "1.1.1.1:53"},
 			{Name: "Google", Address: "8.8.8.8:53"},
@@ -138,33 +175,45 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "Google", Address: "8.8.8.8", Kind: "Global"},
 			{Name: "AliDNS", Address: "223.5.5.5", Kind: "中国大陆"},
 		},
+		// 三网回程参考目标：北京与广州各取三大运营商一个公开地址，
+		// 南北各一组能反映不同的骨干接入。Kind 存放运营商名，供报告分组。
+		BacktraceTargets: []Endpoint{
+			{Name: "北京电信", Address: "219.141.136.12", Kind: "电信"},
+			{Name: "北京联通", Address: "202.106.50.1", Kind: "联通"},
+			{Name: "北京移动", Address: "221.179.155.161", Kind: "移动"},
+			{Name: "广州电信", Address: "58.60.188.222", Kind: "电信"},
+			{Name: "广州联通", Address: "210.21.196.6", Kind: "联通"},
+			{Name: "广州移动", Address: "120.196.165.24", Kind: "移动"},
+		},
 	}
 
 	switch profile {
 	case ProfileQuick:
 		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency"}
-		base.CPUTime = 750 * time.Millisecond
-		base.DiskMiB = 64
-		base.DNSAttempts = 2
-		base.LatencyAttempts = 3
-		base.SpeedThreads = 2
-		base.IPerfDuration = 3 * time.Second
-	case ProfileStandard:
-		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "media", "route"}
-		base.CPUTime = 2 * time.Second
+		base.CPUTime = 5 * time.Second
 		base.DiskMiB = 256
 		base.DNSAttempts = 3
 		base.LatencyAttempts = 4
-		base.SpeedThreads = 4
-		base.IPerfDuration = 5 * time.Second
-	case ProfileFull:
-		base.Modules = append([]string(nil), ModuleOrder...)
-		base.CPUTime = 4 * time.Second
+		base.SpeedThreads = 2
+		base.IPerfDuration = 3 * time.Second
+	case ProfileStandard:
+		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "media", "route", "backtrace"}
+		base.CPUTime = 10 * time.Second
 		base.DiskMiB = 1024
 		base.DNSAttempts = 5
 		base.LatencyAttempts = 6
 		base.SpeedThreads = 8
 		base.IPerfDuration = 10 * time.Second
+	case ProfileFull:
+		base.Modules = append([]string(nil), ModuleOrder...)
+		base.CPUTime = 15 * time.Second
+		base.DiskMiB = 2048
+		base.DNSAttempts = 8
+		base.LatencyAttempts = 10
+		base.SpeedThreads = 8
+		base.IPerfDuration = 15 * time.Second
+		// full 档跑遍公共节点池，覆盖欧洲、北美、亚洲各方向。
+		base.IPerfTargets = selectIPerfTargets(3)
 	default:
 		return Runtime{}, fmt.Errorf("未知配置档 %q，可选 quick、standard、full", profile)
 	}
@@ -258,6 +307,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	if len(file.RouteTargets) > 0 {
 		runtime.RouteTargets = append([]Endpoint(nil), file.RouteTargets...)
+	}
+	if len(file.BacktraceTargets) > 0 {
+		runtime.BacktraceTargets = append([]Endpoint(nil), file.BacktraceTargets...)
 	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
@@ -371,6 +423,14 @@ func Validate(runtime Runtime) error {
 			return fmt.Errorf("路由目标 %q 不是安全的 IP 或主机名", endpoint.Address)
 		}
 	}
+	for _, endpoint := range runtime.BacktraceTargets {
+		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
+			return errors.New("三网回程目标必须同时包含 name 和 address")
+		}
+		if !validRouteTarget(endpoint.Address) {
+			return fmt.Errorf("三网回程目标 %q 不是安全的 IP 或主机名", endpoint.Address)
+		}
+	}
 	if runtime.DiskPath == "" {
 		return errors.New("磁盘测试路径不能为空")
 	}
@@ -440,7 +500,8 @@ func EstimateFor(runtime Runtime) Estimate {
 
 func estimateTypicalDuration(runtime Runtime) time.Duration {
 	networkModule := map[string]bool{
-		"network": true, "dns": true, "latency": true, "speed": true, "ports": true, "media": true, "route": true,
+		"network": true, "dns": true, "latency": true, "speed": true,
+		"ports": true, "media": true, "route": true, "backtrace": true,
 	}
 	var total time.Duration
 	for _, module := range runtime.Modules {
@@ -453,8 +514,12 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += time.Second
 		case "network":
 			total += 5 * time.Second
-		case "cpu", "memory":
+		case "cpu":
+			// sysbench CPU 跑单线程与多线程两轮。
 			total += 2*runtime.CPUTime + time.Second
+		case "memory":
+			// sysbench memory 跑读/写 × 单/多线程共四轮。
+			total += 4*runtime.CPUTime + time.Second
 		case "disk":
 			randomDuration := runtime.CPUTime
 			if randomDuration > 3*time.Second {
@@ -477,6 +542,9 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += 10 * time.Second
 		case "route":
 			total += time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
+		case "backtrace":
+			// 参考目标并发追踪，耗时取决于最慢的一个而不是总和。
+			total += 30 * time.Second
 		}
 	}
 	if total < 5*time.Second {

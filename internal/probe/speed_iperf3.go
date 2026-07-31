@@ -35,6 +35,85 @@ type iperfJSONSum struct {
 	BitsPerSecond float64 `json:"bits_per_second"`
 	Retransmits   int64   `json:"retransmits"`
 	Seconds       float64 `json:"seconds"`
+	// UDP 专有统计。
+	JitterMS    float64 `json:"jitter_ms"`
+	LostPackets int64   `json:"lost_packets"`
+	Packets     int64   `json:"packets"`
+	LostPercent float64 `json:"lost_percent"`
+}
+
+// udpResult 是一次 UDP 测试的丢包与抖动统计。
+type udpResult struct {
+	Available   bool
+	JitterMS    float64
+	LostPercent float64
+	Packets     int64
+	Mbps        float64
+	Err         string
+}
+
+// runIPerfUDP 用固定码率的 UDP 流测量丢包与抖动。
+//
+// TCP 吞吐说明链路能跑多快，UDP 丢包和抖动说明链路稳不稳；实时音视频、游戏和
+// VPN 的体验取决于后者。这里用适中的固定码率而不是压满带宽：压满时的丢包只能
+// 说明拥塞，不能反映常态质量。
+func runIPerfUDP(ctx context.Context, path, host string, port int, family string, bitrate string, seconds int) udpResult {
+	args := []string{
+		"-" + strings.TrimPrefix(family, "IPv"),
+		"-c", host,
+		"-p", strconv.Itoa(port),
+		"-u",
+		"-b", bitrate,
+		"-t", strconv.Itoa(seconds),
+		"-J",
+	}
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds+12)*time.Second)
+	defer cancel()
+	command := exec.CommandContext(runCtx, path, args...)
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+
+	result := udpResult{}
+	if runCtx.Err() != nil {
+		result.Err = runCtx.Err().Error()
+		return result
+	}
+	if stdout.Len() > 4*1024*1024 {
+		result.Err = "iperf3 UDP JSON 超过 4 MiB 安全上限"
+		return result
+	}
+	var output iperfJSONOutput
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &output); decodeErr != nil {
+		detail := tailText(sanitizeCommandOutput(stderr.Bytes()), 200)
+		result.Err = fmt.Sprintf("解析 UDP JSON: %v: %s", decodeErr, detail)
+		return result
+	}
+	if output.Error != "" {
+		result.Err = output.Error
+		return result
+	}
+	if err != nil && output.End.SumReceived.Packets == 0 {
+		result.Err = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 200))
+		return result
+	}
+	// UDP 模式下服务端回报的接收统计才带 jitter 与丢包。
+	sum := output.End.SumReceived
+	if sum.Packets == 0 {
+		sum = output.End.SumSent
+	}
+	if sum.Packets == 0 {
+		result.Err = "iperf3 未返回 UDP 包统计"
+		return result
+	}
+	result.Available = true
+	result.JitterMS = sum.JitterMS
+	result.LostPercent = sum.LostPercent
+	result.Packets = sum.Packets
+	result.Mbps = sum.BitsPerSecond / 1_000_000
+	return result
 }
 
 type iperfDirectionResult struct {
@@ -53,6 +132,7 @@ type iperfRow struct {
 	Family   string
 	Upload   iperfDirectionResult
 	Download iperfDirectionResult
+	UDP      udpResult
 }
 
 type speedProbe struct{}
@@ -109,24 +189,35 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	hasIPv6 := hostHasUsableIPv6()
+	// UDP 丢包/抖动只在 full 档跑：它需要额外的往返时间，而 standard 档的重点
+	// 是吞吐本身。
+	udpEnabled := env.Config.Profile == "full"
 	rows := make([]iperfRow, 0, len(env.Config.IPerfTargets)*2)
 	for _, target := range env.Config.IPerfTargets {
 		for _, family := range endpointFamilies(target.Networks, hasIPv6) {
 			if ctx.Err() != nil {
 				break
 			}
-			rows = append(rows, iperfRow{
+			row := iperfRow{
 				Target:   target,
 				Family:   family,
 				Upload:   runIPerfDirection(ctx, path, target, family, false, threads, seconds),
 				Download: runIPerfDirection(ctx, path, target, family, true, threads, seconds),
-			})
+			}
+			if udpEnabled && ctx.Err() == nil && (row.Upload.Mbps > 0 || row.Download.Mbps > 0) {
+				port := target.PortStart
+				if row.Upload.Port > 0 {
+					port = row.Upload.Port
+				}
+				row.UDP = runIPerfUDP(ctx, path, target.Host, port, family, "50M", 5)
+			}
+			rows = append(rows, row)
 		}
 	}
 
 	table := model.Table{
 		Title:   "iperf3 TCP 节点",
-		Columns: []string{"服务商", "位置", "协议", "上传", "下载", "重传", "端口", "状态"},
+		Columns: []string{"服务商", "位置", "协议", "上传", "下载", "重传", "UDP 丢包", "UDP 抖动", "端口", "状态"},
 	}
 	var transferred int64
 	failures := 0
@@ -168,6 +259,28 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		}
 		retransmits := row.Upload.Retransmits + row.Download.Retransmits
 		ports := formatIPerfPorts(row.Upload.Port, row.Download.Port)
+		udpLoss, udpJitter := "—", "—"
+		if row.UDP.Available {
+			udpLoss = fmt.Sprintf("%.2f %%", row.UDP.LostPercent)
+			udpJitter = fmt.Sprintf("%.3f ms", row.UDP.JitterMS)
+			result.Measurements = append(result.Measurements,
+				model.Measurement{
+					Key:   fmt.Sprintf("iperf3_target_%02d_%s_udp_loss_percent", rowIndex+1, strings.ToLower(row.Family)),
+					Label: fmt.Sprintf("%s %s UDP 丢包", row.Target.Name, row.Family),
+					Value: row.UDP.LostPercent, Unit: "%", Display: udpLoss,
+					Method: "iperf3-udp-50M-5s-v1", HigherIsBetter: model.BoolPtr(false),
+				},
+				model.Measurement{
+					Key:   fmt.Sprintf("iperf3_target_%02d_%s_udp_jitter_ms", rowIndex+1, strings.ToLower(row.Family)),
+					Label: fmt.Sprintf("%s %s UDP 抖动", row.Target.Name, row.Family),
+					Value: row.UDP.JitterMS, Unit: "ms", Display: udpJitter,
+					Method: "iperf3-udp-50M-5s-v1", HigherIsBetter: model.BoolPtr(false),
+				},
+			)
+		} else if row.UDP.Err != "" {
+			result.Notes = append(result.Notes,
+				fmt.Sprintf("%s %s UDP 测试失败: %s", row.Target.Name, row.Family, row.UDP.Err))
+		}
 		table.Rows = append(table.Rows, []string{
 			row.Target.Name,
 			fallback(row.Target.Location, row.Target.Host),
@@ -175,6 +288,8 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			formatOptionalMbps(row.Upload.Mbps),
 			formatOptionalMbps(row.Download.Mbps),
 			strconv.FormatInt(retransmits, 10),
+			udpLoss,
+			udpJitter,
 			ports,
 			status,
 		})
@@ -220,6 +335,13 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		"只比较相同节点、IP 协议、iperf3 版本、并发流和时长的结果。",
 		"报告保留每个节点、方向的 iperf3 原值，不计算跨节点平均分、中位数或综合分。",
 	)
+	if udpEnabled {
+		result.Notes = append(result.Notes,
+			"UDP 列用 50 Mbps 固定码率跑 5 秒，测的是常态丢包与抖动而不是压满带宽后的拥塞表现；实时音视频与游戏体验主要取决于这两项。",
+		)
+	} else {
+		result.Notes = append(result.Notes, "UDP 丢包与抖动仅在 full 档执行，可用 --profile full 获取。")
+	}
 	result.Summary = fmt.Sprintf(
 		"iperf3 完成 %d/%d 个节点方向 · 实际传输 %s",
 		completedDirections,

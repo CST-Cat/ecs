@@ -41,6 +41,17 @@ type systemSnapshot struct {
 	Load           string
 	Congestion     string
 	QDisc          string
+
+	// Allowance 是 cgroup 配额折算后本进程真正可用的 CPU。
+	Allowance cpuAllowance
+	// MemoryLimit 是 cgroup 内存上限；非零且小于 MemoryTotal 时说明
+	// /proc/meminfo 报的是宿主机内存（没有 lxcfs 的 LXC/OpenVZ 常见）。
+	MemoryLimit    uint64
+	MemoryLimitVia string
+	// StealPercent 是自开机以来被虚拟化层偷走的 CPU 时间占比，
+	// 比短窗口采样更能反映长期超售程度。
+	StealPercent float64
+	StealKnown   bool
 }
 
 func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -56,6 +67,10 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
+	memoryValue := fmt.Sprintf("%s 总计 / %s 可用", model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryFree))
+	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
+		memoryValue = fmt.Sprintf("%s 配额（%s 宿主可见）", model.FormatBytes(snapshot.MemoryLimit), model.FormatBytes(snapshot.MemoryTotal))
+	}
 	result.Fields = []model.Field{
 		{Key: "hostname", Label: "主机名", Value: snapshot.Hostname, Sensitive: true},
 		{Key: "os", Label: "系统", Value: snapshot.OS},
@@ -64,9 +79,11 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "virtualization", Label: "虚拟化", Value: snapshot.Virtualization},
 		{Key: "cpu_model", Label: "CPU", Value: snapshot.CPUModel},
 		{Key: "cpu_topology", Label: "CPU 拓扑", Value: fmt.Sprintf("%d 逻辑 / %d 物理核心", snapshot.LogicalCPUs, snapshot.PhysicalCores)},
+		{Key: "cpu_allowance", Label: "CPU 配额", Value: describeCPUAllowance(snapshot.Allowance)},
 		{Key: "cpu_frequency", Label: "CPU 频率", Value: snapshot.CPUFrequency},
+		{Key: "cpu_steal", Label: "CPU steal（累计）", Value: describeSteal(snapshot)},
 		{Key: "aes", Label: "AES 指令", Value: snapshot.AES},
-		{Key: "memory", Label: "内存", Value: fmt.Sprintf("%s 总计 / %s 可用", model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryFree))},
+		{Key: "memory", Label: "内存", Value: memoryValue},
 		{Key: "swap", Label: "Swap", Value: model.FormatBytes(snapshot.SwapTotal)},
 		{Key: "disk", Label: "测试盘", Value: fmt.Sprintf("%s 总计 / %s 可用 (%s)", model.FormatBytes(snapshot.DiskTotal), model.FormatBytes(snapshot.DiskFree), snapshot.DiskMount)},
 		{Key: "uptime", Label: "运行时间", Value: snapshot.Uptime},
@@ -76,8 +93,22 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Measurements = []model.Measurement{
 		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
+		{Key: "usable_cpus", Label: "可用 CPU", Value: float64(snapshot.Allowance.Threads), Unit: "线程", Display: strconv.Itoa(snapshot.Allowance.Threads)},
 		{Key: "memory_total_bytes", Label: "总内存", Value: float64(snapshot.MemoryTotal), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryTotal)},
 		{Key: "disk_free_bytes", Label: "磁盘可用", Value: float64(snapshot.DiskFree), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskFree)},
+	}
+	if snapshot.StealKnown {
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: "cpu_steal_percent_cumulative", Label: "CPU steal（自开机累计）",
+			Value: snapshot.StealPercent, Unit: "%", Display: fmt.Sprintf("%.2f %%", snapshot.StealPercent),
+			Method: "proc-stat-steal-cumulative-v1", HigherIsBetter: model.BoolPtr(false),
+		})
+	}
+	if snapshot.MemoryLimit > 0 {
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: "memory_limit_bytes", Label: "内存配额",
+			Value: float64(snapshot.MemoryLimit), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryLimit),
+		})
 	}
 
 	missing := 0
@@ -90,9 +121,36 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "当前平台限制了部分系统信息读取；缺失字段不会影响其余测试。")
 	}
+	if snapshot.Allowance.Limited() {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"cgroup 限制本机只能用 %.2f 个核（%s），但系统可见 %d 个逻辑核；CPU 与内存基准会按配额开 %d 个线程。",
+			snapshot.Allowance.Quota, snapshot.Allowance.Source, snapshot.Allowance.Visible, snapshot.Allowance.Threads,
+		))
+	}
+	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"/proc/meminfo 报告 %s，但 %s 只有 %s；容器没有挂载 lxcfs 时 meminfo 显示的是宿主机内存，配额才是真实可用值。",
+			model.FormatBytes(snapshot.MemoryTotal), snapshot.MemoryLimitVia, model.FormatBytes(snapshot.MemoryLimit),
+		))
+	}
+	if snapshot.StealKnown && snapshot.StealPercent >= 5 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"自开机以来 CPU steal 累计 %.2f%%，宿主机长期存在资源争抢，通常意味着超售；所有 CPU 成绩都应按此折价理解。",
+			snapshot.StealPercent,
+		))
+	}
 	result.Summary = fmt.Sprintf("%d vCPU · %s 内存 · %s 可用盘 · %s", snapshot.LogicalCPUs, model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.DiskFree), snapshot.Virtualization)
 	result.Finish(start)
 	return result
+}
+
+// describeSteal 给出可读的 steal 描述。
+func describeSteal(s systemSnapshot) string {
+	if !s.StealKnown {
+		return "n/a（仅 Linux 提供 /proc/stat）"
+	}
+	return fmt.Sprintf("%.2f %%", s.StealPercent)
 }
 
 func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
@@ -112,6 +170,7 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 		Congestion:     "n/a",
 		QDisc:          "n/a",
 		DiskMount:      diskPath,
+		Allowance:      detectCPUAllowance(),
 	}
 
 	switch runtime.GOOS {
@@ -208,6 +267,15 @@ func collectLinuxSystem(s *systemSnapshot) {
 	s.Congestion = readTrimmed("/proc/sys/net/ipv4/tcp_congestion_control", "n/a")
 	s.QDisc = readTrimmed("/proc/sys/net/core/default_qdisc", "n/a")
 	s.Virtualization = detectLinuxVirtualization(cpuText)
+
+	// 容器里 /proc/meminfo 通常是宿主机视图，cgroup 上限才是真正拿得到的内存。
+	if limit, via, ok := cgroupMemoryLimit(); ok {
+		s.MemoryLimit = limit
+		s.MemoryLimitVia = via
+	}
+	if sample, ok := readCPUTimes(); ok {
+		s.StealPercent, s.StealKnown = cumulativeStealPercent(sample)
+	}
 }
 
 func collectDarwinSystem(ctx context.Context, s *systemSnapshot) {

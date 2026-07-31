@@ -207,17 +207,18 @@ func listCommand(stdout io.Writer) int {
 	fmt.Fprintln(stdout, "  full      更长性能测试、更大流量并包含路由")
 	fmt.Fprintln(stdout, "\n模块:")
 	descriptions := map[string]string{
-		"system":  "系统、虚拟化、资源、内核网络栈",
-		"network": "IPv4/IPv6、原生/广播、六库风险分与九库风险因子",
-		"cpu":     "sysbench 标准 CPU 基准",
-		"memory":  "sysbench 标准内存基准",
-		"disk":    "fio Direct I/O 标准基准",
-		"dns":     "公共 DNS 延迟、失败率与抖动",
-		"latency": "TCP 建连延迟与可达率",
-		"speed":   "iperf3 多节点标准吞吐基准",
-		"ports":   "Web、SSH、DNS 与邮件出站端口",
-		"media":   "流媒体与 AI 服务公开页证据",
-		"route":   "NextTrace/系统 traceroute 适配器",
+		"system":    "系统、虚拟化、资源、内核网络栈",
+		"network":   "IPv4/IPv6、原生/广播、六库风险分与九库风险因子",
+		"cpu":       "sysbench 标准 CPU 基准",
+		"memory":    "sysbench 标准内存基准",
+		"disk":      "fio Direct I/O 标准基准",
+		"dns":       "公共 DNS 延迟、失败率与抖动",
+		"latency":   "TCP 建连延迟与可达率",
+		"speed":     "iperf3 多节点标准吞吐基准",
+		"ports":     "Web、SSH、DNS 与邮件出站端口",
+		"media":     "流媒体与 AI 服务公开页证据",
+		"route":     "NextTrace/系统 traceroute 适配器",
+		"backtrace": "三网回程线路识别（电信/联通/移动骨干特征）",
 	}
 	for _, id := range config.ModuleOrder {
 		fmt.Fprintf(stdout, "  %-10s %s\n", id, descriptions[id])

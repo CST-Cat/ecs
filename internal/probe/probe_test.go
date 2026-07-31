@@ -64,9 +64,6 @@ func TestParseSystemFiles(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := detectRegion(`{"countryCode":"JP"}`, "https://example.com"); got != "JP" {
-		t.Fatalf("region = %q", got)
-	}
 	if got := sanitizeCommandOutput([]byte("\x1b[31m 1  1.1.1.1\x1b[0m\n")); got != "1  1.1.1.1" {
 		t.Fatalf("sanitized = %q", got)
 	}
@@ -105,11 +102,33 @@ func TestFIOJSONHelpers(t *testing.T) {
 	if got := fioP95Milliseconds(output.Jobs[0].Read); got != 2.5 {
 		t.Fatalf("fio p95 = %f", got)
 	}
-	args := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, "libaio"), " ")
-	for _, expected := range []string{"--output-format=json", "--direct=1", "--name=seqwrite", "--name=randwrite", "--iodepth=32"} {
+	asyncEngine := fioEngine{Name: "libaio", AsyncQueue: true, Detected: true}
+	plan := fioJobPlan(config.ProfileStandard)
+	args := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, asyncEngine, plan), " ")
+	for _, expected := range []string{
+		"--output-format=json", "--direct=1", "--name=seqwrite", "--name=randwrite",
+		"--iodepth=32", "--name=mix4k", "--name=mix512k", "--rwmixread=50", "--iodepth=64", "--numjobs=2",
+	} {
 		if !strings.Contains(args, expected) {
 			t.Fatalf("fio args missing %q: %s", expected, args)
 		}
+	}
+
+	// 同步引擎下队列深度必须降级为 1，不能照抄请求值。
+	syncEngine := fioEngine{Name: "psync", Detected: true}
+	if got := syncEngine.EffectiveDepth(64); got != 1 {
+		t.Fatalf("psync effective depth = %d, want 1", got)
+	}
+	syncArgs := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, syncEngine, plan), " ")
+	if strings.Contains(syncArgs, "--iodepth=64") || strings.Contains(syncArgs, "--iodepth=32") {
+		t.Fatalf("psync args must not request an async queue depth: %s", syncArgs)
+	}
+
+	// quick 档只跑首尾两档混合，避免时长失控。
+	quickPlan := fioJobPlan(config.ProfileQuick)
+	quickArgs := strings.Join(fioArguments("<tempfile>", 1<<20, time.Second, asyncEngine, quickPlan), " ")
+	if strings.Contains(quickArgs, "--name=mix64k") {
+		t.Fatalf("quick profile should skip 64k mixed job: %s", quickArgs)
 	}
 }
 
@@ -120,11 +139,19 @@ func TestRunFIODiskWithLocalJSONAdapter(t *testing.T) {
 	directory := t.TempDir()
 	helper := filepath.Join(directory, "fio")
 	script := `#!/bin/sh
+case "$*" in
+  *--enghelp*)
+    printf '%s\n' 'psync'
+    exit 0
+    ;;
+esac
 printf '%s\n' '{"fio version":"fio-test","jobs":[
 {"jobname":"seqwrite","error":0,"write":{"bw_bytes":104857600,"iops":100}},
 {"jobname":"seqread","error":0,"read":{"bw_bytes":209715200,"iops":200}},
 {"jobname":"randread","error":0,"read":{"bw_bytes":4096000,"iops":1000,"clat_ns":{"percentile":{"95.000000":2000000}}}},
-{"jobname":"randwrite","error":0,"write":{"bw_bytes":2048000,"iops":500,"clat_ns":{"percentile":{"95.000000":3000000}}}}
+{"jobname":"randwrite","error":0,"write":{"bw_bytes":2048000,"iops":500,"clat_ns":{"percentile":{"95.000000":3000000}}}},
+{"jobname":"mix4k","error":0,"read":{"bw_bytes":2097152,"iops":512},"write":{"bw_bytes":1048576,"iops":256}},
+{"jobname":"mix1m","error":0,"read":{"bw_bytes":52428800,"iops":50},"write":{"bw_bytes":52428800,"iops":50}}
 ]}'
 `
 	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
@@ -140,8 +167,21 @@ printf '%s\n' '{"fio version":"fio-test","jobs":[
 	if result.Status != "ok" {
 		t.Fatalf("fio result = %+v", result)
 	}
-	if len(result.Measurements) != 6 || !strings.Contains(result.Summary, "100.0 MiB/s") {
-		t.Fatalf("fio measurements = %+v, summary = %q", result.Measurements, result.Summary)
+	if !strings.Contains(result.Summary, "100.0 MiB/s") {
+		t.Fatalf("fio summary = %q", result.Summary)
+	}
+	// 四项基础指标 + 两个 P95 + 两档混合各读写两项。
+	if len(result.Measurements) != 10 {
+		t.Fatalf("fio measurements = %d: %+v", len(result.Measurements), result.Measurements)
+	}
+	mixedFound := false
+	for _, table := range result.Tables {
+		if strings.Contains(table.Title, "混合") && len(table.Rows) == 2 {
+			mixedFound = true
+		}
+	}
+	if !mixedFound {
+		t.Fatalf("mixed matrix table missing: %+v", result.Tables)
 	}
 	matches, err := filepath.Glob(filepath.Join(directory, ".ecs-fio-*"))
 	if err != nil {
@@ -208,8 +248,18 @@ esac
 	}
 	cfg.CPUTime = 100 * time.Millisecond
 	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, helper)
-	if cpu.Status != "ok" || cpu.Methodology.Kind != "standard-benchmark" || len(cpu.Measurements) != 2 {
+	if cpu.Status != "ok" || cpu.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
+	}
+	// steal 只在能读到 /proc/stat 的平台出现，所以按 key 断言而不是按数量。
+	cpuKeys := make(map[string]bool, len(cpu.Measurements))
+	for _, measurement := range cpu.Measurements {
+		cpuKeys[measurement.Key] = true
+	}
+	for _, required := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
+		if !cpuKeys[required] {
+			t.Fatalf("sysbench CPU missing %q: %+v", required, cpu.Measurements)
+		}
 	}
 	for _, measurement := range cpu.Measurements {
 		if strings.Contains(measurement.Key, "efficiency") {

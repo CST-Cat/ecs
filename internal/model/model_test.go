@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,62 @@ func TestSummarize(t *testing.T) {
 func TestFormatBytes(t *testing.T) {
 	if got := FormatBytes(1024 * 1024); got != "1.00 MiB" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestMaskIPsInTextKeepsRoutePrefixes(t *testing.T) {
+	// 线路特征必须保留：59.43 段是判定 CN2 的依据，整段抹掉会让复核失去意义。
+	trace := " 3  202.97.94.1  32.118 ms\n 4  59.43.130.22  35.900 ms"
+	masked := MaskIPsInText(trace)
+	if !strings.Contains(masked, "202.97.94.x") || !strings.Contains(masked, "59.43.130.x") {
+		t.Fatalf("masked trace = %q", masked)
+	}
+	if strings.Contains(masked, "130.22") {
+		t.Fatalf("masked trace still exposes the final octet: %q", masked)
+	}
+	// 耗时里的小数不能被误当成 IP。
+	if !strings.Contains(masked, "32.118 ms") {
+		t.Fatalf("masked trace corrupted timings: %q", masked)
+	}
+	if got := MaskIPsInText(""); got != "" {
+		t.Fatalf("empty text = %q", got)
+	}
+}
+
+func TestRedactedCopyMasksTextBlocksAndTables(t *testing.T) {
+	report := Report{Results: []Result{{
+		ID: "backtrace",
+		TextBlocks: []TextBlock{
+			{Content: "hop 59.43.130.22", Sensitive: true},
+			{Content: "hop 59.43.130.22"},
+		},
+		Tables: []Table{{
+			Columns:          []string{"线路", "命中 IP"},
+			Rows:             [][]string{{"CN2", "59.43.130.22"}},
+			SensitiveColumns: []int{1},
+		}},
+	}}}
+
+	redacted := RedactedCopy(report, false)
+	if got := redacted.Results[0].TextBlocks[0].Content; got != "hop 59.43.130.x" {
+		t.Fatalf("sensitive text block = %q", got)
+	}
+	// 未标记的块保持原样，避免误伤非路由输出。
+	if got := redacted.Results[0].TextBlocks[1].Content; got != "hop 59.43.130.22" {
+		t.Fatalf("unmarked text block = %q", got)
+	}
+	if got := redacted.Results[0].Tables[0].Rows[0][1]; got != "59.43.130.x" {
+		t.Fatalf("sensitive column = %q", got)
+	}
+	if got := redacted.Results[0].Tables[0].Rows[0][0]; got != "CN2" {
+		t.Fatalf("non-sensitive column changed: %q", got)
+	}
+	if report.Results[0].TextBlocks[0].Content != "hop 59.43.130.22" {
+		t.Fatal("RedactedCopy mutated the source text block")
+	}
+
+	revealed := RedactedCopy(report, true)
+	if revealed.Results[0].Tables[0].Rows[0][1] != "59.43.130.22" {
+		t.Fatal("--reveal must keep full values")
 	}
 }

@@ -20,11 +20,16 @@ func (dnsProbe) ID() string         { return "dns" }
 func (dnsProbe) Title() string      { return "DNS 质量" }
 func (dnsProbe) NeedsNetwork() bool { return true }
 
+// dnsQueryName 是固定的探测域名，各解析器都能递归到且 TTL 稳定。
+const dnsQueryName = "www.cloudflare.com"
+
 type dnsResult struct {
 	Endpoint config.Endpoint
 	Values   []time.Duration
 	Failures int
 	LastErr  error
+	// WarmupErr 记录预热查询的失败原因，仅用于诊断，不计入成功率。
+	WarmupErr error
 }
 
 func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -35,7 +40,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		Kind:            "protocol-measurement",
 		Label:           "协议测量",
 		Engine:          "native DNS/UDP",
-		Profile:         "A query www.cloudflare.com",
+		Profile:         "A query " + dnsQueryName + " (warmed up)",
 		ComparisonScope: "相同解析器、域名、缓存状态、样本数与网络路径；不是标准基准分数",
 	}
 
@@ -47,8 +52,13 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		go func(endpoint config.Endpoint) {
 			defer wg.Done()
 			item := dnsResult{Endpoint: endpoint}
+			// 预热一次且不计入统计：首次查询大概率是递归 miss，后续是缓存命中，
+			// 两者能差一个数量级，混在一起会让 P50/P95 和抖动全部失真。
+			if _, err := dnsQuery(ctx, endpoint.Address, dnsQueryName, 2*time.Second); err != nil {
+				item.WarmupErr = err
+			}
 			for i := 0; i < attempts; i++ {
-				elapsed, err := dnsQuery(ctx, endpoint.Address, "www.cloudflare.com", 2*time.Second)
+				elapsed, err := dnsQuery(ctx, endpoint.Address, dnsQueryName, 2*time.Second)
 				if err != nil {
 					item.Failures++
 					item.LastErr = err
@@ -126,7 +136,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		result.Summary = fmt.Sprintf("%s 最快 · P50 %s", bestName, formatMilliseconds(best))
 	}
-	result.Notes = append(result.Notes, "查询域名固定为 www.cloudflare.com；结果反映 UDP/53 往返与递归缓存状态，不等同于系统解析器体验。")
+	result.Notes = append(result.Notes, "查询域名固定为 "+dnsQueryName+"；每个解析器先发一次不计入统计的预热查询，随后的样本反映缓存命中后的稳态 UDP/53 往返，不等同于系统解析器体验。")
 	result.Finish(start)
 	return result
 }

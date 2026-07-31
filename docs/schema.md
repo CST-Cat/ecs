@@ -33,7 +33,7 @@
     "kind": "standard-benchmark",
     "label": "标准基准",
     "engine": "fio",
-    "profile": "Direct I/O seq 1 MiB QD1 + random 4 KiB QD32",
+    "profile": "Direct I/O seq 1 MiB QD1 + rand 4 KiB QD32 + randrw 50/50 QD64",
     "comparison_scope": "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长"
   },
   "status": "ok",
@@ -114,9 +114,30 @@ IP 质量指标尤其需要保留 `method`：
 
 `tables` 保存端点、平台或样本矩阵。`columns` 定义顺序，每一行应与列数一致。
 
+`sensitive_columns` 是可选的列索引数组，列出需要遮盖的列：
+
+```json
+{
+  "title": "三网回程线路",
+  "columns": ["运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"],
+  "rows": [["电信", "北京电信", "电信 163 骨干（AS4134）", "10", "202.97.55.x", "已识别"]],
+  "sensitive_columns": [4]
+}
+```
+
 `network` 结果固定保留 IP 类型属性、风险评分、风险因子和数据源状态表。即使供应商未配置、被限流或解析失败，对应行也不能静默删除；使用 `未启用`、`失败`、`未返回` 或 `—` 区分状态。这样 Markdown/HTML 和下游程序能看到证据缺口，而不是把缺失误判成低风险。
 
 `text_blocks` 保存路由等需要原文复核的结果。终端 ANSI 和 NUL 会在写入前移除；HTML 使用转义后的 `<pre>` 展示。
+
+```json
+{"title":"北京电信 (219.141.136.x) 原始路径","language":"text","content":"…","sensitive":true}
+```
+
+`sensitive` 为真时，正文里的 IP 会在写入前按段遮盖：IPv4 隐藏最后一段、IPv6 只保留 `/48`。
+路由类原文必须置位——路径 IP 会暴露机房位置。遮盖刻意保留前缀，因为 `59.43`、`202.97`
+这类网段正是判定线路类型的依据，整段抹掉会让证据失去复核价值。
+
+遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者。
 
 ## 兼容策略
 

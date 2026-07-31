@@ -4,7 +4,7 @@
 
 `ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出终端、Markdown 和独立 HTML 报告。所有性能成绩只读取 sysbench、fio、iperf3 的结果；项目不实现 CPU、内存、磁盘或网络吞吐替代分数，也不生成并行效率、跨节点平均值或综合跑分等自算成绩。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
 
-> 当前处于首个开发版本。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点和平台规则。
+> 当前处于首个开发版本。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、三网回程、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
 ## 为什么再做一个
 
@@ -107,9 +107,12 @@ ecs config example
 
 | 配置档 | 目标 | 性能主引擎 | CPU/内存每轮 | 临时磁盘上限 | 网络负载 |
 | --- | --- | --- | ---: | ---: | --- |
-| `quick` | 低资源快速筛查 | sysbench + fio | 0.75 秒（sysbench 向上取整为 1 秒） | 64 MiB | 默认不跑吞吐 |
-| `standard` | 日常综合验机 | sysbench + fio + iperf3 | 2 秒 | 256 MiB | 3 节点、双方向、每方向 5 秒 |
-| `full` | 更稳定的长样本 | sysbench + fio + iperf3 | 4 秒 | 1024 MiB | 3 节点、双方向、每方向 10 秒 |
+| `quick` | 低资源快速筛查 | sysbench + fio | 5 秒 | 256 MiB | 默认不跑吞吐 |
+| `standard` | 日常综合验机 | sysbench + fio + iperf3 | 10 秒 | 1024 MiB | 3 节点、双方向、每方向 10 秒 |
+| `full` | 更稳定的长样本 | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 8 节点、双方向、每方向 15 秒，含 UDP 丢包 |
+
+采样窗口对齐 sysbench 的通行时长：低于 10 秒的窗口在突发性能机型（AWS t 系列、
+GCP e2、阿里突发实例）上测到的是 burst credit 而不是稳态性能，且方差极大。
 
 fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力跑满链路，实际流量随 VPS 带宽变化，无法用 MiB 预封顶；启动前会显示节点数、时长和并发流。
 
@@ -121,13 +124,14 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 顺序读写，1 MiB，单/多线程 | 微基准，不等同 STREAM |
-| `disk` | 标准基准 | fio Direct I/O：1 MiB QD1、4 KiB QD32、P95 | 只与相同 fio/ecs 参数和文件系统比较 |
+| `disk` | 标准基准 | fio Direct I/O：顺序 1 MiB、随机 4 KiB，加 YABS 兼容的 4k/64k/512k/1m 50/50 混合矩阵 | 只与相同 fio/ecs 参数和文件系统比较；同步引擎下队列深度降级标注 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
-| `latency` | 协议测量 | DNS + TCP 建连 | 不是 ICMP ping，受 Anycast/CDN 调度影响 |
+| `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
 | `ports` | 协议测量 | 原生 TCP 握手 | 单目标失败不能独立证明端口被封 |
-| `media` | 启发式判断 | 公开页 HTTP 证据规则 | 不等同账号权益、注册、支付或实际播放 |
+| `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
+| `backtrace` | 启发式判断 | 三网参考 IP 路径 + 骨干网段特征表 | 主动探测推断，非反向抓包；未命中特征返回未识别 |
 
 探针串行运行，避免 CPU、内存、磁盘和网络压力互相污染。DNS、端口等同类目标在模块内部并发。
 
@@ -194,6 +198,8 @@ ecs render --input report.json --format md,html --output ./exported
 
 默认情况下，主机名显示为 `hidden`，IPv4 显示为 `A.B.C.x`，IPv6 只保留 `/48` 前缀。遮盖在写入 JSON 之前完成，因此默认生成的三个文件都不保存完整值。
 
+遮盖同时覆盖表格与原始命令输出：`route` 与 `backtrace` 保存的 traceroute 原文会逐个 IP 按段遮盖，既不泄露完整地址，又保留 `59.43`、`202.97` 这类前缀供你复核线路判定是否成立。
+
 在线配置可能连接以下第三方：
 
 - `network`：ipapi.is；以及按 `--ip-quality-sources` 选择的 IPinfo、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQualityScore、DB-IP、ipdata、IPWHOIS。无用户密钥时，MaxMind 和部分风险源会经 `ipinfo.check.place` 查询；IPQS 最后一级免密兜底会把目标公开页 URL（其中含待查 IP）交给 `r.jina.ai`，并可能读取一小时内缓存；若进程配置了系统 HTTP(S) 代理，该只读兜底可经代理访问；
@@ -202,7 +208,9 @@ ecs render --input report.json --format md,html --output ./exported
 - `speed`：使用 YABS 维护清单中的 Clouvider/Leaseweb 公共 iperf3 节点；
 - `ports`：Example、GitHub、Cloudflare DNS、Gmail 的公开端口；
 - `media`：被检测服务自己的公开网页；
-- `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定。
+- `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定；
+- `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
+- `latency`：除 TCP 建连外，还会调用系统 `ping` 对同一目标发 ICMP。
 
 `--offline` 会跳过所有声明需要网络的模块。项目不包含遥测、运行次数统计、Pastebin、报告站或隐藏的上传请求。
 
@@ -271,9 +279,10 @@ make cross
 ## 接下来
 
 - 增加 MaxMind、DB-IP、IP2Location 等离线数据库适配器，降低在线 API 依赖；
-- 增加 YABS 50/50 混合随机 I/O 兼容预设和 Phoronix/UnixBench 可选长测套件；
+- 增加 Phoronix/UnixBench 可选长测套件；
 - 建立 Linux KVM、LXC、OpenVZ、低内存 NAT VPS 的回归样本库；
-- 把流媒体规则拆成可更新、可测试、带过期时间的规则包；
+- 用真实海外 VPS 样本校准三网骨干特征表，并补齐 CN2 GIA/GT 的入口段判定；
+- 把流媒体规则包拆成可独立更新、带过期时间的外部文件；
 - 在不破坏 schema 的前提下增加中英文终端与报告；
 - 发布稳定基线后冻结性能工作负载版本和比较规则。
 
