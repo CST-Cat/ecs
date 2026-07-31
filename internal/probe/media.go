@@ -3,11 +3,7 @@ package probe
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,169 +16,163 @@ func (mediaProbe) ID() string         { return "media" }
 func (mediaProbe) Title() string      { return "流媒体与 AI 服务" }
 func (mediaProbe) NeedsNetwork() bool { return true }
 
-type mediaTarget struct {
-	Name string
-	URL  string
-}
-
+// mediaResult 是一个平台的完整检测记录。
 type mediaResult struct {
-	Target   mediaTarget
-	Verdict  string
-	HTTPCode int
-	Region   string
-	Latency  time.Duration
-	Evidence string
-}
-
-var regionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)"countryCode"\s*:\s*"([A-Z]{2})"`),
-	regexp.MustCompile(`(?i)"country_code"\s*:\s*"([A-Z]{2})"`),
-	regexp.MustCompile(`(?i)[?&]gl=([A-Z]{2})`),
+	Check   mediaCheck
+	Verdict mediaVerdict
+	Latency time.Duration
+	// Statuses 保留每次请求的状态码，便于复核判定依据。
+	Statuses []int
 }
 
 func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	result := model.NewResult("media", "流媒体与 AI 服务")
-	result.Description = "公开网页的区域可达性与页面信号，结论不依赖登录账号"
+	result.Description = "按平台规则检测区域可用性，结论区分解锁、仅自制剧、不解锁与未知"
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
 		Label:           "启发式判断",
-		Engine:          "public HTTP evidence",
-		Profile:         "versioned page rules v1",
-		ComparisonScope: "仅作当次公开页证据；不等同于账号播放、注册或支付能力",
+		Engine:          "public HTTP evidence + per-platform rules",
+		Profile:         "media rules " + mediaRulesVersion,
+		ComparisonScope: "仅当次公开页证据；不等同于账号播放、注册或支付能力",
 	}
 
-	targets := []mediaTarget{
-		{Name: "Netflix", URL: "https://www.netflix.com/title/80018499"},
-		{Name: "YouTube Premium", URL: "https://www.youtube.com/premium"},
-		{Name: "Disney+", URL: "https://www.disneyplus.com/"},
-		{Name: "TikTok", URL: "https://www.tiktok.com/"},
-		{Name: "ChatGPT", URL: "https://chatgpt.com/"},
-		{Name: "Claude", URL: "https://claude.ai/"},
-		{Name: "Gemini", URL: "https://gemini.google.com/"},
-	}
-	results := make(chan mediaResult, len(targets))
+	checks := mediaChecks()
+	// 并发上限避免一次运行对同一批 CDN 制造请求突发。
+	const concurrency = 8
+	semaphore := make(chan struct{}, concurrency)
+	results := make([]mediaResult, len(checks))
 	var wg sync.WaitGroup
-	for _, target := range targets {
+	for index, check := range checks {
 		wg.Add(1)
-		go func(target mediaTarget) {
+		go func(index int, check mediaCheck) {
 			defer wg.Done()
-			results <- checkMedia(ctx, env, target)
-		}(target)
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			results[index] = runMediaCheck(ctx, env, check)
+		}(index, check)
 	}
 	wg.Wait()
-	close(results)
-	collected := make([]mediaResult, 0, len(targets))
-	for item := range results {
-		collected = append(collected, item)
+
+	// 按分类分组呈现，组内保持规则声明顺序。
+	categories := make([]string, 0, 8)
+	grouped := make(map[string][]mediaResult)
+	for _, item := range results {
+		if _, seen := grouped[item.Check.Category]; !seen {
+			categories = append(categories, item.Check.Category)
+		}
+		grouped[item.Check.Category] = append(grouped[item.Check.Category], item)
 	}
-	order := make(map[string]int, len(targets))
-	for index, target := range targets {
-		order[target.URL] = index
-	}
-	sort.SliceStable(collected, func(i, j int) bool {
-		return order[collected[i].Target.URL] < order[collected[j].Target.URL]
+	sort.SliceStable(categories, func(i, j int) bool {
+		return categoryOrder(categories[i]) < categoryOrder(categories[j])
 	})
 
-	table := model.Table{
-		Title:   "可达性",
-		Columns: []string{"平台", "结论", "HTTP", "地区信号", "耗时", "证据"},
+	unlocked, unknown, locked := 0, 0, 0
+	for _, category := range categories {
+		table := model.Table{
+			Title:   category,
+			Columns: []string{"平台", "结论", "地区", "证据", "强度", "耗时"},
+		}
+		for _, item := range grouped[category] {
+			switch item.Verdict.State {
+			case stateUnlocked, stateOriginals:
+				unlocked++
+			case stateUnknown:
+				unknown++
+			case stateLocked, stateRestricted, stateUnreachable:
+				locked++
+			}
+			table.Rows = append(table.Rows, []string{
+				item.Check.Name,
+				item.Verdict.State,
+				fallback(item.Verdict.Region, "—"),
+				item.Verdict.Evidence,
+				strengthLabel(item.Check.Strength),
+				formatMilliseconds(item.Latency),
+			})
+		}
+		result.Tables = append(result.Tables, table)
 	}
-	available, unknown := 0, 0
-	for _, item := range collected {
-		if item.Verdict == "可达" || item.Verdict == "需登录" {
-			available++
-		}
-		if item.Verdict == "未知" {
-			unknown++
-		}
-		code := "n/a"
-		if item.HTTPCode > 0 {
-			code = fmt.Sprintf("%d", item.HTTPCode)
-		}
-		table.Rows = append(table.Rows, []string{
-			item.Target.Name,
-			item.Verdict,
-			code,
-			fallback(item.Region, "—"),
-			formatMilliseconds(item.Latency),
-			item.Evidence,
-		})
-	}
-	result.Tables = []model.Table{table}
-	if unknown == len(targets) {
+
+	total := len(checks)
+	if unknown == total {
 		result.Status = model.StatusWarning
 	}
 	result.Measurements = []model.Measurement{
-		{Key: "reachable_services", Label: "公开页可达", Value: float64(available), Unit: "项", Display: fmt.Sprintf("%d/%d", available, len(targets)), Method: "http-evidence-v1", HigherIsBetter: model.BoolPtr(true)},
+		{
+			Key: "media_unlocked", Label: "可用平台",
+			Value: float64(unlocked), Unit: "项",
+			Display: fmt.Sprintf("%d/%d", unlocked, total),
+			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(true),
+		},
+		{
+			Key: "media_unknown", Label: "无法判定",
+			Value: float64(unknown), Unit: "项",
+			Display: fmt.Sprintf("%d/%d", unknown, total),
+			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(false),
+		},
 	}
 	result.Notes = append(result.Notes,
-		"“可达”只表示公开页面响应正常，不代表账号订阅、播放版权、注册或支付一定可用。",
-		"HTTP 403 可能是地区限制，也可能是反自动化；缺少明确证据时统一返回“未知”，避免把反爬误报成不解锁。",
-		"平台页面与规则会变化；报告保留 HTTP 状态和地区信号，便于复核。",
+		"规则包版本 "+mediaRulesVersion+"；平台页面会变化，规则失效是常态，报告保留状态码与地区信号供复核。",
+		"“强”规则有平台特定判定逻辑；“弱”规则只说明公开页可达，不代表账号能播放、注册或支付。",
+		"Netflix 用两部非自制剧区分完全解锁与仅自制剧；只测首页会把仅自制剧误报成解锁。",
+		"HTTP 403 既可能是地区封锁也可能是反自动化，一律记为“未知”，不会误报成“不解锁”。",
 	)
-	result.Summary = fmt.Sprintf("%d/%d 公开页可达 · %d 项未知", available, len(targets), unknown)
+	result.Summary = fmt.Sprintf("%d/%d 可用 · %d 不可用 · %d 未知", unlocked, total, locked, unknown)
 	result.Finish(start)
 	return result
 }
 
-func checkMedia(ctx context.Context, env Environment, target mediaTarget) mediaResult {
-	item := mediaResult{Target: target, Verdict: "未知", Evidence: "request failed"}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
-	if err != nil {
-		item.Evidence = err.Error()
-		return item
-	}
-	request.Header.Set("User-Agent", env.UserAgent)
-	request.Header.Set("Accept-Language", "en-US,en;q=0.8")
-	request.Header.Set("Range", "bytes=0-1048575")
+// runMediaCheck 执行一条规则的全部请求并给出结论。
+func runMediaCheck(ctx context.Context, env Environment, check mediaCheck) mediaResult {
+	item := mediaResult{Check: check}
 	begin := time.Now()
-	response, err := env.HTTPClient.Do(request)
+	responses := make([]mediaResponse, 0, len(check.Requests))
+	for _, request := range check.Requests {
+		response := performMediaRequest(ctx, env, request)
+		responses = append(responses, response)
+		item.Statuses = append(item.Statuses, response.Status)
+	}
 	item.Latency = time.Since(begin)
-	if err != nil {
-		item.Evidence = compactError(err)
+	if len(responses) == 0 {
+		item.Verdict = mediaVerdict{State: stateUnknown, Evidence: "规则未声明请求"}
 		return item
 	}
-	defer response.Body.Close()
-	item.HTTPCode = response.StatusCode
-	body, _ := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
-	text := string(body)
-	item.Region = detectRegion(text, response.Request.URL.String())
-
-	switch {
-	case response.StatusCode >= 200 && response.StatusCode < 300:
-		item.Verdict = "可达"
-		item.Evidence = "2xx public page"
-	case response.StatusCode == http.StatusUnauthorized:
-		item.Verdict = "需登录"
-		item.Evidence = "401 account gate"
-	case response.StatusCode == http.StatusForbidden:
-		item.Verdict = "未知"
-		item.Evidence = "403 geo/anti-bot"
-	case response.StatusCode == http.StatusUnavailableForLegalReasons:
-		item.Verdict = "受限"
-		item.Evidence = "451 legal restriction"
-	case response.StatusCode >= 300 && response.StatusCode < 400:
-		item.Verdict = "未知"
-		item.Evidence = "redirect limit"
-	case response.StatusCode >= 500:
-		item.Verdict = "未知"
-		item.Evidence = "service error"
-	default:
-		item.Verdict = "不可达"
-		item.Evidence = fmt.Sprintf("HTTP %d", response.StatusCode)
+	item.Verdict = check.Decide(responses)
+	if item.Verdict.State == "" {
+		item.Verdict.State = stateUnknown
 	}
 	return item
 }
 
-func detectRegion(text, finalURL string) string {
-	for _, pattern := range regionPatterns {
-		if match := pattern.FindStringSubmatch(text); len(match) == 2 {
-			return strings.ToUpper(match[1])
-		}
-		if match := pattern.FindStringSubmatch(finalURL); len(match) == 2 {
-			return strings.ToUpper(match[1])
-		}
+// categoryOrder 固定分类展示顺序。
+func categoryOrder(category string) int {
+	switch category {
+	case "流媒体":
+		return 0
+	case "AI 服务":
+		return 1
+	case "社交":
+		return 2
+	case "音乐":
+		return 3
+	case "日本":
+		return 4
+	case "台湾":
+		return 5
+	case "香港":
+		return 6
+	case "中国大陆":
+		return 7
+	default:
+		return 8
 	}
-	return ""
+}
+
+// strengthLabel 把证据强度翻译成表格用语。
+func strengthLabel(strength mediaEvidenceStrength) string {
+	if strength == strengthStrong {
+		return "强"
+	}
+	return "弱"
 }

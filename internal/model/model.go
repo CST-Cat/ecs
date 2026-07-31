@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -104,12 +105,18 @@ type Table struct {
 	Title   string     `json:"title,omitempty"`
 	Columns []string   `json:"columns"`
 	Rows    [][]string `json:"rows"`
+	// SensitiveColumns 列出需要遮盖的列索引。默认遮盖会把这些单元格里的
+	// IP 按段处理，不影响其余列。
+	SensitiveColumns []int `json:"sensitive_columns,omitempty"`
 }
 
 type TextBlock struct {
 	Title    string `json:"title,omitempty"`
 	Language string `json:"language,omitempty"`
 	Content  string `json:"content"`
+	// Sensitive 表示正文可能含 IP，默认遮盖时需要按段处理。
+	// 路由类原文必须置位：路径 IP 会暴露机房位置。
+	Sensitive bool `json:"sensitive,omitempty"`
 }
 
 type Source struct {
@@ -188,6 +195,7 @@ func RedactedCopy(in Report, reveal bool) Report {
 		for j, table := range result.Tables {
 			out.Results[i].Tables[j] = table
 			out.Results[i].Tables[j].Columns = append([]string(nil), table.Columns...)
+			out.Results[i].Tables[j].SensitiveColumns = append([]int(nil), table.SensitiveColumns...)
 			out.Results[i].Tables[j].Rows = make([][]string, len(table.Rows))
 			for k, row := range table.Rows {
 				out.Results[i].Tables[j].Rows[k] = append([]string(nil), row...)
@@ -199,10 +207,64 @@ func RedactedCopy(in Report, reveal bool) Report {
 					out.Results[i].Fields[j].Value = Mask(out.Results[i].Fields[j].Value)
 				}
 			}
+			// 原始命令输出与路由表格同样会带出 IP，遮盖必须覆盖到它们，
+			// 否则 --reveal 开关的语义是漏的。
+			for j := range out.Results[i].TextBlocks {
+				if out.Results[i].TextBlocks[j].Sensitive {
+					out.Results[i].TextBlocks[j].Content = MaskIPsInText(out.Results[i].TextBlocks[j].Content)
+				}
+			}
+			for j := range out.Results[i].Tables {
+				table := &out.Results[i].Tables[j]
+				for _, column := range table.SensitiveColumns {
+					for k := range table.Rows {
+						if column >= 0 && column < len(table.Rows[k]) {
+							table.Rows[k][column] = MaskIPsInText(table.Rows[k][column])
+						}
+					}
+				}
+			}
 		}
 	}
 	out.Run.Redacted = !reveal
 	return out
+}
+
+var (
+	textIPv4Pattern = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d{1,3})\b`)
+	textIPv6Pattern = regexp.MustCompile(`\b([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){2})(:[0-9a-fA-F:]{2,})\b`)
+)
+
+// MaskIPsInText 遮盖自由文本里的 IP，但保留足以复核的前缀。
+//
+// 路由与线路识别的价值就在于让人核对路径特征（例如 59.43 段说明走 CN2），
+// 整段抹掉会让功能失去意义。因此 IPv4 只隐藏最后一段、IPv6 只保留 /48，
+// 与 Mask 对单值字段的处理保持一致。
+func MaskIPsInText(text string) string {
+	if text == "" {
+		return text
+	}
+	masked := textIPv4Pattern.ReplaceAllStringFunc(text, func(match string) string {
+		groups := textIPv4Pattern.FindStringSubmatch(match)
+		if len(groups) != 3 {
+			return match
+		}
+		// 逐段确认是合法 IPv4，避免误伤版本号之类的点分数字。
+		if net.ParseIP(match) == nil {
+			return match
+		}
+		return groups[1] + ".x"
+	})
+	return textIPv6Pattern.ReplaceAllStringFunc(masked, func(match string) string {
+		if net.ParseIP(match) == nil {
+			return match
+		}
+		groups := textIPv6Pattern.FindStringSubmatch(match)
+		if len(groups) != 3 {
+			return match
+		}
+		return groups[1] + "::/48"
+	})
 }
 
 func Mask(value string) string {

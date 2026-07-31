@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,8 @@ type latencyResult struct {
 	ResolveErr  error
 	Values      []time.Duration
 	Failures    int
+	// ICMP 是同一目标的 ICMP 往返统计，系统没有 ping 时为不可用。
+	ICMP icmpStats
 }
 
 // resolveEndpoint 把 host:port 解析成可直接拨号的 ip:port。
@@ -69,6 +72,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	attempts := env.Config.LatencyAttempts
+	icmpEnabled := icmpAvailable()
 	results := make(chan latencyResult, len(env.Config.LatencyTargets))
 	var wg sync.WaitGroup
 	for _, endpoint := range env.Config.LatencyTargets {
@@ -97,6 +101,14 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 				_ = connection.Close()
 				item.Values = append(item.Values, elapsed)
 			}
+			// ICMP 与 TCP 建连测的不是一回事：ICMP 反映纯网络往返，TCP 还包含
+			// 目标服务的接受队列表现，两者并列才能看出是链路问题还是服务端问题。
+			if icmpEnabled {
+				host, _, splitErr := net.SplitHostPort(dialAddress)
+				if splitErr == nil {
+					item.ICMP = runICMPPing(ctx, host, attempts, 2*time.Second)
+				}
+			}
 			results <- item
 		}(endpoint)
 	}
@@ -115,8 +127,8 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Title:   "TCP 建连",
-		Columns: []string{"目标", "区域", "成功", "P50", "P95", "标准差", "DNS 解析"},
+		Title:   "TCP 建连与 ICMP 往返",
+		Columns: []string{"目标", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 平均", "ICMP 丢包", "DNS 解析"},
 	}
 	var best time.Duration
 	var bestName string
@@ -141,6 +153,11 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		} else if item.ResolveTime == 0 {
 			resolveText = "无需解析"
 		}
+		icmpAvg, icmpLoss := "n/a", "n/a"
+		if item.ICMP.Available {
+			icmpAvg = fmt.Sprintf("%.2f ms", item.ICMP.AvgMS)
+			icmpLoss = fmt.Sprintf("%.0f %%", item.ICMP.LossPercent)
+		}
 		table.Rows = append(table.Rows, []string{
 			item.Endpoint.Name,
 			item.Endpoint.Kind,
@@ -148,10 +165,20 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			formatMilliseconds(median),
 			formatMilliseconds(p95),
 			fmt.Sprintf("%.2f ms", stddevFloat(floatValues)),
+			icmpAvg,
+			icmpLoss,
 			resolveText,
 		})
 		if item.ResolveErr != nil {
 			result.Notes = append(result.Notes, fmt.Sprintf("%s 解析失败：%s", item.Endpoint.Name, compactError(item.ResolveErr)))
+		}
+		if item.ICMP.Available {
+			result.Measurements = append(result.Measurements, model.Measurement{
+				Key:   "icmp_avg_ms_" + strings.ToLower(strings.ReplaceAll(item.Endpoint.Name, " ", "_")),
+				Label: item.Endpoint.Name + " ICMP 平均",
+				Value: item.ICMP.AvgMS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", item.ICMP.AvgMS),
+				Method: "icmp-echo-v1", HigherIsBetter: model.BoolPtr(false),
+			})
 		}
 	}
 	result.Tables = []model.Table{table}
@@ -159,20 +186,25 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 		result.Summary = "全部 TCP 延迟目标不可达"
 	} else {
-		result.Measurements = []model.Measurement{
-			{
-				Key: "best_tcp_median_ms", Label: "最佳 TCP P50",
-				Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
-				Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
-			},
-		}
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: "best_tcp_median_ms", Label: "最佳 TCP P50",
+			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
+			Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
+		})
 		result.Summary = fmt.Sprintf("%s 最快 · P50 %s", bestName, formatMilliseconds(best))
 	}
 	result.Notes = append(result.Notes,
-		"每个目标只解析一次 DNS，之后固定对该 IP 建连；表中的延迟只包含 TCP 三次握手，解析耗时单列。",
-		"这不是 ICMP ping；目标服务的 Anycast/CDN 调度会影响结果。",
+		"每个目标只解析一次 DNS，之后固定对该 IP 建连；表中的 TCP 延迟只包含三次握手，解析耗时单列。",
 		"区域标签说明服务归属，不保证本次连接实际落在该地区。",
 	)
+	if icmpEnabled {
+		result.Notes = append(result.Notes,
+			"ICMP 列由系统 ping 提供，反映纯网络往返；与 TCP 列并列可区分链路问题与服务端排队。",
+			"部分网络会限速或丢弃 ICMP，ICMP 丢包高但 TCP 正常时通常是策略限制而非线路故障。",
+		)
+	} else {
+		result.Notes = append(result.Notes, "系统没有可用的 ping，本次只有 TCP 建连延迟；ecs 不会用 TCP 数字冒充 ICMP 结果。")
+	}
 	result.Finish(start)
 	return result
 }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "engine", Label: "引擎", Value: engine.Name},
 		{Key: "version", Label: "版本", Value: fallback(engine.Version, "unknown")},
 		{Key: "binary_sha256", Label: "外部程序 SHA-256", Value: fallback(engine.SHA256, "unavailable")},
-		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgs(engine, "<target>"), " ")},
+		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgs(engine, "<target>", routeSnapshotHops), " ")},
 	}
 	if engine.Name == "nexttrace" {
 		result.Sources = append(result.Sources, model.Source{
@@ -73,7 +74,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	for _, target := range env.Config.RouteTargets {
 		traceCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		traceStart := time.Now()
-		output, err := runRouteCommand(traceCtx, engine, target.Address)
+		output, err := runRouteCommand(traceCtx, engine, target.Address, routeSnapshotHops)
 		elapsed := time.Since(traceStart)
 		cancel()
 		clean := sanitizeCommandOutput(output)
@@ -91,9 +92,10 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 				language = "json"
 			}
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:    target.Name + " (" + target.Address + ")",
-				Language: language,
-				Content:  clean,
+				Title:     target.Name + " (" + target.Address + ")",
+				Language:  language,
+				Content:   clean,
+				Sensitive: true,
 			})
 		}
 	}
@@ -142,8 +144,11 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 	return routeEngine{}
 }
 
-func runRouteCommand(ctx context.Context, engine routeEngine, target string) ([]byte, error) {
-	args := routeCommandArgs(engine, target)
+// routeSnapshotHops 是路径快照的跳数上限。
+const routeSnapshotHops = 12
+
+func runRouteCommand(ctx context.Context, engine routeEngine, target string, maxHops int) ([]byte, error) {
+	args := routeCommandArgs(engine, target, maxHops)
 	command := exec.CommandContext(ctx, engine.Path, args...)
 	command.Env = append(os.Environ(), "NO_COLOR=1", "LC_ALL=C", "LANG=C")
 	var buffer bytes.Buffer
@@ -157,16 +162,21 @@ func runRouteCommand(ctx context.Context, engine routeEngine, target string) ([]
 	return output, err
 }
 
-func routeCommandArgs(engine routeEngine, target string) []string {
+// routeCommandArgs 组装路由追踪参数。
+//
+// maxHops 由调用方决定：路径快照 12 跳足够看清出口方向，但三网回程识别必须给到
+// 更大的跳数——从海外到中国骨干通常要走 15 跳以上，截断会让骨干特征根本不出现。
+func routeCommandArgs(engine routeEngine, target string, maxHops int) []string {
+	hops := strconv.Itoa(maxHops)
 	switch engine.Name {
 	case "nexttrace":
-		return []string{"--no-color", "--json", "-M", "--max-hops", "12", "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", target}
+		return []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", target}
 	case "tracepath":
-		return []string{"-n", "-m", "12", target}
+		return []string{"-n", "-m", hops, target}
 	case "tracert":
-		return []string{"-d", "-h", "12", "-w", "1000", target}
+		return []string{"-d", "-h", hops, "-w", "1000", target}
 	default:
-		return []string{"-n", "-m", "12", "-q", "1", "-w", "1", target}
+		return []string{"-n", "-m", hops, "-q", "1", "-w", "1", target}
 	}
 }
 

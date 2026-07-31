@@ -54,6 +54,7 @@ func Registry() []Probe {
 		portsProbe{},
 		mediaProbe{},
 		routeProbe{},
+		backtraceProbe{},
 	}
 }
 
@@ -81,6 +82,8 @@ func MethodologyFor(id string) model.Methodology {
 		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"}
 	case "route":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议诊断", Engine: "NextTrace/traceroute/tracepath", ComparisonScope: "正向路径快照；不是性能基准"}
+	case "backtrace":
+		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "NextTrace/traceroute + 骨干网段特征表", ComparisonScope: "路径特征推断；不是反向抓包"}
 	default:
 		return model.Methodology{}
 	}

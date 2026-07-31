@@ -64,9 +64,6 @@ func TestParseSystemFiles(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := detectRegion(`{"countryCode":"JP"}`, "https://example.com"); got != "JP" {
-		t.Fatalf("region = %q", got)
-	}
 	if got := sanitizeCommandOutput([]byte("\x1b[31m 1  1.1.1.1\x1b[0m\n")); got != "1  1.1.1.1" {
 		t.Fatalf("sanitized = %q", got)
 	}

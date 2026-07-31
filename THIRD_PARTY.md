@@ -12,7 +12,8 @@
 | fio | Direct I/O 磁盘测试 | [axboe/fio](https://github.com/axboe/fio) | GPL-2.0 | 磁盘模块唯一基准引擎；解析 JSON；记录参数、版本与 SHA-256 |
 | iperf3 | TCP 多流上传/反向下载 | [ESnet/iperf](https://github.com/esnet/iperf) | BSD-3-Clause | standard/full 的网络吞吐唯一基准；解析逐节点 JSON 原值；记录节点、参数、版本与 SHA-256 |
 | NextTrace | 带节点信息的路由追踪 | [nxtrace/NTrace-core](https://github.com/nxtrace/NTrace-core) | GPL-3.0 | 仅在路由模块启用且本机存在时调用；强制 JSON、无启动横幅；记录参数与 SHA-256 |
-| traceroute / tracepath / tracert | 基础路由追踪 | 操作系统发行方 | 随系统而异 | NextTrace 不存在时使用；不经过 shell |
+| traceroute / tracepath / tracert | 基础路由追踪 | 操作系统发行方 | 随系统而异 | NextTrace 不存在时使用；路径快照 12 跳、三网回程 20 跳；不经过 shell |
+| ping | ICMP 往返与丢包 | 操作系统发行方 | 随系统而异 | `latency` 模块的 ICMP 列；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
 
 默认安装不会触碰包管理器。`install.sh --with-benchmarks` 是用户明确授权后的便捷入口；它安装发行版提供的软件包，不从随机镜像下载裸二进制，也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版上传行为不作为默认依赖。
 
@@ -33,6 +34,7 @@
 - [IPQuality/check.place](https://check.place/)：无用户密钥时，为 MaxMind、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQS、ipdata 提供社区兼容中转；
 - [Jina Reader](https://github.com/jina-ai/reader)（Apache-2.0 服务实现）：当 IPQS 社区额度和官方公开页出口配额同时不可用时，读取同一公开查询页的一小时内缓存；不提供或代算供应商分数；
 - YABS 当前公共 iperf3 节点清单中的 Clouvider/Leaseweb 测速服务：standard/full 的多节点 TCP 吞吐；
+- 电信、联通、移动的公开参考 IP：`backtrace` 模块用于识别路径上的骨干线路，只发送路由探测包；
 - README 中列出的公共 DNS、延迟、端口以及服务自身公开网页。
 
 第三方服务会看到请求出口 IP，并可能有各自的日志、速率限制、套餐字段差异与隐私政策。社区中转和 Jina Reader 还会看到被查询 IP；报告的数据源状态表会区分“官方 API”“官方免密/公开接口”“IPQuality/check.place 中转”和网页读取兜底。`--offline` 会跳过全部在线探针，`--ip-quality-sources none` 只关闭附加质量源。
@@ -40,5 +42,7 @@
 官方 API 凭据只从 `IPINFO_TOKEN`、`IPREGISTRY_API_KEY`、`IP2LOCATION_API_KEY`、`ABUSEIPDB_API_KEY`、`SCAMALYTICS_USER`、`SCAMALYTICS_API_KEY`、`IPQS_API_KEY`、`DBIP_API_KEY`、`IPWHOIS_API_KEY` 读取。它们不会进入配置文件示例、进程参数、错误文本或报告。
 
 ## 调研项目
+
+`backtrace` 的三网回程识别思路与参考目标选择来自 [zhanghanyun/backtrace](https://github.com/zhanghanyun/backtrace)（MIT）；骨干网段与 AS 对应关系属于运营商公开事实，未复制上游代码或数据文件。磁盘的 50/50 混合矩阵沿用 [YABS](https://github.com/masonr/yet-another-bench-script)（WTFPL-2.0）的块大小与队列深度口径。
 
 oneclickvirt/ecs、spiritLHLS/ecs 与另外十个项目构成功能、交互和工程风险调研样本。逐项提交快照、许可证与取舍见 [docs/research.md](docs/research.md)。其中 IPQuality 是已归属的 AGPL 上游；其他项目的源码、规则文件和报告模板未复制进本项目。
