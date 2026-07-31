@@ -156,11 +156,14 @@ CPU、内存、磁盘和网络吞吐只展示标准工具直接返回或按其�
 
 **默认运行不要求任何 API Key。** 免密模式会依次使用官方免密/tryout 接口、官方公开查询页和 IPQuality 的 `check.place` 社区通道；社区通道请求会串行并留出间隔，避免一次运行制造请求突发。IPQS 在社区共享额度或公开页出口配额耗尽时，可使用 Jina Reader 读取同一官方公开页的一小时内缓存；DB-IP 的风险网页不可访问时，会降级到官方 free API。
 
-> **社区通道现状（2026-07 实测）**：`ipinfo.check.place` 对全部查询返回 403 与 Cloudflare 挑战页，
-> 依赖它的 MaxMind、AbuseIPDB、Scamalytics、ipdata 四个数据源在免密模式下**当前不可用**，
-> 报告会如实标记为"失败"，`原生/广播 IP` 判定随之显示"无法判定"。
-> 这四家需要配置下表的官方密钥才能取到数据。IPinfo、ipregistry、ipapi、IP2Location、
-> DB-IP、IPWHOIS 的官方免密链路实测正常。`ecs` 不会拿其他数据源的分值顶替失败的数据源。
+> **社区通道现状（2026-07 实测，两个出口）**：`ipinfo.check.place` 的可用性**取决于出口 IP**。
+> 从 GitHub Actions（Azure AS8075）出口访问，四条路全部可用，11 个数据源 8 成功 3 部分 0 失败；
+> 从一个 DigitalOcean 出口访问，四条路全部返回 403 与 Cloudflare 挑战页，
+> MaxMind、AbuseIPDB、Scamalytics、ipdata 随之失败，`原生/广播 IP` 显示"无法判定"。
+> 也就是说它没有下线，而是部分数据中心 IP 段被拦。落到被拦的出口时，
+> 报告会如实标记"失败"，配置下表的官方密钥即可绕开社区通道。
+> `ecs` 不会拿其他数据源的分值顶替失败的数据源。
+> 可用 `go test -tags=live -run TestLiveCommunityGateway` 复核你自己出口的情况。
 
 下列环境变量只是可选的“官方实时直连增强项”，不是运行前提。配置后能减少社区服务依赖，并可能获得免费公开页没有的付费字段；密钥不会写进命令行、日志或任何报告：
 

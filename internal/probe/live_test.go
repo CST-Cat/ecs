@@ -198,6 +198,10 @@ func TestLiveMediaStrongRules(t *testing.T) {
 }
 
 // 公共 iperf3 节点清单来自 YABS，需要定期确认还活着。
+//
+// 与 runIPerfDirection 保持一致：在端口范围内最多试三个。iperf3 服务端一次只
+// 服务一个测试，忙碌时单个端口会直接 connection refused，只探首个端口会把
+// "当时那个端口忙"误报成"节点挂了"。
 func TestLiveIPerfNodeReachability(t *testing.T) {
 	cfg, err := config.Defaults(config.ProfileFull)
 	if err != nil {
@@ -208,17 +212,35 @@ func TestLiveIPerfNodeReachability(t *testing.T) {
 	}
 	reachable := 0
 	for _, target := range cfg.IPerfTargets {
-		address := net.JoinHostPort(target.Host, strconv.Itoa(target.PortStart))
-		start := time.Now()
-		connection, err := net.DialTimeout("tcp", address, 10*time.Second)
-		elapsed := time.Since(start)
-		if err != nil {
-			t.Logf("%-10s %-34s 不可达：%v", target.Name, address, compactError(err))
-			continue
+		attempts := target.PortEnd - target.PortStart + 1
+		if attempts > 3 {
+			attempts = 3
 		}
-		_ = connection.Close()
-		reachable++
-		t.Logf("%-10s %-34s 可达（%s，%s）", target.Name, address, target.Location, elapsed.Round(time.Millisecond))
+		if attempts < 1 {
+			attempts = 1
+		}
+		var lastErr error
+		connected := false
+		for attempt := 0; attempt < attempts && !connected; attempt++ {
+			port := target.PortStart + attempt
+			address := net.JoinHostPort(target.Host, strconv.Itoa(port))
+			start := time.Now()
+			connection, err := net.DialTimeout("tcp", address, 10*time.Second)
+			elapsed := time.Since(start)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			_ = connection.Close()
+			connected = true
+			reachable++
+			t.Logf("%-10s %-34s 可达（%s，端口 %d，%s）",
+				target.Name, target.Host, target.Location, port, elapsed.Round(time.Millisecond))
+		}
+		if !connected {
+			t.Logf("%-10s %-34s 端口 %d-%d 均不可达：%v",
+				target.Name, target.Host, target.PortStart, target.PortStart+attempts-1, compactError(lastErr))
+		}
 	}
 	if reachable == 0 {
 		t.Fatalf("节点池里 %d 个公共 iperf3 节点全部不可达", len(cfg.IPerfTargets))

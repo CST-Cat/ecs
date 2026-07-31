@@ -118,10 +118,14 @@
    这条恰好印证了当初并列 ICMP 的设计意图：两个独立测量互相矛盾时，
    至少要让读者知道有矛盾。
 
-7. **社区中转已不可用**：`ipinfo.check.place` 目前对所有查询返回 403 与 Cloudflare
-   挑战页，依赖它的 MaxMind、AbuseIPDB、Scamalytics、ipdata 四个免密数据源全部失败，
-   `原生/广播 IP` 判定随之变成"无法判定"。代码行为正确——如实标记失败、不拿别家分数顶替，
-   但文档不应继续宣称这条链路可用。是否为全局下线还是特定出口被拦，需要更多出口验证。
+7. **社区中转的可用性取决于出口**：`ipinfo.check.place` 从一个 DigitalOcean 出口访问时，
+   全部查询返回 403 与 Cloudflare 挑战页，依赖它的 MaxMind、AbuseIPDB、Scamalytics、ipdata
+   四个免密数据源全部失败，`原生/广播 IP` 变成"无法判定"。
+   **但这个结论只有一个数据点时是错的**：同期从 GitHub Actions（Azure AS8075）出口访问，
+   四条路全部可用，11 个数据源 8 成功 3 部分 0 失败。它没有下线，是部分数据中心 IP 段被拦。
+   代码行为在两种情况下都正确——如实标记失败、不拿别家分数顶替。
+   教训是单一出口的观测不足以下"服务不可用"这种结论；实网测试进 CI 之后立刻提供了
+   第二个出口，才推翻了第一版判断。
 
 8. **节点清单不能凭记忆写**：`iperfNodePool` 里的 `ams.speedtest.eranium.net` 与
    `speedtest.tyo1.jp.leaseweb.net` 在三个独立 DNS 上都无 A 记录——它们从来就不存在，
