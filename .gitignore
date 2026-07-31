@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/reports/
+/ecs
+/ecs.exe
+*.test
+*.out
+ecs-report-*
+.DS_Store

@@ -1,0 +1,43 @@
+ecs — upstream attribution and modification notice
+
+Copyright (C) 2026 ecs contributors
+SPDX-License-Identifier: AGPL-3.0-only
+
+IP quality functionality is informed by and adapted from:
+
+  IPQuality
+  https://github.com/xykt/IPQuality
+  Audited revision: 44a55baec6cd
+  License: GNU Affero General Public License v3.0
+
+Adapted concepts include the multi-provider coverage, provider field mappings,
+network/company type normalization, factor matrix, and provider-specific risk
+bands for IP2Location, Scamalytics, AbuseIPDB, IPQualityScore, and DB-IP.
+
+ecs reimplements these capabilities in Go around a versioned report model. It
+adds official API-key routing, preserves provider failures and disagreements,
+supports local JSON/Markdown/HTML rendering, and never averages unlike scores
+into an opaque overall score.
+
+The following IPQuality behavior and assets are intentionally not included:
+
+  - sponsor or advertising output and sponsor images;
+  - run counters, telemetry, or hit endpoints;
+  - automatic online report generation or report upload;
+  - dependency installation;
+  - media-unlock and mail-provider test code.
+
+Provider data remains subject to each provider's own terms, quotas, and privacy
+policy. IPQuality and the provider names are trademarks or project names of
+their respective owners; no endorsement is implied.
+
+The default public iperf3 endpoint registry is derived from:
+
+  Yet-Another-Bench-Script (YABS)
+  https://github.com/masonr/yet-another-bench-script
+  Audited script version: v2026-07-24
+  License: WTFPL-2.0
+
+No YABS executable code, banners, upload behavior, or bundled binaries are
+included. ecs invokes the user's installed iperf3 process, records the exact
+parameters and result provenance, and keeps all reports local.
