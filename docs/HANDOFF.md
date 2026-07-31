@@ -71,16 +71,11 @@
 
 ### 2.3 已重写的测试（`4457bda` 的妥协已撤销）
 
-1. **fio 适配器**拆成两个用例，假脚本的 `--enghelp` 输出改为可配置：
-   - `TestRunFIODiskWithAsyncEngine`：报告 `libaio`，断言参数含 `--iodepth=32`/`--iodepth=64`、
-     method 名含 `qd32`/`qd64`、ioengine 字段标"异步"，且不得出现同步降级说明——即真实 VPS 路径。
-   - `TestRunFIODiskDowngradesSynchronousEngine`：报告 `psync`，断言参数**不含**高队列深度、
-     method 名为 `qd1`、并且必须披露降级说明。
-   两个用例对同一份代码作相反断言，引擎探测一旦失效必有一个失败。
-2. **sysbench CPU** 断言 `cpu_steal_percent_during_test` 必须存在。假脚本的 cpu 分支加了
-   `sleep 0.2`：`/proc/stat` 是 jiffies 计数，瞬时返回的假脚本会让前后两次采样完全相同，
-   steal 增量无从计算。状态断言放宽为"不是 error"——宿主机 steal 高时降级 warning 是正确行为。
-   另加 `TestStealSamplingReadsProcStat` 覆盖累计口径、增量口径与计数器倒退。
+1. **fio 适配器**：撤销"只报告 psync"的妥协，改为断言真实生效的队列深度与 `qd32`/`qd64`
+   方法名。这一步初版仍用假脚本，随后被 2.6 全部替换为真实工具。
+2. **sysbench CPU** 断言 `cpu_steal_percent_during_test` 必须存在——Linux 上读不到
+   `/proc/stat` 就是 bug。状态断言放宽为"不是 error"：宿主机 steal 高时降级 warning 是
+   正确行为。另加 `TestStealSamplingReadsProcStat` 覆盖累计口径、增量口径与计数器倒退。
 3. 三处 `if runtime.GOOS == "windows" { t.Skip(...) }` 已删除。
 4. `icmp_test.go` 的三平台 `switch` 改为只断言 Linux 参数形态，并新增不足一秒进位的断言。
 
@@ -115,9 +110,11 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 本地缺工具才 `Skip`，避免测试静默跳过后仍然显示为绿；`ci.yml` 的 `test` 与 `race`
 两个 job 已加 `apt-get install fio sysbench iperf3 traceroute`。
 
-**例外**：第三方 HTTP 数据源（IP 质量、流媒体）的解析器仍用固定样本，
-因为真实调用会依赖公网、对方配额和随时变动的页面，违反"测试不依赖公网"的约束。
-`ipquality_test.go` 里的 `httptest` 服务器测的是跨主机重定向拒绝这一安全边界——
+第三方 HTTP 数据源（IP 质量、流媒体）的解析器仍用固定样本，但**不再以此为终点**：
+真实调用的验证已补成 `//go:build live` 测试，见 3.3。原先援引"测试不依赖公网"来
+不做真实调用是对该约束的误读——它要求的是"这些逻辑要有确定性测试"，从没说禁止
+联网测试。`CONTRIBUTING.md` 第 7、13 条已改写澄清。
+`ipquality_test.go` 里的 `httptest` 服务器测的是跨主机重定向拒绝这一安全边界，
 真实数据源不会配合构造重定向，这个必须保留。
 
 ### 2.7 顺带修复：TCP 被透明代理代答时无提示
@@ -146,8 +143,35 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 - **TCP 被透明代理代答时无任何提示**：`latency` 报告到 Cloudflare 的 TCP 建连 0.11 ms、
   状态 `ok`，而同表 ICMP 是 221 ms。已增加交叉校验，TCP 中位数不到同目标 ICMP 平均的
   1/5 时降级为 `warning` 并说明 TCP 列不能当作链路延迟。已在真实环境确认会触发。
+- **iperf3 节点池有两个域名根本不存在**：`ams.speedtest.eranium.net` 与
+  `speedtest.tyo1.jp.leaseweb.net` 在三个独立 DNS 上都无 A 记录，是凭印象编的；
+  Eranium 的端口范围也错了。已逐条抄自 YABS `v2026-07-24` 的 `IPERF_LOCS` 并实测 7/7 可达。
+  节点数因此从 8 变为 7，`full` 档说明已同步。
+- **ULA 被当成可用 IPv6**：`hostHasUsableIPv6()` 把 Tailscale 的 `fd7a::/48` 判为公网 IPv6，
+  于是每个节点白跑一轮 IPv6 并全部失败。现改为"全球可路由单播地址 + UDP dial 确认路由"。
 
-### 3.3 仍然需要真实海外 VPS（网络类结论一律不可信）
+### 3.3 新增的实网测试（`//go:build live`）
+
+上面三个缺陷有两个是实网测试发现的。默认 `go test` 只跑确定性测试，
+真实调用第三方与公共节点的验证放在 `internal/probe/live_test.go`：
+
+```bash
+go test -tags=live ./internal/probe/ -run TestLive -v
+```
+
+| 测试 | 覆盖 |
+| --- | --- |
+| `TestLiveIPLookup` | ipapi.is 出口发现 |
+| `TestLiveIPQualityProviders` | 11 个 IP 质量数据源逐个真实调用，拿到响应却解析不出字段即失败 |
+| `TestLiveCommunityGateway` | `check.place` 四条路的可用性，只记录不判失败 |
+| `TestLiveMediaStrongRules` | 4 条强规则在真实页面上的判定 |
+| `TestLiveIPerfNodeReachability` | 节点池逐个 TCP 可达性 |
+
+策略是"个别源失败只记录、全部失败才判失败"——第三方限流、改版、地区封锁都会发生，
+让它们阻塞每个 PR 只会训练所有人忽略红灯。CI 用 `schedule`（每日）与 `workflow_dispatch`
+运行 `live` job，不挂在 push/PR 上。
+
+### 3.4 仍然需要真实海外 VPS（网络类结论一律不可信）
 
 **开发机虽然出口 IP 是 DigitalOcean，但它在家用 NAT 后面，经网关透明代理落地。**
 因此本机的 `latency`、`speed`、`route`、`backtrace`、`media` 与 `network` 地理判断
@@ -164,8 +188,9 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 4. **fio 引擎回退链**：开发机命中 io_uring，`libaio` 与 `psync` 两条分支尚未在真实机器上
    走到。需要在精简发行版（Alpine、无 libaio 的 Debian slim）上确认。
 5. **busybox ping**：三段回退目前只有单元测试覆盖，需要在 Alpine 上跑一次 `latency`。
-6. **iperf3 公网节点**：8 个公共节点的可用性与端口范围需实测核对（清单来自记忆，未经验证）。
-   本次只验证了回环，没有验证公网节点。
+6. **iperf3 公网吞吐**：节点清单已修正并实测 7/7 可达，公网 TCP 吞吐也在本机跑通
+   （IPv4 三节点有真实数据）。但本机经代理出网，吞吐数字不代表任何真实 VPS 的带宽，
+   仍需在海外 VPS 上复跑。
 7. **流媒体规则**：33 条规则在解锁/不解锁地区各跑一次，核对强规则判定；
    弱规则的"公开页 2xx"目前只能说明可达性，需逐步升级为强规则。
 8. **`check.place` 403 的范围**：见下方 P2 第一条，需要更多出口来判断是全局下线还是特定

@@ -456,22 +456,48 @@ func endpointFamilies(networks string, hasIPv6 bool) []string {
 	}
 }
 
-func hostHasUsableIPv6() bool {
-	addresses, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
+// hasGlobalUnicastIPv6 判断地址列表里是否存在全球可路由的 IPv6 单播地址。
+//
+// 必须排除 ULA（fc00::/7）：Tailscale、Docker 和家用网络都会分配 ULA，
+// 它有地址但到不了公网。注意 net.IP.IsGlobalUnicast() 对 ULA 同样返回 true，
+// 不能用它做这个判断，得靠 IsPrivate()。
+func hasGlobalUnicastIPv6(addresses []net.Addr) bool {
 	for _, address := range addresses {
 		raw := address.String()
 		if slash := strings.IndexByte(raw, '/'); slash >= 0 {
 			raw = raw[:slash]
 		}
 		ip := net.ParseIP(raw)
-		if ip != nil && ip.To4() == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
-			return true
+		if ip == nil || ip.To4() != nil {
+			continue
 		}
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || !ip.IsGlobalUnicast() {
+			continue
+		}
+		return true
 	}
 	return false
+}
+
+// hostHasUsableIPv6 判断本机是否真的能用 IPv6 出网。
+//
+// 只看网卡上有没有 IPv6 地址是不够的。实测中一台只有 Tailscale ULA、没有 IPv6
+// 默认路由的机器会被判为"支持 IPv6"，于是每个 iperf3 节点都白跑一轮 IPv6 测试
+// 并全部失败，既浪费时间又在报告里留下一堆并非链路问题的"失败"行。
+//
+// 因此在地址检查之外再确认内核确实有到公网 IPv6 的路由：UDP dial 只做路由查找、
+// 不发送任何数据包，没有路由会立即失败。
+func hostHasUsableIPv6() bool {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil || !hasGlobalUnicastIPv6(addresses) {
+		return false
+	}
+	connection, err := net.DialTimeout("udp6", "[2001:4860:4860::8888]:53", 2*time.Second)
+	if err != nil {
+		return false
+	}
+	_ = connection.Close()
+	return true
 }
 
 func formatOptionalMbps(value float64) string {

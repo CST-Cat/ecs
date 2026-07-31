@@ -114,7 +114,7 @@ ecs config example
 | --- | --- | --- | ---: | ---: | --- |
 | `quick` | 低资源快速筛查 | sysbench + fio | 5 秒 | 256 MiB | 默认不跑吞吐 |
 | `standard` | 日常综合验机 | sysbench + fio + iperf3 | 10 秒 | 1024 MiB | 3 节点、双方向、每方向 10 秒 |
-| `full` | 更稳定的长样本 | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 8 节点、双方向、每方向 15 秒，含 UDP 丢包 |
+| `full` | 更稳定的长样本 | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包 |
 
 采样窗口对齐 sysbench 的通行时长：低于 10 秒的窗口在突发性能机型（AWS t 系列、
 GCP e2、阿里突发实例）上测到的是 burst credit 而不是稳态性能，且方差极大。

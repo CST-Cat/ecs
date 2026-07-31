@@ -5,6 +5,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  # 实网测试按天跑，不挂在 push/PR 上：第三方限流或改版会让每个 PR 变红，
+  # 那只会训练所有人忽略红灯。
+  schedule:
+    - cron: "37 5 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -58,6 +63,25 @@ jobs:
           go-version: stable
           cache: false
       - run: make cross
+
+  # 实网测试：真实调用第三方数据源与公共 iperf3 节点，确认上游格式没变、链路还在。
+  # 只在定时任务与手动触发时运行；固定样本永远发现不了 check.place 全线 403
+  # 或节点域名不存在这类问题。
+  live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: Install benchmark tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
+      - name: Live upstream checks
+        run: go test -tags=live ./internal/probe/ -run TestLive -v -timeout 20m
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

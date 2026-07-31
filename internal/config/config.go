@@ -52,22 +52,27 @@ type IPerfEndpoint struct {
 	Region string `json:"region,omitempty"`
 }
 
-// iperfNodePool 是 YABS 公共节点清单里长期可用的一批 iperf3 服务器。
+// iperfNodePool 是 YABS 公共节点清单里的 iperf3 服务器。
+//
+// 主机名、端口范围、友好名与位置逐条抄自 YABS v2026-07-24 的 IPERF_LOCS 数组，
+// 不凭记忆填写——此前编造的 ams.speedtest.eranium.net 与 speedtest.tyo1.jp.leaseweb.net
+// 在三个独立 DNS 上都无记录，是实网测试才发现的。
+// Region 是 ecs 自己加的分区，用于按地区裁剪节点集；YABS 本身不分区。
 //
 // 这些节点由第三方免费提供，随时可能繁忙、限速、换端口或下线；ecs 只复用清单，
 // 不保证可用性。standard 档按地区各取一个，full 档跑全部。
+// 可用性用 `go test -tags=live -run TestLiveIPerfNodeReachability` 复核。
 func iperfNodePool() []IPerfEndpoint {
 	return []IPerfEndpoint{
 		{Name: "Clouvider", Host: "lon.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "London, UK (10G)", Networks: "IPv4|IPv6", Region: "europe"},
-		{Name: "Eranium", Host: "ams.speedtest.eranium.net", PortStart: 5200, PortEnd: 5209, Location: "Amsterdam, NL (10G)", Networks: "IPv4|IPv6", Region: "europe"},
-		{Name: "Leaseweb", Host: "speedtest.fra1.de.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Frankfurt, DE (10G)", Networks: "IPv4|IPv6", Region: "europe"},
+		{Name: "Eranium", Host: "iperf-ams-nl.eranium.net", PortStart: 5201, PortEnd: 5210, Location: "Amsterdam, NL (100G)", Networks: "IPv4|IPv6", Region: "europe"},
 
-		{Name: "Clouvider", Host: "nyc.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "New York, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
-		{Name: "Clouvider", Host: "la.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "Los Angeles, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
-		{Name: "Leaseweb", Host: "speedtest.nyc1.us.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "New York, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
-
+		{Name: "Uztelecom", Host: "speedtest.uztelecom.uz", PortStart: 5200, PortEnd: 5209, Location: "Tashkent, UZ (10G)", Networks: "IPv4|IPv6", Region: "asia"},
 		{Name: "Leaseweb", Host: "speedtest.sin1.sg.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Singapore, SG (10G)", Networks: "IPv4|IPv6", Region: "asia"},
-		{Name: "Leaseweb", Host: "speedtest.tyo1.jp.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "Tokyo, JP (10G)", Networks: "IPv4|IPv6", Region: "asia"},
+
+		{Name: "Clouvider", Host: "la.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "Los Angeles, CA, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
+		{Name: "Leaseweb", Host: "speedtest.nyc1.us.leaseweb.net", PortStart: 5201, PortEnd: 5210, Location: "NYC, NY, US (10G)", Networks: "IPv4|IPv6", Region: "america"},
+		{Name: "Edgoo", Host: "speedtest.sao1.edgoo.net", PortStart: 9204, PortEnd: 9240, Location: "Sao Paulo, BR (1G)", Networks: "IPv4|IPv6", Region: "america"},
 	}
 }
 
