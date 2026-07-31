@@ -5,15 +5,17 @@
 
 ## 一、当前状态
 
-`main` 已包含 5 个提交，CI（`test` × Go 1.22/stable、`race`、`cross`）在合并前为绿。
+`main` 已包含 7 个提交，CI（`test` × Go 1.22/stable、`race`、`cross`）在提交前于本地全绿。
 
 | 提交 | 内容 |
 | --- | --- |
 | `11259b1` | 初始提交 |
 | `73a2445` | 标准化：采样窗口、cgroup、steal、fio 引擎探测与混合矩阵、延迟与 DNS 采样 |
 | `fd003b0` | 功能补齐：三网回程、流媒体规则引擎、ICMP、UDP 丢包、脱敏边界、节点池 |
-| `4457bda` | CI 修复（临时方案，见下方 P0） |
+| `4457bda` | CI 修复（临时方案，已被 `a829a54` 撤销） |
 | `668eb7d` | 合并 `standardize-benchmarks`（分支保留未删） |
+| `bb4cf2e` | 补充工作交接文档 |
+| `a829a54` | **P0：Linux-only 重构（见第二节）** |
 
 ### 已解决的问题
 
@@ -29,65 +31,80 @@
 
 ---
 
-## 二、P0：Linux-only 重构（下一步第一优先）
+## 二、P0：Linux-only 重构 —— 已完成
 
-**决策**：本项目只面向 Linux VPS。删除全部 macOS / Windows / BSD 代码路径，不做兼容、不做降级。
+**决策（长期有效）**：本项目只面向 Linux VPS，不保留 macOS / Windows / BSD 的代码路径、
+测试分支与发布目标，不做兼容、不做降级。
 
 理由：VPS 99% 是 Linux 发行版。为其他平台保留分支会让测试断言被迫放宽到"跨平台都成立"，
 结果是**真实生产路径反而没被测到**——`4457bda` 就是这个错误的产物。
 
-### 2.1 删除平台分支
+这条约束已写入 `CONTRIBUTING.md` 第 11 条与 `docs/research.md` 设计约束第 13 条，
+避免后续贡献重新引入 `runtime.GOOS` 分支。
 
-| 文件 | 位置 | 处理 |
-| --- | --- | --- |
-| `internal/probe/system.go` | `:176` `switch runtime.GOOS` | 直接调用 `collectLinuxSystem` |
-| | `:281` `collectDarwinSystem` | 删除整个函数 |
-| | `:345` `collectBSDSystem` | 删除整个函数 |
-| | `:353` `collectWindowsSystem` | 删除整个函数 |
-| | `:364` `collectDisk` 的 windows 分支 | 删除 |
-| `internal/probe/icmp.go` | `:46` `pingCommandName` | 固定为 `ping` |
-| | `:56` `pingArguments` 的三分支 | 只保留 Linux（`-W` 是秒） |
-| `internal/probe/disk_fio.go` | `:69` 非 Linux 直返 psync | 删除，始终走 `--enghelp` 探测 |
-| `internal/probe/route.go` | `:120` windows 候选列表 | 只保留 `nexttrace`/`traceroute`/`tracepath` |
-| `internal/probe/container.go` | `:69`/`:146`/`:227` 的 GOOS 检查 | 删除（恒为 Linux） |
-| `cmd/ecs/signals_windows.go` | 整个文件 | 删除 |
-| `cmd/ecs/signals_unix.go` | `//go:build !windows` | 删除约束，重命名为 `signals.go` |
+### 2.1 已删除的平台分支
 
-保留 `runtime.GOARCH`：Linux VPS 有 ARM/RISC-V，架构维度不能砍。
+| 文件 | 处理结果 |
+| --- | --- |
+| `internal/probe/system.go` | `switch runtime.GOOS` 改为直接调用 `collectLinuxSystem`；`collectDarwinSystem`/`collectBSDSystem`/`collectWindowsSystem` 三个函数已删除；`collectDisk` 的 windows 提前返回已删除；随之成为孤儿的 `parseHumanBytes`（macOS `vm.swapusage` 专用）与 `parseIntDefault`（sysctl 专用）一并清理 |
+| `internal/probe/icmp.go` | `pingCommandName()` 换成常量 `pingCommand = "ping"`；`pingArguments` 只保留 Linux 形态（`-W` 以秒计、不足一秒进位） |
+| `internal/probe/disk_fio.go` | 删除非 Linux 直返 psync 的提前返回，始终走 `--enghelp` 探测 |
+| `internal/probe/route.go` | 候选固定为 `nexttrace`/`traceroute`/`tracepath`；删除 `.exe` 后缀处理与 `tracert` 参数分支 |
+| `internal/probe/container.go` | 删除 `detectCPUAllowance`、`cgroupMemoryLimit`、`readCPUTimes` 里的三处 GOOS 检查 |
+| `cmd/ecs/signals_windows.go` | 已删除 |
+| `cmd/ecs/signals_unix.go` | 已重命名为 `signals.go`，去掉 `//go:build !windows` |
 
-### 2.2 收紧发布目标
+`runtime` 包在 `internal/probe` 中现在只剩 `GOARCH` 与 `NumCPU()`：Linux VPS 有 ARM/RISC-V，
+架构维度不能砍。
 
-- `scripts/package.sh`：13 个目标砍到 Linux 的 `amd64`/`arm64`/`armv7`/`386`/`s390x`/`riscv64`/`ppc64le`。
-- `Makefile` 的 `cross`：同上。
-- `install.sh`：`os_name` 只接受 `linux`，其余直接报错退出。
-- `.github/workflows/ci.yml`：`cross` job 相应调整。
+### 2.2 已收紧的发布目标
 
-### 2.3 重写被弱化的测试（撤销 `4457bda` 的妥协）
+- `scripts/package.sh`：13 个目标砍到 Linux 的 `amd64`/`arm64`/`armv7`/`386`/`s390x`/`riscv64`/`ppc64le`；
+  windows 的 zip 分支与 checksums 里的 `ecs_*.zip` 一并删除（否则 glob 展开失败会中断打包）。
+- `Makefile` 的 `cross`：同上七个目标。
+- `install.sh`：`os_name` 不是 `linux` 直接报错退出；删除已无对应资产的 darwin/freebsd 组合校验，
+  以及 `pkg`（FreeBSD）与 `brew`（macOS）包管理器分支。
+- `.github/workflows/ci.yml`：`cross` job 调用 `make cross`，随 Makefile 自动收敛，未改动。
 
-这两处当前是"放宽到跨平台成立"，必须改成断言 Linux 真实行为：
+已实跑验证：七个架构全部构建成功；`scripts/package.sh` 产出 7 个 tar.gz 与格式正确的
+`checksums.txt`，资产名与 `install.sh` 的期望一致。
 
-1. **`probe_test.go` 的 fio 适配器**
-   - 现状：假脚本 `--enghelp` 只输出 `psync`，于是测到的是同步引擎 QD1 路径。
-   - 应改为：输出 `libaio`，断言 `--iodepth=64`、method 名含 `qd64`，即真实 VPS 路径。
-   - 另建一个用例专门覆盖 psync 降级标注。
+### 2.3 已重写的测试（`4457bda` 的妥协已撤销）
 
-2. **`probe_test.go` 的 sysbench CPU**
-   - 现状：按 key 断言，允许 steal 指标缺失。
-   - 应改为：**断言 `cpu_steal_percent_during_test` 必须存在**——Linux 上读不到 `/proc/stat` 就是 bug。
-
-3. 删除所有 `if runtime.GOOS == "windows" { t.Skip(...) }`（`probe_test.go:136/196/276`）。
-4. `icmp_test.go:16` 的三平台 `switch` 改为只断言 Linux 参数形态。
+1. **fio 适配器**拆成两个用例，假脚本的 `--enghelp` 输出改为可配置：
+   - `TestRunFIODiskWithAsyncEngine`：报告 `libaio`，断言参数含 `--iodepth=32`/`--iodepth=64`、
+     method 名含 `qd32`/`qd64`、ioengine 字段标"异步"，且不得出现同步降级说明——即真实 VPS 路径。
+   - `TestRunFIODiskDowngradesSynchronousEngine`：报告 `psync`，断言参数**不含**高队列深度、
+     method 名为 `qd1`、并且必须披露降级说明。
+   两个用例对同一份代码作相反断言，引擎探测一旦失效必有一个失败。
+2. **sysbench CPU** 断言 `cpu_steal_percent_during_test` 必须存在。假脚本的 cpu 分支加了
+   `sleep 0.2`：`/proc/stat` 是 jiffies 计数，瞬时返回的假脚本会让前后两次采样完全相同，
+   steal 增量无从计算。状态断言放宽为"不是 error"——宿主机 steal 高时降级 warning 是正确行为。
+   另加 `TestStealSamplingReadsProcStat` 覆盖累计口径、增量口径与计数器倒退。
+3. 三处 `if runtime.GOOS == "windows" { t.Skip(...) }` 已删除。
+4. `icmp_test.go` 的三平台 `switch` 改为只断言 Linux 参数形态，并新增不足一秒进位的断言。
 
 ### 2.4 文档
 
-`README.md`、`docs/research.md`、`THIRD_PARTY.md`、`install.sh` 的用法说明都要写明**仅支持 Linux**，并删掉 macOS/Windows/FreeBSD 的表述。
+`README.md`（快速开始已写明仅支持 Linux 与七个发布架构）、`docs/research.md`（设计约束第 13 条
+与实测教训第 4 条）、`THIRD_PARTY.md`、`SECURITY.md`、`CONTRIBUTING.md`、`install.sh` 用法说明
+均已更新，macOS/Windows/FreeBSD 与 `tracert` 的表述已删除。
+
+### 2.5 顺带修复：busybox ping
+
+Linux-only 的目的是覆盖真实生产路径，因此补上了一个此前被跨平台正则掩盖的差异：
+Alpine 等精简镜像默认是 busybox ping，统计行只有 `min/avg/max` 三段，没有 iputils 的 `mdev`，
+原四段正则在这些镜像上解析不出 RTT（丢包率仍可解析，于是 RTT 静默为 0）。现增加三段回退正则，
+并给 `icmpStats` 加 `StdDevKnown` 字段，区分"标准差为 0"与"该 ping 实现不报告标准差"。
+
+> 这一条超出了原 P0 清单。如认为不该在本次改动中携带，回退它不影响 P0 其余部分。
 
 ---
 
-## 三、P1：必须在真实 Linux VPS 上验证
+## 三、P1：必须在真实 Linux VPS 上验证（现为第一优先）
 
 **此前的实测是在 macOS + 中国大陆家宽完成的，对本项目毫无代表性，结论不可信。**
-需要在真实 VPS 上重跑并校准：
+P0 已完成，此项现在是最高优先级。需要在真实 VPS 上重跑并校准：
 
 1. **三网回程**：本地实测 6 个目标只识别出 1 个，其余因 ICMP 限速判为"可能被限速"。
    必须在海外 VPS（美西、日本、香港各一台为佳）上验证特征表是否命中，并校准：
@@ -99,9 +116,12 @@
    OpenVZ 的 `/proc/meminfo` 行为需单独确认。
 3. **steal**：找一台已知超售的机器验证累计值与告警阈值（当前 5%）是否合理。
 4. **fio 引擎探测**：在精简发行版（Alpine、无 libaio 的 Debian slim）上验证回退链。
-5. **流媒体规则**：33 条规则在解锁/不解锁地区各跑一次，核对强规则判定；
+   注意本地开发机没有 fio/sysbench/iperf3，P0 只用假适配器覆盖了两条引擎路径，
+   **真实 `fio --enghelp` 的输出格式尚未在任何机器上验证过**。
+5. **busybox ping**：2.5 的三段回退只有单元测试覆盖，需要在 Alpine 上跑一次 `latency` 模块确认。
+6. **流媒体规则**：33 条规则在解锁/不解锁地区各跑一次，核对强规则判定；
    弱规则的"公开页 2xx"目前只能说明可达性，需逐步升级为强规则。
-6. **iperf3 节点池**：8 个公共节点的可用性与端口范围需实测核对（清单来自记忆，未经抓取验证）。
+7. **iperf3 节点池**：8 个公共节点的可用性与端口范围需实测核对（清单来自记忆，未经抓取验证）。
 
 ---
 
@@ -113,8 +133,10 @@
 - **离线 GeoIP**：MaxMind/DB-IP/IP2Location 本地库，降低对在线 API 的依赖。
 - **UnixBench/Phoronix**：可选长测套件。
 - **回归样本库**：KVM、LXC、OpenVZ、低内存 NAT VPS 的基线数据。
-- **发布**：仓库已建但**尚未发 Release**。`install.sh:5` 的 `ECS_REPOSITORY` 仍需手动传，
+- **发布**：仓库已建但**尚未发 Release**。`install.sh` 的 `ECS_REPOSITORY` 仍需手动传。
   发版后应把默认值填成 `CST-Cat/ecs`，并把 README 的"快速开始"从 `go build` 改成 `install.sh` 优先。
+  **在 Release 存在之前不要填默认值**，否则 `install.sh` 会指向一个 404 的下载地址；
+  `SECURITY.md` 当前的"必须显式设置 `ECS_REPOSITORY`"说明也要同步改。
 
 ---
 
@@ -123,7 +145,7 @@
 ```bash
 git clone https://github.com/CST-Cat/ecs.git && cd ecs
 
-# Go 1.22+（CI 同时验 1.22 与 stable）
+# 仅支持 Linux。Go 1.22+（CI 同时验 1.22 与 stable）
 go build ./cmd/ecs
 
 # 本地检查（提交前必跑，与 CI 一致）
@@ -131,6 +153,8 @@ gofmt -l cmd internal     # 必须无输出
 go test ./...
 go vet ./...
 go test -race ./...
+sh -n install.sh
+bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
 apt-get install -y sysbench fio iperf3 traceroute
@@ -147,4 +171,5 @@ apt-get install -y sysbench fio iperf3 traceroute
 4. 外部程序只作可关闭的适配器，记录版本与 SHA-256，参数以数组传入不经过 shell；
 5. 解析、遮盖、报告、协议逻辑都要有**不依赖公网**的测试；
 6. 工作负载语义变化时升级 `measurement.method` 的版本号；
-7. 不加入广告、推广、遥测或默认上传。
+7. 不加入广告、推广、遥测或默认上传；
+8. **只面向 Linux**：不引入 `runtime.GOOS` 分支或其他系统的发布目标，测试断言真实 Linux 行为。
