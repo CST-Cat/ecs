@@ -143,28 +143,28 @@ func Defaults(profile string) (Runtime, error) {
 	switch profile {
 	case ProfileQuick:
 		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency"}
-		base.CPUTime = 750 * time.Millisecond
-		base.DiskMiB = 64
-		base.DNSAttempts = 2
-		base.LatencyAttempts = 3
+		base.CPUTime = 5 * time.Second
+		base.DiskMiB = 256
+		base.DNSAttempts = 3
+		base.LatencyAttempts = 4
 		base.SpeedThreads = 2
 		base.IPerfDuration = 3 * time.Second
 	case ProfileStandard:
 		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "media", "route"}
-		base.CPUTime = 2 * time.Second
-		base.DiskMiB = 256
-		base.DNSAttempts = 3
-		base.LatencyAttempts = 4
-		base.SpeedThreads = 4
-		base.IPerfDuration = 5 * time.Second
-	case ProfileFull:
-		base.Modules = append([]string(nil), ModuleOrder...)
-		base.CPUTime = 4 * time.Second
+		base.CPUTime = 10 * time.Second
 		base.DiskMiB = 1024
 		base.DNSAttempts = 5
 		base.LatencyAttempts = 6
 		base.SpeedThreads = 8
 		base.IPerfDuration = 10 * time.Second
+	case ProfileFull:
+		base.Modules = append([]string(nil), ModuleOrder...)
+		base.CPUTime = 15 * time.Second
+		base.DiskMiB = 2048
+		base.DNSAttempts = 8
+		base.LatencyAttempts = 10
+		base.SpeedThreads = 8
+		base.IPerfDuration = 15 * time.Second
 	default:
 		return Runtime{}, fmt.Errorf("未知配置档 %q，可选 quick、standard、full", profile)
 	}
@@ -453,8 +453,12 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += time.Second
 		case "network":
 			total += 5 * time.Second
-		case "cpu", "memory":
+		case "cpu":
+			// sysbench CPU 跑单线程与多线程两轮。
 			total += 2*runtime.CPUTime + time.Second
+		case "memory":
+			// sysbench memory 跑读/写 × 单/多线程共四轮。
+			total += 4*runtime.CPUTime + time.Second
 		case "disk":
 			randomDuration := runtime.CPUTime
 			if randomDuration > 3*time.Second {

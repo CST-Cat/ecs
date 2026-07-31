@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -70,13 +69,12 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 	if seconds < 1 {
 		seconds = 1
 	}
-	workers := runtime.NumCPU()
-	if workers < 1 {
-		workers = 1
-	}
-	if workers > 256 {
-		workers = 256
-	}
+	allowance := detectCPUAllowance()
+	workers := allowance.Threads
+
+	// steal 只有在压满 CPU 的窗口内测才有意义：空闲时宿主机没有争抢对象，
+	// 读到的比例会偏低。这里夹住两轮 sysbench 的整个执行区间。
+	stealBefore, stealTracked := readCPUTimes()
 
 	single, err := executeSysbenchCPU(ctx, path, 1, seconds)
 	if err != nil {
@@ -88,6 +86,13 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 	if err != nil {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "sysbench 多线程 CPU 基准失败: "+err.Error())
+	}
+
+	steal, stealOK := 0.0, false
+	if stealTracked {
+		if after, ok := readCPUTimes(); ok {
+			steal, stealOK = stealPercent(stealBefore, after)
+		}
 	}
 
 	result.Measurements = []model.Measurement{
@@ -104,12 +109,20 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 			Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(true),
 		})
 	}
+	if stealOK {
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: "cpu_steal_percent_during_test", Label: "测试期间 CPU steal",
+			Value: steal, Unit: "%", Display: fmt.Sprintf("%.2f %%", steal),
+			Method: "proc-stat-steal-delta-v1", HigherIsBetter: model.BoolPtr(false),
+		})
+	}
 	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "标准工具", Value: "sysbench"},
 		{Key: "version", Label: "工具版本", Value: version},
 		{Key: "binary_sha256", Label: "程序 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
+		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},
 		{Key: "prime", Label: "最大素数", Value: "20000"},
 		{Key: "single_events", Label: "单线程总事件", Value: strconv.FormatUint(single.Events, 10)},
@@ -129,6 +142,18 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 		"成绩不与不同 sysbench 版本、prime 值、线程数或测试时长混算。",
 		"sysbench CPU 是素数计算微基准，不等同于 Geekbench/SPEC 的综合应用负载。",
 	)
+	if allowance.Limited() {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"检测到 CPU 配额 %.2f 核（%s），低于可见的 %d 个逻辑核；多线程测试按配额使用 %d 线程，避免超开导致成绩失真。",
+			allowance.Quota, allowance.Source, allowance.Visible, allowance.Threads,
+		))
+	}
+	if stealOK && steal >= 1 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"测试期间 CPU steal 约 %.2f%%，宿主机存在争抢；本轮成绩会被压低，建议错峰复测。", steal,
+		))
+	}
 	if multi.Rate > 0 {
 		result.Summary = fmt.Sprintf("sysbench 单线程 %s · %d 线程 %s",
 			model.FormatRate(single.Rate, "events/s"), workers, model.FormatRate(multi.Rate, "events/s"))

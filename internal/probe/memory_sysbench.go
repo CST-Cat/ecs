@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -64,13 +63,8 @@ func runSysbenchMemory(ctx context.Context, env Environment, path string) model.
 	if seconds < 1 {
 		seconds = 1
 	}
-	workers := runtime.NumCPU()
-	if workers < 1 {
-		workers = 1
-	}
-	if workers > 256 {
-		workers = 256
-	}
+	allowance := detectCPUAllowance()
+	workers := allowance.Threads
 
 	writeSingle, err := executeSysbenchMemory(ctx, path, "write", 1, seconds)
 	if err != nil {
@@ -116,6 +110,7 @@ func runSysbenchMemory(ctx context.Context, env Environment, path string) model.
 		{Key: "version", Label: "工具版本", Value: commandVersion(ctx, path)},
 		{Key: "binary_sha256", Label: "程序 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
+		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},
 		{Key: "block_size", Label: "块大小", Value: "1 MiB"},
 		{Key: "access_mode", Label: "访问模式", Value: "sequential / global"},

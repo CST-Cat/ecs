@@ -19,8 +19,12 @@ func TestDefaultsAndModuleSelection(t *testing.T) {
 	if !contains(cfg.Modules, "route") || !contains(cfg.Modules, "speed") {
 		t.Fatalf("standard modules = %v", cfg.Modules)
 	}
-	if cfg.IPerfDuration != 5*time.Second || len(cfg.IPerfTargets) == 0 {
+	if cfg.IPerfDuration != 10*time.Second || len(cfg.IPerfTargets) == 0 {
 		t.Fatalf("standard iperf settings = %s, targets=%d", cfg.IPerfDuration, len(cfg.IPerfTargets))
+	}
+	// 采样窗口必须达到 sysbench 的通行时长，短窗口会在突发性能机型上测到 burst credit。
+	if cfg.CPUTime < 10*time.Second {
+		t.Fatalf("standard cpu time = %s, want at least 10s", cfg.CPUTime)
 	}
 	selected := SelectModules(cfg.Modules, []string{"disk", "system", "disk"}, []string{"disk"})
 	if want := []string{"system"}; !reflect.DeepEqual(selected, want) {
