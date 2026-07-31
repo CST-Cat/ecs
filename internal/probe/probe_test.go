@@ -139,6 +139,12 @@ func TestRunFIODiskWithLocalJSONAdapter(t *testing.T) {
 	directory := t.TempDir()
 	helper := filepath.Join(directory, "fio")
 	script := `#!/bin/sh
+case "$*" in
+  *--enghelp*)
+    printf '%s\n' 'psync'
+    exit 0
+    ;;
+esac
 printf '%s\n' '{"fio version":"fio-test","jobs":[
 {"jobname":"seqwrite","error":0,"write":{"bw_bytes":104857600,"iops":100}},
 {"jobname":"seqread","error":0,"read":{"bw_bytes":209715200,"iops":200}},
@@ -242,8 +248,18 @@ esac
 	}
 	cfg.CPUTime = 100 * time.Millisecond
 	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, helper)
-	if cpu.Status != "ok" || cpu.Methodology.Kind != "standard-benchmark" || len(cpu.Measurements) != 2 {
+	if cpu.Status != "ok" || cpu.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
+	}
+	// steal 只在能读到 /proc/stat 的平台出现，所以按 key 断言而不是按数量。
+	cpuKeys := make(map[string]bool, len(cpu.Measurements))
+	for _, measurement := range cpu.Measurements {
+		cpuKeys[measurement.Key] = true
+	}
+	for _, required := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
+		if !cpuKeys[required] {
+			t.Fatalf("sysbench CPU missing %q: %+v", required, cpu.Measurements)
+		}
 	}
 	for _, measurement := range cpu.Measurements {
 		if strings.Contains(measurement.Key, "efficiency") {
