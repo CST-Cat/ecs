@@ -35,15 +35,17 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 标准工具，从系统包管理器准备临时组件，生成本地报告后清理本次新增的包。
 
 ```bash
-# 有终端时进交互向导：选档位、按需关掉有代价的检测项
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
+# 完整测试：所有模块，非交互
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
 
-# 跳过向导，直接按默认（standard 全模块）开跑
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --yes
+# 标准测试：日常综合测试，非交互
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile standard --yes
 
-# 带了参数就不再打扰，直接按参数跑
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
+# 快速测试：低资源快速筛查，非交互
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
 ```
+
+如果不指定档位并且当前有终端，`run.sh` 会进入交互向导；没有终端时按 `standard` 档直接运行。
 
 向导只问真正有代价的四件事，其余用推荐值，直接回车即可：
 
