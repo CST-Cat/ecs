@@ -248,7 +248,8 @@ func listCommand(stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "\nIP 质量数据源:")
 	fmt.Fprintln(stdout, "  maxmind, ipinfo, ipregistry, ipapi, ip2location, abuseipdb,")
-	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois")
+	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois, ipapicom, ipsb,")
+	fmt.Fprintln(stdout, "  virustotal, ipgeolocation, bigdatacloud, getipintel")
 	fmt.Fprintln(stdout, "  默认 all；none 关闭附加质量查询（出口发现仍访问 ipapi.is）")
 	return 0
 }
@@ -360,5 +361,5 @@ func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
 	fmt.Fprintln(writer, "用法: ecs [run] [选项]")
 	flags.PrintDefaults()
 	fmt.Fprintln(writer, "\n模块:", strings.Join(config.ModuleOrder, ","))
-	fmt.Fprintln(writer, "IP 质量数据源: maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois")
+	fmt.Fprintln(writer, "IP 质量数据源: maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois,ipapicom,ipsb,virustotal,ipgeolocation,bigdatacloud,getipintel")
 }

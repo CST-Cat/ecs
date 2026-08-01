@@ -37,9 +37,15 @@ var (
 		"dbip",
 		"ipdata",
 		"ipwhois",
+		"ipapicom",
+		"ipsb",
+		"virustotal",
+		"ipgeolocation",
+		"bigdatacloud",
+		"getipintel",
 	}
-	typeSourceOrder   = []string{"ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb"}
-	scoreSourceOrder  = []string{"ip2location", "scamalytics", "ipapi", "abuseipdb", "ipqs", "dbip"}
+	typeSourceOrder   = []string{"ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb", "ipapicom", "ipsb"}
+	scoreSourceOrder  = []string{"ip2location", "scamalytics", "ipapi", "abuseipdb", "ipqs", "dbip", "virustotal", "ipgeolocation", "getipintel"}
 	factorSourceOrder = []string{
 		"ip2location",
 		"ipapi",
@@ -50,19 +56,28 @@ var (
 		"ipinfo",
 		"ipwhois",
 		"dbip",
+		"ipapicom",
+		"ipgeolocation",
+		"bigdatacloud",
 	}
 	qualitySourceLabels = map[string]string{
-		"maxmind":     "MaxMind",
-		"ipinfo":      "IPinfo",
-		"ipregistry":  "ipregistry",
-		"ipapi":       "ipapi",
-		"ip2location": "IP2Location",
-		"abuseipdb":   "AbuseIPDB",
-		"scamalytics": "Scamalytics",
-		"ipqs":        "IPQS",
-		"dbip":        "DB-IP",
-		"ipdata":      "ipdata",
-		"ipwhois":     "IPWHOIS",
+		"maxmind":       "MaxMind",
+		"ipinfo":        "IPinfo",
+		"ipregistry":    "ipregistry",
+		"ipapi":         "ipapi",
+		"ip2location":   "IP2Location",
+		"abuseipdb":     "AbuseIPDB",
+		"scamalytics":   "Scamalytics",
+		"ipqs":          "IPQS",
+		"dbip":          "DB-IP",
+		"ipdata":        "ipdata",
+		"ipwhois":       "IPWHOIS",
+		"ipapicom":      "ip-api",
+		"ipsb":          "ip.sb",
+		"virustotal":    "VirusTotal",
+		"ipgeolocation": "ipgeolocation",
+		"bigdatacloud":  "BigDataCloud",
+		"getipintel":    "getipintel",
 	}
 )
 
@@ -152,15 +167,21 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 	}
 
 	fetchers := map[string]func(context.Context, Environment, *http.Client, string) qualityFinding{
-		"ipinfo":      fetchIPinfo,
-		"ipregistry":  fetchIPregistry,
-		"ip2location": fetchIP2Location,
-		"abuseipdb":   fetchAbuseIPDB,
-		"scamalytics": fetchScamalytics,
-		"ipqs":        fetchIPQS,
-		"dbip":        fetchDBIP,
-		"ipdata":      fetchIPdata,
-		"ipwhois":     fetchIPWhois,
+		"ipinfo":        fetchIPinfo,
+		"ipregistry":    fetchIPregistry,
+		"ip2location":   fetchIP2Location,
+		"abuseipdb":     fetchAbuseIPDB,
+		"scamalytics":   fetchScamalytics,
+		"ipqs":          fetchIPQS,
+		"dbip":          fetchDBIP,
+		"ipdata":        fetchIPdata,
+		"ipwhois":       fetchIPWhois,
+		"ipapicom":      fetchIPAPICom,
+		"ipsb":          fetchIPSB,
+		"virustotal":    fetchVirusTotal,
+		"ipgeolocation": fetchIPGeolocation,
+		"bigdatacloud":  fetchBigDataCloud,
+		"getipintel":    fetchGetIPIntel,
 	}
 	for _, id := range qualitySourceOrder {
 		fetcher, ok := fetchers[id]
@@ -1315,6 +1336,10 @@ func scoreBands(id string) string {
 		return "<25 低 / 25–74 注意 / ≥75 高"
 	case "ipqs":
 		return "<75 低 / 75–84 可疑 / 85–89 高 / ≥90 极高"
+	case "virustotal":
+		return "厂商投票占比：0 低 / <3 需留意 / <10 高 / ≥10 极高"
+	case "ipgeolocation", "getipintel":
+		return "<25 低 / 25–49 中等 / 50–74 高 / ≥75 极高"
 	case "dbip":
 		return "low/medium/high → 0/50/100*"
 	default:

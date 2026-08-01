@@ -520,6 +520,8 @@ func Validate(runtime Runtime) error {
 		"ipregistry": true, "ipapi": true, "ip2location": true,
 		"abuseipdb": true, "scamalytics": true, "ipqs": true,
 		"dbip": true, "ipdata": true, "ipwhois": true,
+		"ipapicom": true, "ipsb": true, "virustotal": true,
+		"ipgeolocation": true, "bigdatacloud": true, "getipintel": true,
 	}
 	if len(runtime.IPQualitySources) == 0 {
 		return errors.New("IP 质量数据源不能为空；使用 all、none 或逗号分隔的数据源")
