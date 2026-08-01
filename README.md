@@ -6,6 +6,24 @@
 
 > 当前处于首个开发版本，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、三网回程、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
+## 快速开始
+
+`ecs` 只支持 Linux。下面三条命令均为非交互模式：自动下载并校验 Release 二进制，准备缺失的
+测试组件，生成本地报告，并在结束时清理本次新增组件。
+
+```bash
+# 完整测试：所有模块
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
+
+# 标准测试：日常综合测试
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile standard --yes
+
+# 快速测试：低资源快速筛查
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
+```
+
+报告默认写入当前目录的 `./reports/`。完整档位可能运行数分钟，`iperf3` 流量不封顶。
+
 ## 为什么再做一个
 
 市面上的优秀脚本已经证明了融合测试的价值，但常见体验仍有几个问题：
@@ -24,26 +42,15 @@
 4. 每项指标记录方法、参数、耗时、数据源、警告和原始证据。
 5. 管道与 JSON 输出不混入 ANSI、进度条或交互提示。
 
-## 快速开始
+## 一键运行说明
 
 `ecs` **只支持 Linux**。VPS 几乎全是 Linux 发行版，因此项目不保留 macOS、Windows 或
 BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台都成立"，真实生产路径反而
 测不到。发布二进制覆盖 Linux 的 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、
 `ppc64le`。
 
-**一键运行**（发布 Release 后可用）：脚本会下载并校验 `ecs`，按所选配置识别缺失的
-标准工具，从系统包管理器准备临时组件，生成本地报告后清理本次新增的包。
-
-```bash
-# 完整测试：所有模块，非交互
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
-
-# 标准测试：日常综合测试，非交互
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile standard --yes
-
-# 快速测试：低资源快速筛查，非交互
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
-```
+脚本会下载并校验 `ecs`，按所选配置识别缺失的标准工具，从系统包管理器准备临时组件，
+生成本地报告后清理本次新增的包。
 
 如果不指定档位并且当前有终端，`run.sh` 会进入交互向导；没有终端时按 `standard` 档直接运行。
 
@@ -76,6 +83,8 @@ CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私�
 结束时只清理本次新增的包；不执行 `autoremove` 或全局缓存清理，也不碰开始前已有的包。
 交互向导会先确定最终档位和模块，再准备对应组件。测试期间不要并行运行其他包管理器操作；
 若安装完成后的包状态被外部改变，脚本会跳过清理并保留临时目录，避免把外部新增包当成测试依赖删除。
+包管理器的正常安装、更新和清理输出会收进临时日志，只在失败时显示末尾诊断；设置 `ECS_KEEP=1`
+或发生清理失败时会保留现场日志。
 无法获得 root/`sudo` 或没有受支持的包管理器时，脚本会停止并提示原因；可用 `ECS_AUTO_DEPS=0`
 接受缺失组件警告继续运行。
 

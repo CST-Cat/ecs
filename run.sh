@@ -162,6 +162,18 @@ list_contains() {
   esac
 }
 
+# 包管理器的正常输出很长，收进临时日志，避免把 curl|sh 的终端刷满。
+# 失败时只显示末尾诊断；日志会随 ECS_KEEP=1 或清理失败一起保留。
+package_command() {
+  PACKAGE_LOG="$WORK/package-manager.log"
+  if "$@" >"$PACKAGE_LOG" 2>&1; then
+    return 0
+  fi
+  say "组件操作失败，日志末尾如下：$PACKAGE_LOG" "component operation failed; log tail: $PACKAGE_LOG"
+  tail -n 80 "$PACKAGE_LOG" >&2 || true
+  return 1
+}
+
 # 从命令行预读会影响依赖规划的选项。带 --config 时配置文件可能改写模块，
 # 因而按完整配置准备，避免先删掉用户实际需要的工具。
 PROFILE=standard
@@ -248,13 +260,13 @@ install_packages() {
   say "准备测试组件：$PACKAGES" "preparing test components: $PACKAGES"
   case "$PACKAGE_MANAGER" in
     apt)
-      as_root env DEBIAN_FRONTEND=noninteractive apt-get update
-      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACKAGES
+      package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get update || return 1
+      package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACKAGES || return 1
       ;;
-    dnf) as_root dnf install -y $PACKAGES ;;
-    yum) as_root yum install -y $PACKAGES ;;
-    apk) as_root apk add --no-cache $PACKAGES ;;
-    pacman) as_root pacman -Sy --noconfirm $PACKAGES ;;
+    dnf) package_command as_root dnf install -y $PACKAGES || return 1 ;;
+    yum) package_command as_root yum install -y $PACKAGES || return 1 ;;
+    apk) package_command as_root apk add --no-cache $PACKAGES || return 1 ;;
+    pacman) package_command as_root pacman -Sy --noconfirm $PACKAGES || return 1 ;;
     *) return 1 ;;
   esac
 }
@@ -274,8 +286,20 @@ prepare_dependencies() {
   if ! select_package_manager; then
     die "找不到支持的包管理器；可设置 ECS_AUTO_DEPS=0 运行并接受降级报告" "no supported package manager; set ECS_AUTO_DEPS=0 to run with a degraded report"
   fi
-  if ! as_root true 2>/dev/null; then
-    die "准备测试组件需要 root 或免密 sudo；可设置 ECS_AUTO_DEPS=0 运行降级测试" "preparing test components requires root or sudo; set ECS_AUTO_DEPS=0 to run with a degraded report"
+  if [ "$(id -u)" -ne 0 ]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+      die "准备测试组件需要 root 或 sudo；可设置 ECS_AUTO_DEPS=0 运行降级测试" "preparing test components requires root or sudo; set ECS_AUTO_DEPS=0 to run with a degraded report"
+    fi
+    if ! sudo -n true 2>/dev/null; then
+      if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        say "准备组件需要 sudo 权限；请按提示授权。" "sudo permission is required to prepare components; follow the prompt"
+        if ! sudo -v </dev/tty >/dev/tty 2>/dev/tty; then
+          die "sudo 授权失败；可设置 ECS_AUTO_DEPS=0 运行降级测试" "sudo authorization failed; set ECS_AUTO_DEPS=0 to run with a degraded report"
+        fi
+      else
+        die "当前不是 root 且没有可用的 sudo 会话；请先运行 sudo -v，或设置 ECS_AUTO_DEPS=0" "not root and no cached sudo session is available; run sudo -v first or set ECS_AUTO_DEPS=0"
+      fi
+    fi
   fi
   for tool in $MISSING_TOOLS; do
     add_package "$(package_for_tool "$tool")"
@@ -315,11 +339,11 @@ cleanup_packages() {
   [ -n "$NEW_PACKAGES" ] || return 0
   say "清理本次新增组件：$NEW_PACKAGES" "removing packages added by this run: $NEW_PACKAGES"
   case "$PACKAGE_MANAGER" in
-    apt) as_root env DEBIAN_FRONTEND=noninteractive apt-get purge -y $NEW_PACKAGES ;;
-    dnf) as_root dnf remove -y $NEW_PACKAGES ;;
-    yum) as_root yum remove -y $NEW_PACKAGES ;;
-    apk) as_root apk del $NEW_PACKAGES ;;
-    pacman) as_root pacman -R --noconfirm $NEW_PACKAGES ;;
+    apt) package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get purge -y $NEW_PACKAGES ;;
+    dnf) package_command as_root dnf remove -y $NEW_PACKAGES ;;
+    yum) package_command as_root yum remove -y $NEW_PACKAGES ;;
+    apk) package_command as_root apk del $NEW_PACKAGES ;;
+    pacman) package_command as_root pacman -R --noconfirm $NEW_PACKAGES ;;
     *) return 1 ;;
   esac
 }
