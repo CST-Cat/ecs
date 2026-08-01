@@ -220,6 +220,7 @@ func listCommand(stdout io.Writer) int {
 		"ports":     "Web、SSH、DNS 与邮件出站端口",
 		"nat":       "STUN 探测 UDP 映射/过滤行为与 NAT 类型",
 		"blacklist": "出口 IP 在 17 个主流 DNS 黑名单的收录情况",
+		"apps":      "Telegram DC、代码/镜像/软件源/证书服务可达性",
 		"media":     "流媒体与 AI 服务公开页证据",
 		"route":     "NextTrace/系统 traceroute 适配器",
 		"backtrace": "三网回程线路识别（电信/联通/移动骨干特征）",

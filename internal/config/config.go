@@ -32,6 +32,7 @@ var ModuleOrder = []string{
 	"ports",
 	"nat",
 	"blacklist",
+	"apps",
 	"media",
 	"route",
 	"backtrace",
@@ -233,7 +234,7 @@ func Defaults(profile string) (Runtime, error) {
 		base.SpeedThreads = 2
 		base.IPerfDuration = 3 * time.Second
 	case ProfileStandard:
-		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "media", "route", "backtrace"}
+		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
 		base.CPUTime = 10 * time.Second
 		base.DiskMiB = 1024
 		base.DNSAttempts = 5
@@ -595,6 +596,8 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
 		case "blacklist":
 			total += 10 * time.Second
+		case "apps":
+			total += 8 * time.Second
 		case "nat":
 			// 多次 UDP 事务，无响应时按超时累计。
 			total += 12 * time.Second
