@@ -43,38 +43,9 @@ func TestParseIPAPIComFields(t *testing.T) {
 	}
 }
 
-func TestRiskVirusTotalUsesVoteSemantics(t *testing.T) {
-	score := func(v float64) *float64 { return &v }
-	// VirusTotal 是厂商投票占比，语义与欺诈分完全不同：
-	// 有一两家标记就值得留意，阈值必须远低于欺诈分类的库。
-	cases := map[float64]string{0: "低", 1.5: "需留意", 5: "高", 25: "极高"}
-	for value, want := range cases {
-		if got := riskVirusTotal(score(value)); got != want {
-			t.Errorf("riskVirusTotal(%g) = %q, want %q", value, got, want)
-		}
-	}
-	if riskVirusTotal(nil) != "" {
-		t.Fatal("无分值时不应给出等级")
-	}
-	// 同样是 5 分，在欺诈分口径下应当是"低"，在 VT 口径下是"高"——
-	// 这正是不能把不同来源的分值合并的原因。
-	if riskIPQS(score(5)) == riskVirusTotal(score(5)) {
-		t.Fatal("不同口径的同一数值不应得到相同等级")
-	}
-}
-
-func TestRiskGenericHundred(t *testing.T) {
-	score := func(v float64) *float64 { return &v }
-	for value, want := range map[float64]string{0: "低", 30: "中等", 60: "高", 90: "极高"} {
-		if got := riskGenericHundred(score(value)); got != want {
-			t.Errorf("riskGenericHundred(%g) = %q, want %q", value, got, want)
-		}
-	}
-}
-
 func TestNewSourcesAreRegisteredEverywhere(t *testing.T) {
 	// 新增数据源必须同时进入顺序表与标签表，否则表格里会出现空名或整行消失。
-	for _, id := range []string{"ipapicom", "ipsb", "virustotal", "ipgeolocation", "bigdatacloud", "getipintel"} {
+	for _, id := range []string{"ipapicom", "ipsb"} {
 		found := false
 		for _, existing := range qualitySourceOrder {
 			if existing == id {
@@ -89,20 +60,10 @@ func TestNewSourcesAreRegisteredEverywhere(t *testing.T) {
 			t.Errorf("%q 缺少显示名", id)
 		}
 	}
-	// 有分值的源必须出现在评分表里，并且有分段规则说明。
-	for _, id := range []string{"virustotal", "ipgeolocation", "getipintel"} {
-		if scoreBands(id) == "—" {
-			t.Errorf("%q 缺少分段规则说明", id)
+	// 纯密钥源不应重新出现：没有免密兜底就等于对绝大多数用户永远失败。
+	for _, id := range []string{"virustotal", "ipgeolocation", "bigdatacloud", "getipintel"} {
+		if qualitySourceLabels[id] != "" {
+			t.Errorf("%q 是纯密钥源，已移除，不应重新登记", id)
 		}
-	}
-}
-
-func TestCompactMessage(t *testing.T) {
-	if got := compactMessage("  "); got != "查询未成功" {
-		t.Fatalf("空消息 = %q", got)
-	}
-	long := strings.Repeat("x", 300)
-	if got := compactMessage(long); len(got) > 130 {
-		t.Fatalf("长消息未截断：%d", len(got))
 	}
 }

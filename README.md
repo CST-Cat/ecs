@@ -154,7 +154,7 @@ CPU、内存、磁盘和网络吞吐只展示标准工具直接返回或按其�
 
 ## IP 质量与欺诈值
 
-`network` 默认执行 `--ip-quality-sources all`，覆盖 17 个数据源。每个 IPv4/IPv6 出口分别展示：
+`network` 默认执行 `--ip-quality-sources all`，覆盖 13 个数据源。每个 IPv4/IPv6 出口分别展示：
 
 - MaxMind 使用地与注册地一致性，给出“原生 IP / 广播 IP”线索；
 - IPinfo、ipregistry、ipapi、IP2Location、AbuseIPDB 的使用类型和公司类型；
@@ -185,10 +185,6 @@ CPU、内存、磁盘和网络吞吐只展示标准工具直接返回或按其�
 | IPQualityScore | `IPQS_API_KEY` |
 | DB-IP Extended | `DBIP_API_KEY` |
 | IPWHOIS Pro | `IPWHOIS_API_KEY` |
-| VirusTotal | `VIRUSTOTAL_API_KEY` |
-| ipgeolocation.io | `IPGEOLOCATION_API_KEY` |
-| BigDataCloud | `BIGDATACLOUD_API_KEY` |
-| getipintel（其条款要求联系邮箱） | `GETIPINTEL_CONTACT` |
 
 可选示例：
 
