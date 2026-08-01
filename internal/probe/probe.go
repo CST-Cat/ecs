@@ -53,6 +53,7 @@ func Registry() []Probe {
 		speedProbe{},
 		portsProbe{},
 		natProbe{},
+		blacklistProbe{},
 		mediaProbe{},
 		routeProbe{},
 		backtraceProbe{},
@@ -81,6 +82,8 @@ func MethodologyFor(id string) model.Methodology {
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "可达性诊断；不是性能基准"}
 	case "nat":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "STUN (RFC 5389/5780)", ComparisonScope: "当次 UDP 路径上的 NAT 行为；不代表 TCP"}
+	case "blacklist":
+		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNSBL over DNS A lookup", ComparisonScope: "各名单收录标准不同，不可合并计分"}
 	case "media":
 		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"}
 	case "route":
