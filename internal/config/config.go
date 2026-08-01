@@ -30,9 +30,34 @@ var ModuleOrder = []string{
 	"latency",
 	"speed",
 	"ports",
+	"nat",
 	"media",
 	"route",
 	"backtrace",
+}
+
+// stunServerPool 是 NAT 行为发现使用的公共 STUN 服务器。
+//
+// RFC 5780 的映射行为判定需要服务器提供**另一个 IP** 的备用地址，只换端口不够。
+// 下面三台是 2026-08-01 各探测三次、每次都返回不同 IP 备用地址的：
+//
+//	stun.miwifi.com  111.206.174.2  → 111.206.174.3:3479   北京
+//	stun.1und1.de    212.227.67.33  → 212.227.67.34:3479   德国
+//	stun.hoiio.com   52.76.91.67    → 52.74.211.13:3479    新加坡
+//
+// 同组的 stun.schlund.de 与 stun.gmx.net 因 DNS 轮询会落到 212.227.67.34，
+// 此时备用地址等于自身、测不了映射行为，故不收录。
+// stun.l.google.com 与 stun.cloudflare.com 可用但不提供备用地址，且会忽略
+// CHANGE-REQUEST 直接回包，只能做基础映射发现，排在后面兜底。
+// 清单照抄实测结果，不凭记忆填写；用 `go test -tags=live -run TestLiveSTUNServers` 复核。
+func stunServerPool() []Endpoint {
+	return []Endpoint{
+		{Name: "Xiaomi", Address: "stun.miwifi.com:3478", Kind: "双 IP"},
+		{Name: "1&1", Address: "stun.1und1.de:3478", Kind: "双 IP"},
+		{Name: "Hoiio", Address: "stun.hoiio.com:3478", Kind: "双 IP"},
+		{Name: "Google", Address: "stun.l.google.com:19302", Kind: "仅映射"},
+		{Name: "Cloudflare", Address: "stun.cloudflare.com:3478", Kind: "仅映射"},
+	}
 }
 
 type Endpoint struct {
@@ -115,6 +140,7 @@ type Runtime struct {
 	LatencyTargets   []Endpoint
 	RouteTargets     []Endpoint
 	BacktraceTargets []Endpoint
+	STUNServers      []Endpoint
 }
 
 type Estimate struct {
@@ -147,6 +173,7 @@ type File struct {
 	LatencyTargets   []Endpoint      `json:"latency_targets,omitempty"`
 	RouteTargets     []Endpoint      `json:"route_targets,omitempty"`
 	BacktraceTargets []Endpoint      `json:"backtrace_targets,omitempty"`
+	STUNServers      []Endpoint      `json:"stun_servers,omitempty"`
 }
 
 func Defaults(profile string) (Runtime, error) {
@@ -161,6 +188,7 @@ func Defaults(profile string) (Runtime, error) {
 		DiskPath:         ".",
 		HTTPTimeout:      10 * time.Second,
 		IPerfTargets:     selectIPerfTargets(1),
+		STUNServers:      stunServerPool(),
 		DNSResolvers: []Endpoint{
 			{Name: "Cloudflare", Address: "1.1.1.1:53"},
 			{Name: "Google", Address: "8.8.8.8:53"},
@@ -202,7 +230,7 @@ func Defaults(profile string) (Runtime, error) {
 		base.SpeedThreads = 2
 		base.IPerfDuration = 3 * time.Second
 	case ProfileStandard:
-		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "media", "route", "backtrace"}
+		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "media", "route", "backtrace"}
 		base.CPUTime = 10 * time.Second
 		base.DiskMiB = 1024
 		base.DNSAttempts = 5
@@ -316,6 +344,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if len(file.BacktraceTargets) > 0 {
 		runtime.BacktraceTargets = append([]Endpoint(nil), file.BacktraceTargets...)
 	}
+	if len(file.STUNServers) > 0 {
+		runtime.STUNServers = append([]Endpoint(nil), file.STUNServers...)
+	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
 }
@@ -426,6 +457,15 @@ func Validate(runtime Runtime) error {
 		}
 		if !validRouteTarget(endpoint.Address) {
 			return fmt.Errorf("路由目标 %q 不是安全的 IP 或主机名", endpoint.Address)
+		}
+	}
+	for _, endpoint := range runtime.STUNServers {
+		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
+			return errors.New("STUN 服务器必须同时包含 name 和 address")
+		}
+		host, port, err := net.SplitHostPort(endpoint.Address)
+		if err != nil || !validRouteTarget(host) || port == "" {
+			return fmt.Errorf("STUN 服务器 %q 必须是 host:port 形式", endpoint.Address)
 		}
 	}
 	for _, endpoint := range runtime.BacktraceTargets {
@@ -547,6 +587,9 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += 10 * time.Second
 		case "route":
 			total += time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
+		case "nat":
+			// 多次 UDP 事务，无响应时按超时累计。
+			total += 12 * time.Second
 		case "backtrace":
 			// 参考目标并发追踪，耗时取决于最慢的一个而不是总和。
 			total += 30 * time.Second

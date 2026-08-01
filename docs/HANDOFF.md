@@ -198,6 +198,40 @@ go test -tags=live ./internal/probe/ -run TestLive -v
 
 ---
 
+## 三·五、新增：NAT 类型检测（对比同类项目后补齐的功能缺口）
+
+2026-08-01 逐个抓取 bench.sh / YABS / superbench / nench / spiritLHLS / oneclickvirt
+的源码做功能对照（表见 `docs/research.md` 末尾），唯一的实质缺口是 **NAT 类型检测**——
+只有 oneclickvirt 与 spiritLHLS 具备，两者都调用 `oneclickvirt/gostun`。
+
+已按 RFC 5389/5780 自行实现，零第三方依赖：
+
+- `internal/probe/stun.go`：STUN Binding 协议编解码，只实现行为发现所需部分，
+  不做 TURN/ICE/认证；事务 ID 与 magic cookie 都校验，UDP 上任何人都能发包。
+- `internal/probe/nat.go`：映射行为（RFC 5780 §4.3）与过滤行为（§4.4）检测，
+  折算成社区习惯的 NAT1–NAT4，证据不足时报"未判定"而不是凑一个等级。
+
+**关键实现差异**：多数公共 STUN 服务器禁用或**忽略** CHANGE-REQUEST。实测
+`stun.l.google.com` 与 `stun.cloudflare.com` 收到 CHANGE-REQUEST 后照常从原地址回包，
+只看"有没有回包"会把对称型 NAT 后的机器误报成全锥型 NAT1。因此判定过滤行为时
+必须核对响应的**源地址**，核不上就记为"服务器忽略了该属性"并报未知。
+这个缺陷是实网测试 `TestLiveSTUNServers` 抓到的，已加确定性测试
+`TestProbeNATRejectsIgnoredChangeRequest` 锁住。
+
+STUN 清单同样照抄实测结果（各探测三次确认稳定）：`stun.miwifi.com`、`stun.1und1.de`、
+`stun.hoiio.com` 提供稳定的双 IP 备用地址；`stun.schlund.de` 与 `stun.gmx.net` 因
+DNS 轮询会落到备用地址等于自身的那台，已剔除。
+
+同时给 `system` 补上几乎所有竞品都采集、ecs 却缺的两项：**CPU 缓存**与
+**VT-x/AMD-V**（决定能否跑嵌套虚拟化）。
+
+仍需真实 VPS 验证：本机在家用 NAT 后，测得对称型 NAT4 属预期结果，
+但**没有覆盖到公网直连（无 NAT）与各类锥形 NAT 的判定路径**——
+独立 IP 的 VPS 应当报"公网直连（无 NAT）"，NAT 小鸡应当报锥形或对称型，
+这两条路径目前只有单元测试覆盖。
+
+---
+
 ## 四、P2：未完成的功能
 
 - **社区中转按出口被拦**：`ipinfo.check.place` 从一个 DigitalOcean 出口访问全部 403，

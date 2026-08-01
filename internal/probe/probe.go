@@ -52,6 +52,7 @@ func Registry() []Probe {
 		latencyProbe{},
 		speedProbe{},
 		portsProbe{},
+		natProbe{},
 		mediaProbe{},
 		routeProbe{},
 		backtraceProbe{},
@@ -78,6 +79,8 @@ func MethodologyFor(id string) model.Methodology {
 		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "iperf3", Profile: "TCP multi-stream forward/reverse"}
 	case "ports":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "可达性诊断；不是性能基准"}
+	case "nat":
+		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "STUN (RFC 5389/5780)", ComparisonScope: "当次 UDP 路径上的 NAT 行为；不代表 TCP"}
 	case "media":
 		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"}
 	case "route":

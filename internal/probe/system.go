@@ -21,15 +21,18 @@ func (systemProbe) Title() string      { return "系统与资源" }
 func (systemProbe) NeedsNetwork() bool { return false }
 
 type systemSnapshot struct {
-	Hostname       string
-	OS             string
-	Kernel         string
-	Arch           string
-	CPUModel       string
-	LogicalCPUs    int
-	PhysicalCores  int
-	CPUFrequency   string
-	AES            string
+	Hostname      string
+	OS            string
+	Kernel        string
+	Arch          string
+	CPUModel      string
+	LogicalCPUs   int
+	PhysicalCores int
+	CPUFrequency  string
+	CPUCache      string
+	AES           string
+	// Nested 表示 CPU 是否暴露了硬件虚拟化指令（vmx/svm），决定能否跑嵌套虚拟化。
+	Nested         string
 	Virtualization string
 	MemoryTotal    uint64
 	MemoryFree     uint64
@@ -82,7 +85,9 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "cpu_allowance", Label: "CPU 配额", Value: describeCPUAllowance(snapshot.Allowance)},
 		{Key: "cpu_frequency", Label: "CPU 频率", Value: snapshot.CPUFrequency},
 		{Key: "cpu_steal", Label: "CPU steal（累计）", Value: describeSteal(snapshot)},
+		{Key: "cpu_cache", Label: "CPU 缓存", Value: snapshot.CPUCache},
 		{Key: "aes", Label: "AES 指令", Value: snapshot.AES},
+		{Key: "virtualization_ext", Label: "硬件虚拟化", Value: snapshot.Nested},
 		{Key: "memory", Label: "内存", Value: memoryValue},
 		{Key: "swap", Label: "Swap", Value: model.FormatBytes(snapshot.SwapTotal)},
 		{Key: "disk", Label: "测试盘", Value: fmt.Sprintf("%s 总计 / %s 可用 (%s)", model.FormatBytes(snapshot.DiskTotal), model.FormatBytes(snapshot.DiskFree), snapshot.DiskMount)},
@@ -163,7 +168,9 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 		PhysicalCores:  runtime.NumCPU(),
 		CPUModel:       "unknown",
 		CPUFrequency:   "unknown",
+		CPUCache:       "unknown",
 		AES:            "unknown",
+		Nested:         "unknown",
 		Virtualization: "unknown",
 		Uptime:         "unknown",
 		Load:           "unknown",
@@ -215,6 +222,10 @@ func collectLinuxSystem(s *systemSnapshot) {
 			if s.CPUFrequency == "unknown" {
 				s.CPUFrequency = value + " MHz"
 			}
+		case "cache size":
+			if s.CPUCache == "unknown" && value != "" {
+				s.CPUCache = value
+			}
 		case "physical id":
 			physicalID = value
 		case "core id":
@@ -225,6 +236,15 @@ func collectLinuxSystem(s *systemSnapshot) {
 				s.AES = "available"
 			} else if s.AES == "unknown" {
 				s.AES = "unavailable"
+			}
+			// Intel 是 vmx、AMD 是 svm；两者都没有说明宿主没有透传虚拟化扩展，
+			// 该机器上跑不了 KVM 嵌套虚拟化。
+			if strings.Contains(flags, " vmx ") {
+				s.Nested = "VT-x (vmx)"
+			} else if strings.Contains(flags, " svm ") {
+				s.Nested = "AMD-V (svm)"
+			} else if s.Nested == "unknown" {
+				s.Nested = "unavailable"
 			}
 		}
 	}

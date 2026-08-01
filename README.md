@@ -125,7 +125,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 
 | ID | 报告口径 | 默认实现 | 关键限制 |
 | --- | --- | --- | --- |
-| `system` | 事实采集 | OS/runtime inspection | 某些容器会隐藏 DMI/内核字段；不是基准 |
+| `system` | 事实采集 | OS/runtime inspection，含 CPU 缓存与 VT-x/AMD-V | 某些容器会隐藏 DMI/内核字段；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 顺序读写，1 MiB，单/多线程 | 微基准，不等同 STREAM |
@@ -134,6 +134,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
 | `ports` | 协议测量 | 原生 TCP 握手 | 单目标失败不能独立证明端口被封 |
+| `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
 | `backtrace` | 启发式判断 | 三网参考 IP 路径 + 骨干网段特征表 | 主动探测推断，非反向抓包；未命中特征返回未识别 |
@@ -224,6 +225,7 @@ ecs render --input report.json --format md,html --output ./exported
 - `media`：被检测服务自己的公开网页；
 - `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定；
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
+- `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
 - `latency`：除 TCP 建连外，还会调用系统 `ping` 对同一目标发 ICMP。
 
 `--offline` 会跳过所有声明需要网络的模块。项目不包含遥测、运行次数统计、Pastebin、报告站或隐藏的上传请求。

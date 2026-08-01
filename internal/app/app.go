@@ -216,6 +216,7 @@ func listCommand(stdout io.Writer) int {
 		"latency":   "TCP 建连延迟与可达率",
 		"speed":     "iperf3 多节点标准吞吐基准",
 		"ports":     "Web、SSH、DNS 与邮件出站端口",
+		"nat":       "STUN 探测 UDP 映射/过滤行为与 NAT 类型",
 		"media":     "流媒体与 AI 服务公开页证据",
 		"route":     "NextTrace/系统 traceroute 适配器",
 		"backtrace": "三网回程线路识别（电信/联通/移动骨干特征）",

@@ -247,3 +247,41 @@ func TestLiveIPerfNodeReachability(t *testing.T) {
 	}
 	t.Logf("可达 %d/%d", reachable, len(cfg.IPerfTargets))
 }
+
+// NAT 检测依赖公共 STUN 服务器，清单会失效，需要定期确认。
+func TestLiveSTUNServers(t *testing.T) {
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.STUNServers) == 0 {
+		t.Fatal("STUN 清单为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	usable, dualStack := 0, 0
+	for _, server := range cfg.STUNServers {
+		finding := probeNAT(ctx, server)
+		if finding.Err != nil {
+			t.Logf("%-12s %-28s 不可用：%v", server.Name, server.Address, compactError(finding.Err))
+			continue
+		}
+		usable++
+		if finding.DualStackServer {
+			dualStack++
+		}
+		t.Logf("%-12s %-28s 映射=%-22s 备用=%-22s 双IP=%v 映射行为=%s 过滤行为=%s",
+			server.Name, server.Address, finding.Mapped.String(),
+			fallback(finding.Other.String(), "—"), finding.DualStackServer,
+			finding.Mapping, finding.Filtering)
+	}
+	if usable == 0 {
+		t.Fatal("全部 STUN 服务器不可用，NAT 模块将完全失效")
+	}
+	// 至少要有一台带第二个 IP，否则映射行为永远测不出来，NAT 等级也就无从判定。
+	if dualStack == 0 {
+		t.Error("没有任何 STUN 服务器提供双 IP 备用地址，映射行为将无法判定；需要补充清单")
+	}
+	t.Logf("可用 %d/%d，其中带双 IP 备用地址 %d 个", usable, len(cfg.STUNServers), dualStack)
+}

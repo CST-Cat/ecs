@@ -61,6 +61,7 @@
 | UDP 丢包与抖动 | — | iperf3 UDP JSON | — | — | ✓ |
 | CPU steal 与容器资源真值 | ✓ | /proc/stat + cgroup v1/v2 | ✓ | ✓ | ✓ |
 | 常用及邮件端口出站能力 | ✓ | — | — | ✓ | ✓ |
+| NAT 类型与 UDP 映射/过滤行为 | ✓ | 自实现 STUN（RFC 5389/5780） | — | ✓ | ✓ |
 | 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | — | ✓ | ✓ |
 | 多目标正向路由 | 基础 traceroute | NextTrace JSON（可用） | — | ✓ | ✓ |
 | 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | — | ✓ | ✓ |
@@ -140,3 +141,40 @@
    现在先要求存在全球可路由的单播地址，再用一次 UDP dial 确认内核确实有到公网 IPv6 的
    路由（UDP dial 只做路由查找、不发包）。这一条正是设计约束第 8 条
    "不能用'有地址'代替'可联网'"被自己违反的实例。
+
+## 与同类项目的功能对比（2026-08-01 逐个抓源码核对）
+
+不凭印象比较，逐个下载源码后对照实际实现：
+
+| 能力 | bench.sh | YABS | superbench | nench | spiritLHLS | oneclickvirt | ecs |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| CPU 基准 | — | Geekbench | — | 自研 AES/bzip2 | 串联 | cputest | sysbench |
+| 内存基准 | — | — | — | — | 串联 | memorytest | sysbench |
+| 磁盘基准 | dd | fio | dd | ioping+dd | 串联 | disktest | fio |
+| 网络吞吐 | speedtest | iperf3 | speedtest | curl | 串联 | speedtest | iperf3 |
+| IP 质量 | — | 基础 | 基础 | — | 串联 | securityCheck | 11 源 |
+| 流媒体解锁 | — | — | — | — | 串联 | UnlockTests | 33 平台 |
+| 路由 / 三网回程 | — | — | — | — | 串联 | backtrace/nt3 | ✓ |
+| 出站端口 | — | — | — | — | 串联 | portchecker | ✓ |
+| **NAT 类型** | — | — | — | — | gostun | **gostun** | **自实现 STUN** |
+| DNS 质量 | — | — | — | — | — | — | **✓（同类中独有）** |
+| CPU 缓存 | ✓ | — | ✓ | — | ✓ | basics | ✓ |
+| VT-x / AMD-V | ✓ | ✓ | — | — | ✓ | basics | ✓ |
+| 结构化 JSON | — | ✓ | — | — | — | ✓ | ✓ |
+| 零广告 / 零上传 | ✓ | 可选上传 | ✗ | ✓ | ✗ | — | ✓ |
+
+补齐的差距：
+
+- **NAT 类型**是唯一的实质功能缺口，只有 oneclickvirt 与 spiritLHLS（均调用 gostun）具备。
+  已按 RFC 5389/5780 自行实现，无第三方依赖。与 gostun 一类实现的区别在于对
+  "测不出来"的处理：多数公共 STUN 服务器禁用或**忽略** CHANGE-REQUEST，
+  实测 `stun.l.google.com` 与 `stun.cloudflare.com` 会照常从原地址回包——
+  只看"有没有回包"就会把对称型 NAT 后的机器误报成全锥型 NAT1。
+  因此判定过滤行为时必须核对响应的源地址，核不上就报"未知"。
+- **CPU 缓存**与 **VT-x/AMD-V**（决定能否跑嵌套虚拟化）几乎所有竞品都采集，已补入 `system`。
+
+有意不做的：
+
+- **Geekbench**：闭源，免费版强制上传结果，且不同大版本之间不可直接比较，与零上传约束冲突。
+- **自研 AES/bzip2 压缩跑分**（nench 的做法）：违反"性能成绩只能来自标准工具"的约束。
+- **串联他人脚本**（spiritLHLS 的做法）：运行时下载多个脚本与二进制，版本、摘要与真实执行内容都不透明。
