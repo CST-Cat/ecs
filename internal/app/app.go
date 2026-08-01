@@ -115,6 +115,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	iperfTargetsFlag := flags.String("iperf-targets", "", i18n.T("flag.iperfTargets"))
 	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), i18n.T("flag.mediaRegion"))
 	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
+	interactiveFlag := flags.Bool("interactive", false, i18n.T("flag.interactive"))
+	yesFlag := flags.Bool("yes", false, i18n.T("flag.yes"))
 	strictFlag := flags.Bool("strict", false, i18n.T("flag.strict"))
 	versionFlag := flags.Bool("version", false, i18n.T("flag.version"))
 	flags.Usage = func() { printRunHelp(stderr, flags) }
@@ -194,6 +196,14 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 	}
 	cfg.Modules = config.SelectModules(cfg.Modules, config.ParseList(*onlyFlag), config.ParseList(*skipFlag))
+	// 交互向导：显式 --interactive 才启动，--yes 永远跳过。
+	// run.sh 在检测到可用终端且用户没传测试参数时会自动加上 --interactive，
+	// 因此 `curl … | sh` 会进向导，而带参数的调用直接开跑。
+	if *interactiveFlag && !*yesFlag {
+		if !runWizard(&cfg, stdout) {
+			return 0
+		}
+	}
 	if err := config.Validate(cfg); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1

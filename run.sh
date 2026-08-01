@@ -3,7 +3,11 @@
 #
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
+#       └ 有终端时进交互向导；没有终端（cron/CI）则按 standard 档直接开跑
+#   curl -fsSL .../run.sh | sh -s -- --yes
+#       └ 跳过向导，直接按默认配置测
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
+#       └ 带了参数就不再打扰，直接按参数跑
 #   wget -qO- .../run.sh | sh -s -- --only cpu,memory,disk
 #
 # 这个脚本只做三件事：拿到二进制、校验、执行。它刻意保持简短，方便你在
@@ -107,5 +111,27 @@ tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
 [ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
 
-# 全部参数原样透传，因此 run.sh 支持 ecs 的每一个选项。
+# 决定要不要进交互向导。
+#
+# 规则：用户没给任何测试参数、且确实有终端可用时才进向导。带了参数说明用户
+# 已经想好要跑什么，这时再弹菜单只会碍事；没有终端（cron、CI、容器）则必须
+# 直接开跑，否则任务会卡在等输入上。
+#
+# 注意判断的是 /dev/tty 而不是 stdin：`curl … | sh` 的 stdin 是那条管道，
+# 脚本正从里面读，它永远不是终端，据此判断会导致所有管道安装都进不了向导。
+INTERACTIVE=""
+if [ "$#" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  INTERACTIVE="--interactive"
+fi
+# 只传了语言选项时仍然算"没想好要跑什么"，照样进向导。
+if [ "$#" -le 2 ] && [ -z "$INTERACTIVE" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  case "$1" in
+    --lang|--lang=*|-lang|-lang=*) INTERACTIVE="--interactive" ;;
+  esac
+fi
+
+# 其余参数原样透传，因此 run.sh 支持 ecs 的每一个选项。
+if [ -n "$INTERACTIVE" ]; then
+  exec "${WORK}/ecs" "$@" "$INTERACTIVE"
+fi
 exec "${WORK}/ecs" "$@"

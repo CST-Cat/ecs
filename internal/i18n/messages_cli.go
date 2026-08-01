@@ -6,6 +6,25 @@ package i18n
 // 一半英文一半中文的帮助。测试强制两张表 key 一一对应。
 
 var cliChinese = map[string]string{
+	"flag.interactive":     "启动交互向导（无终端时自动跳过）",
+	"flag.yes":             "跳过交互向导，直接按当前参数运行",
+	"wizard.aborted":       "已取消。",
+	"wizard.askIPQuality":  "检测 IP 质量与黑名单？会把出口 IP 发给 13 个数据源",
+	"wizard.askMedia":      "检测流媒体解锁？会访问 33 个平台的公开页",
+	"wizard.askReveal":     "在报告中保留完整 IP 与主机名？",
+	"wizard.askRouting":    "检测路由与三网回程？耗时较长",
+	"wizard.askStart":      "开始测试？",
+	"wizard.askThroughput": "测试网络吞吐？iperf3 会跑满带宽，流量不封顶",
+	"wizard.invalidChoice": "输入无效，请输入选项编号",
+	"wizard.invalidYesNo":  "请输入 y 或 n",
+	"wizard.noModules":     "没有选中任何模块，已取消。",
+	"wizard.profileTitle":  "选择配置档",
+	"wizard.revealWarning": "报告将包含完整 IP 与主机名，分享前请自行确认",
+	"wizard.selectPrompt":  "请选择",
+	"wizard.subtitle":      "直接回车即用推荐值；全程零上传，报告只写本地",
+	"wizard.summaryTitle":  "即将运行",
+	"wizard.title":         "ecs — VPS 综合测试",
+
 	"doctor.allReady":           "标准性能工具已就绪。",
 	"doctor.header":             "ecs 标准基准依赖",
 	"doctor.installHint":        "安装：./install.sh --with-benchmarks",
@@ -87,6 +106,25 @@ var cliChinese = map[string]string{
 }
 
 var cliEnglish = map[string]string{
+	"flag.interactive":     "start the interactive wizard (skipped automatically without a terminal)",
+	"flag.yes":             "skip the wizard and run with the current options",
+	"wizard.aborted":       "Aborted.",
+	"wizard.askIPQuality":  "Check IP quality and blocklists? Your egress IP will be sent to 13 sources",
+	"wizard.askMedia":      "Check streaming availability? Visits the public pages of 33 platforms",
+	"wizard.askReveal":     "Keep full IPs and hostnames in the report?",
+	"wizard.askRouting":    "Check routing and China return paths? This takes a while",
+	"wizard.askStart":      "Start the tests?",
+	"wizard.askThroughput": "Run throughput tests? iperf3 saturates the link, traffic is uncapped",
+	"wizard.invalidChoice": "Invalid input, enter the option number",
+	"wizard.invalidYesNo":  "Please answer y or n",
+	"wizard.noModules":     "No modules selected, aborted.",
+	"wizard.profileTitle":  "Choose a profile",
+	"wizard.revealWarning": "The report will contain full IPs and hostnames — review before sharing",
+	"wizard.selectPrompt":  "Select",
+	"wizard.subtitle":      "Press Enter to accept the recommended value; nothing is ever uploaded",
+	"wizard.summaryTitle":  "About to run",
+	"wizard.title":         "ecs — VPS benchmark suite",
+
 	"doctor.allReady":           "Standard performance tools are ready.",
 	"doctor.header":             "ecs standard benchmark dependencies",
 	"doctor.installHint":        "Install: ./install.sh --with-benchmarks",

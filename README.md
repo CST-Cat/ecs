@@ -34,9 +34,40 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 **一键运行**（发布 Release 后可用，全部参数原样透传）：
 
 ```bash
+# 有终端时进交互向导：选档位、按需关掉有代价的检测项
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
+
+# 跳过向导，直接按默认（standard 全模块）开跑
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --yes
+
+# 带了参数就不再打扰，直接按参数跑
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
 ```
+
+向导只问真正有代价的四件事，其余用推荐值，直接回车即可：
+
+```
+选择配置档
+  1) quick     低资源快速筛查，不执行大流量测速和路由
+→ 2) standard  默认综合测试
+  3) full      更长性能测试、更大流量并包含路由
+请选择 [2]
+
+检测 IP 质量与黑名单？会把出口 IP 发给 13 个数据源 [Y/n]
+测试网络吞吐？iperf3 会跑满带宽，流量不封顶 [Y/n]
+检测流媒体解锁？会访问 33 个平台的公开页 [Y/n]
+检测路由与三网回程？耗时较长 [Y/n]
+在报告中保留完整 IP 与主机名？ [y/N]
+
+即将运行
+  配置档 standard
+  模块 12 — system, network, cpu, memory, disk, dns, latency, ports, nat, blacklist, apps, media
+  预计 约 2–5 分钟
+开始测试？ [Y/n]
+```
+
+CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私或流量代价，关掉只会让报告残缺。
+没有终端时（cron、CI、容器）向导自动跳过，按默认配置直接跑，不会卡在等输入。
 
 `run.sh` 只做三件事：下载、校验 SHA-256、执行。它不改包管理器、不写系统目录、不调用
 `sudo`、不留后台进程，二进制放临时目录跑完即删。`curl | sh` 把信任完全交给下载源，
