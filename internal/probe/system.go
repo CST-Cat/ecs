@@ -145,6 +145,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 			snapshot.StealPercent,
 		))
 	}
+	appendKernelNetworkParams(&result)
 	result.Summary = fmt.Sprintf("%d vCPU · %s 内存 · %s 可用盘 · %s", snapshot.LogicalCPUs, model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.DiskFree), snapshot.Virtualization)
 	result.Finish(start)
 	return result

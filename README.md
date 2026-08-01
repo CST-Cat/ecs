@@ -125,7 +125,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 
 | ID | 报告口径 | 默认实现 | 关键限制 |
 | --- | --- | --- | --- |
-| `system` | 事实采集 | OS/runtime inspection，含 CPU 缓存与 VT-x/AMD-V | 某些容器会隐藏 DMI/内核字段；不是基准 |
+| `system` | 事实采集 | OS/runtime inspection，含 CPU 缓存、VT-x/AMD-V 与 16 项内核网络参数 | 某些容器会隐藏 DMI/内核字段；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 顺序读写 + mbw memcpy 带宽 | 两者口径不同并列保留；sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运 |
@@ -134,7 +134,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
 | `ports` | 协议测量 | 原生 TCP 握手 | 单目标失败不能独立证明端口被封 |
-| `blacklist` | 协议测量 | 17 个实测可用的 DNSBL 查询 | 各名单收录标准差异大，不可合并计分；127.255.255.x 是查询被拒而非命中 |
+| `blacklist` | 协议测量 | 17 个 DNSBL 查询 + 反向解析 FCrDNS 校验 | 各名单收录标准差异大，不可合并计分；127.255.255.x 是查询被拒而非命中 |
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（仅 full 档） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
@@ -142,7 +142,11 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
 | `backtrace` | 启发式判断 | 三网参考 IP 路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；未命中特征返回未识别 |
 
-探针串行运行，避免 CPU、内存、磁盘和网络压力互相污染。DNS、端口等同类目标在模块内部并发。
+模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed）、
+路由类（route/backtrace）各自独占运行，避免互相污染——traceroute 尤其敏感，实测并发
+会让关键跳全部无响应。轻量探测（dns/latency/ports/nat/blacklist/apps/media/network）
+并行执行，它们等的是网络往返，并行只是把等待时间叠起来。
+本机实测这组模块串行需 37.7 秒、并行 12.1 秒，省 67%。
 
 任意配置档缺少标准工具时，对应模块显示黄色“标准基准未运行”警告，不产生替代成绩。所有终端、JSON、Markdown、HTML 都保留 `methodology.kind`、引擎、工作负载和可比范围。
 

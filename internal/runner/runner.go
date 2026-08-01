@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"ecs/internal/buildinfo"
@@ -65,40 +66,79 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		UserAgent:  fmt.Sprintf("ecs/%s", buildinfo.Version),
 	}
 
+	ids := make([]string, len(selected))
 	for index, item := range selected {
+		ids[index] = item.ID()
+	}
+	results := make([]model.Result, len(selected))
+	completed := 0
+
+	// 结果按模块原顺序写入固定槽位，因此并行不会打乱报告顺序。
+	for _, group := range planSchedule(ids) {
 		if ctx.Err() != nil {
 			report.Run.Canceled = true
 			break
 		}
-		if progress != nil {
-			progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title()})
-		}
-		var result model.Result
-		if cfg.Offline && item.NeedsNetwork() {
-			start := time.Now()
-			result = model.NewResult(item.ID(), item.Title())
-			result.Skip("离线模式")
-			result.Finish(start)
+		if group.Parallel {
+			var wg sync.WaitGroup
+			for _, index := range group.Indices {
+				wg.Add(1)
+				go func(index int) {
+					defer wg.Done()
+					results[index] = runOne(ctx, selected[index], cfg, env)
+				}(index)
+			}
+			// 并行组内进度先统一报开始，避免多个模块的输出交错。
+			if progress != nil {
+				for _, index := range group.Indices {
+					item := selected[index]
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title()})
+				}
+			}
+			wg.Wait()
 		} else {
-			result = safeRun(ctx, item, env)
+			index := group.Indices[0]
+			item := selected[index]
+			if progress != nil {
+				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title()})
+			}
+			results[index] = runOne(ctx, item, cfg, env)
 		}
-		if result.Methodology.Label == "" {
-			result.Methodology = probe.MethodologyFor(item.ID())
-		}
-		report.Results = append(report.Results, result)
-		if progress != nil {
-			progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title(), Result: result})
+		for _, index := range group.Indices {
+			item := selected[index]
+			completed++
+			if progress != nil {
+				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title(), Result: results[index]})
+			}
 		}
 		if ctx.Err() != nil {
 			report.Run.Canceled = true
 			break
 		}
 	}
+	report.Results = append(report.Results, results[:completed]...)
 
 	report.Run.CompletedAt = time.Now().UTC()
 	report.Run.DurationMS = report.Run.CompletedAt.Sub(report.Run.StartedAt).Milliseconds()
 	model.Summarize(&report)
 	return report
+}
+
+// runOne 执行单个探针，统一处理离线跳过与方法学补全。
+func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment) model.Result {
+	var result model.Result
+	if cfg.Offline && item.NeedsNetwork() {
+		start := time.Now()
+		result = model.NewResult(item.ID(), item.Title())
+		result.Skip("离线模式")
+		result.Finish(start)
+	} else {
+		result = safeRun(ctx, item, env)
+	}
+	if result.Methodology.Label == "" {
+		result.Methodology = probe.MethodologyFor(item.ID())
+	}
+	return result
 }
 
 func selectedProbes(ids []string) []probe.Probe {

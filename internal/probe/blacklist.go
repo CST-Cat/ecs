@@ -33,7 +33,7 @@ import (
 type blacklistProbe struct{}
 
 func (blacklistProbe) ID() string         { return "blacklist" }
-func (blacklistProbe) Title() string      { return "IP 黑名单" }
+func (blacklistProbe) Title() string      { return "IP 信誉与发信条件" }
 func (blacklistProbe) NeedsNetwork() bool { return true }
 
 // dnsblZone 是一个黑名单区域。
@@ -169,8 +169,8 @@ func asDNSError(err error, target **net.DNSError) bool {
 
 func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("blacklist", "IP 黑名单")
-	result.Description = "查询出口 IP 是否被主流 DNS 黑名单收录，判断发信与信誉风险"
+	result := model.NewResult("blacklist", "IP 信誉与发信条件")
+	result.Description = "DNS 黑名单收录情况与反向解析（FCrDNS）——判断发信能力的两大要素"
 	result.Methodology = model.Methodology{
 		Kind:            "protocol-measurement",
 		Label:           "协议测量",
@@ -281,6 +281,8 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	if failed > 0 {
 		result.Notes = append(result.Notes, fmt.Sprintf("%d 个名单查询失败（解析超时或服务不可用）。", failed))
 	}
+
+	appendReverseDNS(ctx, &result, data.IP)
 
 	switch {
 	case listed > 0:
