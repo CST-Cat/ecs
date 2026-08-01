@@ -308,7 +308,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Name: "YABS", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "50/50 混合随机读写矩阵的块大小与队列深度口径"},
 	}
 	result.Notes = append(result.Notes,
-		"fio 必须由用户预先安装；ecs 不会调用包管理器或下载二进制。",
+		"fio 可由用户预先安装，也可由 run.sh 从系统包管理器临时准备；ecs 不下载未经校验的裸二进制。",
 		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
 		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
 	)

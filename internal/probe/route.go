@@ -50,7 +50,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
 		result.Skip("未发现 nexttrace、traceroute 或 tracepath")
-		result.Notes = append(result.Notes, "ecs 不会静默下载外部二进制；安装 NextTrace 后重跑即可获得更完整的路由标注。")
+		result.Notes = append(result.Notes, "ecs 不会在探针内部静默下载外部二进制；run.sh 会优先临时准备系统 traceroute，安装 NextTrace 后重跑可获得更完整的路由标注。")
 		result.Finish(start)
 		return result
 	}
@@ -104,7 +104,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Notes = append(result.Notes,
 		"这是从 VPS 到目标的正向路径，不等同于用户所在地到 VPS 的去程或三网回程。",
-		"外部程序通过参数数组启动，不经过 shell；ecs 记录可安全读取的版本和程序 SHA-256，且不自动安装依赖。",
+		"外部程序通过参数数组启动，不经过 shell；ecs 记录可安全读取的版本和程序 SHA-256。一次性依赖由 run.sh 在探针外准备并在退出时清理。",
 	)
 	if engine.Name == "nexttrace" {
 		result.Notes = append(result.Notes, "NextTrace 使用 --json 并关闭地图 URL；不会调用会输出推广内容的版本界面。")

@@ -13,7 +13,7 @@ var probeEnglishBench = map[string]string{
 	"I/O 延迟抖动":    "I/O latency (mdev)",
 	"I/O 延迟最大":    "I/O latency (max)",
 	"fio SHA-256": "fio SHA-256",
-	"fio 必须由用户预先安装；ecs 不会调用包管理器或下载二进制。": "fio must be installed by the user; ecs never invokes a package manager or downloads binaries.",
+	"fio 可由用户预先安装，也可由 run.sh 从系统包管理器临时准备；ecs 不下载未经校验的裸二进制。": "fio may be pre-installed or prepared temporarily by run.sh from the system package manager; ecs does not download unchecked standalone binaries.",
 	"fio 版本":   "fio version",
 	"fio 顺序写入": "fio sequential write",
 	"fio 顺序读取": "fio sequential read",

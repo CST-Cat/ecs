@@ -18,6 +18,7 @@ var probeEnglishSystem = map[string]string{
 	"BBR 不在其中就说明内核没编译进来": "If BBR is absent, the kernel was built without it",
 	"BBR 状态":            "BBR status",
 	"BBR 通常需要配合 fq":     "BBR usually needs the fq qdisc",
+	"已启用 BBR":           "BBR enabled",
 	"CPU steal（累计）":     "CPU steal (cumulative)",
 	"CPU steal（自开机累计）":  "CPU steal (since boot)",
 	"CPU 性能":            "CPU Performance",

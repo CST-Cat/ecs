@@ -27,7 +27,7 @@ var cliChinese = map[string]string{
 
 	"doctor.allReady":           "标准性能工具已就绪。",
 	"doctor.header":             "ecs 标准基准依赖",
-	"doctor.installHint":        "安装：./install.sh --with-benchmarks",
+	"doctor.installHint":        "一次性运行可用 run.sh 自动准备；长期安装：./install.sh --with-benchmarks",
 	"doctor.missing":            "缺失",
 	"doctor.noSubstitute":       "缺失时任何配置档都会明确警告对应标准成绩未运行，不会生成替代分数。",
 	"doctor.optional":           "可选",
@@ -127,7 +127,7 @@ var cliEnglish = map[string]string{
 
 	"doctor.allReady":           "Standard performance tools are ready.",
 	"doctor.header":             "ecs standard benchmark dependencies",
-	"doctor.installHint":        "Install: ./install.sh --with-benchmarks",
+	"doctor.installHint":        "For one-shot runs use run.sh; persistent install: ./install.sh --with-benchmarks",
 	"doctor.missing":            "missing",
 	"doctor.noSubstitute":       "When a tool is missing, every profile clearly warns that the standard result did not run; no substitute score is produced.",
 	"doctor.optional":           "optional",

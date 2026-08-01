@@ -48,7 +48,7 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Status = model.StatusWarning
 	result.Summary = "未找到 sysbench，标准 CPU 基准未运行"
-	result.Notes = append(result.Notes, "运行 install.sh --with-benchmarks 或通过系统包管理器安装 sysbench。ecs 不提供自研替代分数。")
+	result.Notes = append(result.Notes, "可用 run.sh 自动临时准备 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。")
 	result.Finish(start)
 	return result
 }

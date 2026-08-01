@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -208,6 +209,15 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
+	// run.sh 的交互模式先让向导选档位和模块，再按计划准备组件。
+	// 计划文件只在临时工作目录中使用，不属于用户报告或持久配置。
+	if planPath := os.Getenv("ECS_PLAN_FILE"); planPath != "" {
+		if err := writeOneShotPlan(planPath, cfg); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+			return 1
+		}
+		return 0
+	}
 
 	terminal := ui.New(stdout, cfg.NoColor)
 	terminal.Header(cfg, config.EstimateFor(cfg))
@@ -226,6 +236,11 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 2
 	}
 	return 0
+}
+
+func writeOneShotPlan(path string, cfg config.Runtime) error {
+	content := cfg.Profile + "\n" + strings.Join(cfg.Modules, ",") + "\n"
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 func renderCommand(args []string, stdout, stderr io.Writer) int {

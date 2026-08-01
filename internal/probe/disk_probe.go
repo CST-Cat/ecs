@@ -30,7 +30,7 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		result.Status = model.StatusWarning
 		result.Summary = "未找到 fio，标准磁盘基准未运行"
-		result.Notes = append(result.Notes, "运行 install.sh --with-benchmarks 或通过系统包管理器安装 fio。ecs 不提供缓存 I/O 或自研替代分数。")
+		result.Notes = append(result.Notes, "可用 run.sh 自动临时准备 fio，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供缓存 I/O 或自研替代分数。")
 	}
 
 	// 多挂载盘默认关闭：多跑一块盘就多一份写入与时间，应由用户显式要求。
