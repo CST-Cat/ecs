@@ -44,6 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 想长期安装用 `install.sh`。
 
 **界面语言**：全部命令支持 `--lang zh|en`，未指定时按 `ECS_LANG`/`LC_ALL`/`LANG` 推断。
+终端、Markdown 与 HTML 全量翻译（877 条译文，含带数值的句子）；**JSON 始终保留探针产出的
+原文**，这样下游程序解析到的字段不会随界面语言变化。外部工具的原始输出（sysbench/fio 的
+stdout、traceroute 路径）不翻译——那是证据，翻译等于篡改。
 
 从源码构建需要 Go 1.22 或更高版本：
 

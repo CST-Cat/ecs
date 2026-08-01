@@ -207,7 +207,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
 	}
-	terminal.Summary(data, files)
+	terminal.Summary(reporter.Localize(data), files)
 	if data.Run.Canceled {
 		return 130
 	}

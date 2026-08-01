@@ -234,12 +234,18 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	if len(intercepted) > 0 {
 		result.Status = model.StatusWarning
+		// 目标名单单独成字段而不是嵌进说明句：嵌进去会让整句随目标变化，
+		// 既无法翻译也无法在不同机器之间对照。
+		result.Fields = append(result.Fields, model.Field{
+			Key: "tcp_intercepted_targets", Label: "疑似被代答的目标",
+			Value: strings.Join(intercepted, "、"),
+		})
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"%s 的 TCP 建连延迟不到同目标 ICMP 往返的 1/%d：握手几乎不可能真的到达目标，"+
+			"%d 个目标的 TCP 建连延迟不到同目标 ICMP 往返的 1/%d：握手几乎不可能真的到达目标，"+
 				"通常是本机或网关上的透明代理、TPROXY 重定向或加速器代答了 TCP。"+
 				"此时 TCP 列反映的是到代理的距离，不能当作本机到目标的链路延迟；"+
 				"ICMP 列不经代理，更接近真实往返。",
-			strings.Join(intercepted, "、"), tcpInterceptRatio,
+			len(intercepted), tcpInterceptRatio,
 		))
 	}
 	result.Finish(start)

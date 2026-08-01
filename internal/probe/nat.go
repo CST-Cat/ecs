@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -379,5 +380,5 @@ func describeNATServers(servers []config.Endpoint) string {
 	for _, server := range servers {
 		names = append(names, server.Address)
 	}
-	return strings.Join(names, "、")
+	return strings.Join(names, i18n.T("punct.listSep"))
 }

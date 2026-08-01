@@ -123,6 +123,8 @@ var chinese = map[string]string{
 	// ── 标点 ────────────────────────────────────────────────
 	// 中英文的句读习惯不同，硬编码"。"会在英文报告里冒出全角句号。
 	"punct.sentenceEnd": "。",
+	"punct.colon":       "：",
+	"punct.listSep":     "、",
 
 	// ── 汇总 ────────────────────────────────────────────────
 	"summary.withErrors":   "%d 项成功，%d 项异常",
@@ -261,6 +263,8 @@ var english = map[string]string{
 
 	// ── Punctuation ─────────────────────────────────────────
 	"punct.sentenceEnd": ". ",
+	"punct.colon":       ": ",
+	"punct.listSep":     ", ",
 
 	// ── Summary ─────────────────────────────────────────────
 	"summary.withErrors":   "%d passed, %d failed",

@@ -62,7 +62,7 @@ func Markdown(data model.Report) string {
 			out.WriteString("\n\n")
 		}
 		if result.Methodology.Label != "" {
-			out.WriteString("**" + i18n.T("report.methodologyLabel") + "**：")
+			out.WriteString("**" + i18n.T("report.methodologyLabel") + "**" + i18n.T("punct.colon"))
 			out.WriteString(markdownEscape(result.Methodology.Label))
 			if result.Methodology.Engine != "" {
 				out.WriteString(" · ")
@@ -75,7 +75,7 @@ func Markdown(data model.Report) string {
 			}
 			out.WriteString("\n\n")
 			if result.Methodology.ComparisonScope != "" {
-				out.WriteString("> " + i18n.T("report.comparability") + "：")
+				out.WriteString("> " + i18n.T("report.comparability") + i18n.T("punct.colon"))
 				out.WriteString(markdownEscape(result.Methodology.ComparisonScope))
 				out.WriteString("\n\n")
 			}
@@ -91,7 +91,7 @@ func Markdown(data model.Report) string {
 		out.WriteString(formatDurationMS(result.DurationMS))
 		out.WriteString("\n\n")
 		if result.Error != "" {
-			out.WriteString("> " + i18n.T("report.errorPrefix") + "：")
+			out.WriteString("> " + i18n.T("report.errorPrefix") + i18n.T("punct.colon"))
 			out.WriteString(markdownEscape(result.Error))
 			out.WriteString("\n\n")
 		}
@@ -162,7 +162,7 @@ func Markdown(data model.Report) string {
 					out.WriteString(markdownEscape(source.Name))
 				}
 				if source.Purpose != "" {
-					out.WriteString("：")
+					out.WriteString(i18n.T("punct.colon"))
 					out.WriteString(markdownEscape(source.Purpose))
 				}
 				out.WriteString("\n")

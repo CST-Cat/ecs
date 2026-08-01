@@ -107,7 +107,12 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			if lookup.Err != nil {
 				reason = lookup.Err.Error()
 			}
-			result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 查询失败：%s", lookup.Version, reason))
+			// 错误原文（Go 的网络错误）拼进句子会让整句无法翻译也无法对照，
+			// 因此说明句保持固定，具体原因单独成字段。
+			result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 出口查询失败，详见下方失败原因。", lookup.Version))
+			result.Fields = append(result.Fields, model.Field{
+				Key: "ipv" + lookup.Version + "_lookup_error", Label: "IPv" + lookup.Version + " 失败原因", Value: reason,
+			})
 		}
 	}
 	if len(found) == 0 {

@@ -35,6 +35,14 @@ jobs:
           sudo apt-get install -y -qq fio sysbench iperf3 traceroute
           fio --version && sysbench --version && iperf3 --version | head -1
       - run: go test ./...
+      # 翻译覆盖率：跑一遍真实模块产出报告，再检查英文渲染后是否还有中文。
+      # 用真实产出而不是源码字面量——源码里大量分支从不触发。
+      - name: i18n coverage
+        run: |
+          mkdir -p /tmp/i18n-samples
+          go run ./cmd/ecs --profile quick --offline --only system,cpu,memory,disk \
+            --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-samples --no-color
+          ECS_I18N_SAMPLES=/tmp/i18n-samples go test ./internal/report/ -run TestLocalizeCovers -v
       - run: go vet ./...
       - run: go build ./cmd/ecs
       - run: sh -n install.sh
