@@ -144,6 +144,7 @@ type Runtime struct {
 	RouteTargets     []Endpoint
 	BacktraceTargets []Endpoint
 	STUNServers      []Endpoint
+	MediaRegions     []string
 }
 
 type Estimate struct {
@@ -178,6 +179,91 @@ type File struct {
 	RouteTargets     []Endpoint      `json:"route_targets,omitempty"`
 	BacktraceTargets []Endpoint      `json:"backtrace_targets,omitempty"`
 	STUNServers      []Endpoint      `json:"stun_servers,omitempty"`
+	MediaRegions     []string        `json:"media_regions,omitempty"`
+}
+
+// backtraceCityTargets 是各城市的三网回程参考目标。
+//
+// 北京与广州两组沿用 zhanghanyun/backtrace 的选点；上海与成都两组是本项目补充，
+// 地址于 2026-08-01 实测 ICMP 可达后才写入（上海电信最初候选 180.153.28.5
+// 完全不响应，已换成实测 0% 丢包的 202.96.209.133）。
+//
+// 需要说明：北京电信、广州电信、广州联通这三个上游选点实测不响应 ICMP echo。
+// 这不影响回程识别——traceroute 依赖沿途路由器的 TTL 超时应答，不需要终点响应，
+// 骨干特征恰恰出现在中间跳上。
+var backtraceCityTargets = map[string][]Endpoint{
+	"beijing": {
+		{Name: "北京电信", Address: "219.141.136.12", Kind: "电信"},
+		{Name: "北京联通", Address: "202.106.50.1", Kind: "联通"},
+		{Name: "北京移动", Address: "221.179.155.161", Kind: "移动"},
+	},
+	"guangzhou": {
+		{Name: "广州电信", Address: "58.60.188.222", Kind: "电信"},
+		{Name: "广州联通", Address: "210.21.196.6", Kind: "联通"},
+		{Name: "广州移动", Address: "120.196.165.24", Kind: "移动"},
+	},
+	"shanghai": {
+		{Name: "上海电信", Address: "202.96.209.133", Kind: "电信"},
+		{Name: "上海联通", Address: "210.22.97.1", Kind: "联通"},
+		{Name: "上海移动", Address: "211.136.112.200", Kind: "移动"},
+	},
+	"chengdu": {
+		{Name: "成都电信", Address: "61.139.2.69", Kind: "电信"},
+		{Name: "成都联通", Address: "119.6.6.6", Kind: "联通"},
+		{Name: "成都移动", Address: "211.137.96.205", Kind: "移动"},
+	},
+}
+
+// BacktraceCityOrder 固定城市的展示与选择顺序。
+var BacktraceCityOrder = []string{"beijing", "guangzhou", "shanghai", "chengdu"}
+
+// defaultBacktraceCities 是默认测试的城市。
+//
+// 南北各一组即可反映不同的骨干接入；四个城市全测会让回程模块耗时翻倍，
+// 需要时用 --backtrace-city 显式扩展。
+var defaultBacktraceCities = []string{"beijing", "guangzhou"}
+
+// BacktraceTargetsFor 按城市列表汇总回程目标。
+func BacktraceTargetsFor(cities []string) []Endpoint {
+	var targets []Endpoint
+	for _, city := range BacktraceCityOrder {
+		if !contains(cities, city) {
+			continue
+		}
+		targets = append(targets, backtraceCityTargets[city]...)
+	}
+	return targets
+}
+
+// ValidateMediaRegions 校验流媒体地区选项。
+func ValidateMediaRegions(regions []string) error {
+	known := map[string]bool{"global": true, "jp": true, "tw": true, "hk": true, "cn": true}
+	for _, region := range regions {
+		if !known[region] {
+			return fmt.Errorf("未知流媒体地区 %q，可选 global、jp、tw、hk、cn", region)
+		}
+	}
+	return nil
+}
+
+// ParseBacktraceCities 解析城市选项，all 表示全部。
+func ParseBacktraceCities(raw string) ([]string, error) {
+	items := ParseList(raw)
+	if len(items) == 0 {
+		return defaultBacktraceCities, nil
+	}
+	if contains(items, "all") {
+		if len(items) > 1 {
+			return nil, errors.New("回程城市 all 不能与其他城市组合")
+		}
+		return append([]string(nil), BacktraceCityOrder...), nil
+	}
+	for _, item := range items {
+		if _, ok := backtraceCityTargets[item]; !ok {
+			return nil, fmt.Errorf("未知回程城市 %q，可选 beijing、guangzhou、shanghai、chengdu、all", item)
+		}
+	}
+	return items, nil
 }
 
 func Defaults(profile string) (Runtime, error) {
@@ -212,16 +298,7 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "Google", Address: "8.8.8.8", Kind: "Global"},
 			{Name: "AliDNS", Address: "223.5.5.5", Kind: "中国大陆"},
 		},
-		// 三网回程参考目标：北京与广州各取三大运营商一个公开地址，
-		// 南北各一组能反映不同的骨干接入。Kind 存放运营商名，供报告分组。
-		BacktraceTargets: []Endpoint{
-			{Name: "北京电信", Address: "219.141.136.12", Kind: "电信"},
-			{Name: "北京联通", Address: "202.106.50.1", Kind: "联通"},
-			{Name: "北京移动", Address: "221.179.155.161", Kind: "移动"},
-			{Name: "广州电信", Address: "58.60.188.222", Kind: "电信"},
-			{Name: "广州联通", Address: "210.21.196.6", Kind: "联通"},
-			{Name: "广州移动", Address: "120.196.165.24", Kind: "移动"},
-		},
+		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCities),
 	}
 
 	switch profile {
@@ -353,6 +430,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	if len(file.STUNServers) > 0 {
 		runtime.STUNServers = append([]Endpoint(nil), file.STUNServers...)
+	}
+	if len(file.MediaRegions) > 0 {
+		runtime.MediaRegions = normalizeList(file.MediaRegions)
 	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil

@@ -100,6 +100,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, "iperf3 每个节点、每个方向的测试时长")
 	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, "测速并发流")
 	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, "单次 HTTP 请求超时")
+	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), "流媒体检测地区：global、jp、tw、hk、cn（逗号分隔，默认全部）")
+	backtraceCityFlag := flags.String("backtrace-city", "", "三网回程测试城市：beijing、guangzhou、shanghai、chengdu 或 all（默认 beijing,guangzhou）")
 	strictFlag := flags.Bool("strict", false, "探针警告或错误时返回非零退出码")
 	versionFlag := flags.Bool("version", false, "显示版本")
 	flags.Usage = func() { printRunHelp(stderr, flags) }
@@ -132,6 +134,21 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.IPerfDuration = *iperfDurationFlag
 	cfg.SpeedThreads = *threadsFlag
 	cfg.HTTPTimeout = *timeoutFlag
+	if regions := config.ParseList(*mediaRegionFlag); len(regions) > 0 {
+		if err := config.ValidateMediaRegions(regions); err != nil {
+			fmt.Fprintln(stderr, "错误:", err)
+			return 1
+		}
+		cfg.MediaRegions = regions
+	}
+	if *backtraceCityFlag != "" {
+		cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
+		if err != nil {
+			fmt.Fprintln(stderr, "错误:", err)
+			return 1
+		}
+		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
+	}
 	cfg.Modules = config.SelectModules(cfg.Modules, config.ParseList(*onlyFlag), config.ParseList(*skipFlag))
 	if err := config.Validate(cfg); err != nil {
 		fmt.Fprintln(stderr, "错误:", err)
@@ -221,7 +238,7 @@ func listCommand(stdout io.Writer) int {
 		"nat":       "STUN 探测 UDP 映射/过滤行为与 NAT 类型",
 		"blacklist": "出口 IP 在 17 个主流 DNS 黑名单的收录情况",
 		"apps":      "Telegram DC、代码/镜像/软件源/证书服务可达性",
-		"media":     "流媒体与 AI 服务公开页证据",
+		"media":     "流媒体与 AI 服务公开页证据（可按 --media-region 筛选）",
 		"route":     "NextTrace/系统 traceroute 适配器",
 		"backtrace": "三网回程线路识别（电信/联通/移动骨干特征）",
 	}

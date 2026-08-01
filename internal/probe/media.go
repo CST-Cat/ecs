@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,11 +34,11 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		Kind:            "heuristic",
 		Label:           "启发式判断",
 		Engine:          "public HTTP evidence + per-platform rules",
-		Profile:         "media rules " + mediaRulesVersion,
+		Profile:         "media rules " + mediaRulesVersion + describeMediaRegions(env.Config.MediaRegions),
 		ComparisonScope: "仅当次公开页证据；不等同于账号播放、注册或支付能力",
 	}
 
-	checks := mediaChecks()
+	checks := mediaChecksForRegions(env.Config.MediaRegions)
 	// 并发上限避免一次运行对同一批 CDN 制造请求突发。
 	const concurrency = 8
 	semaphore := make(chan struct{}, concurrency)
@@ -175,4 +176,12 @@ func strengthLabel(strength mediaEvidenceStrength) string {
 		return "强"
 	}
 	return "弱"
+}
+
+// describeMediaRegions 在方法学里注明本次跑了哪些地区，避免不同筛选的结果被混比。
+func describeMediaRegions(regions []string) string {
+	if len(regions) == 0 {
+		return " (all regions)"
+	}
+	return " (regions: " + strings.Join(regions, ",") + ")"
 }

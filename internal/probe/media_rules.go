@@ -130,6 +130,46 @@ func mediaChecks() []mediaCheck {
 	return checks
 }
 
+// MediaRegionOrder 固定地区选项的顺序。
+//
+// 对应 oneclickvirt 的 -utregion：只想知道日本解锁情况时，没必要把 33 条规则
+// 全跑一遍——那既慢又会给无关平台平白制造请求。
+var MediaRegionOrder = []string{"global", "jp", "tw", "hk", "cn"}
+
+// mediaRegionCategories 把地区选项映射到规则分类。
+//
+// global 是不分地区的通用平台（流媒体、AI、社交、音乐），其余按分类名对应。
+var mediaRegionCategories = map[string][]string{
+	"global": {"流媒体", "AI 服务", "社交", "音乐"},
+	"jp":     {"日本"},
+	"tw":     {"台湾"},
+	"hk":     {"香港"},
+	"cn":     {"中国大陆"},
+}
+
+// mediaChecksForRegions 按地区筛选规则，保持声明顺序。
+func mediaChecksForRegions(regions []string) []mediaCheck {
+	if len(regions) == 0 {
+		return mediaChecks()
+	}
+	allowed := make(map[string]bool)
+	for _, region := range regions {
+		for _, category := range mediaRegionCategories[region] {
+			allowed[category] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return mediaChecks()
+	}
+	var selected []mediaCheck
+	for _, check := range mediaChecks() {
+		if allowed[check.Category] {
+			selected = append(selected, check)
+		}
+	}
+	return selected
+}
+
 // netflixCheck 用两部非自制剧区分"完全解锁"与"仅自制剧"。
 //
 // Netflix 对未购买版权的地区会让非自制剧返回 404，但自制剧全球可看。只测首页

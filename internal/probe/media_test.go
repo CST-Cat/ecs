@@ -149,3 +149,40 @@ func TestMediaChecksAreWellFormed(t *testing.T) {
 		}
 	}
 }
+
+func TestMediaChecksForRegions(t *testing.T) {
+	all := mediaChecks()
+	// 空选择等于全部：不能因为没传参数就悄悄少测。
+	if len(mediaChecksForRegions(nil)) != len(all) {
+		t.Fatalf("空地区应返回全部 %d 条规则", len(all))
+	}
+	jp := mediaChecksForRegions([]string{"jp"})
+	if len(jp) == 0 || len(jp) >= len(all) {
+		t.Fatalf("日本地区筛选结果异常：%d/%d", len(jp), len(all))
+	}
+	for _, check := range jp {
+		if check.Category != "日本" {
+			t.Fatalf("jp 筛选混入了 %q 分类的 %q", check.Category, check.Name)
+		}
+	}
+	// 多地区取并集。
+	combined := mediaChecksForRegions([]string{"jp", "tw"})
+	if len(combined) <= len(jp) {
+		t.Fatalf("多地区应取并集：jp=%d, jp+tw=%d", len(jp), len(combined))
+	}
+	// 未知地区不应静默返回空——那会让报告看起来"全部通过"。
+	if got := mediaChecksForRegions([]string{"不存在的地区"}); len(got) != len(all) {
+		t.Fatalf("未知地区应回落到全部而非空集，实际 %d", len(got))
+	}
+	// 筛选后仍保持声明顺序。
+	globalChecks := mediaChecksForRegions([]string{"global"})
+	if len(globalChecks) == 0 || globalChecks[0].Name != "Netflix" {
+		t.Fatalf("筛选后顺序被打乱：%+v", globalChecks[:1])
+	}
+	// 每个地区选项都要有对应分类，否则选了等于没选。
+	for _, region := range MediaRegionOrder {
+		if len(mediaChecksForRegions([]string{region})) == 0 {
+			t.Errorf("地区 %q 没有对应任何规则", region)
+		}
+	}
+}
