@@ -55,9 +55,35 @@ func fillTemplate(template string, numbers []string) (string, bool) {
 	return builder.String(), true
 }
 
+// tokenPattern 匹配句子里的非中文片段：数值、单位、路径、虚拟化名等。
+//
+// 数值占位只能覆盖"16 线程"这类差异；实测中 CI 机器与开发机还会在单位（KiB 与
+// MiB）、挂载路径（/ 与 /tmp）、虚拟化类型（Hyper-V 与 none/unknown）上不同，
+// 这些都不是数字。因此再加一级更宽的片段占位。
+var tokenPattern = regexp.MustCompile(`[0-9A-Za-z][0-9A-Za-z./:_+-]*`)
+
+// hanPattern 用于确认模板里还剩下中文锚点。
+var hanPattern = regexp.MustCompile(`\p{Han}`)
+
+// tokenTemplateOf 把非中文片段换成占位符。
+//
+// 只有当模板里仍留有中文时才认为有效：全是占位符的模板会退化成通配符，
+// 把语义完全不同的句子匹配到一起。
+func tokenTemplateOf(text string) (string, []string, bool) {
+	tokens := tokenPattern.FindAllString(text, -1)
+	if len(tokens) == 0 {
+		return "", nil, false
+	}
+	template := tokenPattern.ReplaceAllString(text, numberPlaceholder)
+	if !hanPattern.MatchString(template) {
+		return "", nil, false
+	}
+	return template, tokens, true
+}
+
 // Text 翻译一句探针文案。
 //
-// 查找顺序：整句精确匹配 → 数值占位模板匹配 → 原样返回。
+// 查找顺序：整句精确匹配 → 数值占位模板 → 非中文片段占位模板 → 原样返回。
 // 任何一步都不会返回空串：缺译文只应表现为那一句没翻译。
 func Text(text string) string {
 	if text == "" || Current() == LangZH {
@@ -66,16 +92,19 @@ func Text(text string) string {
 	if translated, ok := probeEnglish[text]; ok && translated != "" {
 		return translated
 	}
-	template, numbers := templateOf(text)
-	if len(numbers) == 0 {
-		return text
+	if template, numbers := templateOf(text); len(numbers) > 0 {
+		if translated, ok := probeEnglish[template]; ok && translated != "" {
+			if filled, ok := fillTemplate(translated, numbers); ok {
+				return filled
+			}
+		}
 	}
-	translated, ok := probeEnglish[template]
-	if !ok || translated == "" {
-		return text
-	}
-	if filled, ok := fillTemplate(translated, numbers); ok {
-		return filled
+	if template, tokens, ok := tokenTemplateOf(text); ok {
+		if translated, found := probeEnglish[template]; found && translated != "" {
+			if filled, ok := fillTemplate(translated, tokens); ok {
+				return filled
+			}
+		}
 	}
 	return text
 }
@@ -100,12 +129,17 @@ func HasProbeText(text string) bool {
 	if _, ok := probeEnglish[text]; ok {
 		return true
 	}
-	template, numbers := templateOf(text)
-	if len(numbers) == 0 {
-		return false
+	if template, numbers := templateOf(text); len(numbers) > 0 {
+		if _, ok := probeEnglish[template]; ok {
+			return true
+		}
 	}
-	_, ok := probeEnglish[template]
-	return ok
+	if template, _, ok := tokenTemplateOf(text); ok {
+		if _, found := probeEnglish[template]; found {
+			return true
+		}
+	}
+	return false
 }
 
 // ProbeTextKeys 返回全部已登记的探针文案，供测试统计。

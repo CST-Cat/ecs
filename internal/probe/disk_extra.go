@@ -109,7 +109,10 @@ func appendIOPingLatency(ctx context.Context, result *model.Result, diskPath str
 		return
 	}
 	if runErr != nil {
-		result.Notes = append(result.Notes, "ioping 延迟测试失败："+tailText(text, 200))
+		result.Notes = append(result.Notes, "ioping 延迟测试失败，详见下方失败原因。")
+		result.Fields = append(result.Fields, model.Field{
+			Key: "ioping_error", Label: "ioping 失败原因", Value: tailText(text, 200),
+		})
 		return
 	}
 	sample, ok := parseIOPingOutput(text)
@@ -262,13 +265,16 @@ func appendSMARTHealth(ctx context.Context, result *model.Result, diskPath strin
 	}
 	info, ok := readSMART(ctx, device)
 	if !ok {
-		detail := "需要 root 权限，或该设备不提供 SMART"
-		if info.Message != "" {
-			detail = compactError(fmt.Errorf("%s", info.Message))
-		}
+		// 失败原因常含 smartctl 的英文原文，拼进句子会让整句无法翻译；
+		// 说明句保持固定，原因单独成字段。
 		result.Notes = append(result.Notes,
-			"未能读取磁盘 SMART 信息（"+detail+"）。VPS 的虚拟磁盘通常不透传 SMART，"+
-				"这不影响 fio 与 ioping 的成绩。")
+			"未能读取磁盘 SMART 信息：需要 root 权限，或该设备不提供 SMART。"+
+				"VPS 的虚拟磁盘通常不透传 SMART，这不影响 fio 与 ioping 的成绩。")
+		if info.Message != "" {
+			result.Fields = append(result.Fields, model.Field{
+				Key: "smart_error", Label: "SMART 失败原因", Value: compactError(fmt.Errorf("%s", info.Message)),
+			})
+		}
 		return
 	}
 

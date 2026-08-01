@@ -72,7 +72,9 @@ func collectUntranslated(data model.Report, missing map[string]bool) {
 		check(result.Title)
 		check(result.Description)
 		check(result.Summary)
-		check(result.Error)
+		// 刻意不检查 Error：它承载外部工具与系统调用的原文（fio 的报错、
+		// 系统的 permission denied），翻译它等于篡改诊断信息，
+		// 与 TextBlock 正文同理。
 		check(result.Methodology.Label)
 		check(result.Methodology.Profile)
 		check(result.Methodology.ComparisonScope)
