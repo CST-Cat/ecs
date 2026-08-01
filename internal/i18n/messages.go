@@ -28,9 +28,9 @@ var chinese = map[string]string{
 	"cli.error":          "错误",
 
 	// ── 配置档 ──────────────────────────────────────────────
-	"profile.quick":    "低资源快速筛查，不执行大流量测速和路由",
-	"profile.standard": "默认综合测试",
-	"profile.full":     "更长性能测试、更大流量并包含路由",
+	"profile.quick":    "只测本机硬件与基础网络，不跑吞吐、路由与解锁（约 1–3 分钟）",
+	"profile.standard": "全面检测，覆盖 15 个模块（推荐，约 3–10 分钟）",
+	"profile.full":     "在 standard 之上加三网测速、UDP 质量与更多测速节点（约 6–18 分钟，流量明显更高）",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
@@ -169,9 +169,9 @@ var english = map[string]string{
 	"cli.error":          "error",
 
 	// ── Profiles ────────────────────────────────────────────
-	"profile.quick":    "Low-footprint screening; skips heavy throughput and route tests",
-	"profile.standard": "Default full check",
-	"profile.full":     "Longer benchmarks, more traffic, includes route tests",
+	"profile.quick":    "Local hardware and basic network only; no throughput, routing or unlock tests (~1-3 min)",
+	"profile.standard": "Full check across 15 modules (recommended, ~3-10 min)",
+	"profile.full":     "standard plus China carrier speedtest, UDP quality and more nodes (~6-18 min, much more traffic)",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",
