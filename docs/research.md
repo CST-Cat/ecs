@@ -233,3 +233,57 @@
 - 每项指标标注 `methodology.kind`（标准基准/协议测量/第三方评估/启发式/事实采集）与可比范围。
 - 默认遮盖主机名与 IP，覆盖字段、表格与 traceroute 原文。
 - 零广告、零上传、不串联下载他人脚本。
+
+## 两个项目的技术栈与开源替代评估（2026-08-01 实测）
+
+用户指定核对 oneclickvirt/ecs 与 spiritLHLS/ecs 的技术栈，判断各组件是否有可靠的开源替代。
+逐项核实上游许可证、Debian 包可用性，并实跑关键候选。
+
+| 能力 | 两个项目使用 | 该技术是否开源可靠 | 可用的开源替代 | ecs 现状 |
+| --- | --- | --- | --- | --- |
+| 系统信息 | basics（GPL-3.0）/ bench.sh 等拼装 | ✅ | 标准库读 `/proc`、`/sys` | 已自实现，另有 cgroup、steal |
+| NAT 类型 | gostun（GPL-3.0） | ✅ | 自实现 STUN RFC 5389/5780 | 已自实现 |
+| CPU | sysbench / **geekbench** | sysbench ✅ GPL-2.0；geekbench ❌ 闭源且强制上传 | sysbench | 已用 sysbench |
+| 内存 | sysbench / dd / **mbw** / **stream** | mbw ✅ Debian 有包；STREAM ✅ 但无 Debian 包需自编译 | **mbw**（Debian `mbw` 1.2.2） | 只有 sysbench，可补 mbw |
+| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟）+ **smartmontools**（SMART） | 已用 fio，后两者可补 |
+| 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
+| 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
+| 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + traceroute/NextTrace 适配器 | 已自实现 |
+| DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
+| IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
+| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI ❌ 闭源 + EULA + 上报**；`speedtest.net/api/js/servers` 实测从本机出口返回 **403** | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | 只有 iperf3 国际节点 |
+| 三网 Ping | pingtest（借鉴 ecsspeed） | ✅ | ICMP 已具备，缺的是节点数据而非技术 | `latency` 为固定全球站点 |
+
+### librespeed-cli 实跑结论（唯一完整开源的测速方案）
+
+装 Debian 官方包 `librespeed-cli 1.0.11`（上游 librespeed/speedtest-cli，LGPL-3.0）实测：
+
+```json
+{"server":{"name":"Amsterdam, Netherlands (Clouvider)"},
+ "bytes_sent":83525632,"bytes_received":124925326,
+ "ping":231,"jitter":1.35,"upload":42.83,"download":64.06}
+```
+
+可用之处：JSON 输出字段完整（ping/jitter/上下行/字节数），支持 `--server` 指定、
+`--exclude` 排除、`--local-json` 自带节点列表，完全开源可审计。
+
+但有三个必须知道的限制：
+
+1. **没有中国大陆节点**。44 个公共节点里亚洲只有印度、新加坡、日本各一个，
+   因此**替代不了"三网测速"**——那正是中文 VPS 圈最看重的一项。
+2. **静默失败**：节点不响应时输出 `null` 且退出码仍为 `0`。若接入必须显式检测，
+   否则会把失败当成"测到了 0"。实测 5 个节点中 Tokyo、Frankfurt 均不可用，第三个才成功。
+3. 单次约消耗 208 MB 流量，需计入资源预算。
+
+### 结论
+
+两个项目的技术栈里，**除三网测速与商业 IP 数据库外，其余都有可靠开源替代，且 ecs 大多
+已用更彻底的方式实现**（自实现协议、零第三方 Go 依赖，不下载他人二进制）。
+
+- 可立即采用的 Debian 官方开源包：`mbw`（内存带宽）、`ioping`（I/O 延迟）、
+  `smartmontools`（SMART 与通电时间）、`librespeed-cli`（通用 HTTP 测速）。
+- **三网测速没有干净的开源解**：中国节点数据只有 speedtest.net 具备，其官方 CLI 闭源，
+  服务器列表 API 还存在出口相关的 403。若要做，只能用 speedtest-go（MIT）自行实现
+  Ookla 协议并自担节点清单维护，且必须如实披露数据来源与失效风险。
+- 商业 IP 数据库无开源替代，这是行业事实；ecs 能做的是保留原值、通道与失败状态，
+  不平均、不顶替——这一点已经做到。
