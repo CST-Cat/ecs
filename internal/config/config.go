@@ -33,6 +33,7 @@ var ModuleOrder = []string{
 	"nat",
 	"blacklist",
 	"apps",
+	"cnspeed",
 	"media",
 	"route",
 	"backtrace",
@@ -678,6 +679,9 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += 10 * time.Second
 		case "apps":
 			total += 8 * time.Second
+		case "cnspeed":
+			// 三个运营商各选点后串行下载。
+			total += 40 * time.Second
 		case "nat":
 			// 多次 UDP 事务，无响应时按超时累计。
 			total += 12 * time.Second

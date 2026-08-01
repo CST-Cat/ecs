@@ -42,6 +42,7 @@
 - YABS 当前公共 iperf3 节点清单中的 Clouvider/Leaseweb 测速服务：standard/full 的多节点 TCP 吞吐；
 - 电信、联通、移动的公开参考 IP：`backtrace` 模块用于识别路径上的骨干线路，只发送路由探测包；
 - DNS 黑名单服务（Spamhaus、SpamCop、Barracuda、CBL、PSBL、blocklist.de、UCEPROTECT、DroneBL、s5h、SpamRats、GBUdb、Mailspike、Backscatterer）：`blacklist` 模块把出口 IP 反转后作为域名查 A 记录，不发送其他信息。各名单有各自的收录标准、解除流程与查询配额；部分名单（如 Spamhaus）拒绝来自公共解析器的查询并返回 127.255.255.x，ecs 将其判为“查询被拒”而非命中；
+- [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT，每日更新）：`cnspeed` 模块的中国测速节点清单，含运营商标注。清单实时抓取而不内置快照——节点会下线，用过期清单去测已消失的节点比不测更糟。ecs 只读取清单，不复制其内容入库；测速本身直接连清单里的节点，不经过第三方；
 - 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；
 - README 中列出的公共 DNS、延迟、端口以及服务自身公开网页。
 

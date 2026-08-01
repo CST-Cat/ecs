@@ -55,6 +55,7 @@ func Registry() []Probe {
 		natProbe{},
 		blacklistProbe{},
 		appsProbe{},
+		cnSpeedProbe{},
 		mediaProbe{},
 		routeProbe{},
 		backtraceProbe{},
@@ -87,6 +88,8 @@ func MethodologyFor(id string) model.Methodology {
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNSBL over DNS A lookup", ComparisonScope: "各名单收录标准不同，不可合并计分"}
 	case "apps":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "native TCP connect", ComparisonScope: "网络可达性诊断；不代表服务本身可用"}
+	case "cnspeed":
+		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "HTTP download against speedtest.cn nodes", ComparisonScope: "到具体节点的 HTTP 带宽；不代表到该运营商全网"}
 	case "media":
 		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"}
 	case "route":

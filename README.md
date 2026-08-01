@@ -137,6 +137,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `blacklist` | 协议测量 | 17 个实测可用的 DNSBL 查询 | 各名单收录标准差异大，不可合并计分；127.255.255.x 是查询被拒而非命中 |
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
+| `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（仅 full 档） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
 | `backtrace` | 启发式判断 | 三网参考 IP 路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；未命中特征返回未识别 |
@@ -227,6 +228,7 @@ ecs render --input report.json --format md,html --output ./exported
 - `media`：被检测服务自己的公开网页；
 - `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定；
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
+- `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
