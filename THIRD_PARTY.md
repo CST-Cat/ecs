@@ -13,6 +13,9 @@
 | iperf3 | TCP 多流上传/反向下载 | [ESnet/iperf](https://github.com/esnet/iperf) | BSD-3-Clause | standard/full 的网络吞吐唯一基准；解析逐节点 JSON 原值；记录节点、参数、版本与 SHA-256 |
 | NextTrace | 带节点信息的路由追踪 | [nxtrace/NTrace-core](https://github.com/nxtrace/NTrace-core) | GPL-3.0 | 仅在路由模块启用且本机存在时调用；强制 JSON、无启动横幅；记录参数与 SHA-256 |
 | traceroute / tracepath | 基础路由追踪 | 操作系统发行方 | 随发行版而异 | NextTrace 不存在时使用；路径快照 12 跳、三网回程 20 跳；不经过 shell |
+| mbw | memcpy 口径的内存带宽 | [ahorvath/mbw](http://ahorvath.web.cern.ch/ahorvath/mbw/) | GPL-2.0 | `memory` 的补充口径，与 sysbench 并列保留不合并；数组大小按可用内存收敛，避免小内存机器 OOM |
+| ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
+| smartctl | 磁盘 SMART 健康与通电时间 | [smartmontools](https://www.smartmontools.org/) | GPL-2.0 | `disk` 的介质健康；需 root，虚拟磁盘通常不透传，缺失时如实说明；**刻意不采集序列号**（可唯一标识物理硬件） |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
 
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，

@@ -28,21 +28,29 @@ func (memoryProbe) Title() string      { return "内存性能" }
 func (memoryProbe) NeedsNetwork() bool { return false }
 
 func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
-	if path, err := exec.LookPath("sysbench"); err == nil {
-		return runSysbenchMemory(ctx, env, path)
-	}
 	start := time.Now()
-	result := model.NewResult("memory", "内存性能")
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "标准基准",
-		Engine:          "sysbench",
-		Profile:         "memory seq 1 MiB",
-		ComparisonScope: "相同 sysbench 版本、操作、块大小、线程数与时长",
+	// /proc/meminfo 的可用内存决定 mbw 的数组大小，小内存机器上不能贸然分配。
+	available := parseMemInfo("/proc/meminfo")["MemAvailable"] * 1024
+
+	var result model.Result
+	if path, err := exec.LookPath("sysbench"); err == nil {
+		result = runSysbenchMemory(ctx, env, path)
+	} else {
+		result = model.NewResult("memory", "内存性能")
+		result.Methodology = model.Methodology{
+			Kind:            "standard-benchmark",
+			Label:           "标准基准",
+			Engine:          "sysbench",
+			Profile:         "memory seq 1 MiB",
+			ComparisonScope: "相同 sysbench 版本、操作、块大小、线程数与时长",
+		}
+		result.Status = model.StatusWarning
+		result.Summary = "未找到 sysbench，标准内存基准未运行"
+		result.Notes = append(result.Notes, "运行 install.sh --with-benchmarks 或通过系统包管理器安装 sysbench。ecs 不提供自研替代分数。")
 	}
-	result.Status = model.StatusWarning
-	result.Summary = "未找到 sysbench，标准内存基准未运行"
-	result.Notes = append(result.Notes, "运行 install.sh --with-benchmarks 或通过系统包管理器安装 sysbench。ecs 不提供自研替代分数。")
+
+	// mbw 是补充口径，缺席不降级整个模块。
+	appendMBWMemory(ctx, &result, available)
 	result.Finish(start)
 	return result
 }

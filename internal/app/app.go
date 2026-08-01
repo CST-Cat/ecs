@@ -258,6 +258,9 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 		{name: "iperf3", required: true, purpose: "网络吞吐", args: []string{"--version"}},
 		{name: "nexttrace", purpose: "高级路由", args: []string{"--version"}},
 		{name: "traceroute", purpose: "基础路由", args: []string{"--version"}},
+		{name: "mbw", purpose: "内存带宽（补充口径）", args: []string{"-h"}},
+		{name: "ioping", purpose: "I/O 延迟（补充口径）", args: []string{"-v"}},
+		{name: "smartctl", purpose: "磁盘健康（需 root）", args: []string{"--version"}},
 	}
 	missingRequired := false
 	for _, tool := range tools {

@@ -128,8 +128,8 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `system` | 事实采集 | OS/runtime inspection，含 CPU 缓存与 VT-x/AMD-V | 某些容器会隐藏 DMI/内核字段；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
-| `memory` | 标准基准 | sysbench memory 顺序读写，1 MiB，单/多线程 | 微基准，不等同 STREAM |
-| `disk` | 标准基准 | fio Direct I/O：顺序 1 MiB、随机 4 KiB，加 YABS 兼容的 4k/64k/512k/1m 50/50 混合矩阵 | 只与相同 fio/ecs 参数和文件系统比较；同步引擎下队列深度降级标注 |
+| `memory` | 标准基准 | sysbench memory 顺序读写 + mbw memcpy 带宽 | 两者口径不同并列保留；sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运 |
+| `disk` | 标准基准 | fio Direct I/O 矩阵 + ioping 空载延迟 + smartctl 介质健康 | 只与相同 fio/ecs 参数和文件系统比较；SMART 需 root 且虚拟磁盘通常不透传 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
