@@ -1,0 +1,129 @@
+package i18n
+
+import (
+	"os"
+	"strings"
+	"sync"
+)
+
+// 轻量国际化。
+//
+// 不引入第三方依赖：一个 key → 各语言译文的映射加一个当前语言变量就够了。
+// 之所以用 key 而不是"中文原文当 key"，是因为原文一旦改字就会静默丢译文，
+// 而 key 改名编译期就能发现。
+//
+// 覆盖范围是分层的：命令行、模块名称、状态、表头、报告框架这些**结构性文本**
+// 必须全部有译文——它们决定英文用户能不能看懂这份报告的骨架。探针内部那些
+// 长篇技术说明（notes）尚未全部翻译，未登记的 key 会原样回退到中文，
+// 不会变成空白或 key 名。这是有意的取舍：宁可中英混排，也不能丢信息。
+
+// Lang 是支持的界面语言。
+type Lang string
+
+const (
+	// LangZH 是默认语言。
+	LangZH Lang = "zh"
+	// LangEN 是英文。
+	LangEN Lang = "en"
+)
+
+var (
+	mutex   sync.RWMutex
+	current = LangZH
+)
+
+// Supported 列出支持的语言。
+func Supported() []Lang { return []Lang{LangZH, LangEN} }
+
+// Parse 解析语言标识，无法识别时返回 false。
+func Parse(value string) (Lang, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "zh", "zh-cn", "zh_cn", "cn", "chinese":
+		return LangZH, true
+	case "en", "en-us", "en_us", "english":
+		return LangEN, true
+	default:
+		return LangZH, false
+	}
+}
+
+// DetectFromEnv 依据 LANG/LC_ALL 猜测语言。
+//
+// 只在用户没有显式指定时使用：容器里常常 LANG=C，此时保持中文默认，
+// 不去猜一个用户没要求的语言。
+func DetectFromEnv() Lang {
+	for _, key := range []string{"ECS_LANG", "LC_ALL", "LC_MESSAGES", "LANG"} {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		lower := strings.ToLower(value)
+		if strings.HasPrefix(lower, "zh") {
+			return LangZH
+		}
+		if strings.HasPrefix(lower, "en") {
+			return LangEN
+		}
+	}
+	return LangZH
+}
+
+// Set 切换当前语言。
+func Set(lang Lang) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	current = lang
+}
+
+// Current 返回当前语言。
+func Current() Lang {
+	mutex.RLock()
+	defer mutex.RUnlock()
+	return current
+}
+
+// T 按当前语言取译文。
+//
+// 找不到译文时原样返回中文，绝不返回空串或 key 名——缺译文只该表现为
+// 那一句没翻译，不该表现为信息消失。
+func T(key string) string {
+	mutex.RLock()
+	lang := current
+	mutex.RUnlock()
+	return translate(lang, key)
+}
+
+// TL 按指定语言取译文，用于同时输出多语言的场景。
+func TL(lang Lang, key string) string { return translate(lang, key) }
+
+func translate(lang Lang, key string) string {
+	if lang == LangEN {
+		if value, ok := english[key]; ok && value != "" {
+			return value
+		}
+	}
+	if value, ok := chinese[key]; ok && value != "" {
+		return value
+	}
+	// key 未登记：返回 key 本身，让缺失在界面上可见而不是静默变空。
+	return key
+}
+
+// Has 报告某个 key 是否有当前语言的译文，供测试核对覆盖率。
+func Has(lang Lang, key string) bool {
+	if lang == LangEN {
+		value, ok := english[key]
+		return ok && value != ""
+	}
+	value, ok := chinese[key]
+	return ok && value != ""
+}
+
+// Keys 返回全部已登记的 key，供测试遍历。
+func Keys() []string {
+	keys := make([]string, 0, len(chinese))
+	for key := range chinese {
+		keys = append(keys, key)
+	}
+	return keys
+}

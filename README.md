@@ -31,6 +31,20 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 测不到。发布二进制覆盖 Linux 的 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、
 `ppc64le`。
 
+**一键运行**（发布 Release 后可用，全部参数原样透传）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
+```
+
+`run.sh` 只做三件事：下载、校验 SHA-256、执行。它不改包管理器、不写系统目录、不调用
+`sudo`、不留后台进程，二进制放临时目录跑完即删。`curl | sh` 把信任完全交给下载源，
+这一点无法靠脚本自身解决——能做的是让脚本短到可以在执行前一眼读完，且不隐藏任何步骤。
+想长期安装用 `install.sh`。
+
+**界面语言**：全部命令支持 `--lang zh|en`，未指定时按 `ECS_LANG`/`LC_ALL`/`LANG` 推断。
+
 从源码构建需要 Go 1.22 或更高版本：
 
 ```bash
@@ -270,6 +284,20 @@ ecs --config ecs.json
 ```
 
 未知字段会直接报错，避免拼写错误被静默忽略。命令行参数优先于配置文件。
+
+**每一项配置都能只用命令行调节**，不必写配置文件——容器与一次性排查场景下这很重要：
+
+```bash
+# 换 DNS 解析器与采样次数
+ecs --only dns --dns-resolvers "Ali=223.5.5.5:53,DNSPod=119.29.29.29:53" --dns-attempts 8
+
+# 指定自建 iperf3 节点
+ecs --only speed --iperf-targets "Home=my.iperf.example:5201-5210"
+
+# 换延迟目标、路由目标与 STUN 服务器
+ecs --latency-targets "example.com:443" --route-targets "1.1.1.1,8.8.8.8" \
+    --stun-servers "stun.miwifi.com:3478"
+```
 
 ## 退出码
 

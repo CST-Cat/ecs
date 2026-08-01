@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+
+	"ecs/internal/i18n"
 	"io"
 	"os"
 	"sort"
@@ -25,17 +27,17 @@ func New(out io.Writer, noColor bool) *Terminal {
 }
 
 func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
-	terminal.line(terminal.style("1;36", "ecs") + " " + terminal.style("2", buildinfo.Version) + "  VPS 综合测试")
-	terminal.line(terminal.style("2", "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML"))
+	terminal.line(terminal.style("1;36", "ecs") + " " + terminal.style("2", buildinfo.Version) + "  " + i18n.T("cli.tagline"))
+	terminal.line(terminal.style("2", i18n.T("term.subtitle")))
 	terminal.line("")
-	terminal.line(fmt.Sprintf("配置档 %-10s  模块 %d 项  预计 %s", cfg.Profile, len(cfg.Modules), estimate.DurationText))
+	terminal.line(fmt.Sprintf("%s %-10s  %s %d  %s %s", i18n.T("term.profileLine"), cfg.Profile, i18n.T("term.moduleCount"), len(cfg.Modules), i18n.T("term.estimate"), estimate.DurationText))
 	networkBudget := fmt.Sprintf("%d MiB", estimate.NetworkMiB)
 	if estimate.NetworkMiB < 0 {
-		networkBudget = "iperf3 按带宽计（不封顶）"
+		networkBudget = i18n.T("term.uncapped")
 	}
-	terminal.line(fmt.Sprintf("资源上限  临时磁盘 %d MiB  网络流量 %s", estimate.DiskMiB, networkBudget))
+	terminal.line(fmt.Sprintf("%s  %s %d MiB  %s %s", i18n.T("term.budget"), i18n.T("term.tempDisk"), estimate.DiskMiB, i18n.T("term.networkUsage"), networkBudget))
 	for _, note := range estimate.Notes {
-		terminal.line(terminal.style("33", "提示") + " " + note)
+		terminal.line(terminal.style("33", i18n.T("term.hint")) + " " + note)
 	}
 	terminal.line("")
 }
@@ -59,8 +61,8 @@ func (terminal *Terminal) Progress(event runner.Progress) {
 			summary = "  " + terminal.style("2", summary)
 		}
 		method := ""
-		if event.Result.Methodology.Label != "" {
-			method = " " + terminal.style("36", "["+event.Result.Methodology.Label+"]")
+		if label := methodologyLabel(event.Result.Methodology); label != "" {
+			method = " " + terminal.style("36", "["+label+"]")
 		}
 		terminal.line(fmt.Sprintf("%s [%d/%d] %s%s%s", terminal.style(code, icon), event.Index, event.Total, event.Title, method, summary))
 	}
@@ -68,7 +70,7 @@ func (terminal *Terminal) Progress(event runner.Progress) {
 
 func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 	terminal.line("")
-	terminal.line(terminal.style("1", "测试完成") + "  " + data.Summary.Headline)
+	terminal.line(terminal.style("1", i18n.T("term.finished")) + "  " + data.Summary.Headline)
 	for _, result := range data.Results {
 		if len(result.Measurements) == 0 {
 			continue
@@ -80,9 +82,9 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 			}
 			values = append(values, metric.Label+" "+metric.Display)
 		}
-		label := result.Methodology.Label
+		label := methodologyLabel(result.Methodology)
 		if label == "" {
-			label = "未标注"
+			label = i18n.T("methodology.unlabeled")
 		}
 		terminal.line(fmt.Sprintf("  %-18s %-10s %s", result.Title, "["+label+"]", strings.Join(values, " · ")))
 	}
@@ -91,7 +93,7 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 			continue
 		}
 		terminal.line("")
-		terminal.line(terminal.style("1;36", "IP 质量明细"))
+		terminal.line(terminal.style("1;36", i18n.T("term.ipDetail")))
 		for _, field := range result.Fields {
 			if strings.HasSuffix(field.Key, "_ip_type") {
 				terminal.line("  " + field.Label + "  " + terminal.style("1", field.Value))
@@ -103,7 +105,7 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 	}
 	if len(files) > 0 {
 		terminal.line("")
-		terminal.line(terminal.style("1", "本地报告"))
+		terminal.line(terminal.style("1", i18n.T("term.localReports")))
 		formats := make([]string, 0, len(files))
 		for format := range files {
 			formats = append(formats, format)
@@ -114,7 +116,7 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 		}
 	}
 	terminal.line("")
-	terminal.line(terminal.style("2", "未上传任何报告；分享文件前请确认敏感字段遮盖状态。"))
+	terminal.line(terminal.style("2", i18n.T("term.noUpload")))
 }
 
 func (terminal *Terminal) printTable(table model.Table) {
@@ -177,7 +179,7 @@ func displayWidth(value string) int {
 }
 
 func (terminal *Terminal) Error(format string, values ...any) {
-	terminal.line(terminal.style("31", "错误") + " " + fmt.Sprintf(format, values...))
+	terminal.line(terminal.style("31", i18n.T("cli.error")) + " " + fmt.Sprintf(format, values...))
 }
 
 func (terminal *Terminal) line(value string) {
@@ -189,6 +191,16 @@ func (terminal *Terminal) style(code, value string) string {
 		return value
 	}
 	return "\x1b[" + code + "m" + value + "\x1b[0m"
+}
+
+// methodologyLabel 优先按 kind 查译文，回落到探针写死的 Label。
+func methodologyLabel(m model.Methodology) string {
+	if m.Kind != "" {
+		if key := "methodology." + m.Kind; i18n.Has(i18n.Current(), key) {
+			return i18n.T(key)
+		}
+	}
+	return m.Label
 }
 
 func isTerminal(writer io.Writer) bool {

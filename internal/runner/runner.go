@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/probe"
 )
@@ -67,8 +68,10 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	}
 
 	ids := make([]string, len(selected))
+	titles := make([]string, len(selected))
 	for index, item := range selected {
 		ids[index] = item.ID()
+		titles[index] = localizedTitle(item.ID(), item.Title())
 	}
 	results := make([]model.Result, len(selected))
 	completed := 0
@@ -92,7 +95,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			if progress != nil {
 				for _, index := range group.Indices {
 					item := selected[index]
-					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title()})
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
 				}
 			}
 			wg.Wait()
@@ -100,7 +103,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			index := group.Indices[0]
 			item := selected[index]
 			if progress != nil {
-				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title()})
+				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
 			}
 			results[index] = runOne(ctx, item, cfg, env)
 		}
@@ -108,7 +111,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			item := selected[index]
 			completed++
 			if progress != nil {
-				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: item.ID(), Title: item.Title(), Result: results[index]})
+				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index], Result: results[index]})
 			}
 		}
 		if ctx.Err() != nil {
@@ -138,7 +141,18 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 	if result.Methodology.Label == "" {
 		result.Methodology = probe.MethodologyFor(item.ID())
 	}
+	result.Title = localizedTitle(item.ID(), result.Title)
 	return result
+}
+
+// localizedTitle 按模块 ID 查标题译文。
+//
+// ID 是稳定的机器标识，正适合做 i18n 的 key；没有译文时保留探针自带的标题。
+func localizedTitle(id, fallback string) string {
+	if key := "module." + id + ".title"; i18n.Has(i18n.Current(), key) {
+		return i18n.T(key)
+	}
+	return fallback
 }
 
 func selectedProbes(ids []string) []probe.Probe {

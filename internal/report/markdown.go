@@ -2,6 +2,8 @@ package report
 
 import (
 	"fmt"
+
+	"ecs/internal/i18n"
 	"net/url"
 	"regexp"
 	"strings"
@@ -12,34 +14,35 @@ import (
 
 func Markdown(data model.Report) string {
 	var out strings.Builder
-	out.WriteString("# ecs VPS 综合测试报告\n\n")
+	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")
 	out.WriteString(statusIcon(data.Summary.Status))
 	out.WriteByte(' ')
 	out.WriteString(data.Summary.Headline)
-	out.WriteString("。报告由本地生成，未自动上传。\n\n")
+	out.WriteString(i18n.T("punct.sentenceEnd") + i18n.T("report.local") + "\n\n")
 
-	out.WriteString("## 运行概览\n\n")
-	out.WriteString("| 项目 | 内容 |\n| --- | --- |\n")
-	writeMarkdownRow(&out, "报告 ID", data.Run.ID)
-	writeMarkdownRow(&out, "ecs 版本", data.Tool.Version+" ("+data.Tool.Commit+")")
-	writeMarkdownRow(&out, "配置档", data.Run.Profile)
-	writeMarkdownRow(&out, "开始时间", data.Run.StartedAt.Format(time.RFC3339))
-	writeMarkdownRow(&out, "总耗时", formatDurationMS(data.Run.DurationMS))
-	writeMarkdownRow(&out, "网络模式", map[bool]string{true: "离线", false: "在线"}[data.Run.Offline])
-	writeMarkdownRow(&out, "隐私", map[bool]string{true: "敏感字段已遮盖", false: "包含完整敏感字段"}[data.Run.Redacted])
+	out.WriteString("## " + i18n.T("report.overview") + "\n\n")
+	out.WriteString("| " + i18n.T("report.item") + " | " + i18n.T("report.content") + " |\n| --- | --- |\n")
+	writeMarkdownRow(&out, i18n.T("report.reportID"), data.Run.ID)
+	writeMarkdownRow(&out, i18n.T("report.version"), data.Tool.Version+" ("+data.Tool.Commit+")")
+	writeMarkdownRow(&out, i18n.T("report.profile"), data.Run.Profile)
+	writeMarkdownRow(&out, i18n.T("report.startedAt"), data.Run.StartedAt.Format(time.RFC3339))
+	writeMarkdownRow(&out, i18n.T("report.totalDuration"), formatDurationMS(data.Run.DurationMS))
+	writeMarkdownRow(&out, i18n.T("report.networkMode"), map[bool]string{true: i18n.T("report.offline"), false: i18n.T("report.online")}[data.Run.Offline])
+	writeMarkdownRow(&out, i18n.T("report.privacy"), map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted])
 	if data.Run.Canceled {
-		writeMarkdownRow(&out, "运行状态", "用户中断，报告包含已完成部分")
+		writeMarkdownRow(&out, i18n.T("report.runState"), i18n.T("report.canceled"))
 	}
 	out.WriteString("\n")
 
-	out.WriteString("## 一眼看懂\n\n")
-	out.WriteString("| 模块 | 口径 | 状态 | 摘要 | 耗时 |\n| --- | --- | --- | --- | --- |\n")
+	out.WriteString("## " + i18n.T("report.glance") + "\n\n")
+	out.WriteString("| " + i18n.T("report.module") + " | " + i18n.T("report.scope") + " | " +
+		i18n.T("report.status") + " | " + i18n.T("report.summary") + " | " + i18n.T("report.duration") + " |\n| --- | --- | --- | --- | --- |\n")
 	for _, result := range data.Results {
 		out.WriteString("| ")
 		out.WriteString(markdownEscape(result.Title))
 		out.WriteString(" | ")
-		out.WriteString(markdownEscape(fallbackReport(result.Methodology.Label, "未标注")))
+		out.WriteString(markdownEscape(localizedMethodology(result.Methodology)))
 		out.WriteString(" | ")
 		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
 		out.WriteString(" | ")
@@ -59,7 +62,7 @@ func Markdown(data model.Report) string {
 			out.WriteString("\n\n")
 		}
 		if result.Methodology.Label != "" {
-			out.WriteString("**测试口径**：")
+			out.WriteString("**" + i18n.T("report.methodologyLabel") + "**：")
 			out.WriteString(markdownEscape(result.Methodology.Label))
 			if result.Methodology.Engine != "" {
 				out.WriteString(" · ")
@@ -72,7 +75,7 @@ func Markdown(data model.Report) string {
 			}
 			out.WriteString("\n\n")
 			if result.Methodology.ComparisonScope != "" {
-				out.WriteString("> 可比范围：")
+				out.WriteString("> " + i18n.T("report.comparability") + "：")
 				out.WriteString(markdownEscape(result.Methodology.ComparisonScope))
 				out.WriteString("\n\n")
 			}
@@ -88,13 +91,14 @@ func Markdown(data model.Report) string {
 		out.WriteString(formatDurationMS(result.DurationMS))
 		out.WriteString("\n\n")
 		if result.Error != "" {
-			out.WriteString("> 错误：")
+			out.WriteString("> " + i18n.T("report.errorPrefix") + "：")
 			out.WriteString(markdownEscape(result.Error))
 			out.WriteString("\n\n")
 		}
 		if len(result.Measurements) > 0 {
-			out.WriteString("### 关键指标\n\n")
-			out.WriteString("| 指标 | 数值 | 评价 | 方法 |\n| --- | ---: | --- | --- |\n")
+			out.WriteString("### " + i18n.T("report.metrics") + "\n\n")
+			out.WriteString("| " + i18n.T("report.metric") + " | " + i18n.T("report.value") + " | " +
+				i18n.T("report.rating") + " | " + i18n.T("report.method") + " |\n| --- | ---: | --- | --- |\n")
 			for _, metric := range result.Measurements {
 				out.WriteString("| ")
 				out.WriteString(markdownEscape(metric.Label))
@@ -109,8 +113,8 @@ func Markdown(data model.Report) string {
 			out.WriteString("\n")
 		}
 		if len(result.Fields) > 0 {
-			out.WriteString("### 详情\n\n")
-			out.WriteString("| 字段 | 内容 |\n| --- | --- |\n")
+			out.WriteString("### " + i18n.T("report.details") + "\n\n")
+			out.WriteString("| " + i18n.T("report.field") + " | " + i18n.T("report.content") + " |\n| --- | --- |\n")
 			for _, field := range result.Fields {
 				writeMarkdownRow(&out, field.Label, field.Value)
 			}
@@ -136,7 +140,7 @@ func Markdown(data model.Report) string {
 			out.WriteString("\n```\n\n</details>\n\n")
 		}
 		if len(result.Notes) > 0 {
-			out.WriteString("### 说明\n\n")
+			out.WriteString("### " + i18n.T("report.notes") + "\n\n")
 			for _, note := range result.Notes {
 				out.WriteString("- ")
 				out.WriteString(markdownEscape(note))
@@ -145,7 +149,7 @@ func Markdown(data model.Report) string {
 			out.WriteString("\n")
 		}
 		if len(result.Sources) > 0 {
-			out.WriteString("### 数据来源\n\n")
+			out.WriteString("### " + i18n.T("report.sources") + "\n\n")
 			for _, source := range result.Sources {
 				out.WriteString("- ")
 				if safeURL := safeMarkdownURL(source.URL); safeURL != "" {
@@ -167,14 +171,14 @@ func Markdown(data model.Report) string {
 		}
 	}
 
-	out.WriteString("## 报告说明\n\n")
+	out.WriteString("## " + i18n.T("report.notices") + "\n\n")
 	for _, notice := range data.Notices {
 		out.WriteString("- ")
 		out.WriteString(markdownEscape(notice))
 		out.WriteString("\n")
 	}
 	out.WriteString("\n")
-	out.WriteString(fmt.Sprintf("Schema：`%s` · 生成器：`%s %s`\n", data.SchemaVersion, data.Tool.Name, data.Tool.Version))
+	out.WriteString(fmt.Sprintf("Schema: `%s` · %s: `%s %s`\n", data.SchemaVersion, i18n.T("report.generator"), data.Tool.Name, data.Tool.Version))
 	return out.String()
 }
 
@@ -248,16 +252,32 @@ func safeMarkdownURL(value string) string {
 func statusLabel(status model.Status) string {
 	switch status {
 	case model.StatusOK:
-		return "完成"
+		return i18n.T("status.ok")
 	case model.StatusWarning:
-		return "需留意"
+		return i18n.T("status.warning")
 	case model.StatusSkipped:
-		return "跳过"
+		return i18n.T("status.skipped")
 	case model.StatusError:
-		return "异常"
+		return i18n.T("status.error")
 	default:
 		return string(status)
 	}
+}
+
+// localizedMethodology 把 methodology.kind 翻成当前语言。
+//
+// 报告里的 Label 是探针写死的中文，英文界面下改用 kind 查译文——
+// kind 是稳定的机器标识，正适合做 i18n 的 key。
+func localizedMethodology(m model.Methodology) string {
+	if m.Kind != "" {
+		if key := "methodology." + m.Kind; i18n.Has(i18n.Current(), key) {
+			return i18n.T(key)
+		}
+	}
+	if m.Label != "" {
+		return m.Label
+	}
+	return i18n.T("methodology.unlabeled")
 }
 
 func statusIcon(status model.Status) string {

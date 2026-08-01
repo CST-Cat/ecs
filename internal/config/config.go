@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"ecs/internal/i18n"
 )
 
 const (
@@ -624,10 +626,10 @@ func EstimateFor(runtime Runtime) Estimate {
 	estimate.DurationText = durationEstimateText(typical*3/5, typical*2)
 	if runtime.Offline {
 		estimate.NetworkMiB = 0
-		estimate.Notes = append(estimate.Notes, "离线模式会跳过全部外网探针")
+		estimate.Notes = append(estimate.Notes, i18n.T("estimate.offline"))
 	}
 	if contains(runtime.Modules, "route") {
-		estimate.Notes = append(estimate.Notes, "路由探测时长受每跳超时影响")
+		estimate.Notes = append(estimate.Notes, i18n.T("estimate.route"))
 	}
 	return estimate
 }
@@ -707,7 +709,7 @@ func durationEstimateText(lower, upper time.Duration) string {
 	if upper < time.Minute {
 		lowerSeconds := int((lower.Seconds()+4)/5) * 5
 		upperSeconds := int((upper.Seconds()+4)/5) * 5
-		return fmt.Sprintf("约 %d–%d 秒", lowerSeconds, upperSeconds)
+		return fmt.Sprintf(i18n.T("estimate.seconds"), lowerSeconds, upperSeconds)
 	}
 	lowerMinutes := int((lower + time.Minute - 1) / time.Minute)
 	upperMinutes := int((upper + time.Minute - 1) / time.Minute)
@@ -717,7 +719,7 @@ func durationEstimateText(lower, upper time.Duration) string {
 	if upperMinutes <= lowerMinutes {
 		upperMinutes = lowerMinutes + 1
 	}
-	return fmt.Sprintf("约 %d–%d 分钟", lowerMinutes, upperMinutes)
+	return fmt.Sprintf(i18n.T("estimate.minutes"), lowerMinutes, upperMinutes)
 }
 
 func ExampleFile() File {

@@ -16,6 +16,7 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	reporter "ecs/internal/report"
 	"ecs/internal/runner"
@@ -23,6 +24,9 @@ import (
 )
 
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// 语言要在任何输出之前定下来：帮助文本、错误信息都要用它。
+	// 显式 --lang 优先，其次看环境变量，最后回落中文。
+	i18n.Set(resolveLanguage(args))
 	command := "run"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command = args[0]
@@ -46,7 +50,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "未知命令 %q\n\n", command)
+		fmt.Fprintf(stderr, "%s %q\n\n", i18n.T("cli.unknownCommand"), command)
 		printHelp(stderr)
 		return 1
 	}
@@ -82,6 +86,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.String("lang", string(i18n.Current()), "界面语言：zh、en")
 	profileFlag := flags.String("profile", cfg.Profile, "配置档：quick、standard、full")
 	configFlag := flags.String("config", configPath, "JSON 配置文件")
 	onlyFlag := flags.String("only", "", "只运行这些模块，逗号分隔")
@@ -100,6 +105,13 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, "iperf3 每个节点、每个方向的测试时长")
 	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, "测速并发流")
 	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, "单次 HTTP 请求超时")
+	dnsAttemptsFlag := flags.Int("dns-attempts", cfg.DNSAttempts, "每个 DNS 解析器的采样次数")
+	latencyAttemptsFlag := flags.Int("latency-attempts", cfg.LatencyAttempts, "每个延迟目标的采样次数")
+	dnsResolversFlag := flags.String("dns-resolvers", "", "覆盖 DNS 解析器：[名称=]host:port，逗号分隔")
+	latencyTargetsFlag := flags.String("latency-targets", "", "覆盖延迟目标：[名称=]host:port，逗号分隔")
+	routeTargetsFlag := flags.String("route-targets", "", "覆盖路由目标：[名称=]host，逗号分隔")
+	stunServersFlag := flags.String("stun-servers", "", "覆盖 STUN 服务器：[名称=]host:port，逗号分隔")
+	iperfTargetsFlag := flags.String("iperf-targets", "", "覆盖 iperf3 节点：[名称=]host:start[-end]，逗号分隔")
 	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), "流媒体检测地区：global、jp、tw、hk、cn（逗号分隔，默认全部）")
 	backtraceCityFlag := flags.String("backtrace-city", "", "三网回程测试城市：beijing、guangzhou、shanghai、chengdu 或 all（默认 beijing,guangzhou）")
 	strictFlag := flags.Bool("strict", false, "探针警告或错误时返回非零退出码")
@@ -134,6 +146,37 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.IPerfDuration = *iperfDurationFlag
 	cfg.SpeedThreads = *threadsFlag
 	cfg.HTTPTimeout = *timeoutFlag
+	cfg.DNSAttempts = *dnsAttemptsFlag
+	cfg.LatencyAttempts = *latencyAttemptsFlag
+	for _, override := range []struct {
+		raw         string
+		requirePort bool
+		apply       func([]config.Endpoint)
+		label       string
+	}{
+		{*dnsResolversFlag, true, func(e []config.Endpoint) { cfg.DNSResolvers = e }, "dns-resolvers"},
+		{*latencyTargetsFlag, true, func(e []config.Endpoint) { cfg.LatencyTargets = e }, "latency-targets"},
+		{*routeTargetsFlag, false, func(e []config.Endpoint) { cfg.RouteTargets = e }, "route-targets"},
+		{*stunServersFlag, true, func(e []config.Endpoint) { cfg.STUNServers = e }, "stun-servers"},
+	} {
+		if override.raw == "" {
+			continue
+		}
+		endpoints, err := config.ParseEndpointList(override.raw, override.requirePort)
+		if err != nil {
+			fmt.Fprintf(stderr, "错误: --%s: %v\n", override.label, err)
+			return 1
+		}
+		override.apply(endpoints)
+	}
+	if *iperfTargetsFlag != "" {
+		targets, err := config.ParseIPerfTargetList(*iperfTargetsFlag)
+		if err != nil {
+			fmt.Fprintln(stderr, "错误: --iperf-targets:", err)
+			return 1
+		}
+		cfg.IPerfTargets = targets
+	}
 	if regions := config.ParseList(*mediaRegionFlag); len(regions) > 0 {
 		if err := config.ValidateMediaRegions(regions); err != nil {
 			fmt.Fprintln(stderr, "错误:", err)
@@ -161,7 +204,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	files, writeErr := reporter.WriteFiles(data, cfg.Output, *nameFlag, cfg.Formats)
 	if writeErr != nil {
-		terminal.Error("报告写入失败：%v", writeErr)
+		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
 	}
 	terminal.Summary(data, files)
@@ -315,6 +358,31 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "\n标准性能工具已就绪。")
 	return 0
+}
+
+// resolveLanguage 在解析命令前先把 --lang 取出来。
+//
+// flag 包要等到子命令解析时才能拿到值，但帮助与错误输出比那更早，
+// 因此这里先扫一遍参数。
+func resolveLanguage(args []string) i18n.Lang {
+	for index := 0; index < len(args); index++ {
+		value := args[index]
+		var raw string
+		switch {
+		case (value == "--lang" || value == "-lang") && index+1 < len(args):
+			raw = args[index+1]
+		case strings.HasPrefix(value, "--lang="):
+			raw = strings.TrimPrefix(value, "--lang=")
+		case strings.HasPrefix(value, "-lang="):
+			raw = strings.TrimPrefix(value, "-lang=")
+		default:
+			continue
+		}
+		if lang, ok := i18n.Parse(raw); ok {
+			return lang
+		}
+	}
+	return i18n.DetectFromEnv()
 }
 
 func preparse(args []string) (configPath, profile string) {

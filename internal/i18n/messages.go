@@ -1,0 +1,287 @@
+package i18n
+
+// 结构性文本的译文表。
+//
+// 只收录决定"报告骨架能否被读懂"的文本：命令行、模块名称与描述、运行状态、
+// 表格列名、报告章节标题、方法学标签。探针内部的长篇技术说明未收录，
+// 会回退到中文——见 i18n.go 顶部关于分层的说明。
+//
+// 两张表的 key 必须一一对应，有测试强制校验；缺 key 会在界面上显示为 key 本身，
+// 一眼就能发现。
+
+var chinese = map[string]string{
+	// ── 命令行 ──────────────────────────────────────────────
+	"cli.tagline":        "无广告、默认零上传的 VPS 综合测试工具",
+	"cli.usage":          "用法",
+	"cli.usage.run":      "运行测试（默认 standard）",
+	"cli.usage.list":     "查看配置档与模块",
+	"cli.usage.render":   "从 JSON 重新导出 Markdown/HTML",
+	"cli.usage.config":   "输出配置文件示例",
+	"cli.usage.doctor":   "检查标准基准工具",
+	"cli.usage.version":  "显示版本",
+	"cli.examples":       "常用示例",
+	"cli.more":           "运行 ecs run --help 查看全部参数。",
+	"cli.modules":        "模块",
+	"cli.profiles":       "配置档",
+	"cli.sources":        "IP 质量数据源",
+	"cli.unknownCommand": "未知命令",
+	"cli.error":          "错误",
+
+	// ── 配置档 ──────────────────────────────────────────────
+	"profile.quick":    "低资源快速筛查，不执行大流量测速和路由",
+	"profile.standard": "默认综合测试",
+	"profile.full":     "更长性能测试、更大流量并包含路由",
+
+	// ── 模块名称 ────────────────────────────────────────────
+	"module.system.title":    "系统与资源",
+	"module.network.title":   "网络与 IP 质量",
+	"module.cpu.title":       "CPU 性能",
+	"module.memory.title":    "内存性能",
+	"module.disk.title":      "磁盘性能",
+	"module.dns.title":       "DNS 质量",
+	"module.latency.title":   "网络延迟",
+	"module.speed.title":     "网络吞吐",
+	"module.ports.title":     "出站端口",
+	"module.nat.title":       "NAT 类型",
+	"module.blacklist.title": "IP 信誉与发信条件",
+	"module.apps.title":      "应用服务可达性",
+	"module.cnspeed.title":   "中国三网测速",
+	"module.media.title":     "流媒体与 AI 服务",
+	"module.route.title":     "路由追踪",
+	"module.backtrace.title": "三网回程",
+
+	// ── 运行状态 ────────────────────────────────────────────
+	"status.ok":      "完成",
+	"status.warning": "需留意",
+	"status.skipped": "跳过",
+	"status.error":   "异常",
+
+	// ── 方法学标签 ──────────────────────────────────────────
+	"methodology.standard-benchmark":   "标准基准",
+	"methodology.protocol-measurement": "协议测量",
+	"methodology.provider-assessment":  "第三方评估",
+	"methodology.heuristic":            "启发式判断",
+	"methodology.inventory":            "事实采集",
+	"methodology.unlabeled":            "未标注",
+
+	// ── 报告框架 ────────────────────────────────────────────
+	"report.title":            "ecs VPS 综合测试报告",
+	"report.local":            "报告由本地生成，未自动上传。",
+	"report.overview":         "运行概览",
+	"report.glance":           "一眼看懂",
+	"report.metrics":          "关键指标",
+	"report.details":          "详情",
+	"report.notes":            "说明",
+	"report.sources":          "数据来源",
+	"report.notices":          "报告说明",
+	"report.item":             "项目",
+	"report.content":          "内容",
+	"report.module":           "模块",
+	"report.scope":            "口径",
+	"report.status":           "状态",
+	"report.summary":          "摘要",
+	"report.duration":         "耗时",
+	"report.metric":           "指标",
+	"report.value":            "数值",
+	"report.rating":           "评价",
+	"report.method":           "方法",
+	"report.field":            "字段",
+	"report.reportID":         "报告 ID",
+	"report.version":          "ecs 版本",
+	"report.profile":          "配置档",
+	"report.startedAt":        "开始时间",
+	"report.totalDuration":    "总耗时",
+	"report.networkMode":      "网络模式",
+	"report.privacy":          "隐私",
+	"report.online":           "在线",
+	"report.offline":          "离线",
+	"report.redacted":         "敏感字段已遮盖",
+	"report.revealed":         "包含完整敏感字段",
+	"report.canceled":         "用户中断，报告包含已完成部分",
+	"report.runState":         "运行状态",
+	"report.methodologyLabel": "测试口径",
+	"report.comparability":    "可比范围",
+	"report.errorPrefix":      "错误",
+	"report.generator":        "生成器",
+
+	// ── 终端界面 ────────────────────────────────────────────
+	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML",
+	"term.profileLine":  "配置档",
+	"term.moduleCount":  "模块",
+	"term.estimate":     "预计",
+	"term.budget":       "资源上限",
+	"term.tempDisk":     "临时磁盘",
+	"term.networkUsage": "网络流量",
+	"term.uncapped":     "iperf3 按带宽计（不封顶）",
+	"term.hint":         "提示",
+	"term.finished":     "测试完成",
+	"term.localReports": "本地报告",
+	"term.noUpload":     "未上传任何报告；分享文件前请确认敏感字段遮盖状态。",
+	"term.ipDetail":     "IP 质量明细",
+	"term.writeFailed":  "报告写入失败",
+
+	// ── 标点 ────────────────────────────────────────────────
+	// 中英文的句读习惯不同，硬编码"。"会在英文报告里冒出全角句号。
+	"punct.sentenceEnd": "。",
+
+	// ── 汇总 ────────────────────────────────────────────────
+	"summary.withErrors":   "%d 项成功，%d 项异常",
+	"summary.withWarnings": "%d 项成功，%d 项需留意",
+	"summary.allOK":        "%d 项测试完成",
+	"summary.skipped":      "，%d 项跳过",
+
+	// ── 预估 ────────────────────────────────────────────────
+	"estimate.seconds": "约 %d–%d 秒",
+	"estimate.minutes": "约 %d–%d 分钟",
+	"estimate.offline": "离线模式会跳过全部外网探针",
+	"estimate.route":   "路由探测时长受每跳超时影响",
+
+	// ── 通用值 ──────────────────────────────────────────────
+	"value.yes":      "是",
+	"value.no":       "否",
+	"value.unknown":  "未知",
+	"value.none":     "—",
+	"value.enabled":  "已启用",
+	"value.disabled": "未启用",
+	"value.success":  "成功",
+	"value.failed":   "失败",
+	"value.partial":  "部分",
+}
+
+var english = map[string]string{
+	// ── Command line ────────────────────────────────────────
+	"cli.tagline":        "Ad-free VPS benchmark suite that never uploads by default",
+	"cli.usage":          "Usage",
+	"cli.usage.run":      "Run tests (standard profile by default)",
+	"cli.usage.list":     "Show profiles and modules",
+	"cli.usage.render":   "Re-export Markdown/HTML from a JSON report",
+	"cli.usage.config":   "Print a sample configuration file",
+	"cli.usage.doctor":   "Check the standard benchmark tools",
+	"cli.usage.version":  "Show version",
+	"cli.examples":       "Examples",
+	"cli.more":           "Run 'ecs run --help' for the full option list.",
+	"cli.modules":        "Modules",
+	"cli.profiles":       "Profiles",
+	"cli.sources":        "IP quality sources",
+	"cli.unknownCommand": "unknown command",
+	"cli.error":          "error",
+
+	// ── Profiles ────────────────────────────────────────────
+	"profile.quick":    "Low-footprint screening; skips heavy throughput and route tests",
+	"profile.standard": "Default full check",
+	"profile.full":     "Longer benchmarks, more traffic, includes route tests",
+
+	// ── Module titles ───────────────────────────────────────
+	"module.system.title":    "System & Resources",
+	"module.network.title":   "Network & IP Quality",
+	"module.cpu.title":       "CPU Performance",
+	"module.memory.title":    "Memory Performance",
+	"module.disk.title":      "Disk Performance",
+	"module.dns.title":       "DNS Quality",
+	"module.latency.title":   "Network Latency",
+	"module.speed.title":     "Network Throughput",
+	"module.ports.title":     "Outbound Ports",
+	"module.nat.title":       "NAT Type",
+	"module.blacklist.title": "IP Reputation & Mail Readiness",
+	"module.apps.title":      "Application Reachability",
+	"module.cnspeed.title":   "China Carrier Speedtest",
+	"module.media.title":     "Streaming & AI Services",
+	"module.route.title":     "Route Trace",
+	"module.backtrace.title": "China Return Path",
+
+	// ── Status ──────────────────────────────────────────────
+	"status.ok":      "OK",
+	"status.warning": "Attention",
+	"status.skipped": "Skipped",
+	"status.error":   "Error",
+
+	// ── Methodology ─────────────────────────────────────────
+	"methodology.standard-benchmark":   "Standard benchmark",
+	"methodology.protocol-measurement": "Protocol measurement",
+	"methodology.provider-assessment":  "Third-party assessment",
+	"methodology.heuristic":            "Heuristic",
+	"methodology.inventory":            "Inventory",
+	"methodology.unlabeled":            "Unlabeled",
+
+	// ── Report ──────────────────────────────────────────────
+	"report.title":            "ecs VPS Benchmark Report",
+	"report.local":            "Generated locally; nothing was uploaded.",
+	"report.overview":         "Run Overview",
+	"report.glance":           "At a Glance",
+	"report.metrics":          "Key Metrics",
+	"report.details":          "Details",
+	"report.notes":            "Notes",
+	"report.sources":          "Data Sources",
+	"report.notices":          "About This Report",
+	"report.item":             "Item",
+	"report.content":          "Value",
+	"report.module":           "Module",
+	"report.scope":            "Kind",
+	"report.status":           "Status",
+	"report.summary":          "Summary",
+	"report.duration":         "Duration",
+	"report.metric":           "Metric",
+	"report.value":            "Value",
+	"report.rating":           "Rating",
+	"report.method":           "Method",
+	"report.field":            "Field",
+	"report.reportID":         "Report ID",
+	"report.version":          "ecs version",
+	"report.profile":          "Profile",
+	"report.startedAt":        "Started at",
+	"report.totalDuration":    "Total duration",
+	"report.networkMode":      "Network mode",
+	"report.privacy":          "Privacy",
+	"report.online":           "Online",
+	"report.offline":          "Offline",
+	"report.redacted":         "Sensitive fields redacted",
+	"report.revealed":         "Full sensitive values included",
+	"report.canceled":         "Interrupted by user; report covers completed modules only",
+	"report.runState":         "Run state",
+	"report.methodologyLabel": "Methodology",
+	"report.comparability":    "Comparable scope",
+	"report.errorPrefix":      "Error",
+	"report.generator":        "Generator",
+
+	// ── Terminal ────────────────────────────────────────────
+	"term.subtitle":     "No ads · No auto-upload · Local JSON/Markdown/HTML",
+	"term.profileLine":  "Profile",
+	"term.moduleCount":  "Modules",
+	"term.estimate":     "ETA",
+	"term.budget":       "Budget",
+	"term.tempDisk":     "Temp disk",
+	"term.networkUsage": "Network",
+	"term.uncapped":     "iperf3 saturates the link (uncapped)",
+	"term.hint":         "Note",
+	"term.finished":     "Finished",
+	"term.localReports": "Local reports",
+	"term.noUpload":     "Nothing was uploaded; check redaction before sharing these files.",
+	"term.ipDetail":     "IP quality detail",
+	"term.writeFailed":  "failed to write report",
+
+	// ── Punctuation ─────────────────────────────────────────
+	"punct.sentenceEnd": ". ",
+
+	// ── Summary ─────────────────────────────────────────────
+	"summary.withErrors":   "%d passed, %d failed",
+	"summary.withWarnings": "%d passed, %d need attention",
+	"summary.allOK":        "%d checks completed",
+	"summary.skipped":      ", %d skipped",
+
+	// ── Estimates ───────────────────────────────────────────
+	"estimate.seconds": "about %d-%d s",
+	"estimate.minutes": "about %d-%d min",
+	"estimate.offline": "Offline mode skips every network probe",
+	"estimate.route":   "Route probing time depends on per-hop timeouts",
+
+	// ── Common values ───────────────────────────────────────
+	"value.yes":      "yes",
+	"value.no":       "no",
+	"value.unknown":  "unknown",
+	"value.none":     "—",
+	"value.enabled":  "enabled",
+	"value.disabled": "disabled",
+	"value.success":  "success",
+	"value.failed":   "failed",
+	"value.partial":  "partial",
+}
