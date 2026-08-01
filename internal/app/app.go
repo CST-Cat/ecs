@@ -96,6 +96,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cpuTimeFlag := flags.Duration("cpu-time", cfg.CPUTime, "每轮 CPU/内存测试时长")
 	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, "磁盘临时文件 MiB")
 	diskPathFlag := flags.String("disk-path", cfg.DiskPath, "磁盘测试目录")
+	diskMultiFlag := flags.Bool("disk-multi", cfg.DiskMulti, "额外测试系统盘之外的挂载盘")
 	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, "iperf3 每个节点、每个方向的测试时长")
 	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, "测速并发流")
 	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, "单次 HTTP 请求超时")
@@ -127,6 +128,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.CPUTime = *cpuTimeFlag
 	cfg.DiskMiB = *diskFlag
 	cfg.DiskPath = *diskPathFlag
+	cfg.DiskMulti = *diskMultiFlag
 	cfg.IPerfDuration = *iperfDurationFlag
 	cfg.SpeedThreads = *threadsFlag
 	cfg.HTTPTimeout = *timeoutFlag

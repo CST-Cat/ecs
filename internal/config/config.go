@@ -131,6 +131,7 @@ type Runtime struct {
 	CPUTime          time.Duration
 	DiskMiB          int
 	DiskPath         string
+	DiskMulti        bool
 	IPerfDuration    time.Duration
 	IPerfTargets     []IPerfEndpoint
 	HTTPTimeout      time.Duration
@@ -164,6 +165,7 @@ type File struct {
 	CPUTime          string          `json:"cpu_time,omitempty"`
 	DiskMiB          *int            `json:"disk_mib,omitempty"`
 	DiskPath         string          `json:"disk_path,omitempty"`
+	DiskMulti        *bool           `json:"disk_multi,omitempty"`
 	IPerfDuration    string          `json:"iperf_duration,omitempty"`
 	IPerfTargets     []IPerfEndpoint `json:"iperf_targets,omitempty"`
 	HTTPTimeout      string          `json:"http_timeout,omitempty"`
@@ -306,6 +308,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	if file.DiskPath != "" {
 		runtime.DiskPath = file.DiskPath
+	}
+	if file.DiskMulti != nil {
+		runtime.DiskMulti = *file.DiskMulti
 	}
 	if file.IPerfDuration != "" {
 		value, err := time.ParseDuration(file.IPerfDuration)

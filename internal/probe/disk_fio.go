@@ -332,6 +332,19 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	return result
 }
 
+// parseFIOJobs 把 fio 的 JSON 输出按作业名索引。
+func parseFIOJobs(output []byte) (map[string]fioJob, error) {
+	var parsed fioOutput
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		return nil, fmt.Errorf("解析 fio JSON: %w", err)
+	}
+	jobs := make(map[string]fioJob, len(parsed.Jobs))
+	for _, job := range parsed.Jobs {
+		jobs[job.Name] = job
+	}
+	return jobs, nil
+}
+
 func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, systemSnapshot, error) {
 	var disk systemSnapshot
 	diskPath, err := filepath.Abs(env.Config.DiskPath)
