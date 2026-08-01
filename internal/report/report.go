@@ -27,15 +27,16 @@ func WriteFiles(data model.Report, directory, baseName string, formats []string)
 		baseName = "ecs-report-" + data.Run.StartedAt.Format("20060102-150405")
 	}
 	baseName = sanitizeBaseName(baseName)
-	// JSON 保留探针产出的原文，供机器解析；面向人阅读的格式才翻译，
-	// 这样下游程序不会因为界面语言变化而拿到不同的字段值。
+	// 选了哪种语言，全部输出就用哪种语言，JSON 也不例外。
+	// 机器标识符（模块 id、measurement.key、method、unit、status、
+	// methodology.kind）本来就不参与翻译，下游按这些字段解析不受影响。
 	localized := Localize(data)
 	written := make(map[string]string)
 	for _, format := range formats {
 		var content []byte
 		switch format {
 		case "json":
-			content, err = JSON(data)
+			content, err = JSON(localized)
 		case "md":
 			content = []byte(Markdown(localized))
 		case "html":

@@ -76,6 +76,7 @@ func collectUntranslated(data model.Report, missing map[string]bool) {
 		// 系统的 permission denied），翻译它等于篡改诊断信息，
 		// 与 TextBlock 正文同理。
 		check(result.Methodology.Label)
+		check(result.Methodology.Engine)
 		check(result.Methodology.Profile)
 		check(result.Methodology.ComparisonScope)
 		for _, note := range result.Notes {
@@ -89,6 +90,8 @@ func collectUntranslated(data model.Report, missing map[string]bool) {
 			check(measurement.Label)
 			check(measurement.Display)
 			check(measurement.Rating)
+			check(measurement.Unit)
+			check(measurement.Method)
 		}
 		for _, table := range result.Tables {
 			check(table.Title)

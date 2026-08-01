@@ -11,8 +11,10 @@ import (
 // 好处是 probe 包一行不用改；代价是原文改字会丢译文，因此有测试遍历真实运行
 // 产出的文本核对覆盖率。
 //
-// 返回新的副本，不修改入参——JSON 报告始终保存探针产出的原文，只有面向人阅读的
-// Markdown/HTML/终端才做翻译。这样机器解析的字段不会随界面语言漂移。
+// 返回新的副本，不修改入参。选定的语言适用于全部输出格式，JSON 也一样：
+// 用户选了英文就该拿到英文报告。机器标识符不在翻译范围内——模块 id、
+// measurement.key/method/unit、status、methodology.kind 都保持原样，
+// 因此下游按这些字段解析不受语言影响。
 func Localize(data model.Report) model.Report {
 	if i18n.Current() == i18n.LangZH {
 		return data
@@ -34,6 +36,7 @@ func localizeResult(result model.Result) model.Result {
 	out.Summary = i18n.Text(result.Summary)
 	out.Error = i18n.Text(result.Error)
 	out.Methodology.Label = i18n.Text(result.Methodology.Label)
+	out.Methodology.Engine = i18n.Text(result.Methodology.Engine)
 	out.Methodology.Profile = i18n.Text(result.Methodology.Profile)
 	out.Methodology.ComparisonScope = i18n.Text(result.Methodology.ComparisonScope)
 	out.Notes = i18n.TextSlice(result.Notes)
@@ -49,6 +52,12 @@ func localizeResult(result model.Result) model.Result {
 		measurement.Label = i18n.Text(measurement.Label)
 		measurement.Display = i18n.Text(measurement.Display)
 		measurement.Rating = i18n.Text(measurement.Rating)
+		// unit 是给人看的量纲（"线程"/"项"/"小时"），跟随语言；
+		// key、method 是机器标识符，不动。
+		measurement.Unit = i18n.Text(measurement.Unit)
+		// method 多数是稳定标识符（sysbench-cpu-prime20000-v1），但 IP 质量模块
+		// 会把口径与通道拼进去，那部分是给人看的，也要翻译。
+		measurement.Method = i18n.Text(measurement.Method)
 		out.Measurements[index] = measurement
 	}
 	out.Tables = make([]model.Table, len(result.Tables))

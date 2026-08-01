@@ -43,6 +43,29 @@ jobs:
           go run ./cmd/ecs --profile quick --offline --only system,cpu,memory,disk \
             --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-samples --no-color
           ECS_I18N_SAMPLES=/tmp/i18n-samples go test ./internal/report/ -run TestLocalizeCovers -v
+          # 再直接扫一遍英文 JSON：翻译覆盖的是渲染层，这里确认落盘文件本身也没有中文。
+          go run ./cmd/ecs --lang en --profile quick --offline --only system,cpu,memory,disk \
+            --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-en --no-color
+          python3 - <<'SCAN'
+          import json,glob,re,sys
+          han=re.compile(r'[\u4e00-\u9fff]'); bad=[]
+          for f in glob.glob('/tmp/i18n-en/*.json'):
+              d=json.load(open(f))
+              def walk(o,path=''):
+                  if isinstance(o,dict):
+                      for k,v in o.items(): walk(v,path+'.'+k)
+                  elif isinstance(o,list):
+                      for i,v in enumerate(o): walk(v,path+f'[{i}]')
+                  elif isinstance(o,str) and han.search(o):
+                      if '.text_blocks[' in path and path.endswith('.content'): return
+                      bad.append((path,o[:80]))
+              walk(d)
+          if bad:
+              print(f'英文 JSON 里有 {len(bad)} 处中文:')
+              for p,v in bad: print('  ',p,':',v)
+              sys.exit(1)
+          print('英文 JSON 零中文残留')
+          SCAN
       - run: go vet ./...
       - run: go build ./cmd/ecs
       - run: sh -n install.sh

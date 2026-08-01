@@ -9,6 +9,19 @@ package i18n
 // 开发机上永远不会触发。
 
 var probeEnglishCross = map[string]string{
+	// methodology.engine 与 measurement.method 里混入的中文描述。
+	"NextTrace/traceroute + 骨干网段特征表":     "NextTrace/traceroute + backbone prefix signatures",
+	"公司滥用概率；官方免密直连":                      "Company abuse probability; official keyless endpoint",
+	"ASN 滥用概率；官方免密直连":                    "ASN abuse probability; official keyless endpoint",
+	"90 天滥用置信度；IPQuality/check.place 中转": "90-day abuse confidence; IPQuality/check.place relay",
+	"IP2Proxy 欺诈分；官方免密接口":                "IP2Proxy fraud score; official keyless endpoint",
+	"Web 流量欺诈分；IPQuality/check.place 中转": "Web traffic fraud score; IPQuality/check.place relay",
+	"IP 欺诈分；官方公开查询页":                     "IP fraud score; official public lookup page",
+	"威胁等级（0/50/100 映射*）；官方 free API（免密保底）；low/medium/high 映射为 0/50/100，仅用于展示": "Threat level (mapped to 0/50/100*); official free API (keyless fallback); low/medium/high mapped to 0/50/100 for display only",
+	// 量纲：给人看的单位，跟随语言。
+	"线程": "threads",
+	"项":  "items",
+	"小时": "hours",
 	// 平台专有名词：英文用户看不懂中文台名，给出通行的罗马化/英文名。
 	"巴哈姆特動畫瘋":      "Bahamut Anime (TW)",
 	"网易云音乐":        "NetEase Cloud Music",
