@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
@@ -63,7 +64,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if configPath != "" {
 		fileConfig, err = config.LoadFile(configPath)
 		if err != nil {
-			fmt.Fprintln(stderr, "错误:", err)
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 			return 1
 		}
 	}
@@ -73,11 +74,11 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	cfg, err := config.Defaults(profile)
 	if err != nil {
-		fmt.Fprintln(stderr, "错误:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 	if err := config.ApplyFile(&cfg, fileConfig); err != nil {
-		fmt.Fprintln(stderr, "错误:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 	if cfg.Output == "" {
@@ -86,36 +87,36 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), "界面语言：zh、en")
-	profileFlag := flags.String("profile", cfg.Profile, "配置档：quick、standard、full")
-	configFlag := flags.String("config", configPath, "JSON 配置文件")
-	onlyFlag := flags.String("only", "", "只运行这些模块，逗号分隔")
-	skipFlag := flags.String("skip", "", "跳过这些模块，逗号分隔")
-	offlineFlag := flags.Bool("offline", cfg.Offline, "跳过全部外网探针")
-	revealFlag := flags.Bool("reveal", cfg.Reveal, "在本地报告中保留完整 IP/主机名")
-	ipSourcesFlag := flags.String("ip-quality-sources", strings.Join(cfg.IPQualitySources, ","), "IP 质量数据源：all、none 或逗号分隔名称")
-	formatsFlag := flags.String("format", strings.Join(cfg.Formats, ","), "输出格式：json,md,html")
-	outputFlag := flags.String("output", cfg.Output, "报告输出目录")
-	nameFlag := flags.String("name", "", "报告文件名前缀")
-	noColorFlag := flags.Bool("no-color", cfg.NoColor, "禁用 ANSI 颜色")
-	cpuTimeFlag := flags.Duration("cpu-time", cfg.CPUTime, "每轮 CPU/内存测试时长")
-	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, "磁盘临时文件 MiB")
-	diskPathFlag := flags.String("disk-path", cfg.DiskPath, "磁盘测试目录")
-	diskMultiFlag := flags.Bool("disk-multi", cfg.DiskMulti, "额外测试系统盘之外的挂载盘")
-	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, "iperf3 每个节点、每个方向的测试时长")
-	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, "测速并发流")
-	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, "单次 HTTP 请求超时")
-	dnsAttemptsFlag := flags.Int("dns-attempts", cfg.DNSAttempts, "每个 DNS 解析器的采样次数")
-	latencyAttemptsFlag := flags.Int("latency-attempts", cfg.LatencyAttempts, "每个延迟目标的采样次数")
-	dnsResolversFlag := flags.String("dns-resolvers", "", "覆盖 DNS 解析器：[名称=]host:port，逗号分隔")
-	latencyTargetsFlag := flags.String("latency-targets", "", "覆盖延迟目标：[名称=]host:port，逗号分隔")
-	routeTargetsFlag := flags.String("route-targets", "", "覆盖路由目标：[名称=]host，逗号分隔")
-	stunServersFlag := flags.String("stun-servers", "", "覆盖 STUN 服务器：[名称=]host:port，逗号分隔")
-	iperfTargetsFlag := flags.String("iperf-targets", "", "覆盖 iperf3 节点：[名称=]host:start[-end]，逗号分隔")
-	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), "流媒体检测地区：global、jp、tw、hk、cn（逗号分隔，默认全部）")
-	backtraceCityFlag := flags.String("backtrace-city", "", "三网回程测试城市：beijing、guangzhou、shanghai、chengdu 或 all（默认 beijing,guangzhou）")
-	strictFlag := flags.Bool("strict", false, "探针警告或错误时返回非零退出码")
-	versionFlag := flags.Bool("version", false, "显示版本")
+	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
+	profileFlag := flags.String("profile", cfg.Profile, i18n.T("flag.profile"))
+	configFlag := flags.String("config", configPath, i18n.T("flag.config"))
+	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
+	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
+	offlineFlag := flags.Bool("offline", cfg.Offline, i18n.T("flag.offline"))
+	revealFlag := flags.Bool("reveal", cfg.Reveal, i18n.T("flag.reveal"))
+	ipSourcesFlag := flags.String("ip-quality-sources", strings.Join(cfg.IPQualitySources, ","), i18n.T("flag.ipQualitySources"))
+	formatsFlag := flags.String("format", strings.Join(cfg.Formats, ","), i18n.T("flag.format"))
+	outputFlag := flags.String("output", cfg.Output, i18n.T("flag.output"))
+	nameFlag := flags.String("name", "", i18n.T("flag.name"))
+	noColorFlag := flags.Bool("no-color", cfg.NoColor, i18n.T("flag.noColor"))
+	cpuTimeFlag := flags.Duration("cpu-time", cfg.CPUTime, i18n.T("flag.cpuTime"))
+	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, i18n.T("flag.diskMiB"))
+	diskPathFlag := flags.String("disk-path", cfg.DiskPath, i18n.T("flag.diskPath"))
+	diskMultiFlag := flags.Bool("disk-multi", cfg.DiskMulti, i18n.T("flag.diskMulti"))
+	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, i18n.T("flag.iperfDuration"))
+	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, i18n.T("flag.speedThreads"))
+	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, i18n.T("flag.timeout"))
+	dnsAttemptsFlag := flags.Int("dns-attempts", cfg.DNSAttempts, i18n.T("flag.dnsAttempts"))
+	latencyAttemptsFlag := flags.Int("latency-attempts", cfg.LatencyAttempts, i18n.T("flag.latencyAttempts"))
+	dnsResolversFlag := flags.String("dns-resolvers", "", i18n.T("flag.dnsResolvers"))
+	latencyTargetsFlag := flags.String("latency-targets", "", i18n.T("flag.latencyTargets"))
+	routeTargetsFlag := flags.String("route-targets", "", i18n.T("flag.routeTargets"))
+	stunServersFlag := flags.String("stun-servers", "", i18n.T("flag.stunServers"))
+	iperfTargetsFlag := flags.String("iperf-targets", "", i18n.T("flag.iperfTargets"))
+	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), i18n.T("flag.mediaRegion"))
+	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
+	strictFlag := flags.Bool("strict", false, i18n.T("flag.strict"))
+	versionFlag := flags.Bool("version", false, i18n.T("flag.version"))
 	flags.Usage = func() { printRunHelp(stderr, flags) }
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -128,7 +129,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintf(stderr, "错误: 多余参数 %s\n", strings.Join(flags.Args(), " "))
+		fmt.Fprintf(stderr, "%s %s\n", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
 		return 1
 	}
 	_ = configFlag
@@ -164,7 +165,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 		endpoints, err := config.ParseEndpointList(override.raw, override.requirePort)
 		if err != nil {
-			fmt.Fprintf(stderr, "错误: --%s: %v\n", override.label, err)
+			fmt.Fprintf(stderr, "%s: --%s: %v\n", i18n.T("cli.error"), override.label, err)
 			return 1
 		}
 		override.apply(endpoints)
@@ -172,14 +173,14 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if *iperfTargetsFlag != "" {
 		targets, err := config.ParseIPerfTargetList(*iperfTargetsFlag)
 		if err != nil {
-			fmt.Fprintln(stderr, "错误: --iperf-targets:", err)
+			fmt.Fprintf(stderr, "%s: --iperf-targets: %v\n", i18n.T("cli.error"), err)
 			return 1
 		}
 		cfg.IPerfTargets = targets
 	}
 	if regions := config.ParseList(*mediaRegionFlag); len(regions) > 0 {
 		if err := config.ValidateMediaRegions(regions); err != nil {
-			fmt.Fprintln(stderr, "错误:", err)
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 			return 1
 		}
 		cfg.MediaRegions = regions
@@ -187,14 +188,14 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if *backtraceCityFlag != "" {
 		cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
 		if err != nil {
-			fmt.Fprintln(stderr, "错误:", err)
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 			return 1
 		}
 		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 	}
 	cfg.Modules = config.SelectModules(cfg.Modules, config.ParseList(*onlyFlag), config.ParseList(*skipFlag))
 	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintln(stderr, "错误:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 
@@ -220,10 +221,10 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 func renderCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	input := flags.String("input", "", "ecs JSON 报告路径")
+	input := flags.String("input", "", i18n.T("flag.renderInput"))
 	formats := flags.String("format", "md,html", "输出格式")
-	output := flags.String("output", "", "输出目录，默认与输入文件相同")
-	name := flags.String("name", "", "报告文件名前缀")
+	output := flags.String("output", "", i18n.T("flag.renderOutput"))
+	name := flags.String("name", "", i18n.T("flag.name"))
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -231,12 +232,12 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if *input == "" {
-		fmt.Fprintln(stderr, "错误: --input 必填")
+		fmt.Fprintln(stderr, i18n.T("help.renderInputRequired"))
 		return 1
 	}
 	data, err := reporter.LoadJSON(*input)
 	if err != nil {
-		fmt.Fprintln(stderr, "错误: 读取报告:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 	if *output == "" {
@@ -248,7 +249,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	written, err := reporter.WriteFiles(data, *output, *name, config.ParseList(*formats))
 	if err != nil {
-		fmt.Fprintln(stderr, "错误:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 	keys := make([]string, 0, len(written))
@@ -263,47 +264,29 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 }
 
 func listCommand(stdout io.Writer) int {
-	fmt.Fprintln(stdout, "配置档:")
-	fmt.Fprintln(stdout, "  quick     低资源快速筛查，不执行大流量测速和路由")
-	fmt.Fprintln(stdout, "  standard  默认综合测试")
-	fmt.Fprintln(stdout, "  full      更长性能测试、更大流量并包含路由")
-	fmt.Fprintln(stdout, "\n模块:")
-	descriptions := map[string]string{
-		"system":    "系统、虚拟化、资源、内核网络栈",
-		"network":   "IPv4/IPv6、原生/广播、六库风险分与九库风险因子",
-		"cpu":       "sysbench 标准 CPU 基准",
-		"memory":    "sysbench 标准内存基准",
-		"disk":      "fio Direct I/O 标准基准",
-		"dns":       "公共 DNS 延迟、失败率与抖动",
-		"latency":   "TCP 建连延迟与可达率",
-		"speed":     "iperf3 多节点标准吞吐基准",
-		"ports":     "Web、SSH、DNS 与邮件出站端口",
-		"nat":       "STUN 探测 UDP 映射/过滤行为与 NAT 类型",
-		"blacklist": "17 个 DNS 黑名单收录情况 + 反向解析 FCrDNS 校验",
-		"apps":      "Telegram DC、代码/镜像/软件源/证书服务可达性",
-		"cnspeed":   "中国电信/联通/移动就近节点 HTTP 下载带宽（仅 full 档）",
-		"media":     "流媒体与 AI 服务公开页证据（可按 --media-region 筛选）",
-		"route":     "NextTrace/系统 traceroute 适配器",
-		"backtrace": "三网回程线路识别（电信/联通/移动骨干特征）",
+	fmt.Fprintln(stdout, i18n.T("list.profilesHeader"))
+	for _, profile := range []string{config.ProfileQuick, config.ProfileStandard, config.ProfileFull} {
+		fmt.Fprintf(stdout, "  %-10s %s\n", profile, i18n.T("profile."+profile))
 	}
+	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
 	for _, id := range config.ModuleOrder {
-		fmt.Fprintf(stdout, "  %-10s %s\n", id, descriptions[id])
+		fmt.Fprintf(stdout, "  %-10s %s\n", id, i18n.T("module."+id+".desc"))
 	}
-	fmt.Fprintln(stdout, "\nIP 质量数据源:")
+	fmt.Fprintln(stdout, "\n"+i18n.T("list.sourcesHeader"))
 	fmt.Fprintln(stdout, "  maxmind, ipinfo, ipregistry, ipapi, ip2location, abuseipdb,")
 	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois, ipapicom, ipsb")
-	fmt.Fprintln(stdout, "  默认 all；none 关闭附加质量查询（出口发现仍访问 ipapi.is）")
+	fmt.Fprintln(stdout, "  "+i18n.T("list.sourcesNote"))
 	return 0
 }
 
 func configCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 || args[0] != "example" {
-		fmt.Fprintln(stderr, "用法: ecs config example")
+		fmt.Fprintln(stderr, i18n.T("help.configUsage"))
 		return 1
 	}
 	content, err := json.MarshalIndent(config.ExampleFile(), "", "  ")
 	if err != nil {
-		fmt.Fprintln(stderr, "错误:", err)
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
 	fmt.Fprintln(stdout, string(content))
@@ -311,32 +294,32 @@ func configCommand(args []string, stdout, stderr io.Writer) int {
 }
 
 func doctorCommand(ctx context.Context, stdout io.Writer) int {
-	fmt.Fprintln(stdout, "ecs 标准基准依赖")
+	fmt.Fprintln(stdout, i18n.T("doctor.header"))
 	tools := []struct {
 		name     string
 		required bool
 		purpose  string
 		args     []string
 	}{
-		{name: "sysbench", required: true, purpose: "CPU / 内存", args: []string{"--version"}},
-		{name: "fio", required: true, purpose: "磁盘 Direct I/O", args: []string{"--version"}},
-		{name: "iperf3", required: true, purpose: "网络吞吐", args: []string{"--version"}},
-		{name: "nexttrace", purpose: "高级路由", args: []string{"--version"}},
-		{name: "traceroute", purpose: "基础路由", args: []string{"--version"}},
-		{name: "mbw", purpose: "内存带宽（补充口径）", args: []string{"-h"}},
-		{name: "ioping", purpose: "I/O 延迟（补充口径）", args: []string{"-v"}},
-		{name: "smartctl", purpose: "磁盘健康（需 root）", args: []string{"--version"}},
+		{name: "sysbench", required: true, purpose: i18n.T("doctor.purpose.sysbench"), args: []string{"--version"}},
+		{name: "fio", required: true, purpose: i18n.T("doctor.purpose.fio"), args: []string{"--version"}},
+		{name: "iperf3", required: true, purpose: i18n.T("doctor.purpose.iperf3"), args: []string{"--version"}},
+		{name: "nexttrace", purpose: i18n.T("doctor.purpose.nexttrace"), args: []string{"--version"}},
+		{name: "traceroute", purpose: i18n.T("doctor.purpose.traceroute"), args: []string{"--version"}},
+		{name: "mbw", purpose: i18n.T("doctor.purpose.mbw"), args: []string{"-h"}},
+		{name: "ioping", purpose: i18n.T("doctor.purpose.ioping"), args: []string{"-v"}},
+		{name: "smartctl", purpose: i18n.T("doctor.purpose.smartctl"), args: []string{"--version"}},
 	}
 	missingRequired := false
 	for _, tool := range tools {
 		path, err := exec.LookPath(tool.name)
 		if err != nil {
-			label := "可选"
+			label := i18n.T("doctor.optional")
 			if tool.required {
-				label = "缺失"
+				label = i18n.T("doctor.missing")
 				missingRequired = true
 			}
-			fmt.Fprintf(stdout, "  %-11s %-4s %s\n", tool.name, label, tool.purpose)
+			fmt.Fprintf(stdout, "  %-11s %s %s\n", tool.name, padDisplay(label, 8), tool.purpose)
 			continue
 		}
 		versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -347,16 +330,16 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 			version = version[:newline]
 		}
 		if runErr != nil || version == "" {
-			version = "版本未知"
+			version = i18n.T("doctor.unknownVersion")
 		}
-		fmt.Fprintf(stdout, "  %-11s 就绪  %s · %s\n", tool.name, tool.purpose, version)
+		fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, padDisplay(i18n.T("doctor.ready"), 8), tool.purpose, version)
 	}
 	if missingRequired {
-		fmt.Fprintln(stdout, "\n安装：./install.sh --with-benchmarks")
-		fmt.Fprintln(stdout, "缺失时任何配置档都会明确警告对应标准成绩未运行，不会生成替代分数。")
+		fmt.Fprintln(stdout, "\n"+i18n.T("doctor.installHint"))
+		fmt.Fprintln(stdout, i18n.T("doctor.noSubstitute"))
 		return 2
 	}
-	fmt.Fprintln(stdout, "\n标准性能工具已就绪。")
+	fmt.Fprintln(stdout, "\n"+i18n.T("doctor.allReady"))
 	return 0
 }
 
@@ -383,6 +366,26 @@ func resolveLanguage(args []string) i18n.Lang {
 		}
 	}
 	return i18n.DetectFromEnv()
+}
+
+// padDisplay 按显示宽度右填充。
+//
+// %-Ns 按字节计数，中日韩字符一个占三字节却只显示两列，直接用会让中英文两种
+// 语言下的列宽都对不齐。
+func padDisplay(value string, width int) string {
+	display := 0
+	for _, character := range value {
+		if unicode.Is(unicode.Han, character) || unicode.Is(unicode.Hiragana, character) ||
+			unicode.Is(unicode.Katakana, character) || unicode.Is(unicode.Hangul, character) {
+			display += 2
+			continue
+		}
+		display++
+	}
+	if display >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-display)
 }
 
 func preparse(args []string) (configPath, profile string) {
@@ -425,8 +428,8 @@ func printHelp(writer io.Writer) {
 }
 
 func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
-	fmt.Fprintln(writer, "用法: ecs [run] [选项]")
+	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
-	fmt.Fprintln(writer, "\n模块:", strings.Join(config.ModuleOrder, ","))
-	fmt.Fprintln(writer, "IP 质量数据源: maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois,ipapicom,ipsb")
+	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleOrder, ","))
+	fmt.Fprintln(writer, i18n.T("cli.sources")+": maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois,ipapicom,ipsb")
 }

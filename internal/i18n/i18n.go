@@ -98,6 +98,14 @@ func TL(lang Lang, key string) string { return translate(lang, key) }
 
 func translate(lang Lang, key string) string {
 	if lang == LangEN {
+		if value, ok := cliEnglish[key]; ok && value != "" {
+			return value
+		}
+	}
+	if value, ok := cliChinese[key]; ok && value != "" {
+		return value
+	}
+	if lang == LangEN {
 		if value, ok := english[key]; ok && value != "" {
 			return value
 		}
@@ -111,6 +119,13 @@ func translate(lang Lang, key string) string {
 
 // Has 报告某个 key 是否有当前语言的译文，供测试核对覆盖率。
 func Has(lang Lang, key string) bool {
+	if lang == LangEN {
+		if value, ok := cliEnglish[key]; ok && value != "" {
+			return true
+		}
+	} else if value, ok := cliChinese[key]; ok && value != "" {
+		return true
+	}
 	if lang == LangEN {
 		value, ok := english[key]
 		return ok && value != ""

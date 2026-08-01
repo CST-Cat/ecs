@@ -43,7 +43,15 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 这一点无法靠脚本自身解决——能做的是让脚本短到可以在执行前一眼读完，且不隐藏任何步骤。
 想长期安装用 `install.sh`。
 
-**界面语言**：全部命令支持 `--lang zh|en`，未指定时按 `ECS_LANG`/`LC_ALL`/`LANG` 推断。
+**界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
+`config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按
+`ECS_LANG`/`LC_ALL`/`LANG` 推断，都没有则用中文。
+
+```bash
+ecs --lang en doctor
+ecs list --lang en
+curl -fsSL .../run.sh | sh -s -- --lang en --profile full
+```
 **选定的语言适用于全部输出**：终端、Markdown、HTML 与 JSON 一致。机器标识符不参与翻译
 （模块 `id`、`measurement.key`/`method`/`unit`、`status`、`methodology.kind`），
 因此下游按这些字段解析不受语言影响。外部工具的原始输出（sysbench/fio 的 stdout、

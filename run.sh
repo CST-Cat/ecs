@@ -19,9 +19,32 @@ REPO="${ECS_REPOSITORY:-CST-Cat/ecs}"
 VERSION="${ECS_VERSION:-latest}"
 KEEP="${ECS_KEEP:-0}"
 
-fail() { printf 'ecs: %s\n' "$1" >&2; exit 1; }
+# 脚本自身的提示也跟随语言：从参数里取 --lang，其次看环境变量。
+# 这些提示在下载 ecs 之前就要打印，所以只能在 shell 里判断。
+LANG_SEL=""
+for arg in "$@"; do
+  case "$arg" in
+    --lang=*) LANG_SEL="${arg#--lang=}" ;;
+    -lang=*)  LANG_SEL="${arg#-lang=}" ;;
+    --lang|-lang) LANG_SEL="__next__" ;;
+    *) [ "$LANG_SEL" = "__next__" ] && LANG_SEL="$arg" ;;
+  esac
+done
+[ -n "$LANG_SEL" ] && [ "$LANG_SEL" != "__next__" ] || LANG_SEL="${ECS_LANG:-${LC_ALL:-${LANG:-}}}"
+case "$LANG_SEL" in
+  en*|EN*) UI=en ;;
+  *) UI=zh ;;
+esac
 
-[ "$(uname -s)" = "Linux" ] || fail "只支持 Linux（检测到 $(uname -s)）"
+say() {
+  if [ "$UI" = "en" ]; then printf 'ecs: %s\n' "$2" >&2; else printf 'ecs: %s\n' "$1" >&2; fi
+}
+die() {
+  if [ "$UI" = "en" ]; then printf 'ecs: %s\n' "$2" >&2; else printf 'ecs: %s\n' "$1" >&2; fi
+  exit 1
+}
+
+[ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
 
 case "$(uname -m)" in
   x86_64|amd64)   ARCH=amd64 ;;
@@ -31,7 +54,7 @@ case "$(uname -m)" in
   s390x)          ARCH=s390x ;;
   riscv64)        ARCH=riscv64 ;;
   ppc64le)        ARCH=ppc64le ;;
-  *) fail "不支持的架构：$(uname -m)" ;;
+  *) die "不支持的架构：$(uname -m)" "unsupported architecture: $(uname -m)" ;;
 esac
 
 if [ "$VERSION" = "latest" ]; then
@@ -43,7 +66,7 @@ ASSET="ecs_linux_${ARCH}.tar.gz"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ecs-run.XXXXXX")
 if [ "$KEEP" = "1" ]; then
-  printf 'ecs: 二进制保留在 %s\n' "$WORK" >&2
+  say "二进制保留在 $WORK" "binary kept at $WORK"
 else
   trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 fi
@@ -54,34 +77,34 @@ fetch() {
   elif command -v wget >/dev/null 2>&1; then
     wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
   else
-    fail "需要 curl 或 wget"
+    die "需要 curl 或 wget" "curl or wget is required"
   fi
 }
 
-printf 'ecs: 下载 %s\n' "$ASSET" >&2
-fetch "${BASE}/${ASSET}" "${WORK}/${ASSET}" || fail "下载失败；仓库是否已发布 Release？"
-fetch "${BASE}/checksums.txt" "${WORK}/checksums.txt" || fail "下载校验文件失败"
+say "下载 $ASSET" "downloading $ASSET"
+fetch "${BASE}/${ASSET}" "${WORK}/${ASSET}" || die "下载失败；仓库是否已发布 Release？" "download failed; has a Release been published?"
+fetch "${BASE}/checksums.txt" "${WORK}/checksums.txt" || die "下载校验文件失败" "failed to download the checksum file"
 
 # 校验不可跳过：这是 curl|sh 这条路径上唯一能自证内容未被替换的环节。
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt")
-[ -n "$EXPECTED" ] || fail "校验文件里没有 ${ASSET} 的条目"
+[ -n "$EXPECTED" ] || die "校验文件里没有 ${ASSET} 的条目" "no checksum entry for ${ASSET}"
 case "$EXPECTED" in
-  *[!A-Fa-f0-9]*|"") fail "校验值格式非法" ;;
+  *[!A-Fa-f0-9]*|"") die "校验值格式非法" "malformed checksum value" ;;
 esac
-[ "${#EXPECTED}" -eq 64 ] || fail "校验值长度非法"
+[ "${#EXPECTED}" -eq 64 ] || die "校验值长度非法" "malformed checksum length"
 
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL=$(sha256sum "${WORK}/${ASSET}" | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
   ACTUAL=$(shasum -a 256 "${WORK}/${ASSET}" | awk '{print $1}')
 else
-  fail "需要 sha256sum 或 shasum 才能校验"
+  die "需要 sha256sum 或 shasum 才能校验" "sha256sum or shasum is required to verify"
 fi
-[ "$ACTUAL" = "$EXPECTED" ] || fail "SHA-256 校验失败：内容与发布版本不一致"
-printf 'ecs: SHA-256 已校验\n' >&2
+[ "$ACTUAL" = "$EXPECTED" ] || die "SHA-256 校验失败：内容与发布版本不一致" "SHA-256 mismatch: content differs from the published release"
+say "SHA-256 已校验" "SHA-256 verified"
 
 tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
-[ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || fail "压缩包里没有常规的 ecs 文件"
+[ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
 
 # 全部参数原样透传，因此 run.sh 支持 ecs 的每一个选项。
