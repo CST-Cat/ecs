@@ -15,6 +15,9 @@
 | traceroute / tracepath | 基础路由追踪 | 操作系统发行方 | 随发行版而异 | NextTrace 不存在时使用；路径快照 12 跳、三网回程 20 跳；不经过 shell |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
 
+`nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
+只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
+
 默认安装不会触碰包管理器。`install.sh --with-benchmarks` 是用户明确授权后的便捷入口；它安装发行版提供的软件包，不从随机镜像下载裸二进制，也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版上传行为不作为默认依赖。
 
 ## 在线服务
@@ -35,6 +38,7 @@
 - [Jina Reader](https://github.com/jina-ai/reader)（Apache-2.0 服务实现）：当 IPQS 社区额度和官方公开页出口配额同时不可用时，读取同一公开查询页的一小时内缓存；不提供或代算供应商分数；
 - YABS 当前公共 iperf3 节点清单中的 Clouvider/Leaseweb 测速服务：standard/full 的多节点 TCP 吞吐；
 - 电信、联通、移动的公开参考 IP：`backtrace` 模块用于识别路径上的骨干线路，只发送路由探测包；
+- 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；
 - README 中列出的公共 DNS、延迟、端口以及服务自身公开网页。
 
 第三方服务会看到请求出口 IP，并可能有各自的日志、速率限制、套餐字段差异与隐私政策。社区中转和 Jina Reader 还会看到被查询 IP；报告的数据源状态表会区分“官方 API”“官方免密/公开接口”“IPQuality/check.place 中转”和网页读取兜底。`--offline` 会跳过全部在线探针，`--ip-quality-sources none` 只关闭附加质量源。
