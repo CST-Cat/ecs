@@ -178,3 +178,58 @@
 - **Geekbench**：闭源，免费版强制上传结果，且不同大版本之间不可直接比较，与零上传约束冲突。
 - **自研 AES/bzip2 压缩跑分**（nench 的做法）：违反"性能成绩只能来自标准工具"的约束。
 - **串联他人脚本**（spiritLHLS 的做法）：运行时下载多个脚本与二进制，版本、摘要与真实执行内容都不透明。
+
+## 与 oneclickvirt/ecs、spiritLHLS/ecs 的逐项差距（2026-08-01 按 README 参数面核对）
+
+用户指定的这两个项目是功能覆盖最全的同类。逐条对照它们的命令行参数与 README 声明，
+`ecs` **并未覆盖全部功能**。如实记录差距，不夸大。
+
+### 已覆盖（能力相当或更强）
+
+| 能力 | 对方实现 | ecs |
+| --- | --- | --- |
+| 系统基础信息 | basics | `system`，含 cgroup 配额、steal、CPU 缓存、VT-x/AMD-V |
+| NAT 类型 | gostun | `nat`，自实现 STUN，且区分"服务器不支持"与"被过滤" |
+| CPU / 内存 / 磁盘 | cputest / memorytest / disktest | sysbench + fio |
+| IP 质量 | securityCheck / IPQuality | `network`，11 源，保留通道与失败状态 |
+| 流媒体解锁 | UnlockTests | `media`，33 平台，强/弱证据分级 |
+| 邮件端口 | portchecker | `ports` |
+| 三网回程 | backtrace | `backtrace` |
+| 路由 | nt3 | `route` |
+
+### 尚未覆盖（真实缺口，按对 VPS 评测的价值排序）
+
+1. **DNS 黑名单（DNSBL）查询**。IPQuality 声称"IP 地址黑名单 400+ 数据库检测"，
+   `ecs` 只有 Scamalytics 顺带返回的 `is_blacklisted_external` 单个信号，没有独立的
+   DNSBL 查询。对邮件服务器用途的机器这是关键指标。
+2. **三网就近测速**。两个项目都基于 speedtest.net / speedtest.cn 的中国节点按运营商测速
+   （oneclickvirt 的 `-speed`/`-spnum`）。`ecs` 只有 iperf3 的 7 个国际节点，
+   测不出到中国电信/联通/移动的实际带宽——这是中文 VPS 圈最常看的一项。
+3. **三网就近 Ping**。oneclickvirt 的 `-ping`（源自 ecsspeed）按运营商选低延迟节点。
+   `ecs` 的 `latency` 是固定 5 个全球站点，不是三网就近。
+4. **多挂载盘 IO**。oneclickvirt 的 `-diskmc`、spiritLHLS 的 `-mdisk` 都支持测试系统盘
+   之外的挂载盘。`ecs` 只测 `--disk-path` 指定的单个路径。
+5. **流媒体地区选择与双栈分测**。oneclickvirt 的 `-utregion` 有 20 种地区组合，
+   `-utipver` 可分别测 IPv4/IPv6。`ecs` 固定跑全部规则且只走默认协议栈。
+6. **回程目标可选**。spiritLHLS 的 `-r` 支持北京/广州/上海/成都及各自的 IPv6 地址。
+   `ecs` 固定北京+广州、仅 IPv4。
+7. **Telegram DC 测试**（oneclickvirt `-tgdc`）与**热门网站可达性**（`-web`）。
+8. **STREAM 内存带宽**。oneclickvirt 的 `-memorym` 默认就是 stream，`ecs` 只有 sysbench。
+   STREAM 是内存带宽的行业标准口径，与 sysbench 的微基准不是一回事。
+9. **英文界面**。oneclickvirt 有 `-lang en/zh`，`ecs` 目前只有中文。
+
+### 有意不做（与项目约束冲突，不属于"缺口"）
+
+- **Geekbench**（两个项目都支持）：闭源，免费版强制上传结果，大版本间不可直接比较。
+- **结果自动上传**（spiritLHLS 默认传 pastebin、oneclickvirt 的 `-upload` 默认开）：
+  与"默认零上传"直接冲突。
+- **dd 作为磁盘测试**：dd 测的是缓存与顺序写的混合，误差大且不可比；fio 已覆盖。
+- **菜单交互模式**：与"管道/JSON 输出不含交互噪音"的约束冲突，命令行参数已足够。
+
+### ecs 相对这两个项目的独有部分
+
+- `dns` 模块（公共解析器延迟、失败率、抖动）：两个项目都没有。
+- 带版本的结构化 JSON schema，Markdown/HTML 由同一份数据渲染，可 `ecs render` 重放。
+- 每项指标标注 `methodology.kind`（标准基准/协议测量/第三方评估/启发式/事实采集）与可比范围。
+- 默认遮盖主机名与 IP，覆盖字段、表格与 traceroute 原文。
+- 零广告、零上传、不串联下载他人脚本。
