@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -221,7 +222,9 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// expandReportPaths 展开位置参数，目录按其中的 .json 文件收集。
+// expandReportPaths 展开位置参数，目录递归收集其中的 .json 文件。
+//
+// 递归而不是只看直接子文件：提交库按月份分子目录存放，只扫一层会什么都找不到。
 func expandReportPaths(args []string) []string {
 	var paths []string
 	for _, arg := range args {
@@ -233,16 +236,23 @@ func expandReportPaths(args []string) []string {
 			paths = append(paths, arg)
 			continue
 		}
-		entries, err := os.ReadDir(arg)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-				continue
+		_ = filepath.WalkDir(arg, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				// 单个不可读的子目录不该中断整次收集。
+				return nil
 			}
-			paths = append(paths, filepath.Join(arg, entry.Name()))
-		}
+			if entry.IsDir() {
+				// 隐藏目录（.git 之类）不参与。
+				if name := entry.Name(); name != "." && strings.HasPrefix(name, ".") {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(entry.Name(), ".json") {
+				paths = append(paths, path)
+			}
+			return nil
+		})
 	}
 	sort.Strings(paths)
 	return paths
