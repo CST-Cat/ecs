@@ -37,6 +37,9 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "media rules " + mediaRulesVersion + describeMediaRegions(env.Config.MediaRegions),
 		ComparisonScope: "仅当次公开页证据；不等同于账号播放、注册或支付能力",
 	}
+	client, closeClient := httpClientForMode(env)
+	defer closeClient()
+	env.HTTPClient = client
 
 	checks := mediaChecksForRegions(env.Config.MediaRegions)
 	// 并发上限避免一次运行对同一批 CDN 制造请求突发。

@@ -44,6 +44,7 @@ type RunInfo struct {
 	CompletedAt   time.Time `json:"completed_at"`
 	DurationMS    int64     `json:"duration_ms"`
 	Offline       bool      `json:"offline"`
+	IPVersion     string    `json:"ip_version,omitempty"`
 	Redacted      bool      `json:"redacted"`
 	Canceled      bool      `json:"canceled,omitempty"`
 	Requested     []string  `json:"requested_modules"`

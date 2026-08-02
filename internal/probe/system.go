@@ -44,6 +44,7 @@ type systemSnapshot struct {
 	Load           string
 	Congestion     string
 	QDisc          string
+	Hardware       hardwareInventory
 
 	// Allowance 是 cgroup 配额折算后本进程真正可用的 CPU。
 	Allowance cpuAllowance
@@ -65,11 +66,12 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		Kind:            "inventory",
 		Label:           "事实采集",
 		Engine:          "OS/runtime inspection",
-		Profile:         "host inventory v1",
+		Profile:         "host inventory v2 (DMI/sysfs/proc)",
 		ComparisonScope: "资源快照；不是性能基准",
 	}
 
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
+	hardware := snapshot.Hardware
 	memoryValue := fmt.Sprintf("%s 总计 / %s 可用", model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryFree))
 	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
 		memoryValue = fmt.Sprintf("%s 配额（%s 宿主可见）", model.FormatBytes(snapshot.MemoryLimit), model.FormatBytes(snapshot.MemoryTotal))
@@ -95,6 +97,17 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "load", Label: "负载", Value: snapshot.Load},
 		{Key: "tcp_congestion", Label: "TCP 拥塞控制", Value: snapshot.Congestion},
 		{Key: "qdisc", Label: "默认队列", Value: snapshot.QDisc},
+		{Key: "system_vendor", Label: "整机厂商", Value: hardware.SystemVendor},
+		{Key: "product_name", Label: "产品型号", Value: hardware.ProductName},
+		{Key: "product_version", Label: "产品版本", Value: hardware.ProductVersion},
+		{Key: "motherboard", Label: "主板", Value: joinHardwareValues(hardware.BoardVendor, hardware.BoardName, hardware.BoardVersion)},
+		{Key: "bios", Label: "BIOS", Value: joinHardwareValues(hardware.BIOSVendor, hardware.BIOSVersion, hardware.BIOSDate)},
+		{Key: "gpus", Label: "GPU", Value: joinHardwareList(hardware.GPUs)},
+		{Key: "network_adapters", Label: "网卡", Value: joinHardwareList(hardware.NICs)},
+		{Key: "block_devices", Label: "块设备", Value: joinHardwareList(hardware.BlockDevices)},
+		{Key: "raid", Label: "软件 RAID", Value: hardware.RAID},
+		{Key: "temperatures", Label: "温度", Value: joinHardwareList(hardware.Temperatures)},
+		{Key: "smart", Label: "SMART 健康", Value: joinHardwareList(hardware.SMART)},
 	}
 	result.Measurements = []model.Measurement{
 		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
@@ -145,6 +158,12 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 			snapshot.StealPercent,
 		))
 	}
+	if hardware.SystemVendor == "unknown" && hardware.ProductName == "unknown" &&
+		hardware.BoardName == "unknown" && hardware.BIOSVersion == "unknown" {
+		result.Notes = append(result.Notes, "DMI 在当前 VPS/容器中不可读；硬件型号与 BIOS 字段显示 unknown，不影响性能探针。")
+	}
+	result.Notes = append(result.Notes,
+		"硬件清单只读 /sys、/proc 与 DMI，刻意不采集序列号、MAC 地址或其他不影响验机结论的持久标识。")
 	appendKernelNetworkParams(&result)
 	result.Summary = fmt.Sprintf("%d vCPU · %s 内存 · %s 可用盘 · %s", snapshot.LogicalCPUs, model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.DiskFree), snapshot.Virtualization)
 	result.Finish(start)
@@ -182,6 +201,7 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 	}
 
 	collectLinuxSystem(&s)
+	s.Hardware = collectHardwareInventory(ctx)
 	if kernel := commandOutput(ctx, "uname", "-sr"); kernel != "" {
 		s.Kernel = kernel
 	}
@@ -190,6 +210,23 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 	}
 	collectDisk(ctx, diskPath, &s)
 	return s
+}
+
+func joinHardwareValues(values ...string) string {
+	var present []string
+	for _, value := range values {
+		if value != "" && value != "unknown" {
+			present = append(present, value)
+		}
+	}
+	return joinHardwareList(present)
+}
+
+func joinHardwareList(values []string) string {
+	if len(values) == 0 {
+		return "unknown"
+	}
+	return strings.Join(values, " · ")
 }
 
 func collectLinuxSystem(s *systemSnapshot) {

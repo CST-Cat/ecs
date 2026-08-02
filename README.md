@@ -4,7 +4,7 @@
 
 `ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出终端、Markdown 和独立 HTML 报告。所有性能成绩只读取 sysbench、fio、iperf3 的结果；项目不实现 CPU、内存、磁盘或网络吞吐替代分数，也不生成并行效率、跨节点平均值或综合跑分等自算成绩。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
 
-> 当前处于首个开发版本，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、路由、三网回程、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
+> 当前处于首个开发版本，仅支持 Linux。系统与资源、SMART/温度、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、公共 BGP 观测、路由、三网回程、可选 Ookla 三网测速、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
 ## 快速开始
 
@@ -71,7 +71,7 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 
 即将运行
   配置档 standard
-  模块 12 — system, network, cpu, memory, disk, dns, latency, ports, nat, blacklist, apps, media
+  模块 16 — system, network, bgp, cpu, memory, disk, dns, latency, ports, nat, blacklist, apps, media, route, backtrace
   预计 约 2–5 分钟
 开始测试？ [Y/n]
 ```
@@ -176,6 +176,20 @@ ecs --reveal
 # 默认查询全部 IP 质量源；也可只启用指定来源
 ecs --only network --ip-quality-sources ipapi,ipinfo,abuseipdb,ipqs
 
+# 双栈默认分别探测；也可复用 NodeQuality 的 -4/-6 习惯只测一个协议族
+ecs --ip-version 4 --only network,latency,ports
+ecs -6 --only network,latency,speed,route
+
+# 当前公共 RIB 观测：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本
+ecs --only bgp
+
+# 四城三网 IPv4/IPv6 回程目标
+ecs --only backtrace -6 --backtrace-city all
+
+# 可选的官方 Ookla 客户端；必须手动安装并显式接受其条款
+ecs --only ookla --accept-ookla-terms
+ecs --only ookla --accept-ookla-terms --ookla-servers "telecom=123,unicom=456,mobile=789"
+
 # 从已有 JSON 重新导出 Markdown/HTML
 ecs render --input ./reports/ecs-report-20260731-120000.json
 
@@ -208,8 +222,9 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 
 | ID | 报告口径 | 默认实现 | 关键限制 |
 | --- | --- | --- | --- |
-| `system` | 事实采集 | OS/runtime inspection，含 CPU 缓存、VT-x/AMD-V 与 16 项内核网络参数 | 某些容器会隐藏 DMI/内核字段；不是基准 |
+| `system` | 事实采集 | OS/runtime inspection，含 DMI/主板/BIOS、GPU/网卡/块设备/RAID、CPU 缓存、VT-x/AMD-V、温度与只读 SMART 摘要 | 某些容器会隐藏 DMI/内核字段；SMART 需 smartctl/root，虚拟盘通常不透传；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
+| `bgp` | 第三方评估 | RouteViews 当前 RIB：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本 | 轻量公共观测；不是私有互联全图，也不含历史 MRT；每个协议族约 1 次查询 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 顺序读写 + mbw memcpy 带宽 | 两者口径不同并列保留；sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运 |
 | `disk` | 标准基准 | fio Direct I/O 矩阵 + ioping 空载延迟 + smartctl 介质健康 | 只与相同 fio/ecs 参数和文件系统比较；SMART 需 root 且虚拟磁盘通常不透传 |
@@ -221,13 +236,14 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（仅 full 档） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
+| `ookla` | 协议测量 | 本机已安装的官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试 | 默认不启用、不下载、不自动接受条款；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
-| `backtrace` | 启发式判断 | 三网参考 IP 路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；未命中特征返回未识别 |
+| `backtrace` | 启发式判断 | 四城三网 IPv4/IPv6 参考目标路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
 
-模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed）、
+模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed/ookla）、
 路由类（route/backtrace）各自独占运行，避免互相污染——traceroute 尤其敏感，实测并发
-会让关键跳全部无响应。轻量探测（dns/latency/ports/nat/blacklist/apps/media/network）
+会让关键跳全部无响应。轻量探测（dns/latency/ports/nat/blacklist/apps/media/network/bgp）
 并行执行，它们等的是网络往返，并行只是把等待时间叠起来。
 本机实测这组模块串行需 37.7 秒、并行 12.1 秒，省 67%。
 
@@ -237,7 +253,7 @@ CPU、内存、磁盘和网络吞吐只展示标准工具直接返回或按其�
 
 ## IP 质量与欺诈值
 
-`network` 默认执行 `--ip-quality-sources all`，覆盖 13 个数据源。每个 IPv4/IPv6 出口分别展示：
+`network` 默认执行 `--ip-quality-sources all`，覆盖 13 个数据源。`--ip-version 4`、`--ip-version 6` 或快捷方式 `-4`、`-6` 可把一次运行限制到指定协议族；`auto`（默认）在没有真实 IPv6 路由的主机上跳过 IPv6 压力探测，不把 ULA 地址当成公网 IPv6。每个 IPv4/IPv6 出口分别展示：
 
 - MaxMind 使用地与注册地一致性，给出“原生 IP / 广播 IP”线索；
 - IPinfo、ipregistry、ipapi、IP2Location、AbuseIPDB 的使用类型和公司类型；
@@ -315,13 +331,17 @@ ecs render --input report.json --format md,html --output ./exported
 - `media`：被检测服务自己的公开网页；
 - `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定；
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
+- `bgp`：RouteViews 当前公共 RIB API，查询本机 IPv4/IPv6 出口的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS 路径样本；只做当前公共观测，不上传 ecs 报告；
 - `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
+- `ookla`：只有显式启用并接受条款后，才运行本机官方 speedtest 客户端；客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
 - `latency`：除 TCP 建连外，还会调用系统 `ping` 对同一目标发 ICMP。
 
-`--offline` 会跳过所有声明需要网络的模块。项目不包含遥测、运行次数统计、Pastebin、报告站或隐藏的上传请求。
+显式选择协议族时，HTTP、TCP、UDP、iperf3、路由工具和能按族解析的目标都会使用对应的 `tcp4`/`tcp6`、`udp4`/`udp6` 或 `-4`/`-6` 参数；无法支持该协议族的固定目标会如实显示失败/跳过，不会用另一族的结果替代。
+
+`--offline` 会跳过所有声明需要网络的模块。项目不包含 ecs 遥测、运行次数统计、Pastebin、报告站或隐藏的报告上传请求；显式启用 Ookla 后，外部客户端自身的数据处理规则另行适用。
 
 VPS 测试默认忽略 `HTTP_PROXY`、`HTTPS_PROXY` 和 `ALL_PROXY`，避免把代理出口误当成服务器自身出口；若检测到这些变量，报告会留下说明。
 
@@ -339,6 +359,7 @@ ecs --config ecs.json
 ```json
 {
   "profile": "standard",
+  "ip_version": "auto",
   "skip": ["media"],
   "ip_quality_sources": ["all"],
   "formats": ["json", "md", "html"],
@@ -348,6 +369,13 @@ ecs --config ecs.json
   "http_timeout": "10s",
   "latency_targets": [
     {"name": "My endpoint", "address": "example.com:443", "kind": "custom"}
+  ],
+  "backtrace_targets": [
+    {"name": "自定义 IPv6", "address": "2001:db8::1", "kind": "自定义", "family": "6"}
+  ],
+  "ookla_consent": false,
+  "ookla_servers": [
+    {"carrier": "电信", "id": 123}
   ]
 }
 ```
@@ -366,6 +394,9 @@ ecs --only speed --iperf-targets "Home=my.iperf.example:5201-5210"
 # 换延迟目标、路由目标与 STUN 服务器
 ecs --latency-targets "example.com:443" --route-targets "1.1.1.1,8.8.8.8" \
     --stun-servers "stun.miwifi.com:3478"
+
+# IPv6 主机名可在 JSON 中用 family: 6 固定；命令行的字面量和 -v6 主机名会自动识别
+ecs --only backtrace -6 --backtrace-targets "北京电信 IPv6=bj-ct-v6.ip.zstaticcdn.com"
 ```
 
 ## 退出码

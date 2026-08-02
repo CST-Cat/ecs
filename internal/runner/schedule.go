@@ -34,6 +34,7 @@ var moduleClass = map[string]concurrencyClass{
 	// 大流量：抢带宽，必须独占。
 	"speed":   classExclusive,
 	"cnspeed": classExclusive,
+	"ookla":   classExclusive,
 
 	// 路由类：对 ICMP/UDP 限速敏感，必须独占。
 	"route":     classExclusive,
@@ -42,6 +43,7 @@ var moduleClass = map[string]concurrencyClass{
 	// 轻量探测：等的是网络往返，并行只叠加等待时间。
 	"system":    classProbe,
 	"network":   classProbe,
+	"bgp":       classProbe,
 	"dns":       classProbe,
 	"latency":   classProbe,
 	"ports":     classProbe,

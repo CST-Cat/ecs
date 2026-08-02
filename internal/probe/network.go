@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -83,9 +84,10 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "同一数据源、字段口径与查询时间；不同供应商分数不可直接混算",
 	}
 
-	lookups := make(chan ipLookup, 2)
+	versions := config.IPVersions(env.Config.IPVersion)
+	lookups := make(chan ipLookup, len(versions))
 	var wg sync.WaitGroup
-	for _, version := range []string{"4", "6"} {
+	for _, version := range versions {
 		wg.Add(1)
 		go func(version string) {
 			defer wg.Done()
@@ -231,6 +233,9 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = append([]model.Table{overview}, result.Tables...)
+	result.Fields = append([]model.Field{{
+		Key: "ip_version_mode", Label: "协议族模式", Value: fallback(env.Config.IPVersion, config.IPVersionAuto),
+	}}, result.Fields...)
 	result.Sources = []model.Source{
 		{Name: "ipapi.is", URL: "https://ipapi.is/", Purpose: "出口 IP、ASN、地理、网络类型与滥用概率"},
 		{Name: "IPQuality", URL: "https://github.com/xykt/IPQuality", Purpose: "多源覆盖、字段映射与社区兼容通道（AGPL-3.0）"},

@@ -189,12 +189,20 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	hasIPv6 := hostHasUsableIPv6()
+	if env.Config.IPVersion == config.IPVersion6 && !hasIPv6 {
+		result.Status = model.StatusWarning
+		result.Summary = "本机没有可用的全球 IPv6 路由，IPv6 吞吐基准未运行"
+		result.Notes = append(result.Notes,
+			"显式选择 IPv6 时不会把 ULA、链路本地地址或无默认路由的 IPv6 当成可用网络；请确认 VPS 已配置全球 IPv6 与默认路由。")
+		result.Finish(start)
+		return result
+	}
 	// UDP 丢包/抖动只在 full 档跑：它需要额外的往返时间，而 standard 档的重点
 	// 是吞吐本身。
 	udpEnabled := env.Config.Profile == "full"
 	rows := make([]iperfRow, 0, len(env.Config.IPerfTargets)*2)
 	for _, target := range env.Config.IPerfTargets {
-		for _, family := range endpointFamilies(target.Networks, hasIPv6) {
+		for _, family := range endpointFamilies(target.Networks, hasIPv6, env.Config.IPVersion) {
 			if ctx.Err() != nil {
 				break
 			}
@@ -439,20 +447,29 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 	return sample
 }
 
-func endpointFamilies(networks string, hasIPv6 bool) []string {
+func endpointFamilies(networks string, hasIPv6 bool, mode string) []string {
+	allow4 := config.AllowsIPVersion(mode, config.IPVersion4)
+	allow6 := config.AllowsIPVersion(mode, config.IPVersion6)
 	switch networks {
 	case "IPv6":
-		if hasIPv6 {
+		if hasIPv6 && allow6 {
 			return []string{"IPv6"}
 		}
 		return nil
 	case "IPv4|IPv6":
-		if hasIPv6 {
-			return []string{"IPv4", "IPv6"}
+		families := make([]string, 0, 2)
+		if allow4 {
+			families = append(families, "IPv4")
 		}
-		return []string{"IPv4"}
+		if hasIPv6 && allow6 {
+			families = append(families, "IPv6")
+		}
+		return families
 	default:
-		return []string{"IPv4"}
+		if allow4 {
+			return []string{"IPv4"}
+		}
+		return nil
 	}
 }
 

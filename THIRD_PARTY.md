@@ -19,6 +19,7 @@
 | ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
 | smartctl | 磁盘 SMART 健康与通电时间 | [smartmontools](https://www.smartmontools.org/) | GPL-2.0 | `disk` 的介质健康；需 root，虚拟磁盘通常不透传，缺失时如实说明；**刻意不采集序列号**（可唯一标识物理硬件） |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
+| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | 仅使用用户已安装的程序；必须显式选择 `ookla` 并确认条款；不自动下载、不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
 
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
@@ -27,7 +28,7 @@
 `autoremove` 或全局缓存清理，也不删除开始前已经存在的包。清理前会复核安装完成后的包状态；
 若测试期间被外部包管理操作改变，就跳过清理并保留临时现场。`install.sh --with-benchmarks`
 是持久安装的明确入口；两条路径都只使用发行版提供的软件包，不从随机镜像下载裸二进制，
-也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版上传行为不作为默认依赖。
+也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为默认依赖；Ookla 只提供显式、可审计的本机客户端适配器。
 
 ## 在线服务
 
@@ -49,6 +50,9 @@
 - [Jina Reader](https://github.com/jina-ai/reader)（Apache-2.0 服务实现）：当 IPQS 社区额度和官方公开页出口配额同时不可用时，读取同一公开查询页的一小时内缓存；不提供或代算供应商分数；
 - YABS 当前公共 iperf3 节点清单中的 Clouvider/Leaseweb 测速服务：standard/full 的多节点 TCP 吞吐；
 - 电信、联通、移动的公开参考 IP：`backtrace` 模块用于识别路径上的骨干线路，只发送路由探测包；
+- [RouteViews API](https://api.routeviews.org/docs/)：`bgp` 模块查询当前公共 RIB 的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS path 样本；不下载历史 MRT、不上传 ecs 报告；
+- 四城三网 IPv4/IPv6 回程目标：IPv4 使用公开参考地址，IPv6 使用地区节点域名并强制 `family: "6"`；目标服务会看到路由探测的源地址；
+- [Ookla Speedtest](https://www.speedtest.net/about/privacy)：仅在用户显式启用并确认条款后由本机官方客户端连接；Ookla 的数据处理不属于 ecs 本地报告保证范围；
 - DNS 黑名单服务（Spamhaus、SpamCop、Barracuda、CBL、PSBL、blocklist.de、UCEPROTECT、DroneBL、s5h、SpamRats、GBUdb、Mailspike、Backscatterer）：`blacklist` 模块把出口 IP 反转后作为域名查 A 记录，不发送其他信息。各名单有各自的收录标准、解除流程与查询配额；部分名单（如 Spamhaus）拒绝来自公共解析器的查询并返回 127.255.255.x，ecs 将其判为“查询被拒”而非命中；
 - [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT，每日更新）：`cnspeed` 模块的中国测速节点清单，含运营商标注。清单实时抓取而不内置快照——节点会下线，用过期清单去测已消失的节点比不测更糟。ecs 只读取清单，不复制其内容入库；测速本身直接连清单里的节点，不经过第三方；
 - 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；

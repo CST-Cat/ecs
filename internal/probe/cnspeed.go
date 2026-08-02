@@ -207,6 +207,9 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "per-carrier nearest node by HTTP latency",
 		ComparisonScope: "当次到该节点的 HTTP 下载带宽；节点、时段与运营商策略都会影响结果",
 	}
+	client, closeClient := httpClientForMode(env)
+	defer closeClient()
+	env.HTTPClient = client
 
 	nodes, err := fetchCNNodes(ctx, env.HTTPClient, env.UserAgent)
 	if err != nil {

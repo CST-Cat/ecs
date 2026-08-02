@@ -70,7 +70,7 @@ var probeEnglishExtra = map[string]string{
 	"地区":            "Region",
 	"外部程序 SHA-\x1f": "External binary SHA-\x1f",
 	"外部程序通过参数数组启动，不经过 shell；ecs 记录可安全读取的版本和程序 SHA-\x1f。一次性依赖由 run.sh 在探针外准备并在退出时清理。": "External binaries are launched with an argument array, never through a shell; ecs records the safely readable version and the binary's SHA-\x1f. One-shot dependencies are prepared by run.sh outside the probes and cleaned up on exit.",
-	"多源覆盖、字段映射与社区兼容通道（AGPL-\x1f）":                                 "Multi-source coverage, field mapping and a community-compatible channel (AGPL-\x1f)",
+	"多源覆盖、字段映射与社区兼容通道（AGPL-\x1f）": "Multi-source coverage, field mapping and a community-compatible channel (AGPL-\x1f)",
 	"失败：HTTP \x1f": "failed: HTTP \x1f",
 	"失败：官方 API、社区额度和公开查询页均不可用":              "failed: official API, community quota and public lookup page all unavailable",
 	"失败：需要 GETIPINTEL_CONTACT（其条款要求提供联系邮箱）": "failed: GETIPINTEL_CONTACT required (their terms require a contact e-mail)",

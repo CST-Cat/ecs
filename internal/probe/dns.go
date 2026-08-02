@@ -45,20 +45,28 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	attempts := env.Config.DNSAttempts
-	results := make(chan dnsResult, len(env.Config.DNSResolvers))
+	resolvers := endpointsForIPVersion(env.Config.DNSResolvers, env.Config.IPVersion)
+	if len(resolvers) == 0 {
+		result.Skip("没有匹配当前协议族的 DNS 解析器")
+		result.Notes = append(result.Notes, "当前协议族没有可用的字面量 DNS 解析器；请用 --dns-resolvers 提供对应协议族的 host:port。")
+		result.Finish(start)
+		return result
+	}
+	results := make(chan dnsResult, len(resolvers))
 	var wg sync.WaitGroup
-	for _, endpoint := range env.Config.DNSResolvers {
+	for _, endpoint := range resolvers {
 		wg.Add(1)
 		go func(endpoint config.Endpoint) {
 			defer wg.Done()
 			item := dnsResult{Endpoint: endpoint}
+			family := endpointFamily(endpoint, env.Config.IPVersion)
 			// 预热一次且不计入统计：首次查询大概率是递归 miss，后续是缓存命中，
 			// 两者能差一个数量级，混在一起会让 P50/P95 和抖动全部失真。
-			if _, err := dnsQuery(ctx, endpoint.Address, dnsQueryName, 2*time.Second); err != nil {
+			if _, err := dnsQueryForMode(ctx, endpoint.Address, dnsQueryName, 2*time.Second, family); err != nil {
 				item.WarmupErr = err
 			}
 			for i := 0; i < attempts; i++ {
-				elapsed, err := dnsQuery(ctx, endpoint.Address, dnsQueryName, 2*time.Second)
+				elapsed, err := dnsQueryForMode(ctx, endpoint.Address, dnsQueryName, 2*time.Second, family)
 				if err != nil {
 					item.Failures++
 					item.LastErr = err
@@ -71,12 +79,12 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	wg.Wait()
 	close(results)
-	collected := make([]dnsResult, 0, len(env.Config.DNSResolvers))
+	collected := make([]dnsResult, 0, len(resolvers))
 	for item := range results {
 		collected = append(collected, item)
 	}
-	order := make(map[string]int, len(env.Config.DNSResolvers))
-	for index, endpoint := range env.Config.DNSResolvers {
+	order := make(map[string]int, len(resolvers))
+	for index, endpoint := range resolvers {
 		order[endpoint.Address] = index
 	}
 	sort.SliceStable(collected, func(i, j int) bool {
@@ -142,12 +150,20 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 func dnsQuery(ctx context.Context, address, name string, timeout time.Duration) (time.Duration, error) {
+	return dnsQueryNetwork(ctx, address, name, timeout, "udp")
+}
+
+func dnsQueryForMode(ctx context.Context, address, name string, timeout time.Duration, mode string) (time.Duration, error) {
+	return dnsQueryNetwork(ctx, address, name, timeout, udpNetworkForMode(mode))
+}
+
+func dnsQueryNetwork(ctx context.Context, address, name string, timeout time.Duration, network string) (time.Duration, error) {
 	packet, id, err := buildDNSQuery(name)
 	if err != nil {
 		return 0, err
 	}
 	dialer := net.Dialer{Timeout: timeout}
-	connection, err := dialer.DialContext(ctx, "udp", address)
+	connection, err := dialer.DialContext(ctx, network, address)
 	if err != nil {
 		return 0, err
 	}

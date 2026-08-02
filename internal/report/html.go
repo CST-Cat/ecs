@@ -122,6 +122,7 @@ const htmlTemplate = `<!doctype html>
     <div class="hero-meta">
       <span class="pill">报告 {{.Run.ID}}</span>
       <span class="pill">{{.Run.Profile}}</span>
+      {{if .Run.IPVersion}}<span class="pill">IP {{.Run.IPVersion}}</span>{{end}}
       <span class="pill">{{time .Run.StartedAt}}</span>
       <span class="pill">{{duration .Run.DurationMS}}</span>
       <span class="pill">{{boolText .Run.Redacted "敏感字段已遮盖" "包含完整敏感字段"}}</span>

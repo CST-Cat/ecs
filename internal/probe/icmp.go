@@ -53,15 +53,27 @@ const pingCommand = "ping"
 // -n 保持输出数字化、-q 只打印统计，避免逐包刷屏。iputils 与 busybox 的 -W 都以
 // 秒为单位，且都不接受小数，因此不足一秒一律进位到 1 秒。
 func pingArguments(host string, count int, timeout time.Duration) []string {
+	return pingArgumentsForFamily(host, count, timeout, "")
+}
+
+func pingArgumentsForFamily(host string, count int, timeout time.Duration, family string) []string {
 	seconds := int(timeout.Seconds())
 	if seconds < 1 {
 		seconds = 1
 	}
-	return []string{"-n", "-q", "-c", strconv.Itoa(count), "-W", strconv.Itoa(seconds), host}
+	args := []string{"-n", "-q", "-c", strconv.Itoa(count), "-W", strconv.Itoa(seconds)}
+	if family == "4" || family == "6" {
+		args = append(args, "-"+family)
+	}
+	return append(args, host)
 }
 
 // runICMPPing 对目标执行一次 ICMP 探测。
 func runICMPPing(ctx context.Context, host string, count int, timeout time.Duration) icmpStats {
+	return runICMPPingFamily(ctx, host, count, timeout, "")
+}
+
+func runICMPPingFamily(ctx context.Context, host string, count int, timeout time.Duration, family string) icmpStats {
 	stats := icmpStats{}
 	path, err := exec.LookPath(pingCommand)
 	if err != nil {
@@ -73,7 +85,7 @@ func runICMPPing(ctx context.Context, host string, count int, timeout time.Durat
 	runCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	command := exec.CommandContext(runCtx, path, pingArguments(host, count, timeout)...)
+	command := exec.CommandContext(runCtx, path, pingArgumentsForFamily(host, count, timeout, family)...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	output, runErr := command.CombinedOutput()
 	text := sanitizeCommandOutput(output)

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,11 +21,19 @@ const (
 	ProfileQuick    = "quick"
 	ProfileStandard = "standard"
 	ProfileFull     = "full"
+
+	// IPVersionAuto keeps the historical behaviour: each probe chooses the
+	// usable protocol family it supports, while dual-stack probes keep results
+	// separate instead of collapsing them into one score.
+	IPVersionAuto = "auto"
+	IPVersion4    = "4"
+	IPVersion6    = "6"
 )
 
 var ModuleOrder = []string{
 	"system",
 	"network",
+	"bgp",
 	"cpu",
 	"memory",
 	"disk",
@@ -36,6 +45,7 @@ var ModuleOrder = []string{
 	"blacklist",
 	"apps",
 	"cnspeed",
+	"ookla",
 	"media",
 	"route",
 	"backtrace",
@@ -69,6 +79,9 @@ type Endpoint struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Kind    string `json:"kind,omitempty"`
+	// Family optionally pins hostname resolution and command-line routing to
+	// IPv4 or IPv6.  Empty means the probe may choose automatically.
+	Family string `json:"family,omitempty"`
 }
 
 type IPerfEndpoint struct {
@@ -80,6 +93,13 @@ type IPerfEndpoint struct {
 	Networks  string `json:"networks,omitempty"`
 	// Region 用于按地区裁剪节点集，避免长档位把所有公共节点跑一遍。
 	Region string `json:"region,omitempty"`
+}
+
+// OoklaServer pins an official Ookla server ID to a carrier label. Server IDs
+// are user/config supplied because the external catalogue changes over time.
+type OoklaServer struct {
+	Carrier string `json:"carrier"`
+	ID      int    `json:"id"`
 }
 
 // iperfNodePool 是 YABS 公共节点清单里的 iperf3 服务器。
@@ -128,6 +148,7 @@ type Runtime struct {
 	Modules          []string
 	Offline          bool
 	Reveal           bool
+	IPVersion        string
 	IPQualitySources []string
 	Formats          []string
 	Output           string
@@ -148,6 +169,11 @@ type Runtime struct {
 	BacktraceTargets []Endpoint
 	STUNServers      []Endpoint
 	MediaRegions     []string
+	// OoklaConsent is deliberately separate from module selection.  The
+	// official client has its own licence/privacy terms and is never silently
+	// accepted by a normal ecs profile.
+	OoklaConsent bool
+	OoklaServers []OoklaServer
 }
 
 type Estimate struct {
@@ -163,6 +189,7 @@ type File struct {
 	Skip             []string        `json:"skip,omitempty"`
 	Offline          *bool           `json:"offline,omitempty"`
 	Reveal           *bool           `json:"reveal,omitempty"`
+	IPVersion        string          `json:"ip_version,omitempty"`
 	IPQualitySources []string        `json:"ip_quality_sources,omitempty"`
 	Formats          []string        `json:"formats,omitempty"`
 	Output           string          `json:"output,omitempty"`
@@ -183,6 +210,8 @@ type File struct {
 	BacktraceTargets []Endpoint      `json:"backtrace_targets,omitempty"`
 	STUNServers      []Endpoint      `json:"stun_servers,omitempty"`
 	MediaRegions     []string        `json:"media_regions,omitempty"`
+	OoklaConsent     *bool           `json:"ookla_consent,omitempty"`
+	OoklaServers     []OoklaServer   `json:"ookla_servers,omitempty"`
 }
 
 // backtraceCityTargets 是各城市的三网回程参考目标。
@@ -199,21 +228,33 @@ var backtraceCityTargets = map[string][]Endpoint{
 		{Name: "北京电信", Address: "219.141.136.12", Kind: "电信"},
 		{Name: "北京联通", Address: "202.106.50.1", Kind: "联通"},
 		{Name: "北京移动", Address: "221.179.155.161", Kind: "移动"},
+		{Name: "北京电信 IPv6", Address: "bj-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
+		{Name: "北京联通 IPv6", Address: "bj-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
+		{Name: "北京移动 IPv6", Address: "bj-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
 	},
 	"guangzhou": {
 		{Name: "广州电信", Address: "58.60.188.222", Kind: "电信"},
 		{Name: "广州联通", Address: "210.21.196.6", Kind: "联通"},
 		{Name: "广州移动", Address: "120.196.165.24", Kind: "移动"},
+		{Name: "广州电信 IPv6", Address: "gd-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
+		{Name: "广州联通 IPv6", Address: "gd-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
+		{Name: "广州移动 IPv6", Address: "gd-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
 	},
 	"shanghai": {
 		{Name: "上海电信", Address: "202.96.209.133", Kind: "电信"},
 		{Name: "上海联通", Address: "210.22.97.1", Kind: "联通"},
 		{Name: "上海移动", Address: "211.136.112.200", Kind: "移动"},
+		{Name: "上海电信 IPv6", Address: "sh-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
+		{Name: "上海联通 IPv6", Address: "sh-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
+		{Name: "上海移动 IPv6", Address: "sh-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
 	},
 	"chengdu": {
 		{Name: "成都电信", Address: "61.139.2.69", Kind: "电信"},
 		{Name: "成都联通", Address: "119.6.6.6", Kind: "联通"},
 		{Name: "成都移动", Address: "211.137.96.205", Kind: "移动"},
+		{Name: "成都电信 IPv6", Address: "sc-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
+		{Name: "成都联通 IPv6", Address: "sc-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
+		{Name: "成都移动 IPv6", Address: "sc-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
 	},
 }
 
@@ -276,6 +317,7 @@ func Defaults(profile string) (Runtime, error) {
 	base := Runtime{
 		Profile:          profile,
 		Reveal:           false,
+		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
 		Formats:          []string{"json", "md", "html"},
 		DiskPath:         ".",
@@ -284,8 +326,11 @@ func Defaults(profile string) (Runtime, error) {
 		STUNServers:      stunServerPool(),
 		DNSResolvers: []Endpoint{
 			{Name: "Cloudflare", Address: "1.1.1.1:53"},
+			{Name: "Cloudflare IPv6", Address: "[2606:4700:4700::1111]:53"},
 			{Name: "Google", Address: "8.8.8.8:53"},
+			{Name: "Google IPv6", Address: "[2001:4860:4860::8888]:53"},
 			{Name: "Quad9", Address: "9.9.9.9:53"},
+			{Name: "Quad9 IPv6", Address: "[2620:fe::fe]:53"},
 			{Name: "AliDNS", Address: "223.5.5.5:53"},
 			{Name: "DNSPod", Address: "119.29.29.29:53"},
 		},
@@ -302,6 +347,7 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "AliDNS", Address: "223.5.5.5", Kind: "中国大陆"},
 		},
 		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCities),
+		OoklaConsent:     false,
 	}
 
 	switch profile {
@@ -314,7 +360,7 @@ func Defaults(profile string) (Runtime, error) {
 		base.SpeedThreads = 2
 		base.IPerfDuration = 3 * time.Second
 	case ProfileStandard:
-		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
+		base.Modules = []string{"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
 		base.CPUTime = 10 * time.Second
 		base.DiskMiB = 1024
 		base.DNSAttempts = 5
@@ -323,6 +369,9 @@ func Defaults(profile string) (Runtime, error) {
 		base.IPerfDuration = 10 * time.Second
 	case ProfileFull:
 		base.Modules = append([]string(nil), ModuleOrder...)
+		// Ookla is an explicit external-service adapter, not a default full
+		// profile dependency.  Use --only ookla plus --accept-ookla-terms.
+		base.Modules = SelectModules(base.Modules, nil, []string{"ookla"})
 		base.CPUTime = 15 * time.Second
 		base.DiskMiB = 2048
 		base.DNSAttempts = 8
@@ -364,6 +413,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	if file.Reveal != nil {
 		runtime.Reveal = *file.Reveal
+	}
+	if file.IPVersion != "" {
+		runtime.IPVersion = strings.ToLower(strings.TrimSpace(file.IPVersion))
 	}
 	if len(file.IPQualitySources) > 0 {
 		runtime.IPQualitySources = normalizeList(file.IPQualitySources)
@@ -437,6 +489,12 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if len(file.MediaRegions) > 0 {
 		runtime.MediaRegions = normalizeList(file.MediaRegions)
 	}
+	if len(file.OoklaServers) > 0 {
+		runtime.OoklaServers = append([]OoklaServer(nil), file.OoklaServers...)
+	}
+	if file.OoklaConsent != nil {
+		runtime.OoklaConsent = *file.OoklaConsent
+	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
 }
@@ -480,6 +538,50 @@ func ParseList(raw string) []string {
 	return out
 }
 
+// ParseOoklaServerList parses carrier=server-id pairs. IDs are not fetched
+// from the network because the official catalogue is volatile.
+func ParseOoklaServerList(raw string) ([]OoklaServer, error) {
+	var result []OoklaServer
+	seen := make(map[string]bool)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		parts := strings.SplitN(item, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("Ookla 节点必须是 运营商=服务器ID")
+		}
+		carrier := normalizeOoklaCarrier(parts[0])
+		if carrier == "" {
+			return nil, fmt.Errorf("未知 Ookla 运营商 %q，可选 电信、联通、移动", parts[0])
+		}
+		id, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || id < 1 || id > 99999999 {
+			return nil, fmt.Errorf("Ookla 服务器 ID 无效 %q", parts[1])
+		}
+		if seen[carrier] {
+			return nil, fmt.Errorf("Ookla 运营商重复 %q", carrier)
+		}
+		seen[carrier] = true
+		result = append(result, OoklaServer{Carrier: carrier, ID: id})
+	}
+	return result, nil
+}
+
+func normalizeOoklaCarrier(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "电信", "telecom", "ct", "chinatelecom":
+		return "电信"
+	case "联通", "unicom", "cu", "chinaunicom":
+		return "联通"
+	case "移动", "mobile", "cm", "chinamobile":
+		return "移动"
+	default:
+		return ""
+	}
+}
+
 func Validate(runtime Runtime) error {
 	knownModules := make(map[string]bool)
 	for _, id := range ModuleOrder {
@@ -487,6 +589,13 @@ func Validate(runtime Runtime) error {
 	}
 	if len(runtime.Modules) == 0 {
 		return errors.New("至少需要选择一个测试模块")
+	}
+	switch runtime.IPVersion {
+	case "", IPVersionAuto, IPVersion4, IPVersion6:
+		// Empty is accepted for callers constructing Runtime directly; it has
+		// the same meaning as auto and keeps older integrations compatible.
+	default:
+		return fmt.Errorf("未知 IP 协议族 %q，可选 auto、4、6", runtime.IPVersion)
 	}
 	for _, id := range runtime.Modules {
 		if !knownModules[id] {
@@ -540,6 +649,9 @@ func Validate(runtime Runtime) error {
 			if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 				return errors.New("自定义测试端点必须同时包含 name 和 address")
 			}
+			if !validEndpointFamily(endpoint.Family) {
+				return fmt.Errorf("测试端点 %q 的 family 必须是 4、6 或空值", endpoint.Name)
+			}
 		}
 	}
 	for _, endpoint := range runtime.RouteTargets {
@@ -548,6 +660,9 @@ func Validate(runtime Runtime) error {
 		}
 		if !validRouteTarget(endpoint.Address) {
 			return fmt.Errorf("路由目标 %q 不是安全的 IP 或主机名", endpoint.Address)
+		}
+		if !validEndpointFamily(endpoint.Family) {
+			return fmt.Errorf("路由目标 %q 的 family 必须是 4、6 或空值", endpoint.Name)
 		}
 	}
 	for _, endpoint := range runtime.STUNServers {
@@ -566,6 +681,22 @@ func Validate(runtime Runtime) error {
 		if !validRouteTarget(endpoint.Address) {
 			return fmt.Errorf("三网回程目标 %q 不是安全的 IP 或主机名", endpoint.Address)
 		}
+		if !validEndpointFamily(endpoint.Family) {
+			return fmt.Errorf("三网回程目标 %q 的 family 必须是 4、6 或空值", endpoint.Name)
+		}
+	}
+	seenOoklaCarriers := make(map[string]bool)
+	for _, server := range runtime.OoklaServers {
+		if server.Carrier != "电信" && server.Carrier != "联通" && server.Carrier != "移动" {
+			return fmt.Errorf("Ookla 服务器 carrier 必须是电信、联通或移动: %q", server.Carrier)
+		}
+		if server.ID < 1 || server.ID > 99999999 {
+			return fmt.Errorf("Ookla 服务器 %q 的 ID 无效", server.Carrier)
+		}
+		if seenOoklaCarriers[server.Carrier] {
+			return fmt.Errorf("Ookla 服务器不能重复配置运营商 %q", server.Carrier)
+		}
+		seenOoklaCarriers[server.Carrier] = true
 	}
 	if runtime.DiskPath == "" {
 		return errors.New("磁盘测试路径不能为空")
@@ -601,12 +732,16 @@ var routeHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,25
 
 func validRouteTarget(value string) bool {
 	value = strings.TrimSpace(value)
-	if net.ParseIP(value) != nil {
+	if net.ParseIP(strings.Trim(value, "[]")) != nil {
 		return true
 	}
 	return len(value) <= 253 &&
 		!strings.Contains(value, "..") &&
 		routeHostnamePattern.MatchString(value)
+}
+
+func validEndpointFamily(value string) bool {
+	return value == "" || value == IPVersion4 || value == IPVersion6
 }
 
 func EstimateFor(runtime Runtime) Estimate {
@@ -636,8 +771,9 @@ func EstimateFor(runtime Runtime) Estimate {
 
 func estimateTypicalDuration(runtime Runtime) time.Duration {
 	networkModule := map[string]bool{
-		"network": true, "dns": true, "latency": true, "speed": true,
+		"network": true, "bgp": true, "dns": true, "latency": true, "speed": true,
 		"ports": true, "media": true, "route": true, "backtrace": true,
+		"ookla": true,
 	}
 	var total time.Duration
 	for _, module := range runtime.Modules {
@@ -650,6 +786,10 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 			total += time.Second
 		case "network":
 			total += 5 * time.Second
+		case "bgp":
+			// One public prefix observation per enabled family, rate-limited by
+			// the RouteViews API client.
+			total += 4 * time.Second
 		case "cpu":
 			// sysbench CPU 跑单线程与多线程两轮。
 			total += 2*runtime.CPUTime + time.Second
@@ -685,6 +825,8 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 		case "cnspeed":
 			// 三个运营商各选点后串行下载。
 			total += 40 * time.Second
+		case "ookla":
+			total += 90 * time.Second
 		case "nat":
 			// 多次 UDP 事务，无响应时按超时累计。
 			total += 12 * time.Second
@@ -729,13 +871,39 @@ func ExampleFile() File {
 		Profile:          ProfileStandard,
 		Offline:          &offline,
 		Reveal:           &reveal,
+		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
 		Formats:          []string{"json", "md", "html"},
 		Output:           "./reports",
 		DiskPath:         ".",
 		IPerfDuration:    "5s",
 		HTTPTimeout:      "10s",
+		OoklaConsent:     boolPtr(false),
 	}
+}
+
+// IPVersions returns the protocol families selected for a run.  The result is
+// intentionally stable so callers can use it to build deterministic report
+// rows and per-family error records.
+func IPVersions(mode string) []string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case IPVersion4:
+		return []string{IPVersion4}
+	case IPVersion6:
+		return []string{IPVersion6}
+	default:
+		return []string{IPVersion4, IPVersion6}
+	}
+}
+
+// AllowsIPVersion reports whether a concrete family is enabled by the run.
+func AllowsIPVersion(mode, version string) bool {
+	for _, candidate := range IPVersions(mode) {
+		if candidate == version {
+			return true
+		}
+	}
+	return false
 }
 
 func KnownModules() []string {
@@ -752,6 +920,8 @@ func contains(items []string, target string) bool {
 	}
 	return false
 }
+
+func boolPtr(value bool) *bool { return &value }
 
 func normalizeList(items []string) []string {
 	seen := make(map[string]bool)

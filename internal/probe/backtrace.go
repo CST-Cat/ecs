@@ -64,6 +64,14 @@ var chinaRouteSignatures = []routeSignature{
 	// 中国移动：CMI 国际优于普通 CMNET。
 	{Prefix: "223.120.", ASN: 58807, Code: "CMI", Label: "移动 CMI 国际（AS58807）", Carrier: "移动", Quality: 30},
 	{Prefix: "221.183.", ASN: 9808, Code: "CMNET", Label: "移动 CMNET 骨干（AS9808）", Carrier: "移动", Quality: 10},
+
+	// IPv6 目标的地址来自运营商前缀；IPv6 的末端目标由地区节点域名
+	// 提供，实际命中的骨干仍以路径中的跳为证据。前缀规则故意保持粗粒度，
+	// 只做“看到了哪家骨干”的线索，不把它伪装成精确 ASN 归属证明。
+	{Prefix: "240e:", ASN: 4134, Code: "CT-v6", Label: "电信 IPv6 骨干（240e）", Carrier: "电信", Quality: 10},
+	{Prefix: "2408:8120:", ASN: 9929, Code: "CUII-v6", Label: "联通 CUII IPv6（2408:8120）", Carrier: "联通", Quality: 30},
+	{Prefix: "2408:8000:", ASN: 4837, Code: "169-v6", Label: "联通 169 IPv6（2408:8000）", Carrier: "联通", Quality: 10},
+	{Prefix: "2409:", ASN: 9808, Code: "CMNET-v6", Label: "移动 CMNET IPv6（2409）", Carrier: "移动", Quality: 10},
 }
 
 // backtraceMaxHops 是回程识别的跳数上限。
@@ -99,18 +107,17 @@ type backtraceRow struct {
 // hopPrefixPattern 匹配 traceroute 文本输出的跳号前缀。
 var (
 	hopLinePattern = regexp.MustCompile(`^\s*(\d{1,2})\s+(.*)$`)
-	ipv4Pattern    = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
 )
 
 func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	result := model.NewResult("backtrace", "三网回程")
-	result.Description = "向三大运营商参考 IP 追踪路径，识别路径上的中国骨干线路"
+	result.Description = "向北京、上海、广州、成都的三网 IPv4/IPv6 参考目标追踪路径，识别中国骨干线路"
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
 		Label:           "启发式判断",
 		Engine:          "NextTrace/traceroute + 骨干网段特征表",
-		Profile:         "china backbone signatures v1, max 30 hops",
+		Profile:         "china backbone signatures v2, max 20 hops, IPv4+IPv6 targets",
 		ComparisonScope: "当次探测的路径特征；不是性能基准，也不等同于反向抓包",
 	}
 
@@ -128,6 +135,13 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
+	targets = endpointsForIPVersion(targets, env.Config.IPVersion)
+	if len(targets) == 0 {
+		result.Skip("没有匹配当前协议族的三网回程目标")
+		result.Notes = append(result.Notes, "当前协议族没有匹配的回程目标；IPv6 目标使用地区节点域名，需 DNS 与 IPv6 出口可用。")
+		result.Finish(start)
+		return result
+	}
 
 	rows := make([]backtraceRow, len(targets))
 	semaphore := make(chan struct{}, backtraceConcurrency)
@@ -138,7 +152,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			rows[index] = runBacktraceTarget(ctx, engine, target)
+			rows[index] = runBacktraceTarget(ctx, engine, target, endpointFamily(target, env.Config.IPVersion))
 		}(index, target)
 	}
 	wg.Wait()
@@ -220,6 +234,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		"这是从 VPS 主动发出的路径探测，不是反向抓包；路由不对称或运营商调度会让结论失真。",
 		"线路判定只依据路径上出现的骨干网段前缀，报告保留命中跳号、IP 与完整原始输出供复核。",
 		"CN2 的 GIA 与 GT 依据 59.43 段出现位置推断，带“推测”标注；精确区分需要更细的入口段表。",
+		"IPv6 目标采用各省三网 TCP-Ping 节点域名，地址可能随 CDN 调度变化；报告保留目标名与原始路径供复核。",
 		"未命中任何已知特征时返回“未识别”，不会猜测线路类型。",
 	)
 	result.Finish(start)
@@ -227,11 +242,11 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 // runBacktraceTarget 追踪单个参考目标并匹配线路特征。
-func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.Endpoint) backtraceRow {
+func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.Endpoint, family string) backtraceRow {
 	row := backtraceRow{Target: target}
 	traceCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	output, err := runRouteCommand(traceCtx, engine, target.Address, backtraceMaxHops)
+	output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, backtraceMaxHops, family)
 	row.Raw = sanitizeCommandOutput(output)
 	row.Hops = extractTraceHops(engine.Name, row.Raw)
 	// traceroute 到国内 IP 时末段被丢弃是常态，只要拿到跳就继续分析；
@@ -262,9 +277,14 @@ func extractTraceHops(engineName, output string) []string {
 			continue
 		}
 		address := ""
-		if found := ipv4Pattern.FindString(match[2]); found != "" {
-			if parsed := net.ParseIP(found); parsed != nil {
-				address = found
+		for _, token := range strings.Fields(match[2]) {
+			token = strings.Trim(token, "[](),<>")
+			if zone := strings.LastIndexByte(token, '%'); zone >= 0 {
+				token = token[:zone]
+			}
+			if parsed := net.ParseIP(token); parsed != nil {
+				address = parsed.String()
+				break
 			}
 		}
 		hops = append(hops, address)
@@ -304,7 +324,7 @@ func matchRouteSignatures(hops []string) []backtraceHit {
 			continue
 		}
 		for _, signature := range chinaRouteSignatures {
-			if strings.HasPrefix(address, signature.Prefix) {
+			if strings.HasPrefix(strings.ToLower(address), strings.ToLower(signature.Prefix)) {
 				hits = append(hits, backtraceHit{Signature: signature, Hop: index + 1, IP: address})
 				break
 			}

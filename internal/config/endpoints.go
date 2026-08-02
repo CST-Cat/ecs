@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -49,9 +50,40 @@ func ParseEndpointList(raw string, requirePort bool) ([]Endpoint, error) {
 		if name == "" {
 			name = address
 		}
-		endpoints = append(endpoints, Endpoint{Name: name, Address: address})
+		endpoints = append(endpoints, Endpoint{
+			Name: name, Address: address,
+			Family: inferEndpointFamily(address, requirePort),
+		})
 	}
 	return endpoints, nil
+}
+
+// inferEndpointFamily records facts that can be established without DNS.  A
+// literal is unambiguous; the backtrace target list also uses a -v6 hostname
+// convention so an IPv6-only hostname is not accidentally routed over IPv4.
+func inferEndpointFamily(address string, requirePort bool) string {
+	host := address
+	if !requirePort {
+		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+			if ip.To4() != nil {
+				return IPVersion4
+			}
+			return IPVersion6
+		}
+	} else if parsedHost, _, err := splitHostPort(address); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() != nil {
+			return IPVersion4
+		}
+		return IPVersion6
+	}
+	if strings.Contains(strings.ToLower(host), "-v6.") {
+		return IPVersion6
+	}
+	return ""
 }
 
 // ParseIPerfTargetList 解析 iperf3 节点列表。
