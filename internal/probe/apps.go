@@ -94,7 +94,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[index] = probeAppTarget(ctx, target)
+			results[index] = probeAppTarget(ctx, target, env.Config.IPVersion)
 		}(index, target)
 	}
 	wg.Wait()
@@ -174,12 +174,12 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 // probeAppTarget 对单个端点做一次 TCP 握手。
-func probeAppTarget(ctx context.Context, target appTarget) appResult {
+func probeAppTarget(ctx context.Context, target appTarget, ipVersion string) appResult {
 	item := appResult{Target: target}
 	address := net.JoinHostPort(target.Host, fmt.Sprint(target.Port))
 	dialer := net.Dialer{Timeout: 6 * time.Second}
 	begin := time.Now()
-	connection, err := dialer.DialContext(ctx, "tcp", address)
+	connection, err := dialer.DialContext(ctx, tcpNetworkForMode(ipVersion), address)
 	item.Latency = time.Since(begin)
 	if err != nil {
 		item.Detail = compactError(err)

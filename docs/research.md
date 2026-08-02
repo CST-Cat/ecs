@@ -50,7 +50,7 @@
 
 | 模块 | 非基准诊断 | 标准基准工具 | quick | standard | full |
 | --- | :---: | --- | :---: | :---: | :---: |
-| 系统、虚拟化、资源与内核网络栈 | ✓ | — | ✓ | ✓ | ✓ |
+| 系统、虚拟化、资源、温度、SMART 与内核网络栈 | ✓ | smartctl + `/proc`/`/sys` 只读采集 | ✓ | ✓ | ✓ |
 | IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 5s | 10s | 15s |
 | 内存顺序读写带宽 | — | sysbench memory（唯一） | 5s | 10s | 15s |
@@ -65,6 +65,8 @@
 | 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | — | ✓ | ✓ |
 | 多目标正向路由 | 基础 traceroute | NextTrace JSON（可用） | — | ✓ | ✓ |
 | 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | — | ✓ | ✓ |
+| 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | — | ✓ | ✓ |
+| Ookla 三网测速（显式启用） | 外部官方客户端 | 本机已安装 speedtest CLI | — | 可选 | 可选 |
 | JSON、Markdown、独立 HTML | ✓ | — | ✓ | ✓ | ✓ |
 
 ## 许可证与复用边界
@@ -173,16 +175,17 @@
   因此判定过滤行为时必须核对响应的源地址，核不上就报"未知"。
 - **CPU 缓存**与 **VT-x/AMD-V**（决定能否跑嵌套虚拟化）几乎所有竞品都采集，已补入 `system`。
 
-有意不做的：
+保留边界的能力：
 
-- **Geekbench**：闭源，免费版强制上传结果，且不同大版本之间不可直接比较，与零上传约束冲突。
+- **Geekbench**：闭源，结果处理受其客户端与条款控制，且不同大版本之间不可直接比较；已有 sysbench 时不值得作为默认依赖。
 - **自研 AES/bzip2 压缩跑分**（nench 的做法）：违反"性能成绩只能来自标准工具"的约束。
 - **串联他人脚本**（spiritLHLS 的做法）：运行时下载多个脚本与二进制，版本、摘要与真实执行内容都不透明。
+- **完整私有互联拓扑**：公共 RouteViews 只能提供当前可见 RIB、报告 peer 和 AS path 样本，不能冒充运营商内部 peer graph 或完整历史 MRT。
 
 ## 与 oneclickvirt/ecs、spiritLHLS/ecs 的逐项差距（2026-08-01 按 README 参数面核对）
 
 用户指定的这两个项目是功能覆盖最全的同类。逐条对照它们的命令行参数与 README 声明，
-`ecs` **并未覆盖全部功能**。如实记录差距，不夸大。
+`ecs` **并未覆盖全部功能**。如实记录差距，不夸大；目前新增的 Ookla 与 BGP 能力仍保留各自的外部服务边界。
 
 ### 已覆盖（能力相当或更强）
 
@@ -199,24 +202,17 @@
 
 ### 尚未覆盖（真实缺口，按对 VPS 评测的价值排序）
 
-1. **DNS 黑名单（DNSBL）查询**。IPQuality 声称"IP 地址黑名单 400+ 数据库检测"，
-   `ecs` 只有 Scamalytics 顺带返回的 `is_blacklisted_external` 单个信号，没有独立的
-   DNSBL 查询。对邮件服务器用途的机器这是关键指标。
-2. **三网就近测速**。两个项目都基于 speedtest.net / speedtest.cn 的中国节点按运营商测速
-   （oneclickvirt 的 `-speed`/`-spnum`）。`ecs` 只有 iperf3 的 7 个国际节点，
-   测不出到中国电信/联通/移动的实际带宽——这是中文 VPS 圈最常看的一项。
-3. **三网就近 Ping**。oneclickvirt 的 `-ping`（源自 ecsspeed）按运营商选低延迟节点。
+1. **完整私有 BGP 互联图与历史事件**。`bgp` 已能查询 RouteViews 当前公共 RIB 的匹配前缀、起源、RPKI、报告 peer 与 AS path 样本，
+   但公共观测无法看到供应商内部 peer graph、完整 MRT 历史或所有未公开会话。
+2. **三网就近 Ping**。oneclickvirt 的 `-ping`（源自 ecsspeed）按运营商选低延迟节点。
    `ecs` 的 `latency` 是固定 5 个全球站点，不是三网就近。
-4. **多挂载盘 IO**。oneclickvirt 的 `-diskmc`、spiritLHLS 的 `-mdisk` 都支持测试系统盘
+3. **多挂载盘 IO**。oneclickvirt 的 `-diskmc`、spiritLHLS 的 `-mdisk` 都支持测试系统盘
    之外的挂载盘。`ecs` 只测 `--disk-path` 指定的单个路径。
-5. **流媒体地区选择与双栈分测**。oneclickvirt 的 `-utregion` 有 20 种地区组合，
-   `-utipver` 可分别测 IPv4/IPv6。`ecs` 固定跑全部规则且只走默认协议栈。
-6. **回程目标可选**。spiritLHLS 的 `-r` 支持北京/广州/上海/成都及各自的 IPv6 地址。
-   `ecs` 固定北京+广州、仅 IPv4。
-7. **Telegram DC 测试**（oneclickvirt `-tgdc`）与**热门网站可达性**（`-web`）。
-8. **STREAM 内存带宽**。oneclickvirt 的 `-memorym` 默认就是 stream，`ecs` 只有 sysbench。
+4. **流媒体地区选择**。oneclickvirt 的 `-utregion` 有 20 种地区组合，`ecs` 目前只保留
+   global/jp/tw/hk/cn 五组，协议族可用 `--ip-version`/`-4`/`-6` 选择。
+5. **Telegram DC 测试**（oneclickvirt `-tgdc`）与**热门网站可达性**（`-web`）。
+6. **STREAM 内存带宽**。oneclickvirt 的 `-memorym` 默认就是 stream，`ecs` 只有 sysbench。
    STREAM 是内存带宽的行业标准口径，与 sysbench 的微基准不是一回事。
-9. **英文界面**。oneclickvirt 有 `-lang en/zh`，`ecs` 目前只有中文。
 
 ### 有意不做（与项目约束冲突，不属于"缺口"）
 
@@ -229,6 +225,7 @@
 ### ecs 相对这两个项目的独有部分
 
 - `dns` 模块（公共解析器延迟、失败率、抖动）：两个项目都没有。
+- 17 个 DNSBL 区域与 FCrDNS 组合检查：不把公共解析器拒绝码误报成黑名单命中。
 - 带版本的结构化 JSON schema，Markdown/HTML 由同一份数据渲染，可 `ecs render` 重放。
 - 每项指标标注 `methodology.kind`（标准基准/协议测量/第三方评估/启发式/事实采集）与可比范围。
 - 默认遮盖主机名与 IP，覆盖字段、表格与 traceroute 原文。
@@ -245,16 +242,16 @@
 | NAT 类型 | gostun（GPL-3.0） | ✅ | 自实现 STUN RFC 5389/5780 | 已自实现 |
 | CPU | sysbench / **geekbench** | sysbench ✅ GPL-2.0；geekbench ❌ 闭源且强制上传 | sysbench | 已用 sysbench |
 | 内存 | sysbench / dd / **mbw** / **stream** | mbw ✅ Debian 有包；STREAM ✅ 但无 Debian 包需自编译 | **mbw**（Debian `mbw` 1.2.2） | 只有 sysbench，可补 mbw |
-| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟）+ **smartmontools**（SMART） | 已用 fio，后两者可补 |
+| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟）+ **smartmontools**（SMART） | 已用 fio + ioping；system/disk 只读接入 smartctl |
 | 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
 | 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + traceroute/NextTrace 适配器 | 已自实现 |
 | DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
 | IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
-| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI ❌ 闭源 + EULA + 上报**；`speedtest.net/api/js/servers` 实测从本机出口返回 **403** | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | 只有 iperf3 国际节点 |
+| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 显式适配本机 CLI；不自动下载、不默认同意，三网需配置服务器 ID |
 | 三网 Ping | pingtest（借鉴 ecsspeed） | ✅ | ICMP 已具备，缺的是节点数据而非技术 | `latency` 为固定全球站点 |
 
-### librespeed-cli 实跑结论（唯一完整开源的测速方案）
+### librespeed-cli 实跑结论（开源替代，但不是中国三网等价物）
 
 装 Debian 官方包 `librespeed-cli 1.0.11`（上游 librespeed/speedtest-cli，LGPL-3.0）实测：
 
@@ -277,14 +274,13 @@
 
 ### 结论
 
-两个项目的技术栈里，**除三网测速与商业 IP 数据库外，其余都有可靠开源替代，且 ecs 大多
+两个项目的技术栈里，**除中国三网测速、商业 IP 数据库和完整私有 BGP 图外，其余都有可靠开源替代，且 ecs 大多
 已用更彻底的方式实现**（自实现协议、零第三方 Go 依赖，不下载他人二进制）。
 
 - 可立即采用的 Debian 官方开源包：`mbw`（内存带宽）、`ioping`（I/O 延迟）、
   `smartmontools`（SMART 与通电时间）、`librespeed-cli`（通用 HTTP 测速）。
-- **三网测速没有干净的开源解**：中国节点数据只有 speedtest.net 具备，其官方 CLI 闭源，
-  服务器列表 API 还存在出口相关的 403。若要做，只能用 speedtest-go（MIT）自行实现
-  Ookla 协议并自担节点清单维护，且必须如实披露数据来源与失效风险。
+- **三网测速没有零外部服务的开源解**：`librespeed-cli` 可审计，但公共节点不覆盖中国三网的
+  同等服务器集合；`ookla` 适配器因此只支持显式调用官方客户端，并把条款、实际流量和外部数据处理写进报告。
 - 商业 IP 数据库无开源替代，这是行业事实；ecs 能做的是保留原值、通道与失败状态，
   不平均、不顶替——这一点已经做到。
 
@@ -296,16 +292,16 @@
 
 | | quick | standard | full |
 | --- | ---: | ---: | ---: |
-| 模块数 | 7 | 15 | 16 |
+| 模块数 | 7 | 16 | 17 |
 | 预计耗时 | 1–3 分钟 | 3–10 分钟 | 6–18 分钟 |
 | 磁盘临时文件 | 256 MiB | 1024 MiB | 2048 MiB |
 | CPU/内存每轮 | 5 s | 10 s | 15 s |
 | iperf3 节点 | — | 3 个 × 10 s | 7 个 × 15 s |
 | UDP 丢包/抖动 | — | — | ✓ |
-| 三网测速 | — | — | ✓ |
+| 三网测速 | — | 显式 Ookla | 显式 Ookla |
 
-`standard` 比 `quick` 多八个模块（speed、ports、nat、blacklist、apps、media、route、backtrace）；
-`full` 比 `standard` **只多一个模块**（cnspeed），其余是采样参数加倍。
+`standard` 比 `quick` 多九个模块（bgp、speed、ports、nat、blacklist、apps、media、route、backtrace）；
+`full` 比 `standard` **只多一个默认模块**（cnspeed），Ookla 始终需要显式选择与条款同意，其余是采样参数加倍。
 
 ### 采样时长翻倍是否改变结论
 
@@ -327,7 +323,7 @@
 
 ### 结论
 
-- **quick 与 standard 的区分是必要的**：七个模块到十五个模块，
+- **quick 与 standard 的区分是必要的**：七个模块到十六个模块，
   从"只看本机硬件"变成"全面体检"，用途完全不同。
 - **standard 与 full 的区分也有必要，但此前的定位是错的**。
   原描述写作"更长性能测试、更大流量并包含路由"，可 `standard` 本来就含路由，

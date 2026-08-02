@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -177,6 +178,13 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		Engine:          "DNSBL over DNS A lookup",
 		Profile:         fmt.Sprintf("%d 个实测可用的黑名单区域", len(dnsblZones())),
 		ComparisonScope: "当次查询结果；各名单收录标准与解除流程不同，不可合并计分",
+	}
+	if env.Config.IPVersion == config.IPVersion6 {
+		result.Skip("当前仅测试 IPv6；主流 DNSBL 仍以 IPv4 为主")
+		result.Notes = append(result.Notes,
+			"本次运行显式限制为 IPv6。绝大多数 DNS 黑名单只支持 IPv4，因此不会把 IPv6 强行映射成无意义的反向查询。")
+		result.Finish(start)
+		return result
 	}
 
 	data, _, err := lookupIP(ctx, env, "4")

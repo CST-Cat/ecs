@@ -97,9 +97,13 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		return result
 	}
 
+	family := config.IPVersion4
+	if env.Config.IPVersion == config.IPVersion6 {
+		family = config.IPVersion6
+	}
 	var findings []natFinding
 	for _, server := range servers {
-		finding := probeNAT(ctx, server)
+		finding := probeNATForVersion(ctx, server, family)
 		findings = append(findings, finding)
 		// 拿到一次完整判定就够了，不必对每台服务器都做完整探测。
 		if finding.Err == nil && finding.Mapping != mappingUnknown {
@@ -112,9 +116,9 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	table := model.Table{
 		Title:   "STUN 探测明细",
-		Columns: []string{"服务器", "映射地址", "映射行为", "过滤行为", "备用地址", "状态"},
+		Columns: []string{"协议", "服务器", "映射地址", "映射行为", "过滤行为", "备用地址", "状态"},
 		// 映射地址是本机公网出口，默认按段遮盖。
-		SensitiveColumns: []int{1},
+		SensitiveColumns: []int{2},
 	}
 	var best *natFinding
 	for index := range findings {
@@ -133,6 +137,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 			other += "（同 IP）"
 		}
 		table.Rows = append(table.Rows, []string{
+			"IPv" + family,
 			finding.Server.Name,
 			fallback(finding.Mapped.String(), "—"),
 			finding.Mapping,
@@ -161,6 +166,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	category, categoryNote := natCategory(*best, behind)
 
 	result.Fields = []model.Field{
+		{Key: "ip_version", Label: "协议族", Value: "IPv" + family},
 		{Key: "nat_category", Label: "NAT 类型", Value: category},
 		{Key: "mapped_address", Label: "公网映射地址", Value: best.Mapped.String(), Sensitive: true},
 		{Key: "local_address", Label: "本地出口地址", Value: best.LocalAddr.String(), Sensitive: true},
@@ -220,20 +226,30 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 // probeNAT 对一台 STUN 服务器完成 RFC 5780 的行为发现。
+// probeNAT 保留 IPv4 默认行为，供旧调用方与确定性测试使用。
 func probeNAT(ctx context.Context, server config.Endpoint) natFinding {
+	return probeNATForVersion(ctx, server, config.IPVersion4)
+}
+
+func probeNATForVersion(ctx context.Context, server config.Endpoint, family string) natFinding {
 	finding := natFinding{
 		Server:    server,
 		Mapping:   mappingUnknown,
 		Filtering: filteringUnknown,
 	}
 	deadline, hasDeadline := ctx.Deadline()
-	primary, err := net.ResolveUDPAddr("udp4", server.Address)
+	network := "udp" + family
+	primary, err := net.ResolveUDPAddr(network, server.Address)
 	if err != nil {
 		finding.Err = err
 		return finding
 	}
 	// 整个检测必须复用同一个 socket：换端口就换了 NAT 映射，所有对比都失效。
-	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	bindIP := net.IPv4zero
+	if family == config.IPVersion6 {
+		bindIP = net.IPv6zero
+	}
+	connection, err := net.ListenUDP(network, &net.UDPAddr{IP: bindIP, Port: 0})
 	if err != nil {
 		finding.Err = err
 		return finding
@@ -243,7 +259,7 @@ func probeNAT(ctx context.Context, server config.Endpoint) natFinding {
 		_ = connection.SetDeadline(deadline)
 	}
 	if local, ok := connection.LocalAddr().(*net.UDPAddr); ok {
-		finding.LocalAddr = netAddr{IP: outboundLocalIP(primary).String(), Port: local.Port}
+		finding.LocalAddr = netAddr{IP: outboundLocalIPForNetwork(primary, network).String(), Port: local.Port}
 	}
 
 	// Test I：基础 Binding，拿到映射地址与服务器备用地址。
@@ -363,13 +379,23 @@ func natCategory(finding natFinding, behind bool) (string, string) {
 // ListenUDP 绑定 0.0.0.0 时 LocalAddr 的 IP 是全零，拿它和映射地址比较永远
 // 会得出"存在 NAT"。这里用一次不发包的 UDP dial 让内核做路由决策。
 func outboundLocalIP(target *net.UDPAddr) net.IP {
-	connection, err := net.DialUDP("udp4", nil, target)
+	return outboundLocalIPForNetwork(target, "udp4")
+}
+
+func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {
+	connection, err := net.DialUDP(network, nil, target)
 	if err != nil {
+		if network == "udp6" {
+			return net.IPv6zero
+		}
 		return net.IPv4zero
 	}
 	defer connection.Close()
 	if local, ok := connection.LocalAddr().(*net.UDPAddr); ok {
 		return local.IP
+	}
+	if network == "udp6" {
+		return net.IPv6zero
 	}
 	return net.IPv4zero
 }

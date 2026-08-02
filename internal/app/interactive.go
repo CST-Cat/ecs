@@ -153,9 +153,10 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	if chosen != cfg.Profile {
 		updated, err := config.Defaults(chosen)
 		if err == nil {
-			// 保留用户已经通过命令行指定的输出偏好。
+			// 保留用户已经通过命令行指定的输出与协议族偏好。
 			updated.Output, updated.Formats = cfg.Output, cfg.Formats
 			updated.NoColor, updated.Reveal = cfg.NoColor, cfg.Reveal
+			updated.IPVersion = cfg.IPVersion
 			*cfg = updated
 		}
 	}

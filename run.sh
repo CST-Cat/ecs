@@ -50,6 +50,29 @@ die() {
   exit 1
 }
 
+# Help must be local and side-effect free.  In particular, asking the wrapper
+# for help must not download a release or prepare system packages first.
+case "${1:-}" in
+  -h|--help)
+    if [ "$UI" = "en" ]; then
+      printf '%s\n' \
+        'Usage: run.sh [--profile quick|standard|full] [--only MODULES] [options]' \
+        '' \
+        'Downloads a checksummed ecs release, prepares missing distro packages, and writes local reports.' \
+        'Common options: --profile, --only, --skip, --config, --offline, --lang, --yes.' \
+        'Ookla is never installed automatically; use the ecs CLI with --only ookla --accept-ookla-terms.'
+    else
+      printf '%s\n' \
+        '用法：run.sh [--profile quick|standard|full] [--only 模块] [选项]' \
+        '' \
+        '下载并校验 ecs Release，准备缺失的发行版组件，并生成本地报告。' \
+        '常用选项：--profile、--only、--skip、--config、--offline、--lang、--yes。' \
+        'Ookla 不会自动安装；请用 ecs --only ookla --accept-ookla-terms 显式启用。'
+    fi
+    exit 0
+    ;;
+esac
+
 [ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
 
 case "$(uname -m)" in
@@ -209,22 +232,22 @@ done
 module_enabled() {
   module=$1
   if [ "$CONFIG_GIVEN" -eq 1 ]; then
-    base_modules="system,network,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace"
+    base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace"
   elif [ -n "$ONLY" ]; then
     base_modules="$ONLY"
   else
     case "$PROFILE" in
       quick) base_modules="system,network,cpu,memory,disk,dns,latency" ;;
-      standard) base_modules="system,network,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,media,route,backtrace" ;;
-      full) base_modules="system,network,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
-      *) base_modules="system,network,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
+      standard) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,media,route,backtrace" ;;
+      full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
+      *) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
     esac
   fi
   list_contains "$base_modules" "$module" || return 1
   list_contains "$SKIP" "$module" && return 1
   if [ "$OFFLINE" -eq 1 ]; then
     case "$module" in
-      network|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|media|route|backtrace) return 1 ;;
+      network|bgp|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|ookla|media|route|backtrace) return 1 ;;
     esac
   fi
   return 0
@@ -241,6 +264,10 @@ collect_missing_tools() {
   if module_enabled disk; then
     tool_exists fio || add_missing_tool fio
     tool_exists ioping || add_missing_tool ioping
+    tool_exists smartctl || add_missing_tool smartctl
+  elif module_enabled system; then
+    # The system inventory can include read-only SMART summaries even when
+    # the disk benchmark itself is not selected.
     tool_exists smartctl || add_missing_tool smartctl
   fi
   if module_enabled speed; then

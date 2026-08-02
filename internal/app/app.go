@@ -95,6 +95,9 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
 	offlineFlag := flags.Bool("offline", cfg.Offline, i18n.T("flag.offline"))
 	revealFlag := flags.Bool("reveal", cfg.Reveal, i18n.T("flag.reveal"))
+	ipVersionFlag := flags.String("ip-version", cfg.IPVersion, i18n.T("flag.ipVersion"))
+	ipv4Flag := flags.Bool("4", false, i18n.T("flag.ipv4"))
+	ipv6Flag := flags.Bool("6", false, i18n.T("flag.ipv6"))
 	ipSourcesFlag := flags.String("ip-quality-sources", strings.Join(cfg.IPQualitySources, ","), i18n.T("flag.ipQualitySources"))
 	formatsFlag := flags.String("format", strings.Join(cfg.Formats, ","), i18n.T("flag.format"))
 	outputFlag := flags.String("output", cfg.Output, i18n.T("flag.output"))
@@ -116,6 +119,10 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	iperfTargetsFlag := flags.String("iperf-targets", "", i18n.T("flag.iperfTargets"))
 	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), i18n.T("flag.mediaRegion"))
 	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
+	backtraceTargetsFlag := flags.String("backtrace-targets", "", i18n.T("flag.backtraceTargets"))
+	ooklaFlag := flags.Bool("ookla", false, i18n.T("flag.ookla"))
+	ooklaConsentFlag := flags.Bool("accept-ookla-terms", cfg.OoklaConsent, i18n.T("flag.acceptOoklaTerms"))
+	ooklaServersFlag := flags.String("ookla-servers", "", i18n.T("flag.ooklaServers"))
 	interactiveFlag := flags.Bool("interactive", false, i18n.T("flag.interactive"))
 	yesFlag := flags.Bool("yes", false, i18n.T("flag.yes"))
 	strictFlag := flags.Bool("strict", false, i18n.T("flag.strict"))
@@ -139,6 +146,17 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.Profile = *profileFlag
 	cfg.Offline = *offlineFlag
 	cfg.Reveal = *revealFlag
+	cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
+	if *ipv4Flag && *ipv6Flag {
+		fmt.Fprintln(stderr, i18n.T("cli.error")+": -4 与 -6 不能同时使用")
+		return 1
+	}
+	if *ipv4Flag {
+		cfg.IPVersion = config.IPVersion4
+	}
+	if *ipv6Flag {
+		cfg.IPVersion = config.IPVersion6
+	}
 	cfg.IPQualitySources = config.ParseList(*ipSourcesFlag)
 	cfg.Formats = config.ParseList(*formatsFlag)
 	cfg.Output = *outputFlag
@@ -152,6 +170,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.HTTPTimeout = *timeoutFlag
 	cfg.DNSAttempts = *dnsAttemptsFlag
 	cfg.LatencyAttempts = *latencyAttemptsFlag
+	cfg.OoklaConsent = *ooklaConsentFlag
 	for _, override := range []struct {
 		raw         string
 		requirePort bool
@@ -195,6 +214,34 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return 1
 		}
 		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
+	}
+	if *backtraceTargetsFlag != "" {
+		targets, err := config.ParseEndpointList(*backtraceTargetsFlag, false)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: --backtrace-targets: %v\n", i18n.T("cli.error"), err)
+			return 1
+		}
+		cfg.BacktraceTargets = targets
+	}
+	if *ooklaServersFlag != "" {
+		servers, err := config.ParseOoklaServerList(*ooklaServersFlag)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: --ookla-servers: %v\n", i18n.T("cli.error"), err)
+			return 1
+		}
+		cfg.OoklaServers = servers
+	}
+	if *ooklaFlag {
+		found := false
+		for _, id := range cfg.Modules {
+			if id == "ookla" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.Modules = append(cfg.Modules, "ookla")
+		}
 	}
 	cfg.Modules = config.SelectModules(cfg.Modules, config.ParseList(*onlyFlag), config.ParseList(*skipFlag))
 	// 交互向导：显式 --interactive 才启动，--yes 永远跳过。
@@ -334,6 +381,7 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 		{name: "mbw", purpose: i18n.T("doctor.purpose.mbw"), args: []string{"-h"}},
 		{name: "ioping", purpose: i18n.T("doctor.purpose.ioping"), args: []string{"-v"}},
 		{name: "smartctl", purpose: i18n.T("doctor.purpose.smartctl"), args: []string{"--version"}},
+		{name: "speedtest", purpose: i18n.T("doctor.purpose.speedtest"), args: []string{"--version"}},
 	}
 	missingRequired := false
 	for _, tool := range tools {

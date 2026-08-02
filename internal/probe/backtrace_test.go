@@ -25,6 +25,20 @@ func TestExtractTraceHopsFromTracerouteText(t *testing.T) {
 	}
 }
 
+func TestExtractTraceHopsAcceptsIPv6Text(t *testing.T) {
+	output := " 1  2001:db8::1  0.5 ms\n 2  * * *\n 3  2408:8120:2::108  10 ms"
+	hops := extractTraceHops("traceroute", output)
+	want := []string{"2001:db8::1", "", "2408:8120:2::108"}
+	if len(hops) != len(want) {
+		t.Fatalf("hops = %v, want %v", hops, want)
+	}
+	for index, address := range want {
+		if hops[index] != address {
+			t.Fatalf("hop %d = %q, want %q", index+1, hops[index], address)
+		}
+	}
+}
+
 func TestExtractTraceHopsFromNextTraceJSON(t *testing.T) {
 	output := `{"Hops":[[{"Address":"10.0.0.1"}],[{"Address":""}],[{"Address":"219.158.16.1"}]]}`
 	hops := extractTraceHops("nexttrace", output)
@@ -43,6 +57,16 @@ func TestMatchRouteSignaturesIdentifiesCarrierBackbones(t *testing.T) {
 	}
 	if hits[1].Signature.Code != "CN2" || hits[1].Hop != 3 {
 		t.Fatalf("second hit = %+v", hits[1])
+	}
+}
+
+func TestMatchRouteSignaturesIdentifiesIPv6CarrierBackbones(t *testing.T) {
+	hits := matchRouteSignatures([]string{"2408:8120:2::108", "2408:8000:2:70b::1", "2409:8c00::1", "240e:0:a::1"})
+	if len(hits) != 4 {
+		t.Fatalf("IPv6 hits = %+v", hits)
+	}
+	if hits[0].Signature.Code != "CUII-v6" || hits[3].Signature.Code != "CT-v6" {
+		t.Fatalf("IPv6 hits = %+v", hits)
 	}
 }
 

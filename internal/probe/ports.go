@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -42,11 +43,15 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "可达性诊断；单目标失败不能等同于端口被封",
 	}
 
+	dnsTarget := "1.1.1.1:53"
+	if env.Config.IPVersion == config.IPVersion6 {
+		dnsTarget = "[2606:4700:4700::1111]:53"
+	}
 	targets := []portTarget{
 		{Service: "HTTP", Address: "example.com:80", Note: "Web"},
 		{Service: "HTTPS", Address: "example.com:443", Note: "Web"},
 		{Service: "SSH", Address: "github.com:22", Note: "Git"},
-		{Service: "DNS TCP", Address: "1.1.1.1:53", Note: "DNS"},
+		{Service: "DNS TCP", Address: dnsTarget, Note: "DNS"},
 		{Service: "SMTP", Address: "smtp.gmail.com:25", Note: "邮件"},
 		{Service: "SMTPS", Address: "smtp.gmail.com:465", Note: "邮件"},
 		{Service: "Submission", Address: "smtp.gmail.com:587", Note: "邮件"},
@@ -60,7 +65,7 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 			defer wg.Done()
 			dialer := net.Dialer{Timeout: 3 * time.Second}
 			begin := time.Now()
-			connection, err := dialer.DialContext(ctx, "tcp", target.Address)
+			connection, err := dialer.DialContext(ctx, tcpNetworkForMode(env.Config.IPVersion), target.Address)
 			elapsed := time.Since(begin)
 			item := portResult{Target: target, Latency: elapsed}
 			if err == nil {

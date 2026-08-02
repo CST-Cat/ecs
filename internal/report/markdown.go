@@ -29,6 +29,9 @@ func Markdown(data model.Report) string {
 	writeMarkdownRow(&out, i18n.T("report.startedAt"), data.Run.StartedAt.Format(time.RFC3339))
 	writeMarkdownRow(&out, i18n.T("report.totalDuration"), formatDurationMS(data.Run.DurationMS))
 	writeMarkdownRow(&out, i18n.T("report.networkMode"), map[bool]string{true: i18n.T("report.offline"), false: i18n.T("report.online")}[data.Run.Offline])
+	if data.Run.IPVersion != "" {
+		writeMarkdownRow(&out, i18n.T("report.ipVersion"), data.Run.IPVersion)
+	}
 	writeMarkdownRow(&out, i18n.T("report.privacy"), map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted])
 	if data.Run.Canceled {
 		writeMarkdownRow(&out, i18n.T("report.runState"), i18n.T("report.canceled"))

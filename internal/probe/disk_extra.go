@@ -228,6 +228,7 @@ func readSMART(ctx context.Context, device string) (smartInfo, bool) {
 			Bytes *uint64 `json:"bytes"`
 		} `json:"user_capacity"`
 		NVMeLog struct {
+			Temperature    *int `json:"temperature"`
 			PercentageUsed *int `json:"percentage_used"`
 		} `json:"nvme_smart_health_information_log"`
 		Smartctl struct {
@@ -249,11 +250,14 @@ func readSMART(ctx context.Context, device string) (smartInfo, bool) {
 	info.Passed = payload.SmartStatus.Passed
 	info.PowerOnHrs = payload.PowerOnTime.Hours
 	info.Temperature = payload.Temperature.Current
+	if info.Temperature == nil {
+		info.Temperature = payload.NVMeLog.Temperature
+	}
 	info.PercentUsed = payload.NVMeLog.PercentageUsed
 	info.RotationRPM = payload.RotationRate
 	info.CapacityB = payload.UserCapacity.Bytes
 
-	usable := info.ModelName != "" || info.Passed != nil || info.PowerOnHrs != nil
+	usable := info.ModelName != "" || info.Passed != nil || info.PowerOnHrs != nil || info.Temperature != nil || info.PercentUsed != nil
 	return info, usable
 }
 

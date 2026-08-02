@@ -71,8 +71,8 @@ func TestEnglishFallsBackToChinese(t *testing.T) {
 func TestModuleTitlesCoverAllModules(t *testing.T) {
 	// 每个模块都必须有标题译文，否则英文界面会露出中文模块名。
 	for _, id := range []string{
-		"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed",
-		"ports", "nat", "blacklist", "apps", "cnspeed", "media", "route", "backtrace",
+		"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
+		"ports", "nat", "blacklist", "apps", "cnspeed", "ookla", "media", "route", "backtrace",
 	} {
 		key := "module." + id + ".title"
 		if !Has(LangZH, key) || !Has(LangEN, key) {

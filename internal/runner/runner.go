@@ -49,14 +49,22 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			Profile:       cfg.Profile,
 			StartedAt:     started,
 			Offline:       cfg.Offline,
+			IPVersion:     cfg.IPVersion,
 			Redacted:      !cfg.Reveal,
 			Requested:     append([]string(nil), cfg.Modules...),
 			OutputFormats: append([]string(nil), cfg.Formats...),
 		},
 		Notices: []string{
-			"报告只写入本地，不会自动上传。",
+			"ecs 报告只写入本地，不会自动上传；网络探针仍会按模块访问必要的公开目标。",
 			"性能结果只应在相同测试方法、版本和资源参数下比较。",
 		},
+	}
+	for _, id := range cfg.Modules {
+		if id == "ookla" && cfg.OoklaConsent {
+			report.Notices = append(report.Notices,
+				"Ookla 已按显式同意调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。")
+			break
+		}
 	}
 
 	httpClient := probe.NewHTTPClient(cfg.HTTPTimeout)

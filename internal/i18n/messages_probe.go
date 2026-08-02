@@ -17,6 +17,7 @@ var probeEnglish = func() map[string]string {
 		probeEnglishTemplates,
 		probeEnglishExtra,
 		probeEnglishCross,
+		probeEnglishBGP,
 	} {
 		for key, value := range table {
 			if existing, duplicated := merged[key]; duplicated && existing != value {

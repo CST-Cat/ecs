@@ -21,6 +21,7 @@ func (latencyProbe) NeedsNetwork() bool { return true }
 
 type latencyResult struct {
 	Endpoint config.Endpoint
+	Family   string
 	// DialAddress 是解析后固定使用的 IP:port。
 	DialAddress string
 	// ResolveTime 是一次性 DNS 解析耗时，单独记录而不混进握手延迟。
@@ -37,18 +38,28 @@ type latencyResult struct {
 // Go 的 net.Dialer 不缓存 DNS，对域名反复拨号会让每次采样都带上一次完整解析，
 // 几十毫秒的解析耗时直接污染 P50/P95。这里只解析一次，之后固定对 IP 拨号，
 // 让延迟真正只反映 TCP 握手。
-func resolveEndpoint(ctx context.Context, address string) (string, time.Duration, error) {
+func resolveEndpoint(ctx context.Context, address, family string) (string, time.Duration, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return "", 0, err
 	}
-	if net.ParseIP(host) != nil {
+	if ip := net.ParseIP(host); ip != nil {
+		if family == config.IPVersion4 && ip.To4() == nil {
+			return "", 0, fmt.Errorf("目标不是 IPv4")
+		}
+		if family == config.IPVersion6 && ip.To4() != nil {
+			return "", 0, fmt.Errorf("目标不是 IPv6")
+		}
 		return address, 0, nil
 	}
 	resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	addresses, err := net.DefaultResolver.LookupNetIP(resolveCtx, "ip", host)
+	network := "ip"
+	if family == config.IPVersion4 || family == config.IPVersion6 {
+		network += family
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(resolveCtx, network, host)
 	elapsed := time.Since(start)
 	if err != nil {
 		return "", elapsed, err
@@ -56,7 +67,49 @@ func resolveEndpoint(ctx context.Context, address string) (string, time.Duration
 	if len(addresses) == 0 {
 		return "", elapsed, fmt.Errorf("解析 %s 未返回地址", host)
 	}
-	return net.JoinHostPort(addresses[0].Unmap().String(), port), elapsed, nil
+	for _, address := range addresses {
+		ip := address.Unmap()
+		if family == config.IPVersion4 && !ip.Is4() {
+			continue
+		}
+		if family == config.IPVersion6 && ip.Is4() {
+			continue
+		}
+		return net.JoinHostPort(ip.String(), port), elapsed, nil
+	}
+	return "", elapsed, fmt.Errorf("解析 %s 没有 IPv%s 地址", host, family)
+}
+
+// latencyFamilies keeps auto mode useful on hosts without IPv6 while still
+// probing both families when the kernel has a real public IPv6 route.
+func latencyFamilies(address, mode string) []string {
+	hasIPv6 := false
+	if mode != config.IPVersion4 {
+		hasIPv6 = hostHasUsableIPv6()
+	}
+	return latencyFamiliesWithCapability(address, mode, hasIPv6)
+}
+
+func latencyFamiliesWithCapability(address, mode string, hasIPv6 bool) []string {
+	var families []string
+	for _, family := range config.IPVersions(mode) {
+		if ip, _, err := net.SplitHostPort(address); err == nil {
+			if parsed := net.ParseIP(ip); parsed != nil {
+				if family == config.IPVersion4 && parsed.To4() != nil {
+					families = append(families, family)
+				}
+				if family == config.IPVersion6 && parsed.To4() == nil {
+					families = append(families, family)
+				}
+				continue
+			}
+		}
+		if family == config.IPVersion6 && mode != config.IPVersion6 && !hasIPv6 {
+			continue
+		}
+		families = append(families, family)
+	}
+	return families
 }
 
 // tcpInterceptRatio 是判定 TCP 建连被本地截获的倍数阈值。
@@ -96,44 +149,54 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	attempts := env.Config.LatencyAttempts
 	icmpEnabled := icmpAvailable()
-	results := make(chan latencyResult, len(env.Config.LatencyTargets))
+	hasIPv6 := false
+	if env.Config.IPVersion != config.IPVersion4 {
+		hasIPv6 = hostHasUsableIPv6()
+	}
+	capacity := 0
+	for _, endpoint := range env.Config.LatencyTargets {
+		capacity += len(latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, hasIPv6))
+	}
+	results := make(chan latencyResult, capacity)
 	var wg sync.WaitGroup
 	for _, endpoint := range env.Config.LatencyTargets {
-		wg.Add(1)
-		go func(endpoint config.Endpoint) {
-			defer wg.Done()
-			item := latencyResult{Endpoint: endpoint}
-			dialAddress, resolveTime, err := resolveEndpoint(ctx, endpoint.Address)
-			item.ResolveTime = resolveTime
-			if err != nil {
-				item.ResolveErr = err
-				item.Failures = attempts
+		for _, family := range latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, hasIPv6) {
+			wg.Add(1)
+			go func(endpoint config.Endpoint, family string) {
+				defer wg.Done()
+				item := latencyResult{Endpoint: endpoint, Family: family}
+				dialAddress, resolveTime, err := resolveEndpoint(ctx, endpoint.Address, family)
+				item.ResolveTime = resolveTime
+				if err != nil {
+					item.ResolveErr = err
+					item.Failures = attempts
+					results <- item
+					return
+				}
+				item.DialAddress = dialAddress
+				for i := 0; i < attempts; i++ {
+					dialer := net.Dialer{Timeout: 3 * time.Second}
+					begin := time.Now()
+					connection, dialErr := dialer.DialContext(ctx, "tcp"+family, dialAddress)
+					elapsed := time.Since(begin)
+					if dialErr != nil {
+						item.Failures++
+						continue
+					}
+					_ = connection.Close()
+					item.Values = append(item.Values, elapsed)
+				}
+				// ICMP 与 TCP 建连测的不是一回事：ICMP 反映纯网络往返，TCP 还包含
+				// 目标服务的接受队列表现，两者并列才能看出是链路问题还是服务端问题。
+				if icmpEnabled {
+					host, _, splitErr := net.SplitHostPort(dialAddress)
+					if splitErr == nil {
+						item.ICMP = runICMPPingFamily(ctx, host, attempts, 2*time.Second, family)
+					}
+				}
 				results <- item
-				return
-			}
-			item.DialAddress = dialAddress
-			for i := 0; i < attempts; i++ {
-				dialer := net.Dialer{Timeout: 3 * time.Second}
-				begin := time.Now()
-				connection, dialErr := dialer.DialContext(ctx, "tcp", dialAddress)
-				elapsed := time.Since(begin)
-				if dialErr != nil {
-					item.Failures++
-					continue
-				}
-				_ = connection.Close()
-				item.Values = append(item.Values, elapsed)
-			}
-			// ICMP 与 TCP 建连测的不是一回事：ICMP 反映纯网络往返，TCP 还包含
-			// 目标服务的接受队列表现，两者并列才能看出是链路问题还是服务端问题。
-			if icmpEnabled {
-				host, _, splitErr := net.SplitHostPort(dialAddress)
-				if splitErr == nil {
-					item.ICMP = runICMPPing(ctx, host, attempts, 2*time.Second)
-				}
-			}
-			results <- item
-		}(endpoint)
+			}(endpoint, family)
+		}
 	}
 	wg.Wait()
 	close(results)
@@ -146,12 +209,16 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		order[endpoint.Address] = index
 	}
 	sort.SliceStable(collected, func(i, j int) bool {
-		return order[collected[i].Endpoint.Address] < order[collected[j].Endpoint.Address]
+		left, right := order[collected[i].Endpoint.Address], order[collected[j].Endpoint.Address]
+		if left != right {
+			return left < right
+		}
+		return collected[i].Family < collected[j].Family
 	})
 
 	table := model.Table{
 		Title:   "TCP 建连与 ICMP 往返",
-		Columns: []string{"目标", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 平均", "ICMP 丢包", "DNS 解析"},
+		Columns: []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 平均", "ICMP 丢包", "DNS 解析"},
 	}
 	var best time.Duration
 	var bestName string
@@ -184,6 +251,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		table.Rows = append(table.Rows, []string{
 			item.Endpoint.Name,
+			"IPv" + item.Family,
 			item.Endpoint.Kind,
 			fmt.Sprintf("%d/%d", len(item.Values), attempts),
 			formatMilliseconds(median),
@@ -250,4 +318,18 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Finish(start)
 	return result
+}
+
+func latencyFamiliesForEndpoint(endpoint config.Endpoint, mode string, hasIPv6 bool) []string {
+	families := latencyFamiliesWithCapability(endpoint.Address, mode, hasIPv6)
+	if endpoint.Family != config.IPVersion4 && endpoint.Family != config.IPVersion6 {
+		return families
+	}
+	filtered := families[:0]
+	for _, family := range families {
+		if family == endpoint.Family {
+			filtered = append(filtered, family)
+		}
+	}
+	return filtered
 }

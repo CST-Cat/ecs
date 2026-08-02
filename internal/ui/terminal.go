@@ -31,6 +31,11 @@ func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
 	terminal.line(terminal.style("2", i18n.T("term.subtitle")))
 	terminal.line("")
 	terminal.line(fmt.Sprintf("%s %-10s  %s %d  %s %s", i18n.T("term.profileLine"), cfg.Profile, i18n.T("term.moduleCount"), len(cfg.Modules), i18n.T("term.estimate"), estimate.DurationText))
+	ipVersion := cfg.IPVersion
+	if ipVersion == "" {
+		ipVersion = config.IPVersionAuto
+	}
+	terminal.line(fmt.Sprintf("%s %s", i18n.T("term.ipVersion"), ipVersion))
 	networkBudget := fmt.Sprintf("%d MiB", estimate.NetworkMiB)
 	if estimate.NetworkMiB < 0 {
 		networkBudget = i18n.T("term.uncapped")

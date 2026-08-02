@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -54,11 +55,18 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
+	targets := endpointsForIPVersion(env.Config.RouteTargets, env.Config.IPVersion)
+	if len(targets) == 0 {
+		result.Skip("没有匹配当前协议族的路由目标")
+		result.Notes = append(result.Notes, "当前协议族没有可用的字面量路由目标；请用 --route-targets 提供对应协议族的目标地址。")
+		result.Finish(start)
+		return result
+	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "引擎", Value: engine.Name},
 		{Key: "version", Label: "版本", Value: fallback(engine.Version, "unknown")},
 		{Key: "binary_sha256", Label: "外部程序 SHA-256", Value: fallback(engine.SHA256, "unavailable")},
-		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgs(engine, "<target>", routeSnapshotHops), " ")},
+		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ") + "（按目标协议族）"},
 	}
 	if engine.Name == "nexttrace" {
 		result.Sources = append(result.Sources, model.Source{
@@ -70,10 +78,10 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		Columns: []string{"目标", "类型", "状态", "已见跳数", "耗时"},
 	}
 	successes := 0
-	for _, target := range env.Config.RouteTargets {
+	for _, target := range targets {
 		traceCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		traceStart := time.Now()
-		output, err := runRouteCommand(traceCtx, engine, target.Address, routeSnapshotHops)
+		output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, routeSnapshotHops, endpointFamily(target, env.Config.IPVersion))
 		elapsed := time.Since(traceStart)
 		cancel()
 		clean := sanitizeCommandOutput(output)
@@ -109,7 +117,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	if engine.Name == "nexttrace" {
 		result.Notes = append(result.Notes, "NextTrace 使用 --json 并关闭地图 URL；不会调用会输出推广内容的版本界面。")
 	}
-	result.Summary = fmt.Sprintf("%d/%d 个目标完成 · %s", successes, len(env.Config.RouteTargets), engine.Name)
+	result.Summary = fmt.Sprintf("%d/%d 个目标完成 · %s", successes, len(targets), engine.Name)
 	result.Finish(start)
 	return result
 }
@@ -142,7 +150,11 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 const routeSnapshotHops = 12
 
 func runRouteCommand(ctx context.Context, engine routeEngine, target string, maxHops int) ([]byte, error) {
-	args := routeCommandArgs(engine, target, maxHops)
+	return runRouteCommandForFamily(ctx, engine, target, maxHops, config.IPVersionAuto)
+}
+
+func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
+	args := routeCommandArgsForFamily(engine, target, maxHops, family)
 	command := exec.CommandContext(ctx, engine.Path, args...)
 	command.Env = append(os.Environ(), "NO_COLOR=1", "LC_ALL=C", "LANG=C")
 	var buffer bytes.Buffer
@@ -161,14 +173,34 @@ func runRouteCommand(ctx context.Context, engine routeEngine, target string, max
 // maxHops 由调用方决定：路径快照 12 跳足够看清出口方向，但三网回程识别必须给到
 // 更大的跳数——从海外到中国骨干通常要走 15 跳以上，截断会让骨干特征根本不出现。
 func routeCommandArgs(engine routeEngine, target string, maxHops int) []string {
+	return routeCommandArgsForFamily(engine, target, maxHops, config.IPVersionAuto)
+}
+
+func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, family string) []string {
 	hops := strconv.Itoa(maxHops)
+	familyArg := ""
+	if family == config.IPVersion4 || family == config.IPVersion6 {
+		familyArg = "-" + family
+	}
 	switch engine.Name {
 	case "nexttrace":
-		return []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", target}
+		args := []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000"}
+		if familyArg != "" {
+			args = append([]string{familyArg}, args...)
+		}
+		return append(args, target)
 	case "tracepath":
-		return []string{"-n", "-m", hops, target}
+		args := []string{"-n", "-m", hops}
+		if familyArg != "" {
+			args = append([]string{familyArg}, args...)
+		}
+		return append(args, target)
 	default:
-		return []string{"-n", "-m", hops, "-q", "1", "-w", "1", target}
+		args := []string{"-n", "-m", hops, "-q", "1", "-w", "1"}
+		if familyArg != "" {
+			args = append([]string{familyArg}, args...)
+		}
+		return append(args, target)
 	}
 }
 

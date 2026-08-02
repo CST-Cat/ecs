@@ -29,12 +29,13 @@ var chinese = map[string]string{
 
 	// ── 配置档 ──────────────────────────────────────────────
 	"profile.quick":    "只测本机硬件与基础网络，不跑吞吐、路由与解锁（约 1–3 分钟）",
-	"profile.standard": "全面检测，覆盖 15 个模块（推荐，约 3–10 分钟）",
+	"profile.standard": "全面检测，覆盖 16 个模块（推荐，约 3–10 分钟）",
 	"profile.full":     "在 standard 之上加三网测速、UDP 质量与更多测速节点（约 6–18 分钟，流量明显更高）",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
 	"module.network.title":   "网络与 IP 质量",
+	"module.bgp.title":       "BGP 与互联观测",
 	"module.cpu.title":       "CPU 性能",
 	"module.memory.title":    "内存性能",
 	"module.disk.title":      "磁盘性能",
@@ -46,6 +47,7 @@ var chinese = map[string]string{
 	"module.blacklist.title": "IP 信誉与发信条件",
 	"module.apps.title":      "应用服务可达性",
 	"module.cnspeed.title":   "中国三网测速",
+	"module.ookla.title":     "Ookla Speedtest（外部服务）",
 	"module.media.title":     "流媒体与 AI 服务",
 	"module.route.title":     "路由追踪",
 	"module.backtrace.title": "三网回程",
@@ -92,6 +94,7 @@ var chinese = map[string]string{
 	"report.startedAt":        "开始时间",
 	"report.totalDuration":    "总耗时",
 	"report.networkMode":      "网络模式",
+	"report.ipVersion":        "IP 协议族",
 	"report.privacy":          "隐私",
 	"report.online":           "在线",
 	"report.offline":          "离线",
@@ -109,6 +112,7 @@ var chinese = map[string]string{
 	"term.profileLine":  "配置档",
 	"term.moduleCount":  "模块",
 	"term.estimate":     "预计",
+	"term.ipVersion":    "IP 协议族",
 	"term.budget":       "资源上限",
 	"term.tempDisk":     "临时磁盘",
 	"term.networkUsage": "网络流量",
@@ -170,12 +174,13 @@ var english = map[string]string{
 
 	// ── Profiles ────────────────────────────────────────────
 	"profile.quick":    "Local hardware and basic network only; no throughput, routing or unlock tests (~1-3 min)",
-	"profile.standard": "Full check across 15 modules (recommended, ~3-10 min)",
+	"profile.standard": "Full check across 16 modules (recommended, ~3-10 min)",
 	"profile.full":     "standard plus China carrier speedtest, UDP quality and more nodes (~6-18 min, much more traffic)",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",
 	"module.network.title":   "Network & IP Quality",
+	"module.bgp.title":       "BGP & Peering Observation",
 	"module.cpu.title":       "CPU Performance",
 	"module.memory.title":    "Memory Performance",
 	"module.disk.title":      "Disk Performance",
@@ -187,6 +192,7 @@ var english = map[string]string{
 	"module.blacklist.title": "IP Reputation & Mail Readiness",
 	"module.apps.title":      "Application Reachability",
 	"module.cnspeed.title":   "China Carrier Speedtest",
+	"module.ookla.title":     "Ookla Speedtest (external service)",
 	"module.media.title":     "Streaming & AI Services",
 	"module.route.title":     "Route Trace",
 	"module.backtrace.title": "China Return Path",
@@ -233,6 +239,7 @@ var english = map[string]string{
 	"report.startedAt":        "Started at",
 	"report.totalDuration":    "Total duration",
 	"report.networkMode":      "Network mode",
+	"report.ipVersion":        "IP protocol family",
 	"report.privacy":          "Privacy",
 	"report.online":           "Online",
 	"report.offline":          "Offline",
@@ -250,6 +257,7 @@ var english = map[string]string{
 	"term.profileLine":  "Profile",
 	"term.moduleCount":  "Modules",
 	"term.estimate":     "ETA",
+	"term.ipVersion":    "IP family",
 	"term.budget":       "Budget",
 	"term.tempDisk":     "Temp disk",
 	"term.networkUsage": "Network",
