@@ -75,6 +75,12 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 		"coverageText": func(covered, possible int) string {
 			return fmt.Sprintf(i18n.T("score.coverage"), covered, possible)
 		},
+		"tierLine": func(vcpu int, label string) string {
+			return fmt.Sprintf(i18n.T("score.tierLine"), vcpu, label)
+		},
+		"tierFallbackLine": func(vcpu int) string {
+			return fmt.Sprintf(i18n.T("score.tierFallbackLine"), vcpu)
+		},
 		"baselineLine": func(source string, sample int) string {
 			return fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(source), sample)
 		},
@@ -240,6 +246,8 @@ const htmlTemplate = `<!doctype html>
       {{if not .Score.Complete}}<p>{{scoreText "score.incompleteWarning"}}</p>{{end}}
       {{if le .Score.BaselineSample 1}}<p>{{scoreText "score.singleSampleWarning"}}</p>{{end}}
       <p>{{baselineLine .Score.BaselineSource .Score.BaselineSample}}</p>
+      {{if .Score.TierLabel}}<p>{{tierLine .Score.HostVCPU .Score.TierLabel}}</p>
+      {{else if .Score.HostVCPU}}<p>{{tierFallbackLine .Score.HostVCPU}}</p>{{end}}
     </div>
   </div>
   {{end}}

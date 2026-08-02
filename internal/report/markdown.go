@@ -358,6 +358,11 @@ func writeMarkdownScore(out *strings.Builder, scored *score.Report) {
 	}
 	out.WriteString(fmt.Sprintf(i18n.T("score.baselineLine"),
 		baselineSourceLabel(scored.BaselineSource), scored.BaselineSample) + "\n\n")
+	if scored.TierLabel != "" {
+		out.WriteString(fmt.Sprintf(i18n.T("score.tierLine"), scored.HostVCPU, scored.TierLabel) + "\n\n")
+	} else if scored.HostVCPU > 0 {
+		out.WriteString(fmt.Sprintf(i18n.T("score.tierFallbackLine"), scored.HostVCPU) + "\n\n")
+	}
 }
 
 func formatScore(value float64) string {

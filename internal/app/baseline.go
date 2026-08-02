@@ -89,6 +89,8 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	output := flags.String("output", "ecs-baseline.json", i18n.T("flag.baselineOutput"))
 	source := flags.String("source", "", i18n.T("flag.baselineSource"))
+	annotateFlag := flags.Bool("annotate", false, i18n.T("flag.baselineAnnotate"))
+	verboseFlag := flags.Bool("verbose", false, i18n.T("flag.baselineVerbose"))
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, i18n.T("help.baselineUsage"))
 		flags.PrintDefaults()
@@ -100,6 +102,7 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	annotate, verbose := *annotateFlag, *verboseFlag
 	// 输入按位置参数给出，方便直接用 shell 展开：ecs baseline reports/*.json
 	paths := expandReportPaths(flags.Args())
 	if len(paths) == 0 {
@@ -110,6 +113,7 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	// 两种输入都收：完整报告（本地跑完直接用）与瘦身提交（排行榜库里的）。
 	// 提交会被转成最小报告，因此聚合只有一条代码路径。
 	var reports []model.Report
+	var submissions []score.Submission
 	var skipped []string
 	seen := make(map[string]string)
 	for _, path := range paths {
@@ -124,6 +128,7 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 				continue
 			}
 			seen[submission.ID] = path
+			submissions = append(submissions, submission)
 			reports = append(reports, submission.AsReport())
 			continue
 		}
@@ -175,6 +180,43 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	if missing := missingMetrics(baseline); len(missing) > 0 {
 		fmt.Fprintf(stdout, "%s %s\n", i18n.T("baseline.missingMetrics"), strings.Join(missing, ", "))
+	}
+
+	// 分档情况：样本够的档位才会被评分实际采用，这里如实列出。
+	if len(baseline.Tiers) > 0 {
+		fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.tiersHeader"))
+		for _, tier := range baseline.Tiers {
+			status := i18n.T("baseline.tierActive")
+			if tier.SampleCount < score.MinTierSamples() {
+				status = fmt.Sprintf(i18n.T("baseline.tierFallback"), score.MinTierSamples())
+			}
+			fmt.Fprintf(stdout, "  %-14s %s  %s\n",
+				score.TierLabel(tier.VCPUMin),
+				fmt.Sprintf(i18n.T("baseline.sampleCount"), tier.SampleCount),
+				status)
+		}
+	}
+
+	// 离群只标记不阻断：可能是新硬件或特殊配置，由维护者判断是否收录。
+	if len(submissions) > 0 {
+		outliers := score.DetectOutliers(submissions)
+		if len(outliers.Outliers) > 0 {
+			fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.outliersHeader"))
+			for _, item := range outliers.Outliers {
+				fmt.Fprintf(stdout, "  %s\n", item.Describe())
+				if annotate {
+					// GitHub Actions 注解：让离群在 PR 页面上直接可见。
+					fmt.Fprintf(stdout, "::warning::%s\n", item.Describe())
+				}
+			}
+			fmt.Fprintf(stdout, "  %s\n", i18n.T("baseline.outlierNote"))
+		}
+		if len(outliers.Undecidable) > 0 && verbose {
+			fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.undecidableHeader"))
+			for _, item := range outliers.Undecidable {
+				fmt.Fprintf(stdout, "  %s\n", item)
+			}
+		}
 	}
 	return 0
 }

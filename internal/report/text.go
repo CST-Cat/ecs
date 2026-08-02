@@ -173,6 +173,12 @@ func (r *textRenderer) scoreSection() {
 	}
 	r.note(fmt.Sprintf(i18n.T("score.baselineLine"),
 		baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample))
+	// 档位决定了这个分数在跟谁比，必须说清楚。
+	if r.score.TierLabel != "" {
+		r.note(fmt.Sprintf(i18n.T("score.tierLine"), r.score.HostVCPU, r.score.TierLabel))
+	} else if r.score.HostVCPU > 0 {
+		r.note(fmt.Sprintf(i18n.T("score.tierFallbackLine"), r.score.HostVCPU))
+	}
 	r.blank()
 }
 

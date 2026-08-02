@@ -158,6 +158,12 @@ type Report struct {
 	// BaselineSource 记录分数基于哪份基线，换基线后分数不可直接比。
 	BaselineSource string `json:"baseline_source,omitempty"`
 	BaselineSample int    `json:"baseline_sample_count,omitempty"`
+	// TierVCPUMin 是实际使用的档位下界，0 表示用的是全局基线。
+	TierVCPUMin int `json:"tier_vcpu_min,omitempty"`
+	// TierLabel 是档位的可读名称，全局基线时为空。
+	TierLabel string `json:"tier_label,omitempty"`
+	// HostVCPU 是被评分机器的核数，用于说明为什么落在这一档。
+	HostVCPU int `json:"host_vcpu,omitempty"`
 }
 
 // Compute 按基线为一份报告算分。
@@ -173,14 +179,26 @@ func Compute(data model.Report, baseline Baseline) *Report {
 		}
 	}
 
+	// 按被测机器的规格选档位：多线程分数几乎正比于核数，拿全体中位数当基线
+	// 会让小机器永远不及格、大机器永远满分。档位样本不足时自动回落到全局。
+	vcpu := hostVCPU(values)
+	tierMetrics, tierMin, tierSamples := baseline.MetricsForHost(vcpu)
+	scoped := baseline
+	scoped.Metrics = tierMetrics
+
 	out := Report{
 		BaselineSource: baseline.Source,
-		BaselineSample: baseline.SampleCount,
+		BaselineSample: tierSamples,
+		TierVCPUMin:    tierMin,
+		HostVCPU:       vcpu,
+	}
+	if tierMin > 0 {
+		out.TierLabel = TierLabel(tierMin)
 	}
 	var totals []float64
 	for _, dimension := range Dimensions() {
 		out.Possible++
-		scored := scoreDimension(dimension, values, baseline, ran[dimension.ModuleID])
+		scored := scoreDimension(dimension, values, scoped, ran[dimension.ModuleID])
 		out.Dimensions = append(out.Dimensions, scored)
 		if !scored.Missing {
 			out.Covered++

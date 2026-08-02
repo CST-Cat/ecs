@@ -89,6 +89,15 @@ jobs:
         env:
           ECS_SUBMISSION_DIR: submissions
 
+      # 离群检测只标记不阻断：可能是新硬件或特殊配置，由维护者判断。
+      # --annotate 把结果转成 GitHub 注解，直接显示在 PR 页面上。
+      - name: Check for outliers
+        run: |
+          go run ./cmd/ecs baseline \
+            --annotate --verbose \
+            --output /tmp/baseline-check.json \
+            submissions
+
       # 基线重建只在主分支做：PR 上重建会让每个 PR 都带一个 baseline.json 改动，
       # 互相冲突且掩盖真正的提交内容。
       - name: Rebuild baseline

@@ -20,6 +20,9 @@ var scoreChinese = map[string]string{
 	"score.singleSampleWarning": "当前基线只有 1 个样本，分数仅供自查；跨机器比较需要用多机样本重建基线。",
 	"score.baselineLine":        "评分基线：%s（样本 %d 台）。换基线后分数不可直接比较。",
 
+	"score.tierLine":         "本机 %d 核，与 %s 档的机器比较。",
+	"score.tierFallbackLine": "本机 %d 核，该档样本不足，改用全部机型的全局基线；跨机型比较对两端都不够公平。",
+
 	"score.baseline.builtinSingleHost": "内置单机快照，非 VPS 典型值",
 
 	"score.metric.cpu_single":           "CPU 单线程",
@@ -51,6 +54,9 @@ var scoreEnglish = map[string]string{
 	"score.incompleteWarning":   "Not all dimensions ran; this total is not directly comparable with a full run.",
 	"score.singleSampleWarning": "The current baseline has only 1 sample; scores are for self-comparison. Rebuild the baseline from multiple hosts before comparing across machines.",
 	"score.baselineLine":        "Scoring baseline: %s (%d sample host(s)). Scores are not comparable across different baselines.",
+
+	"score.tierLine":         "This host has %d vCPU and is compared against the %s tier.",
+	"score.tierFallbackLine": "This host has %d vCPU; that tier has too few samples, so the global baseline across all sizes is used instead — which is unfair to both ends of the range.",
 
 	"score.baseline.builtinSingleHost": "built-in single-host snapshot, not a typical VPS",
 

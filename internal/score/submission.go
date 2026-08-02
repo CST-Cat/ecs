@@ -313,6 +313,14 @@ func (s Submission) AsReport() model.Report {
 	report := model.Report{
 		Run: model.RunInfo{Profile: s.Profile, StartedAt: s.RanAt},
 	}
+	// 机器规格要一并还原：基线按 vCPU 分档，少了它整批提交都会落进"未知档"。
+	report.Results = append(report.Results, model.Result{
+		ID: "system", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "logical_cpus", Value: float64(s.Host.VCPU)},
+			{Key: "memory_total_bytes", Value: s.Host.MemoryGiB * (1 << 30)},
+		},
+	})
 	for _, id := range sortedModuleIDs(byModule) {
 		report.Results = append(report.Results, model.Result{
 			ID: id, Status: model.StatusOK, Measurements: byModule[id],

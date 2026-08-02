@@ -17,6 +17,7 @@ import (
 	"sort"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -32,8 +33,10 @@ type Baseline struct {
 	// 报告需要据此提醒读者分数的参考价值有限。
 	SampleCount int       `json:"sample_count"`
 	GeneratedAt time.Time `json:"generated_at,omitempty"`
-	// Metrics 是指标 key 到基线值的映射，键与 Dimensions() 中的 Metric.Key 对应。
+	// Metrics 是全局基线，也是分档样本不足时的回落值。
 	Metrics map[string]float64 `json:"metrics"`
+	// Tiers 是按 vCPU 分档的基线。样本少时为空，评分自动用全局值。
+	Tiers []Tier `json:"tiers,omitempty"`
 }
 
 // builtinBaseline 是内置基线。
@@ -123,9 +126,11 @@ func LoadBaseline(path string) (Baseline, error) {
 // 只有至少一台机器测到的指标才会进入基线——凭空补齐会让缺失伪装成数据。
 func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	if len(reports) == 0 {
-		return Baseline{}, fmt.Errorf("no reports supplied")
+		return Baseline{}, i18n.Errorf("err.baselineNoReports")
 	}
 	samples := make(map[string][]float64)
+	// 同一批样本同时按档位归类，分档基线与全局基线一次算完。
+	byTier := make(map[int]map[string][]float64)
 	for _, report := range reports {
 		values := collectMeasurements(report)
 		ran := make(map[string]bool, len(report.Results))
@@ -134,6 +139,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 				ran[result.ID] = true
 			}
 		}
+		tierKey := TierKeyFor(hostVCPU(values))
 		for _, dimension := range Dimensions() {
 			if !ran[dimension.ModuleID] {
 				continue
@@ -144,11 +150,17 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 					continue
 				}
 				samples[metric.Key] = append(samples[metric.Key], value)
+				if tierKey > 0 {
+					if byTier[tierKey] == nil {
+						byTier[tierKey] = make(map[string][]float64)
+					}
+					byTier[tierKey][metric.Key] = append(byTier[tierKey][metric.Key], value)
+				}
 			}
 		}
 	}
 	if len(samples) == 0 {
-		return Baseline{}, fmt.Errorf("the supplied reports contain no scoreable measurements")
+		return Baseline{}, i18n.Errorf("err.baselineNoMetrics")
 	}
 	metrics := make(map[string]float64, len(samples))
 	for key, values := range samples {
@@ -164,7 +176,16 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 		SampleCount: len(reports),
 		GeneratedAt: time.Now().UTC(),
 		Metrics:     metrics,
+		Tiers:       buildTiers(byTier),
 	}, nil
+}
+
+// hostVCPU 从报告里取逻辑核数，用于归档。
+func hostVCPU(values map[string]measured) int {
+	if item, ok := values["logical_cpus"]; ok && item.value > 0 {
+		return int(item.value)
+	}
+	return 0
 }
 
 // Encode 序列化基线，供写入文件。
