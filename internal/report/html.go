@@ -2,14 +2,24 @@ package report
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"strings"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/score"
+	"ecs/internal/termcolor"
 )
 
-func HTML(data model.Report) ([]byte, error) {
+// htmlPayload 把评分与报告一起交给模板：模板只认一个顶层数据对象。
+type htmlPayload struct {
+	model.Report
+	Score *score.Report
+}
+
+func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"statusLabel": statusLabel,
 		"statusIcon":  statusIcon,
@@ -24,13 +34,59 @@ func HTML(data model.Report) ([]byte, error) {
 			return no
 		},
 		"valueClass": reportValueClass,
+		"scoreValue": func(value float64) string { return fmt.Sprintf("%.0f", value) },
+		"metricValue": func(value float64) string {
+			switch {
+			case value >= 1000:
+				return fmt.Sprintf("%.0f", value)
+			case value >= 10:
+				return fmt.Sprintf("%.1f", value)
+			default:
+				return fmt.Sprintf("%.2f", value)
+			}
+		},
+		"percent": func(ratio float64) string { return fmt.Sprintf("%.0f", ratio*100) },
+		// 条宽与 txt 柱状图同口径：超过基线不撑破容器，但颜色已到顶。
+		"barWidth": func(ratio float64) string {
+			if ratio > 1 {
+				ratio = 1
+			}
+			if ratio < 0 {
+				ratio = 0
+			}
+			return fmt.Sprintf("%.1f", ratio*100)
+		},
+		"scoreColor": func(ratio float64) template.CSS {
+			color := termcolor.Color(ratio)
+			return template.CSS(fmt.Sprintf("#%02x%02x%02x", color.R, color.G, color.B))
+		},
+		"dimensionName": func(key string) string { return i18n.T("score.dimension." + key) },
+		"metricName": func(metric score.MetricScore) string {
+			if key := "score.metric." + metric.Key; i18n.Has(i18n.Current(), key) {
+				return i18n.T(key)
+			}
+			return metric.Label
+		},
+		// 评分区的成句文案统一走 i18n，避免模板里留下写死的中文。
+		"scoreText": func(key string) string { return i18n.T(key) },
+		"ofBaseline": func(ratio float64) string {
+			return fmt.Sprintf(i18n.T("score.ofBaseline"), ratio*100)
+		},
+		"coverageText": func(covered, possible int) string {
+			return fmt.Sprintf(i18n.T("score.coverage"), covered, possible)
+		},
+		"baselineLine": func(source string, sample int) string {
+			return fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(source), sample)
+		},
+		"missingReason":  func(key string) string { return i18n.T("score.missing." + key) },
+		"baselineSource": baselineSourceLabel,
 	}
 	parsed, err := template.New("report").Funcs(functions).Parse(htmlTemplate)
 	if err != nil {
 		return nil, err
 	}
 	var output bytes.Buffer
-	if err := parsed.Execute(&output, data); err != nil {
+	if err := parsed.Execute(&output, htmlPayload{Report: data, Score: scored}); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil
@@ -105,6 +161,25 @@ const htmlTemplate = `<!doctype html>
     ul { padding-left: 21px; margin-bottom: 0; }
     details { margin-top: 12px; border: 1px solid var(--line); border-radius: 13px; padding: 10px 13px; }
     summary { cursor: pointer; font-weight: 650; }
+    .score-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+      box-shadow: var(--shadow); padding: 20px; margin: 18px 0; }
+    .score-total { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+    .score-total strong { font-size: 40px; line-height: 1; }
+    .score-total span { color: var(--muted); font-size: 13px; }
+    .score-row { display: grid; grid-template-columns: 88px 1fr 72px; align-items: center;
+      gap: 12px; margin: 9px 0; }
+    .score-row .name { font-weight: 620; }
+    .score-row .value { text-align: right; font-variant-numeric: tabular-nums; }
+    /* 条形与 txt 报告用同一套色阶：低分偏橙红，接近或超过基线转青绿。
+       宽度按比例，与柱状图一样不做等宽装饰。 */
+    .bar { position: relative; height: 13px; border-radius: 7px; background: var(--line); overflow: hidden; }
+    .bar > i { display: block; height: 100%; border-radius: 7px; }
+    .score-metrics { margin: 4px 0 12px 88px; color: var(--muted); font-size: 13px; }
+    .score-metrics div { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 1px 0; }
+    .score-metrics .num { font-variant-numeric: tabular-nums; }
+    .score-missing { color: var(--muted); }
+    .score-note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
     pre { overflow: auto; max-height: 480px; margin: 10px -2px 0; padding: 14px; border-radius: 10px; background: #090d16; color: #d9e2f5; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
     a { color: var(--accent); }
     footer { padding: 24px 4px; color: var(--muted); font-size: 13px; }
@@ -136,6 +211,38 @@ const htmlTemplate = `<!doctype html>
     <div class="summary-card"><strong class="error">{{.Summary.Errors}}</strong><span>异常</span></div>
     <div class="summary-card"><strong class="skipped">{{.Summary.Skipped}}</strong><span>跳过</span></div>
   </div>
+
+  {{if .Score}}
+  <div class="score-card">
+    <h2>{{scoreText "score.title"}}</h2>
+    <div class="score-total">
+      <strong style="color:{{scoreColor .Score.Ratio}}">{{scoreValue .Score.Total}}</strong>
+      <span>{{coverageText .Score.Covered .Score.Possible}}</span>
+    </div>
+    {{range .Score.Dimensions}}
+      {{if .Missing}}
+      <div class="score-row">
+        <div class="name">{{dimensionName .Key}}</div>
+        <div class="score-missing" style="grid-column: 2 / span 2">{{missingReason .MissingReason}}</div>
+      </div>
+      {{else}}
+      <div class="score-row">
+        <div class="name">{{dimensionName .Key}}</div>
+        <div class="bar"><i style="width:{{barWidth .Ratio}}%;background:{{scoreColor .Ratio}}"></i></div>
+        <div class="value" style="color:{{scoreColor .Ratio}}">{{scoreValue .Score}}</div>
+      </div>
+      <div class="score-metrics">
+        {{range .Metrics}}<div><span>{{metricName .}}</span><span class="num">{{metricValue .Value}} {{.Unit}}</span><span class="num">{{ofBaseline .Ratio}}</span></div>{{end}}
+      </div>
+      {{end}}
+    {{end}}
+    <div class="score-note">
+      {{if not .Score.Complete}}<p>{{scoreText "score.incompleteWarning"}}</p>{{end}}
+      {{if le .Score.BaselineSample 1}}<p>{{scoreText "score.singleSampleWarning"}}</p>{{end}}
+      <p>{{baselineLine .Score.BaselineSource .Score.BaselineSample}}</p>
+    </div>
+  </div>
+  {{end}}
 
   {{range .Results}}
   <section id="{{.ID}}">

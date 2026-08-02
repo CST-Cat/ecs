@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"ecs/internal/model"
+	"ecs/internal/score"
+	"ecs/internal/termcolor"
 )
 
-func Markdown(data model.Report) string {
+func Markdown(data model.Report, scored *score.Report) string {
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")
@@ -43,6 +45,10 @@ func Markdown(data model.Report) string {
 		writeMarkdownRow(&out, i18n.T("report.runState"), i18n.T("report.canceled"))
 	}
 	out.WriteString("\n")
+
+	if scored != nil {
+		writeMarkdownScore(&out, scored)
+	}
 
 	out.WriteString("## " + i18n.T("report.glance") + "\n\n")
 	out.WriteString("| " + i18n.T("report.module") + " | " + i18n.T("report.scope") + " | " +
@@ -320,4 +326,40 @@ func fallbackReport(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// writeMarkdownScore 渲染评分区。
+//
+// markdown 不能依赖 ANSI 颜色，因此层次全部由柱长与密度字符承担——这也是
+// 无色档位一直要能独立表达层次的原因。
+func writeMarkdownScore(out *strings.Builder, scored *score.Report) {
+	plain := termcolor.Palette{Level: termcolor.LevelNone}
+	out.WriteString("## " + i18n.T("score.title") + "\n\n")
+	out.WriteString("**" + i18n.T("score.total") + "** " +
+		formatScore(scored.Total) + " · " +
+		fmt.Sprintf(i18n.T("score.coverage"), scored.Covered, scored.Possible) + "\n\n")
+
+	out.WriteString("| " + i18n.T("report.metric") + " | " + i18n.T("report.value") + " | |\n| --- | ---: | --- |\n")
+	for _, dimension := range scored.Dimensions {
+		name := i18n.T("score.dimension." + dimension.Key)
+		if dimension.Missing {
+			writeMarkdownRow(out, name, i18n.T("score.missing."+dimension.MissingReason))
+			continue
+		}
+		out.WriteString("| " + markdownEscape(name) + " | " + formatScore(dimension.Score) +
+			" | `" + plain.Bar(dimension.Ratio, 20) + "` |\n")
+	}
+	out.WriteString("\n")
+	if !scored.Complete {
+		out.WriteString("> " + i18n.T("score.incompleteWarning") + "\n\n")
+	}
+	if scored.BaselineSample <= 1 {
+		out.WriteString("> " + i18n.T("score.singleSampleWarning") + "\n\n")
+	}
+	out.WriteString(fmt.Sprintf(i18n.T("score.baselineLine"),
+		baselineSourceLabel(scored.BaselineSource), scored.BaselineSample) + "\n\n")
+}
+
+func formatScore(value float64) string {
+	return fmt.Sprintf("%.0f", value)
 }

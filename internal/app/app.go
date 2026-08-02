@@ -22,6 +22,8 @@ import (
 	"ecs/internal/model"
 	reporter "ecs/internal/report"
 	"ecs/internal/runner"
+	"ecs/internal/score"
+	"ecs/internal/termcolor"
 	"ecs/internal/ui"
 )
 
@@ -45,6 +47,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return configCommand(args, stdout, stderr)
 	case "doctor":
 		return doctorCommand(ctx, stdout)
+	case "baseline":
+		return baselineCommand(args, stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 		return 0
@@ -104,6 +108,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	outputFlag := flags.String("output", cfg.Output, i18n.T("flag.output"))
 	nameFlag := flags.String("name", "", i18n.T("flag.name"))
 	noColorFlag := flags.Bool("no-color", cfg.NoColor, i18n.T("flag.noColor"))
+	colorFlag := flags.String("color", "auto", i18n.T("flag.color"))
+	baselineFlag := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
 	cpuTimeFlag := flags.Duration("cpu-time", cfg.CPUTime, i18n.T("flag.cpuTime"))
 	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, i18n.T("flag.diskMiB"))
 	diskPathFlag := flags.String("disk-path", cfg.DiskPath, i18n.T("flag.diskPath"))
@@ -271,11 +277,38 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 
+	baseline := score.DefaultBaseline()
+	if *baselineFlag != "" {
+		loaded, err := score.LoadBaseline(*baselineFlag)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), i18n.Errorf("err.baselineLoad", *baselineFlag, err))
+			return 1
+		}
+		baseline = loaded
+	}
+
 	terminal := ui.New(stdout, cfg.NoColor)
 	terminal.Header(cfg, config.EstimateFor(cfg))
 	raw := runner.Run(ctx, cfg, terminal.Progress)
 	data := model.RedactedCopy(raw, cfg.Reveal)
-	files, writeErr := reporter.WriteFiles(data, cfg.Output, *nameFlag, cfg.Formats)
+	scored := score.Compute(data, baseline)
+
+	// 写进文件的 txt 默认不着色：报告会被 diff、贴进不解析转义序列的地方。
+	// --color always 才把颜色写进文件，auto 只影响终端直出。
+	textColor := termcolor.LevelNone
+	if requested, ok := termcolor.ParseLevel(*colorFlag); ok {
+		textColor = requested
+	} else if strings.EqualFold(*colorFlag, "always") {
+		textColor = termcolor.Detect(true)
+		if textColor == termcolor.LevelNone {
+			textColor = termcolor.LevelANSI256
+		}
+	}
+	if cfg.NoColor {
+		textColor = termcolor.LevelNone
+	}
+	files, writeErr := reporter.WriteFilesWithOptions(data, cfg.Output, *nameFlag, cfg.Formats,
+		reporter.Options{TextColor: textColor, Score: scored})
 	if writeErr != nil {
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
@@ -298,10 +331,14 @@ func writeOneShotPlan(path string, cfg config.Runtime) error {
 func renderCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	// 语言已由 Main 扫描原始参数设置，这里定义只为让 --lang 通过解析。
+	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
 	formats := flags.String("format", "md,html", i18n.T("flag.format"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))
 	name := flags.String("name", "", i18n.T("flag.name"))
+	renderColor := flags.String("color", "auto", i18n.T("flag.color"))
+	renderBaseline := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -324,7 +361,26 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		base := filepath.Base(*input)
 		*name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	written, err := reporter.WriteFiles(data, *output, *name, config.ParseList(*formats))
+	// 重新导出时同样算分：同一份 JSON 换个基线再看分数，是评分能被检验的前提。
+	baseline := score.DefaultBaseline()
+	if *renderBaseline != "" {
+		loaded, loadErr := score.LoadBaseline(*renderBaseline)
+		if loadErr != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), i18n.Errorf("err.baselineLoad", *renderBaseline, loadErr))
+			return 1
+		}
+		baseline = loaded
+	}
+	textColor := termcolor.LevelNone
+	if requested, ok := termcolor.ParseLevel(*renderColor); ok {
+		textColor = requested
+	} else if strings.EqualFold(*renderColor, "always") {
+		if textColor = termcolor.Detect(true); textColor == termcolor.LevelNone {
+			textColor = termcolor.LevelANSI256
+		}
+	}
+	written, err := reporter.WriteFilesWithOptions(data, *output, *name, config.ParseList(*formats),
+		reporter.Options{TextColor: textColor, Score: score.Compute(data, baseline)})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
@@ -499,6 +555,7 @@ func printHelp(writer io.Writer) {
   ecs render --input FILE     从 JSON 重新导出 Markdown/HTML
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
+  ecs baseline REPORTS...     从多份报告聚合评分基线
   ecs version                 显示版本
 
 常用示例:

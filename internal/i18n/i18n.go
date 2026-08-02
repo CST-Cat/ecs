@@ -129,11 +129,17 @@ func translate(lang Lang, key string) string {
 		if value, ok := errorEnglish[key]; ok && value != "" {
 			return value
 		}
+		if value, ok := scoreEnglish[key]; ok && value != "" {
+			return value
+		}
 		if value, ok := cliEnglish[key]; ok && value != "" {
 			return value
 		}
 	}
 	if value, ok := errorChinese[key]; ok && value != "" {
+		return value
+	}
+	if value, ok := scoreChinese[key]; ok && value != "" {
 		return value
 	}
 	if value, ok := cliChinese[key]; ok && value != "" {
@@ -157,11 +163,17 @@ func Has(lang Lang, key string) bool {
 		if value, ok := errorEnglish[key]; ok && value != "" {
 			return true
 		}
+		if value, ok := scoreEnglish[key]; ok && value != "" {
+			return true
+		}
 		if value, ok := cliEnglish[key]; ok && value != "" {
 			return true
 		}
 	} else {
 		if value, ok := errorChinese[key]; ok && value != "" {
+			return true
+		}
+		if value, ok := scoreChinese[key]; ok && value != "" {
 			return true
 		}
 		if value, ok := cliChinese[key]; ok && value != "" {

@@ -190,8 +190,16 @@ ecs --only backtrace -6 --backtrace-city all
 ecs --accept ookla
 ecs --accept ookla --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
 
-# 从已有 JSON 重新导出 Markdown/HTML
-ecs render --input ./reports/ecs-report-20260731-120000.json
+# 终端友好的纯文本报告（彩色柱状图，自适应终端能力）
+ecs --format txt
+ecs --format txt --color always      # 把颜色一并写进文件
+
+# 从多台机器的报告聚合评分基线，再用它算分
+ecs baseline --source "我的 VPS 集群" --output baseline.json ./reports
+ecs --score-baseline baseline.json
+
+# 从已有 JSON 重新导出
+ecs render --input ./reports/ecs-report-20260731-120000.json --format txt,md,html
 
 # 查看全部模块
 ecs list
@@ -338,21 +346,80 @@ ABUSEIPDB_API_KEY='...' IPQS_API_KEY='...' ecs --only network
 
 ## 报告
 
-JSON 是事实来源，schema 当前为 `ecs.report/v1`。Markdown 和 HTML 由同一份数据生成：
+JSON 是事实来源，schema 当前为 `ecs.report/v1`。四种格式由同一份数据生成：
 
-- Markdown 适合 GitHub、论坛和工单；
-- HTML 是单文件、无 JavaScript、无外部字体/图片/统计脚本，支持深色模式和打印；
-- JSON 保留精确数值、显示值、测试方法、状态、来源、警告和路由原文；
+- **`txt`** 面向终端：分区标题、中文数字章节、按比例的彩色柱状图，适合 `cat` 看完顺手贴进论坛或聊天窗；
+- **`md`** 适合 GitHub、论坛和工单；
+- **`html`** 是单文件、无 JavaScript、无外部字体/图片/统计脚本，支持深色模式和打印；
+- **`json`** 保留精确数值、显示值、测试方法、状态、来源、警告和路由原文；
 - 每个模块明确标注“标准基准、协议测量、第三方评估、启发式判断或事实采集”，避免把所有数字都包装成标准成绩；
 - `Ctrl+C` 会取消正在运行的探针、清理磁盘临时文件，并导出已经完成的部分。
 
-HTML/Markdown 一键导出不依赖 Pandoc、Node.js 或浏览器：
+导出不依赖 Pandoc、Node.js 或浏览器：
 
 ```bash
-ecs render --input report.json --format md,html --output ./exported
+ecs --format txt,md,html,json
+ecs render --input report.json --format txt,md,html --output ./exported
 ```
 
 详细字段见 [报告 schema](docs/schema.md)。
+
+### 颜色自适应
+
+终端之间的差距不只是“有没有颜色”，而是**能不能寻址到某个颜色**：8/16 色只能说“给我红色”，
+256 色可以说“第 196 号”，真彩色才能直接指定 RGB。链路上还会掉档——SSH 到缺 terminfo 的机器、
+穿过配置不全的 tmux，真彩色都可能退回 256 甚至 16 色。
+
+ecs 按 `COLORTERM`、`TERM` 与 `NO_COLOR` 逐级判定，并且**层次不单独依赖颜色**：
+柱状图同时用 `░▒▓█` 四级密度字符表达高低，因此单色终端、纯文本文件、被 `grep`
+过的输出里层次照样在。
+
+```bash
+ecs --format txt                  # 写进文件默认无色（可 diff、可粘贴）
+ecs --format txt --color always   # 把颜色一并写进文件
+ecs --color 256                   # 显式指定档位：none|basic|256|truecolor
+NO_COLOR=1 ecs                    # 遵循跨工具约定，一律关闭
+```
+
+写入文件的 txt **默认不带转义序列**：报告会被 diff、贴进不解析 ANSI 的地方，
+转义码在那里就是可见垃圾。需要彩色文件时用 `--color always`。
+
+### 综合评分
+
+分项分是**一步除法**：实测值 ÷ 基线值 × 1000，读者可以手算复核。四个维度
+（CPU、内存、磁盘、带宽）**均等权重**，总分是它们的算术平均。
+
+```
+总分              570   基于 3/4 个维度
+CPU           ░░░░░░░·················      286
+    单线程事件率                  785.9 events/s  基线的 29%
+内存          ▒▒▒▒▒▒▒▒▒▒▒▒▒···········      556
+磁盘          █████████████████████···      870
+带宽          未测（未计入）
+```
+
+三条规则让分数可解释：
+
+- **只累加真正跑过的维度**，覆盖度与分数并排显示。缺的维度既不按 0 也不按满分——
+  参考实现里出现过“总分 3867 = CPU N/A + GPU N/A + 内存 2850 + 磁盘 1017”，两项缺失却照给总分；
+- **分数不封顶**，跑赢基线一倍就是两倍分，截断会抹掉真实差距；
+- **不做百分位**。真百分位需要跨机器的样本库，而 ecs 不上传任何数据，编一个百分位就是凭空捏造。
+
+**基线决定分数的含义**，因此它是可替换的数据而不是算法里的常数。内置基线只是一台
+开发机的单次快照（明确标注、非 VPS 典型值），横向比较要用自己的机器群重建：
+
+```bash
+# 跑完多台机器后，从报告聚合基线（每项取中位数，一台异常机器不会拽走基线）
+ecs baseline --source "我的 VPS 集群" --output baseline.json ./reports
+
+# 之后用这份基线算分
+ecs --score-baseline baseline.json
+ecs render --input report.json --score-baseline baseline.json --format txt
+```
+
+`ecs baseline` 会逐项列出样本数，并指出这批报告没覆盖到的指标——某个指标只有一两台
+机器测到时，它对基线的代表性远低于其他项，这件事必须看得见。样本数为 1 时报告会明确提示
+分数仅供自查。
 
 ## 隐私与网络请求
 

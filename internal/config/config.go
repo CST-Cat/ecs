@@ -636,7 +636,7 @@ func Validate(runtime Runtime) error {
 	if runtime.SpeedThreads < 1 || runtime.SpeedThreads > 32 {
 		return i18n.Errorf("err.threadsRange")
 	}
-	allowedFormats := map[string]bool{"json": true, "md": true, "html": true}
+	allowedFormats := map[string]bool{"json": true, "md": true, "html": true, "txt": true}
 	if len(runtime.Formats) == 0 {
 		return i18n.Errorf("err.noFormats")
 	}

@@ -84,6 +84,21 @@ var errorChinese = map[string]string{
 	"err.ooklaDuplicate":    "Ookla 运营商重复 %q",
 	"err.ooklaDupField":     "Ookla 服务器不能重复配置运营商 %q",
 
+	// ── 报告输出 ────────────────────────────────────────────
+	"err.reportOutputDir":      "解析输出目录: %w",
+	"err.reportCreateDir":      "创建输出目录: %w",
+	"err.reportUnknownFormat":  "未知报告格式 %q",
+	"err.reportGenerate":       "生成 %s 报告: %w",
+	"err.reportWrite":          "写入 %s 报告: %w",
+	"err.reportTooLarge":       "报告文件超过 32 MiB 安全上限",
+	"err.reportSingleObject":   "报告文件只能包含一个 JSON 对象",
+	"err.reportTrailing":       "报告文件尾部存在无效内容: %w",
+	"err.reportNoSchema":       "缺少 schema_version",
+	"err.reportSchemaMismatch": "不支持 schema_version %q，当前渲染器支持 %q",
+	"err.baselineNoReports":    "没有可用的报告文件",
+	"err.baselineNoMetrics":    "这些报告里没有可评分的实测值",
+	"err.baselineLoad":         "读取评分基线 %s: %w",
+
 	// ── 配置文件 ────────────────────────────────────────────
 	"err.configRead":     "读取配置文件: %w",
 	"err.configParse":    "解析配置文件: %w",
@@ -166,6 +181,21 @@ var errorEnglish = map[string]string{
 	"err.ooklaIDField":      "Ookla server %q has an invalid ID",
 	"err.ooklaDuplicate":    "duplicate Ookla carrier %q",
 	"err.ooklaDupField":     "Ookla servers must not configure the same carrier twice: %q",
+
+	// ── Report output ───────────────────────────────────────
+	"err.reportOutputDir":      "resolve output directory: %w",
+	"err.reportCreateDir":      "create output directory: %w",
+	"err.reportUnknownFormat":  "unknown report format %q",
+	"err.reportGenerate":       "generate %s report: %w",
+	"err.reportWrite":          "write %s report: %w",
+	"err.reportTooLarge":       "report file exceeds the 32 MiB safety limit",
+	"err.reportSingleObject":   "the report file must contain exactly one JSON object",
+	"err.reportTrailing":       "invalid trailing content in the report file: %w",
+	"err.reportNoSchema":       "missing schema_version",
+	"err.reportSchemaMismatch": "unsupported schema_version %q; this renderer supports %q",
+	"err.baselineNoReports":    "no usable report files",
+	"err.baselineNoMetrics":    "the supplied reports contain no scoreable measurements",
+	"err.baselineLoad":         "read scoring baseline %s: %w",
 
 	// ── Config file ─────────────────────────────────────────
 	"err.configRead":     "read config file: %w",

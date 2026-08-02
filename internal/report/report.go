@@ -2,26 +2,42 @@ package report
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"ecs/internal/buildinfo"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/score"
+	"ecs/internal/termcolor"
 )
 
+// Options 控制报告生成。
+type Options struct {
+	// TextColor 是纯文本报告的颜色档位。写入文件默认无色：文件会被 diff、
+	// 贴进不解析转义序列的地方，转义码在那里就是可见垃圾。需要彩色文件时
+	// 由调用方显式指定。
+	TextColor termcolor.Level
+	// Score 是可选的综合评分。
+	Score *score.Report
+}
+
 func WriteFiles(data model.Report, directory, baseName string, formats []string) (map[string]string, error) {
+	return WriteFilesWithOptions(data, directory, baseName, formats, Options{})
+}
+
+func WriteFilesWithOptions(data model.Report, directory, baseName string, formats []string, options Options) (map[string]string, error) {
 	if directory == "" {
 		directory = "./reports"
 	}
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
-		return nil, fmt.Errorf("解析输出目录: %w", err)
+		return nil, i18n.Errorf("err.reportOutputDir", err)
 	}
 	if err := os.MkdirAll(absolute, 0o700); err != nil {
-		return nil, fmt.Errorf("创建输出目录: %w", err)
+		return nil, i18n.Errorf("err.reportCreateDir", err)
 	}
 	if baseName == "" {
 		baseName = "ecs-report-" + data.Run.StartedAt.Format("20060102-150405")
@@ -38,18 +54,20 @@ func WriteFiles(data model.Report, directory, baseName string, formats []string)
 		case "json":
 			content, err = JSON(localized)
 		case "md":
-			content = []byte(Markdown(localized))
+			content = []byte(Markdown(localized, options.Score))
 		case "html":
-			content, err = HTML(localized)
+			content, err = HTML(localized, options.Score)
+		case "txt":
+			content = []byte(Text(localized, TextOptions{Color: options.TextColor, Score: options.Score}))
 		default:
-			err = fmt.Errorf("未知报告格式 %q", format)
+			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}
 		if err != nil {
-			return written, fmt.Errorf("生成 %s 报告: %w", format, err)
+			return written, i18n.Errorf("err.reportGenerate", format, err)
 		}
 		path := filepath.Join(absolute, baseName+"."+format)
 		if err := atomicWrite(path, content, 0o600); err != nil {
-			return written, fmt.Errorf("写入 %s 报告: %w", format, err)
+			return written, i18n.Errorf("err.reportWrite", format, err)
 		}
 		written[format] = path
 	}
@@ -72,7 +90,7 @@ func LoadJSON(path string) (model.Report, error) {
 	}
 	defer file.Close()
 	if info, err := file.Stat(); err == nil && info.Size() > 32*1024*1024 {
-		return data, fmt.Errorf("报告文件超过 32 MiB 安全上限")
+		return data, i18n.Errorf("err.reportTooLarge")
 	}
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&data); err != nil {
@@ -81,15 +99,15 @@ func LoadJSON(path string) (model.Report, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return data, fmt.Errorf("报告文件只能包含一个 JSON 对象")
+			return data, i18n.Errorf("err.reportSingleObject")
 		}
-		return data, fmt.Errorf("报告文件尾部存在无效内容: %w", err)
+		return data, i18n.Errorf("err.reportTrailing", err)
 	}
 	if data.SchemaVersion == "" {
-		return data, fmt.Errorf("缺少 schema_version")
+		return data, i18n.Errorf("err.reportNoSchema")
 	}
 	if data.SchemaVersion != buildinfo.SchemaVersion {
-		return data, fmt.Errorf("不支持 schema_version %q，当前渲染器支持 %q", data.SchemaVersion, buildinfo.SchemaVersion)
+		return data, i18n.Errorf("err.reportSchemaMismatch", data.SchemaVersion, buildinfo.SchemaVersion)
 	}
 	return data, nil
 }

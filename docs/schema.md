@@ -24,6 +24,11 @@
 - `summary`：`ok`、`warning`、`skipped`、`error` 数量与人类可读摘要。
 - `notices`：适用于整份报告的方法或隐私说明。
 
+综合评分不写进报告 JSON：它依赖运行时选定的基线，把某一份基线下的分数固化进
+数据文件会让同一份 JSON 在换基线后自相矛盾。评分只在 txt/md/html 渲染时计算，
+基线来源与样本数随分数一起呈现。基线文件本身是独立的 `ecs.baseline/v1` 格式，
+由 `ecs baseline` 生成。
+
 ## Result
 
 每个探针返回一个 `Result`：

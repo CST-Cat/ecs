@@ -44,11 +44,11 @@ func sampleReport() model.Report {
 
 func TestMarkdownAndHTML(t *testing.T) {
 	data := sampleReport()
-	md := Markdown(data)
+	md := Markdown(data, nil)
 	if !strings.Contains(md, "系统 \\| 信息") || !strings.Contains(md, "&lt;safe&gt;") || !strings.Contains(md, "事实采集") {
 		t.Fatalf("unexpected markdown:\n%s", md)
 	}
-	html, err := HTML(data)
+	html, err := HTML(data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
