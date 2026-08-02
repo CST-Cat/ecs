@@ -417,6 +417,25 @@ ecs --score-baseline baseline.json
 ecs render --input report.json --score-baseline baseline.json --format txt
 ```
 
+### 提交进排行榜
+
+完整报告不适合入库：三千多行、含出口 IP 主机名与逐跳路由，那些对排行榜没用却能定位机器。
+提交走另一种格式 `ecs.submission/v1`，只带机器规格与跑分数值，每份约 3 KB：
+
+```bash
+ecs submit --input ./reports/ecs-report-*.json \
+  --region jp --provider vultr --output ./submissions/2026-08/
+```
+
+字段是白名单——加字段要显式改 `internal/score/submission.go`，不会因为报告新增了
+什么就悄悄多带出去。文件名前 12 位是内容指纹，手改数值而不重算会被 CI 发现。
+
+fork 仓库把文件放进 `submissions/YYYY-MM/` 开 PR，CI 校验格式、指纹与重复；
+合并后自动重建 `submissions/baseline.json` 并同步进内嵌副本，下次发版随二进制发出去。
+新用户 `curl … | sh` 拿到的就自带最新基线，**不需要额外联网**。
+
+详见 [submissions/README.md](submissions/README.md)。
+
 `ecs baseline` 会逐项列出样本数，并指出这批报告没覆盖到的指标——某个指标只有一两台
 机器测到时，它对基线的代表性远低于其他项，这件事必须看得见。样本数为 1 时报告会明确提示
 分数仅供自查。

@@ -136,3 +136,54 @@ func TestErrorKeysDoNotCollide(t *testing.T) {
 		}
 	}
 }
+
+// 命令行文案表同样必须一一对应。
+//
+// 这个检查是补上的：此前只有 chinese/english 两张表被核对，cliChinese/cliEnglish
+// 没人管，结果英文侧整块缺了 19 个 key 而测试全绿——英文用户看到的是中文回退。
+func TestCLITablesAreInSync(t *testing.T) {
+	for key, value := range cliChinese {
+		if value == "" {
+			t.Errorf("中文命令行文案 %q 为空", key)
+		}
+		if translated, ok := cliEnglish[key]; !ok || translated == "" {
+			t.Errorf("缺少英文命令行文案：%q", key)
+		}
+	}
+	for key := range cliEnglish {
+		if _, ok := cliChinese[key]; !ok {
+			t.Errorf("英文命令行文案多出无用 key：%q", key)
+		}
+	}
+}
+
+func TestCLIFormatVerbsMatchAcrossLanguages(t *testing.T) {
+	for key, zh := range cliChinese {
+		en := cliEnglish[key]
+		if zhCount, enCount := strings.Count(zh, "%"), strings.Count(en, "%"); zhCount != enCount {
+			t.Errorf("%q 的格式动词数量不一致：中文 %d 个，英文 %d 个", key, zhCount, enCount)
+		}
+	}
+}
+
+// 评分文案表同理。
+func TestScoreTablesAreInSync(t *testing.T) {
+	for key, value := range scoreChinese {
+		if value == "" {
+			t.Errorf("中文评分文案 %q 为空", key)
+		}
+		if translated, ok := scoreEnglish[key]; !ok || translated == "" {
+			t.Errorf("缺少英文评分文案：%q", key)
+		}
+	}
+	for key := range scoreEnglish {
+		if _, ok := scoreChinese[key]; !ok {
+			t.Errorf("英文评分文案多出无用 key：%q", key)
+		}
+	}
+	for key, zh := range scoreChinese {
+		if zhCount, enCount := strings.Count(zh, "%"), strings.Count(scoreEnglish[key], "%"); zhCount != enCount {
+			t.Errorf("%q 的格式动词数量不一致：中文 %d 个，英文 %d 个", key, zhCount, enCount)
+		}
+	}
+}

@@ -49,6 +49,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return doctorCommand(ctx, stdout)
 	case "baseline":
 		return baselineCommand(args, stdout, stderr)
+	case "submit":
+		return submitCommand(args, stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 		return 0
@@ -277,7 +279,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 
-	baseline := score.DefaultBaseline()
+	baseline := score.EmbeddedBaseline()
 	if *baselineFlag != "" {
 		loaded, err := score.LoadBaseline(*baselineFlag)
 		if err != nil {
@@ -362,7 +364,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		*name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 	// 重新导出时同样算分：同一份 JSON 换个基线再看分数，是评分能被检验的前提。
-	baseline := score.DefaultBaseline()
+	baseline := score.EmbeddedBaseline()
 	if *renderBaseline != "" {
 		loaded, loadErr := score.LoadBaseline(*renderBaseline)
 		if loadErr != nil {
@@ -556,6 +558,7 @@ func printHelp(writer io.Writer) {
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
   ecs baseline REPORTS...     从多份报告聚合评分基线
+  ecs submit --input FILE     导出可公开入库的瘦身提交
   ecs version                 显示版本
 
 常用示例:

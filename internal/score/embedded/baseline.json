@@ -1,0 +1,17 @@
+{
+  "schema": "ecs.baseline/v1",
+  "source": "builtinSingleHost",
+  "sample_count": 1,
+  "metrics": {
+    "cpu_single": 785.85,
+    "cpu_multi": 6152.04,
+    "memory_copy": 6389.17,
+    "memory_write": 25719.54,
+    "disk_seq_read": 6912.04,
+    "disk_seq_write": 2309.85,
+    "disk_rand_read_iops": 451266.5,
+    "disk_rand_write_iops": 367767.62,
+    "bandwidth_download": 1000,
+    "bandwidth_upload": 1000
+  }
+}

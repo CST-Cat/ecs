@@ -25,6 +25,64 @@ import (
 	"ecs/internal/score"
 )
 
+// submitCommand 从完整报告导出一份可公开入库的瘦身提交。
+func submitCommand(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("ecs submit", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
+	input := flags.String("input", "", i18n.T("flag.submitInput"))
+	output := flags.String("output", "", i18n.T("flag.submitOutput"))
+	region := flags.String("region", "", i18n.T("flag.submitRegion"))
+	provider := flags.String("provider", "", i18n.T("flag.submitProvider"))
+	note := flags.String("note", "", i18n.T("flag.submitNote"))
+	flags.Usage = func() {
+		fmt.Fprintln(stderr, i18n.T("help.submitUsage"))
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
+	if *input == "" {
+		fmt.Fprintln(stderr, i18n.T("help.renderInputRequired"))
+		return 1
+	}
+	data, err := reporter.LoadJSON(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	submission, err := score.BuildSubmission(data, score.SubmissionOptions{
+		Region: *region, Provider: *provider, Note: *note,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	content, err := submission.Encode()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	target := *output
+	if target == "" {
+		target = submission.FileName()
+	} else if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+		target = filepath.Join(target, submission.FileName())
+	}
+	if err := os.WriteFile(target, content, 0o600); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "%s %s\n", i18n.T("submit.written"), target)
+	fmt.Fprintf(stdout, "%s\n", fmt.Sprintf(i18n.T("submit.summary"),
+		submission.Host.VCPU, submission.Host.MemoryGiB, len(submission.Metrics)))
+	fmt.Fprintf(stdout, "%s\n", i18n.T("submit.privacyNote"))
+	return 0
+}
+
 func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs baseline", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -49,12 +107,29 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// 两种输入都收：完整报告（本地跑完直接用）与瘦身提交（排行榜库里的）。
+	// 提交会被转成最小报告，因此聚合只有一条代码路径。
 	var reports []model.Report
 	var skipped []string
+	seen := make(map[string]string)
 	for _, path := range paths {
+		// 目录里通常就放着上一次生成的基线，它不是输入。
+		if _, err := score.LoadBaseline(path); err == nil {
+			continue
+		}
+		if submission, err := score.LoadSubmission(path); err == nil {
+			if previous, duplicated := seen[submission.ID]; duplicated {
+				skipped = append(skipped, fmt.Sprintf("%s: %s (%s)",
+					filepath.Base(path), i18n.T("baseline.duplicate"), filepath.Base(previous)))
+				continue
+			}
+			seen[submission.ID] = path
+			reports = append(reports, submission.AsReport())
+			continue
+		}
 		data, err := reporter.LoadJSON(path)
 		if err != nil {
-			// 一份坏报告不该让整批失败，但必须说出来是哪一份、为什么。
+			// 一份坏输入不该让整批失败，但必须说出来是哪一份、为什么。
 			skipped = append(skipped, fmt.Sprintf("%s: %v", filepath.Base(path), err))
 			continue
 		}

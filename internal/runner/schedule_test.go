@@ -3,6 +3,8 @@ package runner
 import (
 	"reflect"
 	"testing"
+
+	"ecs/internal/config"
 )
 
 func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
@@ -81,4 +83,28 @@ func TestUnknownModuleDefaultsToExclusive(t *testing.T) {
 	if classOf("某个未来才有的模块") != classExclusive {
 		t.Fatal("未登记的模块必须默认独占")
 	}
+}
+
+// 新增模块漏配并发特性只会让它被当成独占跑——不报错，只是慢。
+// 这个守卫让漏配在 CI 上可见。
+func TestScheduleCoversEveryModule(t *testing.T) {
+	for _, id := range config.ModuleOrder {
+		if _, ok := moduleClass[id]; !ok {
+			t.Errorf("模块 %q 未登记并发特性（schedule.go 的 moduleClass）", id)
+		}
+	}
+	for id := range moduleClass {
+		if !containsModule(config.ModuleOrder, id) {
+			t.Errorf("moduleClass 里的 %q 不是已注册模块", id)
+		}
+	}
+}
+
+func containsModule(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

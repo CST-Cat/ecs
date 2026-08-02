@@ -1,0 +1,30 @@
+{
+  "schema": "ecs.submission/v1",
+  "id": "8109db82d028",
+  "host": {
+    "vcpu": 16,
+    "memory_gib": 30.69,
+    "virtualization": "none/unknown",
+    "cpu_model": "AMD Ryzen 7 PRO 4750U with Radeon Graphics",
+    "arch": "amd64",
+    "region": "jp",
+    "provider": "vultr"
+  },
+  "tool": {
+    "ecs": "dev",
+    "sysbench": "sysbench 1.0.20",
+    "fio": "fio-3.39"
+  },
+  "ran_at": "2026-08-02T10:36:05.145159355Z",
+  "metrics": {
+    "cpu_multi": 6152.04,
+    "cpu_single": 785.85,
+    "disk_rand_read_iops": 451266.5,
+    "disk_rand_write_iops": 367767.616192,
+    "disk_seq_read": 6912.043977737427,
+    "disk_seq_write": 2309.845076560974,
+    "memory_copy": 6389.17,
+    "memory_write": 25719.54
+  },
+  "profile": "quick"
+}

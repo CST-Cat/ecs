@@ -605,3 +605,39 @@ func TestHasGlobalUnicastIPv6(t *testing.T) {
 		}
 	}
 }
+
+// 每个模块都要有方法学标注：漏了报告里就缺"这个数字是怎么来的、能和什么比"，
+// 而那正是本项目区别于跑分脚本的地方。
+func TestMethodologyCoversEveryModule(t *testing.T) {
+	for _, item := range Registry() {
+		methodology := MethodologyFor(item.ID())
+		if methodology.Kind == "" || methodology.Label == "" {
+			t.Errorf("模块 %q 缺少方法学标注（probe.go 的 MethodologyFor）", item.ID())
+		}
+	}
+}
+
+// 注册表与 ModuleOrder 必须一致，否则模块要么选不到，要么选了不跑。
+func TestRegistryMatchesModuleOrder(t *testing.T) {
+	registered := make(map[string]bool)
+	for _, item := range Registry() {
+		registered[item.ID()] = true
+	}
+	for _, id := range config.ModuleOrder {
+		if !registered[id] {
+			t.Errorf("ModuleOrder 里的 %q 没有对应探针", id)
+		}
+	}
+	for id := range registered {
+		found := false
+		for _, ordered := range config.ModuleOrder {
+			if ordered == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("探针 %q 不在 ModuleOrder 里，用户选不到它", id)
+		}
+	}
+}
