@@ -59,15 +59,15 @@ case "${1:-}" in
         'Usage: run.sh [--profile quick|standard|full] [--only MODULES] [options]' \
         '' \
         'Downloads a checksummed ecs release, prepares missing distro packages, and writes local reports.' \
-        'Common options: --profile, --only, --skip, --config, --offline, --lang, --yes.' \
-        'Ookla is never installed automatically; use the ecs CLI with --only ookla --accept-ookla-terms.'
+        'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
+        'Ookla is never installed automatically; use the ecs CLI with --accept ookla.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile quick|standard|full] [--only 模块] [选项]' \
         '' \
         '下载并校验 ecs Release，准备缺失的发行版组件，并生成本地报告。' \
-        '常用选项：--profile、--only、--skip、--config、--offline、--lang、--yes。' \
-        'Ookla 不会自动安装；请用 ecs --only ookla --accept-ookla-terms 显式启用。'
+        '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
+        'Ookla 不会自动安装；请用 ecs --accept ookla 显式启用。'
     fi
     exit 0
     ;;
@@ -202,7 +202,9 @@ package_command() {
 PROFILE=standard
 ONLY=""
 SKIP=""
-OFFLINE=0
+# 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 是纯 HTTP，
+# 不需要外部程序；ookla 从不自动安装）。因此这里不复刻完整的分级表。
+LOCAL_ONLY=0
 CONFIG_GIVEN=0
 EXPECT=""
 for arg in "$@"; do
@@ -212,6 +214,7 @@ for arg in "$@"; do
       only) ONLY="$arg" ;;
       skip) SKIP="$arg" ;;
       config) CONFIG_GIVEN=1 ;;
+      exposure) [ "$arg" = "local" ] && LOCAL_ONLY=1 ;;
     esac
     EXPECT=""
     continue
@@ -225,7 +228,8 @@ for arg in "$@"; do
     --skip=*) SKIP="${arg#--skip=}" ;;
     --config) EXPECT=config ;;
     --config=*) CONFIG_GIVEN=1 ;;
-    --offline|--offline=true) OFFLINE=1 ;;
+    --exposure) EXPECT=exposure ;;
+    --exposure=local) LOCAL_ONLY=1 ;;
   esac
 done
 
@@ -245,7 +249,7 @@ module_enabled() {
   fi
   list_contains "$base_modules" "$module" || return 1
   list_contains "$SKIP" "$module" && return 1
-  if [ "$OFFLINE" -eq 1 ]; then
+  if [ "$LOCAL_ONLY" -eq 1 ]; then
     case "$module" in
       network|bgp|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|ookla|media|route|backtrace) return 1 ;;
     esac

@@ -19,7 +19,7 @@
 | ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
 | smartctl | 磁盘 SMART 健康与通电时间 | [smartmontools](https://www.smartmontools.org/) | GPL-2.0 | `disk` 的介质健康；需 root，虚拟磁盘通常不透传，缺失时如实说明；**刻意不采集序列号**（可唯一标识物理硬件） |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
-| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | 仅使用用户已安装的程序；必须显式选择 `ookla` 并确认条款；不自动下载、不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
+| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | 仅使用用户已安装的程序；必须用 `--accept ookla` 显式确认条款；不自动下载、不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
 
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
@@ -34,7 +34,7 @@
 
 在线配置会直接连接：
 
-- [ipapi.is](https://ipapi.is/)：出口 IP、ASN、地理、类型、风险因子与公司/ASN 滥用概率；
+- [ipapi.is](https://ipapi.is/)：出口 IP、ASN、地理、类型、风险因子与公司/ASN 滥用概率；出口发现每次运行只做一次，由 `network`、`blacklist`、`bgp` 共用，`--exposure public` 时改用公共 STUN 服务器取地址、不访问本接口；
 - [IPinfo](https://ipinfo.io/developers)：网络/公司类型与隐私信号；
 - [ipregistry](https://ipregistry.co/docs/)：网络类型与代理、Tor、VPN、机房、滥用信号；
 - [IP2Location.io](https://www.ip2location.io/ip2location-documentation)：类型、代理因子与 IP2Proxy 欺诈分；
@@ -58,7 +58,7 @@
 - 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；
 - README 中列出的公共 DNS、延迟、端口以及服务自身公开网页。
 
-第三方服务会看到请求出口 IP，并可能有各自的日志、速率限制、套餐字段差异与隐私政策。社区中转和 Jina Reader 还会看到被查询 IP；报告的数据源状态表会区分“官方 API”“官方免密/公开接口”“IPQuality/check.place 中转”和网页读取兜底。`--offline` 会跳过全部在线探针，`--ip-quality-sources none` 只关闭附加质量源。
+第三方服务会看到请求出口 IP，并可能有各自的日志、速率限制、套餐字段差异与隐私政策。社区中转和 Jina Reader 还会看到被查询 IP；报告的数据源状态表会区分“官方 API”“官方免密/公开接口”“IPQuality/check.place 中转”和网页读取兜底。`--exposure local` 会跳过全部在线探针；`--exposure public` 保留联网但排除第三方情报服务，此时出口 IP 改由 STUN 发现；`--ip-quality-sources none` 只关闭附加质量源。
 
 官方 API 凭据只从 `IPINFO_TOKEN`、`IPREGISTRY_API_KEY`、`IP2LOCATION_API_KEY`、`ABUSEIPDB_API_KEY`、`SCAMALYTICS_USER`、`SCAMALYTICS_API_KEY`、`IPQS_API_KEY`、`DBIP_API_KEY`、`IPWHOIS_API_KEY` 读取。它们不会进入配置文件示例、进程参数、错误文本或报告。
 

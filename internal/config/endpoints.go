@@ -1,10 +1,11 @@
 package config
 
 import (
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
+
+	"ecs/internal/i18n"
 )
 
 // 命令行端点解析。
@@ -30,21 +31,21 @@ func ParseEndpointList(raw string, requirePort bool) ([]Endpoint, error) {
 			name, address = strings.TrimSpace(key), strings.TrimSpace(value)
 		}
 		if address == "" {
-			return nil, fmt.Errorf("端点 %q 缺少地址", item)
+			return nil, i18n.Errorf("err.endpointMissingAddress", item)
 		}
 		if requirePort {
 			host, port, err := splitHostPort(address)
 			if err != nil || host == "" || port == "" {
-				return nil, fmt.Errorf("端点 %q 必须是 host:port 形式", address)
+				return nil, i18n.Errorf("err.endpointNeedsHostPort", address)
 			}
 			if !validRouteTarget(host) {
-				return nil, fmt.Errorf("端点主机 %q 不是安全的 IP 或主机名", host)
+				return nil, i18n.Errorf("err.endpointUnsafeHost", host)
 			}
 		} else if !validRouteTarget(address) {
-			return nil, fmt.Errorf("端点 %q 不是安全的 IP 或主机名", address)
+			return nil, i18n.Errorf("err.endpointUnsafe", address)
 		}
 		if seen[address] {
-			return nil, fmt.Errorf("端点 %q 重复", address)
+			return nil, i18n.Errorf("err.endpointDuplicate", address)
 		}
 		seen[address] = true
 		if name == "" {
@@ -107,21 +108,21 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 		}
 		host, ports, ok := splitLastColon(spec)
 		if !ok {
-			return nil, fmt.Errorf("iperf3 节点 %q 必须是 host:port 或 host:start-end 形式", item)
+			return nil, i18n.Errorf("err.iperfNodeFormat", item)
 		}
 		if !validRouteTarget(host) {
-			return nil, fmt.Errorf("iperf3 节点主机 %q 不是安全的 IP 或主机名", host)
+			return nil, i18n.Errorf("err.iperfNodeHost", host)
 		}
 		startText, endText, hasRange := strings.Cut(ports, "-")
 		start, err := strconv.Atoi(strings.TrimSpace(startText))
 		if err != nil || start < 1 || start > 65535 {
-			return nil, fmt.Errorf("iperf3 节点 %q 起始端口无效", item)
+			return nil, i18n.Errorf("err.iperfNodeStart", item)
 		}
 		end := start
 		if hasRange {
 			end, err = strconv.Atoi(strings.TrimSpace(endText))
 			if err != nil || end < start || end > 65535 {
-				return nil, fmt.Errorf("iperf3 节点 %q 端口范围无效", item)
+				return nil, i18n.Errorf("err.iperfNodeRange", item)
 			}
 		}
 		if name == "" {
@@ -152,10 +153,10 @@ func splitTrimmed(raw string) []string {
 func splitHostPort(address string) (string, string, error) {
 	host, port, ok := splitLastColon(address)
 	if !ok {
-		return "", "", fmt.Errorf("缺少端口")
+		return "", "", i18n.Errorf("err.portMissing")
 	}
 	if number, err := strconv.Atoi(port); err != nil || number < 1 || number > 65535 {
-		return "", "", fmt.Errorf("端口无效")
+		return "", "", i18n.Errorf("err.portInvalid")
 	}
 	return host, port, nil
 }

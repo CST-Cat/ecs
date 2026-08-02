@@ -157,12 +157,51 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 			updated.Output, updated.Formats = cfg.Output, cfg.Formats
 			updated.NoColor, updated.Reveal = cfg.NoColor, cfg.Reveal
 			updated.IPVersion = cfg.IPVersion
+			// 外联设置同样是用户的显式选择：换档位不该悄悄把它放宽回默认值。
+			updated.Exposure, updated.Accepted = cfg.Exposure, cfg.Accepted
 			*cfg = updated
 		}
 	}
 	prompt.line("")
 
-	// 二、按组开关模块
+	// 二、外联级别
+	//
+	// 放在模块问答之前：它决定了后面还有哪些模块可问。用户在这一步表达的是
+	// "我愿意让多少东西离开这台机器"，比逐个模块勾选更接近真实意图。
+	levels := config.ExposureNames()
+	exposureLabels := make([]string, len(levels))
+	exposureDefault := 0
+	for index, name := range levels {
+		exposureLabels[index] = fmt.Sprintf("%-11s %s", name, i18n.T("exposure."+name))
+		if name == cfg.Exposure.String() {
+			exposureDefault = index
+		}
+	}
+	chosenExposure, err := config.ParseExposure(levels[prompt.choose(i18n.T("wizard.exposureTitle"), exposureLabels, exposureDefault)])
+	if err == nil {
+		cfg.Exposure = chosenExposure
+	}
+	// any 只是放开上限，具体的闭源模块仍要逐个签字。
+	if cfg.Exposure == config.ExposureConsent {
+		for _, id := range config.ConsentModules() {
+			if config.AllowsModule(cfg.Exposure, cfg.Accepted, id) {
+				continue
+			}
+			if prompt.confirm(fmt.Sprintf(i18n.T("wizard.askConsent"), id), false) {
+				cfg.Accepted = append(cfg.Accepted, id)
+			}
+		}
+	}
+	cfg.Modules = config.FilterModulesByExposure(
+		config.MergeAccepted(cfg.Modules, cfg.Accepted), cfg.Exposure, cfg.Accepted)
+	if len(cfg.Modules) == 0 {
+		prompt.line("")
+		prompt.line("%s", prompt.style("33", i18n.T("wizard.noModules")))
+		return false
+	}
+	prompt.line("")
+
+	// 三、按组开关模块
 	selected := make(map[string]bool, len(cfg.Modules))
 	for _, id := range cfg.Modules {
 		selected[id] = true
@@ -186,7 +225,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 		}
 	}
 
-	// 三、隐私
+	// 四、隐私
 	cfg.Reveal = prompt.confirm(i18n.T("wizard.askReveal"), cfg.Reveal)
 
 	modules := make([]string, 0, len(selected))
@@ -202,11 +241,15 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	}
 	cfg.Modules = modules
 
-	// 四、确认
+	// 五、确认
 	prompt.line("")
 	estimate := config.EstimateFor(*cfg)
 	prompt.line("%s", prompt.style("1", i18n.T("wizard.summaryTitle")))
 	prompt.line("  %s %s", i18n.T("term.profileLine"), cfg.Profile)
+	prompt.line("  %s %s — %s", i18n.T("report.exposure"), cfg.Exposure.String(), i18n.T("exposure."+cfg.Exposure.String()))
+	if len(cfg.Accepted) > 0 {
+		prompt.line("  %s %s", i18n.T("report.accepted"), strings.Join(cfg.Accepted, ", "))
+	}
 	prompt.line("  %s %d — %s", i18n.T("term.moduleCount"), len(modules), strings.Join(modules, ", "))
 	prompt.line("  %s %s", i18n.T("term.estimate"), estimate.DurationText)
 	if estimate.NetworkMiB < 0 {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -144,9 +143,12 @@ func selectIPerfTargets(perRegion int) []IPerfEndpoint {
 }
 
 type Runtime struct {
-	Profile          string
-	Modules          []string
-	Offline          bool
+	Profile string
+	Modules []string
+	// Exposure 是本次运行允许的最高外联级别，见 exposure.go。
+	Exposure Exposure
+	// Accepted 是经 --accept 逐个放行的模块，优先于 Exposure。
+	Accepted         []string
 	Reveal           bool
 	IPVersion        string
 	IPQualitySources []string
@@ -169,11 +171,7 @@ type Runtime struct {
 	BacktraceTargets []Endpoint
 	STUNServers      []Endpoint
 	MediaRegions     []string
-	// OoklaConsent is deliberately separate from module selection.  The
-	// official client has its own licence/privacy terms and is never silently
-	// accepted by a normal ecs profile.
-	OoklaConsent bool
-	OoklaServers []OoklaServer
+	OoklaServers     []OoklaServer
 }
 
 type Estimate struct {
@@ -187,7 +185,8 @@ type File struct {
 	Profile          string          `json:"profile,omitempty"`
 	Only             []string        `json:"only,omitempty"`
 	Skip             []string        `json:"skip,omitempty"`
-	Offline          *bool           `json:"offline,omitempty"`
+	Exposure         string          `json:"exposure,omitempty"`
+	Accept           []string        `json:"accept,omitempty"`
 	Reveal           *bool           `json:"reveal,omitempty"`
 	IPVersion        string          `json:"ip_version,omitempty"`
 	IPQualitySources []string        `json:"ip_quality_sources,omitempty"`
@@ -210,7 +209,6 @@ type File struct {
 	BacktraceTargets []Endpoint      `json:"backtrace_targets,omitempty"`
 	STUNServers      []Endpoint      `json:"stun_servers,omitempty"`
 	MediaRegions     []string        `json:"media_regions,omitempty"`
-	OoklaConsent     *bool           `json:"ookla_consent,omitempty"`
 	OoklaServers     []OoklaServer   `json:"ookla_servers,omitempty"`
 }
 
@@ -284,7 +282,7 @@ func ValidateMediaRegions(regions []string) error {
 	known := map[string]bool{"global": true, "jp": true, "tw": true, "hk": true, "cn": true}
 	for _, region := range regions {
 		if !known[region] {
-			return fmt.Errorf("未知流媒体地区 %q，可选 global、jp、tw、hk、cn", region)
+			return i18n.Errorf("err.unknownMediaRegion", region)
 		}
 	}
 	return nil
@@ -298,13 +296,13 @@ func ParseBacktraceCities(raw string) ([]string, error) {
 	}
 	if contains(items, "all") {
 		if len(items) > 1 {
-			return nil, errors.New("回程城市 all 不能与其他城市组合")
+			return nil, i18n.Errorf("err.cityAllCombo")
 		}
 		return append([]string(nil), BacktraceCityOrder...), nil
 	}
 	for _, item := range items {
 		if _, ok := backtraceCityTargets[item]; !ok {
-			return nil, fmt.Errorf("未知回程城市 %q，可选 beijing、guangzhou、shanghai、chengdu、all", item)
+			return nil, i18n.Errorf("err.unknownCity", item)
 		}
 	}
 	return items, nil
@@ -316,6 +314,7 @@ func Defaults(profile string) (Runtime, error) {
 	}
 	base := Runtime{
 		Profile:          profile,
+		Exposure:         ExposureThirdParty,
 		Reveal:           false,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
@@ -347,7 +346,6 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "AliDNS", Address: "223.5.5.5", Kind: "中国大陆"},
 		},
 		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCities),
-		OoklaConsent:     false,
 	}
 
 	switch profile {
@@ -368,10 +366,9 @@ func Defaults(profile string) (Runtime, error) {
 		base.SpeedThreads = 8
 		base.IPerfDuration = 10 * time.Second
 	case ProfileFull:
+		// 全集直接给出，需显式同意的模块由外联过滤器挡住（见 exposure.go），
+		// 不必在这里逐个特判。
 		base.Modules = append([]string(nil), ModuleOrder...)
-		// Ookla is an explicit external-service adapter, not a default full
-		// profile dependency.  Use --only ookla plus --accept-ookla-terms.
-		base.Modules = SelectModules(base.Modules, nil, []string{"ookla"})
 		base.CPUTime = 15 * time.Second
 		base.DiskMiB = 2048
 		base.DNSAttempts = 8
@@ -381,7 +378,7 @@ func Defaults(profile string) (Runtime, error) {
 		// full 档跑遍公共节点池，覆盖欧洲、北美、亚洲各方向。
 		base.IPerfTargets = selectIPerfTargets(3)
 	default:
-		return Runtime{}, fmt.Errorf("未知配置档 %q，可选 quick、standard、full", profile)
+		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
 	}
 	return base, nil
 }
@@ -390,26 +387,37 @@ func LoadFile(path string) (File, error) {
 	var cfg File
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, fmt.Errorf("读取配置文件: %w", err)
+		return cfg, i18n.Errorf("err.configRead", err)
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
-		return cfg, fmt.Errorf("解析配置文件: %w", err)
+		return cfg, i18n.Errorf("err.configParse", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return cfg, errors.New("配置文件只能包含一个 JSON 对象")
+			return cfg, i18n.Errorf("err.configSingle")
 		}
-		return cfg, fmt.Errorf("配置文件尾部存在无效内容: %w", err)
+		return cfg, i18n.Errorf("err.configTrailing", err)
 	}
 	return cfg, nil
 }
 
 func ApplyFile(runtime *Runtime, file File) error {
-	if file.Offline != nil {
-		runtime.Offline = *file.Offline
+	if file.Exposure != "" {
+		level, err := ParseExposure(file.Exposure)
+		if err != nil {
+			return err
+		}
+		runtime.Exposure = level
+	}
+	if len(file.Accept) > 0 {
+		accepted := normalizeList(file.Accept)
+		if err := ValidateAccepted(accepted); err != nil {
+			return err
+		}
+		runtime.Accepted = accepted
 	}
 	if file.Reveal != nil {
 		runtime.Reveal = *file.Reveal
@@ -492,9 +500,6 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if len(file.OoklaServers) > 0 {
 		runtime.OoklaServers = append([]OoklaServer(nil), file.OoklaServers...)
 	}
-	if file.OoklaConsent != nil {
-		runtime.OoklaConsent = *file.OoklaConsent
-	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
 }
@@ -550,18 +555,18 @@ func ParseOoklaServerList(raw string) ([]OoklaServer, error) {
 		}
 		parts := strings.SplitN(item, "=", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("Ookla 节点必须是 运营商=服务器ID")
+			return nil, i18n.Errorf("err.ooklaFormat")
 		}
 		carrier := normalizeOoklaCarrier(parts[0])
 		if carrier == "" {
-			return nil, fmt.Errorf("未知 Ookla 运营商 %q，可选 电信、联通、移动", parts[0])
+			return nil, i18n.Errorf("err.ooklaCarrier", parts[0])
 		}
 		id, err := strconv.Atoi(strings.TrimSpace(parts[1]))
 		if err != nil || id < 1 || id > 99999999 {
-			return nil, fmt.Errorf("Ookla 服务器 ID 无效 %q", parts[1])
+			return nil, i18n.Errorf("err.ooklaIDInvalid", parts[1])
 		}
 		if seen[carrier] {
-			return nil, fmt.Errorf("Ookla 运营商重复 %q", carrier)
+			return nil, i18n.Errorf("err.ooklaDuplicate", carrier)
 		}
 		seen[carrier] = true
 		result = append(result, OoklaServer{Carrier: carrier, ID: id})
@@ -588,42 +593,56 @@ func Validate(runtime Runtime) error {
 		knownModules[id] = true
 	}
 	if len(runtime.Modules) == 0 {
-		return errors.New("至少需要选择一个测试模块")
+		return i18n.Errorf("err.noModules")
 	}
 	switch runtime.IPVersion {
 	case "", IPVersionAuto, IPVersion4, IPVersion6:
 		// Empty is accepted for callers constructing Runtime directly; it has
 		// the same meaning as auto and keeps older integrations compatible.
 	default:
-		return fmt.Errorf("未知 IP 协议族 %q，可选 auto、4、6", runtime.IPVersion)
+		return i18n.Errorf("err.unknownIPVersion", runtime.IPVersion)
 	}
 	for _, id := range runtime.Modules {
 		if !knownModules[id] {
-			return fmt.Errorf("未知测试模块 %q", id)
+			return i18n.Errorf("err.unknownModule", id)
+		}
+	}
+	if err := ValidateAccepted(runtime.Accepted); err != nil {
+		return err
+	}
+	// 到这一步模块集已经过滤过；仍然复核一遍，挡住直接构造 Runtime 的调用方
+	// 绕过外联上限的可能。
+	for _, id := range runtime.Modules {
+		if !AllowsModule(runtime.Exposure, runtime.Accepted, id) {
+			info := ExposureFor(id)
+			if info.RequiresConsent {
+				return i18n.Errorf("err.moduleConsentShort", id, id)
+			}
+			return i18n.Errorf("err.moduleAboveLimitFix", id, info.Level.String(), runtime.Exposure.String())
 		}
 	}
 	if runtime.CPUTime < 100*time.Millisecond || runtime.CPUTime > 30*time.Second {
-		return errors.New("CPU 测试时长必须在 100ms 到 30s 之间")
+		return i18n.Errorf("err.cpuTimeRange")
 	}
 	if runtime.DiskMiB < 16 || runtime.DiskMiB > 16384 {
-		return errors.New("磁盘测试大小必须在 16 到 16384 MiB 之间")
+		return i18n.Errorf("err.diskSizeRange")
 	}
 	if runtime.HTTPTimeout < time.Second || runtime.HTTPTimeout > time.Minute {
-		return errors.New("HTTP 超时必须在 1s 到 1m 之间")
+		return i18n.Errorf("err.httpTimeoutRange")
 	}
 	if runtime.DNSAttempts < 1 || runtime.DNSAttempts > 20 || runtime.LatencyAttempts < 1 || runtime.LatencyAttempts > 20 {
-		return errors.New("DNS/延迟采样次数必须在 1 到 20 之间")
+		return i18n.Errorf("err.attemptsRange")
 	}
 	if runtime.SpeedThreads < 1 || runtime.SpeedThreads > 32 {
-		return errors.New("测速并发必须在 1 到 32 之间")
+		return i18n.Errorf("err.threadsRange")
 	}
 	allowedFormats := map[string]bool{"json": true, "md": true, "html": true}
 	if len(runtime.Formats) == 0 {
-		return errors.New("至少需要一个输出格式")
+		return i18n.Errorf("err.noFormats")
 	}
 	for _, format := range runtime.Formats {
 		if !allowedFormats[format] {
-			return fmt.Errorf("未知输出格式 %q", format)
+			return i18n.Errorf("err.unknownFormat", format)
 		}
 	}
 	allowedIPSources := map[string]bool{
@@ -634,96 +653,96 @@ func Validate(runtime Runtime) error {
 		"ipapicom": true, "ipsb": true,
 	}
 	if len(runtime.IPQualitySources) == 0 {
-		return errors.New("IP 质量数据源不能为空；使用 all、none 或逗号分隔的数据源")
+		return i18n.Errorf("err.ipSourceEmpty")
 	}
 	for _, source := range runtime.IPQualitySources {
 		if !allowedIPSources[source] {
-			return fmt.Errorf("未知 IP 质量数据源 %q", source)
+			return i18n.Errorf("err.ipSourceUnknown", source)
 		}
 	}
 	if len(runtime.IPQualitySources) > 1 && (contains(runtime.IPQualitySources, "all") || contains(runtime.IPQualitySources, "none")) {
-		return errors.New("IP 质量数据源 all/none 不能与其他数据源组合")
+		return i18n.Errorf("err.ipSourceCombo")
 	}
 	for _, group := range [][]Endpoint{runtime.DNSResolvers, runtime.LatencyTargets} {
 		for _, endpoint := range group {
 			if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
-				return errors.New("自定义测试端点必须同时包含 name 和 address")
+				return i18n.Errorf("err.endpointNameAddress")
 			}
 			if !validEndpointFamily(endpoint.Family) {
-				return fmt.Errorf("测试端点 %q 的 family 必须是 4、6 或空值", endpoint.Name)
+				return i18n.Errorf("err.endpointFamily", endpoint.Name)
 			}
 		}
 	}
 	for _, endpoint := range runtime.RouteTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
-			return errors.New("自定义路由目标必须同时包含 name 和 address")
+			return i18n.Errorf("err.routeNameAddress")
 		}
 		if !validRouteTarget(endpoint.Address) {
-			return fmt.Errorf("路由目标 %q 不是安全的 IP 或主机名", endpoint.Address)
+			return i18n.Errorf("err.routeUnsafe", endpoint.Address)
 		}
 		if !validEndpointFamily(endpoint.Family) {
-			return fmt.Errorf("路由目标 %q 的 family 必须是 4、6 或空值", endpoint.Name)
+			return i18n.Errorf("err.routeFamily", endpoint.Name)
 		}
 	}
 	for _, endpoint := range runtime.STUNServers {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
-			return errors.New("STUN 服务器必须同时包含 name 和 address")
+			return i18n.Errorf("err.stunNameAddress")
 		}
 		host, port, err := net.SplitHostPort(endpoint.Address)
 		if err != nil || !validRouteTarget(host) || port == "" {
-			return fmt.Errorf("STUN 服务器 %q 必须是 host:port 形式", endpoint.Address)
+			return i18n.Errorf("err.stunHostPort", endpoint.Address)
 		}
 	}
 	for _, endpoint := range runtime.BacktraceTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
-			return errors.New("三网回程目标必须同时包含 name 和 address")
+			return i18n.Errorf("err.backtraceNameAddress")
 		}
 		if !validRouteTarget(endpoint.Address) {
-			return fmt.Errorf("三网回程目标 %q 不是安全的 IP 或主机名", endpoint.Address)
+			return i18n.Errorf("err.backtraceUnsafe", endpoint.Address)
 		}
 		if !validEndpointFamily(endpoint.Family) {
-			return fmt.Errorf("三网回程目标 %q 的 family 必须是 4、6 或空值", endpoint.Name)
+			return i18n.Errorf("err.backtraceFamily", endpoint.Name)
 		}
 	}
 	seenOoklaCarriers := make(map[string]bool)
 	for _, server := range runtime.OoklaServers {
 		if server.Carrier != "电信" && server.Carrier != "联通" && server.Carrier != "移动" {
-			return fmt.Errorf("Ookla 服务器 carrier 必须是电信、联通或移动: %q", server.Carrier)
+			return i18n.Errorf("err.ooklaCarrierField", server.Carrier)
 		}
 		if server.ID < 1 || server.ID > 99999999 {
-			return fmt.Errorf("Ookla 服务器 %q 的 ID 无效", server.Carrier)
+			return i18n.Errorf("err.ooklaIDField", server.Carrier)
 		}
 		if seenOoklaCarriers[server.Carrier] {
-			return fmt.Errorf("Ookla 服务器不能重复配置运营商 %q", server.Carrier)
+			return i18n.Errorf("err.ooklaDupField", server.Carrier)
 		}
 		seenOoklaCarriers[server.Carrier] = true
 	}
 	if runtime.DiskPath == "" {
-		return errors.New("磁盘测试路径不能为空")
+		return i18n.Errorf("err.diskPathEmpty")
 	}
 	if runtime.IPerfDuration < time.Second || runtime.IPerfDuration > 30*time.Second {
-		return errors.New("iperf3 单方向时长必须在 1s 到 30s 之间")
+		return i18n.Errorf("err.iperfDuration")
 	}
 	for _, endpoint := range runtime.IPerfTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || !validRouteTarget(endpoint.Host) {
-			return fmt.Errorf("iperf3 节点名称或主机无效: %q", endpoint.Host)
+			return i18n.Errorf("err.iperfNodeName", endpoint.Host)
 		}
 		if endpoint.PortStart < 1 || endpoint.PortStart > 65535 ||
 			endpoint.PortEnd < endpoint.PortStart || endpoint.PortEnd > 65535 {
-			return fmt.Errorf("iperf3 节点 %q 端口范围无效", endpoint.Name)
+			return i18n.Errorf("err.iperfNodeRange", endpoint.Name)
 		}
 		switch endpoint.Networks {
 		case "", "IPv4", "IPv6", "IPv4|IPv6":
 		default:
-			return fmt.Errorf("iperf3 节点 %q networks 必须是 IPv4、IPv6 或 IPv4|IPv6", endpoint.Name)
+			return i18n.Errorf("err.iperfNodeNetwork", endpoint.Name)
 		}
 	}
 	abs, err := filepath.Abs(runtime.DiskPath)
 	if err != nil {
-		return fmt.Errorf("磁盘测试路径: %w", err)
+		return i18n.Errorf("err.diskPathWrap", err)
 	}
 	if strings.TrimSpace(abs) == "" {
-		return errors.New("磁盘测试路径无效")
+		return i18n.Errorf("err.diskPathInvalid")
 	}
 	return nil
 }
@@ -759,7 +778,7 @@ func EstimateFor(runtime Runtime) Estimate {
 	}
 	typical := estimateTypicalDuration(runtime)
 	estimate.DurationText = durationEstimateText(typical*3/5, typical*2)
-	if runtime.Offline {
+	if runtime.OfflineOnly() {
 		estimate.NetworkMiB = 0
 		estimate.Notes = append(estimate.Notes, i18n.T("estimate.offline"))
 	}
@@ -777,7 +796,7 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 	}
 	var total time.Duration
 	for _, module := range runtime.Modules {
-		if runtime.Offline && networkModule[module] {
+		if runtime.OfflineOnly() && networkModule[module] {
 			total += 100 * time.Millisecond
 			continue
 		}
@@ -865,11 +884,10 @@ func durationEstimateText(lower, upper time.Duration) string {
 }
 
 func ExampleFile() File {
-	offline := false
 	reveal := false
 	return File{
 		Profile:          ProfileStandard,
-		Offline:          &offline,
+		Exposure:         DefaultExposure,
 		Reveal:           &reveal,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
@@ -878,7 +896,6 @@ func ExampleFile() File {
 		DiskPath:         ".",
 		IPerfDuration:    "5s",
 		HTTPTimeout:      "10s",
-		OoklaConsent:     boolPtr(false),
 	}
 }
 
@@ -920,8 +937,6 @@ func contains(items []string, target string) bool {
 	}
 	return false
 }
-
-func boolPtr(value bool) *bool { return &value }
 
 func normalizeList(items []string) []string {
 	seen := make(map[string]bool)

@@ -80,8 +80,8 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 	versions := config.IPVersions(env.Config.IPVersion)
 	successes := 0
 	for _, version := range versions {
-		lookup, _, err := lookupIP(ctx, env, version)
-		if err != nil || net.ParseIP(lookup.IP) == nil {
+		egressIP, err := env.Egress.IPFor(version)
+		if err != nil {
 			result.Fields = append(result.Fields, model.Field{
 				Key:   "ipv" + version + "_error",
 				Label: "IPv" + version + " 失败原因",
@@ -90,11 +90,17 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 			continue
 		}
 		result.Fields = append(result.Fields,
-			model.Field{Key: "ipv" + version + "_ip", Label: "IPv" + version + " 出口 IP", Value: lookup.IP, Sensitive: true},
-			model.Field{Key: "ipv" + version + "_ipapi_asn", Label: "IPv" + version + " ipapi ASN", Value: formatASN(lookup.ASN.ASN)},
+			model.Field{Key: "ipv" + version + "_ip", Label: "IPv" + version + " 出口 IP", Value: egressIP, Sensitive: true},
 		)
+		// ASN 只有走情报接口时才有。STUN 路径下留空而不是填 unknown：
+		// RouteViews 返回的起源 ASN 本来就是这一项的权威来源。
+		if intel, ok := env.Egress.IntelFor(version); ok {
+			result.Fields = append(result.Fields,
+				model.Field{Key: "ipv" + version + "_ipapi_asn", Label: "IPv" + version + " ipapi ASN", Value: formatASN(intel.ASN.ASN)},
+			)
+		}
 
-		observations, err := queryRouteViewsPrefix(ctx, env, lookup.IP)
+		observations, err := queryRouteViewsPrefix(ctx, env, egressIP)
 		if err != nil {
 			result.Fields = append(result.Fields, model.Field{
 				Key: "ipv" + version + "_routeviews_error", Label: "IPv" + version + " RouteViews 失败原因", Value: compactError(err),

@@ -68,7 +68,6 @@ type ipAPIResponse struct {
 type ipLookup struct {
 	Version string
 	Data    ipAPIResponse
-	Err     error
 	Latency time.Duration
 }
 
@@ -85,37 +84,26 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	versions := config.IPVersions(env.Config.IPVersion)
-	lookups := make(chan ipLookup, len(versions))
-	var wg sync.WaitGroup
-	for _, version := range versions {
-		wg.Add(1)
-		go func(version string) {
-			defer wg.Done()
-			data, latency, err := lookupIP(ctx, env, version)
-			lookups <- ipLookup{Version: version, Data: data, Err: err, Latency: latency}
-		}(version)
-	}
-	go func() {
-		wg.Wait()
-		close(lookups)
-	}()
-
+	// 出口发现由 runner 统一做过（见 egress.go），这里只读结果：
+	// network 是第三方级模块，走到这一步一定拿到了完整的情报记录。
 	var found []ipLookup
-	for lookup := range lookups {
-		if lookup.Err == nil && lookup.Data.IP != "" {
-			found = append(found, lookup)
-		} else {
-			reason := "unavailable"
-			if lookup.Err != nil {
-				reason = lookup.Err.Error()
-			}
-			// 错误原文（Go 的网络错误）拼进句子会让整句无法翻译也无法对照，
-			// 因此说明句保持固定，具体原因单独成字段。
-			result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 出口查询失败，详见下方失败原因。", lookup.Version))
-			result.Fields = append(result.Fields, model.Field{
-				Key: "ipv" + lookup.Version + "_lookup_error", Label: "IPv" + lookup.Version + " 失败原因", Value: reason,
-			})
+	for _, version := range versions {
+		address, ok := env.Egress.Lookup(version)
+		intel, hasIntel := env.Egress.IntelFor(version)
+		if ok && address.Err == nil && hasIntel && intel.IP != "" {
+			found = append(found, ipLookup{Version: version, Data: intel, Latency: address.Latency})
+			continue
 		}
+		reason := "unavailable"
+		if ok && address.Err != nil {
+			reason = address.Err.Error()
+		}
+		// 错误原文（Go 的网络错误）拼进句子会让整句无法翻译也无法对照，
+		// 因此说明句保持固定，具体原因单独成字段。
+		result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 出口查询失败，详见下方失败原因。", version))
+		result.Fields = append(result.Fields, model.Field{
+			Key: "ipv" + version + "_lookup_error", Label: "IPv" + version + " 失败原因", Value: reason,
+		})
 	}
 	if len(found) == 0 {
 		result.Fail(fmt.Errorf("IPv4 与 IPv6 出口信息均无法查询"))

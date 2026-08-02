@@ -12,6 +12,7 @@
     "started_at": "2026-08-01T12:37:45.181826753Z",
     "completed_at": "2026-08-01T12:46:01.890794359Z",
     "duration_ms": 496708,
+    "exposure": "thirdparty",
     "offline": false,
     "redacted": true,
     "requested_modules": [
@@ -3468,6 +3469,7 @@
   },
   "notices": [
     "报告只写入本地，不会自动上传。",
-    "性能结果只应在相同测试方法、版本和资源参数下比较。"
+    "性能结果只应在相同测试方法、版本和资源参数下比较。",
+    "出口 IP 由 ipapi.is 统一发现一次，供需要它的模块共用。"
   ]
 }

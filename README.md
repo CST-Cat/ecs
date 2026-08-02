@@ -165,7 +165,7 @@ ecs --profile full --skip media
 ecs --only system,cpu,memory,disk,speed
 
 # 快速档仍只使用标准工具，只缩短时长和磁盘文件
-ecs --profile quick --only system,cpu,memory,disk --offline
+ecs --profile quick --only system,cpu,memory,disk --exposure local
 
 # 只保留 JSON 和 HTML
 ecs --format json,html --output ./my-report
@@ -187,8 +187,8 @@ ecs --only bgp
 ecs --only backtrace -6 --backtrace-city all
 
 # 可选的官方 Ookla 客户端；必须手动安装并显式接受其条款
-ecs --only ookla --accept-ookla-terms
-ecs --only ookla --accept-ookla-terms --ookla-servers "telecom=123,unicom=456,mobile=789"
+ecs --accept ookla
+ecs --accept ookla --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
 
 # 从已有 JSON 重新导出 Markdown/HTML
 ecs render --input ./reports/ecs-report-20260731-120000.json
@@ -217,6 +217,45 @@ ecs config example
 GCP e2、阿里突发实例）上测到的是 burst credit 而不是稳态性能，且方差极大。
 
 fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力跑满链路，实际流量随 VPS 带宽变化，无法用 MiB 预封顶；启动前会显示节点数、时长和并发流。
+
+## 外联级别
+
+配置档决定跑多少测试，外联级别决定**允许多少信息离开这台机器**。两者独立：
+`--profile full --exposure public` 是"全套测试，但不碰商业 API"。
+
+| `--exposure` | 含义 | 对方看到什么 |
+| --- | --- | --- |
+| `local` | 不联网 | 什么都看不到 |
+| `public` | 只连公共基础设施 | 你的出口 IP——任何联网都免不了这一层 |
+| `thirdparty`（默认） | 加上第三方情报服务 | 出口 IP，外加**被查询的 IP** 交给十余家商业 API |
+| `any` | 放开上限到闭源服务 | 同上；具体模块仍需 `--accept` 逐个签字 |
+
+级别是**上限过滤器**，作用在 `--profile`/`--only`/`--skip` 选出的模块集上。
+`ecs list` 会列出每个模块的级别。
+
+```bash
+# 只要本地基准，一个包都不发
+ecs --exposure local
+
+# 全套测试，但不把出口 IP 交给商业风控 API
+ecs --profile full --exposure public
+
+# 需显式同意的闭源服务逐个放行；--accept 同时把模块加入本次运行
+ecs --accept ookla
+```
+
+`--accept` 比级别更强：签过字的模块在任何级别下都能跑，不必再写 `--exposure any`。
+反过来，`--exposure any` 只是放开上限，不会替你接受任何条款。
+
+被档位带进来的模块超出级别时静默过滤；被你用 `--only` 亲手点名的模块超出级别时
+报错并给出该用哪个开关——显式的选择不该被悄悄丢掉。
+
+**出口 IP 发现**：`network`、`blacklist`、`bgp` 都需要先知道本机公网地址。
+这一步每次运行只做一次，结果三个模块共用，并按级别选择来源：`thirdparty`
+及以上走 ipapi.is（带 ASN、地理、公司字段），`public` 走 STUN（只回一个映射
+地址，判定逻辑全在协议里）。因此 `--exposure public` 下 `blacklist` 与 `bgp`
+仍然可用，而待查 IP 不必交给第三方。STUN 拿不到 IPv6 地址时按查询失败处理，
+不伪造数据。
 
 ## 模块
 
@@ -295,7 +334,7 @@ ABUSEIPDB_API_KEY='...' IPQS_API_KEY='...' ecs --only network
 
 商业数据库的“实时完整字段”和“永久免密”不能同时保证。IPQS 官方 API 要求凭据，但官方公开查询页可以免密读取；DB-IP 官方 free API 只提供地理字段，`threatLevel` 属于 Extended 数据。`ecs` 会尽力走公开链路，但绝不会拿别家的分数冒充 IPQS/DB-IP 分数。报告中的“部分”表示数据库确实响应了、但该通道没有返回所有截图字段。
 
-不想把出口 IP 交给社区中转或 Jina Reader 时，显式选择已配置的官方来源；完全关闭附加质量查询可用 `--ip-quality-sources none`。无论如何，`network` 仍需访问 ipapi.is 来发现服务器的 IPv4/IPv6 出口。
+不想把出口 IP 交给社区中转或 Jina Reader 时，显式选择已配置的官方来源；完全关闭附加质量查询可用 `--ip-quality-sources none`。要连出口发现也不走商业接口，用 `--exposure public`（改由 STUN 取地址）或 `--skip network`。
 
 ## 报告
 
@@ -323,7 +362,8 @@ ecs render --input report.json --format md,html --output ./exported
 
 在线配置可能连接以下第三方：
 
-- `network`：ipapi.is；以及按 `--ip-quality-sources` 选择的 IPinfo、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQualityScore、DB-IP、ipdata、IPWHOIS。无用户密钥时，MaxMind 和部分风险源会经 `ipinfo.check.place` 查询；IPQS 最后一级免密兜底会把目标公开页 URL（其中含待查 IP）交给 `r.jina.ai`，并可能读取一小时内缓存；若进程配置了系统 HTTP(S) 代理，该只读兜底可经代理访问；
+- 出口 IP 发现：`thirdparty` 及以上走 ipapi.is，`public` 走公共 STUN 服务器。每次运行只做一次，`network`、`blacklist`、`bgp` 共用同一结果；
+- `network`：按 `--ip-quality-sources` 选择的 IPinfo、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQualityScore、DB-IP、ipdata、IPWHOIS。无用户密钥时，MaxMind 和部分风险源会经 `ipinfo.check.place` 查询；IPQS 最后一级免密兜底会把目标公开页 URL（其中含待查 IP）交给 `r.jina.ai`，并可能读取一小时内缓存；若进程配置了系统 HTTP(S) 代理，该只读兜底可经代理访问；
 - `dns`：Cloudflare、Google、Quad9、AliDNS、DNSPod 的 UDP/53；
 - `latency`：Cloudflare、Google、阿里云、腾讯、Amazon 的公开 TCP/443；
 - `speed`：使用 YABS 维护清单中的 Clouvider/Leaseweb 公共 iperf3 节点；
@@ -341,7 +381,7 @@ ecs render --input report.json --format md,html --output ./exported
 
 显式选择协议族时，HTTP、TCP、UDP、iperf3、路由工具和能按族解析的目标都会使用对应的 `tcp4`/`tcp6`、`udp4`/`udp6` 或 `-4`/`-6` 参数；无法支持该协议族的固定目标会如实显示失败/跳过，不会用另一族的结果替代。
 
-`--offline` 会跳过所有声明需要网络的模块。项目不包含 ecs 遥测、运行次数统计、Pastebin、报告站或隐藏的报告上传请求；显式启用 Ookla 后，外部客户端自身的数据处理规则另行适用。
+`--exposure local` 会跳过所有声明需要网络的模块，`--exposure public` 保留联网但不接触第三方情报服务。项目不包含 ecs 遥测、运行次数统计、Pastebin、报告站或隐藏的报告上传请求；显式启用 Ookla 后，外部客户端自身的数据处理规则另行适用。
 
 VPS 测试默认忽略 `HTTP_PROXY`、`HTTPS_PROXY` 和 `ALL_PROXY`，避免把代理出口误当成服务器自身出口；若检测到这些变量，报告会留下说明。
 
@@ -359,6 +399,8 @@ ecs --config ecs.json
 ```json
 {
   "profile": "standard",
+  "exposure": "thirdparty",
+  "accept": [],
   "ip_version": "auto",
   "skip": ["media"],
   "ip_quality_sources": ["all"],
@@ -373,12 +415,14 @@ ecs --config ecs.json
   "backtrace_targets": [
     {"name": "自定义 IPv6", "address": "2001:db8::1", "kind": "自定义", "family": "6"}
   ],
-  "ookla_consent": false,
   "ookla_servers": [
     {"carrier": "电信", "id": 123}
   ]
 }
 ```
+
+`exposure` 与 `accept` 对应命令行的 `--exposure` 和 `--accept`；把 `accept`
+写进配置文件等于持久接受该模块的条款，请只对自己确实同意的服务这么做。
 
 未知字段会直接报错，避免拼写错误被静默忽略。命令行参数优先于配置文件。
 

@@ -15,6 +15,9 @@ type Environment struct {
 	Config     config.Runtime
 	HTTPClient *http.Client
 	UserAgent  string
+	// Egress 是本次运行共享的出口地址快照，由 runner 在探针启动前发现一次。
+	// 见 egress.go：需要出口 IP 的模块读这里，不再各自去查。
+	Egress Egress
 }
 
 // tcpNetworkForMode turns the user-facing IP family setting into the network

@@ -63,10 +63,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "同一 Ookla 客户端、服务器选择与协议族；外部服务数据不等同 ecs 本地报告",
 	}
 
-	if !env.Config.OoklaConsent {
+	if !config.AllowsModule(env.Config.Exposure, env.Config.Accepted, "ookla") {
 		result.Skip("未确认 Ookla 许可与隐私条款")
 		result.Notes = append(result.Notes,
-			"Ookla 不是 ecs 的零上传探针；如需运行，请显式使用 --only ookla --accept-ookla-terms，或使用 --ookla --accept-ookla-terms。",
+			"Ookla 不是 ecs 的零上传探针；如需运行，请显式使用 --accept ookla。",
 		)
 		result.Finish(start)
 		return result

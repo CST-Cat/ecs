@@ -93,7 +93,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	configFlag := flags.String("config", configPath, i18n.T("flag.config"))
 	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
 	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
-	offlineFlag := flags.Bool("offline", cfg.Offline, i18n.T("flag.offline"))
+	exposureFlag := flags.String("exposure", cfg.Exposure.String(), i18n.T("flag.exposure"))
+	acceptFlag := flags.String("accept", strings.Join(cfg.Accepted, ","), i18n.T("flag.accept"))
 	revealFlag := flags.Bool("reveal", cfg.Reveal, i18n.T("flag.reveal"))
 	ipVersionFlag := flags.String("ip-version", cfg.IPVersion, i18n.T("flag.ipVersion"))
 	ipv4Flag := flags.Bool("4", false, i18n.T("flag.ipv4"))
@@ -120,8 +121,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), i18n.T("flag.mediaRegion"))
 	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
 	backtraceTargetsFlag := flags.String("backtrace-targets", "", i18n.T("flag.backtraceTargets"))
-	ooklaFlag := flags.Bool("ookla", false, i18n.T("flag.ookla"))
-	ooklaConsentFlag := flags.Bool("accept-ookla-terms", cfg.OoklaConsent, i18n.T("flag.acceptOoklaTerms"))
 	ooklaServersFlag := flags.String("ookla-servers", "", i18n.T("flag.ooklaServers"))
 	interactiveFlag := flags.Bool("interactive", false, i18n.T("flag.interactive"))
 	yesFlag := flags.Bool("yes", false, i18n.T("flag.yes"))
@@ -144,11 +143,21 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	_ = configFlag
 	cfg.Profile = *profileFlag
-	cfg.Offline = *offlineFlag
+	exposure, err := config.ParseExposure(*exposureFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: --exposure: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	cfg.Exposure = exposure
+	cfg.Accepted = config.ParseList(*acceptFlag)
+	if err := config.ValidateAccepted(cfg.Accepted); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
 	cfg.Reveal = *revealFlag
 	cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
 	if *ipv4Flag && *ipv6Flag {
-		fmt.Fprintln(stderr, i18n.T("cli.error")+": -4 与 -6 不能同时使用")
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), i18n.Errorf("err.ipv4AndIPv6"))
 		return 1
 	}
 	if *ipv4Flag {
@@ -170,7 +179,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.HTTPTimeout = *timeoutFlag
 	cfg.DNSAttempts = *dnsAttemptsFlag
 	cfg.LatencyAttempts = *latencyAttemptsFlag
-	cfg.OoklaConsent = *ooklaConsentFlag
 	for _, override := range []struct {
 		raw         string
 		requirePort bool
@@ -231,19 +239,16 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 		cfg.OoklaServers = servers
 	}
-	if *ooklaFlag {
-		found := false
-		for _, id := range cfg.Modules {
-			if id == "ookla" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			cfg.Modules = append(cfg.Modules, "ookla")
-		}
+	// --accept 同时表达"我知道这是什么"和"我要跑它"，因此并入模块集。
+	cfg.Modules = config.MergeAccepted(cfg.Modules, cfg.Accepted)
+	named := config.ParseList(*onlyFlag)
+	cfg.Modules = config.SelectModules(cfg.Modules, named, config.ParseList(*skipFlag))
+	// 用户亲手点名的模块若越过外联上限就报错；档位带进来的静默过滤。
+	if err := config.CheckModuleExposure(named, cfg.Exposure, cfg.Accepted); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
 	}
-	cfg.Modules = config.SelectModules(cfg.Modules, config.ParseList(*onlyFlag), config.ParseList(*skipFlag))
+	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure, cfg.Accepted)
 	// 交互向导：显式 --interactive 才启动，--yes 永远跳过。
 	// run.sh 在检测到可用终端且用户没传测试参数时会自动加上 --interactive，
 	// 因此 `curl … | sh` 会进向导，而带参数的调用直接开跑。
@@ -294,7 +299,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
-	formats := flags.String("format", "md,html", "输出格式")
+	formats := flags.String("format", "md,html", i18n.T("flag.format"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))
 	name := flags.String("name", "", i18n.T("flag.name"))
 	if err := flags.Parse(args); err != nil {
@@ -342,8 +347,13 @@ func listCommand(stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
 	for _, id := range config.ModuleOrder {
-		fmt.Fprintf(stdout, "  %-10s %s\n", id, i18n.T("module."+id+".desc"))
+		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", id, config.ModuleExposureName(id), i18n.T("module."+id+".desc"))
 	}
+	fmt.Fprintln(stdout, "\n"+i18n.T("list.exposureHeader"))
+	for _, name := range config.ExposureNames() {
+		fmt.Fprintf(stdout, "  %-11s %s\n", name, i18n.T("exposure."+name))
+	}
+	fmt.Fprintln(stdout, "  "+i18n.T("list.exposureNote"))
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.sourcesHeader"))
 	fmt.Fprintln(stdout, "  maxmind, ipinfo, ipregistry, ipapi, ip2location, abuseipdb,")
 	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois, ipapicom, ipsb")
@@ -493,7 +503,8 @@ func printHelp(writer io.Writer) {
 
 常用示例:
   ecs
-  ecs --profile quick --offline
+  ecs --profile quick --exposure local
+  ecs --profile full --exposure public
   ecs --profile full --skip media --output ./reports
   ecs --only system,cpu,memory,disk --format json,html
 

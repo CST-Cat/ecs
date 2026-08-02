@@ -187,15 +187,15 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		return result
 	}
 
-	data, _, err := lookupIP(ctx, env, "4")
-	if err != nil || data.IP == "" {
+	egressIP, err := env.Egress.IPFor(config.IPVersion4)
+	if err != nil {
 		result.Status = model.StatusWarning
 		result.Summary = "无法确定 IPv4 出口，未执行黑名单查询"
 		result.Notes = append(result.Notes, "黑名单查询需要先知道出口 IPv4；本次出口发现失败。")
 		result.Finish(start)
 		return result
 	}
-	ip := net.ParseIP(data.IP)
+	ip := net.ParseIP(egressIP)
 	prefix, ok := reverseIPv4(ip)
 	if !ok {
 		result.Status = model.StatusWarning
@@ -258,7 +258,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Tables = []model.Table{table}
 
 	result.Fields = []model.Field{
-		{Key: "queried_ip", Label: "查询的出口 IP", Value: data.IP, Sensitive: true},
+		{Key: "queried_ip", Label: "查询的出口 IP", Value: egressIP, Sensitive: true},
 		{Key: "zones_total", Label: "查询名单数", Value: fmt.Sprintf("%d", len(zones))},
 		{Key: "resolver", Label: "使用的解析器", Value: "系统默认（部分名单拒绝公共解析器查询）"},
 	}
@@ -290,7 +290,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Notes = append(result.Notes, fmt.Sprintf("%d 个名单查询失败（解析超时或服务不可用）。", failed))
 	}
 
-	appendReverseDNS(ctx, &result, data.IP)
+	appendReverseDNS(ctx, &result, egressIP)
 
 	switch {
 	case listed > 0:

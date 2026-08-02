@@ -48,7 +48,9 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			ID:            newRunID(),
 			Profile:       cfg.Profile,
 			StartedAt:     started,
-			Offline:       cfg.Offline,
+			Exposure:      cfg.Exposure.String(),
+			Accepted:      append([]string(nil), cfg.Accepted...),
+			Offline:       cfg.OfflineOnly(),
 			IPVersion:     cfg.IPVersion,
 			Redacted:      !cfg.Reveal,
 			Requested:     append([]string(nil), cfg.Modules...),
@@ -60,7 +62,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		},
 	}
 	for _, id := range cfg.Modules {
-		if id == "ookla" && cfg.OoklaConsent {
+		if id == "ookla" && config.AllowsModule(cfg.Exposure, cfg.Accepted, "ookla") {
 			report.Notices = append(report.Notices,
 				"Ookla 已按显式同意调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。")
 			break
@@ -73,6 +75,13 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		Config:     cfg,
 		HTTPClient: httpClient,
 		UserAgent:  fmt.Sprintf("ecs/%s", buildinfo.Version),
+	}
+	// 出口 IP 只发现一次，供 network、blacklist、bgp 共用：这既省掉重复请求，
+	// 也让"连了哪个外部服务"在报告里只出现一处。
+	env.Egress = probe.DiscoverEgress(ctx, env)
+	if env.Egress.Attempted {
+		report.Notices = append(report.Notices,
+			fmt.Sprintf("出口 IP 由 %s 统一发现一次，供需要它的模块共用。", env.Egress.SourceName))
 	}
 
 	ids := make([]string, len(selected))
@@ -138,7 +147,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 // runOne 执行单个探针，统一处理离线跳过与方法学补全。
 func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment) model.Result {
 	var result model.Result
-	if cfg.Offline && item.NeedsNetwork() {
+	if cfg.OfflineOnly() && item.NeedsNetwork() {
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
 		result.Skip("离线模式")

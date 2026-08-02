@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -96,11 +97,44 @@ func T(key string) string {
 // TL 按指定语言取译文，用于同时输出多语言的场景。
 func TL(lang Lang, key string) string { return translate(lang, key) }
 
+// Errorf 构造一个按当前语言渲染的错误。
+//
+// 校验错误在命令行上立即打印，没有报告渲染层可以挂翻译（探针文案走的是
+// probe_text.go 的原文查表）。因此这里让错误在构造时就取译文：key 决定语义，
+// 译文本身是格式串，参数按位置填入。
+//
+// 用独立函数而不是 fmt.Errorf(T(key), ...) 直接写在调用点，是为了避免 vet 的
+// printf 检查对非常量格式串报警，同时给测试一个统一的入口去核对 key 覆盖。
+func Errorf(key string, args ...any) error {
+	return fmt.Errorf(T(key), args...)
+}
+
+// ErrorKeyPrefix 是校验错误 key 的统一前缀，测试据此核对中英覆盖。
+const ErrorKeyPrefix = "err."
+
+// JoinList 按当前语言的习惯连接一组枚举值。
+//
+// 中文用顿号，英文用逗号加空格。硬编码任一种都会让另一种语言的句子读起来别扭：
+// `choose local、public、any` 和 `可选 local, public, any` 都不对。
+func JoinList(items []string) string {
+	separator := "、"
+	if Current() == LangEN {
+		separator = ", "
+	}
+	return strings.Join(items, separator)
+}
+
 func translate(lang Lang, key string) string {
 	if lang == LangEN {
+		if value, ok := errorEnglish[key]; ok && value != "" {
+			return value
+		}
 		if value, ok := cliEnglish[key]; ok && value != "" {
 			return value
 		}
+	}
+	if value, ok := errorChinese[key]; ok && value != "" {
+		return value
 	}
 	if value, ok := cliChinese[key]; ok && value != "" {
 		return value
@@ -120,11 +154,19 @@ func translate(lang Lang, key string) string {
 // Has 报告某个 key 是否有当前语言的译文，供测试核对覆盖率。
 func Has(lang Lang, key string) bool {
 	if lang == LangEN {
+		if value, ok := errorEnglish[key]; ok && value != "" {
+			return true
+		}
 		if value, ok := cliEnglish[key]; ok && value != "" {
 			return true
 		}
-	} else if value, ok := cliChinese[key]; ok && value != "" {
-		return true
+	} else {
+		if value, ok := errorChinese[key]; ok && value != "" {
+			return true
+		}
+		if value, ok := cliChinese[key]; ok && value != "" {
+			return true
+		}
 	}
 	if lang == LangEN {
 		value, ok := english[key]
@@ -136,8 +178,20 @@ func Has(lang Lang, key string) bool {
 
 // Keys 返回全部已登记的 key，供测试遍历。
 func Keys() []string {
-	keys := make([]string, 0, len(chinese))
+	keys := make([]string, 0, len(chinese)+len(errorChinese))
 	for key := range chinese {
+		keys = append(keys, key)
+	}
+	for key := range errorChinese {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// ErrorKeys 返回全部校验错误 key，供测试核对中英覆盖与格式符一致。
+func ErrorKeys() []string {
+	keys := make([]string, 0, len(errorChinese))
+	for key := range errorChinese {
 		keys = append(keys, key)
 	}
 	return keys
