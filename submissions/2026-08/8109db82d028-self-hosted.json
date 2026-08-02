@@ -7,8 +7,7 @@
     "virtualization": "none/unknown",
     "cpu_model": "AMD Ryzen 7 PRO 4750U with Radeon Graphics",
     "arch": "amd64",
-    "region": "jp",
-    "provider": "vultr"
+    "provider": "self-hosted"
   },
   "tool": {
     "ecs": "dev",
@@ -26,5 +25,6 @@
     "memory_copy": 6389.17,
     "memory_write": 25719.54
   },
-  "profile": "quick"
+  "profile": "quick",
+  "note": "开发机（Ryzen 7 PRO 4750U，NVMe），非 VPS；数值显著高于典型云主机，仅用于验证流程"
 }
