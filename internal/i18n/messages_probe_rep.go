@@ -3,6 +3,9 @@ package i18n
 // 探针文案的英文译文（第 4 批：黑名单、反解、应用可达性、路由与回程）。
 
 var probeEnglishRep = map[string]string{
+	"ecs 报告只写入本地，不会自动上传；网络探针仍会按模块访问必要的公开目标。":                  "ecs reports are written locally and never uploaded automatically; network probes still reach the public targets their module needs.",
+	"硬件清单只读 /sys、/proc 与 DMI，刻意不采集序列号、MAC 地址或其他不影响验机结论的持久标识。": "The hardware inventory reads only /sys, /proc and DMI; serial numbers, MAC addresses and other persistent identifiers are deliberately not collected, as they do not affect the verification result.",
+	"出口 \x1f 由 \x1f 统一发现一次，供需要它的模块共用。":                        "The egress \x1f is discovered once via \x1f and shared by every module that needs it.",
 	"\x1f 个实测可用的黑名单区域":                      "\x1f verified DNSBL zones",
 	"DNS 黑名单收录情况与反向解析（FCrDNS）——判断发信能力的两大要素": "DNSBL listings and reverse DNS (FCrDNS) — the two factors that decide mail deliverability",
 	"DNS 黑名单查询":   "DNSBL lookups",

@@ -40,11 +40,11 @@ jobs:
       - name: i18n coverage
         run: |
           mkdir -p /tmp/i18n-samples
-          go run ./cmd/ecs --profile quick --offline --only system,cpu,memory,disk \
+          go run ./cmd/ecs --profile quick --exposure local --only system,cpu,memory,disk \
             --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-samples --no-color
           ECS_I18N_SAMPLES=/tmp/i18n-samples go test ./internal/report/ -run TestLocalizeCovers -v
           # 再直接扫一遍英文 JSON：翻译覆盖的是渲染层，这里确认落盘文件本身也没有中文。
-          go run ./cmd/ecs --lang en --profile quick --offline --only system,cpu,memory,disk \
+          go run ./cmd/ecs --lang en --profile quick --exposure local --only system,cpu,memory,disk \
             --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-en --no-color
           python3 - <<'SCAN'
           import json,glob,re,sys
