@@ -1,0 +1,33 @@
+{
+  "schema": "ecs.submission/v1",
+  "id": "08c8a5065bd3",
+  "host": {
+    "vcpu": 4,
+    "memory_gib": 23.41,
+    "virtualization": "KVM",
+    "cpu_model": "unknown",
+    "arch": "arm64",
+    "region": "us-sanjose-1",
+    "provider": "oracle-cloud"
+  },
+  "tool": {
+    "ecs": "dev",
+    "sysbench": "sysbench 1.0.20",
+    "fio": "fio-3.36",
+    "iperf3": "iperf 3.16 (cJSON 1.7.15)"
+  },
+  "ran_at": "2026-08-03T01:37:28.49752876Z",
+  "metrics": {
+    "bandwidth_download": 2860.199575001634,
+    "bandwidth_upload": 1161.1757954654604,
+    "cpu_multi": 5026.9,
+    "cpu_single": 1280.9,
+    "disk_rand_read_iops": 39024.663005,
+    "disk_rand_write_iops": 6034.431138,
+    "disk_seq_read": 35.36110210418701,
+    "disk_seq_write": 35.9025354385376,
+    "memory_copy": 9315.73,
+    "memory_write": 15302.19
+  },
+  "profile": "full"
+}
