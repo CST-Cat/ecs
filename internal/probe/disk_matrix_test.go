@@ -10,26 +10,32 @@ import (
 )
 
 func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
-	plan := fioJobPlan(config.ProfileFull)
-	mixed := 0
-	crystal, atto := 0, 0
-	for _, job := range plan {
-		switch job.Matrix {
-		case "":
-			if job.Mixed() {
-				mixed++
-			}
-		case "crystal":
-			crystal++
-		case "atto":
-			atto++
-			if strings.Contains(strings.ToLower(job.BlockSize), "5m") {
-				t.Fatalf("ATTO plan must not silently include 5M: %+v", job)
+	for _, profile := range []string{config.ProfileQuick, config.ProfileStandard, config.ProfileFull} {
+		plan := fioJobPlan(profile)
+		mixed := 0
+		crystal, atto := 0, 0
+		for _, job := range plan {
+			switch job.Matrix {
+			case "":
+				if job.Mixed() {
+					mixed++
+				}
+			case "crystal":
+				crystal++
+			case "atto":
+				atto++
+				if strings.Contains(strings.ToLower(job.BlockSize), "5m") {
+					t.Fatalf("ATTO plan must not silently include 5M: %+v", job)
+				}
 			}
 		}
-	}
-	if mixed != 4 || crystal != 8 || atto != 36 {
-		t.Fatalf("matrix job counts = mixed %d jobs, Crystal %d, ATTO %d; plan=%+v", mixed, crystal, atto, plan)
+		wantMixed := 4
+		if profile == config.ProfileQuick {
+			wantMixed = 2
+		}
+		if mixed != wantMixed || crystal != 8 || atto != 36 {
+			t.Fatalf("%s matrix job counts = mixed %d jobs, Crystal %d, ATTO %d; plan=%+v", profile, mixed, crystal, atto, plan)
+		}
 	}
 	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
 		jobs := make(map[string]fioJobSpec)
@@ -60,9 +66,6 @@ func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
 		if !read || !write {
 			t.Fatalf("Crystal workload %s lacks both directions", workload)
 		}
-	}
-	if quick := fioJobPlan(config.ProfileQuick); anyMatrixJob(quick) {
-		t.Fatal("quick profile should preserve its bounded legacy matrix")
 	}
 	wantBlocks := []string{"512b", "1k", "2k", "4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "2m", "4m", "8m", "16m", "32m", "64m"}
 	if len(attoBlockSizes) != len(wantBlocks) {
@@ -182,15 +185,6 @@ func TestFIOMatrixMissingCellsRemainExplicit(t *testing.T) {
 	if !containsNote(result.Notes, "缺") {
 		t.Fatalf("missing matrix warning note absent: %v", result.Notes)
 	}
-}
-
-func anyMatrixJob(plan []fioJobSpec) bool {
-	for _, job := range plan {
-		if job.Matrix != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func containsNote(notes []string, needle string) bool {

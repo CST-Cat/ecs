@@ -610,7 +610,8 @@ func (s fioJobSpec) Mixed() bool { return s.RW == "randrw" }
 // 前四项是 ecs 既有口径：1 MiB 顺序读写反映带宽上限，4 KiB 随机读写反映 IOPS。
 // 后面是 YABS 兼容矩阵：4k/64k/512k/1m 四档 50/50 混合随机读写，iodepth=64、
 // numjobs=2，这是社区里流传最广、样本量最大的磁盘口径，补上它才能和主流测评
-// 贴的数字对得上。quick 档只跑首尾两档以控制时长。
+// 贴的数字对得上。quick 档仍只跑首尾两档以控制时长，但 Crystal 与 ATTO 矩阵
+// 在所有档位都完整执行，避免快速档只写方法学却没有可复核的矩阵结果。
 func fioJobPlan(profile string) []fioJobSpec {
 	plan := []fioJobSpec{
 		{Name: "seqwrite", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, EndFsync: true},
@@ -639,11 +640,11 @@ func fioJobPlan(profile string) []fioJobSpec {
 	return plan
 }
 
-func matrixJobsEnabled(profile string) bool {
-	// quick retains the established small workload and output shape.  The
-	// standard and full profiles carry the complete reporting expansion; full
-	// also supplies the stable 10-second fio duration.
-	return profile != "quick"
+func matrixJobsEnabled(_ string) bool {
+	// 每个档位都必须留下完整 Crystal/ATTO 证据；quick 只通过更短的作业时长
+	// 与较少的混合作业控制总耗时。这里保留 profile 参数是为了让调用点明确
+	// 表达“按档位决定磁盘计划”的语义，也兼容已有内部测试与调用方。
+	return true
 }
 
 func crystalJobSpecs() []fioJobSpec {

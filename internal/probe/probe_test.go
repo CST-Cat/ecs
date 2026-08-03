@@ -128,11 +128,16 @@ func TestFIOJSONHelpers(t *testing.T) {
 		t.Fatalf("psync args must not request an async queue depth: %s", syncArgs)
 	}
 
-	// quick 档只跑首尾两档混合，避免时长失控。
+	// quick 档只跑首尾两档混合，避免时长失控；Crystal/ATTO 仍必须完整保留。
 	quickPlan := fioJobPlan(config.ProfileQuick)
 	quickArgs := strings.Join(fioArguments("<tempfile>", 1<<20, time.Second, asyncEngine, quickPlan), " ")
 	if strings.Contains(quickArgs, "--name=mix64k") {
 		t.Fatalf("quick profile should skip 64k mixed job: %s", quickArgs)
+	}
+	for _, expected := range []string{"--name=crystal_read_rnd4k_q1", "--name=crystal_write_seq1m_q8", "--name=atto_read_512b", "--name=atto_write_64m"} {
+		if !strings.Contains(quickArgs, expected) {
+			t.Fatalf("quick profile must include complete matrix job %q: %s", expected, quickArgs)
+		}
 	}
 }
 
@@ -270,18 +275,71 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		}
 	}
 
-	// 四项基础指标 + 两个 P95 + quick 档两档混合各读写两项。
-	if len(result.Measurements) != 10 {
-		t.Fatalf("fio measurements = %d: %+v", len(result.Measurements), result.Measurements)
+	// 四项基础指标 + 两个 P95 + quick 档两档混合各读写两项 +
+	// Crystal 8 个读写单元 × 吞吐/IOPS + ATTO 36 个读写单元 × 吞吐/IOPS。
+	if len(result.Measurements) != 98 {
+		t.Fatalf("fio measurements = %d, want 98: %+v", len(result.Measurements), result.Measurements)
+	}
+	measurementKeys := make(map[string]bool, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		measurementKeys[measurement.Key] = true
+	}
+	for _, block := range attoBlockSizes {
+		for _, suffix := range []string{"read_mib_s", "read_iops", "write_mib_s", "write_iops"} {
+			key := "atto_" + block.FIO + "_" + suffix
+			if !measurementKeys[key] {
+				t.Fatalf("quick result missing ATTO measurement %q", key)
+			}
+		}
+	}
+	crystalKeys := 0
+	for key := range measurementKeys {
+		if strings.HasPrefix(key, "crystal_") {
+			crystalKeys++
+		}
+	}
+	if crystalKeys != 16 {
+		t.Fatalf("quick result Crystal measurement cells = %d, want 16", crystalKeys)
 	}
 	mixedFound := false
+	crystalFound, attoFound := false, false
 	for _, table := range result.Tables {
 		if strings.Contains(table.Title, "混合") && len(table.Rows) == 2 {
 			mixedFound = true
 		}
+		if table.Title == "Crystal" {
+			if len(table.Rows) != 4 || len(table.Rows)*2 != 8 {
+				t.Fatalf("quick Crystal rows/cells = %d/%d, want 4/8", len(table.Rows), len(table.Rows)*2)
+			}
+			crystalFound = true
+		}
+		if table.Title == "ATTO" {
+			if len(table.Rows) != 18 || len(table.Rows)*2 != 36 {
+				t.Fatalf("quick ATTO rows/cells = %d/%d, want 18/36", len(table.Rows), len(table.Rows)*2)
+			}
+			for _, row := range table.Rows {
+				if len(row) < 5 || row[1] == "—" || row[2] == "—" || row[3] == "—" || row[4] == "—" {
+					t.Fatalf("quick ATTO row has missing read/write cell: %v", row)
+				}
+			}
+			attoFound = true
+		}
 	}
 	if !mixedFound {
 		t.Fatalf("mixed matrix table missing: %+v", result.Tables)
+	}
+	if !crystalFound || !attoFound {
+		t.Fatalf("quick complete matrix tables missing: crystal=%v atto=%v", crystalFound, attoFound)
+	}
+	jsonResult, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonText := string(jsonResult)
+	for _, key := range []string{"atto_512b_read_mib_s", "atto_512b_write_iops", "atto_64m_read_mib_s", "atto_64m_write_iops"} {
+		if !strings.Contains(jsonText, key) {
+			t.Fatalf("quick JSON missing ATTO measurement key %q", key)
+		}
 	}
 	matches, err := filepath.Glob(filepath.Join(directory, ".ecs-fio-*"))
 	if err != nil {

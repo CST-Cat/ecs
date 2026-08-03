@@ -54,7 +54,7 @@
 | IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 5s | 10s | 15s |
 | 内存顺序读写、事件时延与 memcpy 补充带宽 | — | sysbench memory + 可选 mbw；Balloon/KSM 只读 sysfs/proc 证据 | 5s | 10s | 15s |
-| 磁盘 legacy、Crystal、ATTO 与 50/50 混合矩阵 | — | fio JSON，Direct I/O，引擎探测回退 | 6 作业 | 52 作业 | 52 作业 |
+| 磁盘 legacy、Crystal、ATTO 与 50/50 混合矩阵 | — | fio JSON，Direct I/O，引擎探测回退 | 50 作业（完整 Crystal/ATTO） | 52 作业 | 52 作业 |
 | DNS 延迟、失败率与抖动 | ✓ | — | ✓ | ✓ | ✓ |
 | TCP 延迟与可达率 | ✓ | 系统 ping 的 ICMP 往返 | ✓ | ✓ | ✓ |
 | 多节点上传/下载吞吐 | — | iperf3 JSON（唯一，逐节点原值） | — | 3 节点 | 7 节点 |

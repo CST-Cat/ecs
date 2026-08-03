@@ -274,7 +274,7 @@ ecs --accept ookla
 | `bgp` | 第三方评估 | RouteViews 当前 RIB：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本 | 轻量公共观测；不是私有互联全图，也不含历史 MRT；每个协议族约 1 次查询 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 单/多线程读写与实际/明确派生时延 + mbw memcpy 带宽；并报告内存使用与可选 Balloon/KSM 证据 | sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运；可选内核接口缺失时明确 unavailable |
-| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 + smartctl 介质健康 | Crystal/ATTO/混合矩阵只在 standard/full 使用完整配置；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
+| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 + smartctl 介质健康 | 所有档位都完整执行 Crystal/ATTO（quick 仅缩短时长并减少混合作业）；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
