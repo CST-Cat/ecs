@@ -83,9 +83,56 @@ func TestProgressViewTTYRefreshesOneLine(t *testing.T) {
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 1 {
-		t.Fatalf("TTY progress should refresh one line: %q", text)
+	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 2 {
+		t.Fatalf("TTY progress should fix the completed line and refresh one line: %q", text)
 	}
+}
+
+func TestProgressViewTTYKeepsCompletedHistory(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
+	// so completed lines can be inspected without requiring a platform PTY.
+	terminal.tty = true
+	progress := terminal.BeginProgress(3)
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 3, Title: "one"})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
+	// Duplicate completion callbacks must redraw the live line, not add history.
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 2, Total: 3, Title: "two"})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 3, Title: "two", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 3, Total: 3, Title: "three"})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 3, Total: 3, Title: "three", Result: model.Result{Status: model.StatusOK}})
+	progress.EndProgress()
+
+	lines := progressLines(output.String())
+	if len(lines) != 4 {
+		t.Fatalf("TTY progress history lines = %d, want 4: %q", len(lines), output.String())
+	}
+	for _, progressCount := range []string{"1/3", "2/3", "3/3"} {
+		seen := 0
+		for _, line := range lines {
+			if strings.Contains(line, progressCount) {
+				seen++
+			}
+		}
+		if seen != 1 {
+			t.Fatalf("TTY progress count %s appears %d times, want once: %q", progressCount, seen, output.String())
+		}
+	}
+}
+
+func progressLines(text string) []string {
+	text = strings.TrimSuffix(text, "\n")
+	rawLines := strings.Split(text, "\n")
+	lines := make([]string, len(rawLines))
+	for index, line := range rawLines {
+		if carriage := strings.LastIndexByte(line, '\r'); carriage >= 0 {
+			line = line[carriage+1:]
+		}
+		lines[index] = line
+	}
+	return lines
 }
 
 func TestNetworkSummaryPrintsDetailedTables(t *testing.T) {

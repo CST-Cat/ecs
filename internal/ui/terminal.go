@@ -122,8 +122,14 @@ func (view *ProgressView) Update(event runner.Progress) {
 		}
 		view.running[index] = event.Title
 	case runner.PhaseDone:
+		_, alreadyDone := view.done[index]
+		if !alreadyDone && view.terminal.tty && view.hasLine {
+			// Keep the last live line visible as history before drawing the next
+			// state. Duplicate completion callbacks must not create blank lines.
+			fmt.Fprintln(view.terminal.out)
+		}
 		delete(view.running, index)
-		if _, seen := view.done[index]; !seen {
+		if !alreadyDone {
 			view.done[index] = struct{}{}
 			view.doneCount++
 			switch event.Result.Status {
