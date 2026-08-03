@@ -1,8 +1,8 @@
 {
   "schema": "ecs.baseline/v1",
-  "source": "aggregated from 1 reports",
+  "source": "社区提交聚合",
   "sample_count": 1,
-  "generated_at": "2026-08-03T01:47:23.217065395Z",
+  "generated_at": "2026-08-03T01:51:28.945546171Z",
   "metrics": {
     "bandwidth_download": 2860.199575001634,
     "bandwidth_upload": 1161.1757954654604,

@@ -2,30 +2,34 @@
   "schema": "ecs.baseline/v1",
   "source": "社区提交聚合",
   "sample_count": 1,
-  "generated_at": "2026-08-02T16:51:14.113643013Z",
+  "generated_at": "2026-08-03T01:51:28.945546171Z",
   "metrics": {
-    "cpu_multi": 6152.04,
-    "cpu_single": 785.85,
-    "disk_rand_read_iops": 451266.5,
-    "disk_rand_write_iops": 367767.616192,
-    "disk_seq_read": 6912.043977737427,
-    "disk_seq_write": 2309.845076560974,
-    "memory_copy": 6389.17,
-    "memory_write": 25719.54
+    "bandwidth_download": 2860.199575001634,
+    "bandwidth_upload": 1161.1757954654604,
+    "cpu_multi": 5026.9,
+    "cpu_single": 1280.9,
+    "disk_rand_read_iops": 39024.663005,
+    "disk_rand_write_iops": 6034.431138,
+    "disk_seq_read": 35.36110210418701,
+    "disk_seq_write": 35.9025354385376,
+    "memory_copy": 9315.73,
+    "memory_write": 15302.19
   },
   "tiers": [
     {
-      "vcpu_min": 16,
+      "vcpu_min": 4,
       "sample_count": 1,
       "metrics": {
-        "cpu_multi": 6152.04,
-        "cpu_single": 785.85,
-        "disk_rand_read_iops": 451266.5,
-        "disk_rand_write_iops": 367767.616192,
-        "disk_seq_read": 6912.043977737427,
-        "disk_seq_write": 2309.845076560974,
-        "memory_copy": 6389.17,
-        "memory_write": 25719.54
+        "bandwidth_download": 2860.199575001634,
+        "bandwidth_upload": 1161.1757954654604,
+        "cpu_multi": 5026.9,
+        "cpu_single": 1280.9,
+        "disk_rand_read_iops": 39024.663005,
+        "disk_rand_write_iops": 6034.431138,
+        "disk_seq_read": 35.36110210418701,
+        "disk_seq_write": 35.9025354385376,
+        "memory_copy": 9315.73,
+        "memory_write": 15302.19
       }
     }
   ]
