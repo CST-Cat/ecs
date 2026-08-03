@@ -18,7 +18,7 @@ func textSampleReport() model.Report {
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run: model.RunInfo{
 			ID: "abc", Profile: "quick", Exposure: "local", Offline: true,
-			StartedAt: time.Unix(0, 0).UTC(), Redacted: true,
+			StartedAt: time.Unix(0, 0).UTC(), Redacted: true, Requested: []string{"cpu"},
 		},
 		Summary: model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项完成"},
 		Results: []model.Result{{
@@ -54,6 +54,33 @@ func TestTextColoredEmitsEscapes(t *testing.T) {
 	out := Text(textSampleReport(), TextOptions{Color: termcolor.LevelTrueColor})
 	if !strings.Contains(out, "\x1b[38;2;") {
 		t.Fatal("真彩色档应输出 RGB 序列")
+	}
+}
+
+func TestTextNavigationAndWidthBudget(t *testing.T) {
+	data := textSampleReport()
+	data.Run.Requested = []string{"cpu", "media", "backtrace"}
+	data.Results = append(data.Results, model.Result{
+		ID: "media", Title: "流媒体与 AI 服务", Status: model.StatusWarning,
+		Summary:      "部分平台响应很长但仍需保持版面稳定",
+		Fields:       []model.Field{{Label: "平台状态说明", Value: strings.Repeat("中文和 English 混排的字段值 ", 8)}},
+		Measurements: []model.Measurement{{Label: "超长指标名称", Display: strings.Repeat("123 ", 10), Value: 123}},
+		Notes:        []string{strings.Repeat("长说明文字 ", 20)},
+	})
+	scored := &score.Report{Total: 720, Ratio: 0.72, Covered: 2, Possible: 3, BaselineSource: "builtinSingleHost", BaselineSample: 1}
+	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
+		out := Text(data, TextOptions{Color: level, Score: scored})
+		for lineNumber, line := range strings.Split(out, "\n") {
+			if width := textwidth.Width(line); width > textWidth {
+				t.Fatalf("line %d exceeds %d columns at color level %v: %d\n%s", lineNumber+1, textWidth, level, width, line)
+			}
+		}
+	}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{"全部模块", "本次选择", "CPU 性能", "流媒体与 AI 服务", "三网回程"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("navigation missing %q:\n%s", want, plain)
+		}
 	}
 }
 

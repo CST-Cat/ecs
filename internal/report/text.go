@@ -28,9 +28,10 @@ import (
 
 // textWidth 是报告的版面宽度。
 //
-// 100 列而不是 80：三网回程那类表格在 80 列下会挤到无法阅读，而现代终端
-// 与聊天窗口普遍容得下 100 列。
-const textWidth = 100
+// 110 列给三网回程、风险矩阵等宽表格留出可读空间，同时仍适合常见终端与
+// 聊天窗口。所有输出路径都按 textwidth.Width 计算，中文、英文和 ANSI 颜色
+// 序列都不会把版面撑开。
+const textWidth = 110
 
 // barWidth 是柱状图的格数。
 const barWidth = 24
@@ -89,35 +90,44 @@ func (r *textRenderer) header(data model.Report) {
 	r.line(r.palette.Bold(rule))
 	r.line(r.palette.Bold(textwidth.Center(i18n.T("report.title"), textWidth)))
 	r.blank()
-
 	meta := []string{
 		i18n.T("report.startedAt") + " " + data.Run.StartedAt.Format("2006-01-02 15:04:05 MST"),
-		i18n.T("report.version") + " " + data.Tool.Version,
-		i18n.T("report.profile") + " " + data.Run.Profile,
+		i18n.T("report.version") + " " + fallbackReport(data.Tool.Version, "—"),
+		i18n.T("report.profile") + " " + fallbackReport(data.Run.Profile, "—"),
 	}
-	r.line(textwidth.Center(strings.Join(meta, "    "), textWidth))
-	exposure := data.Run.Exposure
-	if exposure != "" {
-		exposure = i18n.T("report.exposure") + " " + exposure + " — " + i18n.T("exposure."+exposure)
+	r.centered(strings.Join(meta, "    "))
+
+	exposure := fallbackReport(data.Run.Exposure, "local")
+	second := []string{
+		i18n.T("report.exposure") + " " + exposure,
+		i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted],
 	}
-	second := []string{exposure}
 	if data.Run.IPVersion != "" {
 		second = append(second, i18n.T("report.ipVersion")+" "+data.Run.IPVersion)
 	}
-	second = append(second, i18n.T("report.privacy")+" "+
-		map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted])
-	r.line(textwidth.Center(strings.Join(second, "    "), textWidth))
+	if data.Run.DurationMS > 0 {
+		second = append(second, i18n.T("report.totalDuration")+" "+formatDurationMS(data.Run.DurationMS))
+	}
+	r.centered(strings.Join(second, "    "))
 	r.line(r.palette.Bold(rule))
 	r.blank()
+}
+
+// centered 按版面宽度折行后居中，避免长的外联级别或自定义版本把标题块撑宽。
+func (r *textRenderer) centered(value string) {
+	for _, line := range wrapText(value, textWidth-2) {
+		r.line(textwidth.Center(line, textWidth))
+	}
 }
 
 // overview 是模块状态总览。
 func (r *textRenderer) overview(data model.Report) {
 	// 概览是报告的前言，不占用正文的章节编号。正文的编号只表示
 	// 实际输出的结果与评分，用户选了几个模块就从一数到几。
-	r.prefaceTitle(i18n.T("report.glance"))
+	r.prefaceTitle(i18n.T("report.overview"))
+	r.moduleNavigation(data)
 	if data.Summary.Headline != "" {
-		r.line("  %s %s", statusIcon(data.Summary.Status), data.Summary.Headline)
+		r.indented(statusIcon(data.Summary.Status)+" "+data.Summary.Headline, true)
 		r.blank()
 	}
 	rows := make([][]string, 0, len(data.Results))
@@ -137,10 +147,80 @@ func (r *textRenderer) overview(data model.Report) {
 	r.blank()
 }
 
+var reportModuleIDs = []string{
+	"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
+	"ports", "nat", "blacklist", "apps", "cnspeed", "ookla", "media", "route", "backtrace",
+}
+
+// moduleNavigation 显示完整模块目录以及本次报告实际选择的模块。Run.Requested
+// 为空时从结果回退，兼容旧 JSON 报告。
+func (r *textRenderer) moduleNavigation(data model.Report) {
+	selected := append([]string(nil), data.Run.Requested...)
+	if len(selected) == 0 {
+		for _, result := range data.Results {
+			selected = append(selected, result.ID)
+		}
+	}
+	r.compactList(i18n.T("report.allModules"), moduleTitles(reportModuleIDs))
+	r.compactList(i18n.T("report.selectedModules"), moduleTitles(selected))
+	r.blank()
+}
+
+func moduleTitles(ids []string) []string {
+	titles := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		key := "module." + id + ".title"
+		if i18n.Has(i18n.Current(), key) {
+			titles = append(titles, i18n.T(key))
+		} else {
+			titles = append(titles, id)
+		}
+	}
+	return titles
+}
+
+// compactList 把长模块目录折成带悬挂缩进的紧凑列表。
+func (r *textRenderer) compactList(label string, values []string) {
+	prefix := "  " + label + "  "
+	available := textWidth - textwidth.Width(prefix)
+	if available < 1 {
+		available = textWidth - 2
+	}
+	content := strings.Join(values, " · ")
+	lines := wrapText(content, available)
+	indent := strings.Repeat(" ", textwidth.Width(prefix))
+	for index, line := range lines {
+		if index == 0 {
+			r.line(prefix + line)
+		} else {
+			r.line(indent + line)
+		}
+	}
+}
+
 // prefaceTitle 是不参与章节编号的标题块（目前用于模块状态总览）。
 func (r *textRenderer) prefaceTitle(title string) {
 	r.line(r.palette.Bold(title))
 	r.line(r.palette.Dim(strings.Repeat("─", textWidth)))
+}
+
+func (r *textRenderer) subsection(title string) {
+	r.line("  %s", r.palette.Bold(title))
+}
+
+// indented 把模块描述、口径和错误按版面宽度折行，避免长字段把 110 列撑开。
+func (r *textRenderer) indented(value string, emphasize ...bool) {
+	indent := "  "
+	for _, line := range wrapText(value, textWidth-textwidth.Width(indent)) {
+		if len(emphasize) > 0 && emphasize[0] {
+			r.line(r.palette.Bold(indent + line))
+		} else {
+			r.line(indent + line)
+		}
+	}
 }
 
 // scoreSection 渲染综合评分。
@@ -228,7 +308,7 @@ func baselineSourceLabel(source string) string {
 func (r *textRenderer) result(result model.Result) {
 	r.sectionTitle(resultTitle(result), localizedMethodology(result.Methodology))
 	if result.Description != "" {
-		r.line("  %s", result.Description)
+		r.indented(result.Description)
 	}
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
@@ -236,9 +316,9 @@ func (r *textRenderer) result(result model.Result) {
 	if result.Summary != "" {
 		status += " · " + result.Summary
 	}
-	r.line("  %s", status)
+	r.indented(status, true)
 	if result.Error != "" {
-		r.line("  %s %s", i18n.T("report.errorPrefix"), result.Error)
+		r.indented(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+result.Error, true)
 	}
 	if result.Methodology.Kind != "" || result.Methodology.Label != "" ||
 		result.Methodology.Engine != "" || result.Methodology.Profile != "" ||
@@ -259,14 +339,16 @@ func (r *textRenderer) result(result model.Result) {
 		if result.Methodology.ComparisonScope != "" {
 			parts = append(parts, i18n.T("report.comparability")+i18n.T("punct.colon")+result.Methodology.ComparisonScope)
 		}
-		r.line("  %s%s%s", i18n.T("report.methodologyLabel"), i18n.T("punct.colon"), strings.Join(parts, " · "))
+		r.indented(i18n.T("report.methodologyLabel") + i18n.T("punct.colon") + strings.Join(parts, " · "))
 	}
 	r.blank()
 
 	if len(result.Measurements) > 0 {
+		r.subsection(i18n.T("report.metrics"))
 		r.measurements(result.Measurements)
 	}
 	if len(result.Fields) > 0 {
+		r.subsection(i18n.T("report.details"))
 		r.fields(result.Fields)
 	}
 	for _, table := range result.Tables {
@@ -275,8 +357,17 @@ func (r *textRenderer) result(result model.Result) {
 	for _, block := range result.TextBlocks {
 		r.textBlock(block)
 	}
+	if len(result.Notes) > 0 {
+		r.subsection(i18n.T("report.notes"))
+	}
 	for _, note := range result.Notes {
+		if note == "" {
+			continue
+		}
 		r.note(note)
+	}
+	if len(result.Sources) > 0 {
+		r.subsection(i18n.T("report.sources"))
 	}
 	for _, source := range result.Sources {
 		parts := []string{source.Name}
@@ -286,7 +377,7 @@ func (r *textRenderer) result(result model.Result) {
 		if source.Purpose != "" {
 			parts = append(parts, source.Purpose)
 		}
-		r.line("  %s", strings.Join(parts, " · "))
+		r.indented(strings.Join(parts, " · "))
 	}
 	r.blank()
 }
@@ -303,22 +394,42 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		valueWidth = maxInt(valueWidth, textwidth.Width(item.Display))
 	}
 	labelWidth = minInt(labelWidth, 30)
+	valueWidth = minInt(valueWidth, 26)
 	for _, item := range items {
 		label := textwidth.Pad(textwidth.Truncate(item.Label, 30), labelWidth)
-		value := textwidth.PadLeft(item.Display, valueWidth)
+		valueLines := wrapText(item.Display, valueWidth)
+		if len(valueLines) == 0 {
+			valueLines = []string{""}
+		}
 		bar := ""
 		if group, ok := groups[item.Key]; ok {
 			bar = "  " + r.palette.BarRelative(comparableValue(item, group), group.max, barWidth)
 		}
 		rating := ""
 		if item.Rating != "" {
-			rating = "  " + r.palette.Dim(item.Rating)
+			rating = "  " + r.palette.Dim(textwidth.Truncate(item.Rating, 20))
 		}
 		method := ""
 		if item.Method != "" {
-			method = "  " + r.palette.Dim("["+item.Method+"]")
+			method = "[" + item.Method + "]"
 		}
-		r.line("  %s  %s%s%s%s", label, value, bar, rating, method)
+		base := "  " + label + "  " + textwidth.PadLeft(valueLines[0], valueWidth) + bar + rating
+		if method != "" && textwidth.Width(base)+2+textwidth.Width(method) <= textWidth {
+			base += "  " + r.palette.Dim(method)
+			method = ""
+		}
+		for index, valueLine := range valueLines {
+			if index == 0 {
+				r.line(base)
+			} else {
+				r.line("      %s", valueLine)
+			}
+		}
+		if method != "" {
+			for _, methodLine := range wrapText(method, textWidth-6) {
+				r.line("      %s", r.palette.Dim(methodLine))
+			}
+		}
 	}
 	r.blank()
 }
@@ -399,13 +510,29 @@ func (r *textRenderer) fields(items []model.Field) {
 	width = minInt(width, 28)
 	for _, item := range items {
 		value := item.Value
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "available", "true":
-			value = r.palette.WrapRatio(value, 1)
-		case "unavailable", "false":
-			value = r.palette.WrapRatio(value, 0)
+		prefix := "  " + r.palette.Dim(textwidth.Pad(textwidth.Truncate(item.Label, 28), width)) + "  "
+		available := textWidth - textwidth.Width(prefix)
+		if available < 1 {
+			available = textWidth - 2
 		}
-		r.line("  %s  %s", r.palette.Dim(textwidth.Pad(textwidth.Truncate(item.Label, 28), width)), value)
+		valueLines := wrapText(value, available)
+		if len(valueLines) == 0 {
+			valueLines = []string{""}
+		}
+		for index, valueLine := range valueLines {
+			linePrefix := prefix
+			if index > 0 {
+				linePrefix = strings.Repeat(" ", textwidth.Width(prefix))
+			}
+			displayValue := valueLine
+			switch strings.ToLower(strings.TrimSpace(valueLine)) {
+			case "available", "true":
+				displayValue = r.palette.WrapRatio(valueLine, 1)
+			case "unavailable", "false":
+				displayValue = r.palette.WrapRatio(valueLine, 0)
+			}
+			r.line(linePrefix + displayValue)
+		}
 	}
 	r.blank()
 }
@@ -413,7 +540,7 @@ func (r *textRenderer) fields(items []model.Field) {
 // resultTable 渲染带边框的表格。
 func (r *textRenderer) resultTable(table model.Table) {
 	if table.Title != "" {
-		r.line("  %s", r.palette.Bold(table.Title))
+		r.indented(table.Title, true)
 	}
 	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
@@ -570,10 +697,12 @@ func shrinkColumns(widths []int, budget int) {
 // textBlock 渲染原文块，逐行缩进以免与正文混淆。
 func (r *textRenderer) textBlock(block model.TextBlock) {
 	if block.Title != "" {
-		r.line("  %s", r.palette.Bold(block.Title))
+		r.indented(block.Title, true)
 	}
 	for _, line := range strings.Split(strings.TrimRight(block.Content, "\n"), "\n") {
-		r.line("    %s", line)
+		for _, wrapped := range wrapText(line, textWidth-6) {
+			r.line("    %s", wrapped)
+		}
 	}
 	r.blank()
 }
@@ -591,11 +720,12 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 	if i18n.Current() == i18n.LangEN {
 		heading = fmt.Sprintf("%d. %s", r.section, title)
 	}
-	line := r.palette.Bold(heading)
 	if scope != "" {
-		line += "  " + r.palette.Dim("["+scope+"]")
+		heading += "  [" + scope + "]"
 	}
-	r.line("%s", line)
+	for _, line := range wrapText(heading, textWidth) {
+		r.line(r.palette.Bold(line))
+	}
 	r.line(r.palette.Dim(strings.Repeat("─", textWidth)))
 }
 
@@ -604,8 +734,7 @@ func (r *textRenderer) footer(data model.Report) {
 	for _, notice := range data.Notices {
 		r.note(notice)
 	}
-	r.line("  %s %s", r.palette.Dim("·"), r.palette.Dim(i18n.T("report.generator")+" "+
-		data.Tool.Name+" "+data.Tool.Version))
+	r.indented(i18n.T("report.generator") + " " + data.Tool.Name + " " + data.Tool.Version)
 }
 
 // chineseNumeral 把章节号转成中文数字。
