@@ -577,8 +577,7 @@ func describeFIOEngine(engine fioEngine) string {
 }
 
 func fioJobDuration() time.Duration {
-	// Profiles only choose the module preset. Every selected disk module uses
-	// the full-depth 10-second workload for comparable results.
+	// 配置档只选择模块预设；每个选中的 disk 模块都使用完整 10 秒工作负载，保证结果可比。
 	return 10 * time.Second
 }
 

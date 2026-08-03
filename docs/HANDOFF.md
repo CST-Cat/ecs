@@ -100,7 +100,7 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 
 | 工具 | 测试方式 |
 | --- | --- |
-| fio | 真实 `fio` 在临时目录跑 quick 档；断言探测到的引擎与队列深度标注自洽 |
+| fio | 真实 `fio` 在临时目录跑完整 52 作业矩阵（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
 | sysbench | 真实 `sysbench` 跑 CPU 与 memory；断言 steal 指标与原始输出留存 |
 | iperf3 | 在回环起真实 `iperf3 -s`，跑 TCP 双向与 UDP |
 | ping | 真实 `ping 127.0.0.1` |
@@ -146,7 +146,7 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 - **iperf3 节点池有两个域名根本不存在**：`ams.speedtest.eranium.net` 与
   `speedtest.tyo1.jp.leaseweb.net` 在三个独立 DNS 上都无 A 记录，是凭印象编的；
   Eranium 的端口范围也错了。已逐条抄自 YABS `v2026-07-24` 的 `IPERF_LOCS` 并实测 7/7 可达。
-  节点数因此从 8 变为 7，`full` 档说明已同步。
+  节点数因此从 8 变为 7；所有配置档选中 `speed` 时均使用这 7 个节点，说明已同步。
 - **ULA 被当成可用 IPv6**：`hostHasUsableIPv6()` 把 Tailscale 的 `fd7a::/48` 判为公网 IPv6，
   于是每个节点白跑一轮 IPv6 并全部失败。现改为"全球可路由单播地址 + UDP dial 确认路由"。
 

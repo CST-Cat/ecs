@@ -47,8 +47,7 @@ const (
 )
 
 func cnSpeedBudget() (time.Duration, int64) {
-	// Profiles only choose the module preset; cnspeed always keeps the full
-	// download depth when explicitly selected.
+	// 配置档只选择模块预设；显式选中 cnspeed 时始终保持完整下载深度。
 	return cnSpeedDuration, cnSpeedMaxBytes
 }
 

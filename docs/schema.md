@@ -116,7 +116,8 @@ Latency 优先使用 sysbench
 DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
 `mbw_array_size_mib`，以便知道动态数组大小。
 
-磁盘 `disk` 结果保留旧的 fio/YABS 兼容指标，并在 `standard`/`full` 中增加三组完整表：
+磁盘 `disk` 结果保留旧的 fio/YABS 兼容指标；只要选中 `disk`（无论配置档预设还是
+`--only`），就增加下面三组完整表。三档配置只预选模块集合，不改变这些表的深度：
 
 - `50/50 混合读写`：4K、64K、512K、1M，读写吞吐保存为
   `fio_mixed_{4k,64k,512k,1m}_{read,write}_mib_s`；提交与基线沿用同一组键名，
