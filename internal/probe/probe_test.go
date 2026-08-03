@@ -523,18 +523,29 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 		if strings.Contains(measurement.Key, "median") || strings.Contains(measurement.Key, "average") {
 			t.Fatalf("iperf3 must preserve per-target values: %+v", measurement)
 		}
-		if measurement.Value <= 0 {
-			t.Fatalf("real iperf3 returned a non-positive throughput: %+v", measurement)
-		}
 		switch {
 		case strings.HasSuffix(measurement.Key, "_upload_mbps"):
+			if measurement.Value <= 0 {
+				t.Fatalf("real iperf3 returned a non-positive upload throughput: %+v", measurement)
+			}
 			directions["upload"] = measurement.Value
 		case strings.HasSuffix(measurement.Key, "_download_mbps"):
+			if measurement.Value <= 0 {
+				t.Fatalf("real iperf3 returned a non-positive download throughput: %+v", measurement)
+			}
 			directions["download"] = measurement.Value
 		case strings.HasSuffix(measurement.Key, "_udp_loss_percent"):
+			if measurement.Value < 0 || measurement.Value > 100 {
+				t.Fatalf("real iperf3 returned an invalid UDP loss percentage: %+v", measurement)
+			}
 			udp["loss"] = measurement.Value
 		case strings.HasSuffix(measurement.Key, "_udp_jitter_ms"):
+			if measurement.Value < 0 {
+				t.Fatalf("real iperf3 returned a negative UDP jitter: %+v", measurement)
+			}
 			udp["jitter"] = measurement.Value
+		default:
+			t.Fatalf("unexpected iperf3 measurement: %+v", measurement)
 		}
 	}
 	if len(directions) != 2 {
