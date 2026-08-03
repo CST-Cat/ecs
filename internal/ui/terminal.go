@@ -2,8 +2,6 @@ package ui
 
 import (
 	"fmt"
-
-	"ecs/internal/i18n"
 	"io"
 	"os"
 	"sort"
@@ -12,8 +10,12 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
+	reporter "ecs/internal/report"
 	"ecs/internal/runner"
+	"ecs/internal/score"
+	"ecs/internal/termcolor"
 )
 
 type Terminal struct {
@@ -22,8 +24,18 @@ type Terminal struct {
 }
 
 func New(out io.Writer, noColor bool) *Terminal {
-	color := !noColor && os.Getenv("NO_COLOR") == "" && isTerminal(out)
-	return &Terminal{out: out, color: color}
+	level := termcolor.Detect(isTerminal(out))
+	if noColor {
+		level = termcolor.LevelNone
+	}
+	return NewWithColor(out, level)
+}
+
+// NewWithColor 创建一个终端，显式指定终端报告的颜色能力。
+// Header/Error 仍使用兼容的 ANSI 层次样式；完整报告由 reporter.Text 按
+// termcolor.Level 渲染，因此 --color 的层级不会在摘要和正文之间分叉。
+func NewWithColor(out io.Writer, level termcolor.Level) *Terminal {
+	return &Terminal{out: out, color: level != termcolor.LevelNone}
 }
 
 func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
@@ -108,18 +120,47 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 			terminal.printTable(table)
 		}
 	}
-	if len(files) > 0 {
+	terminal.printFiles(files)
+	terminal.printNoUpload()
+}
+
+// FullReport 在所有模块完成、脱敏、评分和文件写入后一次性输出完整报告。
+// data 必须是已经按当前语言本地化的副本；正文的所有 measurements、fields、
+// tables、text blocks 和 notes 均由 reporter.Text 统一渲染，避免终端摘要自行
+// 截断或遗漏结果。
+func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
+	terminal.line("")
+	text := reporter.Text(data, reporter.TextOptions{Color: color, Score: scored})
+	_, _ = io.WriteString(terminal.out, text)
+	if text != "" && !strings.HasSuffix(text, "\n") {
 		terminal.line("")
-		terminal.line(terminal.style("1", i18n.T("term.localReports")))
-		formats := make([]string, 0, len(files))
-		for format := range files {
-			formats = append(formats, format)
-		}
-		sort.Strings(formats)
-		for _, format := range formats {
-			terminal.line(fmt.Sprintf("  %-5s %s", strings.ToUpper(format), files[format]))
-		}
 	}
+	terminal.printFiles(files)
+	terminal.printNoUpload()
+}
+
+// Report 是 FullReport 的简短别名，供调用方按语义选择名称。
+func (terminal *Terminal) Report(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
+	terminal.FullReport(data, files, scored, color)
+}
+
+func (terminal *Terminal) printFiles(files map[string]string) {
+	if len(files) == 0 {
+		return
+	}
+	terminal.line("")
+	terminal.line(terminal.style("1", i18n.T("term.localReports")))
+	formats := make([]string, 0, len(files))
+	for format := range files {
+		formats = append(formats, format)
+	}
+	sort.Strings(formats)
+	for _, format := range formats {
+		terminal.line(fmt.Sprintf("  %-5s %s", strings.ToUpper(format), files[format]))
+	}
+}
+
+func (terminal *Terminal) printNoUpload() {
 	terminal.line("")
 	terminal.line(terminal.style("2", i18n.T("term.noUpload")))
 }

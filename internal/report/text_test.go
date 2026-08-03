@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
@@ -140,6 +141,70 @@ func TestTextWithoutScoreOmitsSection(t *testing.T) {
 	out := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone})
 	if strings.Contains(out, "综合评分") {
 		t.Fatal("没有评分时不该出现评分区")
+	}
+}
+
+func TestTextSectionsNumberOnlyActualResultsAndScore(t *testing.T) {
+	data := textSampleReport()
+	data.Results = []model.Result{
+		{ID: "one", Title: "结果一", Status: model.StatusOK},
+		{ID: "two", Title: "结果二", Status: model.StatusOK},
+		{ID: "three", Title: "结果三", Status: model.StatusWarning},
+		{ID: "four", Title: "结果四", Status: model.StatusSkipped},
+		{ID: "five", Title: "结果五", Status: model.StatusError},
+	}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, heading := range []string{"一、结果一", "二、结果二", "三、结果三", "四、结果四", "五、结果五"} {
+		if !strings.Contains(plain, heading) {
+			t.Fatalf("missing numbered result %q:\n%s", heading, plain)
+		}
+	}
+	if strings.Contains(plain, "六、") {
+		t.Fatal("没有评分时不应出现额外章节编号")
+	}
+
+	scored := &score.Report{Total: 800, Ratio: 0.8, Covered: 1, Possible: 1}
+	withScore := Text(data, TextOptions{Color: termcolor.LevelNone, Score: scored})
+	if !strings.Contains(withScore, "六、综合评分") {
+		t.Fatalf("评分章节未接在实际结果之后:\n%s", withScore)
+	}
+
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangEN)
+	english := Text(data, TextOptions{Color: termcolor.LevelNone, Score: scored})
+	for _, heading := range []string{"1. 结果一", "2. 结果二", "3. 结果三", "4. 结果四", "5. 结果五", "6. Composite score"} {
+		if !strings.Contains(english, heading) {
+			t.Fatalf("missing English heading %q:\n%s", heading, english)
+		}
+	}
+}
+
+func TestTextIncludesEveryResultDetail(t *testing.T) {
+	data := textSampleReport()
+	result := &data.Results[0]
+	result.Measurements = append(result.Measurements,
+		model.Measurement{Key: "third", Label: "第三个指标", Value: 3, Display: "3 units", Method: "third-method"})
+	result.Fields = append(result.Fields, model.Field{Key: "third-field", Label: "第三个字段", Value: "第三个值"})
+	result.Tables = append(result.Tables, model.Table{
+		Title: "第二张表", Columns: []string{"列"}, Rows: [][]string{{"第三张表值"}},
+	})
+	result.TextBlocks = []model.TextBlock{{Title: "原始文本", Content: "第三个文本块内容"}}
+	result.Notes = append(result.Notes, "第三条备注")
+	result.Status = model.StatusWarning
+	result.Methodology = model.Methodology{
+		Kind: "custom-kind", Label: "自定义方法", Engine: "custom-engine",
+		Profile: "custom-profile", ComparisonScope: "custom-scope",
+	}
+	out := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{
+		"第三个指标", "3 units", "third-method", "第三个字段", "第三个值",
+		"第二张表", "第三张表值", "原始文本", "第三个文本块内容", "第三条备注",
+		"需留意", "custom-kind", "自定义方法", "custom-engine", "custom-profile", "custom-scope",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("完整文本报告缺少 %q:\n%s", want, out)
+		}
 	}
 }
 

@@ -113,7 +113,13 @@ func (r *textRenderer) header(data model.Report) {
 
 // overview 是模块状态总览。
 func (r *textRenderer) overview(data model.Report) {
-	r.sectionTitle(i18n.T("report.glance"), "")
+	// 概览是报告的前言，不占用正文的章节编号。正文的编号只表示
+	// 实际输出的结果与评分，用户选了几个模块就从一数到几。
+	r.prefaceTitle(i18n.T("report.glance"))
+	if data.Summary.Headline != "" {
+		r.line("  %s %s", statusIcon(data.Summary.Status), data.Summary.Headline)
+		r.blank()
+	}
 	rows := make([][]string, 0, len(data.Results))
 	for _, result := range data.Results {
 		rows = append(rows, []string{
@@ -129,6 +135,12 @@ func (r *textRenderer) overview(data model.Report) {
 		i18n.T("report.status"), i18n.T("report.summary"), i18n.T("report.duration"),
 	}, rows, map[int]bool{4: true})
 	r.blank()
+}
+
+// prefaceTitle 是不参与章节编号的标题块（目前用于模块状态总览）。
+func (r *textRenderer) prefaceTitle(title string) {
+	r.line(r.palette.Bold(title))
+	r.line(r.palette.Dim(strings.Repeat("─", textWidth)))
 }
 
 // scoreSection 渲染综合评分。
@@ -215,26 +227,39 @@ func baselineSourceLabel(source string) string {
 // result 渲染单个模块。
 func (r *textRenderer) result(result model.Result) {
 	r.sectionTitle(resultTitle(result), localizedMethodology(result.Methodology))
-	if result.Summary != "" {
-		r.line("  %s %s", statusIcon(result.Status), result.Summary)
+	if result.Description != "" {
+		r.line("  %s", result.Description)
 	}
+	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
+	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
+	status := statusIcon(result.Status) + " " + statusLabel(result.Status)
+	if result.Summary != "" {
+		status += " · " + result.Summary
+	}
+	r.line("  %s", status)
 	if result.Error != "" {
 		r.line("  %s %s", i18n.T("report.errorPrefix"), result.Error)
 	}
-	if result.Methodology.Engine != "" || result.Methodology.ComparisonScope != "" {
-		parts := []string{}
+	if result.Methodology.Kind != "" || result.Methodology.Label != "" ||
+		result.Methodology.Engine != "" || result.Methodology.Profile != "" ||
+		result.Methodology.ComparisonScope != "" {
+		parts := make([]string, 0, 5)
+		if result.Methodology.Kind != "" {
+			parts = append(parts, result.Methodology.Kind)
+		}
+		if label := localizedMethodology(result.Methodology); label != "" {
+			parts = append(parts, label)
+		}
 		if result.Methodology.Engine != "" {
 			parts = append(parts, result.Methodology.Engine)
 		}
 		if result.Methodology.Profile != "" {
 			parts = append(parts, result.Methodology.Profile)
 		}
-		if len(parts) > 0 {
-			r.line("  %s", r.palette.Dim(strings.Join(parts, " · ")))
-		}
 		if result.Methodology.ComparisonScope != "" {
-			r.line("  %s", r.palette.Dim(i18n.T("report.comparability")+i18n.T("punct.colon")+result.Methodology.ComparisonScope))
+			parts = append(parts, i18n.T("report.comparability")+i18n.T("punct.colon")+result.Methodology.ComparisonScope)
 		}
+		r.line("  %s%s%s", i18n.T("report.methodologyLabel"), i18n.T("punct.colon"), strings.Join(parts, " · "))
 	}
 	r.blank()
 
@@ -252,6 +277,16 @@ func (r *textRenderer) result(result model.Result) {
 	}
 	for _, note := range result.Notes {
 		r.note(note)
+	}
+	for _, source := range result.Sources {
+		parts := []string{source.Name}
+		if source.URL != "" {
+			parts = append(parts, source.URL)
+		}
+		if source.Purpose != "" {
+			parts = append(parts, source.Purpose)
+		}
+		r.line("  %s", strings.Join(parts, " · "))
 	}
 	r.blank()
 }
@@ -279,7 +314,11 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		if item.Rating != "" {
 			rating = "  " + r.palette.Dim(item.Rating)
 		}
-		r.line("  %s  %s%s%s", label, value, bar, rating)
+		method := ""
+		if item.Method != "" {
+			method = "  " + r.palette.Dim("["+item.Method+"]")
+		}
+		r.line("  %s  %s%s%s%s", label, value, bar, rating, method)
 	}
 	r.blank()
 }

@@ -289,33 +289,25 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		baseline = loaded
 	}
 
-	terminal := ui.New(stdout, cfg.NoColor)
+	terminalColor := resolveTerminalColor(*colorFlag, cfg.NoColor, stdout)
+	terminal := ui.NewWithColor(stdout, terminalColor)
 	terminal.Header(cfg, config.EstimateFor(cfg))
-	raw := runner.Run(ctx, cfg, terminal.Progress)
+	// runner 只负责收集结果；终端报告必须等所有模块完成后一次性渲染，
+	// 否则并行模块的进度行会把完整报告拆成无法复制的碎片。
+	raw := runner.Run(ctx, cfg, nil)
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
 	// 写进文件的 txt 默认不着色：报告会被 diff、贴进不解析转义序列的地方。
 	// --color always 才把颜色写进文件，auto 只影响终端直出。
-	textColor := termcolor.LevelNone
-	if requested, ok := termcolor.ParseLevel(*colorFlag); ok {
-		textColor = requested
-	} else if strings.EqualFold(*colorFlag, "always") {
-		textColor = termcolor.Detect(true)
-		if textColor == termcolor.LevelNone {
-			textColor = termcolor.LevelANSI256
-		}
-	}
-	if cfg.NoColor {
-		textColor = termcolor.LevelNone
-	}
+	textColor := resolveFileTextColor(*colorFlag, cfg.NoColor)
 	files, writeErr := reporter.WriteFilesWithOptions(data, cfg.Output, *nameFlag, cfg.Formats,
 		reporter.Options{TextColor: textColor, Score: scored})
 	if writeErr != nil {
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
 	}
-	terminal.Summary(reporter.Localize(data), files)
+	terminal.FullReport(reporter.Localize(data), files, scored, terminalColor)
 	if data.Run.Canceled {
 		return 130
 	}
@@ -323,6 +315,60 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 2
 	}
 	return 0
+}
+
+// resolveTerminalColor 解析终端完整报告的颜色层级。
+//
+// auto 遵循终端能力探测，always 即使 stdout 不是 TTY 也强制使用至少 256 色；
+// 显式 none 和 --no-color 都彻底关闭颜色，后者优先于所有其他选项。
+func resolveTerminalColor(raw string, noColor bool, out io.Writer) termcolor.Level {
+	if noColor {
+		return termcolor.LevelNone
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "auto":
+		return termcolor.Detect(writerIsTerminal(out))
+	case "always":
+		level := termcolor.Detect(true)
+		if level == termcolor.LevelNone {
+			level = termcolor.LevelANSI256
+		}
+		return level
+	}
+	if level, ok := termcolor.ParseLevel(raw); ok {
+		return level
+	}
+	// 兼容旧行为：未知值不产生转义序列。flag 的帮助文本会列出合法值，
+	// 但不在这里把既有命令调用升级成新的错误路径。
+	return termcolor.LevelNone
+}
+
+// resolveFileTextColor 保留 --color 对 TXT 文件的既有语义：auto 默认无色，
+// 只有显式 always 或具体能力档位才把 ANSI 写入文件。
+func resolveFileTextColor(raw string, noColor bool) termcolor.Level {
+	if noColor {
+		return termcolor.LevelNone
+	}
+	if level, ok := termcolor.ParseLevel(raw); ok {
+		return level
+	}
+	if strings.EqualFold(strings.TrimSpace(raw), "always") {
+		level := termcolor.Detect(true)
+		if level == termcolor.LevelNone {
+			level = termcolor.LevelANSI256
+		}
+		return level
+	}
+	return termcolor.LevelNone
+}
+
+func writerIsTerminal(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func writeOneShotPlan(path string, cfg config.Runtime) error {
