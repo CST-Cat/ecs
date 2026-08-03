@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
 ```
 
-报告默认写入当前目录的 `./reports/`。启用全部模块可能运行数分钟，`iperf3` 流量不封顶。
+通过 `run.sh` 运行时，报告默认直接写入 `${TMPDIR:-/tmp}`，不会创建新的报告目录；如需固定目录，显式传入 `--output PATH`。默认文件名前缀带有本次运行的唯一后缀，也可以用 `--name PREFIX` 自定义。启用全部模块可能运行数分钟，`iperf3` 流量不封顶。
 
 ## 为什么再做一个
 
@@ -121,7 +121,7 @@ go build -trimpath -o ecs ./cmd/ecs
 ./ecs
 ```
 
-默认执行 `standard` 配置，并在 `./reports` 同时生成：
+直接运行编译好的 `ecs` 时，默认执行 `standard` 配置，并在 `./reports` 同时生成：
 
 ```text
 ecs-report-YYYYMMDD-HHMMSS.json
