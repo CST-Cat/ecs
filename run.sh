@@ -73,6 +73,19 @@ case "${1:-}" in
     ;;
 esac
 
+OUTPUT_GIVEN=0
+EXPECT_OUTPUT=0
+for arg in "$@"; do
+  if [ "$EXPECT_OUTPUT" -eq 1 ]; then
+    EXPECT_OUTPUT=0
+    continue
+  fi
+  case "$arg" in
+    --output) OUTPUT_GIVEN=1; EXPECT_OUTPUT=1 ;;
+    --output=*) OUTPUT_GIVEN=1 ;;
+  esac
+done
+
 [ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
 
 case "$(uname -m)" in
@@ -94,6 +107,7 @@ fi
 ASSET="ecs_linux_${ARCH}.tar.gz"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ecs-run.XXXXXX")
+REPORT_DIR=""
 PACKAGE_MANAGER=""
 BEFORE_PACKAGES=""
 AFTER_INSTALL_PACKAGES=""
@@ -401,6 +415,12 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
+if [ "$OUTPUT_GIVEN" -eq 0 ]; then
+  REPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ecs-reports.XXXXXX") ||
+    die "无法创建临时报告目录" "failed to create the temporary report directory"
+  say "报告目录：$REPORT_DIR" "report directory: $REPORT_DIR"
+fi
+
 fetch() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
@@ -470,18 +490,52 @@ fi
 
 prepare_dependencies
 
+report_paths() {
+  REPORT_JSON=""
+  for report_path in "$REPORT_DIR"/*.json; do
+    if [ -f "$report_path" ]; then
+      REPORT_JSON="$report_path"
+      break
+    fi
+  done
+  if [ -n "$REPORT_JSON" ]; then
+    say "JSON 报告：$REPORT_JSON" "JSON report: $REPORT_JSON"
+  else
+    say "未找到 JSON 报告；报告目录：$REPORT_DIR" "no JSON report found; report directory: $REPORT_DIR"
+  fi
+}
+
 # 不使用 exec：必须等 ecs 退出后运行清理逻辑，并原样保留退出码。
 if [ -n "$PLAN_FILE" ]; then
-  if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes; then
-    RUN_STATUS=0
+  if [ -n "$REPORT_DIR" ]; then
+    if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR"; then
+      RUN_STATUS=0
+    else
+      RUN_STATUS=$?
+    fi
   else
-    RUN_STATUS=$?
+    if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes; then
+      RUN_STATUS=0
+    else
+      RUN_STATUS=$?
+    fi
   fi
 else
-  if "${WORK}/ecs" "$@"; then
-    RUN_STATUS=0
+  if [ -n "$REPORT_DIR" ]; then
+    if "${WORK}/ecs" "$@" --output "$REPORT_DIR"; then
+      RUN_STATUS=0
+    else
+      RUN_STATUS=$?
+    fi
   else
-    RUN_STATUS=$?
+    if "${WORK}/ecs" "$@"; then
+      RUN_STATUS=0
+    else
+      RUN_STATUS=$?
+    fi
   fi
+fi
+if [ -n "$REPORT_DIR" ]; then
+  report_paths
 fi
 exit "$RUN_STATUS"
