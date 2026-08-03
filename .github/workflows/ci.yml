@@ -14,9 +14,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -27,24 +32,28 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: false
-      # 标准基准适配器的测试跑真实的 fio / sysbench / iperf3，不使用脚本替身。
-      # 替身只能证明解析器认得自己造出来的输出，证明不了它认得工具的真实输出。
-      - name: Install benchmark tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
-          fio --version && sysbench --version && iperf3 --version | head -1
-      - run: go test ./...
+      # 真实外部工具端到端测试集中在 benchmark job，避免 1.22/stable
+      # 矩阵和 race 再重复跑完整 fio/ATTO、sysbench 与 iperf3。
+      - name: Unit and parser tests
+        run: >-
+          go test
+          -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
+          ./...
       # 翻译覆盖率：跑一遍真实模块产出报告，再检查英文渲染后是否还有中文。
       # 用真实产出而不是源码字面量——源码里大量分支从不触发。
       - name: i18n coverage
+        if: matrix.go == 'stable'
         run: |
           mkdir -p /tmp/i18n-samples
-          go run ./cmd/ecs --profile quick --exposure local --only system,cpu,memory,disk \
+          # 内存报告足以覆盖结果、状态、说明和 JSON 翻译；刻意不选 disk，
+          # 也不选带宿主机 CPU-steal 动态说明的 cpu，避免矩阵里的压测与
+          # 非确定性文本。缺少基准工具时报告仍会记录可见的降级状态，翻译覆盖
+          # 依然检查真实落盘 JSON。
+          go run ./cmd/ecs --profile quick --exposure local --only memory \
             --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-samples --no-color
           ECS_I18N_SAMPLES=/tmp/i18n-samples go test ./internal/report/ -run TestLocalizeCovers -v
           # 再直接扫一遍英文 JSON：翻译覆盖的是渲染层，这里确认落盘文件本身也没有中文。
-          go run ./cmd/ecs --lang en --profile quick --exposure local --only system,cpu,memory,disk \
+          go run ./cmd/ecs --lang en --profile quick --exposure local --only memory \
             --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-en --no-color
           python3 - <<'SCAN'
           import json,glob,re,sys
@@ -76,6 +85,7 @@ jobs:
   # 指纹由内容派生，因此手改数值而不重算会被当场发现。
   submissions:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -126,6 +136,24 @@ jobs:
 
   race:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: Race tests
+        run: >-
+          go test -race
+          -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
+          ./...
+
+  # 真实标准工具端到端测试只跑一次：完整 fio/ATTO、sysbench、iperf3、
+  # loopback ping 与 traceroute 仍是质量门禁，但不再乘以 Go/race 矩阵。
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -135,11 +163,16 @@ jobs:
       - name: Install benchmark tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
-      - run: go test -race ./...
+          sudo apt-get install -y -qq fio sysbench iperf3 traceroute iputils-ping
+          fio --version && sysbench --version && iperf3 --version | head -1
+      - name: Real benchmark adapter tests
+        run: >-
+          go test ./internal/probe/ -count=1 -v -timeout 20m
+          -run '^(TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback)$'
 
   cross:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -154,6 +187,7 @@ jobs:
   live:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -169,8 +203,9 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, race, cross]
+    needs: [test, race, benchmark, cross]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
