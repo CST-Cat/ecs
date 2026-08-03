@@ -91,6 +91,21 @@ func TestMethodologyKindsAreTranslated(t *testing.T) {
 	}
 }
 
+func TestATTOExpansionNoteTranslation(t *testing.T) {
+	const note = "为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 32.00 MiB 对齐/扩展为 128.00 MiB（至少两个 64 MiB 窗口）。"
+	original := Current()
+	defer Set(original)
+	Set(LangEN)
+
+	if !HasProbeText(note) {
+		t.Fatalf("ATTO expansion note is missing an English template: %q", note)
+	}
+	want := "To safely fit ATTO 64 MiB jobs, the fio file was aligned/expanded from 32.00 MiB to 128.00 MiB (at least two 64 MiB windows)."
+	if got := Text(note); got != want {
+		t.Fatalf("ATTO expansion note translation = %q, want %q", got, want)
+	}
+}
+
 // 校验错误表与其余译文表同样必须一一对应。
 func TestErrorTablesAreInSync(t *testing.T) {
 	for key, value := range errorChinese {

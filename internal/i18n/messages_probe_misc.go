@@ -21,7 +21,7 @@ var probeEnglishMisc = map[string]string{
 	"DNSPod 最快 · P\x1f \x1f ms":     "DNSPod fastest · P\x1f \x1f ms",
 	"Direct I/O 磁盘工作负载与 JSON 统计":    "Direct I/O disk workload with JSON statistics",
 	"fio Direct I/O 的基础口径、Crystal 矩阵、ATTO 矩阵与 YABS 兼容补充矩阵":                                           "fio Direct I/O legacy metrics, Crystal matrix, ATTO matrix and YABS-compatible supplemental matrix",
-	"为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 \x1f 对齐/扩展为 \x1f（至少两个 64 MiB 窗口）。":                              "To safely fit ATTO \x1f MiB jobs, the fio file was aligned/expanded from \x1f to \x1f (at least two 64 MiB windows).",
+	"为安全容纳 ATTO \x1f MiB 作业，fio 文件从配置的 \x1f MiB 对齐/扩展为 \x1f MiB（至少两个 \x1f MiB 窗口）。":                  "To safely fit ATTO \x1f MiB jobs, the fio file was aligned/expanded from \x1f MiB to \x1f MiB (at least two \x1f MiB windows).",
 	"混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：legacy、混合、Crystal、ATTO 各占四分之一；缺失单元不补零。":      "Mixed, Crystal and ATTO throughput and IOPS are averaged within each matrix, then the legacy, mixed, Crystal and ATTO subgroups contribute equally to the disk score; missing cells are not filled with zero.",
 	"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。": "ATTO uses the complete block-size list 512B, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M, 2M, 4M, 8M, 16M, 32M and 64M; the unrequested 5M size is not included.",
 	"Google 最快 · P\x1f \x1f ms": "Google fastest · P\x1f \x1f ms",
