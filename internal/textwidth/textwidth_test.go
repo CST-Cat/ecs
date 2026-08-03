@@ -1,6 +1,9 @@
 package textwidth
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // 对齐的根基：中文占两列。按 rune 数或字节数算都会让表格歪掉。
 func TestWidthCountsCJKAsTwoColumns(t *testing.T) {
@@ -76,6 +79,17 @@ func TestVisibleWidthIgnoresEscapes(t *testing.T) {
 	}
 	if got := PadVisible(colored, 10); VisibleWidth(got) != 10 {
 		t.Errorf("PadVisible 后可见宽度 = %d，期望 10", VisibleWidth(got))
+	}
+}
+
+func TestTruncatePreservesANSISequences(t *testing.T) {
+	colored := "\x1b[38;2;255;0;0m123456789\x1b[0m"
+	got := Truncate(colored, 5)
+	if VisibleWidth(got) > 5 || !contains(got, "…") {
+		t.Fatalf("ANSI truncate width/content = %d/%q", VisibleWidth(got), got)
+	}
+	if !strings.HasSuffix(got, "\x1b[0m…") {
+		t.Fatalf("truncation must close an active style before ellipsis: %q", got)
 	}
 }
 

@@ -46,16 +46,12 @@ func Markdown(data model.Report, scored *score.Report) string {
 	}
 	out.WriteString("\n")
 
-	if scored != nil {
-		writeMarkdownScore(&out, scored)
-	}
-
 	out.WriteString("## " + i18n.T("report.glance") + "\n\n")
 	out.WriteString("| " + i18n.T("report.module") + " | " + i18n.T("report.scope") + " | " +
 		i18n.T("report.status") + " | " + i18n.T("report.summary") + " | " + i18n.T("report.duration") + " |\n| --- | --- | --- | --- | --- |\n")
 	for _, result := range data.Results {
 		out.WriteString("| ")
-		out.WriteString(markdownEscape(result.Title))
+		out.WriteString(markdownEscape(resultTitle(result)))
 		out.WriteString(" | ")
 		out.WriteString(markdownEscape(localizedMethodology(result.Methodology)))
 		out.WriteString(" | ")
@@ -70,7 +66,7 @@ func Markdown(data model.Report, scored *score.Report) string {
 
 	for _, result := range data.Results {
 		out.WriteString("## ")
-		out.WriteString(markdownEscape(result.Title))
+		out.WriteString(markdownEscape(resultTitle(result)))
 		out.WriteString("\n\n")
 		if result.Description != "" {
 			out.WriteString(markdownEscape(result.Description))
@@ -186,6 +182,10 @@ func Markdown(data model.Report, scored *score.Report) string {
 		}
 	}
 
+	if scored != nil {
+		writeMarkdownScore(&out, scored)
+	}
+
 	out.WriteString("## " + i18n.T("report.notices") + "\n\n")
 	for _, notice := range data.Notices {
 		out.WriteString("- ")
@@ -224,7 +224,8 @@ func writeMarkdownTable(out *strings.Builder, table model.Table) {
 		out.WriteString("---")
 	}
 	out.WriteString(" |\n")
-	for _, row := range table.Rows {
+	rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+	for _, row := range rows {
 		out.WriteString("| ")
 		for index := range table.Columns {
 			if index > 0 {
@@ -343,11 +344,16 @@ func writeMarkdownScore(out *strings.Builder, scored *score.Report) {
 	for _, dimension := range scored.Dimensions {
 		name := i18n.T("score.dimension." + dimension.Key)
 		if dimension.Missing {
-			writeMarkdownRow(out, name, i18n.T("score.missing."+dimension.MissingReason))
+			out.WriteString("| " + markdownEscape(name) + " | " +
+				markdownEscape(i18n.T("score.missing."+dimension.MissingReason)) + " | — |\n")
 			continue
 		}
 		out.WriteString("| " + markdownEscape(name) + " | " + formatScore(dimension.Score) +
 			" | `" + plain.Bar(dimension.Ratio, 20) + "` |\n")
+		if len(dimension.MissingMetrics) > 0 {
+			out.WriteString("| " + markdownEscape(name) + " | " +
+				markdownEscape(fmt.Sprintf(i18n.T("score.missingMetrics"), name, len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", "))) + " | — |\n")
+		}
 	}
 	out.WriteString("\n")
 	if !scored.Complete {
@@ -356,6 +362,7 @@ func writeMarkdownScore(out *strings.Builder, scored *score.Report) {
 	if scored.BaselineSample <= 1 {
 		out.WriteString("> " + i18n.T("score.singleSampleWarning") + "\n\n")
 	}
+	out.WriteString("> " + i18n.T("score.weightingNote") + "\n\n")
 	out.WriteString(fmt.Sprintf(i18n.T("score.baselineLine"),
 		baselineSourceLabel(scored.BaselineSource), scored.BaselineSample) + "\n\n")
 	if scored.TierLabel != "" {

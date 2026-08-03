@@ -19,6 +19,11 @@ type htmlPayload struct {
 	Score *score.Report
 }
 
+type htmlTableCell struct {
+	Value string
+	Class string
+}
+
 func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"statusLabel": statusLabel,
@@ -61,11 +66,10 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 			return template.CSS(fmt.Sprintf("#%02x%02x%02x", color.R, color.G, color.B))
 		},
 		"dimensionName": func(key string) string { return i18n.T("score.dimension." + key) },
+		"resultTitle":   resultTitle,
+		"tableRows":     htmlTableRows,
 		"metricName": func(metric score.MetricScore) string {
-			if key := "score.metric." + metric.Key; i18n.Has(i18n.Current(), key) {
-				return i18n.T(key)
-			}
-			return metric.Label
+			return metricLabel(metric)
 		},
 		// 评分区的成句文案统一走 i18n，避免模板里留下写死的中文。
 		"scoreText": func(key string) string { return i18n.T(key) },
@@ -84,7 +88,13 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 		"baselineLine": func(source string, sample int) string {
 			return fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(source), sample)
 		},
-		"missingReason":  func(key string) string { return i18n.T("score.missing." + key) },
+		"missingReason": func(key string) string { return i18n.T("score.missing." + key) },
+		"missingMetrics": func(dimension score.DimensionScore) string {
+			if len(dimension.MissingMetrics) == 0 {
+				return ""
+			}
+			return fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", "))
+		},
 		"baselineSource": baselineSourceLabel,
 	}
 	parsed, err := template.New("report").Funcs(functions).Parse(htmlTemplate)
@@ -218,44 +228,10 @@ const htmlTemplate = `<!doctype html>
     <div class="summary-card"><strong class="skipped">{{.Summary.Skipped}}</strong><span>跳过</span></div>
   </div>
 
-  {{if .Score}}
-  <div class="score-card">
-    <h2>{{scoreText "score.title"}}</h2>
-    <div class="score-total">
-      <strong style="color:{{scoreColor .Score.Ratio}}">{{scoreValue .Score.Total}}</strong>
-      <span>{{coverageText .Score.Covered .Score.Possible}}</span>
-    </div>
-    {{range .Score.Dimensions}}
-      {{if .Missing}}
-      <div class="score-row">
-        <div class="name">{{dimensionName .Key}}</div>
-        <div class="score-missing" style="grid-column: 2 / span 2">{{missingReason .MissingReason}}</div>
-      </div>
-      {{else}}
-      <div class="score-row">
-        <div class="name">{{dimensionName .Key}}</div>
-        <div class="bar"><i style="width:{{barWidth .Ratio}}%;background:{{scoreColor .Ratio}}"></i></div>
-        <div class="value" style="color:{{scoreColor .Ratio}}">{{scoreValue .Score}}</div>
-      </div>
-      <div class="score-metrics">
-        {{range .Metrics}}<div><span>{{metricName .}}</span><span class="num">{{metricValue .Value}} {{.Unit}}</span><span class="num">{{ofBaseline .Ratio}}</span></div>{{end}}
-      </div>
-      {{end}}
-    {{end}}
-    <div class="score-note">
-      {{if not .Score.Complete}}<p>{{scoreText "score.incompleteWarning"}}</p>{{end}}
-      {{if le .Score.BaselineSample 1}}<p>{{scoreText "score.singleSampleWarning"}}</p>{{end}}
-      <p>{{baselineLine .Score.BaselineSource .Score.BaselineSample}}</p>
-      {{if .Score.TierLabel}}<p>{{tierLine .Score.HostVCPU .Score.TierLabel}}</p>
-      {{else if .Score.HostVCPU}}<p>{{tierFallbackLine .Score.HostVCPU}}</p>{{end}}
-    </div>
-  </div>
-  {{end}}
-
   {{range .Results}}
   <section id="{{.ID}}">
     <div class="section-head">
-      <div><h2>{{.Title}}</h2>{{if .Description}}<p class="description">{{.Description}}</p>{{end}}</div>
+      <div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{.Description}}</p>{{end}}</div>
       <div class="badges">
         {{if .Methodology.Label}}<span class="badge method-badge">{{.Methodology.Label}}</span>{{end}}
         <span class="badge {{.Status}}">{{statusIcon .Status}} {{statusLabel .Status}}</span>
@@ -291,7 +267,7 @@ const htmlTemplate = `<!doctype html>
     {{range .Tables}}
     {{if .Title}}<h3>{{.Title}}</h3>{{end}}
     <div class="table-wrap"><table><thead><tr>{{range .Columns}}<th>{{.}}</th>{{end}}</tr></thead>
-      <tbody>{{range .Rows}}<tr>{{range .}}<td class="{{valueClass .}}">{{.}}</td>{{end}}</tr>{{end}}</tbody>
+      <tbody>{{range tableRows .}}<tr>{{range .}}<td class="{{.Class}}">{{.Value}}</td>{{end}}</tr>{{end}}</tbody>
     </table></div>
     {{end}}
 
@@ -302,6 +278,41 @@ const htmlTemplate = `<!doctype html>
     {{if .Notes}}<h3>说明</h3><ul>{{range .Notes}}<li>{{.}}</li>{{end}}</ul>{{end}}
     {{if .Sources}}<h3>数据来源</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Purpose}}：{{.Purpose}}{{end}}</li>{{end}}</ul>{{end}}
   </section>
+  {{end}}
+
+  {{if .Score}}
+  <div class="score-card">
+    <h2>{{scoreText "score.title"}}</h2>
+    <div class="score-total">
+      <strong style="color:{{scoreColor .Score.Ratio}}">{{scoreValue .Score.Total}}</strong>
+      <span>{{coverageText .Score.Covered .Score.Possible}}</span>
+    </div>
+    {{range .Score.Dimensions}}
+      {{if .Missing}}
+      <div class="score-row">
+        <div class="name">{{dimensionName .Key}}</div>
+        <div class="score-missing" style="grid-column: 2 / span 2">{{missingReason .MissingReason}}</div>
+      </div>
+      {{else}}
+      <div class="score-row">
+        <div class="name">{{dimensionName .Key}}</div>
+        <div class="bar"><i style="width:{{barWidth .Ratio}}%;background:{{scoreColor .Ratio}}"></i></div>
+        <div class="value" style="color:{{scoreColor .Ratio}}">{{scoreValue .Score}}</div>
+      </div>
+      <div class="score-metrics">
+        {{range .Metrics}}<div><span>{{metricName .}}</span><span class="num">{{metricValue .Value}} {{.Unit}}</span><span class="num">{{ofBaseline .Ratio}}</span></div>{{end}}
+      </div>
+      {{if .MissingMetrics}}<div class="score-missing">{{missingMetrics .}}</div>{{end}}
+      {{end}}
+    {{end}}
+    <div class="score-note">
+      {{if not .Score.Complete}}<p>{{scoreText "score.incompleteWarning"}}</p>{{end}}
+      {{if le .Score.BaselineSample 1}}<p>{{scoreText "score.singleSampleWarning"}}</p>{{end}}
+      <p>{{baselineLine .Score.BaselineSource .Score.BaselineSample}}</p>
+      {{if .Score.TierLabel}}<p>{{tierLine .Score.HostVCPU .Score.TierLabel}}</p>
+      {{else if .Score.HostVCPU}}<p>{{tierFallbackLine .Score.HostVCPU}}</p>{{end}}
+    </div>
+  </div>
   {{end}}
 
   <footer>
@@ -315,13 +326,13 @@ const htmlTemplate = `<!doctype html>
 
 func reportValueClass(value string) string {
 	switch strings.TrimSpace(value) {
-	case "极低", "低", "否", "成功", "原生 IP":
+	case "极低", "低", "否", "成功", "原生 IP", "available", "true":
 		return "cell-good"
 	case "中等", "需留意", "可疑", "商业", "其他":
 		return "cell-warn"
 	case "高", "极高", "是", "机房", "失败":
 		return "cell-bad"
-	case "—", "未启用", "未返回":
+	case "—", "未启用", "未返回", "unavailable", "false":
 		return "cell-muted"
 	default:
 		if strings.HasPrefix(value, "失败：") {
@@ -332,4 +343,43 @@ func reportValueClass(value string) string {
 		}
 		return ""
 	}
+}
+
+func htmlTableRows(table model.Table) [][]htmlTableCell {
+	rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+	result := make([][]htmlTableCell, len(rows))
+	for rowIndex, row := range rows {
+		result[rowIndex] = make([]htmlTableCell, len(table.Columns))
+		for column := range table.Columns {
+			value := ""
+			if column < len(row) {
+				value = row[column]
+			}
+			original := ""
+			if column < len(table.Rows[rowIndex]) {
+				original = table.Rows[rowIndex][column]
+			}
+			class := reportValueClass(original)
+			for _, numericColumn := range table.NumericColumns {
+				if numericColumn != column {
+					continue
+				}
+				if _, ok := numericCellValue(original); !ok {
+					break
+				}
+				density := "░"
+				if strings.Contains(value, "█") {
+					density = "█"
+				} else if strings.Contains(value, "▓") {
+					density = "▓"
+				} else if strings.Contains(value, "▒") {
+					density = "▒"
+				}
+				class = map[string]string{"█": "cell-good", "▓": "cell-good", "▒": "cell-warn", "░": "cell-bad"}[density]
+				break
+			}
+			result[rowIndex][column] = htmlTableCell{Value: value, Class: class}
+		}
+	}
+	return result
 }

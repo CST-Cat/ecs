@@ -135,6 +135,7 @@ func appendMBWMemory(ctx context.Context, result *model.Result, availableBytes u
 	}
 	result.Fields = append(result.Fields,
 		model.Field{Key: "mbw_binary_sha256", Label: "mbw SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+		model.Field{Key: "mbw_array_size_mib", Label: "mbw 动态数组大小", Value: strconv.Itoa(sizeMiB) + " MiB"},
 		model.Field{Key: "mbw_arguments", Label: "mbw 参数", Value: "mbw " + strings.Join(args, " ")},
 	)
 	result.TextBlocks = append(result.TextBlocks, model.TextBlock{

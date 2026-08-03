@@ -184,6 +184,56 @@ func TestSubmissionRoundTripsThroughBaseline(t *testing.T) {
 	}
 }
 
+func TestSubmissionWhitelistIncludesExpandedStableMetrics(t *testing.T) {
+	data := sampleSubmissionReport()
+	data.Results = append(data.Results, model.Result{
+		ID: "disk", Status: model.StatusOK,
+		Measurements: []model.Measurement{{Key: "arbitrary_report_field", Value: 999}},
+	})
+	disk := &data.Results[len(data.Results)-1]
+	for _, dimension := range Dimensions() {
+		if dimension.Key != "disk" {
+			continue
+		}
+		for _, metric := range dimension.Metrics {
+			if metric.MeasurementKey == "" {
+				continue
+			}
+			disk.Measurements = append(disk.Measurements, model.Measurement{
+				Key: metric.MeasurementKey, Value: 123, Unit: "u", Label: metric.Key,
+			})
+		}
+	}
+	submission, err := BuildSubmission(data, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"crystal_rnd4k_q1_read_mib_s", "crystal_seq1m_q8_write_iops",
+		"fio_mixed_4k_read_mib_s", "fio_mixed_1m_write_mib_s",
+		"atto_512b_read_mib_s", "atto_64m_write_iops",
+	} {
+		if got := submission.Metrics[key]; got != 123 {
+			t.Fatalf("expanded stable key %q = %v, want 123", key, got)
+		}
+	}
+	mixedCount := 0
+	for key := range submission.Metrics {
+		if strings.HasPrefix(key, "fio_mixed_") {
+			mixedCount++
+		}
+	}
+	if mixedCount != 8 {
+		t.Fatalf("submission fio mixed metric count = %d, want 8", mixedCount)
+	}
+	if _, ok := submission.Metrics["arbitrary_report_field"]; ok {
+		t.Fatal("submission leaked an arbitrary report field")
+	}
+	if err := submission.Validate(); err != nil {
+		t.Fatalf("expanded submission should remain valid: %v", err)
+	}
+}
+
 func TestSubmissionFileNameIsSafe(t *testing.T) {
 	submission, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{
 		Region: "US West/2", Provider: "Acme Cloud Inc.",

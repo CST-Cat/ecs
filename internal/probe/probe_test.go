@@ -357,8 +357,8 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	if memory.Status != model.StatusOK || memory.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench memory result = %+v", memory)
 	}
-	if len(memory.Measurements) != 4 {
-		t.Fatalf("sysbench memory measurements = %d: %+v", len(memory.Measurements), memory.Measurements)
+	if len(memory.Measurements) < 8 {
+		t.Fatalf("sysbench memory measurements = %d, want throughput plus latency for four contexts: %+v", len(memory.Measurements), memory.Measurements)
 	}
 	for _, measurement := range memory.Measurements {
 		if measurement.Value <= 0 {

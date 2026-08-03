@@ -113,6 +113,12 @@ type Table struct {
 	Title   string     `json:"title,omitempty"`
 	Columns []string   `json:"columns"`
 	Rows    [][]string `json:"rows"`
+	// NumericColumns lists columns whose cells contain comparable numeric values.
+	// Renderers may add a data-proportional relative bar without having to guess
+	// from localized labels or display strings.  The optional direction slice is
+	// aligned with NumericColumns; absent entries default to higher-is-better.
+	NumericColumns        []int  `json:"numeric_columns,omitempty"`
+	NumericHigherIsBetter []bool `json:"numeric_higher_is_better,omitempty"`
 	// SensitiveColumns 列出需要遮盖的列索引。默认遮盖会把这些单元格里的
 	// IP 按段处理，不影响其余列。
 	SensitiveColumns []int `json:"sensitive_columns,omitempty"`
@@ -203,6 +209,8 @@ func RedactedCopy(in Report, reveal bool) Report {
 		for j, table := range result.Tables {
 			out.Results[i].Tables[j] = table
 			out.Results[i].Tables[j].Columns = append([]string(nil), table.Columns...)
+			out.Results[i].Tables[j].NumericColumns = append([]int(nil), table.NumericColumns...)
+			out.Results[i].Tables[j].NumericHigherIsBetter = append([]bool(nil), table.NumericHigherIsBetter...)
 			out.Results[i].Tables[j].SensitiveColumns = append([]int(nil), table.SensitiveColumns...)
 			out.Results[i].Tables[j].Rows = make([][]string, len(table.Rows))
 			for k, row := range table.Rows {

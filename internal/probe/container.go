@@ -165,6 +165,35 @@ func cgroupMemoryLimit() (uint64, string, bool) {
 	return 0, "", false
 }
 
+// cgroupMemoryCurrent returns the bytes currently charged to this cgroup.
+// When /proc/meminfo exposes host memory, this lets the memory inventory report
+// a real effective used/available split instead of subtracting host
+// MemAvailable from a smaller container limit.
+func cgroupMemoryCurrent() (uint64, string, bool) {
+	for _, candidate := range []struct {
+		base string
+		file string
+		via  string
+	}{
+		{cgroupV2Root, "memory.current", "cgroup v2 memory.current"},
+		{cgroupV1Mem, "memory.usage_in_bytes", "cgroup v1 memory.usage_in_bytes"},
+		{cgroupV2Root, "memory.usage_in_bytes", "cgroup v1 memory.usage_in_bytes"},
+	} {
+		for _, path := range cgroupCandidatePaths(candidate.base, candidate.file) {
+			text := strings.TrimSpace(readTrimmed(path, ""))
+			if text == "" {
+				continue
+			}
+			value, err := strconv.ParseUint(text, 10, 64)
+			if err != nil {
+				continue
+			}
+			return value, candidate.via, true
+		}
+	}
+	return 0, "", false
+}
+
 // cgroupCandidatePaths 给出一个 cgroup 控制文件的候选位置。
 //
 // 启用了 cgroup namespace 的容器里，挂载点根部就是该容器自身的 cgroup，直接路径

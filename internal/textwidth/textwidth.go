@@ -12,15 +12,12 @@ package textwidth
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Width 返回字符串在等宽终端里占用的列数。
 func Width(value string) int {
-	width := 0
-	for _, character := range value {
-		width += RuneWidth(character)
-	}
-	return width
+	return VisibleWidth(value)
 }
 
 // RuneWidth 返回单个字符占用的列数。
@@ -94,15 +91,56 @@ func Truncate(value string, width int) string {
 	}
 	var builder strings.Builder
 	used := 0
-	for _, character := range value {
-		size := RuneWidth(character)
-		if used+size > width-1 {
+	styleActive := false
+	for index := 0; index < len(value); {
+		if value[index] == '\x1b' {
+			end := ansiSequenceEnd(value, index)
+			if end == index {
+				index++
+				continue
+			}
+			sequence := value[index:end]
+			builder.WriteString(sequence)
+			if strings.HasSuffix(sequence, "[0m") {
+				styleActive = false
+			} else {
+				styleActive = true
+			}
+			index = end
+			continue
+		}
+		character, size := utf8.DecodeRuneInString(value[index:])
+		if character == utf8.RuneError && size == 0 {
+			break
+		}
+		characterWidth := RuneWidth(character)
+		if used+characterWidth > width-1 {
 			break
 		}
 		builder.WriteRune(character)
-		used += size
+		used += characterWidth
+		index += size
+	}
+	if styleActive {
+		builder.WriteString("\x1b[0m")
 	}
 	return builder.String() + "…"
+}
+
+// ansiSequenceEnd returns the byte offset after a CSI escape sequence.  The
+// renderer only emits CSI colors, but preserving unknown CSI parameters keeps
+// this width helper safe for user-supplied table text too.
+func ansiSequenceEnd(value string, start int) int {
+	if start+2 > len(value) || value[start] != '\x1b' || value[start+1] != '[' {
+		return start
+	}
+	for index := start + 2; index < len(value); index++ {
+		character := value[index]
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
+			return index + 1
+		}
+	}
+	return len(value)
 }
 
 // VisibleWidth 返回忽略 ANSI 转义序列后的显示宽度。

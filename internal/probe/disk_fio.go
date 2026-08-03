@@ -96,12 +96,12 @@ func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 func runFIODisk(ctx context.Context, env Environment, fioPath string) (result model.Result) {
 	start := time.Now()
 	result = model.NewResult("disk", "磁盘性能")
-	result.Description = "fio Direct I/O 的顺序吞吐、4K 随机 IOPS 与 YABS 兼容的 50/50 混合矩阵"
+	result.Description = "fio Direct I/O 的基础口径、Crystal 矩阵、ATTO 矩阵与 YABS 兼容补充矩阵"
 	result.Methodology = model.Methodology{
 		Kind:            "standard-benchmark",
 		Label:           "标准基准",
 		Engine:          "fio",
-		Profile:         "Direct I/O seq 1 MiB QD1 + rand 4 KiB QD32 + randrw 50/50 QD64",
+		Profile:         "Direct I/O legacy + Crystal RND4K/SEQ1M + ATTO 512B–64M + YABS mixed",
 		ComparisonScope: "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
 	}
 
@@ -275,6 +275,10 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	if len(mixTable.Rows) > 0 {
 		result.Tables = append(result.Tables, mixTable)
 	}
+	if matrixJobsEnabled(env.Config.Profile) {
+		appendCrystalMatrix(&result, jobs, engine)
+		appendATTOMatrix(&result, jobs, engine)
+	}
 
 	if seqWrite <= 0 || seqRead <= 0 || randomRead <= 0 || randomWrite <= 0 {
 		result.Status = model.StatusWarning
@@ -289,12 +293,23 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			model.FormatBytes(uint64(actualBytes)),
 		))
 	}
+	if matrixJobsEnabled(env.Config.Profile) && actualBytes > requestedBytes {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 %s 对齐/扩展为 %s（至少两个 64 MiB 窗口）。",
+			model.FormatBytes(uint64(requestedBytes)), model.FormatBytes(uint64(actualBytes)),
+		))
+	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "引擎", Value: "fio"},
 		{Key: "version", Label: "fio 版本", Value: fallback(output.Version, "unknown")},
 		{Key: "binary_sha256", Label: "fio SHA-256", Value: fallback(binarySHA256(fioPath), "unavailable")},
+		{Key: "disk_device", Label: "测试设备", Value: fallback(disk.DiskDevice, "unavailable")},
 		{Key: "path", Label: "测试目录", Value: diskPath, Sensitive: true},
 		{Key: "mount", Label: "挂载点", Value: fallback(disk.DiskMount, diskPath)},
+		{Key: "disk_total", Label: "磁盘总量", Value: model.FormatBytes(disk.DiskTotal)},
+		{Key: "disk_used", Label: "磁盘已用", Value: model.FormatBytes(disk.DiskUsed)},
+		{Key: "disk_available", Label: "磁盘可用", Value: model.FormatBytes(disk.DiskFree)},
+		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: fmt.Sprintf("%.1f %%", disk.DiskUsage)},
 		{Key: "file_size", Label: "临时文件", Value: model.FormatBytes(uint64(actualBytes))},
 		{Key: "free_before", Label: "测试前可用", Value: model.FormatBytes(disk.DiskFree)},
 		{Key: "direct_io", Label: "Direct I/O", Value: "1"},
@@ -312,6 +327,12 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
 		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
 	)
+	if matrixJobsEnabled(env.Config.Profile) {
+		result.Notes = append(result.Notes,
+			"混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：legacy、混合、Crystal、ATTO 各占四分之一；缺失单元不补零。",
+			"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
+		)
+	}
 	if !engine.AsyncQueue {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"当前 ioengine 为 %s（同步），队列深度对它无效；所有随机项按实际生效的 QD1 标注，不能与 libaio/io_uring 的高队列深度成绩比较。",
@@ -330,6 +351,157 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	)
 	result.Finish(start)
 	return result
+}
+
+type matrixCell struct {
+	ReadMiB, ReadIOPS   float64
+	WriteMiB, WriteIOPS float64
+	ReadMethod          string
+	WriteMethod         string
+}
+
+func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine) {
+	specs := crystalJobSpecs()
+	cells := make(map[string]matrixCell, 4)
+	missing := 0
+	for _, spec := range specs {
+		sample, ok := jobs[spec.Name]
+		if !ok {
+			missing++
+			continue
+		}
+		direction := sample.Read
+		if spec.Direction == "write" {
+			direction = sample.Write
+		}
+		throughput := fioBandwidthMiB(direction)
+		if throughput <= 0 && direction.IOPS <= 0 {
+			missing++
+			continue
+		}
+		actualDepth := engine.EffectiveDepth(spec.IODepth)
+		workloadID := strings.ToLower(strings.ReplaceAll(spec.Workload, "/", "-"))
+		method := fmt.Sprintf("fio-direct-crystal-%s-%s-qd%d-v1", workloadID, spec.Direction, actualDepth)
+		cell := cells[spec.Workload]
+		if spec.Direction == "read" {
+			cell.ReadMiB, cell.ReadIOPS, cell.ReadMethod = throughput, direction.IOPS, method
+			appendFioMatrixMeasurements(result, "crystal", crystalMetricStem(spec.Workload), "read", throughput, direction.IOPS, method)
+		} else {
+			cell.WriteMiB, cell.WriteIOPS, cell.WriteMethod = throughput, direction.IOPS, method
+			appendFioMatrixMeasurements(result, "crystal", crystalMetricStem(spec.Workload), "write", throughput, direction.IOPS, method)
+		}
+		cells[spec.Workload] = cell
+	}
+
+	table := model.Table{
+		Title:                 "Crystal",
+		Columns:               []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+		NumericColumns:        []int{1, 2, 3, 4},
+		NumericHigherIsBetter: []bool{true, true, true, true},
+	}
+	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
+		cell := cells[workload]
+		status := "完成"
+		if cell.ReadMiB <= 0 && cell.ReadIOPS <= 0 || cell.WriteMiB <= 0 && cell.WriteIOPS <= 0 {
+			status = "未返回"
+		}
+		table.Rows = append(table.Rows, []string{
+			workload,
+			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
+			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"), status,
+		})
+	}
+	result.Tables = append(result.Tables, table)
+	if missing > 0 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf("Crystal 矩阵有 %d 个读写单元未返回有效吞吐或 IOPS；缺失项保留为未返回。", missing))
+	}
+}
+
+func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine) {
+	cells := make(map[string]matrixCell, len(attoBlockSizes))
+	missing := 0
+	for _, block := range attoBlockSizes {
+		for _, directionName := range []string{"read", "write"} {
+			name := "atto_" + directionName + "_" + block.FIO
+			sample, ok := jobs[name]
+			if !ok {
+				missing++
+				continue
+			}
+			direction := sample.Read
+			if directionName == "write" {
+				direction = sample.Write
+			}
+			throughput := fioBandwidthMiB(direction)
+			if throughput <= 0 && direction.IOPS <= 0 {
+				missing++
+				continue
+			}
+			method := fmt.Sprintf("fio-direct-atto-%s-%s-qd%d-v1", block.FIO, directionName, engine.EffectiveDepth(1))
+			cell := cells[block.Label]
+			if directionName == "read" {
+				cell.ReadMiB, cell.ReadIOPS, cell.ReadMethod = throughput, direction.IOPS, method
+				appendFioMatrixMeasurements(result, "atto", "atto_"+block.FIO, "read", throughput, direction.IOPS, method)
+			} else {
+				cell.WriteMiB, cell.WriteIOPS, cell.WriteMethod = throughput, direction.IOPS, method
+				appendFioMatrixMeasurements(result, "atto", "atto_"+block.FIO, "write", throughput, direction.IOPS, method)
+			}
+			cells[block.Label] = cell
+		}
+	}
+
+	table := model.Table{
+		Title:                 "ATTO",
+		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+		NumericColumns:        []int{1, 2, 3, 4},
+		NumericHigherIsBetter: []bool{true, true, true, true},
+	}
+	for _, block := range attoBlockSizes {
+		cell := cells[block.Label]
+		status := "完成"
+		if cell.ReadMiB <= 0 && cell.ReadIOPS <= 0 || cell.WriteMiB <= 0 && cell.WriteIOPS <= 0 {
+			status = "未返回"
+		}
+		table.Rows = append(table.Rows, []string{
+			block.Label,
+			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
+			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"), status,
+		})
+	}
+	result.Tables = append(result.Tables, table)
+	if missing > 0 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf("ATTO 矩阵有 %d 个读写单元未返回有效吞吐或 IOPS；缺失项保留为未返回。", missing))
+	}
+}
+
+func appendFioMatrixMeasurements(result *model.Result, matrix, stem, direction string, throughput, iops float64, method string) {
+	if throughput > 0 {
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: stem + "_" + direction + "_mib_s", Label: matrix + " " + stem + " " + direction + " 吞吐",
+			Value: throughput, Unit: "MiB/s", Display: model.FormatRate(throughput, "MiB/s"), Method: method,
+			HigherIsBetter: model.BoolPtr(true),
+		})
+	}
+	if iops > 0 {
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: stem + "_" + direction + "_iops", Label: matrix + " " + stem + " " + direction + " IOPS",
+			Value: iops, Unit: "IOPS", Display: model.FormatRate(iops, "IOPS"), Method: method,
+			HigherIsBetter: model.BoolPtr(true),
+		})
+	}
+}
+
+func crystalMetricStem(workload string) string {
+	return "crystal_" + strings.ToLower(strings.ReplaceAll(workload, "/", "_"))
+}
+
+func formatMatrixRate(value float64, unit string) string {
+	if value <= 0 {
+		return "—"
+	}
+	return model.FormatRate(value, unit)
 }
 
 // parseFIOJobs 把 fio 的 JSON 输出按作业名索引。
@@ -356,19 +528,44 @@ func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, sy
 		return "", 0, disk, fmt.Errorf("测试路径不可用: %s", diskPath)
 	}
 	collectDisk(ctx, diskPath, &disk)
-	actualBytes := int64(env.Config.DiskMiB) * 1024 * 1024
-	if disk.DiskFree > 0 {
-		safeLimit := int64(disk.DiskFree / 5)
+	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree, matrixJobsEnabled(env.Config.Profile))
+	if err != nil {
+		return "", 0, disk, err
+	}
+	return diskPath, actualBytes, disk, nil
+}
+
+func fioDiskSize(requestedBytes, freeBytes uint64, matrix bool) (int64, error) {
+	actualBytes := int64(requestedBytes)
+	if freeBytes > 0 {
+		safeLimit := int64(freeBytes / 5)
 		if actualBytes > safeLimit {
 			actualBytes = safeLimit
 		}
 	}
-	const alignment = int64(4 * 1024 * 1024)
-	actualBytes = actualBytes / alignment * alignment
-	if actualBytes < 16*1024*1024 {
-		return "", 0, disk, fmt.Errorf("测试盘安全余量不足 16 MiB")
+	alignment := int64(4 * 1024 * 1024)
+	minimum := int64(16 * 1024 * 1024)
+	if matrix {
+		// The largest ATTO job is 64 MiB.  Keep two aligned 64 MiB windows so
+		// fio can place a full block without edge truncation or an accidental
+		// single-window cache effect on small VPS disks.
+		alignment = 64 * 1024 * 1024
+		minimum = 128 * 1024 * 1024
+		// A caller may configure a smaller legacy file size.  Expand it to the
+		// matrix minimum when the 20% free-space safety limit permits; otherwise
+		// refusing the run is safer than silently dropping ATTO cells.
+		if actualBytes < minimum {
+			if freeBytes > 0 && int64(freeBytes/5) < minimum {
+				return 0, fmt.Errorf("测试盘安全余量不足 %s（ATTO 最大块为 64 MiB）", model.FormatBytes(uint64(minimum)))
+			}
+			actualBytes = minimum
+		}
 	}
-	return diskPath, actualBytes, disk, nil
+	actualBytes = actualBytes / alignment * alignment
+	if actualBytes < minimum {
+		return 0, fmt.Errorf("测试盘安全余量不足 %s（ATTO 最大块为 64 MiB）", model.FormatBytes(uint64(minimum)))
+	}
+	return actualBytes, nil
 }
 
 // describeFIOEngine 给出带队列能力说明的 ioengine 描述。
@@ -397,6 +594,9 @@ type fioJobSpec struct {
 	BlockSize string
 	IODepth   int
 	NumJobs   int
+	Matrix    string
+	Workload  string
+	Direction string
 	// MixRead 只对 randrw 有效，表示读操作占比。
 	MixRead  int
 	EndFsync bool
@@ -432,7 +632,52 @@ func fioJobPlan(profile string) []fioJobSpec {
 			MixRead:   50,
 		})
 	}
+	if matrixJobsEnabled(profile) {
+		plan = append(plan, crystalJobSpecs()...)
+		plan = append(plan, attoJobSpecs()...)
+	}
 	return plan
+}
+
+func matrixJobsEnabled(profile string) bool {
+	// quick retains the established small workload and output shape.  The
+	// standard and full profiles carry the complete reporting expansion; full
+	// also supplies the stable 10-second fio duration.
+	return profile != "quick"
+}
+
+func crystalJobSpecs() []fioJobSpec {
+	return []fioJobSpec{
+		{Name: "crystal_read_rnd4k_q1", RW: "randread", BlockSize: "4k", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q1", Direction: "read"},
+		{Name: "crystal_write_rnd4k_q1", RW: "randwrite", BlockSize: "4k", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q1", Direction: "write", EndFsync: true},
+		{Name: "crystal_read_rnd4k_q32", RW: "randread", BlockSize: "4k", IODepth: 32, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q32", Direction: "read"},
+		{Name: "crystal_write_rnd4k_q32", RW: "randwrite", BlockSize: "4k", IODepth: 32, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q32", Direction: "write", EndFsync: true},
+		{Name: "crystal_read_seq1m_q1", RW: "read", BlockSize: "1m", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q1", Direction: "read"},
+		{Name: "crystal_write_seq1m_q1", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q1", Direction: "write", EndFsync: true},
+		{Name: "crystal_read_seq1m_q8", RW: "read", BlockSize: "1m", IODepth: 8, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q8", Direction: "read"},
+		{Name: "crystal_write_seq1m_q8", RW: "write", BlockSize: "1m", IODepth: 8, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q8", Direction: "write", EndFsync: true},
+	}
+}
+
+var attoBlockSizes = []struct {
+	FIO   string
+	Label string
+}{
+	{"512b", "512B"}, {"1k", "1K"}, {"2k", "2K"}, {"4k", "4K"}, {"8k", "8K"},
+	{"16k", "16K"}, {"32k", "32K"}, {"64k", "64K"}, {"128k", "128K"}, {"256k", "256K"},
+	{"512k", "512K"}, {"1m", "1M"}, {"2m", "2M"}, {"4m", "4M"}, {"8m", "8M"},
+	{"16m", "16M"}, {"32m", "32M"}, {"64m", "64M"},
+}
+
+func attoJobSpecs() []fioJobSpec {
+	jobs := make([]fioJobSpec, 0, len(attoBlockSizes)*2)
+	for _, block := range attoBlockSizes {
+		jobs = append(jobs,
+			fioJobSpec{Name: "atto_read_" + block.FIO, RW: "read", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "read"},
+			fioJobSpec{Name: "atto_write_" + block.FIO, RW: "write", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "write", EndFsync: true},
+		)
+	}
+	return jobs
 }
 
 func fioArguments(filename string, size int64, duration time.Duration, engine fioEngine, plan []fioJobSpec) []string {

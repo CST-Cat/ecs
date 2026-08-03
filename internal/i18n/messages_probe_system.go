@@ -75,7 +75,7 @@ var probeEnglishSystem = map[string]string{
 	"测试盘":         "Test disk",
 	"监听队列上限":      "Listen backlog",
 	"硬件虚拟化":       "Hardware virtualization",
-	"磁盘可用":        "Disk free",
+	"磁盘可用":        "Available disk",
 	"空闲后慢启动":      "Slow start after idle",
 	"系统":          "OS",
 	"系统与资源":       "System & Resources",

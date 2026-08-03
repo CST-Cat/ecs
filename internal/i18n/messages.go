@@ -113,6 +113,8 @@ var chinese = map[string]string{
 	"report.comparability":    "可比范围",
 	"report.errorPrefix":      "错误",
 	"report.generator":        "生成器",
+	"report.memoryBenchmark":  "内存测评",
+	"report.diskBenchmark":    "硬盘测评",
 
 	// ── 终端界面 ────────────────────────────────────────────
 	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML",
@@ -265,6 +267,8 @@ var english = map[string]string{
 	"report.comparability":    "Comparable scope",
 	"report.errorPrefix":      "Error",
 	"report.generator":        "Generator",
+	"report.memoryBenchmark":  "Memory Benchmark",
+	"report.diskBenchmark":    "Disk Benchmark",
 
 	// ── Terminal ────────────────────────────────────────────
 	"term.subtitle":     "No ads · No auto-upload · Local JSON/Markdown/HTML",

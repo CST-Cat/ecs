@@ -16,6 +16,7 @@ package report
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"ecs/internal/i18n"
@@ -61,11 +62,11 @@ type textRenderer struct {
 func (r *textRenderer) render(data model.Report) string {
 	r.header(data)
 	r.overview(data)
-	if r.score != nil {
-		r.scoreSection()
-	}
 	for _, result := range data.Results {
 		r.result(result)
+	}
+	if r.score != nil {
+		r.scoreSection()
 	}
 	r.footer(data)
 	return r.out.String()
@@ -116,7 +117,7 @@ func (r *textRenderer) overview(data model.Report) {
 	rows := make([][]string, 0, len(data.Results))
 	for _, result := range data.Results {
 		rows = append(rows, []string{
-			result.Title,
+			resultTitle(result),
 			localizedMethodology(result.Methodology),
 			statusIcon(result.Status) + " " + statusLabel(result.Status),
 			result.Summary,
@@ -163,6 +164,9 @@ func (r *textRenderer) scoreSection() {
 				r.palette.Dim(textwidth.PadLeft(formatFloat(metric.Value)+" "+metric.Unit, 20)),
 				r.palette.Dim(fmt.Sprintf(i18n.T("score.ofBaseline"), metric.Ratio*100)))
 		}
+		if len(dimension.MissingMetrics) > 0 {
+			r.note(fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", ")))
+		}
 	}
 	r.blank()
 	if !r.score.Complete {
@@ -173,6 +177,7 @@ func (r *textRenderer) scoreSection() {
 	}
 	r.note(fmt.Sprintf(i18n.T("score.baselineLine"),
 		baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample))
+	r.note(i18n.T("score.weightingNote"))
 	// 档位决定了这个分数在跟谁比，必须说清楚。
 	if r.score.TierLabel != "" {
 		r.note(fmt.Sprintf(i18n.T("score.tierLine"), r.score.HostVCPU, r.score.TierLabel))
@@ -188,6 +193,15 @@ func metricLabel(metric score.MetricScore) string {
 	if key := "score.metric." + metric.Key; i18n.Has(i18n.Current(), key) {
 		return i18n.T(key)
 	}
+	if strings.HasPrefix(metric.Key, "crystal_") {
+		return i18n.T("score.metric.crystal") + " · " + strings.TrimPrefix(metric.Key, "crystal_")
+	}
+	if strings.HasPrefix(metric.Key, "fio_mixed_") {
+		return i18n.T("score.metric.fio_mixed") + " · " + strings.TrimPrefix(metric.Key, "fio_mixed_")
+	}
+	if strings.HasPrefix(metric.Key, "atto_") {
+		return i18n.T("score.metric.atto") + " · " + strings.TrimPrefix(metric.Key, "atto_")
+	}
 	return metric.Label
 }
 
@@ -200,7 +214,7 @@ func baselineSourceLabel(source string) string {
 
 // result 渲染单个模块。
 func (r *textRenderer) result(result model.Result) {
-	r.sectionTitle(result.Title, localizedMethodology(result.Methodology))
+	r.sectionTitle(resultTitle(result), localizedMethodology(result.Methodology))
 	if result.Summary != "" {
 		r.line("  %s %s", statusIcon(result.Status), result.Summary)
 	}
@@ -345,7 +359,14 @@ func (r *textRenderer) fields(items []model.Field) {
 	}
 	width = minInt(width, 28)
 	for _, item := range items {
-		r.line("  %s  %s", r.palette.Dim(textwidth.Pad(textwidth.Truncate(item.Label, 28), width)), item.Value)
+		value := item.Value
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "available", "true":
+			value = r.palette.WrapRatio(value, 1)
+		case "unavailable", "false":
+			value = r.palette.WrapRatio(value, 0)
+		}
+		r.line("  %s  %s", r.palette.Dim(textwidth.Pad(textwidth.Truncate(item.Label, 28), width)), value)
 	}
 	r.blank()
 }
@@ -355,8 +376,68 @@ func (r *textRenderer) resultTable(table model.Table) {
 	if table.Title != "" {
 		r.line("  %s", r.palette.Bold(table.Title))
 	}
-	r.table(table.Columns, table.Rows, nil)
+	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
+}
+
+func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string {
+	if len(table.NumericColumns) == 0 || len(table.Rows) == 0 {
+		return table.Rows
+	}
+	maxValues := make(map[int]float64, len(table.NumericColumns))
+	directions := make(map[int]bool, len(table.NumericColumns))
+	for index, column := range table.NumericColumns {
+		higher := true
+		if index < len(table.NumericHigherIsBetter) {
+			higher = table.NumericHigherIsBetter[index]
+		}
+		directions[column] = higher
+		for _, row := range table.Rows {
+			if column >= len(row) {
+				continue
+			}
+			value, ok := numericCellValue(row[column])
+			if !ok || value <= 0 {
+				continue
+			}
+			if !higher {
+				value = 1 / value
+			}
+			if value > maxValues[column] {
+				maxValues[column] = value
+			}
+		}
+	}
+	rows := make([][]string, len(table.Rows))
+	for rowIndex, original := range table.Rows {
+		rows[rowIndex] = append([]string(nil), original...)
+		for _, column := range table.NumericColumns {
+			if column >= len(rows[rowIndex]) || maxValues[column] <= 0 {
+				continue
+			}
+			value, ok := numericCellValue(rows[rowIndex][column])
+			if !ok || value <= 0 {
+				continue
+			}
+			if !directions[column] {
+				value = 1 / value
+			}
+			rows[rowIndex][column] += " " + palette.BarRelative(value, maxValues[column], 8)
+		}
+	}
+	return rows
+}
+
+func numericCellValue(cell string) (float64, bool) {
+	fields := strings.Fields(strings.TrimSpace(cell))
+	if len(fields) == 0 || fields[0] == "—" || fields[0] == "-" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.ReplaceAll(fields[0], ",", ""), 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 // table 渲染一张对齐的表格。

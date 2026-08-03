@@ -32,7 +32,7 @@ type Dimension struct {
 	Key string
 	// ModuleID 指出该维度依赖哪个模块，模块没跑则该维度缺失。
 	ModuleID string
-	// Metrics 是构成该维度的指标。维度分取各指标分的算术平均。
+	// Metrics 是构成该维度的指标。相同 Group 先取算术平均，Group 之间再等权平均。
 	Metrics []Metric
 }
 
@@ -50,6 +50,15 @@ type Metric struct {
 	Aggregate Aggregation
 	// HigherIsBetter 决定分数方向。延迟类指标越小越好，得分要反过来算。
 	HigherIsBetter bool
+	// Group controls weighting inside a dimension. Metrics in the same group
+	// are averaged first, so a wide matrix such as ATTO cannot outweigh CPU or
+	// bandwidth merely because it has more cells. Empty means the metric is its
+	// own group for backward-compatible legacy dimensions.
+	Group string
+	// Optional marks metrics introduced after the legacy embedded baseline. A
+	// missing optional baseline is reported explicitly and never treated as a
+	// zero; newly aggregated baselines score it normally.
+	Optional bool
 }
 
 // Aggregation 是多值归并方式。
@@ -67,7 +76,7 @@ const (
 // 指标是精选的而非全收：一个维度里塞进十个高度相关的指标，等于给其中某个
 // 侧面偷偷加权。每项都注明了为什么选它。
 func Dimensions() []Dimension {
-	return []Dimension{
+	dimensions := []Dimension{
 		{
 			Key:      "cpu",
 			ModuleID: "cpu",
@@ -85,20 +94,24 @@ func Dimensions() []Dimension {
 				// 用 mbw 的 memcpy 口径而不是 sysbench 的多线程读：后者在本机
 				// 实测 329 GiB/s，那是缓存命中而非内存带宽，拿它当基线会让所有
 				// 缓存较小的机器凭空吃亏。
-				{Key: "memory_copy", MeasurementKey: "mbw_memcpy_mib_s", HigherIsBetter: true},
-				{Key: "memory_write", MeasurementKey: "sysbench_memory_write_single_mib_s", HigherIsBetter: true},
+				{Key: "memory_copy", MeasurementKey: "mbw_memcpy_mib_s", HigherIsBetter: true, Group: "copy"},
+				{Key: "memory_write", MeasurementKey: "sysbench_memory_write_single_mib_s", HigherIsBetter: true, Group: "write"},
+				{Key: "memory_write_multi", MeasurementKey: "sysbench_memory_write_multi_mib_s", HigherIsBetter: true, Group: "write", Optional: true},
+				{Key: "memory_read", Prefix: "sysbench_memory_read_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "read", Optional: true},
+				{Key: "memory_latency", Prefix: "sysbench_memory_", Suffix: "_latency_ms", Aggregate: AggregateMedian, HigherIsBetter: false, Group: "latency", Optional: true},
 			},
 		},
 		{
 			Key:      "disk",
 			ModuleID: "disk",
 			Metrics: []Metric{
-				// 顺序吞吐与 4K 随机 IOPS 是两类完全不同的负载，缺一不可：
-				// 只看顺序会让机械盘阵列显得够用，只看随机会埋没大文件场景。
-				{Key: "disk_seq_read", MeasurementKey: "fio_sequential_read_mib_s", HigherIsBetter: true},
-				{Key: "disk_seq_write", MeasurementKey: "fio_sequential_write_mib_s", HigherIsBetter: true},
-				{Key: "disk_rand_read_iops", MeasurementKey: "fio_random_read_4k_iops", HigherIsBetter: true},
-				{Key: "disk_rand_write_iops", MeasurementKey: "fio_random_write_4k_iops", HigherIsBetter: true},
+				// 顺序吞吐、4K 随机 IOPS、50/50 混合读写和 Crystal/ATTO
+				// 矩阵覆盖不同负载，缺一不可：只看顺序会让机械盘阵列显得够用，
+				// 只看随机会埋没大文件场景。各组等权，宽矩阵不会按单元数放大。
+				{Key: "disk_seq_read", MeasurementKey: "fio_sequential_read_mib_s", HigherIsBetter: true, Group: "legacy"},
+				{Key: "disk_seq_write", MeasurementKey: "fio_sequential_write_mib_s", HigherIsBetter: true, Group: "legacy"},
+				{Key: "disk_rand_read_iops", MeasurementKey: "fio_random_read_4k_iops", HigherIsBetter: true, Group: "legacy"},
+				{Key: "disk_rand_write_iops", MeasurementKey: "fio_random_write_4k_iops", HigherIsBetter: true, Group: "legacy"},
 			},
 		},
 		{
@@ -112,6 +125,59 @@ func Dimensions() []Dimension {
 			},
 		},
 	}
+	dimensions[2].Metrics = append(dimensions[2].Metrics, crystalScoreMetrics()...)
+	dimensions[2].Metrics = append(dimensions[2].Metrics, mixedScoreMetrics()...)
+	dimensions[2].Metrics = append(dimensions[2].Metrics, attoScoreMetrics()...)
+	return dimensions
+}
+
+func crystalScoreMetrics() []Metric {
+	workloads := []string{"rnd4k_q1", "rnd4k_q32", "seq1m_q1", "seq1m_q8"}
+	var metrics []Metric
+	for _, workload := range workloads {
+		for _, direction := range []string{"read", "write"} {
+			for _, kind := range []string{"mib_s", "iops"} {
+				metrics = append(metrics, Metric{
+					Key:            "crystal_" + workload + "_" + direction + "_" + kind,
+					MeasurementKey: "crystal_" + workload + "_" + direction + "_" + kind,
+					HigherIsBetter: true, Group: "crystal", Optional: true,
+				})
+			}
+		}
+	}
+	return metrics
+}
+
+func mixedScoreMetrics() []Metric {
+	blocks := []string{"4k", "64k", "512k", "1m"}
+	var metrics []Metric
+	for _, block := range blocks {
+		for _, direction := range []string{"read", "write"} {
+			metrics = append(metrics, Metric{
+				Key:            "fio_mixed_" + block + "_" + direction + "_mib_s",
+				MeasurementKey: "fio_mixed_" + block + "_" + direction + "_mib_s",
+				HigherIsBetter: true, Group: "mixed", Optional: true,
+			})
+		}
+	}
+	return metrics
+}
+
+func attoScoreMetrics() []Metric {
+	blocks := []string{"512b", "1k", "2k", "4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "2m", "4m", "8m", "16m", "32m", "64m"}
+	var metrics []Metric
+	for _, block := range blocks {
+		for _, direction := range []string{"read", "write"} {
+			for _, kind := range []string{"mib_s", "iops"} {
+				metrics = append(metrics, Metric{
+					Key:            "atto_" + block + "_" + direction + "_" + kind,
+					MeasurementKey: "atto_" + block + "_" + direction + "_" + kind,
+					HigherIsBetter: true, Group: "atto", Optional: true,
+				})
+			}
+		}
+	}
+	return metrics
 }
 
 // FullScale 是分项满分刻度：实测值等于基线时得这个分。
@@ -124,6 +190,7 @@ const FullScale = 1000
 type MetricScore struct {
 	Key      string  `json:"key"`
 	Label    string  `json:"label,omitempty"`
+	Group    string  `json:"group,omitempty"`
 	Value    float64 `json:"value"`
 	Unit     string  `json:"unit,omitempty"`
 	Baseline float64 `json:"baseline"`
@@ -132,21 +199,36 @@ type MetricScore struct {
 	Ratio float64 `json:"ratio"`
 }
 
+// GroupScore exposes the equal-weight subgroup calculation in the score
+// report. It is especially important for the disk matrices: all cells are
+// visible, but each workload subgroup contributes only once to the disk
+// dimension.
+type GroupScore struct {
+	Key         string  `json:"key"`
+	Score       float64 `json:"score"`
+	Ratio       float64 `json:"ratio"`
+	MetricCount int     `json:"metric_count"`
+}
+
 // DimensionScore 是一个维度的得分。
 type DimensionScore struct {
 	Key     string        `json:"key"`
 	Score   float64       `json:"score"`
 	Ratio   float64       `json:"ratio"`
 	Metrics []MetricScore `json:"metrics"`
+	Groups  []GroupScore  `json:"groups,omitempty"`
 	// Missing 为真表示该维度没有可用数据，未计入总分。
 	Missing bool `json:"missing"`
 	// MissingReason 说明缺失原因，报告里如实呈现而不是留白。
 	MissingReason string `json:"missing_reason,omitempty"`
+	// MissingMetrics lists expected metric keys absent from the report or its
+	// selected baseline. Missing values are excluded, never replaced by zero.
+	MissingMetrics []string `json:"missing_metrics,omitempty"`
 }
 
 // Report 是一次运行的完整评分。
 type Report struct {
-	// Total 是已覆盖维度的加权平均分；权重均等，因此就是算术平均。
+	// Total 是已覆盖维度的等权平均分；维度内部按 Group 先聚合，再等权平均。
 	Total float64 `json:"total"`
 	// Ratio 是总分相对满分刻度的倍率，供柱状图与色阶取档。
 	Ratio float64 `json:"ratio"`
@@ -196,6 +278,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 		out.TierLabel = TierLabel(tierMin)
 	}
 	var totals []float64
+	complete := true
 	for _, dimension := range Dimensions() {
 		out.Possible++
 		scored := scoreDimension(dimension, values, scoped, ran[dimension.ModuleID])
@@ -203,6 +286,9 @@ func Compute(data model.Report, baseline Baseline) *Report {
 		if !scored.Missing {
 			out.Covered++
 			totals = append(totals, scored.Score)
+		}
+		if scored.Missing || len(scored.MissingMetrics) > 0 {
+			complete = false
 		}
 	}
 	if out.Covered == 0 {
@@ -214,7 +300,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 	}
 	out.Total = sum / float64(len(totals))
 	out.Ratio = out.Total / FullScale
-	out.Complete = out.Covered == out.Possible
+	out.Complete = complete && out.Covered == out.Possible
 	return &out
 }
 
@@ -225,14 +311,16 @@ func scoreDimension(dimension Dimension, values map[string]measured, baseline Ba
 		scored.MissingReason = "moduleNotRun"
 		return scored
 	}
-	var sum float64
+	groupScores := make(map[string][]float64)
 	for _, metric := range dimension.Metrics {
 		base, ok := baseline.Metrics[metric.Key]
 		if !ok || base <= 0 {
+			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
 		value, unit, label, found := resolveMetric(metric, values)
 		if !found || value <= 0 {
+			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
 		ratio := value / base
@@ -244,18 +332,41 @@ func scoreDimension(dimension Dimension, values map[string]measured, baseline Ba
 			continue
 		}
 		item := MetricScore{
-			Key: metric.Key, Label: label, Value: value, Unit: unit,
+			Key: metric.Key, Label: label, Group: metric.Group, Value: value, Unit: unit,
 			Baseline: base, Ratio: ratio, Score: ratio * FullScale,
 		}
 		scored.Metrics = append(scored.Metrics, item)
-		sum += item.Score
+		group := metric.Group
+		if group == "" {
+			group = metric.Key
+		}
+		groupScores[group] = append(groupScores[group], item.Score)
 	}
+	sort.Strings(scored.MissingMetrics)
 	if len(scored.Metrics) == 0 {
 		scored.Missing = true
 		scored.MissingReason = "noComparableMetric"
 		return scored
 	}
-	scored.Score = sum / float64(len(scored.Metrics))
+	groupKeys := make([]string, 0, len(groupScores))
+	for key := range groupScores {
+		groupKeys = append(groupKeys, key)
+	}
+	sort.Strings(groupKeys)
+	var sum float64
+	for _, key := range groupKeys {
+		values := groupScores[key]
+		var groupSum float64
+		for _, value := range values {
+			groupSum += value
+		}
+		groupScore := groupSum / float64(len(values))
+		scored.Groups = append(scored.Groups, GroupScore{
+			Key: key, Score: groupScore, Ratio: groupScore / FullScale, MetricCount: len(values),
+		})
+		sum += groupScore
+	}
+	scored.Score = sum / float64(len(groupKeys))
 	scored.Ratio = scored.Score / FullScale
 	return scored
 }

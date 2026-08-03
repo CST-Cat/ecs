@@ -107,6 +107,42 @@
 
 不同 `method` 的数值不能直接混入同一个排名或总分。
 
+本次扩展仍只保存工具返回的原始指标。内存标准基准使用
+`sysbench_memory_{write,read}_{single,multi}_mib_s`，并为四个操作/线程上下文保存
+`sysbench_memory_{write,read}_{single,multi}_latency_ms`，并在表中保留对应的 P95 时延。
+Latency 优先使用 sysbench
+原生 `Latency (ms)` 的平均值；若该版本没有原生时延，则明确标记为派生，并按
+`total time * 1000 / total number of events` 计算每个 1 MiB 事件的平均耗时。它不是
+DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
+`mbw_array_size_mib`，以便知道动态数组大小。
+
+磁盘 `disk` 结果保留旧的 fio/YABS 兼容指标，并在 `standard`/`full` 中增加三组完整表：
+
+- `50/50 混合读写`：4K、64K、512K、1M，读写吞吐保存为
+  `fio_mixed_{4k,64k,512k,1m}_{read,write}_mib_s`；提交与基线沿用同一组键名，
+  这些单元与其它磁盘工作负载一样进入独立的等权评分子组。
+
+- `Crystal`：`RND4K/Q1`、`RND4K/Q32`、`SEQ1M/Q1`、`SEQ1M/Q8`，读写各保存
+  `crystal_{rnd4k_q1,rnd4k_q32,seq1m_q1,seq1m_q8}_{read,write}_{mib_s,iops}`；
+- `ATTO`：512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、
+  8M、16M、32M、64M，读写各保存
+  `atto_{512b,1k,2k,4k,8k,16k,32k,64k,128k,256k,512k,1m,2m,4m,8m,16m,32m,64m}_{read,write}_{mib_s,iops}`。
+  5M 不属于本 schema 的 ATTO 清单。缺失单元仍在表中显示为 `—`/`未返回`，不会补零。
+
+内存库存字段 `memory_total`、`memory_used`、`memory_available`、
+`memory_usage_percent` 以及 `balloon_reclaim`/`ksm_merging` 的 status、`*_available`
+布尔值和 `*_evidence` 都是显式字段。Balloon reclaim 只有 Linux sysfs reclaim 控制项
+或 reclaim/migration/deferred 相关 `/proc/vmstat` 证据才会标为可用；KSM 要求 sysfs
+`run` 与 `pages_sharing` 同时存在。缺少这些可选接口时报告 `unavailable`，不从虚拟化
+类型或 inflate/deflate 活动计数推断能力。
+
+如果 cgroup 暴露 `memory.current`（或 v1 等价文件），内存测评优先用它计算有效配额内的
+已用/可用值；否则保留按 `MemAvailable` 的兼容回退，并在 notes 中说明证据边界。
+
+磁盘库存同时保存 `disk_device`、`disk_total`、`disk_used`、`disk_available` 和
+`disk_usage_percent`，设备与挂载点来自测试路径的 `df -P` 记录；无法读取时保留
+`unavailable`，不猜测底层块设备。
+
 性能模块只保存标准工具直接返回或按公开单位换算的指标。CPU 不派生并行效率，网络吞吐不派生跨节点平均值、中位数或综合分；逐节点、逐方向的 iperf3 数值各自保存。
 
 IP 质量指标尤其需要保留 `method`：
@@ -121,6 +157,10 @@ IP 质量指标尤其需要保留 `method`：
 ## Table 与 TextBlock
 
 `tables` 保存端点、平台或样本矩阵。`columns` 定义顺序，每一行应与列数一致。
+
+表格可选 `numeric_columns` 与对应的 `numeric_higher_is_better`。前者是从零开始的
+数值列索引，后者注明相对柱的方向；渲染器据此绘制按数据比例变化的柱，不猜测本地化
+列名。省略方向时按越大越好处理。该元数据只影响呈现，不改变 JSON 中的原始单元格。
 
 `sensitive_columns` 是可选的列索引数组，列出需要遮盖的列：
 

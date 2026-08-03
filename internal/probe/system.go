@@ -35,10 +35,15 @@ type systemSnapshot struct {
 	Nested         string
 	Virtualization string
 	MemoryTotal    uint64
+	MemoryUsed     uint64
 	MemoryFree     uint64
+	MemoryUsage    float64
 	SwapTotal      uint64
 	DiskTotal      uint64
+	DiskUsed       uint64
 	DiskFree       uint64
+	DiskUsage      float64
+	DiskDevice     string
 	DiskMount      string
 	Uptime         string
 	Load           string
@@ -52,6 +57,8 @@ type systemSnapshot struct {
 	// /proc/meminfo 报的是宿主机内存（没有 lxcfs 的 LXC/OpenVZ 常见）。
 	MemoryLimit    uint64
 	MemoryLimitVia string
+	BalloonReclaim memoryFacility
+	KSM            memoryFacility
 	// StealPercent 是自开机以来被虚拟化层偷走的 CPU 时间占比，
 	// 比短窗口采样更能反映长期超售程度。
 	StealPercent float64
@@ -72,9 +79,13 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
 	hardware := snapshot.Hardware
-	memoryValue := fmt.Sprintf("%s 总计 / %s 可用", model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryFree))
+	memoryValue := fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率",
+		model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryUsed),
+		model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
 	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
-		memoryValue = fmt.Sprintf("%s 配额（%s 宿主可见）", model.FormatBytes(snapshot.MemoryLimit), model.FormatBytes(snapshot.MemoryTotal))
+		memoryValue = fmt.Sprintf("%s 配额（%s 宿主可见；%s 已用 / %s 可用 / %.1f%%）",
+			model.FormatBytes(snapshot.MemoryLimit), model.FormatBytes(snapshot.MemoryTotal),
+			model.FormatBytes(snapshot.MemoryUsed), model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
 	}
 	result.Fields = []model.Field{
 		{Key: "hostname", Label: "主机名", Value: snapshot.Hostname, Sensitive: true},
@@ -91,8 +102,26 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "aes", Label: "AES 指令", Value: snapshot.AES},
 		{Key: "virtualization_ext", Label: "硬件虚拟化", Value: snapshot.Nested},
 		{Key: "memory", Label: "内存", Value: memoryValue},
+		{Key: "memory_total", Label: "内存总量", Value: model.FormatBytes(snapshot.MemoryTotal)},
+		{Key: "memory_used", Label: "内存已用", Value: model.FormatBytes(snapshot.MemoryUsed)},
+		{Key: "memory_available", Label: "内存可用", Value: model.FormatBytes(snapshot.MemoryFree)},
+		{Key: "memory_usage_percent", Label: "内存使用率", Value: fmt.Sprintf("%.1f %%", snapshot.MemoryUsage)},
+		{Key: "balloon_reclaim", Label: "Balloon reclaim", Value: snapshot.BalloonReclaim.Status()},
+		{Key: "balloon_reclaim_available", Label: "Balloon reclaim 可用", Value: strconv.FormatBool(snapshot.BalloonReclaim.Available)},
+		{Key: "balloon_reclaim_evidence", Label: "Balloon reclaim 证据", Value: fallback(snapshot.BalloonReclaim.Evidence, "none found")},
+		{Key: "ksm_merging", Label: "KSM merging", Value: snapshot.KSM.Status()},
+		{Key: "ksm_merging_available", Label: "KSM merging 可用", Value: strconv.FormatBool(snapshot.KSM.Available)},
+		{Key: "ksm_merging_evidence", Label: "KSM merging 证据", Value: fallback(snapshot.KSM.Evidence, "none found")},
 		{Key: "swap", Label: "Swap", Value: model.FormatBytes(snapshot.SwapTotal)},
-		{Key: "disk", Label: "测试盘", Value: fmt.Sprintf("%s 总计 / %s 可用 (%s)", model.FormatBytes(snapshot.DiskTotal), model.FormatBytes(snapshot.DiskFree), snapshot.DiskMount)},
+		{Key: "disk", Label: "测试盘", Value: fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率 (%s -> %s)",
+			model.FormatBytes(snapshot.DiskTotal), model.FormatBytes(snapshot.DiskUsed),
+			model.FormatBytes(snapshot.DiskFree), snapshot.DiskUsage,
+			fallback(snapshot.DiskDevice, "unavailable"), fallback(snapshot.DiskMount, "unavailable"))},
+		{Key: "disk_device", Label: "测试设备", Value: fallback(snapshot.DiskDevice, "unavailable")},
+		{Key: "disk_total", Label: "磁盘总量", Value: model.FormatBytes(snapshot.DiskTotal)},
+		{Key: "disk_used", Label: "磁盘已用", Value: model.FormatBytes(snapshot.DiskUsed)},
+		{Key: "disk_available", Label: "磁盘可用", Value: model.FormatBytes(snapshot.DiskFree)},
+		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: fmt.Sprintf("%.1f %%", snapshot.DiskUsage)},
 		{Key: "uptime", Label: "运行时间", Value: snapshot.Uptime},
 		{Key: "load", Label: "负载", Value: snapshot.Load},
 		{Key: "tcp_congestion", Label: "TCP 拥塞控制", Value: snapshot.Congestion},
@@ -113,7 +142,13 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
 		{Key: "usable_cpus", Label: "可用 CPU", Value: float64(snapshot.Allowance.Threads), Unit: "线程", Display: strconv.Itoa(snapshot.Allowance.Threads)},
 		{Key: "memory_total_bytes", Label: "总内存", Value: float64(snapshot.MemoryTotal), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryTotal)},
+		{Key: "memory_used_bytes", Label: "已用内存", Value: float64(snapshot.MemoryUsed), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryUsed), HigherIsBetter: model.BoolPtr(false)},
+		{Key: "memory_available_bytes", Label: "可用内存", Value: float64(snapshot.MemoryFree), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryFree), HigherIsBetter: model.BoolPtr(true)},
+		{Key: "memory_usage_percent", Label: "内存使用率", Value: snapshot.MemoryUsage, Unit: "%", Display: fmt.Sprintf("%.1f %%", snapshot.MemoryUsage), HigherIsBetter: model.BoolPtr(false)},
+		{Key: "disk_total_bytes", Label: "磁盘总量", Value: float64(snapshot.DiskTotal), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskTotal)},
+		{Key: "disk_used_bytes", Label: "磁盘已用", Value: float64(snapshot.DiskUsed), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskUsed), HigherIsBetter: model.BoolPtr(false)},
 		{Key: "disk_free_bytes", Label: "磁盘可用", Value: float64(snapshot.DiskFree), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskFree)},
+		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: snapshot.DiskUsage, Unit: "%", Display: fmt.Sprintf("%.1f %%", snapshot.DiskUsage), HigherIsBetter: model.BoolPtr(false)},
 	}
 	if snapshot.StealKnown {
 		result.Measurements = append(result.Measurements, model.Measurement{
@@ -127,6 +162,16 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 			Key: "memory_limit_bytes", Label: "内存配额",
 			Value: float64(snapshot.MemoryLimit), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryLimit),
 		})
+	}
+	if snapshot.BalloonReclaim.Available {
+		result.Notes = append(result.Notes, "检测到 Balloon reclaim 相关 Linux 证据："+snapshot.BalloonReclaim.Evidence)
+	} else {
+		result.Notes = append(result.Notes, "Balloon reclaim unavailable：未找到可验证的 sysfs/proc reclaim 证据。")
+	}
+	if snapshot.KSM.Available {
+		result.Notes = append(result.Notes, "检测到 KSM merging 相关 Linux 证据："+snapshot.KSM.Evidence)
+	} else {
+		result.Notes = append(result.Notes, "KSM merging unavailable：未找到可验证的 sysfs run/pages_sharing 证据。")
 	}
 
 	missing := 0
@@ -198,6 +243,8 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 		QDisc:          "n/a",
 		DiskMount:      diskPath,
 		Allowance:      detectCPUAllowance(),
+		BalloonReclaim: memoryFacility{Evidence: "unavailable"},
+		KSM:            memoryFacility{Evidence: "unavailable"},
 	}
 
 	collectLinuxSystem(&s)
@@ -294,13 +341,21 @@ func collectLinuxSystem(s *systemSnapshot) {
 	}
 
 	mem := parseMemInfo("/proc/meminfo")
-	s.MemoryTotal = mem["MemTotal"] * 1024
-	if available := mem["MemAvailable"]; available > 0 {
-		s.MemoryFree = available * 1024
-	} else {
-		s.MemoryFree = (mem["MemFree"] + mem["Buffers"] + mem["Cached"]) * 1024
+	// Read the cgroup limit before computing the effective benchmark view.  The
+	// host-visible values remain in the historical fields below; the memory
+	// probe uses the same helper and applies the limit to allocation decisions.
+	if limit, via, ok := cgroupMemoryLimit(); ok {
+		s.MemoryLimit = limit
+		s.MemoryLimitVia = via
 	}
+	usage := memoryUsageFromMemInfo(mem, s.MemoryLimit)
+	s.MemoryTotal = usage.HostTotalBytes
+	s.MemoryUsed = usage.HostUsedBytes
+	s.MemoryFree = usage.HostAvailableBytes
+	s.MemoryUsage = usage.HostUsagePercent
 	s.SwapTotal = mem["SwapTotal"] * 1024
+	s.BalloonReclaim = detectBalloonReclaim("/sys", "/proc/vmstat")
+	s.KSM = detectKSM("/sys")
 
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
 		if seconds, err := strconv.ParseFloat(strings.Fields(string(data))[0], 64); err == nil {
@@ -317,11 +372,6 @@ func collectLinuxSystem(s *systemSnapshot) {
 	s.QDisc = readTrimmed("/proc/sys/net/core/default_qdisc", "n/a")
 	s.Virtualization = detectLinuxVirtualization(cpuText)
 
-	// 容器里 /proc/meminfo 通常是宿主机视图，cgroup 上限才是真正拿得到的内存。
-	if limit, via, ok := cgroupMemoryLimit(); ok {
-		s.MemoryLimit = limit
-		s.MemoryLimitVia = via
-	}
 	if sample, ok := readCPUTimes(); ok {
 		s.StealPercent, s.StealKnown = cumulativeStealPercent(sample)
 	}
@@ -334,12 +384,36 @@ func collectDisk(ctx context.Context, diskPath string, s *systemSnapshot) {
 		return
 	}
 	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) < 6 {
+	parsed, ok := parseDiskDFFields(fields)
+	if !ok {
 		return
 	}
-	s.DiskTotal = parseUintDefault(fields[len(fields)-5], 0) * 1024
-	s.DiskFree = parseUintDefault(fields[len(fields)-3], 0) * 1024
-	s.DiskMount = fields[len(fields)-1]
+	s.DiskDevice, s.DiskTotal, s.DiskUsed, s.DiskFree = parsed.DiskDevice, parsed.DiskTotal, parsed.DiskUsed, parsed.DiskFree
+	s.DiskUsage, s.DiskMount = parsed.DiskUsage, parsed.DiskMount
+}
+
+func parseDiskDFFields(fields []string) (systemSnapshot, bool) {
+	var parsed systemSnapshot
+	if len(fields) < 6 {
+		return parsed, false
+	}
+	parsed.DiskDevice = fields[0]
+	parsed.DiskTotal = parseUintDefault(fields[len(fields)-5], 0) * 1024
+	parsed.DiskUsed = parseUintDefault(fields[len(fields)-4], 0) * 1024
+	parsed.DiskFree = parseUintDefault(fields[len(fields)-3], 0) * 1024
+	if parsed.DiskTotal > 0 {
+		if parsed.DiskUsed > parsed.DiskTotal {
+			parsed.DiskUsed = parsed.DiskTotal
+		}
+		if parsed.DiskFree > parsed.DiskTotal-parsed.DiskUsed {
+			parsed.DiskFree = parsed.DiskTotal - parsed.DiskUsed
+		}
+		parsed.DiskUsage = float64(parsed.DiskUsed) / float64(parsed.DiskTotal) * 100
+	} else if usage, err := strconv.ParseFloat(strings.TrimSuffix(fields[len(fields)-2], "%"), 64); err == nil && usage >= 0 {
+		parsed.DiskUsage = usage
+	}
+	parsed.DiskMount = fields[len(fields)-1]
+	return parsed, true
 }
 
 func detectLinuxVirtualization(cpuinfo string) string {

@@ -39,15 +39,13 @@ type Baseline struct {
 	Tiers []Tier `json:"tiers,omitempty"`
 }
 
-// builtinBaseline 是内置基线。
+// builtinBaseline 是内嵌 JSON 损坏或缺失时的最后兜底。
 //
-// 数值取自单台开发机（AMD Ryzen 7 PRO 4750U，16 逻辑核，NVMe，tmpfs 上的
-// fio）的一次实测，**不是 VPS 的典型值**：这台机器的磁盘与内存带宽显著高于
-// 常见云主机，因此多数 VPS 用它当基线会得到远低于 1000 的分。
-//
-// 保留它是为了让首次运行就有可算的分，而不是主张它是"标准机器"。分数的横向
-// 意义要等基线换成跨机器聚合的样本之后才成立——报告里会一并显示样本数，
-// 样本为 1 时明确提示。
+// 数值仍取自旧版开发机（AMD Ryzen 7 PRO 4750U，16 逻辑核，NVMe，tmpfs 上的
+// fio）的一次实测，**不是 VPS 的标准基线**。正常发行二进制优先加载
+// internal/score/embedded/baseline.json；该文件由提交样本重建，当前是 Oracle
+// Cloud Classic Free Tier 单台参考样本。保留这里的常量只是保证坏文件不会让评分
+// 消失，报告会显示来源与样本数。
 func builtinBaseline() Baseline {
 	return Baseline{
 		Schema:      BaselineSchema,
@@ -59,6 +57,11 @@ func builtinBaseline() Baseline {
 
 			"memory_copy":  6389.17,
 			"memory_write": 25719.54,
+			// The embedded snapshot intentionally keeps only measurements that
+			// existed when it was captured.  Crystal/ATTO and the expanded
+			// sysbench memory metrics enter scoring as soon as an aggregated
+			// baseline contains them; inventing values here would misrepresent
+			// the single-host evidence.
 
 			"disk_seq_read":        6912.04,
 			"disk_seq_write":       2309.85,
