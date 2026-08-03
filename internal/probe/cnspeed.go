@@ -41,6 +41,17 @@ func (cnSpeedProbe) NeedsNetwork() bool { return true }
 // ecs 只读取清单，不复制其内容入库——内置快照会过期，而过期清单比没有更糟。
 const cnNodeListURL = "https://raw.githubusercontent.com/spiritLHLS/speedtest.cn-CN-ID/main/CN.csv"
 
+const (
+	cnSpeedDuration       = 8 * time.Second
+	cnSpeedMaxBytes int64 = 100 * 1024 * 1024
+)
+
+func cnSpeedBudget() (time.Duration, int64) {
+	// Profiles only choose the module preset; cnspeed always keeps the full
+	// download depth when explicitly selected.
+	return cnSpeedDuration, cnSpeedMaxBytes
+}
+
 // cnNodeListURLForTest 让测试把清单指向本地服务器，生产路径始终用上面的常量。
 var cnNodeListURLForTest = cnNodeListURL
 
@@ -228,12 +239,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	// 每个运营商最多试这么多节点来选最快的，避免把清单里几十个节点全 ping 一遍。
 	const probeCandidates = 6
-	duration := 5 * time.Second
-	maxBytes := int64(50 * 1024 * 1024)
-	if env.Config.Profile == "full" {
-		duration = 8 * time.Second
-		maxBytes = 100 * 1024 * 1024
-	}
+	duration, maxBytes := cnSpeedBudget()
 
 	results := make([]cnNodeResult, len(cnCarriers))
 	var wg sync.WaitGroup

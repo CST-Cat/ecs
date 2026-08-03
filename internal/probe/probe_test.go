@@ -107,7 +107,7 @@ func TestFIOJSONHelpers(t *testing.T) {
 		t.Fatalf("fio p95 = %f", got)
 	}
 	asyncEngine := fioEngine{Name: "libaio", AsyncQueue: true, Detected: true}
-	plan := fioJobPlan(config.ProfileStandard)
+	plan := fioJobPlan()
 	args := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, asyncEngine, plan), " ")
 	for _, expected := range []string{
 		"--output-format=json", "--direct=1", "--name=seqwrite", "--name=randwrite",
@@ -128,15 +128,15 @@ func TestFIOJSONHelpers(t *testing.T) {
 		t.Fatalf("psync args must not request an async queue depth: %s", syncArgs)
 	}
 
-	// quick 档只跑首尾两档混合，避免时长失控；Crystal/ATTO 仍必须完整保留。
-	quickPlan := fioJobPlan(config.ProfileQuick)
-	quickArgs := strings.Join(fioArguments("<tempfile>", 1<<20, time.Second, asyncEngine, quickPlan), " ")
-	if strings.Contains(quickArgs, "--name=mix64k") {
-		t.Fatalf("quick profile should skip 64k mixed job: %s", quickArgs)
+	// 配置档只控制模块预设；选中 disk 时混合与 Crystal/ATTO 口径始终完整。
+	for _, expected := range []string{"--name=mix4k", "--name=mix64k", "--name=mix512k", "--name=mix1m"} {
+		if !strings.Contains(args, expected) {
+			t.Fatalf("selected disk must include complete mixed job %q: %s", expected, args)
+		}
 	}
 	for _, expected := range []string{"--name=crystal_read_rnd4k_q1", "--name=crystal_write_seq1m_q8", "--name=atto_read_512b", "--name=atto_write_64m"} {
-		if !strings.Contains(quickArgs, expected) {
-			t.Fatalf("quick profile must include complete matrix job %q: %s", expected, quickArgs)
+		if !strings.Contains(args, expected) {
+			t.Fatalf("selected disk must include complete matrix job %q: %s", expected, args)
 		}
 	}
 }
@@ -275,10 +275,10 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		}
 	}
 
-	// 四项基础指标 + 两个 P95 + quick 档两档混合各读写两项 +
+	// 四项基础指标 + 两个 P95 + 四档混合各读写两项 +
 	// Crystal 8 个读写单元 × 吞吐/IOPS + ATTO 36 个读写单元 × 吞吐/IOPS。
-	if len(result.Measurements) != 98 {
-		t.Fatalf("fio measurements = %d, want 98: %+v", len(result.Measurements), result.Measurements)
+	if len(result.Measurements) != 102 {
+		t.Fatalf("fio measurements = %d, want 102: %+v", len(result.Measurements), result.Measurements)
 	}
 	measurementKeys := make(map[string]bool, len(result.Measurements))
 	for _, measurement := range result.Measurements {
@@ -288,7 +288,7 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		for _, suffix := range []string{"read_mib_s", "read_iops", "write_mib_s", "write_iops"} {
 			key := "atto_" + block.FIO + "_" + suffix
 			if !measurementKeys[key] {
-				t.Fatalf("quick result missing ATTO measurement %q", key)
+				t.Fatalf("disk result missing ATTO measurement %q", key)
 			}
 		}
 	}
@@ -299,27 +299,27 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		}
 	}
 	if crystalKeys != 16 {
-		t.Fatalf("quick result Crystal measurement cells = %d, want 16", crystalKeys)
+		t.Fatalf("disk result Crystal measurement cells = %d, want 16", crystalKeys)
 	}
 	mixedFound := false
 	crystalFound, attoFound := false, false
 	for _, table := range result.Tables {
-		if strings.Contains(table.Title, "混合") && len(table.Rows) == 2 {
+		if strings.Contains(table.Title, "混合") && len(table.Rows) == 4 {
 			mixedFound = true
 		}
 		if table.Title == "Crystal" {
 			if len(table.Rows) != 4 || len(table.Rows)*2 != 8 {
-				t.Fatalf("quick Crystal rows/cells = %d/%d, want 4/8", len(table.Rows), len(table.Rows)*2)
+				t.Fatalf("disk Crystal rows/cells = %d/%d, want 4/8", len(table.Rows), len(table.Rows)*2)
 			}
 			crystalFound = true
 		}
 		if table.Title == "ATTO" {
 			if len(table.Rows) != 18 || len(table.Rows)*2 != 36 {
-				t.Fatalf("quick ATTO rows/cells = %d/%d, want 18/36", len(table.Rows), len(table.Rows)*2)
+				t.Fatalf("disk ATTO rows/cells = %d/%d, want 18/36", len(table.Rows), len(table.Rows)*2)
 			}
 			for _, row := range table.Rows {
 				if len(row) < 5 || row[1] == "—" || row[2] == "—" || row[3] == "—" || row[4] == "—" {
-					t.Fatalf("quick ATTO row has missing read/write cell: %v", row)
+					t.Fatalf("disk ATTO row has missing read/write cell: %v", row)
 				}
 			}
 			attoFound = true
@@ -329,7 +329,7 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		t.Fatalf("mixed matrix table missing: %+v", result.Tables)
 	}
 	if !crystalFound || !attoFound {
-		t.Fatalf("quick complete matrix tables missing: crystal=%v atto=%v", crystalFound, attoFound)
+		t.Fatalf("disk complete matrix tables missing: crystal=%v atto=%v", crystalFound, attoFound)
 	}
 	jsonResult, err := json.Marshal(result)
 	if err != nil {
@@ -338,7 +338,7 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 	jsonText := string(jsonResult)
 	for _, key := range []string{"atto_512b_read_mib_s", "atto_512b_write_iops", "atto_64m_read_mib_s", "atto_64m_write_iops"} {
 		if !strings.Contains(jsonText, key) {
-			t.Fatalf("quick JSON missing ATTO measurement key %q", key)
+			t.Fatalf("disk JSON missing ATTO measurement key %q", key)
 		}
 	}
 	matches, err := filepath.Glob(filepath.Join(directory, ".ecs-fio-*"))
@@ -513,11 +513,12 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 	if result.Status != model.StatusOK || result.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("iperf result = %+v", result)
 	}
-	// 一个节点、一个协议族、上传与下载两个方向。
-	if len(result.Measurements) != 2 {
-		t.Fatalf("iperf measurements = %d: %+v", len(result.Measurements), result.Measurements)
+	// 一个节点、一个协议族、TCP 上传/下载与 UDP 丢包/抖动四项。
+	if len(result.Measurements) != 4 {
+		t.Fatalf("iperf measurements = %d, want 4 (TCP + UDP): %+v", len(result.Measurements), result.Measurements)
 	}
 	directions := make(map[string]float64, 2)
+	udp := make(map[string]float64, 2)
 	for _, measurement := range result.Measurements {
 		if strings.Contains(measurement.Key, "median") || strings.Contains(measurement.Key, "average") {
 			t.Fatalf("iperf3 must preserve per-target values: %+v", measurement)
@@ -530,10 +531,17 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 			directions["upload"] = measurement.Value
 		case strings.HasSuffix(measurement.Key, "_download_mbps"):
 			directions["download"] = measurement.Value
+		case strings.HasSuffix(measurement.Key, "_udp_loss_percent"):
+			udp["loss"] = measurement.Value
+		case strings.HasSuffix(measurement.Key, "_udp_jitter_ms"):
+			udp["jitter"] = measurement.Value
 		}
 	}
 	if len(directions) != 2 {
 		t.Fatalf("both directions must be recorded: %+v", result.Measurements)
+	}
+	if len(udp) != 2 {
+		t.Fatalf("UDP loss and jitter must be recorded for every selected speed module: %+v", result.Measurements)
 	}
 	if version := resultField(result, "version"); !strings.Contains(strings.ToLower(version), "iperf") {
 		t.Fatalf("iperf3 version field = %q", version)
@@ -543,7 +551,7 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 	}
 }
 
-// full 档的 UDP 丢包与抖动同样走真实 iperf3。
+// 选中 speed 模块时，UDP 丢包与抖动同样走真实 iperf3。
 func TestRunIPerfUDPWithRealServer(t *testing.T) {
 	iperfPath := requireTool(t, "iperf3")
 	port := startIPerf3Server(t, iperfPath)

@@ -109,7 +109,7 @@ type OoklaServer struct {
 // Region 是 ecs 自己加的分区，用于按地区裁剪节点集；YABS 本身不分区。
 //
 // 这些节点由第三方免费提供，随时可能繁忙、限速、换端口或下线；ecs 只复用清单，
-// 不保证可用性。standard 档按地区各取一个，full 档跑全部。
+// 不保证可用性。默认所有配置档按地区各取三个，以保持选中 speed 模块的口径一致。
 // 可用性用 `go test -tags=live -run TestLiveIPerfNodeReachability` 复核。
 func iperfNodePool() []IPerfEndpoint {
 	return []IPerfEndpoint{
@@ -321,8 +321,17 @@ func Defaults(profile string) (Runtime, error) {
 		Formats:          []string{"json", "md", "html"},
 		DiskPath:         ".",
 		HTTPTimeout:      10 * time.Second,
-		IPerfTargets:     selectIPerfTargets(1),
-		STUNServers:      stunServerPool(),
+		// Profiles are module-count shortcuts. Keep the full-depth benchmark
+		// budget and selected iperf nodes identical so a module has one
+		// comparable meaning regardless of the shortcut that selected it.
+		CPUTime:         15 * time.Second,
+		DiskMiB:         2048,
+		DNSAttempts:     8,
+		LatencyAttempts: 10,
+		SpeedThreads:    8,
+		IPerfDuration:   15 * time.Second,
+		IPerfTargets:    selectIPerfTargets(3),
+		STUNServers:     stunServerPool(),
 		DNSResolvers: []Endpoint{
 			{Name: "Cloudflare", Address: "1.1.1.1:53"},
 			{Name: "Cloudflare IPv6", Address: "[2606:4700:4700::1111]:53"},
@@ -351,32 +360,12 @@ func Defaults(profile string) (Runtime, error) {
 	switch profile {
 	case ProfileQuick:
 		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency"}
-		base.CPUTime = 5 * time.Second
-		base.DiskMiB = 256
-		base.DNSAttempts = 3
-		base.LatencyAttempts = 4
-		base.SpeedThreads = 2
-		base.IPerfDuration = 3 * time.Second
 	case ProfileStandard:
 		base.Modules = []string{"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
-		base.CPUTime = 10 * time.Second
-		base.DiskMiB = 1024
-		base.DNSAttempts = 5
-		base.LatencyAttempts = 6
-		base.SpeedThreads = 8
-		base.IPerfDuration = 10 * time.Second
 	case ProfileFull:
 		// 全集直接给出，需显式同意的模块由外联过滤器挡住（见 exposure.go），
 		// 不必在这里逐个特判。
 		base.Modules = append([]string(nil), ModuleOrder...)
-		base.CPUTime = 15 * time.Second
-		base.DiskMiB = 2048
-		base.DNSAttempts = 8
-		base.LatencyAttempts = 10
-		base.SpeedThreads = 8
-		base.IPerfDuration = 15 * time.Second
-		// full 档跑遍公共节点池，覆盖欧洲、北美、亚洲各方向。
-		base.IPerfTargets = selectIPerfTargets(3)
 	default:
 		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
 	}
@@ -500,6 +489,8 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if len(file.OoklaServers) > 0 {
 		runtime.OoklaServers = append([]OoklaServer(nil), file.OoklaServers...)
 	}
+	// An explicit file allowlist is independent of the profile preset: callers
+	// may select any ModuleOrder entry, then remove entries with skip.
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
 }
@@ -507,6 +498,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 func SelectModules(base, only, skip []string) []string {
 	selected := make(map[string]bool)
 	if len(only) > 0 {
+		// --only is an explicit module request, not an intersection with the
+		// profile's default set. This keeps every module reachable from every
+		// profile shortcut.
 		for _, id := range only {
 			selected[id] = true
 		}

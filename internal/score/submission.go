@@ -38,7 +38,8 @@ type Submission struct {
 	RanAt time.Time `json:"ran_at"`
 	// Metrics 是评分用的原始实测值，键与 Dimensions() 的 Metric.Key 对应。
 	Metrics map[string]float64 `json:"metrics"`
-	// Profile 记录跑的是哪个档位：quick 与 full 的采样窗口不同，混在一起比不公平。
+	// Profile 记录用户选中的模块预设；各档位使用相同的 full-depth 基准口径，
+	// 因此分组时应按实际模块覆盖与机器规格解释，而不是按采样窗口区分。
 	Profile string `json:"profile"`
 	// Note 是提交者的自由备注，长度受限，用于说明特殊情况。
 	Note string `json:"note,omitempty"`

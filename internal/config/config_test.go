@@ -22,16 +22,74 @@ func TestDefaultsAndModuleSelection(t *testing.T) {
 	if !contains(cfg.Modules, "route") || !contains(cfg.Modules, "speed") {
 		t.Fatalf("standard modules = %v", cfg.Modules)
 	}
-	if cfg.IPerfDuration != 10*time.Second || len(cfg.IPerfTargets) == 0 {
-		t.Fatalf("standard iperf settings = %s, targets=%d", cfg.IPerfDuration, len(cfg.IPerfTargets))
+	if cfg.IPerfDuration != 15*time.Second || len(cfg.IPerfTargets) != 7 {
+		t.Fatalf("standard iperf settings = %s, targets=%d; want full-depth 15s/7 nodes", cfg.IPerfDuration, len(cfg.IPerfTargets))
 	}
-	// 采样窗口必须达到 sysbench 的通行时长，短窗口会在突发性能机型上测到 burst credit。
-	if cfg.CPUTime < 10*time.Second {
-		t.Fatalf("standard cpu time = %s, want at least 10s", cfg.CPUTime)
+	if cfg.CPUTime != 15*time.Second {
+		t.Fatalf("standard cpu time = %s, want full-depth 15s", cfg.CPUTime)
 	}
 	selected := SelectModules(cfg.Modules, []string{"disk", "system", "disk"}, []string{"disk"})
 	if want := []string{"system"}; !reflect.DeepEqual(selected, want) {
 		t.Fatalf("selected = %v, want %v", selected, want)
+	}
+}
+
+func TestProfilesOnlyChangeModulePreset(t *testing.T) {
+	full, err := Defaults(ProfileFull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCounts := map[string]int{
+		ProfileQuick:    7,
+		ProfileStandard: 16,
+		ProfileFull:     18,
+	}
+	for _, profile := range []string{ProfileQuick, ProfileStandard, ProfileFull} {
+		cfg, err := Defaults(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Modules) != wantCounts[profile] {
+			t.Fatalf("%s module count = %d, want %d", profile, len(cfg.Modules), wantCounts[profile])
+		}
+		if cfg.CPUTime != full.CPUTime || cfg.DiskMiB != full.DiskMiB ||
+			cfg.DNSAttempts != full.DNSAttempts || cfg.LatencyAttempts != full.LatencyAttempts ||
+			cfg.SpeedThreads != full.SpeedThreads || cfg.IPerfDuration != full.IPerfDuration ||
+			!reflect.DeepEqual(cfg.IPerfTargets, full.IPerfTargets) {
+			t.Fatalf("%s benchmark defaults differ from full depth: %+v", profile, cfg)
+		}
+	}
+}
+
+func TestOnlyCanSelectModulesOutsideProfile(t *testing.T) {
+	cfg, err := Defaults(ProfileQuick)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range []struct {
+		name string
+		only []string
+		want []string
+	}{
+		{name: "cnspeed and disk", only: []string{"cnspeed", "disk"}, want: []string{"disk", "cnspeed"}},
+		{name: "ookla", only: []string{"ookla"}, want: []string{"ookla"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := SelectModules(cfg.Modules, testCase.only, nil); !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("SelectModules(%v) = %v, want %v", testCase.only, got, testCase.want)
+			}
+			runtime := cfg
+			if err := ApplyFile(&runtime, File{Only: testCase.only}); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(runtime.Modules, testCase.want) {
+				t.Fatalf("ApplyFile only=%v modules = %v, want %v", testCase.only, runtime.Modules, testCase.want)
+			}
+		})
+	}
+	// --skip still filters an explicitly selected module after --only.
+	if got := SelectModules(cfg.Modules, []string{"cnspeed", "disk"}, []string{"disk"}); !reflect.DeepEqual(got, []string{"cnspeed"}) {
+		t.Fatalf("SelectModules skip = %v, want [cnspeed]", got)
 	}
 }
 

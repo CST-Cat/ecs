@@ -4,54 +4,47 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
-	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
 func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
-	for _, profile := range []string{config.ProfileQuick, config.ProfileStandard, config.ProfileFull} {
-		plan := fioJobPlan(profile)
-		mixed := 0
-		crystal, atto := 0, 0
-		for _, job := range plan {
-			switch job.Matrix {
-			case "":
-				if job.Mixed() {
-					mixed++
-				}
-			case "crystal":
-				crystal++
-			case "atto":
-				atto++
-				if strings.Contains(strings.ToLower(job.BlockSize), "5m") {
-					t.Fatalf("ATTO plan must not silently include 5M: %+v", job)
-				}
+	if got := fioJobDuration(); got != 10*time.Second {
+		t.Fatalf("fio duration = %s, want 10s", got)
+	}
+	plan := fioJobPlan()
+	mixed := 0
+	crystal, atto := 0, 0
+	for _, job := range plan {
+		switch job.Matrix {
+		case "":
+			if job.Mixed() {
+				mixed++
 			}
-		}
-		wantMixed := 4
-		if profile == config.ProfileQuick {
-			wantMixed = 2
-		}
-		if mixed != wantMixed || crystal != 8 || atto != 36 {
-			t.Fatalf("%s matrix job counts = mixed %d jobs, Crystal %d, ATTO %d; plan=%+v", profile, mixed, crystal, atto, plan)
+		case "crystal":
+			crystal++
+		case "atto":
+			atto++
+			if strings.Contains(strings.ToLower(job.BlockSize), "5m") {
+				t.Fatalf("ATTO plan must not silently include 5M: %+v", job)
+			}
 		}
 	}
-	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
-		jobs := make(map[string]fioJobSpec)
-		for _, job := range fioJobPlan(profile) {
-			if job.Mixed() {
-				jobs[job.Name] = job
-			}
+	if mixed != 4 || crystal != 8 || atto != 36 {
+		t.Fatalf("matrix job counts = mixed %d jobs, Crystal %d, ATTO %d; plan=%+v", mixed, crystal, atto, plan)
+	}
+	jobs := make(map[string]fioJobSpec)
+	for _, job := range plan {
+		if job.Mixed() {
+			jobs[job.Name] = job
 		}
-		for _, block := range []string{"4k", "64k", "512k", "1m"} {
-			for _, direction := range []string{"read", "write"} {
-				name := "mix" + block
-				job, ok := jobs[name]
-				if !ok || job.BlockSize != block || job.MixRead != 50 || job.NumJobs != 2 || job.IODepth != 64 {
-					t.Fatalf("%s missing complete mixed %s/%s job: %+v", profile, block, direction, job)
-				}
-			}
+	}
+	for _, block := range []string{"4k", "64k", "512k", "1m"} {
+		name := "mix" + block
+		job, ok := jobs[name]
+		if !ok || job.BlockSize != block || job.MixRead != 50 || job.NumJobs != 2 || job.IODepth != 64 {
+			t.Fatalf("missing complete mixed %s job: %+v", block, job)
 		}
 	}
 	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
@@ -80,7 +73,7 @@ func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
 
 func TestFIOArgumentsSafelySupportLargestATTOJob(t *testing.T) {
 	engine := fioEngine{Name: "io_uring", AsyncQueue: true, Detected: true}
-	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, fioJobPlan(config.ProfileFull)), " ")
+	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, fioJobPlan()), " ")
 	for _, want := range []string{"--name=atto_read_64m", "--name=atto_write_64m", "--bs=64m", "--size=134217728", "--direct=1", "--iodepth=1"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("fio args missing %q", want)

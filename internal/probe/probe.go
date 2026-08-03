@@ -190,7 +190,7 @@ func MethodologyFor(id string) model.Methodology {
 	case "latency":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "现场诊断；不是 ICMP ping"}
 	case "speed":
-		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "iperf3", Profile: "TCP multi-stream forward/reverse"}
+		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "iperf3", Profile: "TCP multi-stream forward/reverse + UDP 50M/5s"}
 	case "ports":
 		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "可达性诊断；不是性能基准"}
 	case "nat":

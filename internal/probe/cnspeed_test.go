@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 样本按 spiritLHLS/speedtest.cn-CN-ID 的真实表头构造，字段顺序与实际一致。
@@ -16,6 +17,13 @@ const realCNNodeCSV = `id,active,https,cros,preferred,host,country_code,province
 999999,0,0,1,0,dead.example.com:8080,CN,广东,深圳,5,电信,113.0,22.5,0,0,已下线,,,,http://dead.example.com:8080/hello,http://dead.example.com:8080/download,http://dead.example.com:8080/upload,
 888888,1,0,1,0,nourl.example.com:8080,CN,北京,北京,5,联通,116.4,39.9,0,0,缺字段,,,,,,,
 `
+
+func TestCNSpeedUsesFullDepthBudget(t *testing.T) {
+	duration, maxBytes := cnSpeedBudget()
+	if duration != 8*time.Second || maxBytes != 100*1024*1024 {
+		t.Fatalf("cnspeed budget = %s/%d, want 8s/100MiB", duration, maxBytes)
+	}
+}
 
 func TestFetchCNNodesParsesRealFormat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

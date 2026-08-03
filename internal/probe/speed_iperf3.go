@@ -151,7 +151,7 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 		Kind:            "standard-benchmark",
 		Label:           "标准基准",
 		Engine:          "iperf3",
-		Profile:         "TCP multi-stream forward/reverse",
+		Profile:         "TCP multi-stream forward/reverse + UDP 50M/5s",
 		ComparisonScope: "相同 iperf3 版本、节点、方向、并发流与时长",
 	}
 	result.Status = model.StatusWarning
@@ -164,12 +164,12 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Result {
 	start := time.Now()
 	result := model.NewResult("speed", "网络吞吐")
-	result.Description = "iperf3 公共节点 TCP 多流上传与反向下载吞吐"
+	result.Description = "iperf3 公共节点 TCP 多流上传/反向下载与 UDP 质量"
 	result.Methodology = model.Methodology{
 		Kind:            "standard-benchmark",
 		Label:           "标准基准",
 		Engine:          "iperf3",
-		Profile:         "TCP multi-stream forward/reverse",
+		Profile:         "TCP multi-stream forward/reverse + UDP 50M/5s",
 		ComparisonScope: "相同 iperf3 版本、节点、IP 协议、并发流与时长",
 	}
 
@@ -197,9 +197,6 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		result.Finish(start)
 		return result
 	}
-	// UDP 丢包/抖动只在 full 档跑：它需要额外的往返时间，而 standard 档的重点
-	// 是吞吐本身。
-	udpEnabled := env.Config.Profile == "full"
 	rows := make([]iperfRow, 0, len(env.Config.IPerfTargets)*2)
 	for _, target := range env.Config.IPerfTargets {
 		for _, family := range endpointFamilies(target.Networks, hasIPv6, env.Config.IPVersion) {
@@ -212,7 +209,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				Upload:   runIPerfDirection(ctx, path, target, family, false, threads, seconds),
 				Download: runIPerfDirection(ctx, path, target, family, true, threads, seconds),
 			}
-			if udpEnabled && ctx.Err() == nil && (row.Upload.Mbps > 0 || row.Download.Mbps > 0) {
+			if ctx.Err() == nil && (row.Upload.Mbps > 0 || row.Download.Mbps > 0) {
 				port := target.PortStart
 				if row.Upload.Port > 0 {
 					port = row.Upload.Port
@@ -224,7 +221,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	table := model.Table{
-		Title:   "iperf3 TCP 节点",
+		Title:   "iperf3 TCP/UDP 节点",
 		Columns: []string{"服务商", "位置", "协议", "上传", "下载", "重传", "UDP 丢包", "UDP 抖动", "端口", "状态"},
 	}
 	var transferred int64
@@ -343,13 +340,9 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		"只比较相同节点、IP 协议、iperf3 版本、并发流和时长的结果。",
 		"报告保留每个节点、方向的 iperf3 原值，不计算跨节点平均分、中位数或综合分。",
 	)
-	if udpEnabled {
-		result.Notes = append(result.Notes,
-			"UDP 列用 50 Mbps 固定码率跑 5 秒，测的是常态丢包与抖动而不是压满带宽后的拥塞表现；实时音视频与游戏体验主要取决于这两项。",
-		)
-	} else {
-		result.Notes = append(result.Notes, "UDP 丢包与抖动仅在 full 档执行，可用 --profile full 获取。")
-	}
+	result.Notes = append(result.Notes,
+		"UDP 列用 50 Mbps 固定码率跑 5 秒，测的是常态丢包与抖动而不是压满带宽后的拥塞表现；实时音视频与游戏体验主要取决于这两项。",
+	)
 	result.Summary = fmt.Sprintf(
 		"iperf3 完成 %d/%d 个节点方向 · 实际传输 %s",
 		completedDirections,

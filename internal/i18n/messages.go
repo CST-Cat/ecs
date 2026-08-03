@@ -28,9 +28,9 @@ var chinese = map[string]string{
 	"cli.error":          "错误",
 
 	// ── 配置档 ──────────────────────────────────────────────
-	"profile.quick":    "只测本机硬件与基础网络，不跑吞吐、路由与解锁（约 1–3 分钟）",
-	"profile.standard": "全面检测，覆盖 16 个模块（推荐，约 3–10 分钟）",
-	"profile.full":     "在 standard 之上加三网测速、UDP 质量与更多测速节点（约 6–18 分钟，流量明显更高）",
+	"profile.quick":    "快捷选择 7 个模块；所有选中模块使用 full 级别统一口径（可用 --only 扩展）",
+	"profile.standard": "快捷选择 16 个模块；所有选中模块使用 full 级别统一口径（推荐）",
+	"profile.full":     "快捷选择全部 18 个模块；所有选中模块使用 full 级别统一口径",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
@@ -182,9 +182,9 @@ var english = map[string]string{
 	"cli.error":          "error",
 
 	// ── Profiles ────────────────────────────────────────────
-	"profile.quick":    "Local hardware and basic network only; no throughput, routing or unlock tests (~1-3 min)",
-	"profile.standard": "Full check across 16 modules (recommended, ~3-10 min)",
-	"profile.full":     "standard plus China carrier speedtest, UDP quality and more nodes (~6-18 min, much more traffic)",
+	"profile.quick":    "Shortcut selecting 7 modules; selected modules use the same full-depth methodology (extend with --only)",
+	"profile.standard": "Shortcut selecting 16 modules; selected modules use the same full-depth methodology (recommended)",
+	"profile.full":     "Shortcut selecting all 18 modules; selected modules use the same full-depth methodology",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",

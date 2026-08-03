@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
 ```
 
-报告默认写入当前目录的 `./reports/`。完整档位可能运行数分钟，`iperf3` 流量不封顶。
+报告默认写入当前目录的 `./reports/`。启用全部模块可能运行数分钟，`iperf3` 流量不封顶。
 
 ## 为什么再做一个
 
@@ -58,9 +58,9 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 
 ```
 选择配置档
-  1) quick     低资源快速筛查，不执行大流量测速和路由
-→ 2) standard  默认综合测试
-  3) full      更长性能测试、更大流量并包含路由
+  1) quick     快捷选择 7 个模块（统一 full 级别测试口径）
+→ 2) standard  快捷选择 16 个模块（推荐）
+  3) full      快捷选择全部 18 个模块（统一 full 级别测试口径）
 请选择 [2]
 
 检测 IP 质量与黑名单？会把出口 IP 发给 13 个数据源 [Y/n]
@@ -215,14 +215,15 @@ ecs config example
 
 ## 配置档与资源上限
 
-| 配置档 | 目标 | 性能主引擎 | CPU/内存每轮 | 临时磁盘上限 | 网络负载 |
+| 配置档 | 默认模块数 | 性能主引擎 | CPU/内存每轮 | 临时磁盘上限 | 选中 `speed` 时的网络口径 |
 | --- | --- | --- | ---: | ---: | --- |
-| `quick` | 低资源快速筛查 | sysbench + fio | 5 秒 | 256 MiB | 默认不跑吞吐 |
-| `standard` | 日常综合验机 | sysbench + fio + iperf3 | 10 秒 | 1024 MiB | 3 节点、双方向、每方向 10 秒 |
-| `full` | 更稳定的长样本 | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包 |
+| `quick` | 7（快捷预设） | sysbench + fio | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包/抖动 |
+| `standard` | 16（快捷预设） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 同 quick；所有选中模块使用同一口径 |
+| `full` | 18（快捷预设） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 同 quick；所有选中模块使用同一口径 |
 
-采样窗口对齐 sysbench 的通行时长：低于 10 秒的窗口在突发性能机型（AWS t 系列、
-GCP e2、阿里突发实例）上测到的是 burst credit 而不是稳态性能，且方差极大。
+三档只改变默认模块数量，不改变已选模块的测试深度：CPU/内存 15 秒，fio 使用完整
+混合/Crystal/ATTO 矩阵，iperf3 使用 7 个节点、双方向 15 秒并附带 UDP 50 Mbps/5 秒；
+显式 `--only` 可以从任意档位选中任意模块（例如 quick + `--only cnspeed,disk`）。
 
 fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力跑满链路，实际流量随 VPS 带宽变化，无法用 MiB 预封顶；启动前会显示节点数、时长和并发流。
 
@@ -274,15 +275,15 @@ ecs --accept ookla
 | `bgp` | 第三方评估 | RouteViews 当前 RIB：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本 | 轻量公共观测；不是私有互联全图，也不含历史 MRT；每个协议族约 1 次查询 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 单/多线程读写与实际/明确派生时延 + mbw memcpy 带宽；并报告内存使用与可选 Balloon/KSM 证据 | sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运；可选内核接口缺失时明确 unavailable |
-| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 + smartctl 介质健康 | 所有档位都完整执行 Crystal/ATTO（quick 仅缩短时长并减少混合作业）；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
+| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 + smartctl 介质健康 | 所有档位都使用相同 10 秒完整 mixed/Crystal/ATTO 口径；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
-| `speed` | 标准基准 | iperf3 TCP 多流正向/反向、多节点 | 公共节点可能繁忙；按时长测试不封顶流量 |
+| `speed` | 标准基准 | iperf3 TCP 多流正向/反向 + UDP 50 Mbps/5 秒、多节点 | 公共节点可能繁忙；按时长测试不封顶流量；所有档位同一节点/时长口径 |
 | `ports` | 协议测量 | 原生 TCP 握手 | 单目标失败不能独立证明端口被封 |
 | `blacklist` | 协议测量 | 17 个 DNSBL 查询 + 反向解析 FCrDNS 校验 | 各名单收录标准差异大，不可合并计分；127.255.255.x 是查询被拒而非命中 |
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
-| `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（仅 full 档） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
+| `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（显式选中即可，8 秒/100 MiB） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
 | `ookla` | 协议测量 | 本机已安装的官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试 | 默认不启用、不下载、不自动接受条款；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
@@ -386,7 +387,7 @@ NO_COLOR=1 ecs                    # 遵循跨工具约定，一律关闭
 
 ### 综合评分
 
-分项分是**一步除法**：实测值 ÷ 基线值 × 1000（延迟类为基线值 ÷ 实测值 × 1000），读者可以手算复核。四个维度（CPU、内存、磁盘、带宽）均等权重，总分是已覆盖维度的算术平均。磁盘内部按 legacy、`fio_mixed_*`、Crystal、ATTO 四个等权子组平均；内存按 memcpy、写、读、时延四个等权子组平均。混合矩阵的 8 个单元、ATTO 的 36 个读写单元都不会按数量放大，缺失项会显式列出且不补零。当前内嵌基线已包含本机 full 测试的新矩阵，但只有 1 台 Oracle VPS 样本；收集更多 full/standard 提交后应重建 baseline。
+分项分是**一步除法**：实测值 ÷ 基线值 × 1000（延迟类为基线值 ÷ 实测值 × 1000），读者可以手算复核。四个维度（CPU、内存、磁盘、带宽）均等权重，总分是已覆盖维度的算术平均。磁盘内部按 legacy、`fio_mixed_*`、Crystal、ATTO 四个等权子组平均；内存按 memcpy、写、读、时延四个等权子组平均。混合矩阵的 8 个单元、ATTO 的 36 个读写单元都不会按数量放大，缺失项会显式列出且不补零。当前内嵌基线已包含本机完整模块测试的新矩阵，但只有 1 台 Oracle VPS 样本；收集更多提交后应重建 baseline。
 
 ```
 总分              570   基于 3/4 个维度

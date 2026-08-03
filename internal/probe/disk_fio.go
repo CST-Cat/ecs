@@ -134,9 +134,9 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		}
 	}()
 
-	duration := fioJobDuration(env.Config.Profile)
+	duration := fioJobDuration()
 	engine := detectFIOEngine(ctx, fioPath)
-	plan := fioJobPlan(env.Config.Profile)
+	plan := fioJobPlan()
 	args := fioArguments(tempName, actualBytes, duration, engine, plan)
 	command := exec.CommandContext(ctx, fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
@@ -275,7 +275,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	if len(mixTable.Rows) > 0 {
 		result.Tables = append(result.Tables, mixTable)
 	}
-	if matrixJobsEnabled(env.Config.Profile) {
+	if matrixJobsEnabled() {
 		appendCrystalMatrix(&result, jobs, engine)
 		appendATTOMatrix(&result, jobs, engine)
 	}
@@ -293,7 +293,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			model.FormatBytes(uint64(actualBytes)),
 		))
 	}
-	if matrixJobsEnabled(env.Config.Profile) && actualBytes > requestedBytes {
+	if matrixJobsEnabled() && actualBytes > requestedBytes {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 %s 对齐/扩展为 %s（至少两个 64 MiB 窗口）。",
 			model.FormatBytes(uint64(requestedBytes)), model.FormatBytes(uint64(actualBytes)),
@@ -327,7 +327,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
 		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
 	)
-	if matrixJobsEnabled(env.Config.Profile) {
+	if matrixJobsEnabled() {
 		result.Notes = append(result.Notes,
 			"混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：legacy、混合、Crystal、ATTO 各占四分之一；缺失单元不补零。",
 			"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
@@ -528,7 +528,7 @@ func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, sy
 		return "", 0, disk, fmt.Errorf("测试路径不可用: %s", diskPath)
 	}
 	collectDisk(ctx, diskPath, &disk)
-	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree, matrixJobsEnabled(env.Config.Profile))
+	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree, matrixJobsEnabled())
 	if err != nil {
 		return "", 0, disk, err
 	}
@@ -576,15 +576,10 @@ func describeFIOEngine(engine fioEngine) string {
 	return engine.Name + "（同步，队列深度恒为 1）"
 }
 
-func fioJobDuration(profile string) time.Duration {
-	switch profile {
-	case "quick":
-		return 2 * time.Second
-	case "full":
-		return 10 * time.Second
-	default:
-		return 5 * time.Second
-	}
+func fioJobDuration() time.Duration {
+	// Profiles only choose the module preset. Every selected disk module uses
+	// the full-depth 10-second workload for comparable results.
+	return 10 * time.Second
 }
 
 // fioJobSpec 描述一个 fio 作业。
@@ -610,9 +605,9 @@ func (s fioJobSpec) Mixed() bool { return s.RW == "randrw" }
 // 前四项是 ecs 既有口径：1 MiB 顺序读写反映带宽上限，4 KiB 随机读写反映 IOPS。
 // 后面是 YABS 兼容矩阵：4k/64k/512k/1m 四档 50/50 混合随机读写，iodepth=64、
 // numjobs=2，这是社区里流传最广、样本量最大的磁盘口径，补上它才能和主流测评
-// 贴的数字对得上。quick 档仍只跑首尾两档以控制时长，但 Crystal 与 ATTO 矩阵
-// 在所有档位都完整执行，避免快速档只写方法学却没有可复核的矩阵结果。
-func fioJobPlan(profile string) []fioJobSpec {
+// 贴的数字对得上。所有被选中的 disk 模块都执行完整混合与 Crystal/ATTO 矩阵，
+// 避免同一模块因为默认模块预设不同而产生不可比的作业集合。
+func fioJobPlan() []fioJobSpec {
 	plan := []fioJobSpec{
 		{Name: "seqwrite", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, EndFsync: true},
 		{Name: "seqread", RW: "read", BlockSize: "1m", IODepth: 1, NumJobs: 1},
@@ -620,9 +615,6 @@ func fioJobPlan(profile string) []fioJobSpec {
 		{Name: "randwrite", RW: "randwrite", BlockSize: "4k", IODepth: 32, NumJobs: 1, EndFsync: true},
 	}
 	blocks := []string{"4k", "64k", "512k", "1m"}
-	if profile == "quick" {
-		blocks = []string{"4k", "1m"}
-	}
 	for _, blockSize := range blocks {
 		plan = append(plan, fioJobSpec{
 			Name:      "mix" + blockSize,
@@ -633,17 +625,15 @@ func fioJobPlan(profile string) []fioJobSpec {
 			MixRead:   50,
 		})
 	}
-	if matrixJobsEnabled(profile) {
+	if matrixJobsEnabled() {
 		plan = append(plan, crystalJobSpecs()...)
 		plan = append(plan, attoJobSpecs()...)
 	}
 	return plan
 }
 
-func matrixJobsEnabled(_ string) bool {
-	// 每个档位都必须留下完整 Crystal/ATTO 证据；quick 只通过更短的作业时长
-	// 与较少的混合作业控制总耗时。这里保留 profile 参数是为了让调用点明确
-	// 表达“按档位决定磁盘计划”的语义，也兼容已有内部测试与调用方。
+func matrixJobsEnabled() bool {
+	// 每个被选中的 disk 模块都留下完整 Crystal/ATTO 证据。
 	return true
 }
 
