@@ -31,6 +31,9 @@ type Progress struct {
 	Result model.Result
 }
 
+// ProgressFunc receives lifecycle events without probe result details. Callers
+// must be safe for concurrent delivery so the scheduler can expose parallel
+// groups without coupling rendering to probe execution.
 type ProgressFunc func(Progress)
 
 func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.Report {
@@ -100,6 +103,14 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			break
 		}
 		if group.Parallel {
+			// 先统一发出开始事件，再启动 worker，进度视图不会把一个很快完成的
+			// 模块误显示成尚未开始；回调本身不携带结果，详细报告仍在最后渲染。
+			if progress != nil {
+				for _, index := range group.Indices {
+					item := selected[index]
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
+				}
+			}
 			var wg sync.WaitGroup
 			for _, index := range group.Indices {
 				wg.Add(1)
@@ -107,13 +118,6 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 					defer wg.Done()
 					results[index] = runOne(ctx, selected[index], cfg, env)
 				}(index)
-			}
-			// 并行组内进度先统一报开始，避免多个模块的输出交错。
-			if progress != nil {
-				for _, index := range group.Indices {
-					item := selected[index]
-					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
-				}
 			}
 			wg.Wait()
 		} else {

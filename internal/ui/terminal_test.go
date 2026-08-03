@@ -3,13 +3,90 @@ package ui
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"ecs/internal/model"
+	"ecs/internal/runner"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
 )
+
+func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelTrueColor)
+	progress := terminal.BeginProgress(2)
+	events := []runner.Progress{
+		{Phase: runner.PhaseStart, Index: 1, Total: 2, Title: "disk"},
+		{Phase: runner.PhaseStart, Index: 2, Total: 2, Title: "network"},
+		{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "disk", Result: model.Result{Status: model.StatusOK, Summary: "private probe details"}},
+		// A duplicate completion must not increase the progress count.
+		{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "disk", Result: model.Result{Status: model.StatusOK}},
+		{Phase: runner.PhaseDone, Index: 2, Total: 2, Title: "network", Result: model.Result{Status: model.StatusOK}},
+	}
+	var group sync.WaitGroup
+	for _, event := range events {
+		group.Add(1)
+		go func(event runner.Progress) {
+			defer group.Done()
+			progress.Update(event)
+		}(event)
+	}
+	group.Wait()
+	progress.Stop()
+	progressText := output.String()
+	terminal.FullReport(model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Run:           model.RunInfo{Profile: "quick", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusOK, Headline: "最终报告"},
+		Results: []model.Result{{
+			ID: "final", Title: "final-only", Status: model.StatusOK,
+			Methodology: model.Methodology{Kind: "inventory", Label: "事实采集"},
+		}},
+	}, nil, nil, termcolor.LevelNone)
+
+	if progress.doneCount != 2 {
+		t.Fatalf("doneCount = %d, want 2", progress.doneCount)
+	}
+	if strings.Contains(progressText, "\x1b") {
+		t.Fatalf("non-TTY progress contains ANSI escape: %q", progressText)
+	} else if !strings.Contains(progressText, "2/2") || !strings.Contains(progressText, "elapsed ") || !strings.Contains(progressText, "status: done") {
+		t.Fatalf("progress output missing final state: %q", progressText)
+	} else if strings.Contains(progressText, "private probe details") {
+		t.Fatalf("progress output leaked probe result details: %q", progressText)
+	} else if strings.Count(output.String(), "最终报告") != 1 {
+		t.Fatalf("complete report should be emitted once after progress: %q", output.String())
+	}
+}
+
+func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	progress := terminal.BeginProgress(2)
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 2, Title: "disk"})
+	progress.Stop()
+	progress.Stop()
+	if text := output.String(); !strings.Contains(text, "status: stopped") {
+		t.Fatalf("partial progress output missing stopped state: %q", text)
+	}
+}
+
+func TestProgressViewTTYRefreshesOneLine(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelBasic)
+	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
+	// to verify the escape sequence without requiring a platform-specific PTY.
+	terminal.tty = true
+	progress := terminal.BeginProgress(1)
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 1, Title: "disk"})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
+	progress.EndProgress()
+	text := output.String()
+	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 1 {
+		t.Fatalf("TTY progress should refresh one line: %q", text)
+	}
+}
 
 func TestNetworkSummaryPrintsDetailedTables(t *testing.T) {
 	var output bytes.Buffer

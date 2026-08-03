@@ -293,8 +293,13 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	terminal := ui.NewWithColor(stdout, terminalColor)
 	terminal.Header(cfg, config.EstimateFor(cfg))
 	// runner 只负责收集结果；终端报告必须等所有模块完成后一次性渲染，
-	// 否则并行模块的进度行会把完整报告拆成无法复制的碎片。
-	raw := runner.Run(ctx, cfg, nil)
+	// 否则并行模块的进度行会把完整报告拆成无法复制的碎片。进度视图只显示
+	// 模块计数、当前运行模块和总耗时，不提前渲染任何探针结果。
+	progress := terminal.BeginProgress(len(cfg.Modules))
+	raw := func() model.Report {
+		defer progress.EndProgress()
+		return runner.Run(ctx, cfg, progress.Update)
+	}()
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
