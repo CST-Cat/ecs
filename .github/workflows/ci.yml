@@ -39,6 +39,15 @@ jobs:
           go test
           -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
+      - name: Install i18n benchmark tools
+        if: matrix.go == 'stable'
+        run: |
+          # memory 报告需要真实 sysbench 输出；mbw 是可选补充口径，发行版有包时一并覆盖。
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sysbench
+          if apt-cache show mbw >/dev/null 2>&1; then
+            sudo apt-get install -y -qq mbw
+          fi
       # 翻译覆盖率：跑一遍真实模块产出报告，再检查英文渲染后是否还有中文。
       # 用真实产出而不是源码字面量——源码里大量分支从不触发。
       - name: i18n coverage
