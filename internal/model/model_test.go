@@ -1,9 +1,38 @@
 package model
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestStripRawOutputClearsOnlyTextBlocks(t *testing.T) {
+	report := Report{Results: []Result{
+		{
+			ID: "system", Title: "系统", Status: StatusWarning, Summary: "summary", Error: "error",
+			Fields:       []Field{{Key: "field", Value: "value"}},
+			Measurements: []Measurement{{Key: "metric", Value: 1.5, Display: "1.5"}},
+			Tables:       []Table{{Columns: []string{"column"}, Rows: [][]string{{"cell"}}}},
+			TextBlocks:   []TextBlock{{Title: "原始输出", Content: "secret transcript"}},
+			Notes:        []string{"note"}, Sources: []Source{{Name: "source", URL: "https://example.test"}},
+		},
+		{ID: "empty"},
+	}}
+	want := report.Results[0]
+	StripRawOutput(&report)
+	if report.Results[0].TextBlocks != nil || report.Results[1].TextBlocks != nil {
+		t.Fatalf("TextBlocks not cleared: %+v", report.Results)
+	}
+	if !reflect.DeepEqual(report.Results[0].Fields, want.Fields) ||
+		!reflect.DeepEqual(report.Results[0].Measurements, want.Measurements) ||
+		!reflect.DeepEqual(report.Results[0].Tables, want.Tables) ||
+		!reflect.DeepEqual(report.Results[0].Notes, want.Notes) ||
+		!reflect.DeepEqual(report.Results[0].Sources, want.Sources) ||
+		report.Results[0].Error != want.Error || report.Results[0].Summary != want.Summary {
+		t.Fatal("StripRawOutput changed structured result fields")
+	}
+	StripRawOutput(nil)
+}
 
 func TestMask(t *testing.T) {
 	tests := map[string]string{

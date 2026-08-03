@@ -300,6 +300,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		defer progress.EndProgress()
 		return runner.Run(ctx, cfg, progress.Update)
 	}()
+	model.StripRawOutput(&raw)
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
@@ -407,6 +408,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
+	model.StripRawOutput(&data)
 	if *output == "" {
 		*output = filepath.Dir(*input)
 	}

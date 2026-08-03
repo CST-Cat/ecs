@@ -78,7 +78,7 @@ var probeEnglishRep = map[string]string{
 	"端点":        "Endpoint",
 	"系统默认（部分名单拒绝公共解析器查询）": "System default (some lists refuse queries from public resolvers)",
 	"线路": "Route",
-	"线路判定只依据路径上出现的骨干网段前缀，报告保留命中跳号、IP 与完整原始输出供复核。": "Route identification relies only on backbone prefixes seen along the path; the hop number, IP and full raw output are kept for review.",
+	"线路判定只依据路径上出现的骨干网段前缀，报告仅保留命中跳号、IP 等结构化信息供复核，不写入原始工具输出。": "Route identification relies only on backbone prefixes seen along the path; reports retain matched hop numbers, IPs and other structured data for review without writing raw tool output.",
 	"结论": "Verdict",
 	"综合名单，邮件服务商采用最广": "General-purpose list, the most widely used by mail providers",
 	"综合滥用名单":         "General abuse list",
