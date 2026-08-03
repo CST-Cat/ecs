@@ -116,12 +116,6 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(false),
 		},
 	}
-	result.Notes = append(result.Notes,
-		"规则包版本 "+mediaRulesVersion+"；平台页面会变化，规则失效是常态，报告保留状态码与地区信号供复核。",
-		"“强”规则有平台特定判定逻辑；“弱”规则只说明公开页可达，不代表账号能播放、注册或支付。",
-		"Netflix 用两部非自制剧区分完全解锁与仅自制剧；只测首页会把仅自制剧误报成解锁。",
-		"HTTP 403 既可能是地区封锁也可能是反自动化，一律记为“未知”，不会误报成“不解锁”。",
-	)
 	result.Summary = fmt.Sprintf("%d/%d 可用 · %d 不可用 · %d 未知", unlocked, total, locked, unknown)
 	result.Finish(start)
 	return result

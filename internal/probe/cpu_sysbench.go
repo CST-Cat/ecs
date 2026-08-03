@@ -127,7 +127,6 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 		{Key: "prime", Label: "最大素数", Value: "20000"},
 		{Key: "single_events", Label: "单线程总事件", Value: strconv.FormatUint(single.Events, 10)},
 		{Key: "multi_events", Label: "多线程总事件", Value: strconv.FormatUint(multi.Events, 10)},
-		{Key: "arguments", Label: "参数模板", Value: "sysbench --threads=N --time=S --events=0 --percentile=95 cpu --cpu-max-prime=20000 run"},
 	}
 	result.TextBlocks = []model.TextBlock{
 		{Title: "sysbench 单线程原始输出", Language: "text", Content: single.Output},

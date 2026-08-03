@@ -316,7 +316,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Key: "ioengine", Label: "ioengine", Value: describeFIOEngine(engine)},
 		{Key: "jobs", Label: "作业数", Value: strconv.Itoa(len(plan))},
 		{Key: "job_duration", Label: "每项计时", Value: duration.String()},
-		{Key: "arguments", Label: "命令参数", Value: strings.Join(fioArguments("<tempfile>", actualBytes, duration, engine, plan), " ")},
 	}
 	result.Sources = []model.Source{
 		{Name: "fio", URL: "https://github.com/axboe/fio", Purpose: "Direct I/O 磁盘工作负载与 JSON 统计"},

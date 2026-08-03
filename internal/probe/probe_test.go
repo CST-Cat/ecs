@@ -229,6 +229,9 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 	if got := resultField(result, "binary_sha256"); len(got) != 64 {
 		t.Fatalf("fio SHA-256 = %q", got)
 	}
+	if got := resultField(result, "arguments"); got != "" {
+		t.Fatalf("fio report must omit command arguments, got %q", got)
+	}
 
 	methods := make(map[string]string, len(result.Measurements))
 	for _, measurement := range result.Measurements {
@@ -237,15 +240,9 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 			t.Fatalf("real fio produced a non-positive value: %+v", measurement)
 		}
 	}
-	arguments := resultField(result, "arguments")
 	randomMethod := methods["fio_random_read_4k_iops"]
 	mixedMethod := methods["fio_mixed_4k_read_mib_s"]
 	if engine.AsyncQueue {
-		for _, expected := range []string{"--iodepth=32", "--iodepth=64"} {
-			if !strings.Contains(arguments, expected) {
-				t.Fatalf("async engine %q must request %s: %s", engine.Name, expected, arguments)
-			}
-		}
 		if !strings.Contains(randomMethod, "qd32") || !strings.Contains(mixedMethod, "qd64") {
 			t.Fatalf("async methods = %q / %q, want qd32 / qd64", randomMethod, mixedMethod)
 		}
@@ -258,9 +255,6 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 			}
 		}
 	} else {
-		if strings.Contains(arguments, "--iodepth=32") || strings.Contains(arguments, "--iodepth=64") {
-			t.Fatalf("sync engine %q must not request a queue depth: %s", engine.Name, arguments)
-		}
 		if !strings.Contains(randomMethod, "qd1") || !strings.Contains(mixedMethod, "qd1") {
 			t.Fatalf("sync methods = %q / %q, want qd1", randomMethod, mixedMethod)
 		}
@@ -406,6 +400,9 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	}
 	if version := resultField(cpu, "version"); !strings.Contains(strings.ToLower(version), "sysbench") {
 		t.Fatalf("sysbench version field = %q", version)
+	}
+	if got := resultField(cpu, "arguments"); got != "" {
+		t.Fatalf("sysbench report must omit command arguments, got %q", got)
 	}
 	if len(cpu.TextBlocks) == 0 || !strings.Contains(cpu.TextBlocks[0].Content, "events per second") {
 		t.Fatalf("raw sysbench output was not preserved: %+v", cpu.TextBlocks)

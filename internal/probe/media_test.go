@@ -1,10 +1,37 @@
 package probe
 
 import (
+	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"ecs/internal/config"
 )
+
+type mediaTestRoundTripper struct{}
+
+func (mediaTestRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("")),
+		Header:     make(http.Header),
+		Request:    request,
+	}, nil
+}
+
+func TestMediaProbeOmitsRuleExplanationNotes(t *testing.T) {
+	result := (mediaProbe{}).Run(context.Background(), Environment{
+		Config:     config.Runtime{HTTPTimeout: time.Second, MediaRegions: []string{"global"}},
+		HTTPClient: &http.Client{Transport: mediaTestRoundTripper{}},
+	})
+	if len(result.Notes) != 0 {
+		t.Fatalf("media probe emitted redundant rule notes: %v", result.Notes)
+	}
+}
 
 // Netflix 的三种典型情形必须区分开，这是旧实现最大的误报来源。
 func TestNetflixDistinguishesOriginalsOnly(t *testing.T) {
