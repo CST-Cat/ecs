@@ -573,23 +573,30 @@ func (r *textRenderer) result(result model.Result) {
 func (r *textRenderer) moduleBanner(result model.Result) {
 	r.line(r.palette.Dim(strings.Repeat("*", textWidth)))
 	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
-	if project := sourceProjectName(result.Sources); project != "" {
-		r.centeredStyled(project, r.palette.Info)
+	if projects := sourceProjectNames(result.Sources); projects != "" {
+		r.centeredStyled(projects, r.palette.Info)
 	}
 	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
-// sourceProjectName keeps the compact, human-facing implementation/source
-// name while deliberately omitting URLs and execution metadata from each
-// module banner.  The first named source is the primary one; additional
-// sources remain available in JSON/other report formats.
-func sourceProjectName(sources []model.Source) string {
+// sourceProjectNames keeps compact, human-facing implementation/source names
+// while deliberately omitting URLs and execution metadata from each module
+// banner.  Names retain source order and are de-duplicated case-insensitively;
+// all source metadata remains available in JSON/other report formats.
+func sourceProjectNames(sources []model.Source) string {
+	names := make([]string, 0, len(sources))
+	seen := make(map[string]struct{}, len(sources))
 	for _, source := range sources {
 		if name := strings.TrimSpace(source.Name); name != "" {
-			return name
+			key := strings.ToLower(name)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			names = append(names, name)
 		}
 	}
-	return ""
+	return strings.Join(names, " · ")
 }
 
 type textGroup struct {
