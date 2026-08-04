@@ -160,7 +160,9 @@ jobs:
 
   # 真实标准工具端到端测试只跑一次：完整 fio/ATTO、sysbench、iperf3、
   # loopback ping 与 traceroute 仍是质量门禁，但不再乘以 Go/race 矩阵。
+  # 它们只在 nightly/manual 运行，push/PR 与 tag 发布不被长测阻塞。
   benchmark:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -212,7 +214,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, race, benchmark, cross]
+    needs: [test, race, cross]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
