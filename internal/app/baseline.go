@@ -114,18 +114,27 @@ func validateSubmissionPath(path string) error {
 }
 
 func validateSubmissionParent(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("submission output parent does not exist: %s", path)
+	// Check every existing component, not just the final directory. Otherwise
+	// `safe-link/submission.json` could still follow a symlink in `safe-link`
+	// even though the final target itself is not one.
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("submission output parent does not exist: %s", current)
+			}
+			return fmt.Errorf("inspect submission output parent %s: %w", current, err)
 		}
-		return fmt.Errorf("inspect submission output parent %s: %w", path, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("submission output parent must not be a symlink: %s", path)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("submission output parent is not a directory: %s", path)
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("submission output parent must not be a symlink: %s", current)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("submission output parent is not a directory: %s", current)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
 	}
 	return nil
 }
