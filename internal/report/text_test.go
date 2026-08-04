@@ -631,3 +631,65 @@ func TestGroupComparableIgnoresUnknownDirection(t *testing.T) {
 		t.Error("方向未知的指标不该画相对柱")
 	}
 }
+
+func TestMeasurementBarsKeepSemanticDirectionAndZeroValues(t *testing.T) {
+	palette := termcolor.Palette{Level: termcolor.LevelNone}
+	densityCount := func(value string) int {
+		return strings.Count(value, "░") + strings.Count(value, "▒") + strings.Count(value, "▓") + strings.Count(value, "█")
+	}
+
+	risk := []model.Measurement{
+		{Key: "ip_risk_score_low", Label: "IP risk score", Value: 3, Unit: "/100", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "ip_risk_score_high", Label: "IP risk score", Value: 90, Unit: "/100", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "ip_risk_score_zero", Label: "IP risk score", Value: 0, Unit: "/100", HigherIsBetter: model.BoolPtr(false)},
+	}
+	riskGroups := groupComparable(risk)
+	if riskGroups["ip_risk_score_low"].inverse {
+		t.Fatal("风险分应按原始幅度而不是质量方向绘制")
+	}
+	lowRiskBar := palette.BarRelative(comparableValue(risk[0], riskGroups["ip_risk_score_low"]), riskGroups["ip_risk_score_low"].max, 24)
+	highRiskBar := palette.BarRelative(comparableValue(risk[1], riskGroups["ip_risk_score_high"]), riskGroups["ip_risk_score_high"].max, 24)
+	zeroRiskBar := palette.BarRelative(comparableValue(risk[2], riskGroups["ip_risk_score_zero"]), riskGroups["ip_risk_score_zero"].max, 24)
+	if densityCount(lowRiskBar) >= densityCount(highRiskBar) || densityCount(zeroRiskBar) != 0 || !strings.Contains(zeroRiskBar, "·") {
+		t.Fatalf("风险柱未按 0/3/90 的幅度递增：0=%q 3=%q 90=%q", zeroRiskBar, lowRiskBar, highRiskBar)
+	}
+
+	latency := []model.Measurement{
+		{Key: "latency_fast", Label: "延迟", Value: 10, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "latency_slow", Label: "延迟", Value: 20, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+	}
+	latencyGroups := groupComparable(latency)
+	if !latencyGroups["latency_fast"].inverse || comparableValue(latency[0], latencyGroups["latency_fast"]) <= comparableValue(latency[1], latencyGroups["latency_slow"]) {
+		t.Fatal("低延迟应得到更长的质量柱")
+	}
+
+	throughput := []model.Measurement{
+		{Key: "throughput_low", Label: "吞吐", Value: 100, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "throughput_high", Label: "吞吐", Value: 200, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+	}
+	throughputGroups := groupComparable(throughput)
+	if throughputGroups["throughput_high"].inverse || comparableValue(throughput[0], throughputGroups["throughput_low"]) >= comparableValue(throughput[1], throughputGroups["throughput_high"]) {
+		t.Fatal("高吞吐应得到更长的柱")
+	}
+
+	usageAndLoss := []model.Measurement{
+		{Key: "memory_usage_percent", Label: "内存使用率", Value: 10, Unit: "%", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: 20, Unit: "%", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "udp_loss_percent", Label: "UDP 丢包", Value: 1, Unit: "%", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "tcp_loss_percent", Label: "TCP 丢包", Value: 2, Unit: "%", HigherIsBetter: model.BoolPtr(false)},
+	}
+	semanticGroups := groupComparable(usageAndLoss)
+	if _, ok := semanticGroups["memory_usage_percent"]; !ok {
+		t.Fatal("使用率应形成独立可比较组")
+	}
+	if _, ok := semanticGroups["udp_loss_percent"]; !ok {
+		t.Fatal("丢包应形成独立可比较组")
+	}
+	if semanticGroups["memory_usage_percent"].max == semanticGroups["udp_loss_percent"].max {
+		t.Fatal("使用率和丢包不应跨语义共用刻度")
+	}
+
+	if groups := groupComparable([]model.Measurement{{Key: "single", Label: "单项", Value: 1, Unit: "u", HigherIsBetter: model.BoolPtr(true)}}); len(groups) != 0 {
+		t.Fatalf("单项不应绘制相对柱：%v", groups)
+	}
+}

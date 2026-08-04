@@ -64,7 +64,9 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	if !config.AllowsModule(env.Config.Exposure, env.Config.Accepted, "ookla") {
-		result.Skip("未确认 Ookla 许可与隐私条款")
+		reason := "未确认 Ookla 许可与隐私条款"
+		result.Skip(reason)
+		appendOoklaSkipDetails(&result, reason, "显式接受 Ookla 许可与隐私条款后重跑模块。")
 		result.Notes = append(result.Notes,
 			"Ookla 不是 ecs 的零上传探针；如需运行，请显式使用 --accept ookla。",
 		)
@@ -73,7 +75,9 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	path, err := exec.LookPath("speedtest")
 	if err != nil {
-		result.Skip("未找到官方 speedtest 客户端")
+		reason := "未找到官方 speedtest 客户端"
+		result.Skip(reason)
+		appendOoklaSkipDetails(&result, reason, "从 Ookla 官方渠道安装 Speedtest 客户端后重跑模块。")
 		result.Notes = append(result.Notes, "ecs 不会自动下载或安装 Ookla 客户端；请从 Ookla 官方渠道安装后重跑。")
 		result.Finish(start)
 		return result
@@ -189,6 +193,13 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	)
 	result.Finish(start)
 	return result
+}
+
+func appendOoklaSkipDetails(result *model.Result, reason, nextStep string) {
+	result.Fields = append(result.Fields,
+		model.Field{Key: "skip_reason", Label: "跳过原因", Value: reason},
+		model.Field{Key: "next_step", Label: "下一步", Value: nextStep},
+	)
 }
 
 func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaResult, error, error, bool) {

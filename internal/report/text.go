@@ -867,6 +867,60 @@ type comparableGroup struct {
 	inverse bool
 }
 
+// riskScoreMeasurement identifies the 0–100 risk scores whose magnitude is
+// useful to show directly.  A high risk score is worse, but a longer bar still
+// communicates a higher observed risk; only latency/utilization-style metrics
+// should invert their values to visualize "higher is better".
+func riskScoreMeasurement(item model.Measurement) bool {
+	if strings.TrimSpace(item.Unit) != "/100" {
+		return false
+	}
+	key := strings.ToLower(item.Key)
+	label := strings.ToLower(item.Label)
+	return strings.Contains(key, "risk") || strings.Contains(key, "风险") ||
+		strings.Contains(label, "risk") || strings.Contains(label, "风险")
+}
+
+// comparisonSemantic prevents unrelated measurements that happen to share a
+// unit from borrowing one another's scale (for example memory usage and packet
+// loss are both percentages, but neither is comparable to the other).
+func comparisonSemantic(item model.Measurement) string {
+	if riskScoreMeasurement(item) {
+		return "risk"
+	}
+	lower := strings.ToLower(item.Key + " " + item.Label)
+	switch strings.TrimSpace(item.Unit) {
+	case "%":
+		switch {
+		case strings.Contains(lower, "loss"), strings.Contains(lower, "丢包"):
+			return "loss"
+		case strings.Contains(lower, "steal"):
+			return "cpu-steal"
+		case strings.Contains(lower, "usage"), strings.Contains(lower, "使用率"):
+			return "usage"
+		case strings.Contains(lower, "percentage_used"), strings.Contains(lower, "已用寿命"):
+			return "device-life"
+		default:
+			return "percent"
+		}
+	case "ms":
+		if strings.Contains(lower, "jitter") || strings.Contains(lower, "抖动") {
+			return "jitter"
+		}
+		return "latency"
+	case "项":
+		switch {
+		case strings.Contains(lower, "blacklist"), strings.Contains(lower, "listed"), strings.Contains(lower, "名单"):
+			return "blacklist"
+		case strings.Contains(lower, "bgp"), strings.Contains(lower, "observed"), strings.Contains(lower, "可观测"):
+			return "coverage"
+		case strings.Contains(lower, "reachable"), strings.Contains(lower, "可达"):
+			return "reachability"
+		}
+	}
+	return ""
+}
+
 // groupComparable 找出可以画组内相对柱的指标。
 func groupComparable(items []model.Measurement) map[string]comparableGroup {
 	type bucket struct {
@@ -876,13 +930,20 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 	}
 	buckets := make(map[string]*bucket)
 	for _, item := range items {
-		if item.Unit == "" || item.Value <= 0 || item.HigherIsBetter == nil {
+		if item.Unit == "" || item.Value < 0 || item.HigherIsBetter == nil {
 			continue
 		}
-		name := item.Unit + "|" + boolKey(*item.HigherIsBetter)
+		semantic := comparisonSemantic(item)
+		direction := boolKey(*item.HigherIsBetter)
+		if semantic == "risk" {
+			// Keep risk scores in their own magnitude-based bucket instead of
+			// mixing them with any other /100 metric that is lower-is-better.
+			direction = "risk"
+		}
+		name := item.Unit + "|" + direction + "|" + semantic
 		entry, ok := buckets[name]
 		if !ok {
-			entry = &bucket{inverse: !*item.HigherIsBetter}
+			entry = &bucket{inverse: !*item.HigherIsBetter && semantic != "risk"}
 			buckets[name] = entry
 		}
 		entry.keys = append(entry.keys, item.Key)
@@ -896,7 +957,7 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 		var maximum float64
 		for _, value := range entry.values {
 			converted := value
-			if entry.inverse {
+			if entry.inverse && value > 0 {
 				converted = 1 / value
 			}
 			if converted > maximum {
@@ -904,7 +965,10 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 			}
 		}
 		if maximum <= 0 {
-			continue
+			// Keep a real all-zero group visible.  It renders as an empty
+			// magnitude bar (or a full quality bar for lower-is-better
+			// metrics) instead of looking like missing data.
+			maximum = 1
 		}
 		for _, key := range entry.keys {
 			out[key] = comparableGroup{max: maximum, inverse: entry.inverse}
@@ -915,7 +979,12 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 
 // comparableValue 把"越小越好"的指标翻转，使柱长始终表示"越长越好"。
 func comparableValue(item model.Measurement, group comparableGroup) float64 {
-	if group.inverse && item.Value > 0 {
+	if group.inverse {
+		if item.Value <= 0 {
+			// Zero latency/loss is the best attainable value; avoid 1/0 while
+			// retaining a visible full-quality bar.
+			return group.max
+		}
 		return 1 / item.Value
 	}
 	return item.Value
@@ -1188,10 +1257,17 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 	maxValues := make(map[int]float64, len(table.NumericColumns))
 	directions := make(map[int]bool, len(table.NumericColumns))
 	valueWidths := make(map[int]int, len(table.NumericColumns))
+	zeroValues := make(map[int]bool, len(table.NumericColumns))
 	for index, column := range table.NumericColumns {
 		higher := true
 		if index < len(table.NumericHigherIsBetter) {
 			higher = table.NumericHigherIsBetter[index]
+		}
+		if riskNumericColumn(table, column) {
+			// Risk magnitude is intentionally drawn directly: a larger
+			// 0–100 score gets a longer warning bar even though the quality
+			// direction metadata is lower-is-better.
+			higher = true
 		}
 		directions[column] = higher
 		for _, row := range table.Rows {
@@ -1199,16 +1275,24 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 				continue
 			}
 			value, ok := numericCellValue(row[column])
-			if !ok || value <= 0 {
+			if !ok || value < 0 {
 				continue
 			}
 			valueWidths[column] = maxInt(valueWidths[column], textwidth.Width(row[column]))
-			if !higher {
+			if value == 0 {
+				zeroValues[column] = true
+			}
+			if !higher && value > 0 {
 				value = 1 / value
 			}
 			if value > maxValues[column] {
 				maxValues[column] = value
 			}
+		}
+		if maxValues[column] <= 0 && zeroValues[column] {
+			// A real all-zero column still gets a visible semantic bar: empty
+			// for magnitude metrics, full quality for lower-is-better metrics.
+			maxValues[column] = 1
 		}
 	}
 	rows := make([][]string, len(table.Rows))
@@ -1219,10 +1303,12 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 				continue
 			}
 			value, ok := numericCellValue(rows[rowIndex][column])
-			if !ok || value <= 0 {
+			if !ok || value < 0 {
 				continue
 			}
-			if !directions[column] {
+			if !directions[column] && value == 0 {
+				value = maxValues[column]
+			} else if !directions[column] {
 				value = 1 / value
 			}
 			// Reserve one stable value field before the bar.  Without this
@@ -1233,6 +1319,22 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 		}
 	}
 	return rows
+}
+
+func riskNumericColumn(table model.Table, column int) bool {
+	if column < 0 || column >= len(table.Columns) {
+		return false
+	}
+	heading := strings.ToLower(table.Columns[column])
+	if !strings.Contains(heading, "risk") && !strings.Contains(heading, "风险") {
+		return false
+	}
+	for _, row := range table.Rows {
+		if column < len(row) && strings.Contains(strings.ToLower(row[column]), "/100") {
+			return true
+		}
+	}
+	return false
 }
 
 func numericCellValue(cell string) (float64, bool) {

@@ -60,7 +60,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		Kind:            "provider-assessment",
 		Label:           "第三方评估",
 		Engine:          "RouteViews current RIB API",
-		Profile:         "one prefix observation per enabled IP family",
+		Profile:         "longest-match prefix observation per enabled IP family",
 		ComparisonScope: "当前公共观测；不是运营商私有互联全图，也不是历史 BGP 事件分析",
 	}
 
@@ -147,6 +147,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Notes = append(result.Notes,
 		"该模块最多每个启用协议族查询一次 RouteViews 当前 RIB，不下载历史 MRT，不向 ecs 服务器上传报告。",
+		"查询按出口 IP 的最长匹配前缀返回；精确 /32 或 /128 没有单独观测时，RouteViews 可能返回其已发布的父前缀。",
 		"AS 路径中的相邻 ASN 是基于公开路径样本的推断；RouteViews reporting peer 是观测点的 peer，不等于你的 VPS 提供商直接互联。",
 		"没有公共观测不等于前缀没有发布：可能是出口 IP 查询、RIB 收敛、过滤或 RouteViews 当前覆盖范围造成的。",
 	)
@@ -166,7 +167,7 @@ func queryRouteViewsPrefix(ctx context.Context, env Environment, ip string) ([]r
 	if err := waitRouteViews(ctx); err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimRight(routeViewsBaseURL, "/") + "/prefix/" + url.PathEscape(ip) + "/" + strconv.Itoa(bits) + "?strict-match=yes"
+	endpoint := strings.TrimRight(routeViewsBaseURL, "/") + "/prefix/" + url.PathEscape(ip) + "/" + strconv.Itoa(bits)
 	body, _, err := requestBytes(ctx, env.HTTPClient, env.UserAgent, endpoint, nil, 4*1024*1024)
 	if err != nil {
 		return nil, err

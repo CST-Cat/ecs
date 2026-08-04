@@ -201,6 +201,27 @@ func TestTableRowsWithBarsInvertsLowerIsBetterColumns(t *testing.T) {
 	}
 }
 
+func TestTableRowsWithBarsKeepZeroDirectionSemantics(t *testing.T) {
+	table := model.Table{
+		Columns:        []string{"样本", "风险", "丢包"},
+		Rows:           [][]string{{"零", "0 /100", "0 %"}, {"高", "90 /100", "2 %"}},
+		NumericColumns: []int{1, 2}, NumericHigherIsBetter: []bool{false, false},
+	}
+	rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	densityCount := func(value string) int {
+		return strings.Count(value, "░") + strings.Count(value, "▒") + strings.Count(value, "▓") + strings.Count(value, "█")
+	}
+	if densityCount(rows[0][1]) != 0 || !strings.Contains(rows[0][1], "·") {
+		t.Fatalf("0/100 risk should remain an empty magnitude bar: %+v", rows)
+	}
+	if densityCount(rows[0][2]) == 0 {
+		t.Fatalf("0%% packet loss should remain a visible quality bar: %+v", rows)
+	}
+}
+
 func TestFioMixedScoreLabelIsLocalized(t *testing.T) {
 	original := i18n.Current()
 	defer i18n.Set(original)
