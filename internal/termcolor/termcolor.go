@@ -120,6 +120,36 @@ func LevelNames() []string {
 // RGB 是一个 24 位颜色。
 type RGB struct{ R, G, B uint8 }
 
+// Tone is a semantic terminal color used by the text report.  The names are
+// deliberately about meaning rather than a particular hue so that the same
+// report remains legible when the palette is quantized to 8 or 256 colors.
+type Tone int
+
+const (
+	ToneAccent Tone = iota
+	ToneInfo
+	ToneSuccess
+	ToneWarning
+	ToneError
+	ToneLabel
+)
+
+var toneColors = [...]RGB{
+	ToneAccent:  {R: 0x5F, G: 0xC8, B: 0xFF}, // cyan-blue headings
+	ToneInfo:    {R: 0x75, G: 0xA9, B: 0xD8}, // calm blue metadata
+	ToneSuccess: {R: 0x3A, G: 0xC6, B: 0x9E}, // teal-green success
+	ToneWarning: {R: 0xF0, G: 0xC0, B: 0x4A}, // orange-yellow warning
+	ToneError:   {R: 0xE0, G: 0x5A, B: 0x5A}, // red error
+	ToneLabel:   {R: 0x9A, G: 0xD9, B: 0xD9}, // restrained cyan labels
+}
+
+func toneColor(tone Tone) RGB {
+	if tone < 0 || int(tone) >= len(toneColors) {
+		return toneColors[ToneLabel]
+	}
+	return toneColors[tone]
+}
+
 // Palette 把一个 0..1 的比例映射到颜色与密度字符。
 //
 // 比例的含义由调用方决定（相对基线的倍率、组内相对最大值的占比），这里只负责
@@ -267,6 +297,40 @@ func (p Palette) Wrap(text string, color RGB) string {
 	return p.escape(color) + text + "\x1b[0m"
 }
 
+// Tone applies a semantic color.  It is safe to call at the report's leaf
+// values: an already styled value is returned unchanged rather than wrapped
+// in another reset sequence.
+func (p Palette) Tone(text string, tone Tone) string {
+	if p.Level == LevelNone || text == "" || strings.Contains(text, "\x1b") {
+		return text
+	}
+	return p.Wrap(text, toneColor(tone))
+}
+
+// ToneBold applies a semantic color and bold emphasis in one CSI sequence.
+// Keeping this as one renderer operation avoids the uncontrolled nesting that
+// would result from calling Bold(Wrap(...)) throughout the report.
+func (p Palette) ToneBold(text string, tone Tone) string {
+	if p.Level == LevelNone || text == "" || strings.Contains(text, "\x1b") {
+		return text
+	}
+	return p.escapeBold(toneColor(tone)) + text + "\x1b[0m"
+}
+
+func (p Palette) Accent(text string) string  { return p.Tone(text, ToneAccent) }
+func (p Palette) Info(text string) string    { return p.Tone(text, ToneInfo) }
+func (p Palette) Success(text string) string { return p.Tone(text, ToneSuccess) }
+func (p Palette) Warning(text string) string { return p.Tone(text, ToneWarning) }
+func (p Palette) Error(text string) string   { return p.Tone(text, ToneError) }
+func (p Palette) Label(text string) string   { return p.Tone(text, ToneLabel) }
+
+func (p Palette) AccentBold(text string) string  { return p.ToneBold(text, ToneAccent) }
+func (p Palette) InfoBold(text string) string    { return p.ToneBold(text, ToneInfo) }
+func (p Palette) SuccessBold(text string) string { return p.ToneBold(text, ToneSuccess) }
+func (p Palette) WarningBold(text string) string { return p.ToneBold(text, ToneWarning) }
+func (p Palette) ErrorBold(text string) string   { return p.ToneBold(text, ToneError) }
+func (p Palette) LabelBold(text string) string   { return p.ToneBold(text, ToneLabel) }
+
 // WrapRatio 按比例着色，是柱状图与分数的主要入口。
 func (p Palette) WrapRatio(text string, ratio float64) string {
 	return p.Wrap(text, Color(ratio))
@@ -285,6 +349,21 @@ func (p Palette) escape(color RGB) string {
 			return "\x1b[1;" + strconv.Itoa(code) + "m"
 		}
 		return "\x1b[" + strconv.Itoa(code) + "m"
+	default:
+		return ""
+	}
+}
+
+func (p Palette) escapeBold(color RGB) string {
+	switch p.Level {
+	case LevelTrueColor:
+		return "\x1b[1;38;2;" + strconv.Itoa(int(color.R)) + ";" +
+			strconv.Itoa(int(color.G)) + ";" + strconv.Itoa(int(color.B)) + "m"
+	case LevelANSI256:
+		return "\x1b[1;38;5;" + strconv.Itoa(ansi256(color)) + "m"
+	case LevelBasic:
+		code, _ := basicANSI(color)
+		return "\x1b[1;" + strconv.Itoa(code) + "m"
 	default:
 		return ""
 	}

@@ -99,6 +99,48 @@ func TestEscapeMatchesLevel(t *testing.T) {
 	}
 }
 
+func TestSemanticTonesRespectPaletteLevels(t *testing.T) {
+	tones := []func(Palette, string) string{
+		func(p Palette, text string) string { return p.Accent(text) },
+		func(p Palette, text string) string { return p.Info(text) },
+		func(p Palette, text string) string { return p.Success(text) },
+		func(p Palette, text string) string { return p.Warning(text) },
+		func(p Palette, text string) string { return p.Error(text) },
+		func(p Palette, text string) string { return p.Label(text) },
+	}
+	for _, level := range []Level{LevelNone, LevelBasic, LevelANSI256, LevelTrueColor} {
+		p := Palette{Level: level}
+		for _, apply := range tones {
+			got := apply(p, "semantic")
+			if level == LevelNone {
+				if got != "semantic" {
+					t.Fatalf("none level changed semantic text: %q", got)
+				}
+				continue
+			}
+			if !strings.HasPrefix(got, "\x1b[") || !strings.HasSuffix(got, "\x1b[0m") {
+				t.Fatalf("level %v semantic tone should wrap with ANSI: %q", level, got)
+			}
+		}
+		bold := p.AccentBold("heading")
+		if level == LevelNone {
+			if bold != "heading" {
+				t.Fatalf("none level changed bold semantic text: %q", bold)
+			}
+		} else if !strings.HasPrefix(bold, "\x1b[1;") || !strings.HasSuffix(bold, "\x1b[0m") {
+			t.Fatalf("level %v semantic bold tone should combine style: %q", level, bold)
+		}
+	}
+}
+
+func TestSemanticToneDoesNotNestExistingANSI(t *testing.T) {
+	p := Palette{Level: LevelTrueColor}
+	styled := p.Success("already styled")
+	if got := p.Warning(styled); got != styled {
+		t.Fatalf("semantic tone nested an existing ANSI value: %q", got)
+	}
+}
+
 // 8 色档只有几个色相，若低比例与高比例落到同一个色加同一个亮度位，
 // 这一档就只剩柱长可读了。
 func TestBasicPaletteSeparatesLowAndHigh(t *testing.T) {

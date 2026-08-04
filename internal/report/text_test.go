@@ -57,6 +57,66 @@ func TestTextColoredEmitsEscapes(t *testing.T) {
 	}
 }
 
+func TestTextSemanticColorsAndWidth(t *testing.T) {
+	data := textSampleReport()
+	data.Results = []model.Result{
+		{
+			ID: "cpu", Title: "CPU 性能", Status: model.StatusOK,
+			Fields: []model.Field{{Label: "可用状态", Value: "已启用 / available"}},
+			Tables: []model.Table{{Title: "状态表", Columns: []string{"状态", "结果"}, Rows: [][]string{{"完成", "正常"}}}},
+		},
+		{
+			ID: "media", Title: "流媒体", Status: model.StatusWarning,
+			Summary: "部分平台 / medium risk", Fields: []model.Field{{Label: "风险", Value: "中风险，需留意"}},
+		},
+		{
+			ID: "route", Title: "回程", Status: model.StatusError,
+			Summary: "失败", Error: "不可用 (not available)", Fields: []model.Field{{Label: "状态", Value: "不可用 (not available)"}},
+		},
+	}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	if strings.Contains(plain, "\x1b") {
+		t.Fatal("无色报告不应输出 ANSI")
+	}
+	for _, level := range []termcolor.Level{termcolor.LevelTrueColor, termcolor.LevelBasic} {
+		colored := Text(data, TextOptions{Color: level})
+		p := termcolor.Palette{Level: level}
+		for _, styled := range []string{
+			p.Success("已启用 / available"), p.Warning("中风险，需留意"), p.Error("不可用 (not available)"),
+		} {
+			if !strings.Contains(colored, styled) {
+				t.Fatalf("%v 档语义状态未按预期着色 %q:\n%s", level, styled, colored)
+			}
+		}
+		if !strings.Contains(colored, "\x1b[1;") {
+			t.Fatalf("%v 档标题/表头应使用带强调色的粗体 ANSI", level)
+		}
+		for lineNumber, line := range strings.Split(colored, "\n") {
+			if width := textwidth.Width(line); width > textWidth {
+				t.Fatalf("%v 档彩色报告第 %d 行超出 %d 列：%d", level, lineNumber+1, textWidth, width)
+			}
+		}
+	}
+}
+
+func TestTextSemanticValueDoesNotNestColoredBars(t *testing.T) {
+	p := termcolor.Palette{Level: termcolor.LevelTrueColor}
+	renderer := textRenderer{palette: p}
+	bar := p.BarRelative(5, 10, 8)
+	cell := "5 MiB/s " + bar
+	if got := renderer.semanticValue(cell); got != cell {
+		t.Fatalf("already colored table bar was wrapped again:\nwant %q\ngot  %q", cell, got)
+	}
+}
+
+func TestSemanticToneNegativeCompositeWins(t *testing.T) {
+	for _, value := range []string{"not available", "not enabled", "not ready", "not ok", "unhealthy"} {
+		if got, ok := semanticTone(value); !ok || got != termcolor.ToneError {
+			t.Fatalf("negative composite %q should be error tone, got %v (ok=%v)", value, got, ok)
+		}
+	}
+}
+
 func TestTextNavigationAndWidthBudget(t *testing.T) {
 	data := textSampleReport()
 	data.Run.Requested = []string{"cpu", "media", "backtrace"}

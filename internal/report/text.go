@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"ecs/internal/i18n"
 	"ecs/internal/model"
@@ -91,19 +92,19 @@ func (r *textRenderer) blank() { r.out.WriteByte('\n') }
 
 // header 是报告顶部的标题块。
 func (r *textRenderer) header(data model.Report) {
-	r.line(r.palette.Bold(strings.Repeat("#", textWidth)))
-	r.centered(i18n.T("report.title"))
-	r.centered("bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)")
-	r.centered("https://github.com/CST-Cat/ecs")
+	r.line(r.palette.AccentBold(strings.Repeat("#", textWidth)))
+	r.centeredStyled(i18n.T("report.title"), r.palette.AccentBold)
+	r.centeredStyled("bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)", r.palette.Info)
+	r.centeredStyled("https://github.com/CST-Cat/ecs", r.palette.Info)
 	reportTime := data.Run.CompletedAt
 	if reportTime.IsZero() {
 		reportTime = data.Run.StartedAt
 	}
-	r.centered(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")))
-	r.centered(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")))
-	r.centered(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")))
+	r.centeredStyled(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")), r.palette.Dim)
+	r.centeredStyled(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")), r.palette.Info)
+	r.centeredStyled(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")), r.palette.Info)
 	if data.Summary.Headline != "" {
-		r.centered(metaLabel("报告状态", data.Summary.Headline, "Report status", data.Summary.Headline))
+		r.centeredStyled(metaLabel("报告状态", data.Summary.Headline, "Report status", data.Summary.Headline), r.statusStyle(data.Summary.Status))
 	}
 	exposure := fallbackReport(data.Run.Exposure, "local")
 	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
@@ -113,8 +114,8 @@ func (r *textRenderer) header(data model.Report) {
 	if data.Run.DurationMS > 0 {
 		second = append(second, i18n.T("report.totalDuration")+" "+formatDurationMS(data.Run.DurationMS))
 	}
-	r.centered(strings.Join(second, "    "))
-	r.line(r.palette.Bold(strings.Repeat("#", textWidth)))
+	r.centeredStyled(strings.Join(second, "    "), r.palette.Dim)
+	r.line(r.palette.AccentBold(strings.Repeat("#", textWidth)))
 	r.blank()
 }
 
@@ -127,7 +128,14 @@ func metaLabel(zh, value, en, englishValue string) string {
 
 // centered 按版面宽度折行后居中，避免长的外联级别或自定义版本把标题块撑宽。
 func (r *textRenderer) centered(value string) {
+	r.centeredStyled(value, nil)
+}
+
+func (r *textRenderer) centeredStyled(value string, style func(string) string) {
 	for _, line := range wrapText(value, textWidth-2) {
+		if style != nil {
+			line = style(line)
+		}
 		r.line(textwidth.Center(line, textWidth))
 	}
 }
@@ -202,7 +210,8 @@ func moduleTitles(ids []string) []string {
 
 // compactList 把长模块目录折成带悬挂缩进的紧凑列表。
 func (r *textRenderer) compactList(label string, values []string) {
-	prefix := "  " + label + "  "
+	styledLabel := r.palette.Label(label)
+	prefix := "  " + styledLabel + "  "
 	available := textWidth - textwidth.Width(prefix)
 	if available < 1 {
 		available = textWidth - 2
@@ -221,12 +230,12 @@ func (r *textRenderer) compactList(label string, values []string) {
 
 // prefaceTitle 是不参与章节编号的标题块（目前用于模块状态总览）。
 func (r *textRenderer) prefaceTitle(title string) {
-	r.line(r.palette.Bold(title))
+	r.line(r.palette.AccentBold(title))
 	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
 func (r *textRenderer) subsection(title string) {
-	r.line("  %s", r.palette.Bold(title))
+	r.line("  %s", r.palette.AccentBold(title))
 }
 
 // indented 把模块描述、口径和错误按版面宽度折行，避免长字段把 110 列撑开。
@@ -238,6 +247,17 @@ func (r *textRenderer) indented(value string, emphasize ...bool) {
 		} else {
 			r.line(indent + line)
 		}
+	}
+}
+
+func (r *textRenderer) indentedStyled(value string, style func(string) string) {
+	indent := "  "
+	for _, line := range wrapText(value, textWidth-textwidth.Width(indent)) {
+		styled := indent + line
+		if style != nil {
+			styled = style(styled)
+		}
+		r.line(styled)
 	}
 }
 
@@ -369,6 +389,104 @@ func compactMissingMetrics(dimension score.DimensionScore) string {
 	return strings.Join(nonMatrix, ", ")
 }
 
+// statusStyle colors a complete status row as one unit.  Unknown values are
+// intentionally dim rather than guessed as success or failure.
+func (r *textRenderer) statusStyle(status model.Status) func(string) string {
+	switch status {
+	case model.StatusOK:
+		return r.palette.SuccessBold
+	case model.StatusWarning:
+		return r.palette.WarningBold
+	case model.StatusError:
+		return r.palette.ErrorBold
+	case model.StatusSkipped:
+		return r.palette.Dim
+	default:
+		return r.palette.Dim
+	}
+}
+
+// semanticValue applies a color only to recognizable status words.  Numeric
+// values and bars remain untouched so a dense report does not become a
+// rainbow of independently colored cells.
+func (r *textRenderer) semanticValue(value string) string {
+	if strings.Contains(value, "\x1b") {
+		return value
+	}
+	if semanticDim(value) {
+		return r.palette.Dim(value)
+	}
+	tone, ok := semanticTone(value)
+	if !ok {
+		return value
+	}
+	return r.palette.Tone(value, tone)
+}
+
+func semanticDim(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, token := range []string{
+		"跳过", "未知", "未测", "未测试", "未覆盖",
+		"skipped", "unknown", "untested", "not tested", "not run", "not covered", "n/a",
+	} {
+		if containsSemanticToken(lower, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func semanticTone(value string) (termcolor.Tone, bool) {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return termcolor.ToneLabel, false
+	}
+	// Check negative states first: "不可用" also contains the success word
+	// "可用", and "not available" contains "available".
+	for _, token := range []string{
+		"错误", "失败", "不可用", "高风险", "阻止", "拒绝", "异常",
+		"fatal", "error", "failed", "failure", "unavailable", "not available", "not enabled", "not ready", "not ok", "unhealthy", "high risk", "blocked", "denied", "critical",
+	} {
+		if containsSemanticToken(lower, token) {
+			return termcolor.ToneError, true
+		}
+	}
+	for _, token := range []string{
+		"警告", "部分", "中风险", "需留意", "注意", "待定",
+		"warning", "partial", "partially", "medium risk", "attention", "degraded", "caution",
+	} {
+		if containsSemanticToken(lower, token) {
+			return termcolor.ToneWarning, true
+		}
+	}
+	for _, token := range []string{
+		"成功", "完成", "通过", "正常", "可用", "已启用", "解锁", "低风险",
+		"ok", "success", "completed", "complete", "passed", "healthy", "available", "enabled", "unlocked", "low risk", "ready", "true",
+	} {
+		if containsSemanticToken(lower, token) {
+			return termcolor.ToneSuccess, true
+		}
+	}
+	return termcolor.ToneLabel, false
+}
+
+func containsSemanticToken(value, token string) bool {
+	if strings.IndexFunc(token, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
+		return strings.Contains(value, token)
+	}
+	if strings.ContainsAny(token, " -_/") {
+		return strings.Contains(value, token)
+	}
+	for _, field := range strings.FieldsFunc(value, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if field == token {
+			return true
+		}
+	}
+	return false
+}
+
 type diskMatrixKind string
 
 const (
@@ -443,10 +561,10 @@ func (r *textRenderer) result(result model.Result) {
 		status += " · " + result.Summary
 	}
 	if result.Status != model.StatusOK || result.Error != "" {
-		r.indented(status, true)
+		r.indentedStyled(status, r.statusStyle(result.Status))
 	}
 	if result.Error != "" {
-		r.indented(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), true)
+		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), r.palette.ErrorBold)
 	}
 	for _, group := range textGroups(result) {
 		r.renderGroup(group)
@@ -455,8 +573,8 @@ func (r *textRenderer) result(result model.Result) {
 }
 
 func (r *textRenderer) moduleBanner(result model.Result) {
-	r.line(r.palette.Bold(strings.Repeat("*", textWidth)))
-	r.centered(resultTitle(result))
+	r.line(r.palette.AccentBold(strings.Repeat("*", textWidth)))
+	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
 	source := "https://github.com/CST-Cat/ecs"
 	for _, candidate := range result.Sources {
 		if strings.TrimSpace(candidate.URL) != "" {
@@ -464,19 +582,19 @@ func (r *textRenderer) moduleBanner(result model.Result) {
 			break
 		}
 	}
-	r.centered(source)
+	r.centeredStyled(source, r.palette.Info)
 	command := "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)"
 	if result.ID != "" {
 		command += " --only " + result.ID
 	}
-	r.centered(command)
+	r.centeredStyled(command, r.palette.Info)
 	when := result.StartedAt
 	version := fallbackReport(r.version, "ecs")
 	if when.IsZero() {
-		r.centered(version)
+		r.centeredStyled(version, r.palette.Dim)
 	} else {
 		timestamp := when.Format("2006-01-02 15:04:05 MST")
-		r.centered(timestamp + " · " + version)
+		r.centeredStyled(timestamp+" · "+version, r.palette.Dim)
 	}
 	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
@@ -494,7 +612,7 @@ func (r *textRenderer) renderGroup(group textGroup) {
 	if i18n.Current() == i18n.LangEN {
 		heading = fmt.Sprintf("%d. %s", r.subsectionNo, group.title)
 	}
-	r.line(r.palette.Bold("  " + heading))
+	r.line(r.palette.AccentBold("  " + heading))
 	r.line(r.palette.Dim("  " + strings.Repeat("-", textWidth-2)))
 	fields := dedupeFields(visibleFields(group.fields))
 	measurements := dedupeMeasurements(fields, group.measurements)
@@ -729,14 +847,14 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		}
 		rating := ""
 		if item.Rating != "" {
-			rating = "  " + r.palette.Dim(textwidth.Truncate(item.Rating, 20))
+			rating = "  " + r.semanticValue(textwidth.Truncate(item.Rating, 20))
 		}
-		base := "  " + label + "  " + textwidth.PadLeft(valueLines[0], valueWidth) + bar + rating
+		base := "  " + r.palette.Label(label) + "  " + r.semanticValue(textwidth.PadLeft(valueLines[0], valueWidth)) + bar + rating
 		for index, valueLine := range valueLines {
 			if index == 0 {
 				r.line(base)
 			} else {
-				r.line("      %s", valueLine)
+				r.line("      %s", r.semanticValue(valueLine))
 			}
 		}
 	}
@@ -820,7 +938,7 @@ func (r *textRenderer) fields(items []model.Field) {
 	for _, item := range items {
 		value := item.Value
 		label := textwidth.Pad(textwidth.Truncate(item.Label, 28), width) + i18n.T("punct.colon")
-		prefix := "  " + r.palette.Dim(label) + "  "
+		prefix := "  " + r.palette.Label(label) + "  "
 		available := textWidth - textwidth.Width(prefix)
 		if available < 1 {
 			available = textWidth - 2
@@ -834,7 +952,7 @@ func (r *textRenderer) fields(items []model.Field) {
 			if index > 0 {
 				linePrefix = strings.Repeat(" ", textwidth.Width(prefix))
 			}
-			displayValue := valueLine
+			displayValue := r.semanticValue(valueLine)
 			switch strings.ToLower(strings.TrimSpace(valueLine)) {
 			case "available", "true":
 				displayValue = r.palette.WrapRatio(valueLine, 1)
@@ -856,7 +974,7 @@ func (r *textRenderer) resultTable(table model.Table) {
 		if kind := matrixKindForTable(title); kind == matrixCrystal || kind == matrixATTO {
 			title += i18n.T("punct.colon")
 		}
-		r.indented(title, true)
+		r.indentedStyled(title, r.palette.AccentBold)
 	}
 	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
@@ -1153,7 +1271,7 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 		}
 		head.WriteString(textwidth.Pad(textwidth.Truncate(column, widths[index]), widths[index]))
 	}
-	r.line(r.palette.Bold(strings.TrimRight(head.String(), " ")))
+	r.line(r.palette.LabelBold(strings.TrimRight(head.String(), " ")))
 
 	total := 2
 	for index, width := range widths {
@@ -1177,9 +1295,9 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 			}
 			cell = textwidth.Truncate(cell, widths[index])
 			if rightAlign[index] {
-				line.WriteString(textwidth.PadLeft(cell, widths[index]))
+				line.WriteString(r.semanticValue(textwidth.PadLeft(cell, widths[index])))
 			} else {
-				line.WriteString(textwidth.Pad(cell, widths[index]))
+				line.WriteString(r.semanticValue(textwidth.Pad(cell, widths[index])))
 			}
 		}
 		r.line(strings.TrimRight(line.String(), " "))
@@ -1241,14 +1359,14 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 		heading += "  [" + scope + "]"
 	}
 	for _, line := range wrapText(heading, textWidth) {
-		r.line(r.palette.Bold(line))
+		r.line(r.palette.AccentBold(line))
 	}
 	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
 func (r *textRenderer) footer(data model.Report) {
 	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
-	r.indented(i18n.T("report.generator") + " " + data.Tool.Name + " " + data.Tool.Version)
+	r.indentedStyled(i18n.T("report.generator")+" "+data.Tool.Name+" "+data.Tool.Version, r.palette.Dim)
 }
 
 // chineseNumeral 把章节号转成中文数字。
