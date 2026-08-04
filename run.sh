@@ -6,6 +6,8 @@
 #       └ 自动下载已校验的 ecs，按当前配置准备缺失组件，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后只清理本次安装的组件
+#   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes --provider vultr --region jp-tokyo
+#       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
 #   - 已有的 sysbench/fio/iperf3 等组件不会改动。
@@ -57,23 +59,94 @@ case "${1:-}" in
     if [ "$UI" = "en" ]; then
       printf '%s\n' \
         'Usage: run.sh [--profile quick|standard|full] [--only MODULES] [options]' \
+        '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
         '' \
         'Downloads a checksummed ecs release, prepares missing distro packages, and writes reports directly to ${TMPDIR:-/tmp} by default.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
+        'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
         'Ookla is never installed automatically; use the ecs CLI with --accept ookla.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile quick|standard|full] [--only 模块] [选项]' \
+        '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
         '' \
         '下载并校验 ecs Release，准备缺失的发行版组件，并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
+        '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
         'Ookla 不会自动安装；请用 ecs --accept ookla 显式启用。'
     fi
     exit 0
     ;;
 esac
+
+# --submit is a wrapper-only mode.  Parse and remove its options before any
+# arguments reach `ecs run`; keeping the filtering in positional parameters
+# avoids eval/string-splitting and therefore preserves spaces and shell
+# metacharacters in ordinary user arguments.
+SUBMIT_MODE=0
+SUBMIT_PROVIDER=""
+SUBMIT_REGION=""
+SUBMIT_OUTPUT=""
+SUBMIT_OUTPUT_GIVEN=0
+for arg in "$@"; do
+  case "$arg" in
+    --submit) SUBMIT_MODE=1 ;;
+    --submit=*) die "--submit 不接受参数" "--submit does not take a value" ;;
+  esac
+done
+
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  SUBMIT_SENTINEL="__ecs_run_submit_filter_$$__"
+  # Append a sentinel, then rotate ordinary arguments behind it.  When the
+  # sentinel reaches the front, the remaining positional parameters are the
+  # filtered argv in their original order.
+  set -- "$@" "$SUBMIT_SENTINEL"
+  while [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ]; do
+    arg=$1
+    shift
+    case "$arg" in
+      --submit)
+        ;;
+      --provider)
+        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+          die "--provider 缺少参数" "--provider requires a value"
+        SUBMIT_PROVIDER=$1
+        shift
+        ;;
+      --provider=*)
+        SUBMIT_PROVIDER=${arg#--provider=}
+        ;;
+      --region)
+        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+          die "--region 缺少参数" "--region requires a value"
+        SUBMIT_REGION=$1
+        shift
+        ;;
+      --region=*)
+        SUBMIT_REGION=${arg#--region=}
+        ;;
+      --output)
+        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+          die "--output 缺少路径" "--output requires a path"
+        SUBMIT_OUTPUT=$1
+        SUBMIT_OUTPUT_GIVEN=1
+        shift
+        ;;
+      --output=*)
+        SUBMIT_OUTPUT=${arg#--output=}
+        SUBMIT_OUTPUT_GIVEN=1
+        ;;
+      *)
+        set -- "$@" "$arg"
+        ;;
+    esac
+  done
+  [ "$#" -gt 0 ] && [ "$1" = "$SUBMIT_SENTINEL" ] ||
+    die "提交参数解析失败" "failed to parse submit arguments"
+  shift
+fi
 
 OUTPUT_GIVEN=0
 EXPECT_OUTPUT=0
@@ -97,6 +170,7 @@ for arg in "$@"; do
     --name=*|-name=*) NAME_GIVEN=1; NAME_VALUE="${arg#*=}" ;;
   esac
 done
+[ "$SUBMIT_MODE" -eq 0 ] || OUTPUT_GIVEN=1
 
 [ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
 
@@ -122,6 +196,8 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/ecs-run.XXXXXX")
 REPORT_DIR=""
 REPORT_NAME=""
 REPORT_BEFORE=""
+SUBMIT_REPORT_DIR=""
+SUBMIT_REPORT=""
 PACKAGE_MANAGER=""
 BEFORE_PACKAGES=""
 AFTER_INSTALL_PACKAGES=""
@@ -457,6 +533,19 @@ if [ "$OUTPUT_GIVEN" -eq 0 ]; then
   say "报告目录：$REPORT_DIR" "report directory: $REPORT_DIR"
 fi
 
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  # The complete report is an implementation detail of submit mode.  Keep it
+  # beside the downloaded binary under WORK so the EXIT trap removes both.
+  SUBMIT_REPORT_DIR="$WORK/report"
+  mkdir -p "$SUBMIT_REPORT_DIR" ||
+    die "无法创建提交临时目录：$SUBMIT_REPORT_DIR" "failed to create submit temporary directory: $SUBMIT_REPORT_DIR"
+  if [ "$SUBMIT_OUTPUT_GIVEN" -eq 0 ]; then
+    SUBMIT_OUTPUT="${TMPDIR:-/tmp}"
+  fi
+  [ -n "$SUBMIT_OUTPUT" ] ||
+    die "--output 路径不能为空" "--output path must not be empty"
+fi
+
 fetch() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
@@ -497,10 +586,10 @@ chmod +x "${WORK}/ecs"
 # stdin 是 curl 管道，交互输入必须走 /dev/tty；无终端时直接按默认配置运行。
 INTERACTIVE=""
 PLAN_FILE=""
-if [ "$#" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+if [ "$SUBMIT_MODE" -eq 0 ] && [ "$#" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
   INTERACTIVE="--interactive"
 fi
-if [ "$#" -le 2 ] && [ -z "$INTERACTIVE" ] && [ -r /dev/tty ] && [ -w /dev/tty ] && [ "$#" -ge 1 ]; then
+if [ "$SUBMIT_MODE" -eq 0 ] && [ "$#" -le 2 ] && [ -z "$INTERACTIVE" ] && [ -r /dev/tty ] && [ -w /dev/tty ] && [ "$#" -ge 1 ]; then
   case "$1" in
     --lang|--lang=*|-lang|-lang=*) INTERACTIVE="--interactive" ;;
   esac
@@ -557,7 +646,16 @@ report_paths() {
 }
 
 # 不使用 exec：必须等 ecs 退出后运行清理逻辑，并原样保留退出码。
-if [ -n "$PLAN_FILE" ]; then
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  # Force a JSON report in WORK.  Wrapper-only submit/provider/region/output
+  # options were removed above, while every ordinary run option remains
+  # quoted in "$@".
+  if "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
+    RUN_STATUS=0
+  else
+    RUN_STATUS=$?
+  fi
+elif [ -n "$PLAN_FILE" ]; then
   if [ -n "$REPORT_DIR" ]; then
     if [ "$NAME_GIVEN" -eq 1 ]; then
       if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR"; then
@@ -597,6 +695,34 @@ else
       RUN_STATUS=$?
     fi
   fi
+fi
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    exit "$RUN_STATUS"
+  fi
+
+  # The temporary output directory is unique to this invocation and is forced
+  # to JSON-only, so exactly one regular JSON is expected.
+  for submit_path in "$SUBMIT_REPORT_DIR"/*.json; do
+    [ -f "$submit_path" ] || continue
+    if [ -n "$SUBMIT_REPORT" ]; then
+      die "提交临时目录里有多个 JSON 报告" "multiple JSON reports found in submit temporary directory"
+    fi
+    SUBMIT_REPORT=$submit_path
+  done
+  [ -n "$SUBMIT_REPORT" ] ||
+    die "测试没有生成 JSON 报告，无法提交" "the test produced no JSON report to submit"
+
+  # ecs submit treats an existing directory as a directory target and a
+  # non-existent path as a file target.  This preserves the CLI's file-or-
+  # directory contract while keeping the default in TMPDIR.
+  if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+      --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
+    SUBMIT_STATUS=0
+  else
+    SUBMIT_STATUS=$?
+  fi
+  exit "$SUBMIT_STATUS"
 fi
 if [ -n "$REPORT_DIR" ]; then
   report_paths
