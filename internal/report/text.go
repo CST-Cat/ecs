@@ -92,7 +92,7 @@ func (r *textRenderer) blank() { r.out.WriteByte('\n') }
 
 // header 是报告顶部的标题块。
 func (r *textRenderer) header(data model.Report) {
-	r.line(r.palette.AccentBold(strings.Repeat("#", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
 	r.centeredStyled(i18n.T("report.title"), r.palette.AccentBold)
 	r.centeredStyled("bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)", r.palette.Info)
 	r.centeredStyled("https://github.com/CST-Cat/ecs", r.palette.Info)
@@ -115,7 +115,7 @@ func (r *textRenderer) header(data model.Report) {
 		second = append(second, i18n.T("report.totalDuration")+" "+formatDurationMS(data.Run.DurationMS))
 	}
 	r.centeredStyled(strings.Join(second, "    "), r.palette.Dim)
-	r.line(r.palette.AccentBold(strings.Repeat("#", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
 	r.blank()
 }
 
@@ -573,7 +573,7 @@ func (r *textRenderer) result(result model.Result) {
 }
 
 func (r *textRenderer) moduleBanner(result model.Result) {
-	r.line(r.palette.AccentBold(strings.Repeat("*", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("*", textWidth)))
 	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
 	source := "https://github.com/CST-Cat/ecs"
 	for _, candidate := range result.Sources {

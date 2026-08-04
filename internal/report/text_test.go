@@ -91,6 +91,22 @@ func TestTextSemanticColorsAndWidth(t *testing.T) {
 		if !strings.Contains(colored, "\x1b[1;") {
 			t.Fatalf("%v 档标题/表头应使用带强调色的粗体 ANSI", level)
 		}
+		if level == termcolor.LevelTrueColor {
+			for _, separator := range []string{
+				p.Dim(strings.Repeat("#", textWidth)),
+				p.Dim(strings.Repeat("*", textWidth)),
+			} {
+				if !strings.Contains(colored, separator) {
+					t.Fatalf("横幅分隔线应保持 dim: %q", separator)
+				}
+			}
+			if !strings.Contains(colored, p.AccentBold("CPU 性能")) {
+				t.Fatal("模块标题应使用 accent+bold")
+			}
+			if !strings.Contains(colored, p.LabelBold("  状态  结果")) {
+				t.Fatal("表头应使用层次色")
+			}
+		}
 		for lineNumber, line := range strings.Split(colored, "\n") {
 			if width := textwidth.Width(line); width > textWidth {
 				t.Fatalf("%v 档彩色报告第 %d 行超出 %d 列：%d", level, lineNumber+1, textWidth, width)
