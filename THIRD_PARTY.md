@@ -19,16 +19,19 @@
 | ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
 | smartctl | 磁盘 SMART 健康与通电时间 | [smartmontools](https://www.smartmontools.org/) | GPL-2.0 | `disk` 的介质健康；需 root，虚拟磁盘通常不透传，缺失时如实说明；**刻意不采集序列号**（可唯一标识物理硬件） |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
-| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | 仅使用用户已安装的程序；必须用 `--accept ookla` 显式确认条款；不自动下载、不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
+| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | 必须用 `--accept ookla` 显式确认条款；缺失时 `run.sh` 只从 Ookla 官方 Packagecloud 签名源临时安装到本次运行，并在退出时按包快照清理；不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
 
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
 `run.sh` 只安装当前配置缺失的组件，并在退出时根据安装前后的包清单移除本次新增包；不执行
-`autoremove` 或全局缓存清理，也不删除开始前已经存在的包。清理前会复核安装完成后的包状态；
-若测试期间被外部包管理操作改变，就跳过清理并保留临时现场。`install.sh --with-benchmarks`
-是持久安装的明确入口；两条路径都只使用发行版提供的软件包，不从随机镜像下载裸二进制，
-也不替用户接受闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为默认依赖；Ookla 只提供显式、可审计的本机客户端适配器。
+`autoremove` 或全局缓存清理，也不删除开始前已经存在的包。清理前会复用
+`packages.before`/`packages.after` 快照并复核测试期间的包状态；若被外部包管理操作改变，就跳过清理并保留临时现场。
+Ookla 缺失时，只有命令行显式 `--accept ookla` 才会启用准备步骤：脚本把官方 Packagecloud
+源、固定指纹的 GPG 公钥、索引和缓存全部放在 `$WORK`，通过包管理器的签名校验安装，不执行
+供应商的 `curl | sh` 安装脚本；退出时工作目录一并消失。`ECS_AUTO_DEPS=0` 会跳过所有安装，
+让报告如实标记缺失模块。`install.sh --with-benchmarks` 是持久安装的明确入口；两条路径都不替
+用户接受闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为默认依赖；Ookla 只提供显式、可审计的本机客户端适配器。
 
 ## 在线服务
 

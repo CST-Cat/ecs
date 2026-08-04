@@ -10,7 +10,7 @@
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 已有的 sysbench/fio/iperf3 等组件不会改动。
+#   - 已有的 sysbench/fio/iperf3/speedtest 等组件不会改动。
 #   - 缺失组件只从系统包管理器的官方配置源安装；不下载未经校验的裸二进制。
 #   - 运行前记录已安装包集合，结束时只移除本次新增的包；不执行 autoremove 或全局 clean。
 #   - ECS_AUTO_DEPS=0 可关闭自动安装，让 ecs 自己报告缺失组件。
@@ -66,7 +66,7 @@ case "${1:-}" in
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'Ookla is never installed automatically; use the ecs CLI with --accept ookla.'
+        'Ookla is prepared only after explicit --accept ookla via a temporary, verified official package source.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile quick|standard|full] [--only 模块] [选项]' \
@@ -77,7 +77,7 @@ case "${1:-}" in
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        'Ookla 不会自动安装；请用 ecs --accept ookla 显式启用。'
+        '只有显式使用 --accept ookla 才会通过临时、已验证的官方包源准备 Ookla。'
     fi
     exit 0
     ;;
@@ -255,6 +255,19 @@ CLEANUP_DONE=0
 CLEANUP_FAILED=0
 MISSING_TOOLS=""
 PACKAGES=""
+OOKLA_ACCEPTED=0
+OOKLA_MISSING=0
+OOKLA_REPO_READY=0
+OOKLA_KEY_ASC=""
+OOKLA_KEYRING=""
+OOKLA_APT_SOURCES=""
+OOKLA_APT_LISTS=""
+OOKLA_RPM_REPO=""
+OOKLA_RPM_ARCH=""
+OOKLA_RPM_OS=""
+OOKLA_RPM_VERSION=""
+OOKLA_DEB_SEEN=""
+OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
 
 as_root() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -350,13 +363,168 @@ package_command() {
   return 1
 }
 
+# Ookla publishes the CLI through a signed Packagecloud repository.  The
+# repository setup is deliberately kept under WORK: no source list, keyring,
+# or repo file is installed in /etc, and apt/yum are pointed at the temporary
+# metadata/cache directories below.  Never execute the vendor's install
+# script (the documented curl|sh command); fetch the key as data and verify
+# its pinned fingerprint before asking the package manager to verify metadata.
+verify_ookla_key() {
+  [ -s "$OOKLA_KEY_ASC" ] || return 1
+  command -v gpg >/dev/null 2>&1 || return 1
+  OOKLA_KEY_FPRS=$(gpg --batch --no-options --show-keys --with-colons "$OOKLA_KEY_ASC" 2>/dev/null |
+    awk -F: '$1 == "fpr" {print toupper($10)}') || return 1
+  printf '%s\n' "$OOKLA_KEY_FPRS" |
+    awk -v expected="$OOKLA_KEY_FINGERPRINT" '$0 == expected {found=1} END {exit !found}'
+}
+
+prepare_ookla_key() {
+  OOKLA_KEY_ASC="$WORK/ookla-packagecloud-key.asc"
+  OOKLA_KEYRING="$WORK/ookla-packagecloud-keyring.gpg"
+  fetch "https://packagecloud.io/ookla/speedtest-cli/gpgkey" "$OOKLA_KEY_ASC" || return 1
+  verify_ookla_key || return 1
+  if ! gpg --batch --no-options --dearmor --yes -o "$OOKLA_KEYRING" "$OOKLA_KEY_ASC"; then
+    return 1
+  fi
+  [ -s "$OOKLA_KEYRING" ]
+}
+
+apt_ookla_command() {
+  package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get \
+    -o "Dir::Etc::sourcelist=$OOKLA_APT_SOURCES" \
+    -o "Dir::Etc::sourceparts=-" \
+    -o "Dir::State::lists=$OOKLA_APT_LISTS" \
+    -o "Dir::Cache::archives=$WORK/ookla-apt-cache" \
+    -o "Dir::Cache::pkgcache=$WORK/ookla-apt-cache/pkgcache.bin" \
+    -o "Dir::Cache::srcpkgcache=$WORK/ookla-apt-cache/srcpkgcache.bin" "$@"
+}
+
+select_ookla_deb_distribution() {
+  OOKLA_DEB_OS=""
+  OOKLA_DEB_CODENAME=""
+  [ -r /etc/os-release ] || return 1
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case "${ID:-}" in
+    debian) OOKLA_DEB_OS=debian ;;
+    ubuntu) OOKLA_DEB_OS=ubuntu ;;
+    *) return 1 ;;
+  esac
+  OOKLA_DEB_CODENAME="${VERSION_CODENAME:-}"
+  if [ -z "$OOKLA_DEB_CODENAME" ] && command -v lsb_release >/dev/null 2>&1; then
+    OOKLA_DEB_CODENAME=$(lsb_release -sc 2>/dev/null || true)
+  fi
+  [ -n "$OOKLA_DEB_CODENAME" ] || return 1
+}
+
+prepare_ookla_apt() {
+  select_ookla_deb_distribution || return 1
+  mkdir -p "$WORK/ookla-apt/lists/partial" "$WORK/ookla-apt-cache/archives/partial" || return 1
+  OOKLA_APT_LISTS="$WORK/ookla-apt/lists"
+  OOKLA_APT_SOURCES="$WORK/ookla-packagecloud.list"
+  prepare_ookla_key || return 1
+
+  # Packagecloud's repository occasionally lags a newly released distro.  A
+  # signed, older Debian/Ubuntu suite is safe for this package (it only
+  # depends on ca-certificates); probe candidates and use the first official
+  # suite that exists instead of silently falling back to an arbitrary mirror.
+  OOKLA_DEB_CANDIDATES="$OOKLA_DEB_CODENAME"
+  if [ "$OOKLA_DEB_OS" = ubuntu ]; then
+    OOKLA_DEB_CANDIDATES="$OOKLA_DEB_CANDIDATES jammy focal bionic"
+  else
+    OOKLA_DEB_CANDIDATES="$OOKLA_DEB_CANDIDATES bookworm bullseye buster"
+  fi
+  OOKLA_DEB_SUITE=""
+  for candidate in $OOKLA_DEB_CANDIDATES; do
+    case " $OOKLA_DEB_SEEN " in *" $candidate "*) continue ;; esac
+    OOKLA_DEB_SEEN="${OOKLA_DEB_SEEN:+$OOKLA_DEB_SEEN }$candidate"
+    if fetch "https://packagecloud.io/ookla/speedtest-cli/$OOKLA_DEB_OS/dists/$candidate/Release" \
+        "$WORK/ookla-release-$candidate"; then
+      OOKLA_DEB_SUITE="$candidate"
+      break
+    fi
+  done
+  [ -n "$OOKLA_DEB_SUITE" ] || return 1
+  printf '%s\n' "deb [signed-by=$OOKLA_KEYRING] https://packagecloud.io/ookla/speedtest-cli/$OOKLA_DEB_OS $OOKLA_DEB_SUITE main" >"$OOKLA_APT_SOURCES"
+
+  apt_ookla_command update || return 1
+  apt_ookla_command install -y speedtest || return 1
+  OOKLA_REPO_READY=1
+}
+
+select_ookla_rpm_distribution() {
+  OOKLA_RPM_OS=""
+  OOKLA_RPM_VERSION=""
+  [ -r /etc/os-release ] || return 1
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case "${ID:-}" in
+    fedora) OOKLA_RPM_OS=fedora ;;
+    amzn|centos|rhel|rocky|almalinux|ol) OOKLA_RPM_OS=el ;;
+    *) return 1 ;;
+  esac
+  OOKLA_RPM_VERSION="${VERSION_ID%%.*}"
+  [ -n "$OOKLA_RPM_VERSION" ] || return 1
+  # The upstream repository currently has EL 6–9 and Fedora 32–36.  Keep
+  # newer compatible systems on the newest signed suite rather than guessing
+  # a third-party package name.
+  if [ "$OOKLA_RPM_OS" = el ] && [ "$OOKLA_RPM_VERSION" -gt 9 ] 2>/dev/null; then
+    OOKLA_RPM_VERSION=9
+  elif [ "$OOKLA_RPM_OS" = fedora ] && [ "$OOKLA_RPM_VERSION" -gt 36 ] 2>/dev/null; then
+    OOKLA_RPM_VERSION=36
+  fi
+  case "$(uname -m)" in
+    x86_64|amd64) OOKLA_RPM_ARCH=x86_64 ;;
+    aarch64|arm64) OOKLA_RPM_ARCH=aarch64 ;;
+    armv7l|armv7) OOKLA_RPM_ARCH=armhfp ;;
+    i386|i686|x86) OOKLA_RPM_ARCH=i386 ;;
+    *) return 1 ;;
+  esac
+}
+
+prepare_ookla_rpm() {
+  select_ookla_rpm_distribution || return 1
+  prepare_ookla_key || return 1
+  OOKLA_RPM_REPO="$WORK/ookla-packagecloud.repo"
+  printf '%s\n' \
+    '[ookla-speedtest-cli]' \
+    'name=Ookla Speedtest CLI (official)' \
+    "baseurl=https://packagecloud.io/ookla/speedtest-cli/$OOKLA_RPM_OS/$OOKLA_RPM_VERSION/\$basearch" \
+    'enabled=1' \
+    'repo_gpgcheck=1' \
+    'gpgcheck=1' \
+    "gpgkey=file://$OOKLA_KEY_ASC" \
+    'sslverify=1' \
+    'metadata_expire=300' >"$OOKLA_RPM_REPO"
+  case "$PACKAGE_MANAGER" in
+    dnf)
+      package_command as_root dnf --setopt=reposdir="$WORK" --disablerepo='*' --enablerepo=ookla-speedtest-cli install -y speedtest
+      ;;
+    yum)
+      package_command as_root yum --setopt=reposdir="$WORK" --disablerepo='*' --enablerepo=ookla-speedtest-cli install -y speedtest
+      ;;
+    *) return 1 ;;
+  esac || return 1
+  OOKLA_REPO_READY=1
+}
+
+install_ookla() {
+  say "通过 Ookla 官方签名包源临时准备 speedtest" "temporarily preparing speedtest from Ookla's signed official package source"
+  case "$PACKAGE_MANAGER" in
+    apt) prepare_ookla_apt ;;
+    dnf|yum) prepare_ookla_rpm ;;
+    *) return 1 ;;
+  esac
+}
+
 # 从命令行预读会影响依赖规划的选项。带 --config 时配置文件可能改写模块，
 # 因而按完整配置准备，避免先删掉用户实际需要的工具。
 PROFILE=standard
 ONLY=""
 SKIP=""
+ACCEPT=""
 # 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 是纯 HTTP，
-# 不需要外部程序；ookla 从不自动安装）。因此这里不复刻完整的分级表。
+# 不需要外部程序）。Ookla 只有在命令行显式 --accept ookla 时才加入依赖规划。
 LOCAL_ONLY=0
 CONFIG_GIVEN=0
 EXPECT=""
@@ -366,6 +534,7 @@ for arg in "$@"; do
       profile) PROFILE="$arg" ;;
       only) ONLY="$arg" ;;
       skip) SKIP="$arg" ;;
+      accept) ACCEPT="$arg" ;;
       config) CONFIG_GIVEN=1 ;;
       exposure) [ "$arg" = "local" ] && LOCAL_ONLY=1 ;;
     esac
@@ -379,12 +548,21 @@ for arg in "$@"; do
     --only=*) ONLY="${arg#--only=}" ;;
     --skip) EXPECT=skip ;;
     --skip=*) SKIP="${arg#--skip=}" ;;
+    --accept) EXPECT=accept ;;
+    --accept=*) ACCEPT="${arg#--accept=}" ;;
     --config) EXPECT=config ;;
     --config=*) CONFIG_GIVEN=1 ;;
     --exposure) EXPECT=exposure ;;
     --exposure=local) LOCAL_ONLY=1 ;;
   esac
 done
+
+# The ecs CLI intentionally requires an explicit consent flag for the
+# third-party Ookla adapter.  Keep this preflight in lockstep with that
+# decision so dependency preparation cannot silently install the client.
+case ",$ACCEPT," in
+  *,ookla,*) OOKLA_ACCEPTED=1 ;;
+esac
 
 module_enabled() {
   module=$1
@@ -400,8 +578,12 @@ module_enabled() {
       *) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
     esac
   fi
+  if [ "$OOKLA_ACCEPTED" -eq 1 ] && [ -z "$ONLY" ] && [ "$CONFIG_GIVEN" -eq 0 ]; then
+    base_modules="$base_modules,ookla"
+  fi
   list_contains "$base_modules" "$module" || return 1
   list_contains "$SKIP" "$module" && return 1
+  [ "$module" != "ookla" ] || [ "$OOKLA_ACCEPTED" -eq 1 ] || return 1
   if [ "$LOCAL_ONLY" -eq 1 ]; then
     case "$module" in
       network|bgp|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|ookla|media|route|backtrace) return 1 ;;
@@ -430,6 +612,9 @@ collect_missing_tools() {
   if module_enabled speed; then
     tool_exists iperf3 || add_missing_tool iperf3
   fi
+  if module_enabled ookla; then
+    tool_exists speedtest || add_missing_tool speedtest
+  fi
   if module_enabled latency; then
     tool_exists ping || add_missing_tool ping
   fi
@@ -441,22 +626,31 @@ collect_missing_tools() {
 }
 
 install_packages() {
-  say "准备测试组件：$PACKAGES" "preparing test components: $PACKAGES"
-  case "$PACKAGE_MANAGER" in
-    apt)
-      package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get update || return 1
-      package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACKAGES || return 1
-      ;;
-    dnf) package_command as_root dnf install -y $PACKAGES || return 1 ;;
-    yum) package_command as_root yum install -y $PACKAGES || return 1 ;;
-    apk) package_command as_root apk add --no-cache $PACKAGES || return 1 ;;
-    pacman) package_command as_root pacman -Sy --noconfirm $PACKAGES || return 1 ;;
-    *) return 1 ;;
-  esac
+  if [ -n "$PACKAGES" ]; then
+    say "准备测试组件：$PACKAGES" "preparing test components: $PACKAGES"
+    case "$PACKAGE_MANAGER" in
+      apt)
+        package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get update || return 1
+        package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACKAGES || return 1
+        ;;
+      dnf) package_command as_root dnf install -y $PACKAGES || return 1 ;;
+      yum) package_command as_root yum install -y $PACKAGES || return 1 ;;
+      apk) package_command as_root apk add --no-cache $PACKAGES || return 1 ;;
+      pacman) package_command as_root pacman -Sy --noconfirm $PACKAGES || return 1 ;;
+      *) return 1 ;;
+    esac
+  fi
+  if [ "$OOKLA_MISSING" -eq 1 ]; then
+    install_ookla || return 1
+  fi
 }
 
 prepare_dependencies() {
   collect_missing_tools
+  OOKLA_MISSING=0
+  for tool in $MISSING_TOOLS; do
+    [ "$tool" = speedtest ] && OOKLA_MISSING=1
+  done
   if [ -z "$MISSING_TOOLS" ]; then
     say "测试组件已就绪" "test components are ready"
     return 0
@@ -469,6 +663,12 @@ prepare_dependencies() {
   fi
   if ! select_package_manager; then
     die "找不到支持的包管理器；可设置 ECS_AUTO_DEPS=0 运行并接受降级报告" "no supported package manager; set ECS_AUTO_DEPS=0 to run with a degraded report"
+  fi
+  if [ "$OOKLA_MISSING" -eq 1 ]; then
+    case "$PACKAGE_MANAGER" in
+      apt|dnf|yum) ;;
+      *) die "当前发行版没有可验证的 Ookla 官方包源；请预先安装 speedtest，或设置 ECS_AUTO_DEPS=0" "this distribution has no verifiable official Ookla package source; install speedtest first or set ECS_AUTO_DEPS=0" ;;
+    esac
   fi
   if [ "$(id -u)" -ne 0 ]; then
     if ! command -v sudo >/dev/null 2>&1; then
@@ -486,8 +686,17 @@ prepare_dependencies() {
     fi
   fi
   for tool in $MISSING_TOOLS; do
-    add_package "$(package_for_tool "$tool")"
+    case "$tool" in
+      speedtest) OOKLA_MISSING=1 ;;
+      *) add_package "$(package_for_tool "$tool")" ;;
+    esac
   done
+  # gpg is only needed to turn the downloaded, pinned Ookla key into an apt
+  # keyring.  Install it from the regular distro repository before touching
+  # the temporary vendor source; rpm/yum verifies the same key directly.
+  if [ "$OOKLA_MISSING" -eq 1 ] && [ "$PACKAGE_MANAGER" = apt ] && ! command -v gpg >/dev/null 2>&1; then
+    add_package gnupg
+  fi
   BEFORE_PACKAGES="$WORK/packages.before"
   if ! package_state >"$BEFORE_PACKAGES"; then
     die "无法记录安装前的软件包状态，已停止以避免误删" "cannot record the pre-install package state; stopping to avoid unsafe cleanup"

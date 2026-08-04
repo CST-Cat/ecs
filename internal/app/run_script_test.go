@@ -107,3 +107,69 @@ func TestRunScriptKeepsRunOptionsAndFiltersSubmitOptions(t *testing.T) {
 		t.Fatal("submit mode must pass filtered run arguments to ecs")
 	}
 }
+
+func TestRunScriptOoklaPreparationRequiresConsentAndUsesTemporarySource(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		"--accept ookla",
+		"OOKLA_ACCEPTED",
+		"OOKLA_KEY_FINGERPRINT",
+		"prepare_ookla_apt",
+		"prepare_ookla_rpm",
+		"install_ookla",
+		"packages.before",
+		"packages.after-install",
+		"gpgcheck=1",
+		"signed-by=",
+		"ECS_AUTO_DEPS=0",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh Ookla preparation is missing %q", required)
+		}
+	}
+	if strings.Contains(text, "Ookla is never installed automatically") || strings.Contains(text, "Ookla 不会自动安装") {
+		t.Fatal("run.sh still claims that the explicit Ookla path never installs the client")
+	}
+	// The ordinary full profile must remain free of Ookla.  The module is
+	// appended only after OOKLA_ACCEPTED is set by an explicit --accept flag.
+	fullProfile := `full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace"`
+	if !strings.Contains(text, fullProfile) {
+		t.Fatal("run.sh full profile unexpectedly changed its default module set")
+	}
+}
+
+func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		`OOKLA_ACCEPTED=0`,
+		`case ",$ACCEPT,"`,
+		`*,ookla,*) OOKLA_ACCEPTED=1`,
+		`tool_exists speedtest || add_missing_tool speedtest`,
+		`speedtest) OOKLA_MISSING=1`,
+		`ECS_AUTO_DEPS=0`,
+		`https://packagecloud.io/ookla/speedtest-cli/gpgkey`,
+		`C525F88FCF3A7E56CE2CF59131EB3981E723ACAA`,
+		`OOKLA_KEY_ASC="$WORK/ookla-packagecloud-key.asc"`,
+		`OOKLA_KEYRING="$WORK/ookla-packagecloud-keyring.gpg"`,
+		`OOKLA_APT_SOURCES="$WORK/ookla-packagecloud.list"`,
+		`OOKLA_RPM_REPO="$WORK/ookla-packagecloud.repo"`,
+		`packages.before`,
+		`packages.after`,
+		`comm -13 "$BEFORE_PACKAGES" "$AFTER_PACKAGES"`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh missing Ookla dependency guard %q", required)
+		}
+	}
+	if strings.Contains(text, `script.deb.sh |`) || strings.Contains(text, `script.rpm.sh |`) {
+		t.Fatal("run.sh must not execute the vendor curl|sh installer")
+	}
+}

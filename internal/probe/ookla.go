@@ -15,7 +15,9 @@ import (
 	"ecs/internal/model"
 )
 
-// ooklaProbe is an adapter around a user-installed official Ookla CLI.
+// ooklaProbe is an adapter around the official Ookla CLI.  Direct ecs runs
+// expect the client to be installed already; run.sh may prepare it from the
+// signed official source only after the user explicitly accepts Ookla.
 // Keeping it as an explicit module matters: the client has its own licence,
 // privacy terms and measurement service, unlike ecs's local-only report.
 type ooklaProbe struct{}
@@ -77,8 +79,8 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	if err != nil {
 		reason := "未找到官方 speedtest 客户端"
 		result.Skip(reason)
-		appendOoklaSkipDetails(&result, reason, "从 Ookla 官方渠道安装 Speedtest 客户端后重跑模块。")
-		result.Notes = append(result.Notes, "ecs 不会自动下载或安装 Ookla 客户端；请从 Ookla 官方渠道安装后重跑。")
+		appendOoklaSkipDetails(&result, reason, "直接运行 ecs 请先从 Ookla 官方渠道安装；也可用 run.sh --accept ookla 让脚本按需准备后重跑。")
+		result.Notes = append(result.Notes, "直接运行 ecs 不会自动安装 Ookla 客户端；只有 run.sh 显式使用 --accept ookla 时，才会从 Ookla 官方签名包源按需准备（ECS_AUTO_DEPS=0 可关闭）。")
 		result.Finish(start)
 		return result
 	}

@@ -81,8 +81,12 @@ CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私�
 
 `run.sh` 的依赖准备有明确边界：开始前记录已安装包集合，只在缺失时调用系统包管理器，
 结束时只清理本次新增的包；不执行 `autoremove` 或全局缓存清理，也不碰开始前已有的包。
-交互向导会先确定最终档位和模块，再准备对应组件。测试期间不要并行运行其他包管理器操作；
-若安装完成后的包状态被外部改变，脚本会跳过清理并保留临时目录，避免把外部新增包当成测试依赖删除。
+Ookla (`speedtest`) 只有在命令行显式 `--accept ookla` 且本机缺失时才会准备：脚本使用
+Ookla 官方 Packagecloud HTTPS 源，下载并固定校验 GPG 公钥指纹，把临时源、key、索引和缓存
+全部放在 `$WORK`，由 apt/dnf/yum 验证签名后安装，不执行供应商的 `curl | sh` 脚本。普通
+`full`/`standard` 未显式同意时不会安装 speedtest。交互向导会先确定最终档位和模块，再准备
+对应组件。测试期间不要并行运行其他包管理器操作；若安装完成后的包状态被外部改变，脚本会
+复用 `packages.before`/`packages.after` 快照并跳过清理，保留临时目录避免把外部新增包当成测试依赖删除。
 包管理器的正常安装、更新和清理输出会收进临时日志，只在失败时显示末尾诊断；设置 `ECS_KEEP=1`
 或发生清理失败时会保留现场日志。
 无法获得 root/`sudo` 或没有受支持的包管理器时，脚本会停止并提示原因；可用 `ECS_AUTO_DEPS=0`
@@ -186,9 +190,12 @@ ecs --only bgp
 # 四城三网 IPv4/IPv6 回程目标
 ecs --only backtrace -6 --backtrace-city all
 
-# 可选的官方 Ookla 客户端；必须手动安装并显式接受其条款
+# 可选的官方 Ookla 客户端；直接运行 ecs 需预先安装并显式接受条款
 ecs --accept ookla
 ecs --accept ookla --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
+
+# 一键脚本在显式接受条款后，可从官方签名包源临时准备缺失的 speedtest
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes --accept ookla
 
 # 终端友好的纯文本报告（彩色柱状图，自适应终端能力）
 ecs --format txt
@@ -284,7 +291,7 @@ ecs --accept ookla
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（显式选中即可，8 秒/100 MiB） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
-| `ookla` | 协议测量 | 本机已安装的官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试 | 默认不启用、不下载、不自动接受条款；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
+| `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；`run.sh --accept ookla` 缺失时可通过临时签名官方源准备 | 默认不启用、不安装、不自动接受条款；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
 | `backtrace` | 启发式判断 | 四城三网 IPv4/IPv6 参考目标路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
@@ -497,7 +504,7 @@ CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只�
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
 - `bgp`：RouteViews 当前公共 RIB API，查询本机 IPv4/IPv6 出口的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS 路径样本；只做当前公共观测，不上传 ecs 报告；
 - `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
-- `ookla`：只有显式启用并接受条款后，才运行本机官方 speedtest 客户端；客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
+- `ookla`：只有显式启用并接受条款后，才运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源准备并在退出时清理新增包，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；

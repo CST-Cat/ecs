@@ -67,7 +67,7 @@
 | 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | — | ✓ | ✓ |
 | 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | — | ✓ | ✓ |
 | 中国三网 HTTP 下载带宽（显式选中） | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB | 8s/100 MiB |
-| Ookla 三网测速（显式启用） | 外部官方客户端 | 本机已安装 speedtest CLI | — | 可选 | 可选 |
+| Ookla 三网测速（显式启用） | 外部官方客户端 | 本机 speedtest CLI（直接运行需预装；`run.sh --accept ookla` 可按需从官方签名源准备） | — | 可选 | 可选 |
 | JSON、Markdown、独立 HTML | ✓ | — | ✓ | ✓ | ✓ |
 
 三档配置只改变默认模块集合（quick 7、standard 16、full 18）；表中标注“选中时”的模块
@@ -252,7 +252,7 @@
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + traceroute/NextTrace 适配器 | 已自实现 |
 | DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
 | IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
-| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 显式适配本机 CLI；不自动下载、不默认同意，三网需配置服务器 ID |
+| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 显式适配本机 CLI；不默认同意，直接运行需预装，`run.sh --accept ookla` 可从官方签名源按需准备，三网需配置服务器 ID |
 | 三网 Ping | pingtest（借鉴 ecsspeed） | ✅ | ICMP 已具备，缺的是节点数据而非技术 | `latency` 为固定全球站点 |
 
 ### librespeed-cli 实跑结论（开源替代，但不是中国三网等价物）
