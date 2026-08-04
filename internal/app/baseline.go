@@ -276,7 +276,8 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "%s %s\n", i18n.T("baseline.skipped"), skipped)
 			return false
 		}
-		fmt.Fprintln(stderr, fmt.Sprintf(i18n.T("baseline.strictFailure"), filepath.Base(path), issue))
+		fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"),
+			fmt.Sprintf(i18n.T("baseline.strictFailure"), filepath.Base(path), issue))
 		return true
 	}
 	if strict {
