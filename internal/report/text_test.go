@@ -225,13 +225,16 @@ func TestTextIncludesEveryResultDetail(t *testing.T) {
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelNone})
 	for _, want := range []string{
-		"第三个指标", "3 units", "third-method", "第三个字段", "第三个值",
+		"第三个指标", "3 units", "第三个字段", "第三个值",
 		"第二张表", "第三张表值", "原始文本", "第三个文本块内容", "第三条备注",
 		"需留意", "custom-kind", "自定义方法", "custom-engine", "custom-profile", "custom-scope",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("完整文本报告缺少 %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "third-method") {
+		t.Fatalf("纯文本不应显示 Measurement.Method: %s", out)
 	}
 }
 

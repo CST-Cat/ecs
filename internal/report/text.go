@@ -249,15 +249,19 @@ func (r *textRenderer) scoreSection() {
 		r.line("  %s  %s  %s", label,
 			r.palette.Bar(dimension.Ratio, barWidth),
 			r.palette.WrapRatio(fmt.Sprintf("%7.0f", dimension.Score), dimension.Ratio))
+		r.matrixScoreSummary(dimension)
 		// 分项指标缩进一级，读者能看到维度分是怎么来的。
 		for _, metric := range dimension.Metrics {
+			if matrixKindForMeasurement(metric.Key) != "" {
+				continue
+			}
 			r.line("      %s  %s  %s",
 				textwidth.Pad(textwidth.Truncate(metricLabel(metric), 22), 22),
 				r.palette.Dim(textwidth.PadLeft(formatFloat(metric.Value)+" "+metric.Unit, 20)),
 				r.palette.Dim(fmt.Sprintf(i18n.T("score.ofBaseline"), metric.Ratio*100)))
 		}
 		if len(dimension.MissingMetrics) > 0 {
-			r.note(fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", ")))
+			r.note(fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), compactMissingMetrics(dimension)))
 		}
 	}
 	r.blank()
@@ -277,6 +281,114 @@ func (r *textRenderer) scoreSection() {
 		r.note(fmt.Sprintf(i18n.T("score.tierFallbackLine"), r.score.HostVCPU))
 	}
 	r.blank()
+}
+
+// matrixScoreSummary keeps the score section readable when a disk result has
+// dozens of Crystal/ATTO cells.  The score still uses every cell; only the
+// textual explanation is grouped by the same subgroup boundaries used by the
+// calculation.
+func (r *textRenderer) matrixScoreSummary(dimension score.DimensionScore) {
+	counts := matrixScoreCounts(dimension)
+	if len(counts) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(counts))
+	for _, kind := range []diskMatrixKind{matrixCrystal, matrixMixed, matrixATTO} {
+		if count := counts[kind]; count > 0 {
+			itemCount := fmt.Sprintf("%d", count)
+			if i18n.Current() == i18n.LangZH {
+				itemCount += " 项"
+			} else {
+				itemCount += " items"
+			}
+			parts = append(parts, matrixKindLabel(kind)+" "+itemCount)
+		}
+	}
+	if len(parts) > 0 {
+		separator := " · "
+		r.line("      %s", r.palette.Dim(strings.Join(parts, separator)))
+	}
+}
+
+func matrixScoreCounts(dimension score.DimensionScore) map[diskMatrixKind]int {
+	counts := make(map[diskMatrixKind]int)
+	for _, group := range dimension.Groups {
+		if kind := matrixKindForGroup(group.Key); kind != "" && group.MetricCount > 0 {
+			counts[kind] = group.MetricCount
+		}
+	}
+	// Old score JSON may not carry Groups.  Recover a useful count from the
+	// metric list in that case, while preferring the calculation's explicit
+	// subgroup count when it is present.
+	for _, metric := range dimension.Metrics {
+		if kind := matrixKindForMeasurement(metric.Key); kind != "" {
+			if _, ok := counts[kind]; !ok {
+				counts[kind]++
+			}
+		}
+	}
+	return counts
+}
+
+func compactMissingMetrics(dimension score.DimensionScore) string {
+	nonMatrix := make([]string, 0, len(dimension.MissingMetrics))
+	counts := make(map[diskMatrixKind]int)
+	for _, key := range dimension.MissingMetrics {
+		if kind := matrixKindForMeasurement(key); kind != "" {
+			counts[kind]++
+			continue
+		}
+		nonMatrix = append(nonMatrix, key)
+	}
+	for _, kind := range []diskMatrixKind{matrixCrystal, matrixMixed, matrixATTO} {
+		if count := counts[kind]; count > 0 {
+			label := matrixKindLabel(kind)
+			if i18n.Current() == i18n.LangZH {
+				label += fmt.Sprintf(" %d 项", count)
+			} else {
+				label += fmt.Sprintf(" (%d)", count)
+			}
+			nonMatrix = append(nonMatrix, label)
+		}
+	}
+	if len(nonMatrix) == 0 {
+		return "—"
+	}
+	return strings.Join(nonMatrix, ", ")
+}
+
+type diskMatrixKind string
+
+const (
+	matrixCrystal diskMatrixKind = "crystal"
+	matrixMixed   diskMatrixKind = "mixed"
+	matrixATTO    diskMatrixKind = "atto"
+)
+
+func matrixKindLabel(kind diskMatrixKind) string {
+	switch kind {
+	case matrixCrystal:
+		return i18n.T("score.metric.crystal")
+	case matrixMixed:
+		return i18n.T("score.metric.fio_mixed")
+	case matrixATTO:
+		return i18n.T("score.metric.atto")
+	default:
+		return string(kind)
+	}
+}
+
+func matrixKindForGroup(key string) diskMatrixKind {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case string(matrixCrystal):
+		return matrixCrystal
+	case string(matrixMixed), "fio_mixed":
+		return matrixMixed
+	case string(matrixATTO):
+		return matrixATTO
+	default:
+		return matrixKindForMeasurement(key)
+	}
 }
 
 // metricLabel 优先用 i18n 文案：measurement 的 label 是探针产出时的语言，
@@ -343,9 +455,10 @@ func (r *textRenderer) result(result model.Result) {
 	}
 	r.blank()
 
-	if len(result.Measurements) > 0 {
+	measurements := visibleMeasurements(result)
+	if len(measurements) > 0 {
 		r.subsection(i18n.T("report.metrics"))
-		r.measurements(result.Measurements)
+		r.measurements(measurements)
 	}
 	if len(result.Fields) > 0 {
 		r.subsection(i18n.T("report.details"))
@@ -409,25 +522,12 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		if item.Rating != "" {
 			rating = "  " + r.palette.Dim(textwidth.Truncate(item.Rating, 20))
 		}
-		method := ""
-		if item.Method != "" {
-			method = "[" + item.Method + "]"
-		}
 		base := "  " + label + "  " + textwidth.PadLeft(valueLines[0], valueWidth) + bar + rating
-		if method != "" && textwidth.Width(base)+2+textwidth.Width(method) <= textWidth {
-			base += "  " + r.palette.Dim(method)
-			method = ""
-		}
 		for index, valueLine := range valueLines {
 			if index == 0 {
 				r.line(base)
 			} else {
 				r.line("      %s", valueLine)
-			}
-		}
-		if method != "" {
-			for _, methodLine := range wrapText(method, textWidth-6) {
-				r.line("      %s", r.palette.Dim(methodLine))
 			}
 		}
 	}
@@ -539,11 +639,149 @@ func (r *textRenderer) fields(items []model.Field) {
 
 // resultTable 渲染带边框的表格。
 func (r *textRenderer) resultTable(table model.Table) {
+	table = normalizeMatrixTable(table)
 	if table.Title != "" {
 		r.indented(table.Title, true)
 	}
 	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
+}
+
+func normalizeMatrixTable(table model.Table) model.Table {
+	kind := matrixKindForTable(table.Title)
+	if kind == "" {
+		return table
+	}
+	if kind == matrixCrystal {
+		table.Title = "Crystal"
+	}
+	if kind == matrixATTO {
+		table.Title = "ATTO"
+	}
+	table.Columns = append([]string(nil), table.Columns...)
+	columns := []string{}
+	switch kind {
+	case matrixCrystal, matrixATTO:
+		columns = []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"}
+	case matrixMixed:
+		columns = []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "合计"}
+	}
+	for index := range table.Columns {
+		if index < len(columns) {
+			table.Columns[index] = columns[index]
+		}
+	}
+	return table
+}
+
+func matrixKindForTable(title string) diskMatrixKind {
+	lower := strings.ToLower(strings.TrimSpace(title))
+	switch {
+	case lower == string(matrixCrystal), strings.HasPrefix(lower, string(matrixCrystal)+" "):
+		return matrixCrystal
+	case lower == string(matrixATTO), strings.HasPrefix(lower, string(matrixATTO)+" "):
+		return matrixATTO
+	case strings.Contains(lower, "混合"), strings.Contains(lower, "mixed"):
+		return matrixMixed
+	default:
+		return ""
+	}
+}
+
+func visibleMeasurements(result model.Result) []model.Measurement {
+	tables := make(map[diskMatrixKind]bool)
+	for _, table := range result.Tables {
+		if kind := matrixKindForTable(table.Title); kind != "" && len(table.Rows) > 0 {
+			tables[kind] = true
+		}
+	}
+	items := make([]model.Measurement, 0, len(result.Measurements))
+	for _, item := range result.Measurements {
+		kind := matrixKindForMeasurement(item.Key)
+		if kind == "" {
+			items = append(items, item)
+			continue
+		}
+		if tables[kind] {
+			continue
+		}
+		// A legacy JSON report may carry the matrix cells without the newer
+		// table.  Keep the value, but replace the internal key-like label with
+		// a compact workload label.
+		item.Label = matrixMeasurementLabel(kind, item.Key)
+		items = append(items, item)
+	}
+	return items
+}
+
+func matrixKindForMeasurement(key string) diskMatrixKind {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	switch {
+	case strings.HasPrefix(lower, "crystal_"):
+		return matrixCrystal
+	case strings.HasPrefix(lower, "atto_"):
+		return matrixATTO
+	case strings.HasPrefix(lower, "fio_mixed_"):
+		return matrixMixed
+	default:
+		return ""
+	}
+}
+
+func matrixMeasurementLabel(kind diskMatrixKind, key string) string {
+	stem := strings.ToLower(strings.TrimSpace(key))
+	switch kind {
+	case matrixCrystal:
+		stem = strings.TrimPrefix(stem, "crystal_")
+	case matrixATTO:
+		stem = strings.TrimPrefix(stem, "atto_")
+	case matrixMixed:
+		stem = strings.TrimPrefix(stem, "fio_mixed_")
+	}
+	direction, metric := "", ""
+	for _, suffix := range []struct {
+		name      string
+		direction string
+		metric    string
+	}{
+		{name: "_read_mib_s", direction: "read", metric: "throughput"},
+		{name: "_write_mib_s", direction: "write", metric: "throughput"},
+		{name: "_read_iops", direction: "read", metric: "IOPS"},
+		{name: "_write_iops", direction: "write", metric: "IOPS"},
+	} {
+		if strings.HasSuffix(stem, suffix.name) {
+			stem = strings.TrimSuffix(stem, suffix.name)
+			direction, metric = suffix.direction, suffix.metric
+			break
+		}
+	}
+	if stem == "" {
+		stem = strings.TrimSpace(key)
+	}
+	block := strings.ToUpper(strings.ReplaceAll(stem, "_", "/"))
+	if kind == matrixCrystal {
+		// Crystal's workload key is already in the compact RND4K/Q1 form
+		// after replacing the separator.
+	} else if kind == matrixMixed {
+		block = strings.ReplaceAll(block, "/", " ")
+	}
+	if i18n.Current() == i18n.LangEN {
+		if kind == matrixMixed {
+			return "Mixed " + block + " " + direction + " " + strings.ToLower(metric)
+		}
+		return block + " " + direction + " " + strings.ToLower(metric)
+	}
+	zhDirection := map[string]string{"read": "读", "write": "写"}[direction]
+	zhMetric := metric
+	if metric == "throughput" {
+		zhMetric = "吞吐"
+	} else if metric == "IOPS" {
+		zhMetric = " IOPS"
+	}
+	if kind == matrixMixed {
+		return block + " 混合" + zhDirection + zhMetric
+	}
+	return block + " " + zhDirection + zhMetric
 }
 
 func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string {

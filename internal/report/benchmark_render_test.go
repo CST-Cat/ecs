@@ -79,6 +79,91 @@ func TestBenchmarkTextRenderingUsesPaletteLevels(t *testing.T) {
 	}
 }
 
+func TestTextHidesMatrixMeasurementKeysAndMethods(t *testing.T) {
+	data := benchmarkRenderReport()
+	disk := &data.Results[1]
+	disk.Measurements = []model.Measurement{
+		{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-legacy"},
+		{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
+		{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Display: "20 IOPS", Method: "fio-direct-atto"},
+		{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "30 MiB/s", Method: "fio-direct-mixed"},
+	}
+	disk.Tables[0].Rows = [][]string{
+		{"RND4K/Q1", "10 MiB/s", "100 IOPS", "20 MiB/s", "200 IOPS", "完成"},
+		{"RND4K/Q32", "11 MiB/s", "110 IOPS", "21 MiB/s", "210 IOPS", "完成"},
+		{"SEQ1M/Q1", "20 MiB/s", "200 IOPS", "40 MiB/s", "400 IOPS", "完成"},
+		{"SEQ1M/Q8", "21 MiB/s", "210 IOPS", "41 MiB/s", "410 IOPS", "完成"},
+	}
+	blocks := []string{"512B", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M"}
+	rows := make([][]string, 0, len(blocks))
+	for index, block := range blocks {
+		rows = append(rows, []string{block, "1 MiB/s", "10 IOPS", "2 MiB/s", "20 IOPS", "完成"})
+		if index == len(blocks)-1 {
+			disk.Tables[1].Rows = rows
+		}
+	}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, forbidden := range []string{"fio-direct-", "crystal crystal_", "atto atto_", "fio_mixed_"} {
+		if strings.Contains(plain, forbidden) {
+			t.Fatalf("纯文本不应显示内部标识 %q:\n%s", forbidden, plain)
+		}
+	}
+	for _, want := range append(blocks, "RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8", "顺序读", "100 MiB/s", "块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS") {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("矩阵/legacy 文本缺少 %q:\n%s", want, plain)
+		}
+	}
+	scored := &score.Report{
+		Total: 800, Covered: 1, Possible: 1,
+		Dimensions: []score.DimensionScore{{
+			Key: "disk", Score: 800, Ratio: 0.8,
+			Metrics: []score.MetricScore{
+				{Key: "fio_sequential_read_mib_s", Label: "磁盘顺序读", Value: 100, Unit: "MiB/s", Ratio: 1},
+				{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Value: 10, Unit: "MiB/s", Ratio: 1},
+				{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Value: 20, Unit: "IOPS", Ratio: 1},
+			},
+			Groups: []score.GroupScore{
+				{Key: "crystal", MetricCount: 16},
+				{Key: "atto", MetricCount: 72},
+			},
+		}},
+	}
+	withScore := Text(data, TextOptions{Color: termcolor.LevelNone, Score: scored})
+	for _, want := range []string{"Crystal 16 项", "ATTO 72 项", "磁盘顺序读"} {
+		if !strings.Contains(withScore, want) {
+			t.Fatalf("评分区缺少矩阵摘要/legacy 指标 %q:\n%s", want, withScore)
+		}
+	}
+	for _, forbidden := range []string{"crystal crystal_", "atto atto_", "fio-direct-"} {
+		if strings.Contains(withScore, forbidden) {
+			t.Fatalf("评分区不应显示冗余标识 %q:\n%s", forbidden, withScore)
+		}
+	}
+}
+
+func TestTextMatrixFallbackLabelsWithoutTables(t *testing.T) {
+	data := benchmarkRenderReport()
+	data.Results = []model.Result{{
+		ID: "disk", Title: "磁盘性能", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
+			{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Display: "20 IOPS", Method: "fio-direct-atto"},
+			{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "30 MiB/s", Method: "fio-direct-mixed"},
+		},
+	}}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{"RND4K/Q1 读吞吐", "512B 写 IOPS", "4K 混合读吞吐"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("旧 JSON 无表格时缺少 fallback label %q:\n%s", want, plain)
+		}
+	}
+	for _, forbidden := range []string{"fio-direct-", "crystal crystal_", "atto atto_", "fio_mixed_"} {
+		if strings.Contains(plain, forbidden) {
+			t.Fatalf("fallback 文本不应显示内部标识 %q:\n%s", forbidden, plain)
+		}
+	}
+}
+
 func TestBenchmarkTitlesAreConsistentAcrossRenderers(t *testing.T) {
 	data := benchmarkRenderReport()
 	markdown := Markdown(data, nil)
