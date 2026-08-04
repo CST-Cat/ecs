@@ -162,6 +162,45 @@ func TestSubmissionSanitizesSelfReportedFields(t *testing.T) {
 	}
 }
 
+func TestSubmissionAutoDetectsAndOverridesCloudMetadata(t *testing.T) {
+	data := sampleSubmissionReport()
+	data.Results[0].Fields = append(data.Results[0].Fields,
+		model.Field{Key: "cloud_provider", Value: "oracle-cloud"},
+		model.Field{Key: "cloud_region", Value: "us-sanjose-1"},
+	)
+	auto, err := BuildSubmission(data, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Host.Provider != "oracle-cloud" || auto.Host.Region != "us-sanjose-1" {
+		t.Fatalf("auto metadata = provider %q region %q", auto.Host.Provider, auto.Host.Region)
+	}
+	override, err := BuildSubmission(data, SubmissionOptions{Provider: "vultr", Region: "fra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.Host.Provider != "vultr" || override.Host.Region != "fra" {
+		t.Fatalf("explicit metadata = provider %q region %q", override.Host.Provider, override.Host.Region)
+	}
+}
+
+func TestSubmissionMetadataRoundTripsThroughAsReport(t *testing.T) {
+	data := sampleSubmissionReport()
+	data.Results[0].Fields = append(data.Results[0].Fields,
+		model.Field{Key: "cloud_provider", Label: "云厂商", Value: "oracle-cloud"},
+		model.Field{Key: "cloud_region", Label: "云区域", Value: "us-sanjose-1"},
+	)
+	submission, err := BuildSubmission(data, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, region := ExtractSubmissionMetadata(submission.AsReport())
+	if provider != submission.Host.Provider || region != submission.Host.Region {
+		t.Fatalf("metadata round-trip = provider %q region %q; want provider %q region %q",
+			provider, region, submission.Host.Provider, submission.Host.Region)
+	}
+}
+
 // 提交转成最小报告后，聚合基线必须得到与原始值一致的结果——
 // 这保证了基线聚合对两种输入只有一条代码路径。
 func TestSubmissionRoundTripsThroughBaseline(t *testing.T) {

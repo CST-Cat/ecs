@@ -313,3 +313,26 @@ func TestBaselineStrictRejectsUnscorableReportWithoutWriting(t *testing.T) {
 		t.Fatalf("strict baseline wrote output after unscorable report: err=%v", err)
 	}
 }
+
+func TestLeaderboardDisplaysPerInputMetadata(t *testing.T) {
+	withMetadata := submitTestReport(true)
+	withMetadata.Results[0].Fields = []model.Field{
+		{Key: "cloud_provider", Value: "oracle-cloud"},
+		{Key: "cloud_region", Value: "us-sanjose-1"},
+	}
+	withoutMetadata := submitTestReport(true)
+	first := writeBaselineReport(t, "with-metadata.json", withMetadata)
+	second := writeBaselineReport(t, "without-metadata.json", withoutMetadata)
+	target := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if status := leaderboardCommand([]string{
+		"--output", target, first, second,
+	}, &stdout, &stderr); status != 0 {
+		t.Fatalf("leaderboard status = %d, stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"oracle-cloud", "us-sanjose-1", "unknown"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("leaderboard metadata summary missing %q: %s", expected, stdout.String())
+		}
+	}
+}

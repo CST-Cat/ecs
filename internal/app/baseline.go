@@ -317,6 +317,18 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 	// 提交会被转成最小报告，因此聚合只有一条代码路径。
 	var reports []model.Report
 	var submissions []score.Submission
+	providerCounts := make(map[string]int)
+	regionCounts := make(map[string]int)
+	recordMetadata := func(provider, region string) {
+		if strings.TrimSpace(provider) == "" {
+			provider = "unknown"
+		}
+		if strings.TrimSpace(region) == "" {
+			region = "unknown"
+		}
+		providerCounts[provider]++
+		regionCounts[region]++
+	}
 	seen := make(map[string]string)
 	for _, path := range paths {
 		// 目录里通常就放着上一次生成的基线，它不是输入。
@@ -333,6 +345,7 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 			}
 			seen[submission.ID] = path
 			submissions = append(submissions, submission)
+			recordMetadata(submission.Host.Provider, submission.Host.Region)
 			reports = append(reports, submission.AsReport())
 			continue
 		}
@@ -350,6 +363,8 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 			}
 			continue
 		}
+		provider, region := score.ExtractSubmissionMetadata(data)
+		recordMetadata(provider, region)
 		reports = append(reports, data)
 	}
 	if len(reports) == 0 {
@@ -374,6 +389,7 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 
 	fmt.Fprintf(stdout, "%s %s\n", i18n.T("baseline.written"), *output)
 	fmt.Fprintf(stdout, "%s\n", fmt.Sprintf(i18n.T("baseline.summary"), len(reports), len(baseline.Metrics)))
+	printMetadataCounts(stdout, providerCounts, regionCounts)
 
 	// 逐项列出样本数：某个指标只有一两台机器测到时，它对基线的代表性远低于
 	// 其他项，使用者应当看得到这件事。
@@ -428,6 +444,34 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 		}
 	}
 	return 0
+}
+
+func printMetadataCounts(stdout io.Writer, providerCounts, regionCounts map[string]int) {
+	fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.metadataHeader"))
+	for _, item := range sortedMetadataCounts(providerCounts) {
+		fmt.Fprintf(stdout, "  %s\n", fmt.Sprintf(i18n.T("baseline.providerSamples"), item.value, item.count))
+	}
+	for _, item := range sortedMetadataCounts(regionCounts) {
+		fmt.Fprintf(stdout, "  %s\n", fmt.Sprintf(i18n.T("baseline.regionSamples"), item.value, item.count))
+	}
+}
+
+type metadataCount struct {
+	value string
+	count int
+}
+
+func sortedMetadataCounts(values map[string]int) []metadataCount {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	items := make([]metadataCount, 0, len(keys))
+	for _, key := range keys {
+		items = append(items, metadataCount{value: key, count: values[key]})
+	}
+	return items
 }
 
 // validateBaselineReport rejects a syntactically valid full report that has

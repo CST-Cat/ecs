@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -117,8 +118,21 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 		Metrics: metrics,
 		Profile: data.Run.Profile,
 	}
-	submission.Host.Region = sanitizeShort(options.Region, 32)
-	submission.Host.Provider = sanitizeShort(options.Provider, 48)
+	// System metadata is a narrow, non-sensitive whitelist.  Explicit CLI
+	// values remain authoritative, while empty values safely leave the
+	// auto-detected metadata in place.
+	if metadata := safeMetadataValue(submission.Host.Region, 32); metadata != "" {
+		submission.Host.Region = metadata
+	}
+	if metadata := safeMetadataValue(submission.Host.Provider, 48); metadata != "" {
+		submission.Host.Provider = metadata
+	}
+	if explicit := sanitizeShort(options.Region, 32); explicit != "" {
+		submission.Host.Region = explicit
+	}
+	if explicit := sanitizeShort(options.Provider, 48); explicit != "" {
+		submission.Host.Provider = explicit
+	}
 	submission.Note = sanitizeShort(options.Note, maxNoteLength)
 	submission.ID = submission.fingerprint()
 	// Keep invalid records out of every export path, not just the repository
@@ -146,6 +160,26 @@ func extractHostSpec(data model.Report, values map[string]measured) HostSpec {
 		for _, field := range result.Fields {
 			// 按 key 白名单取值，不按 label——label 会随语言变。
 			switch field.Key {
+			case "cloud_provider":
+				if value := safeMetadataValue(field.Value, 48); value != "" {
+					spec.Provider = value
+				}
+			case "provider":
+				if spec.Provider == "" {
+					if value := safeMetadataValue(field.Value, 48); value != "" {
+						spec.Provider = value
+					}
+				}
+			case "cloud_region":
+				if value := safeMetadataValue(field.Value, 32); value != "" {
+					spec.Region = value
+				}
+			case "region":
+				if spec.Region == "" {
+					if value := safeMetadataValue(field.Value, 32); value != "" {
+						spec.Region = value
+					}
+				}
 			case "virtualization":
 				spec.Virtualization = field.Value
 			case "cpu_model":
@@ -156,6 +190,14 @@ func extractHostSpec(data model.Report, values map[string]measured) HostSpec {
 		}
 	}
 	return spec
+}
+
+// ExtractSubmissionMetadata returns only the provider/region fields that the
+// submission whitelist permits.  It is used by leaderboard aggregation for
+// full reports that have not yet been converted to a submission.
+func ExtractSubmissionMetadata(data model.Report) (provider, region string) {
+	spec := extractHostSpec(data, collectMeasurements(data))
+	return spec.Provider, spec.Region
 }
 
 func extractToolSpec(data model.Report) ToolSpec {
@@ -324,6 +366,10 @@ func (s Submission) AsReport() model.Report {
 	// 机器规格要一并还原：基线按 vCPU 分档，少了它整批提交都会落进"未知档"。
 	report.Results = append(report.Results, model.Result{
 		ID: "system", Status: model.StatusOK,
+		Fields: []model.Field{
+			{Key: "cloud_provider", Label: "云厂商", Value: s.Host.Provider},
+			{Key: "cloud_region", Label: "云区域", Value: s.Host.Region},
+		},
 		Measurements: []model.Measurement{
 			{Key: "logical_cpus", Value: float64(s.Host.VCPU)},
 			{Key: "memory_total_bytes", Value: s.Host.MemoryGiB * (1 << 30)},
@@ -335,6 +381,17 @@ func (s Submission) AsReport() model.Report {
 		})
 	}
 	return report
+}
+
+func safeMetadataValue(value string, limit int) string {
+	value = sanitizeShort(value, limit)
+	if value == "" || net.ParseIP(value) != nil || strings.Contains(value, "://") {
+		return ""
+	}
+	if strings.ContainsAny(value, "/\\@") {
+		return ""
+	}
+	return value
 }
 
 func sortedModuleIDs(values map[string][]model.Measurement) []string {

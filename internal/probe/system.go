@@ -79,6 +79,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
 	hardware := snapshot.Hardware
+	cloud := discoverLocalCloudIdentity()
 	memoryValue := fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率",
 		model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryUsed),
 		model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
@@ -93,6 +94,8 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "kernel", Label: "内核", Value: snapshot.Kernel},
 		{Key: "arch", Label: "架构", Value: snapshot.Arch},
 		{Key: "virtualization", Label: "虚拟化", Value: snapshot.Virtualization},
+		{Key: "cloud_provider", Label: "云厂商", Value: cloud.Provider},
+		{Key: "cloud_region", Label: "云区域", Value: cloud.Region},
 		{Key: "cpu_model", Label: "CPU", Value: snapshot.CPUModel},
 		{Key: "cpu_topology", Label: "CPU 拓扑", Value: fmt.Sprintf("%d 逻辑 / %d 物理核心", snapshot.LogicalCPUs, snapshot.PhysicalCores)},
 		{Key: "cpu_allowance", Label: "CPU 配额", Value: describeCPUAllowance(snapshot.Allowance)},

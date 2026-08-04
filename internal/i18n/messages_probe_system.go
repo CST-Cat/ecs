@@ -21,6 +21,8 @@ var probeEnglishSystem = map[string]string{
 	"已启用 BBR":          "BBR enabled",
 	"CPU steal（累计）":    "CPU steal (cumulative)",
 	"CPU steal（自开机累计）": "CPU steal (since boot)",
+	"云厂商":              "Cloud provider",
+	"云区域":              "Cloud region",
 	"CPU 性能":           "CPU Performance",
 	"CPU 拓扑":           "CPU topology",
 	"CPU 缓存":           "CPU cache",
