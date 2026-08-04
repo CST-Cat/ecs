@@ -189,6 +189,69 @@ func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
 	}
 }
 
+func TestTextModuleHeadersKeepProjectNamesOnly(t *testing.T) {
+	data := textSampleReport()
+	data.Results = []model.Result{
+		{
+			ID: "backtrace", Title: "三网回程", Status: model.StatusOK,
+			StartedAt: time.Date(2026, 8, 4, 3, 4, 5, 0, time.UTC),
+			Sources:   []model.Source{{Name: "backtrace", URL: "https://github.com/zhanghanyun/backtrace"}},
+		},
+		{
+			ID: "disk", Title: "磁盘性能", Status: model.StatusOK,
+			Sources: []model.Source{{Name: "fio", URL: "https://github.com/axboe/fio"}},
+		},
+		{ID: "bare", Title: "无来源模块", Status: model.StatusOK},
+	}
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
+	segments := textModuleBanners(plain)
+	if len(segments) != len(data.Results) {
+		t.Fatalf("模块头数量 = %d，期望 %d:\n%s", len(segments), len(data.Results), plain)
+	}
+	for _, segment := range segments {
+		for _, forbidden := range []string{
+			"https://", "http://", "bash <(curl", "2026-08-04", "03:04:05", "test",
+		} {
+			if strings.Contains(segment, forbidden) {
+				t.Fatalf("模块头不应包含冗余元数据 %q:\n%s", forbidden, segment)
+			}
+		}
+	}
+	if !strings.Contains(segments[0], "三网回程") || !strings.Contains(segments[0], "backtrace") {
+		t.Fatalf("模块头应保留标题和项目名:\n%s", segments[0])
+	}
+	if !strings.Contains(segments[1], i18n.T("report.diskBenchmark")) || !strings.Contains(segments[1], "fio") {
+		t.Fatalf("模块头应保留标题和项目名:\n%s", segments[1])
+	}
+	if !strings.Contains(segments[2], "无来源模块") {
+		t.Fatalf("无来源模块头缺少标题:\n%s", segments[2])
+	}
+	if lines := strings.Split(segments[2], "\n"); len(lines) != 3 {
+		t.Fatalf("无来源模块不应因空项目产生额外空行：%d 行\n%s", len(lines), segments[2])
+	}
+}
+
+func textModuleBanners(output string) []string {
+	startMarker := strings.Repeat("*", textWidth)
+	endMarker := strings.Repeat("-", textWidth)
+	segments := []string{}
+	for offset := 0; offset < len(output); {
+		start := strings.Index(output[offset:], startMarker)
+		if start < 0 {
+			break
+		}
+		start += offset
+		end := strings.Index(output[start+len(startMarker):], endMarker)
+		if end < 0 {
+			break
+		}
+		end += start + len(startMarker)
+		segments = append(segments, output[start:end+len(endMarker)])
+		offset = end + len(endMarker)
+	}
+	return segments
+}
+
 func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 	data := textSampleReport()
 	result := &data.Results[0]
@@ -208,18 +271,18 @@ func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 		{Name: "secondary", URL: "https://example.com/secondary"},
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "secondary"} {
+	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "https://example.com/primary", "https://example.com/secondary", "secondary"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("实现/解释性文本不应出现在 txt (%q):\n%s", forbidden, out)
 		}
 	}
-	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "https://example.com/primary"} {
+	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "primary"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("纯文本缺少保留事实 %q:\n%s", want, out)
 		}
 	}
-	if count := strings.Count(out, "https://example.com/primary"); count != 1 {
-		t.Fatalf("banner 来源应只显示一次，出现 %d 次", count)
+	if count := strings.Count(out, "primary"); count != 1 {
+		t.Fatalf("banner 项目名应只显示一次，出现 %d 次", count)
 	}
 }
 

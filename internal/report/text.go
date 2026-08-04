@@ -60,12 +60,10 @@ type textRenderer struct {
 	score        *score.Report
 	section      int
 	subsectionNo int
-	version      string
 	headline     string
 }
 
 func (r *textRenderer) render(data model.Report) string {
-	r.version = data.Tool.Version
 	r.headline = data.Summary.Headline
 	r.moduleNavigation(data)
 	r.header(data)
@@ -575,28 +573,23 @@ func (r *textRenderer) result(result model.Result) {
 func (r *textRenderer) moduleBanner(result model.Result) {
 	r.line(r.palette.Dim(strings.Repeat("*", textWidth)))
 	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
-	source := "https://github.com/CST-Cat/ecs"
-	for _, candidate := range result.Sources {
-		if strings.TrimSpace(candidate.URL) != "" {
-			source = candidate.URL
-			break
-		}
-	}
-	r.centeredStyled(source, r.palette.Info)
-	command := "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)"
-	if result.ID != "" {
-		command += " --only " + result.ID
-	}
-	r.centeredStyled(command, r.palette.Info)
-	when := result.StartedAt
-	version := fallbackReport(r.version, "ecs")
-	if when.IsZero() {
-		r.centeredStyled(version, r.palette.Dim)
-	} else {
-		timestamp := when.Format("2006-01-02 15:04:05 MST")
-		r.centeredStyled(timestamp+" · "+version, r.palette.Dim)
+	if project := sourceProjectName(result.Sources); project != "" {
+		r.centeredStyled(project, r.palette.Info)
 	}
 	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
+}
+
+// sourceProjectName keeps the compact, human-facing implementation/source
+// name while deliberately omitting URLs and execution metadata from each
+// module banner.  The first named source is the primary one; additional
+// sources remain available in JSON/other report formats.
+func sourceProjectName(sources []model.Source) string {
+	for _, source := range sources {
+		if name := strings.TrimSpace(source.Name); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 type textGroup struct {
