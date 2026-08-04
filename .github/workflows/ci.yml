@@ -32,14 +32,12 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: false
-      # 真实外部工具端到端测试集中在 benchmark job，避免 1.22/stable
-      # 矩阵和 race 再重复跑完整 fio/ATTO、sysbench 与 iperf3。
       - name: Unit and parser tests
         run: >-
           go test
           -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
-      - name: Install i18n benchmark tools
+      - name: Install i18n report tools
         if: matrix.go == 'stable'
         run: |
           # memory 报告需要真实 sysbench 输出；mbw 是可选补充口径，发行版有包时一并覆盖。
@@ -158,29 +156,6 @@ jobs:
           -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
 
-  # 真实标准工具端到端测试只跑一次：完整 fio/ATTO、sysbench、iperf3、
-  # loopback ping 与 traceroute 仍是质量门禁，但不再乘以 Go/race 矩阵。
-  # 它们只在 nightly/manual 运行，push/PR 与 tag 发布不被长测阻塞。
-  benchmark:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          cache: false
-      - name: Install benchmark tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fio sysbench iperf3 traceroute iputils-ping
-          fio --version && sysbench --version && iperf3 --version | head -1
-      - name: Real benchmark adapter tests
-        run: >-
-          go test ./internal/probe/ -count=1 -v -timeout 20m
-          -run '^(TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback)$'
-
   cross:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -205,7 +180,7 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - name: Install benchmark tools
+      - name: Install live-check tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq fio sysbench iperf3 traceroute
