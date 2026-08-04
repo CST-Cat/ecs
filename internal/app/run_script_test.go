@@ -50,6 +50,7 @@ func TestRunScriptUsesDirectTempOutputAndTracksThisRun(t *testing.T) {
 		`ECS_PLAN_FILE=`,
 		`submit --help >/dev/null 2>&1`,
 		`--reveal is not allowed in submit mode`,
+		`validate_submit_parent`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh missing report-output guard %q", required)

@@ -592,6 +592,23 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   [ -n "$SUBMIT_OUTPUT" ] ||
     die "--output 路径不能为空" "--output path must not be empty"
 
+  validate_submit_parent() {
+    submit_parent=$1
+    while :; do
+      [ ! -L "$submit_parent" ] ||
+        die "提交输出父目录不能是符号链接：$submit_parent" "submit output parent must not be a symlink: $submit_parent"
+      [ -d "$submit_parent" ] ||
+        die "提交输出父目录不存在：$submit_parent" "submit output parent does not exist: $submit_parent"
+      case "$submit_parent" in
+        /) break ;;
+        */*) submit_next=${submit_parent%/*}; [ -n "$submit_next" ] || submit_next=/ ;;
+        *) submit_next=. ;;
+      esac
+      [ "$submit_next" = "$submit_parent" ] && break
+      submit_parent=$submit_next
+    done
+  }
+
   # Fail before downloading/running benchmarks when the final destination is
   # plainly unusable.  Submit mode never creates a user directory and never
   # overwrites an existing file; the downloaded ecs binary repeats the same
@@ -599,6 +616,7 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   if [ -L "$SUBMIT_OUTPUT" ]; then
     die "提交输出不能是符号链接：$SUBMIT_OUTPUT" "submit output must not be a symlink: $SUBMIT_OUTPUT"
   elif [ -d "$SUBMIT_OUTPUT" ]; then
+    validate_submit_parent "$SUBMIT_OUTPUT"
     [ -w "$SUBMIT_OUTPUT" ] ||
       die "提交输出目录不可写：$SUBMIT_OUTPUT" "submit output directory is not writable: $SUBMIT_OUTPUT"
   else
@@ -606,10 +624,7 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
       */*) SUBMIT_OUTPUT_PARENT=${SUBMIT_OUTPUT%/*}; [ -n "$SUBMIT_OUTPUT_PARENT" ] || SUBMIT_OUTPUT_PARENT=/ ;;
       *) SUBMIT_OUTPUT_PARENT=. ;;
     esac
-    [ -d "$SUBMIT_OUTPUT_PARENT" ] ||
-      die "提交输出父目录不存在：$SUBMIT_OUTPUT_PARENT" "submit output parent does not exist: $SUBMIT_OUTPUT_PARENT"
-    [ ! -L "$SUBMIT_OUTPUT_PARENT" ] ||
-      die "提交输出父目录不能是符号链接：$SUBMIT_OUTPUT_PARENT" "submit output parent must not be a symlink: $SUBMIT_OUTPUT_PARENT"
+    validate_submit_parent "$SUBMIT_OUTPUT_PARENT"
     [ -w "$SUBMIT_OUTPUT_PARENT" ] ||
       die "提交输出父目录不可写：$SUBMIT_OUTPUT_PARENT" "submit output parent is not writable: $SUBMIT_OUTPUT_PARENT"
     [ ! -e "$SUBMIT_OUTPUT" ] ||
