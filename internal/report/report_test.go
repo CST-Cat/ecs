@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ecs/internal/model"
+	"ecs/internal/score"
 )
 
 func sampleReport() model.Report {
@@ -58,6 +59,82 @@ func TestMarkdownAndHTML(t *testing.T) {
 	}
 	if !strings.Contains(text, "&lt;safe&gt;") || !strings.Contains(text, "零自动上传") || !strings.Contains(text, "事实采集") {
 		t.Fatalf("unexpected html: %s", text)
+	}
+}
+
+// Human-readable formats intentionally differ in density, but they must retain
+// every structured result category that a reader needs to diagnose a run.  The
+// terminal view is compact by design (see text_test.go for its explicit
+// omissions); Markdown and HTML are the complete human-facing views.
+func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
+	data := sampleReport()
+	data.Run.Exposure = "public"
+	data.Run.Accepted = []string{"ookla"}
+	data.Run.IPVersion = "4"
+	data.Run.Canceled = true
+	data.Summary = model.Summary{
+		Status: model.StatusWarning, Warnings: 1, Headline: "summary-marker",
+	}
+	data.Notices = []string{"notice-marker"}
+	data.Results = []model.Result{{
+		ID: "coverage", Title: "result-title-marker", Description: "description-marker",
+		Methodology: model.Methodology{
+			Kind: "custom", Label: "method-label-marker", Engine: "method-engine-marker",
+			Profile: "method-profile-marker", ComparisonScope: "method-scope-marker",
+		},
+		Status: model.StatusError, Summary: "result-summary-marker", Error: "error-marker",
+		Fields: []model.Field{{Label: "field-label-marker", Value: "field-value-marker"}},
+		Measurements: []model.Measurement{{
+			Label: "measurement-label-marker", Display: "measurement-display-marker",
+			Rating: "measurement-rating-marker", Method: "measurement-method-marker",
+		}},
+		Tables: []model.Table{{
+			Title: "table-title-marker", Columns: []string{"column-marker"},
+			Rows: [][]string{{"cell-marker"}},
+		}},
+		Notes:   []string{"note-marker"},
+		Sources: []model.Source{{Name: "source-name-marker", URL: "https://example.com/source", Purpose: "source-purpose-marker"}},
+	}}
+	scored := &score.Report{
+		Total: 123, Ratio: 0.123, Covered: 1, Possible: 2,
+		BaselineSource: "score-source-marker", BaselineSample: 3,
+		Dimensions: []score.DimensionScore{{Key: "cpu", Score: 123, Ratio: 0.123}},
+	}
+
+	markdown := Markdown(data, scored)
+	htmlBytes, err := HTML(data, scored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(htmlBytes)
+	for _, format := range map[string]string{"markdown": markdown, "html": html} {
+		for _, marker := range []string{
+			"summary-marker", "result-title-marker", "description-marker", "method-label-marker",
+			"method-engine-marker", "method-profile-marker", "method-scope-marker", "result-summary-marker",
+			"error-marker", "field-label-marker", "field-value-marker", "measurement-label-marker",
+			"measurement-display-marker", "measurement-rating-marker", "measurement-method-marker",
+			"table-title-marker", "column-marker", "cell-marker", "note-marker", "source-name-marker",
+			"source-purpose-marker", "notice-marker", "score-source-marker",
+		} {
+			if !strings.Contains(format, marker) {
+				t.Fatalf("%s format missing %q:\n%s", format, marker, format)
+			}
+		}
+	}
+
+	// JSON is the lossless structured artifact; unlike human renderers it does
+	// not embed the optional computed score, which is intentionally derived.
+	jsonBytes, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"field-value-marker", "measurement-display-marker", "cell-marker", "note-marker",
+		"source-purpose-marker", "error-marker", "summary-marker", "notice-marker",
+	} {
+		if !strings.Contains(string(jsonBytes), marker) {
+			t.Fatalf("JSON format missing %q:\n%s", marker, jsonBytes)
+		}
 	}
 }
 

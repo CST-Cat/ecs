@@ -63,3 +63,34 @@ func TestRunScriptUsesDirectTempOutputAndTracksThisRun(t *testing.T) {
 		t.Fatal("run.sh must not select an arbitrary JSON from the report directory")
 	}
 }
+
+func TestRunScriptKeepsRunOptionsAndFiltersSubmitOptions(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	// These are ecs run flags, not wrapper flags: normal invocations and submit
+	// invocations both pass the filtered positional parameters through intact.
+	for _, option := range []string{
+		"--profile", "--only", "--skip", "--config", "--exposure", "--accept",
+		"--format", "--output", "--name",
+	} {
+		if !strings.Contains(text, option) {
+			t.Fatalf("run.sh no longer documents or handles run option %q", option)
+		}
+	}
+	for _, option := range []string{
+		"      --submit)",
+		"      --provider)",
+		"      --region)",
+		"      --output)",
+	} {
+		if !strings.Contains(text, option) {
+			t.Fatalf("run.sh submit filter missing %q", option)
+		}
+	}
+	if !strings.Contains(text, `"${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"`) {
+		t.Fatal("submit mode must pass filtered run arguments to ecs")
+	}
+}
