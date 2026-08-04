@@ -367,9 +367,9 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 }
 
 // FullReport 在所有模块完成、脱敏、评分和文件写入后一次性输出完整报告。
-// data 必须是已经按当前语言本地化的副本；正文的所有 measurements、fields、
-// tables、text blocks 和 notes 均由 reporter.Text 统一渲染，避免终端摘要自行
-// 截断或遗漏结果。
+// data 必须是已经按当前语言本地化的副本；结构化 measurements、fields 和 tables
+// 由 reporter.Text 统一渲染。终端 txt 有意隐藏原始 text blocks、冗余 notes 与
+// 方法学长说明，避免把实现细节混入模板正文。
 func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
 	terminal.line("")
 	text := reporter.Text(data, reporter.TextOptions{Color: color, Score: scored})

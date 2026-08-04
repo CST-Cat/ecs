@@ -60,10 +60,12 @@ type textRenderer struct {
 	section      int
 	subsectionNo int
 	version      string
+	headline     string
 }
 
 func (r *textRenderer) render(data model.Report) string {
 	r.version = data.Tool.Version
+	r.headline = data.Summary.Headline
 	r.moduleNavigation(data)
 	r.header(data)
 	for _, result := range data.Results {
@@ -100,6 +102,9 @@ func (r *textRenderer) header(data model.Report) {
 	r.centered(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")))
 	r.centered(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")))
 	r.centered(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")))
+	if data.Summary.Headline != "" {
+		r.centered(metaLabel("报告状态", data.Summary.Headline, "Report status", data.Summary.Headline))
+	}
 	exposure := fallbackReport(data.Run.Exposure, "local")
 	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
 	if data.Run.IPVersion != "" {
@@ -434,7 +439,7 @@ func (r *textRenderer) result(result model.Result) {
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
 	status := statusIcon(result.Status) + " " + statusLabel(result.Status)
-	if result.Summary != "" {
+	if result.Summary != "" && strings.TrimSpace(result.Summary) != strings.TrimSpace(r.headline) {
 		status += " · " + result.Summary
 	}
 	if result.Status != model.StatusOK || result.Error != "" {

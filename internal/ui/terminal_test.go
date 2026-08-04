@@ -197,11 +197,16 @@ func TestFullReportPrintsCompleteTextAndPaths(t *testing.T) {
 	}, map[string]string{"json": "/tmp/report.json", "txt": "/tmp/report.txt"}, &score.Report{Total: 800, Covered: 1, Possible: 1}, termcolor.LevelNone)
 	text := output.String()
 	for _, want := range []string{
-		"指标一", "指标二", "指标三", "字段值", "表格值", "文本块内容", "备注",
-		"完整结果", "事实采集", "综合评分", "/tmp/report.json", "/tmp/report.txt", "未上传任何报告",
+		"指标一", "指标二", "指标三", "字段值", "表格值",
+		"完整结果", "报告状态：完成", "综合评分", "/tmp/report.json", "/tmp/report.txt", "未上传任何报告",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("full report output missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"文本块内容", "备注", "事实采集", "全部完成", "engine"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("full report should hide raw/notes/methodology detail %q:\n%s", forbidden, text)
 		}
 	}
 }
