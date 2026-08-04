@@ -917,6 +917,15 @@ func comparisonSemantic(item model.Measurement) string {
 		case strings.Contains(lower, "reachable"), strings.Contains(lower, "可达"):
 			return "reachability"
 		}
+	case "bytes":
+		switch {
+		case strings.Contains(lower, "memory"), strings.Contains(lower, "内存"):
+			return "memory-capacity"
+		case strings.Contains(lower, "disk"), strings.Contains(lower, "磁盘"):
+			return "disk-capacity"
+		case strings.Contains(lower, "swap"), strings.Contains(lower, "交换"):
+			return "swap-capacity"
+		}
 	}
 	return ""
 }

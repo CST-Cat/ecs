@@ -692,4 +692,20 @@ func TestMeasurementBarsKeepSemanticDirectionAndZeroValues(t *testing.T) {
 	if groups := groupComparable([]model.Measurement{{Key: "single", Label: "单项", Value: 1, Unit: "u", HigherIsBetter: model.BoolPtr(true)}}); len(groups) != 0 {
 		t.Fatalf("单项不应绘制相对柱：%v", groups)
 	}
+
+	resources := []model.Measurement{
+		{Key: "memory_used_bytes", Label: "已用内存", Value: 100, Unit: "bytes", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "memory_cached_bytes", Label: "缓存内存", Value: 50, Unit: "bytes", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "memory_available_bytes", Label: "可用内存", Value: 200, Unit: "bytes", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "memory_total_bytes", Label: "总内存", Value: 300, Unit: "bytes", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "disk_used_bytes", Label: "已用磁盘", Value: 1000, Unit: "bytes", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "disk_reserved_bytes", Label: "预留磁盘", Value: 500, Unit: "bytes", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "disk_available_bytes", Label: "可用磁盘", Value: 2000, Unit: "bytes", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "disk_total_bytes", Label: "总磁盘", Value: 3000, Unit: "bytes", HigherIsBetter: model.BoolPtr(true)},
+	}
+	resourceGroups := groupComparable(resources)
+	if resourceGroups["memory_used_bytes"].max == resourceGroups["disk_used_bytes"].max ||
+		resourceGroups["memory_available_bytes"].max == resourceGroups["disk_available_bytes"].max {
+		t.Fatal("内存与磁盘容量不应共用同一柱状图刻度")
+	}
 }
