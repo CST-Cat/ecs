@@ -60,10 +60,12 @@ type textRenderer struct {
 	score        *score.Report
 	section      int
 	subsectionNo int
+	version      string
 	headline     string
 }
 
 func (r *textRenderer) render(data model.Report) string {
+	r.version = data.Tool.Version
 	r.headline = data.Summary.Headline
 	r.moduleNavigation(data)
 	r.header(data)
@@ -573,30 +575,28 @@ func (r *textRenderer) result(result model.Result) {
 func (r *textRenderer) moduleBanner(result model.Result) {
 	r.line(r.palette.Dim(strings.Repeat("*", textWidth)))
 	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
-	if projects := sourceProjectNames(result.Sources); projects != "" {
-		r.centeredStyled(projects, r.palette.Info)
-	}
-	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
-}
-
-// sourceProjectNames keeps compact, human-facing implementation/source names
-// while deliberately omitting URLs and execution metadata from each module
-// banner.  Names retain source order and are de-duplicated case-insensitively;
-// all source metadata remains available in JSON/other report formats.
-func sourceProjectNames(sources []model.Source) string {
-	names := make([]string, 0, len(sources))
-	seen := make(map[string]struct{}, len(sources))
-	for _, source := range sources {
-		if name := strings.TrimSpace(source.Name); name != "" {
-			key := strings.ToLower(name)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			names = append(names, name)
+	source := "https://github.com/CST-Cat/ecs"
+	for _, candidate := range result.Sources {
+		if strings.TrimSpace(candidate.URL) != "" {
+			source = candidate.URL
+			break
 		}
 	}
-	return strings.Join(names, " · ")
+	r.centeredStyled(source, r.palette.Info)
+	command := "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)"
+	if result.ID != "" {
+		command += " --only " + result.ID
+	}
+	r.centeredStyled(command, r.palette.Info)
+	when := result.StartedAt
+	version := fallbackReport(r.version, "ecs")
+	if when.IsZero() {
+		r.centeredStyled(version, r.palette.Dim)
+	} else {
+		timestamp := when.Format("2006-01-02 15:04:05 MST")
+		r.centeredStyled(timestamp+" · "+version, r.palette.Dim)
+	}
+	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
 type textGroup struct {

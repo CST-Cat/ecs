@@ -189,7 +189,7 @@ func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
 	}
 }
 
-func TestTextModuleHeadersKeepProjectNamesOnly(t *testing.T) {
+func TestTextModuleHeadersIncludeSourceAndExecutionMetadata(t *testing.T) {
 	data := textSampleReport()
 	data.Results = []model.Result{
 		{
@@ -214,33 +214,29 @@ func TestTextModuleHeadersKeepProjectNamesOnly(t *testing.T) {
 		t.Fatalf("模块头数量 = %d，期望 %d:\n%s", len(segments), len(data.Results), plain)
 	}
 	for _, segment := range segments {
-		for _, forbidden := range []string{
-			"https://", "http://", "bash <(curl", "2026-08-04", "03:04:05", "test",
-		} {
-			if strings.Contains(segment, forbidden) {
-				t.Fatalf("模块头不应包含冗余元数据 %q:\n%s", forbidden, segment)
+		for _, want := range []string{"https://", "bash <(curl", "test"} {
+			if !strings.Contains(segment, want) {
+				t.Fatalf("模块头缺少 URL/curl/时间或版本 %q:\n%s", want, segment)
 			}
 		}
 	}
-	if !strings.Contains(segments[0], "三网回程") || !strings.Contains(segments[0], "backtrace") {
-		t.Fatalf("模块头应保留标题和项目名:\n%s", segments[0])
+	if !strings.Contains(segments[0], "三网回程") || !strings.Contains(segments[0], "https://github.com/zhanghanyun/backtrace") ||
+		!strings.Contains(segments[0], "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh) --only backtrace") ||
+		!strings.Contains(segments[0], "2026-08-04 03:04:05 UTC · test") {
+		t.Fatalf("模块头应保留来源、命令和开始时间/版本:\n%s", segments[0])
 	}
-	if !strings.Contains(segments[1], i18n.T("report.diskBenchmark")) || !strings.Contains(segments[1], "fio · YABS") {
-		t.Fatalf("模块头应保留去重后的全部项目名:\n%s", segments[1])
-	}
-	if strings.Count(segments[1], "fio") != 1 || strings.Count(segments[1], "YABS") != 1 {
-		t.Fatalf("模块头项目名不应重复:\n%s", segments[1])
+	if !strings.Contains(segments[1], i18n.T("report.diskBenchmark")) ||
+		!strings.Contains(segments[1], "https://github.com/axboe/fio") ||
+		!strings.Contains(segments[1], "--only disk") || !strings.Contains(segments[1], "test") {
+		t.Fatalf("磁盘模块头应保留首个来源、命令和版本:\n%s", segments[1])
 	}
 	if !strings.Contains(segments[2], "无来源模块") {
 		t.Fatalf("无来源模块头缺少标题:\n%s", segments[2])
 	}
 	for _, segment := range segments {
-		if lines := strings.Split(segment, "\n"); lines[0] == "" {
-			t.Fatalf("模块头缺少起始分隔线：%s", segment)
+		if lines := strings.Split(segment, "\n"); len(lines) != 6 {
+			t.Fatalf("模块头布局应为标题/来源/命令/时间版本/分隔线：%d 行\n%s", len(lines), segment)
 		}
-	}
-	if lines := strings.Split(segments[2], "\n"); len(lines) != 3 {
-		t.Fatalf("无来源模块不应因空项目产生额外空行：%d 行\n%s", len(lines), segments[2])
 	}
 }
 
@@ -284,21 +280,18 @@ func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 		{Name: "secondary", URL: "https://example.com/secondary"},
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "https://example.com/primary", "https://example.com/secondary"} {
+	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "https://example.com/secondary", "secondary"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("实现/解释性文本不应出现在 txt (%q):\n%s", forbidden, out)
 		}
 	}
-	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "primary", "secondary"} {
+	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "https://example.com/primary"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("纯文本缺少保留事实 %q:\n%s", want, out)
 		}
 	}
-	if count := strings.Count(out, "primary"); count != 1 {
-		t.Fatalf("banner 项目名应只显示一次，出现 %d 次", count)
-	}
-	if count := strings.Count(out, "secondary"); count != 1 {
-		t.Fatalf("banner 项目名应只显示一次，出现 %d 次", count)
+	if count := strings.Count(out, "https://example.com/primary"); count != 1 {
+		t.Fatalf("banner 来源应只显示一次，出现 %d 次", count)
 	}
 }
 
