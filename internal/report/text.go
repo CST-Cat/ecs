@@ -54,15 +54,18 @@ func Text(data model.Report, options TextOptions) string {
 }
 
 type textRenderer struct {
-	out     strings.Builder
-	palette termcolor.Palette
-	score   *score.Report
-	section int
+	out          strings.Builder
+	palette      termcolor.Palette
+	score        *score.Report
+	section      int
+	subsectionNo int
+	version      string
 }
 
 func (r *textRenderer) render(data model.Report) string {
+	r.version = data.Tool.Version
+	r.moduleNavigation(data)
 	r.header(data)
-	r.overview(data)
 	for _, result := range data.Results {
 		r.result(result)
 	}
@@ -86,22 +89,19 @@ func (r *textRenderer) blank() { r.out.WriteByte('\n') }
 
 // header 是报告顶部的标题块。
 func (r *textRenderer) header(data model.Report) {
-	rule := strings.Repeat("═", textWidth)
-	r.line(r.palette.Bold(rule))
-	r.line(r.palette.Bold(textwidth.Center(i18n.T("report.title"), textWidth)))
-	r.blank()
-	meta := []string{
-		i18n.T("report.startedAt") + " " + data.Run.StartedAt.Format("2006-01-02 15:04:05 MST"),
-		i18n.T("report.version") + " " + fallbackReport(data.Tool.Version, "—"),
-		i18n.T("report.profile") + " " + fallbackReport(data.Run.Profile, "—"),
+	r.line(r.palette.Bold(strings.Repeat("#", textWidth)))
+	r.centered(i18n.T("report.title"))
+	r.centered("bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)")
+	r.centered("https://github.com/CST-Cat/ecs")
+	reportTime := data.Run.CompletedAt
+	if reportTime.IsZero() {
+		reportTime = data.Run.StartedAt
 	}
-	r.centered(strings.Join(meta, "    "))
-
+	r.centered(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")))
+	r.centered(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")))
+	r.centered(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")))
 	exposure := fallbackReport(data.Run.Exposure, "local")
-	second := []string{
-		i18n.T("report.exposure") + " " + exposure,
-		i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted],
-	}
+	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
 	if data.Run.IPVersion != "" {
 		second = append(second, i18n.T("report.ipVersion")+" "+data.Run.IPVersion)
 	}
@@ -109,8 +109,15 @@ func (r *textRenderer) header(data model.Report) {
 		second = append(second, i18n.T("report.totalDuration")+" "+formatDurationMS(data.Run.DurationMS))
 	}
 	r.centered(strings.Join(second, "    "))
-	r.line(r.palette.Bold(rule))
+	r.line(r.palette.Bold(strings.Repeat("#", textWidth)))
 	r.blank()
+}
+
+func metaLabel(zh, value, en, englishValue string) string {
+	if i18n.Current() == i18n.LangEN {
+		return en + ": " + englishValue
+	}
+	return zh + "：" + value
 }
 
 // centered 按版面宽度折行后居中，避免长的外联级别或自定义版本把标题块撑宽。
@@ -124,7 +131,7 @@ func (r *textRenderer) centered(value string) {
 func (r *textRenderer) overview(data model.Report) {
 	// 概览是报告的前言，不占用正文的章节编号。正文的编号只表示
 	// 实际输出的结果与评分，用户选了几个模块就从一数到几。
-	r.prefaceTitle(i18n.T("report.overview"))
+	r.prefaceTitle(i18n.T("report.glance"))
 	r.moduleNavigation(data)
 	if data.Summary.Headline != "" {
 		r.indented(statusIcon(data.Summary.Status)+" "+data.Summary.Headline, true)
@@ -161,8 +168,14 @@ func (r *textRenderer) moduleNavigation(data model.Report) {
 			selected = append(selected, result.ID)
 		}
 	}
-	r.compactList(i18n.T("report.allModules"), moduleTitles(reportModuleIDs))
-	r.compactList(i18n.T("report.selectedModules"), moduleTitles(selected))
+	allTabs := []string{}
+	if i18n.Current() == i18n.LangEN {
+		allTabs = []string{"Basic info", "Hardware", "IP quality", "Network quality", "Return path"}
+	} else {
+		allTabs = []string{"基本信息", "硬件性能", "IP质量", "网络质量", "回程路由"}
+	}
+	r.compactList(localizedGroup("全部", "All"), allTabs)
+	r.compactList(localizedGroup("本次选择", "Selected"), moduleTitles(selected))
 	r.blank()
 }
 
@@ -189,7 +202,7 @@ func (r *textRenderer) compactList(label string, values []string) {
 	if available < 1 {
 		available = textWidth - 2
 	}
-	content := strings.Join(values, " · ")
+	content := strings.Join(values, "    ")
 	lines := wrapText(content, available)
 	indent := strings.Repeat(" ", textwidth.Width(prefix))
 	for index, line := range lines {
@@ -204,7 +217,7 @@ func (r *textRenderer) compactList(label string, values []string) {
 // prefaceTitle 是不参与章节编号的标题块（目前用于模块状态总览）。
 func (r *textRenderer) prefaceTitle(title string) {
 	r.line(r.palette.Bold(title))
-	r.line(r.palette.Dim(strings.Repeat("─", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
 func (r *textRenderer) subsection(title string) {
@@ -261,24 +274,18 @@ func (r *textRenderer) scoreSection() {
 				r.palette.Dim(fmt.Sprintf(i18n.T("score.ofBaseline"), metric.Ratio*100)))
 		}
 		if len(dimension.MissingMetrics) > 0 {
-			r.note(fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), compactMissingMetrics(dimension)))
+			r.indented(fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), compactMissingMetrics(dimension)))
 		}
 	}
 	r.blank()
 	if !r.score.Complete {
-		r.note(i18n.T("score.incompleteWarning"))
+		r.indented(localizedGroup("评分状态：未覆盖全部维度", "Score status: not all dimensions ran"))
 	}
-	if r.score.BaselineSample <= 1 {
-		r.note(i18n.T("score.singleSampleWarning"))
-	}
-	r.note(fmt.Sprintf(i18n.T("score.baselineLine"),
-		baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample))
-	r.note(i18n.T("score.weightingNote"))
-	// 档位决定了这个分数在跟谁比，必须说清楚。
-	if r.score.TierLabel != "" {
-		r.note(fmt.Sprintf(i18n.T("score.tierLine"), r.score.HostVCPU, r.score.TierLabel))
-	} else if r.score.HostVCPU > 0 {
-		r.note(fmt.Sprintf(i18n.T("score.tierFallbackLine"), r.score.HostVCPU))
+	if r.score.BaselineSample > 0 {
+		r.indented(localizedGroup(
+			fmt.Sprintf("评分基线：%s（样本 %d 台）", baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample),
+			fmt.Sprintf("Scoring baseline: %s (%d sample hosts)", baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample),
+		))
 	}
 	r.blank()
 }
@@ -418,7 +425,9 @@ func baselineSourceLabel(source string) string {
 
 // result 渲染单个模块。
 func (r *textRenderer) result(result model.Result) {
-	r.sectionTitle(resultTitle(result), localizedMethodology(result.Methodology))
+	r.section++
+	r.subsectionNo = 0
+	r.moduleBanner(result)
 	if result.Description != "" {
 		r.indented(result.Description)
 	}
@@ -430,69 +439,248 @@ func (r *textRenderer) result(result model.Result) {
 	}
 	r.indented(status, true)
 	if result.Error != "" {
-		r.indented(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+result.Error, true)
+		r.indented(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), true)
 	}
-	if result.Methodology.Kind != "" || result.Methodology.Label != "" ||
-		result.Methodology.Engine != "" || result.Methodology.Profile != "" ||
-		result.Methodology.ComparisonScope != "" {
-		parts := make([]string, 0, 5)
-		if result.Methodology.Kind != "" {
-			parts = append(parts, result.Methodology.Kind)
+	for _, group := range textGroups(result) {
+		r.renderGroup(group)
+	}
+	firstExtraSource := 0
+	if len(result.Sources) > 0 && strings.TrimSpace(result.Sources[0].URL) != "" {
+		firstExtraSource = 1
+	}
+	if firstExtraSource < len(result.Sources) {
+		r.indented("来源链接" + i18n.T("punct.colon"))
+		for _, source := range result.Sources[firstExtraSource:] {
+			parts := []string{source.Name}
+			if source.URL != "" {
+				parts = append(parts, source.URL)
+			}
+			r.indented("· " + strings.Join(parts, " · "))
 		}
-		if label := localizedMethodology(result.Methodology); label != "" {
-			parts = append(parts, label)
-		}
-		if result.Methodology.Engine != "" {
-			parts = append(parts, result.Methodology.Engine)
-		}
-		if result.Methodology.Profile != "" {
-			parts = append(parts, result.Methodology.Profile)
-		}
-		if result.Methodology.ComparisonScope != "" {
-			parts = append(parts, i18n.T("report.comparability")+i18n.T("punct.colon")+result.Methodology.ComparisonScope)
-		}
-		r.indented(i18n.T("report.methodologyLabel") + i18n.T("punct.colon") + strings.Join(parts, " · "))
 	}
 	r.blank()
+}
 
-	measurements := visibleMeasurements(result)
+func (r *textRenderer) moduleBanner(result model.Result) {
+	r.line(r.palette.Bold(strings.Repeat("*", textWidth)))
+	r.centered(resultTitle(result))
+	source := "https://github.com/CST-Cat/ecs"
+	if len(result.Sources) > 0 && strings.TrimSpace(result.Sources[0].URL) != "" {
+		source = result.Sources[0].URL
+	}
+	r.centered(source)
+	command := "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)"
+	if result.ID != "" {
+		command += " --only " + result.ID
+	}
+	r.centered(command)
+	when := result.StartedAt
+	version := fallbackReport(r.version, "ecs")
+	if when.IsZero() {
+		r.centered(version)
+	} else {
+		timestamp := when.Format("2006-01-02 15:04:05 MST")
+		r.centered(timestamp + " · " + version)
+	}
+	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
+}
+
+type textGroup struct {
+	title        string
+	fields       []model.Field
+	measurements []model.Measurement
+	tables       []model.Table
+}
+
+func (r *textRenderer) renderGroup(group textGroup) {
+	r.subsectionNo++
+	heading := fmt.Sprintf("%s、%s", chineseNumeral(r.subsectionNo), group.title)
+	if i18n.Current() == i18n.LangEN {
+		heading = fmt.Sprintf("%d. %s", r.subsectionNo, group.title)
+	}
+	r.line(r.palette.Bold("  " + heading))
+	r.line(r.palette.Dim("  " + strings.Repeat("-", textWidth-2)))
+	fields := dedupeFields(group.fields)
+	measurements := dedupeMeasurements(fields, group.measurements)
+	if len(fields) > 0 {
+		r.fields(fields)
+	}
+	measurements = visibleMeasurements(model.Result{Measurements: measurements, Tables: group.tables})
 	if len(measurements) > 0 {
-		r.subsection(i18n.T("report.metrics"))
 		r.measurements(measurements)
 	}
-	if len(result.Fields) > 0 {
-		r.subsection(i18n.T("report.details"))
-		r.fields(result.Fields)
-	}
-	for _, table := range result.Tables {
+	for _, table := range group.tables {
 		r.resultTable(table)
 	}
-	for _, block := range result.TextBlocks {
-		r.textBlock(block)
-	}
-	if len(result.Notes) > 0 {
-		r.subsection(i18n.T("report.notes"))
-	}
-	for _, note := range result.Notes {
-		if note == "" {
+}
+
+func dedupeFields(items []model.Field) []model.Field {
+	seen := make(map[string]bool, len(items)*2)
+	out := make([]model.Field, 0, len(items))
+	for _, item := range items {
+		keys := []string{strings.ToLower(strings.TrimSpace(item.Key)), strings.ToLower(strings.TrimSpace(item.Label))}
+		duplicate := false
+		for _, key := range keys {
+			if key != "" && seen[key] {
+				duplicate = true
+			}
+		}
+		if duplicate {
 			continue
 		}
-		r.note(note)
-	}
-	if len(result.Sources) > 0 {
-		r.subsection(i18n.T("report.sources"))
-	}
-	for _, source := range result.Sources {
-		parts := []string{source.Name}
-		if source.URL != "" {
-			parts = append(parts, source.URL)
+		for _, key := range keys {
+			if key != "" {
+				seen[key] = true
+			}
 		}
-		if source.Purpose != "" {
-			parts = append(parts, source.Purpose)
-		}
-		r.indented(strings.Join(parts, " · "))
+		out = append(out, item)
 	}
-	r.blank()
+	return out
+}
+
+func dedupeMeasurements(fields []model.Field, items []model.Measurement) []model.Measurement {
+	seen := make(map[string]bool, len(fields)+len(items))
+	for _, field := range fields {
+		for _, key := range []string{field.Key, field.Label} {
+			key = strings.ToLower(strings.TrimSpace(key))
+			if key != "" {
+				seen[key] = true
+			}
+		}
+	}
+	out := make([]model.Measurement, 0, len(items))
+	for _, item := range items {
+		keys := []string{strings.ToLower(strings.TrimSpace(item.Key)), strings.ToLower(strings.TrimSpace(item.Label))}
+		duplicate := false
+		for _, key := range keys {
+			if key != "" && seen[key] {
+				duplicate = true
+			}
+		}
+		if duplicate {
+			continue
+		}
+		for _, key := range keys {
+			if key != "" {
+				seen[key] = true
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func textGroups(result model.Result) []textGroup {
+	groups := make([]textGroup, 0, 4)
+	indexes := make(map[string]int)
+	add := func(title string) *textGroup {
+		if index, ok := indexes[title]; ok {
+			return &groups[index]
+		}
+		groups = append(groups, textGroup{title: title})
+		index := len(groups) - 1
+		indexes[title] = index
+		return &groups[index]
+	}
+	for _, field := range result.Fields {
+		group := add(fieldGroupTitle(result.ID, field.Key, result.Title))
+		group.fields = append(group.fields, field)
+	}
+	for _, measurement := range result.Measurements {
+		group := add(measurementGroupTitle(result.ID, measurement.Key, measurement.Label, result.Title))
+		group.measurements = append(group.measurements, measurement)
+	}
+	for _, table := range result.Tables {
+		group := add(tableGroupTitle(result.ID, table.Title, result.Title))
+		group.tables = append(group.tables, table)
+	}
+	if len(groups) == 0 {
+		groups = append(groups, textGroup{title: fallbackGroupTitle(result.ID)})
+	}
+	groupOrder := func(title string) int {
+		orders := map[string][]string{
+			"system":  {localizedGroup("操作系统与硬件", "OS/hardware"), localizedGroup("磁盘与运行状态", "Storage/runtime"), localizedGroup("内核网络", "Kernel networking")},
+			"network": {localizedGroup("出口概览", "Egress overview"), localizedGroup("IP 信息", "IP information"), localizedGroup("风险矩阵", "Risk matrix")},
+		}
+		for index, name := range orders[result.ID] {
+			if name == title {
+				return index
+			}
+		}
+		return len(orders[result.ID]) + 1
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		return groupOrder(groups[i].title) < groupOrder(groups[j].title)
+	})
+	return groups
+}
+
+func fallbackGroupTitle(id string) string {
+	if i18n.Current() == i18n.LangEN {
+		return "Module details"
+	}
+	return "模块详情"
+}
+
+func fieldGroupTitle(id, key, resultTitle string) string {
+	lower := strings.ToLower(key)
+	if id == "system" {
+		if strings.HasPrefix(lower, "tcp") || strings.HasPrefix(lower, "net") || strings.Contains(lower, "ipv6") || strings.Contains(lower, "forward") || strings.Contains(lower, "syn") || strings.Contains(lower, "mtu") || strings.Contains(lower, "queue") || strings.Contains(lower, "conntrack") {
+			return localizedGroup("内核网络", "Kernel networking")
+		}
+		if strings.HasPrefix(lower, "disk") || strings.HasPrefix(lower, "swap") || strings.HasPrefix(lower, "load") || strings.Contains(lower, "uptime") || strings.Contains(lower, "temperature") || strings.Contains(lower, "smart") || strings.HasPrefix(lower, "block") {
+			return localizedGroup("磁盘与运行状态", "Storage/runtime")
+		}
+		return localizedGroup("操作系统与硬件", "OS/hardware")
+	}
+	if id == "network" {
+		if strings.Contains(lower, "risk") || strings.Contains(lower, "fraud") || strings.Contains(lower, "proxy") || strings.Contains(lower, "vpn") || strings.Contains(lower, "tor") {
+			return localizedGroup("风险矩阵", "Risk matrix")
+		}
+		return localizedGroup("IP 信息", "IP information")
+	}
+	return defaultResultGroup(id, resultTitle)
+}
+
+func measurementGroupTitle(id, key, label, resultTitle string) string {
+	return fieldGroupTitle(id, key+" "+label, resultTitle)
+}
+
+func tableGroupTitle(id, title, resultTitle string) string {
+	lower := strings.ToLower(title)
+	if id == "system" {
+		return localizedGroup("内核网络", "Kernel networking")
+	}
+	if id == "network" {
+		switch {
+		case strings.Contains(lower, "风险"), strings.Contains(lower, "risk"):
+			return localizedGroup("风险矩阵", "Risk matrix")
+		case strings.Contains(lower, "出口"), strings.Contains(lower, "overview"):
+			return localizedGroup("出口概览", "Egress overview")
+		default:
+			return localizedGroup("IP 信息", "IP information")
+		}
+	}
+	return defaultResultGroup(id, resultTitle)
+}
+
+func defaultResultGroup(id, resultTitle string) string {
+	titles := map[string][2]string{
+		"cpu": {"CPU 测评", "CPU benchmark"}, "memory": {"内存测评", "Memory benchmark"}, "disk": {"磁盘测评", "Disk benchmark"},
+		"dns": {"DNS 结果", "DNS results"}, "latency": {"延迟结果", "Latency results"}, "speed": {"吞吐结果", "Throughput results"},
+		"route": {"路由结果", "Route results"}, "backtrace": {"回程结果", "Return path results"},
+	}
+	if title, ok := titles[id]; ok {
+		return localizedGroup(title[0], title[1])
+	}
+	return fallbackGroupTitle(id)
+}
+
+func localizedGroup(zh, en string) string {
+	if i18n.Current() == i18n.LangEN {
+		return en
+	}
+	return zh
 }
 
 // measurements 渲染指标，并对同单位的一组画组内相对柱。
@@ -509,7 +697,7 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 	labelWidth = minInt(labelWidth, 30)
 	valueWidth = minInt(valueWidth, 26)
 	for _, item := range items {
-		label := textwidth.Pad(textwidth.Truncate(item.Label, 30), labelWidth)
+		label := textwidth.Pad(textwidth.Truncate(item.Label, 30), labelWidth) + i18n.T("punct.colon")
 		valueLines := wrapText(item.Display, valueWidth)
 		if len(valueLines) == 0 {
 			valueLines = []string{""}
@@ -610,7 +798,8 @@ func (r *textRenderer) fields(items []model.Field) {
 	width = minInt(width, 28)
 	for _, item := range items {
 		value := item.Value
-		prefix := "  " + r.palette.Dim(textwidth.Pad(textwidth.Truncate(item.Label, 28), width)) + "  "
+		label := textwidth.Pad(textwidth.Truncate(item.Label, 28), width) + i18n.T("punct.colon")
+		prefix := "  " + r.palette.Dim(label) + "  "
 		available := textWidth - textwidth.Width(prefix)
 		if available < 1 {
 			available = textWidth - 2
@@ -641,7 +830,11 @@ func (r *textRenderer) fields(items []model.Field) {
 func (r *textRenderer) resultTable(table model.Table) {
 	table = normalizeMatrixTable(table)
 	if table.Title != "" {
-		r.indented(table.Title, true)
+		title := table.Title
+		if kind := matrixKindForTable(title); kind == matrixCrystal || kind == matrixATTO {
+			title += i18n.T("punct.colon")
+		}
+		r.indented(title, true)
 	}
 	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
@@ -964,11 +1157,11 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 	for _, line := range wrapText(heading, textWidth) {
 		r.line(r.palette.Bold(line))
 	}
-	r.line(r.palette.Dim(strings.Repeat("─", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
 }
 
 func (r *textRenderer) footer(data model.Report) {
-	r.line(r.palette.Dim(strings.Repeat("═", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
 	for _, notice := range data.Notices {
 		r.note(notice)
 	}

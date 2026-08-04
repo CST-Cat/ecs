@@ -77,9 +77,38 @@ func TestTextNavigationAndWidthBudget(t *testing.T) {
 		}
 	}
 	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, want := range []string{"全部模块", "本次选择", "CPU 性能", "流媒体与 AI 服务", "三网回程"} {
+	for _, want := range []string{"全部", "本次选择", "CPU 性能", "流媒体与 AI 服务", "三网回程"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("navigation missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
+	data := textSampleReport()
+	data.Results = append(data.Results, model.Result{
+		ID: "network", Title: "网络与 IP 质量", Status: model.StatusOK,
+		Fields: []model.Field{{Key: "ipv4", Label: "IPv4 出口", Value: "203.0.113.x"}},
+		Tables: []model.Table{{Title: "IPv4 · 风险评分", Columns: []string{"数据库", "风险"}, Rows: [][]string{{"ipapi", "低"}}}},
+	}, model.Result{
+		ID: "mystery", Title: "神秘模块", Status: model.StatusWarning,
+		Fields: []model.Field{{Key: "answer", Label: "答案", Value: "保留"}},
+		Tables: []model.Table{{Title: "未知明细", Columns: []string{"值"}, Rows: [][]string{{"仍然可见"}}}},
+	})
+	out := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{
+		strings.Repeat("#", textWidth), strings.Repeat("*", textWidth),
+		"bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)",
+		"https://github.com/CST-Cat/ecs", "一、CPU 测评", "一、IP 信息", "一、模块详情",
+		"引擎：", "单线程事件率：", "答案：", "仍然可见",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("模板文本缺少 %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"关键指标", "测试口径", "原始文本", "third-method"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("模板文本不应包含通用/原始前缀 %q:\n%s", forbidden, out)
 		}
 	}
 }
@@ -153,7 +182,7 @@ func TestTextScoreSectionStatesCoverageAndBaseline(t *testing.T) {
 		},
 	}
 	out := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scored})
-	for _, want := range []string{"2/4", "未跑满全部维度", "只有 1 个样本", "内置单机快照"} {
+	for _, want := range []string{"2/4", "未覆盖全部维度", "样本 1 台", "内置单机快照"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("评分区缺少 %q", want)
 		}
@@ -181,13 +210,13 @@ func TestTextSectionsNumberOnlyActualResultsAndScore(t *testing.T) {
 		{ID: "five", Title: "结果五", Status: model.StatusError},
 	}
 	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, heading := range []string{"一、结果一", "二、结果二", "三、结果三", "四、结果四", "五、结果五"} {
+	for _, heading := range []string{"结果一", "结果二", "结果三", "结果四", "结果五", "一、模块详情"} {
 		if !strings.Contains(plain, heading) {
-			t.Fatalf("missing numbered result %q:\n%s", heading, plain)
+			t.Fatalf("missing result/banner section %q:\n%s", heading, plain)
 		}
 	}
-	if strings.Contains(plain, "六、") {
-		t.Fatal("没有评分时不应出现额外章节编号")
+	if strings.Contains(plain, "六、综合评分") {
+		t.Fatal("没有评分时不应出现评分章节")
 	}
 
 	scored := &score.Report{Total: 800, Ratio: 0.8, Covered: 1, Possible: 1}
@@ -200,7 +229,7 @@ func TestTextSectionsNumberOnlyActualResultsAndScore(t *testing.T) {
 	defer i18n.Set(original)
 	i18n.Set(i18n.LangEN)
 	english := Text(data, TextOptions{Color: termcolor.LevelNone, Score: scored})
-	for _, heading := range []string{"1. 结果一", "2. 结果二", "3. 结果三", "4. 结果四", "5. 结果五", "6. Composite score"} {
+	for _, heading := range []string{"结果一", "结果二", "结果三", "结果四", "结果五", "1. Module details", "6. Composite score"} {
 		if !strings.Contains(english, heading) {
 			t.Fatalf("missing English heading %q:\n%s", heading, english)
 		}
@@ -226,8 +255,8 @@ func TestTextIncludesEveryResultDetail(t *testing.T) {
 	out := Text(data, TextOptions{Color: termcolor.LevelNone})
 	for _, want := range []string{
 		"第三个指标", "3 units", "第三个字段", "第三个值",
-		"第二张表", "第三张表值", "原始文本", "第三个文本块内容", "第三条备注",
-		"需留意", "custom-kind", "自定义方法", "custom-engine", "custom-profile", "custom-scope",
+		"第二张表", "第三张表值",
+		"需留意",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("完整文本报告缺少 %q:\n%s", want, out)
@@ -235,6 +264,9 @@ func TestTextIncludesEveryResultDetail(t *testing.T) {
 	}
 	if strings.Contains(out, "third-method") {
 		t.Fatalf("纯文本不应显示 Measurement.Method: %s", out)
+	}
+	if strings.Contains(out, "第三个文本块内容") || strings.Contains(out, "第三条备注") {
+		t.Fatal("纯文本不应恢复原始文本块或长注释")
 	}
 }
 
