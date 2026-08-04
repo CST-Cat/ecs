@@ -147,6 +147,53 @@ func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 	}
 }
 
+func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
+	data := textSampleReport()
+	data.Run.Requested = []string{"disk"}
+	data.Notices = []string{"内部 notice 不应出现在终端模板"}
+	data.Results = []model.Result{{
+		ID: "disk", Title: "磁盘性能", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-legacy"},
+			{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
+			{Key: "atto_512b_read_mib_s", Label: "ATTO atto_512b read 吞吐", Display: "1 MiB/s", Method: "fio-direct-atto"},
+			{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "15 MiB/s", Method: "fio-direct-mixed"},
+		},
+		Tables: []model.Table{
+			{Title: "Crystal", Columns: []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"}, Rows: [][]string{
+				{"RND4K/Q1", "10 MiB/s", "100 IOPS", "20 MiB/s", "200 IOPS", "完成"},
+				{"SEQ1M/Q8", "30 MiB/s", "300 IOPS", "40 MiB/s", "400 IOPS", "完成"},
+			}},
+			{Title: "ATTO", Columns: []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"}, Rows: [][]string{
+				{"512B", "1 MiB/s", "10 IOPS", "2 MiB/s", "20 IOPS", "完成"},
+				{"64M", "8 MiB/s", "80 IOPS", "16 MiB/s", "160 IOPS", "完成"},
+			}},
+			{Title: "50/50 混合随机读写 QD64 × 2 作业（YABS 兼容口径）", Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"}, Rows: [][]string{
+				{"4k", "15 MiB/s", "150 IOPS", "25 MiB/s", "250 IOPS", "40 MiB/s"},
+				{"1m", "35 MiB/s", "350 IOPS", "45 MiB/s", "450 IOPS", "80 MiB/s"},
+			}},
+		},
+	}}
+	out := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{"Crystal：", "ATTO：", "RND4K/Q1", "SEQ1M/Q8", "512B", "64M", "4k", "1m", "10 MiB/s", "100 IOPS", "20 MiB/s", "200 IOPS", "15 MiB/s", "150 IOPS", "25 MiB/s", "250 IOPS"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("磁盘矩阵缺少 %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"crystal_", "atto_", "fio_mixed_", "内部 notice"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("txt 不应扁平化/输出冗余内容 %q:\n%s", forbidden, out)
+		}
+	}
+	jsonBytes, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(jsonBytes), "内部 notice") || !strings.Contains(string(jsonBytes), "crystal_rnd4k_q1_read_mib_s") {
+		t.Fatal("隐藏 txt notice/flat metrics 不应修改 JSON 数据")
+	}
+}
+
 // 中英混排的表格必须列对齐：用字符数而不是显示宽度对齐会让整张表歪掉。
 func TestTextTableAlignsCJK(t *testing.T) {
 	data := textSampleReport()

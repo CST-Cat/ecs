@@ -1243,9 +1243,6 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 
 func (r *textRenderer) footer(data model.Report) {
 	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
-	for _, notice := range data.Notices {
-		r.note(notice)
-	}
 	r.indented(i18n.T("report.generator") + " " + data.Tool.Name + " " + data.Tool.Version)
 }
 
