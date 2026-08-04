@@ -344,6 +344,72 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 	}
 }
 
+func TestTableRowsWithBarsKeepNumericBoundariesAcrossTables(t *testing.T) {
+	tables := []model.Table{
+		{
+			Title: "Crystal", Columns: []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+			Rows: [][]string{
+				{"RND4K/Q1", "1 MiB/s", "9 IOPS", "2 MiB/s", "20 IOPS", "完成"},
+				{"SEQ1M/Q8", "1000 MiB/s", "1000 IOPS", "2000 MiB/s", "2000 IOPS", "完成"},
+			}, NumericColumns: []int{1, 2, 3, 4},
+		},
+		{
+			Title: "ATTO", Columns: []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+			Rows: [][]string{
+				{"512B", "10 MiB/s", "9 IOPS", "11 MiB/s", "99 IOPS", "完成"},
+				{"64M", "1000 MiB/s", "10000 IOPS", "2000 MiB/s", "20000 IOPS", "完成"},
+			}, NumericColumns: []int{1, 2, 3, 4},
+		},
+		{
+			Title: "普通数值表", Columns: []string{"节点", "时延", "IOPS", "状态"},
+			Rows: [][]string{
+				{"节点 A", "1 ms", "9 IOPS", "正常"},
+				{"node-long", "1000 ms", "1000 IOPS", "正常"},
+			}, NumericColumns: []int{1, 2},
+		},
+	}
+	for _, table := range tables {
+		rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+		for _, column := range table.NumericColumns {
+			start := -1
+			for rowIndex, row := range rows {
+				if column >= len(row) {
+					t.Fatalf("%s row %d missing numeric column %d", table.Title, rowIndex, column)
+				}
+				barStart := firstDensityStart(row[column])
+				if barStart < 0 {
+					t.Fatalf("%s row %d column %d missing bar: %q", table.Title, rowIndex, column, row[column])
+				}
+				if start < 0 {
+					start = barStart
+				} else if barStart != start {
+					t.Fatalf("%s column %d bar boundary drift: row %d at %d, want %d", table.Title, column, rowIndex, barStart, start)
+				}
+			}
+		}
+	}
+
+	data := textSampleReport()
+	data.Results = []model.Result{{ID: "disk", Title: "磁盘", Status: model.StatusOK, Tables: tables}}
+	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
+		out := Text(data, TextOptions{Color: level})
+		for lineNumber, line := range strings.Split(out, "\n") {
+			if width := textwidth.Width(line); width > textWidth {
+				t.Fatalf("%v 档第 %d 行超出 %d 列：%d", level, lineNumber+1, textWidth, width)
+			}
+		}
+	}
+}
+
+func firstDensityStart(value string) int {
+	for index, character := range value {
+		if strings.ContainsRune("░▒▓█", character) {
+			return textwidth.Width(value[:index])
+		}
+	}
+	return -1
+}
+
 // 中英混排的表格必须列对齐：用字符数而不是显示宽度对齐会让整张表歪掉。
 func TestTextTableAlignsCJK(t *testing.T) {
 	data := textSampleReport()

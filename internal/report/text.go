@@ -1187,6 +1187,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 	}
 	maxValues := make(map[int]float64, len(table.NumericColumns))
 	directions := make(map[int]bool, len(table.NumericColumns))
+	valueWidths := make(map[int]int, len(table.NumericColumns))
 	for index, column := range table.NumericColumns {
 		higher := true
 		if index < len(table.NumericHigherIsBetter) {
@@ -1201,6 +1202,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 			if !ok || value <= 0 {
 				continue
 			}
+			valueWidths[column] = maxInt(valueWidths[column], textwidth.Width(row[column]))
 			if !higher {
 				value = 1 / value
 			}
@@ -1223,7 +1225,11 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 			if !directions[column] {
 				value = 1 / value
 			}
-			rows[rowIndex][column] += " " + palette.BarRelative(value, maxValues[column], 8)
+			// Reserve one stable value field before the bar.  Without this
+			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
+			// row and the visual column drifts with digit count or unit text.
+			cell := textwidth.Pad(rows[rowIndex][column], valueWidths[column])
+			rows[rowIndex][column] = cell + " " + palette.BarRelative(value, maxValues[column], 8)
 		}
 	}
 	return rows
