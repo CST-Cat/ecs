@@ -89,13 +89,38 @@ SUBMIT_MODE=0
 SUBMIT_PROVIDER=""
 SUBMIT_REGION=""
 SUBMIT_OUTPUT=""
+SUBMIT_PROVIDER_GIVEN=0
+SUBMIT_REGION_GIVEN=0
 SUBMIT_OUTPUT_GIVEN=0
+
+reject_submit_value() {
+  submit_label=$1
+  submit_value=$2
+  [ -n "$submit_value" ] ||
+    die "--$submit_label 参数不能为空" "--$submit_label requires a non-empty value"
+  case "$submit_value" in
+    -*) die "--$submit_label 的值不能是另一个选项" "--$submit_label value must not be another option" ;;
+  esac
+  submit_clean=$(LC_ALL=C printf '%s' "$submit_value" | LC_ALL=C tr -d '\001-\037\177')
+  [ "$submit_clean" = "$submit_value" ] ||
+    die "--$submit_label 的值不能包含控制字符" "--$submit_label value contains a control character"
+}
+
 for arg in "$@"; do
   case "$arg" in
     --submit) SUBMIT_MODE=1 ;;
     --submit=*) die "--submit 不接受参数" "--submit does not take a value" ;;
   esac
 done
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --reveal|--reveal=*)
+        die "提交模式不允许 --reveal（中间报告不会公开）" "--reveal is not allowed in submit mode (the intermediate report is private)"
+        ;;
+    esac
+  done
+fi
 
 if [ "$SUBMIT_MODE" -eq 1 ]; then
   SUBMIT_SENTINEL="__ecs_run_submit_filter_$$__"
@@ -112,30 +137,52 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
       --provider)
         [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
           die "--provider 缺少参数" "--provider requires a value"
+        [ "$SUBMIT_PROVIDER_GIVEN" -eq 0 ] ||
+          die "--provider 不能重复" "--provider must not be repeated"
         SUBMIT_PROVIDER=$1
         shift
+        reject_submit_value provider "$SUBMIT_PROVIDER"
+        SUBMIT_PROVIDER_GIVEN=1
         ;;
       --provider=*)
+        [ "$SUBMIT_PROVIDER_GIVEN" -eq 0 ] ||
+          die "--provider 不能重复" "--provider must not be repeated"
         SUBMIT_PROVIDER=${arg#--provider=}
+        reject_submit_value provider "$SUBMIT_PROVIDER"
+        SUBMIT_PROVIDER_GIVEN=1
         ;;
       --region)
         [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
           die "--region 缺少参数" "--region requires a value"
+        [ "$SUBMIT_REGION_GIVEN" -eq 0 ] ||
+          die "--region 不能重复" "--region must not be repeated"
         SUBMIT_REGION=$1
         shift
+        reject_submit_value region "$SUBMIT_REGION"
+        SUBMIT_REGION_GIVEN=1
         ;;
       --region=*)
+        [ "$SUBMIT_REGION_GIVEN" -eq 0 ] ||
+          die "--region 不能重复" "--region must not be repeated"
         SUBMIT_REGION=${arg#--region=}
+        reject_submit_value region "$SUBMIT_REGION"
+        SUBMIT_REGION_GIVEN=1
         ;;
       --output)
         [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
           die "--output 缺少路径" "--output requires a path"
+        [ "$SUBMIT_OUTPUT_GIVEN" -eq 0 ] ||
+          die "--output 不能重复" "--output must not be repeated"
         SUBMIT_OUTPUT=$1
-        SUBMIT_OUTPUT_GIVEN=1
         shift
+        reject_submit_value output "$SUBMIT_OUTPUT"
+        SUBMIT_OUTPUT_GIVEN=1
         ;;
       --output=*)
+        [ "$SUBMIT_OUTPUT_GIVEN" -eq 0 ] ||
+          die "--output 不能重复" "--output must not be repeated"
         SUBMIT_OUTPUT=${arg#--output=}
+        reject_submit_value output "$SUBMIT_OUTPUT"
         SUBMIT_OUTPUT_GIVEN=1
         ;;
       *)
@@ -544,6 +591,30 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   fi
   [ -n "$SUBMIT_OUTPUT" ] ||
     die "--output 路径不能为空" "--output path must not be empty"
+
+  # Fail before downloading/running benchmarks when the final destination is
+  # plainly unusable.  Submit mode never creates a user directory and never
+  # overwrites an existing file; the downloaded ecs binary repeats the same
+  # checks at the final write to cover races.
+  if [ -L "$SUBMIT_OUTPUT" ]; then
+    die "提交输出不能是符号链接：$SUBMIT_OUTPUT" "submit output must not be a symlink: $SUBMIT_OUTPUT"
+  elif [ -d "$SUBMIT_OUTPUT" ]; then
+    [ -w "$SUBMIT_OUTPUT" ] ||
+      die "提交输出目录不可写：$SUBMIT_OUTPUT" "submit output directory is not writable: $SUBMIT_OUTPUT"
+  else
+    case "$SUBMIT_OUTPUT" in
+      */*) SUBMIT_OUTPUT_PARENT=${SUBMIT_OUTPUT%/*}; [ -n "$SUBMIT_OUTPUT_PARENT" ] || SUBMIT_OUTPUT_PARENT=/ ;;
+      *) SUBMIT_OUTPUT_PARENT=. ;;
+    esac
+    [ -d "$SUBMIT_OUTPUT_PARENT" ] ||
+      die "提交输出父目录不存在：$SUBMIT_OUTPUT_PARENT" "submit output parent does not exist: $SUBMIT_OUTPUT_PARENT"
+    [ ! -L "$SUBMIT_OUTPUT_PARENT" ] ||
+      die "提交输出父目录不能是符号链接：$SUBMIT_OUTPUT_PARENT" "submit output parent must not be a symlink: $SUBMIT_OUTPUT_PARENT"
+    [ -w "$SUBMIT_OUTPUT_PARENT" ] ||
+      die "提交输出父目录不可写：$SUBMIT_OUTPUT_PARENT" "submit output parent is not writable: $SUBMIT_OUTPUT_PARENT"
+    [ ! -e "$SUBMIT_OUTPUT" ] ||
+      die "提交输出文件已存在：$SUBMIT_OUTPUT" "submit output file already exists: $SUBMIT_OUTPUT"
+  fi
 fi
 
 fetch() {
@@ -581,6 +652,13 @@ say "SHA-256 已校验" "SHA-256 verified"
 tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
 [ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
+
+if [ "$SUBMIT_MODE" -eq 1 ]; then
+  # Check the downloaded binary before dependencies or benchmarks.  This is a
+  # side-effect-free command and gives old releases a clear error up front.
+  "${WORK}/ecs" submit --help >/dev/null 2>&1 ||
+    die "下载的 ecs 不支持 submit 子命令，请使用最新 Release" "the downloaded ecs does not support submit; use a current Release"
+fi
 
 # 决定要不要进交互向导。
 # stdin 是 curl 管道，交互输入必须走 /dev/tty；无终端时直接按默认配置运行。
@@ -650,7 +728,7 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Force a JSON report in WORK.  Wrapper-only submit/provider/region/output
   # options were removed above, while every ordinary run option remains
   # quoted in "$@".
-  if "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
+  if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
     RUN_STATUS=0
   else
     RUN_STATUS=$?
@@ -716,7 +794,7 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # ecs submit treats an existing directory as a directory target and a
   # non-existent path as a file target.  This preserves the CLI's file-or-
   # directory contract while keeping the default in TMPDIR.
-  if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+  if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
       --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
     SUBMIT_STATUS=0
   else

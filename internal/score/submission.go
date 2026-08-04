@@ -120,6 +120,12 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	submission.Host.Provider = sanitizeShort(options.Provider, 48)
 	submission.Note = sanitizeShort(options.Note, maxNoteLength)
 	submission.ID = submission.fingerprint()
+	// Keep invalid records out of every export path, not just the repository
+	// loader.  In particular, a report containing only CPU measurements has no
+	// host specification and must fail before a file can be written.
+	if err := submission.Validate(); err != nil {
+		return Submission{}, err
+	}
 	return submission, nil
 }
 

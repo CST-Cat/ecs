@@ -43,6 +43,13 @@ func TestRunScriptUsesDirectTempOutputAndTracksThisRun(t *testing.T) {
 		`SUBMIT_REPORT_DIR="$WORK/report"`,
 		`--format json --output "$SUBMIT_REPORT_DIR"`,
 		`submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"`,
+		`reject_submit_value`,
+		`--provider 不能重复`,
+		`--region 不能重复`,
+		`--output 不能重复`,
+		`ECS_PLAN_FILE=`,
+		`submit --help >/dev/null 2>&1`,
+		`--reveal is not allowed in submit mode`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh missing report-output guard %q", required)
