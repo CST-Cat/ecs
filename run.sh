@@ -268,6 +268,7 @@ OOKLA_RPM_OS=""
 OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
+ACCEPT=""
 
 as_root() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -522,7 +523,6 @@ install_ookla() {
 PROFILE=standard
 ONLY=""
 SKIP=""
-ACCEPT=""
 # 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 是纯 HTTP，
 # 不需要外部程序）。Ookla 只有在命令行显式 --accept ookla 时才加入依赖规划。
 LOCAL_ONLY=0
