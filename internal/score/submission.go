@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -273,14 +274,14 @@ func (s Submission) Validate() error {
 		if !known[key] {
 			return fmt.Errorf("unknown metric %q", key)
 		}
-		if value <= 0 {
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 			return fmt.Errorf("metric %q must be positive", key)
 		}
 	}
 	if s.Host.VCPU <= 0 {
 		return fmt.Errorf("host vcpu must be positive")
 	}
-	if s.Host.MemoryGiB <= 0 {
+	if s.Host.MemoryGiB <= 0 || math.IsNaN(s.Host.MemoryGiB) || math.IsInf(s.Host.MemoryGiB, 0) {
 		return fmt.Errorf("host memory must be positive")
 	}
 	if s.Tool.ECS == "" {
