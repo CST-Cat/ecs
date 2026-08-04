@@ -794,8 +794,28 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # ecs submit treats an existing directory as a directory target and a
   # non-existent path as a file target.  This preserves the CLI's file-or-
   # directory contract while keeping the default in TMPDIR.
-  if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
-      --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
+  if [ "$SUBMIT_PROVIDER_GIVEN:$SUBMIT_REGION_GIVEN" = "1:1" ]; then
+    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+        --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
+      SUBMIT_STATUS=0
+    else
+      SUBMIT_STATUS=$?
+    fi
+  elif [ "$SUBMIT_PROVIDER_GIVEN" -eq 1 ]; then
+    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+        --provider "$SUBMIT_PROVIDER"; then
+      SUBMIT_STATUS=0
+    else
+      SUBMIT_STATUS=$?
+    fi
+  elif [ "$SUBMIT_REGION_GIVEN" -eq 1 ]; then
+    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+        --region "$SUBMIT_REGION"; then
+      SUBMIT_STATUS=0
+    else
+      SUBMIT_STATUS=$?
+    fi
+  elif ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"; then
     SUBMIT_STATUS=0
   else
     SUBMIT_STATUS=$?
