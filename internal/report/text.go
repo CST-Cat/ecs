@@ -307,10 +307,17 @@ func (r *textRenderer) scoreSection() {
 		r.indented(localizedGroup("评分状态：未覆盖全部维度", "Score status: not all dimensions ran"))
 	}
 	if r.score.BaselineSample > 0 {
-		r.indented(localizedGroup(
-			fmt.Sprintf("评分基线：%s（样本 %d 台）", baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample),
-			fmt.Sprintf("Scoring baseline: %s (%d sample hosts)", baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample),
-		))
+		r.indented(fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample))
+	}
+	if r.score.RankStatus != "" || r.score.RankSamples > 0 || r.score.BaselineSample > 0 {
+		switch r.score.EffectiveRankStatus() {
+		case score.RankStatusAvailable:
+			r.indented(fmt.Sprintf(i18n.T("score.rank.available"), r.score.TopPercent, r.score.EffectiveRankSamples()))
+		case score.RankStatusInsufficient:
+			r.indented(fmt.Sprintf(i18n.T("score.rank.insufficient"), r.score.EffectiveRankSamples(), r.score.EffectiveRankMinSamples()))
+		default:
+			r.indented(i18n.T("score.rank.unavailable"))
+		}
 	}
 	r.blank()
 }

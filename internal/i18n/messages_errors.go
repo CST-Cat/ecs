@@ -97,7 +97,7 @@ var errorChinese = map[string]string{
 	"err.reportSchemaMismatch": "不支持 schema_version %q，当前渲染器支持 %q",
 	"err.baselineNoReports":    "没有可用的报告文件",
 	"err.baselineNoMetrics":    "这些报告里没有可评分的实测值",
-	"err.baselineLoad":         "读取评分基线 %s: %w",
+	"err.baselineLoad":         "读取排行榜参考 %s: %w",
 
 	// ── 配置文件 ────────────────────────────────────────────
 	"err.configRead":     "读取配置文件: %w",
@@ -195,7 +195,7 @@ var errorEnglish = map[string]string{
 	"err.reportSchemaMismatch": "unsupported schema_version %q; this renderer supports %q",
 	"err.baselineNoReports":    "no usable report files",
 	"err.baselineNoMetrics":    "the supplied reports contain no scoreable measurements",
-	"err.baselineLoad":         "read scoring baseline %s: %w",
+	"err.baselineLoad":         "read scoring leaderboard reference %s: %w",
 
 	// ── Config file ─────────────────────────────────────────
 	"err.configRead":     "read config file: %w",

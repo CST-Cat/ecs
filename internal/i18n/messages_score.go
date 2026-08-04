@@ -6,7 +6,7 @@ var scoreChinese = map[string]string{
 	"score.title":      "综合评分",
 	"score.total":      "总分",
 	"score.coverage":   "基于 %d/%d 个维度",
-	"score.ofBaseline": "基线的 %.0f%%",
+	"score.ofBaseline": "排行榜参考的 %.0f%%",
 
 	"score.dimension.cpu":       "CPU",
 	"score.dimension.memory":    "内存",
@@ -19,11 +19,14 @@ var scoreChinese = map[string]string{
 	"score.incompleteWarning":   "未跑满全部维度，本次总分不可与完整跑分直接比较。",
 	"score.missingMetrics":      "%s 缺少 %d 项指标（%s），未补零。",
 	"score.weightingNote":       "磁盘按 legacy、混合、Crystal、ATTO 四个等权子组计算；每组先平均，矩阵单元不会按数量放大。内存按 memcpy、读、写、时延子组等权；缺失项不补零。",
-	"score.singleSampleWarning": "当前基线只有 1 个样本，分数仅供自查；跨机器比较需要用多机样本重建基线。",
-	"score.baselineLine":        "评分基线：%s（样本 %d 台）。换基线后分数不可直接比较。",
+	"score.singleSampleWarning": "当前排行榜参考只有 1 个样本，分数仅供自查；跨机器比较需要用多机样本重建排行榜统计。",
+	"score.baselineLine":        "排行榜参考均值：%s（样本 %d 台）。更换参考后分数不可直接比较。",
+	"score.rank.available":      "当前排行榜前 %.1f%%（样本 %d 台）",
+	"score.rank.insufficient":   "排行榜样本不足（当前 %d 台，至少需要 %d 台）",
+	"score.rank.unavailable":    "排行榜排名不可用（样本不足，或旧参考未保存分数分布；暂不排名）",
 
 	"score.tierLine":         "本机 %d 核，与 %s 档的机器比较。",
-	"score.tierFallbackLine": "本机 %d 核，该档样本不足，改用全部机型的全局基线；跨机型比较对两端都不够公平。",
+	"score.tierFallbackLine": "本机 %d 核，该档样本不足，改用全部机型的排行榜参考均值；跨机型比较对两端都不够公平。",
 
 	"score.baseline.builtinSingleHost": "内置单机快照，非 VPS 典型值",
 
@@ -41,15 +44,15 @@ var scoreChinese = map[string]string{
 	"score.metric.disk_seq_write":       "磁盘顺序写",
 	"score.metric.disk_rand_read_iops":  "磁盘 4K 随机读",
 	"score.metric.disk_rand_write_iops": "磁盘 4K 随机写",
-	"score.metric.bandwidth_download":   "下行带宽（中位）",
-	"score.metric.bandwidth_upload":     "上行带宽（中位）",
+	"score.metric.bandwidth_download":   "下行带宽（参考样本聚合）",
+	"score.metric.bandwidth_upload":     "上行带宽（参考样本聚合）",
 }
 
 var scoreEnglish = map[string]string{
 	"score.title":      "Composite score",
 	"score.total":      "Total",
 	"score.coverage":   "based on %d/%d dimensions",
-	"score.ofBaseline": "%.0f%% of baseline",
+	"score.ofBaseline": "%.0f%% of leaderboard reference",
 
 	"score.dimension.cpu":       "CPU",
 	"score.dimension.memory":    "Memory",
@@ -62,11 +65,14 @@ var scoreEnglish = map[string]string{
 	"score.incompleteWarning":   "Not all dimensions ran; this total is not directly comparable with a full run.",
 	"score.missingMetrics":      "%s is missing %d metric(s) (%s); missing values were not filled with zero.",
 	"score.weightingNote":       "Disk uses four equal-weight subgroups: legacy, mixed, Crystal and ATTO; each subgroup is averaged first, so matrix cells do not gain weight by count. Memory uses equal-weight memcpy, read, write and latency subgroups; missing values are excluded.",
-	"score.singleSampleWarning": "The current baseline has only 1 sample; scores are for self-comparison. Rebuild the baseline from multiple hosts before comparing across machines.",
-	"score.baselineLine":        "Scoring baseline: %s (%d sample host(s)). Scores are not comparable across different baselines.",
+	"score.singleSampleWarning": "The current leaderboard reference has only 1 sample; scores are for self-comparison. Rebuild the leaderboard statistics from multiple hosts before comparing across machines.",
+	"score.baselineLine":        "Leaderboard reference mean: %s (%d sample host(s)). Scores are not comparable across different references.",
+	"score.rank.available":      "Currently in the top %.1f%% of the leaderboard (%d samples)",
+	"score.rank.insufficient":   "Not enough leaderboard samples (currently %d; need at least %d)",
+	"score.rank.unavailable":    "Leaderboard rank unavailable (too few samples or an old reference has no score distribution; no rank shown)",
 
 	"score.tierLine":         "This host has %d vCPU and is compared against the %s tier.",
-	"score.tierFallbackLine": "This host has %d vCPU; that tier has too few samples, so the global baseline across all sizes is used instead — which is unfair to both ends of the range.",
+	"score.tierFallbackLine": "This host has %d vCPU; that tier has too few samples, so the global leaderboard reference mean across all sizes is used instead — which is unfair to both ends of the range.",
 
 	"score.baseline.builtinSingleHost": "built-in single-host snapshot, not a typical VPS",
 
@@ -84,6 +90,6 @@ var scoreEnglish = map[string]string{
 	"score.metric.disk_seq_write":       "Disk sequential write",
 	"score.metric.disk_rand_read_iops":  "Disk 4K random read",
 	"score.metric.disk_rand_write_iops": "Disk 4K random write",
-	"score.metric.bandwidth_download":   "Download (median)",
-	"score.metric.bandwidth_upload":     "Upload (median)",
+	"score.metric.bandwidth_download":   "Download (sample aggregate)",
+	"score.metric.bandwidth_upload":     "Upload (sample aggregate)",
 }

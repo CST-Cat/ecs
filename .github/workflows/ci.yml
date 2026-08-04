@@ -115,30 +115,30 @@ jobs:
             --output /tmp/baseline-check.json \
             submissions
 
-      # 基线重建只在主分支做：PR 上重建会让每个 PR 都带一个 baseline.json 改动，
+      # 排行榜参考重建只在主分支做：PR 上重建会让每个 PR 都带一个 baseline.json 改动，
       # 互相冲突且掩盖真正的提交内容。
-      - name: Rebuild baseline
+      - name: Rebuild leaderboard reference
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           go run ./cmd/ecs baseline \
             --source "社区提交聚合" \
             --output submissions/baseline.json \
             submissions
-          # 基线随二进制发布，因此同步写进内嵌副本。
+          # 排行榜参考随二进制发布，因此同步写进内嵌副本。
           cp submissions/baseline.json internal/score/embedded/baseline.json
           go build ./... && go test ./internal/score/
 
-      - name: Commit rebuilt baseline
+      - name: Commit rebuilt leaderboard reference
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           if git diff --quiet -- submissions/baseline.json internal/score/embedded/baseline.json; then
-            echo "基线无变化，跳过提交"
+            echo "排行榜参考无变化，跳过提交"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add submissions/baseline.json internal/score/embedded/baseline.json
-          git commit -m "CI：按最新提交重建评分基线"
+          git commit -m "CI：按最新提交重建排行榜参考"
           git push
 
   race:

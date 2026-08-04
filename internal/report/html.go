@@ -88,6 +88,19 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 		"baselineLine": func(source string, sample int) string {
 			return fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(source), sample)
 		},
+		"rankLine": func(scored *score.Report) string {
+			if scored == nil {
+				return ""
+			}
+			switch scored.EffectiveRankStatus() {
+			case score.RankStatusAvailable:
+				return fmt.Sprintf(i18n.T("score.rank.available"), scored.TopPercent, scored.EffectiveRankSamples())
+			case score.RankStatusInsufficient:
+				return fmt.Sprintf(i18n.T("score.rank.insufficient"), scored.EffectiveRankSamples(), scored.EffectiveRankMinSamples())
+			default:
+				return i18n.T("score.rank.unavailable")
+			}
+		},
 		"missingReason": func(key string) string { return i18n.T("score.missing." + key) },
 		"missingMetrics": func(dimension score.DimensionScore) string {
 			if len(dimension.MissingMetrics) == 0 {
@@ -307,8 +320,8 @@ const htmlTemplate = `<!doctype html>
     {{end}}
     <div class="score-note">
       {{if not .Score.Complete}}<p>{{scoreText "score.incompleteWarning"}}</p>{{end}}
-      {{if le .Score.BaselineSample 1}}<p>{{scoreText "score.singleSampleWarning"}}</p>{{end}}
       <p>{{baselineLine .Score.BaselineSource .Score.BaselineSample}}</p>
+      {{if or .Score.RankStatus .Score.RankSamples .Score.BaselineSample}}<p>{{rankLine .Score}}</p>{{end}}
       {{if .Score.TierLabel}}<p>{{tierLine .Score.HostVCPU .Score.TierLabel}}</p>
       {{else if .Score.HostVCPU}}<p>{{tierFallbackLine .Score.HostVCPU}}</p>{{end}}
     </div>

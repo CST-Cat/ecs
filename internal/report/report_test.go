@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
 )
@@ -134,6 +135,45 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	} {
 		if !strings.Contains(string(jsonBytes), marker) {
 			t.Fatalf("JSON format missing %q:\n%s", marker, jsonBytes)
+		}
+	}
+}
+
+func TestRankStatusRendersAcrossHumanFormats(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+	data := sampleReport()
+	scored := &score.Report{
+		Total: 1000, Ratio: 1, Covered: 1, Possible: 1,
+		BaselineSource: "fleet", BaselineSample: 5,
+		RankStatus: score.RankStatusAvailable, TopPercent: 20, RankSamples: 5,
+		RankMinSamples: score.DefaultRankMinSamples,
+	}
+	txt := Text(data, TextOptions{Score: scored})
+	md := Markdown(data, scored)
+	htmlBytes, err := HTML(data, scored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string]string{"txt": txt, "md": md, "html": string(htmlBytes)} {
+		if !strings.Contains(output, "排行榜前") {
+			t.Fatalf("%s output missing available rank:\n%s", name, output)
+		}
+	}
+
+	scored.RankStatus = score.RankStatusInsufficient
+	scored.RankSamples = 3
+	scored.BaselineSample = 3
+	txt = Text(data, TextOptions{Score: scored})
+	md = Markdown(data, scored)
+	htmlBytes, err = HTML(data, scored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string]string{"txt": txt, "md": md, "html": string(htmlBytes)} {
+		if !strings.Contains(output, "排行榜样本不足") {
+			t.Fatalf("%s output missing sparse rank:\n%s", name, output)
 		}
 	}
 }

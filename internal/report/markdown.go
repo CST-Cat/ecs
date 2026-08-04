@@ -359,12 +359,21 @@ func writeMarkdownScore(out *strings.Builder, scored *score.Report) {
 	if !scored.Complete {
 		out.WriteString("> " + i18n.T("score.incompleteWarning") + "\n\n")
 	}
-	if scored.BaselineSample <= 1 {
-		out.WriteString("> " + i18n.T("score.singleSampleWarning") + "\n\n")
-	}
 	out.WriteString("> " + i18n.T("score.weightingNote") + "\n\n")
 	out.WriteString(fmt.Sprintf(i18n.T("score.baselineLine"),
 		baselineSourceLabel(scored.BaselineSource), scored.BaselineSample) + "\n\n")
+	if scored.RankStatus != "" || scored.RankSamples > 0 || scored.BaselineSample > 0 {
+		var rankLine string
+		switch scored.EffectiveRankStatus() {
+		case score.RankStatusAvailable:
+			rankLine = fmt.Sprintf(i18n.T("score.rank.available"), scored.TopPercent, scored.EffectiveRankSamples())
+		case score.RankStatusInsufficient:
+			rankLine = fmt.Sprintf(i18n.T("score.rank.insufficient"), scored.EffectiveRankSamples(), scored.EffectiveRankMinSamples())
+		default:
+			rankLine = i18n.T("score.rank.unavailable")
+		}
+		out.WriteString("> " + rankLine + "\n\n")
+	}
 	if scored.TierLabel != "" {
 		out.WriteString(fmt.Sprintf(i18n.T("score.tierLine"), scored.HostVCPU, scored.TierLabel) + "\n\n")
 	} else if scored.HostVCPU > 0 {

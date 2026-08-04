@@ -327,8 +327,8 @@ func TestAggregateMedianHandlesEvenCount(t *testing.T) {
 	}
 }
 
-// 基线由多份报告的中位数构成：一台异常机器不该把基线拽走。
-func TestBuildBaselineUsesMedian(t *testing.T) {
+// 排行榜参考由多份报告的算术平均构成；离群检测在提交流程中单独完成。
+func TestBuildBaselineUsesMean(t *testing.T) {
 	reports := []model.Report{
 		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 100})),
 		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 200})),
@@ -338,8 +338,8 @@ func TestBuildBaselineUsesMedian(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(baseline.Metrics["cpu_single"]-200) > 0.001 {
-		t.Fatalf("基线应取中位数 200，得到 %v", baseline.Metrics["cpu_single"])
+	if math.Abs(baseline.Metrics["cpu_single"]-3100) > 0.001 {
+		t.Fatalf("参考应取算术平均 3100，得到 %v", baseline.Metrics["cpu_single"])
 	}
 	if baseline.SampleCount != 3 {
 		t.Fatalf("样本数 = %d，期望 3", baseline.SampleCount)
@@ -347,6 +347,63 @@ func TestBuildBaselineUsesMedian(t *testing.T) {
 	// 没有任何机器测到的指标不该凭空出现在基线里。
 	if _, ok := baseline.Metrics["bandwidth_download"]; ok {
 		t.Fatal("未测到的指标不该进入基线")
+	}
+}
+
+func TestBuildBaselineStoresScoreDistributionAndRanks(t *testing.T) {
+	reports := []model.Report{
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 100})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 200})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 300})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 400})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 500})),
+	}
+	baseline, err := BuildBaseline(reports, "cluster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baseline.ScoreSamples) != 5 {
+		t.Fatalf("score distribution length = %d, want 5", len(baseline.ScoreSamples))
+	}
+	if baseline.RankMinSamples != DefaultRankMinSamples {
+		t.Fatalf("rank threshold = %d, want %d", baseline.RankMinSamples, DefaultRankMinSamples)
+	}
+	got := Compute(reports[3], baseline)
+	if got == nil {
+		t.Fatal("expected score for the fourth report")
+	}
+	if got.RankStatus != RankStatusAvailable || got.RankSamples != 5 {
+		t.Fatalf("rank status/samples = %q/%d, want available/5", got.RankStatus, got.RankSamples)
+	}
+	if math.Abs(got.TopPercent-40) > 0.001 {
+		t.Fatalf("top percent = %v, want 40", got.TopPercent)
+	}
+}
+
+func TestComputeDoesNotInventRankForSparseOrLegacyReference(t *testing.T) {
+	reports := []model.Report{
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 100})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 200})),
+		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 300})),
+	}
+	baseline, err := BuildBaseline(reports, "sparse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Compute(reports[0], baseline)
+	if got == nil || got.RankStatus != RankStatusInsufficient || got.RankSamples != 3 || got.RankMinSamples != DefaultRankMinSamples {
+		t.Fatalf("sparse rank = %+v", got)
+	}
+	legacy := testBaseline()
+	legacyScore := Compute(reports[0], legacy)
+	if legacyScore == nil || legacyScore.RankStatus != RankStatusInsufficient || legacyScore.RankSamples != 3 || legacyScore.TopPercent != 0 {
+		t.Fatalf("legacy sparse rank should be insufficient without distribution: %+v", legacyScore)
+	}
+	legacyLarge := legacy
+	legacyLarge.SampleCount = 10
+	legacyLargeScore := Compute(reports[0], legacyLarge)
+	if legacyLargeScore == nil || legacyLargeScore.RankStatus != RankStatusUnavailable || legacyLargeScore.TopPercent != 0 {
+		t.Fatalf("legacy rank should be unavailable without distribution: %+v", legacyLargeScore)
 	}
 }
 

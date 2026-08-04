@@ -40,7 +40,7 @@ func TestTierLabelReadsAsRange(t *testing.T) {
 	}
 }
 
-// 分档的核心价值：多线程分数几乎正比于核数，全局基线会让小机器永远不及格。
+// 分档的核心价值：多线程分数几乎正比于核数，全局排行榜参考会让小机器永远不及格。
 func TestTieredBaselineIsFairToSmallHosts(t *testing.T) {
 	var reports []Submission
 	// 两档各 6 台，多线程性能随核数线性缩放。
@@ -73,13 +73,34 @@ func TestTieredBaselineIsFairToSmallHosts(t *testing.T) {
 	if math.Abs(large["cpu_multi"]-12000) > 1 {
 		t.Fatalf("16 核档基线 = %v，期望约 12000", large["cpu_multi"])
 	}
-	// 全局基线介于两者之间——正是它对两端都不公平的原因。
+	// 全局参考均值介于两者之间——正是它对两端都不公平的原因。
 	if baseline.Metrics["cpu_multi"] <= 1500 || baseline.Metrics["cpu_multi"] >= 12000 {
 		t.Fatalf("全局基线应落在两档之间，得到 %v", baseline.Metrics["cpu_multi"])
 	}
 }
 
-// 样本不足的档位必须回落到全局基线，而不是用三台机器的中位数评判所有人。
+func TestTierReferenceUsesArithmeticMean(t *testing.T) {
+	var reports []Submission
+	for index := 0; index < 6; index++ {
+		reports = append(reports, tierSubmission(
+			"m"+string(rune('a'+index)), 4,
+			map[string]float64{"cpu_multi": float64((index + 1) * 100)},
+		))
+	}
+	baseline, err := BuildBaseline(submissionsToReports(reports), "mean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics, tierMin, samples := baseline.MetricsForHost(4)
+	if tierMin != 4 || samples != 6 {
+		t.Fatalf("tier selection = %d/%d, want 4/6", tierMin, samples)
+	}
+	if math.Abs(metrics["cpu_multi"]-350) > 0.001 {
+		t.Fatalf("tier reference = %v, want arithmetic mean 350", metrics["cpu_multi"])
+	}
+}
+
+// 样本不足的档位必须回落到全局参考均值，而不是用三台机器评判所有人。
 func TestSparseTierFallsBackToGlobal(t *testing.T) {
 	var subs []Submission
 	for index := 0; index < 3; index++ {

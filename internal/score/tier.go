@@ -1,16 +1,16 @@
 package score
 
-// 按机型分档。
+// 按机型分档的排行榜参考。
 //
-// 全局中位数得到的是"中位机器"，而 4 核和 32 核混在一起比对两端都不公平：
-// 多线程分数几乎正比于核数，用全体中位数当基线，小机器永远及格不了，大机器
+// 全局平均值得到的是"平均机器"，而 4 核和 32 核混在一起比对两端都不公平：
+// 多线程分数几乎正比于核数，用全体平均值作参考，小机器永远及格不了，大机器
 // 永远轻松满分——两边看到的都不是有用的信息。
 //
 // 分档的边界不是我划的，是云厂商的实际规格分布：1、2、4、8、16、32、64+
 // 这几档覆盖了绝大多数售卖规格，落在中间的（如 6 核）归入下界所在的档。
 //
 // 关键约束是**样本不足时自动退化**：某档不够 minTierSamples 台机器就回落到
-// 全局基线并在报告里说明。一个由三台机器算出来的档位中位数没有代表性，
+// 全局排行榜参考均值并在报告里说明。一个由三台机器算出来的档位平均值没有代表性，
 // 用它去评判别人还不如老实说"这档样本不够"。
 
 import (
@@ -20,14 +20,14 @@ import (
 
 // minTierSamples 是一个档位可用的最少样本数。
 //
-// 取 5 而不是 3：中位数在三个样本上等同于取中间那个，任何一台机器出问题都会
-// 直接成为基线。5 台起码要两台同向偏离才能拽动中位数。
+// 取 5 而不是 3：三个样本的平均值很容易被单台异常机器显著拉动，5 台起码有
+// 更多交叉验证机会。
 const minTierSamples = 5
 
 // tierBounds 是档位下界，按云厂商常见规格划分。
 var tierBounds = []int{1, 2, 4, 8, 16, 32, 64}
 
-// Tier 是一个机型档位的基线。
+// Tier 是一个机型档位的排行榜参考。
 type Tier struct {
 	// VCPUMin 是这一档的 vCPU 下界，上界由下一档决定（最后一档无上界）。
 	VCPUMin     int                `json:"vcpu_min"`
@@ -72,9 +72,9 @@ func TierLabel(vcpuMin int) string {
 	return fmt.Sprintf("%d vCPU", vcpuMin)
 }
 
-// MetricsForHost 返回适用于该机器的基线指标，以及所用档位的说明。
+// MetricsForHost 返回适用于该机器的参考指标，以及所用档位的说明。
 //
-// 第二个返回值是档位下界，0 表示用的是全局基线（该档样本不足或没有分档数据）。
+// 第二个返回值是档位下界，0 表示用的是全局参考（该档样本不足或没有分档数据）。
 func (b Baseline) MetricsForHost(vcpu int) (map[string]float64, int, int) {
 	key := TierKeyFor(vcpu)
 	for _, tier := range b.Tiers {
@@ -95,7 +95,7 @@ func (b Baseline) MetricsForHost(vcpu int) (map[string]float64, int, int) {
 	return b.Metrics, 0, b.SampleCount
 }
 
-// buildTiers 从按档位分好的样本里生成分档基线。
+// buildTiers 从按档位分好的样本里生成分档排行榜参考。
 func buildTiers(samplesByTier map[int]map[string][]float64) []Tier {
 	keys := make([]int, 0, len(samplesByTier))
 	for key := range samplesByTier {
@@ -113,9 +113,7 @@ func buildTiers(samplesByTier map[int]map[string][]float64) []Tier {
 			if len(values) == 0 {
 				continue
 			}
-			sorted := append([]float64(nil), values...)
-			sort.Float64s(sorted)
-			metrics[metricKey] = aggregate(sorted, AggregateMedian)
+			metrics[metricKey] = arithmeticMean(values)
 			if len(values) > count {
 				count = len(values)
 			}

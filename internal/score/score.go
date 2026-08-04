@@ -9,14 +9,14 @@ package score
 //
 // 因此这里的每条规则都是为了让分数可复核：
 //
-//   - 分项分 = 实测值 / 基线值 × 1000，一步除法，读者能手算验证；
+//   - 分项分 = 实测值 / 排行榜参考均值 × 1000，一步除法，读者能手算验证；
 //   - 只累加真正跑过的维度，覆盖度随分数一起呈现，缺的维度不按 0 也不按满分；
 //   - 权重均等，不替用户假设用途；
-//   - 基线是可替换的数据，不是写死在算法里的常数——它决定了分数的含义，
+//   - 排行榜参考是可替换的数据，不是写死在算法里的常数——它决定了分数的含义，
 //     必须能随实测样本更新。
 //
-// 不做百分位：那需要一个跨机器的样本库，而 ecs 不上传任何数据，编一个百分位
-// 就是凭空捏造。
+// 排名只使用参考文件明确保存的样本分数分布；旧文件或样本不足时不显示百分位，
+// 不从主机数目推造排名。
 
 import (
 	"math"
@@ -38,7 +38,7 @@ type Dimension struct {
 
 // Metric 是维度下的一项指标。
 type Metric struct {
-	// Key 是基线文件里的键。
+	// Key 是排行榜参考文件里的键（JSON 字段名保持兼容）。
 	Key string
 	// MeasurementKey 直接匹配一个 measurement 的 key。
 	MeasurementKey string
@@ -180,10 +180,10 @@ func attoScoreMetrics() []Metric {
 	return metrics
 }
 
-// FullScale 是分项满分刻度：实测值等于基线时得这个分。
+// FullScale 是分项满分刻度：实测值等于排行榜参考均值时得这个分。
 //
-// 取 1000 而不是 100，是为了让超出基线的机器有清晰的表达空间——分数不封顶，
-// 跑出 2000 就是基线的两倍，含义直白。
+// 取 1000 而不是 100，是为了让超出参考均值的机器有清晰的表达空间——分数不封顶，
+// 跑出 2000 就是参考均值的两倍，含义直白。
 const FullScale = 1000
 
 // MetricScore 是一项指标的得分。
@@ -246,6 +246,62 @@ type Report struct {
 	TierLabel string `json:"tier_label,omitempty"`
 	// HostVCPU 是被评分机器的核数，用于说明为什么落在这一档。
 	HostVCPU int `json:"host_vcpu,omitempty"`
+	// RankStatus reports whether a leaderboard position is available without
+	// pretending that an old reference file has a distribution. Values are the
+	// RankStatus* constants below.
+	RankStatus string `json:"rank_status,omitempty"`
+	// TopPercent is the share of score samples at or above this report's total;
+	// lower is better. It is omitted when RankStatus is not available.
+	TopPercent float64 `json:"top_percent,omitempty"`
+	// RankSamples is the number of scores used for TopPercent, or the available
+	// distribution size when the sample is too small.
+	RankSamples int `json:"rank_samples,omitempty"`
+	// RankMinSamples records the threshold used by the reference. It is kept in
+	// the score report so renderers can explain a sparse distribution.
+	RankMinSamples int `json:"rank_min_samples,omitempty"`
+}
+
+const (
+	// RankStatusAvailable means a top-percent rank was computed.
+	RankStatusAvailable = "available"
+	// RankStatusInsufficient means a distribution exists but has too few scores.
+	RankStatusInsufficient = "insufficient"
+	// RankStatusUnavailable means the artifact has no score distribution (for
+	// example an older ecs.baseline/v1 file).
+	RankStatusUnavailable = "unavailable"
+)
+
+// EffectiveRankStatus normalizes reports produced by older versions, which do
+// not contain ranking fields. Such reports deliberately degrade to an
+// unavailable rank instead of deriving one from the reference's host count.
+func (r Report) EffectiveRankStatus() string {
+	switch r.RankStatus {
+	case RankStatusAvailable, RankStatusInsufficient, RankStatusUnavailable:
+		return r.RankStatus
+	default:
+		if r.BaselineSample > 0 && r.BaselineSample < r.EffectiveRankMinSamples() {
+			return RankStatusInsufficient
+		}
+		return RankStatusUnavailable
+	}
+}
+
+// EffectiveRankSamples returns the score distribution size, falling back to
+// the legacy reference sample count only for explanatory rendering.
+func (r Report) EffectiveRankSamples() int {
+	if r.RankSamples > 0 {
+		return r.RankSamples
+	}
+	return r.BaselineSample
+}
+
+// EffectiveRankMinSamples returns the persisted threshold or the current
+// conservative default for old score reports.
+func (r Report) EffectiveRankMinSamples() int {
+	if r.RankMinSamples > 0 {
+		return r.RankMinSamples
+	}
+	return DefaultRankMinSamples
 }
 
 // Compute 按基线为一份报告算分。
@@ -261,7 +317,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 		}
 	}
 
-	// 按被测机器的规格选档位：多线程分数几乎正比于核数，拿全体中位数当基线
+	// 按被测机器的规格选档位：多线程分数几乎正比于核数，拿全体参考均值
 	// 会让小机器永远不及格、大机器永远满分。档位样本不足时自动回落到全局。
 	vcpu := hostVCPU(values)
 	tierMetrics, tierMin, tierSamples := baseline.MetricsForHost(vcpu)
@@ -273,6 +329,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 		BaselineSample: tierSamples,
 		TierVCPUMin:    tierMin,
 		HostVCPU:       vcpu,
+		RankMinSamples: baseline.RankThreshold(),
 	}
 	if tierMin > 0 {
 		out.TierLabel = TierLabel(tierMin)
@@ -301,7 +358,46 @@ func Compute(data model.Report, baseline Baseline) *Report {
 	out.Total = sum / float64(len(totals))
 	out.Ratio = out.Total / FullScale
 	out.Complete = complete && out.Covered == out.Possible
+	populateRank(&out, baseline)
 	return &out
+}
+
+// populateRank computes a leaderboard position only when the reference carries
+// an explicit score distribution. SampleCount alone is not enough: old
+// ecs.baseline/v1 artifacts contain host counts but no scores to rank against.
+func populateRank(out *Report, baseline Baseline) {
+	out.RankSamples = len(baseline.ScoreSamples)
+	if baseline.ScoreSamples == nil {
+		// Legacy references expose only a host count.  We can still explain that
+		// the sample is too small, but never derive a percentage without scores.
+		if baseline.SampleCount > 0 && baseline.SampleCount < baseline.RankThreshold() {
+			out.RankSamples = baseline.SampleCount
+			out.RankStatus = RankStatusInsufficient
+			return
+		}
+		out.RankStatus = RankStatusUnavailable
+		return
+	}
+	threshold := baseline.RankThreshold()
+	out.RankMinSamples = threshold
+	if len(baseline.ScoreSamples) < threshold {
+		out.RankStatus = RankStatusInsufficient
+		return
+	}
+	if len(baseline.ScoreSamples) == 0 {
+		// A zero threshold is invalid, but keep this guard defensive for callers
+		// constructing a Baseline directly rather than loading one from disk.
+		out.RankStatus = RankStatusUnavailable
+		return
+	}
+	countAtOrAbove := 0
+	for _, sample := range baseline.ScoreSamples {
+		if sample >= out.Total {
+			countAtOrAbove++
+		}
+	}
+	out.TopPercent = float64(countAtOrAbove) * 100 / float64(len(baseline.ScoreSamples))
+	out.RankStatus = RankStatusAvailable
 }
 
 func scoreDimension(dimension Dimension, values map[string]measured, baseline Baseline, moduleRan bool) DimensionScore {
