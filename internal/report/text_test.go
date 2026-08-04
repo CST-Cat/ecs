@@ -234,6 +234,11 @@ func TestTextModuleHeadersKeepProjectNamesOnly(t *testing.T) {
 	if !strings.Contains(segments[2], "无来源模块") {
 		t.Fatalf("无来源模块头缺少标题:\n%s", segments[2])
 	}
+	for _, segment := range segments {
+		if lines := strings.Split(segment, "\n"); lines[0] == "" {
+			t.Fatalf("模块头缺少起始分隔线：%s", segment)
+		}
+	}
 	if lines := strings.Split(segments[2], "\n"); len(lines) != 3 {
 		t.Fatalf("无来源模块不应因空项目产生额外空行：%d 行\n%s", len(lines), segments[2])
 	}
@@ -341,6 +346,40 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 	}
 	if !strings.Contains(string(jsonBytes), "内部 notice") || !strings.Contains(string(jsonBytes), "crystal_rnd4k_q1_read_mib_s") {
 		t.Fatal("隐藏 txt notice/flat metrics 不应修改 JSON 数据")
+	}
+}
+
+func TestTextBacktraceRendersHopDetailsAndMasksIPs(t *testing.T) {
+	data := textSampleReport()
+	data.Results = []model.Result{{
+		ID: "backtrace", Title: "三网回程", Status: model.StatusOK,
+		Summary: "电信 CN2（AS4809）",
+		Tables: []model.Table{
+			{Title: "三网回程线路", Columns: []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"}, Rows: [][]string{{"电信", "北京电信", "电信 CN2（AS4809）", "3", "59.43.130.22", "已识别"}}, SensitiveColumns: []int{4}},
+			{Title: "逐跳明细", Columns: []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"}, Rows: [][]string{
+				{"北京电信", "电信", "1", "0.512 ms", "10.0.0.1", "—", "—", "—", "已响应"},
+				{"北京电信", "电信", "2", "—", "—", "—", "—", "—", "无响应"},
+				{"北京电信", "电信", "3", "32.118 ms", "59.43.130.22", "AS4809", "China Telecom", "Shanghai", "已响应"},
+			}, SensitiveColumns: []int{4}},
+		},
+	}}
+	redacted := model.RedactedCopy(data, false)
+	plain := Text(redacted, TextOptions{Color: termcolor.LevelNone})
+	for _, want := range []string{"三网回程线路", "逐跳明细", "北京电信", "0.512 ms", "32.118 ms", "AS4809", "China Telecom", "无响应", "59.43.130.x"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("回程逐跳报告缺少 %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "59.43.130.22") || strings.Contains(plain, "10.0.0.1") {
+		t.Fatalf("脱敏后的终端报告仍暴露完整 IP:\n%s", plain)
+	}
+	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
+		out := Text(redacted, TextOptions{Color: level})
+		for lineNumber, line := range strings.Split(out, "\n") {
+			if width := textwidth.Width(line); width > textWidth {
+				t.Fatalf("%v 档第 %d 行超出 %d 列：%d", level, lineNumber+1, textWidth, width)
+			}
+		}
 	}
 }
 

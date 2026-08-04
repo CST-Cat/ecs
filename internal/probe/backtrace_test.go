@@ -25,6 +25,27 @@ func TestExtractTraceHopsFromTracerouteText(t *testing.T) {
 	}
 }
 
+func TestExtractTraceDetailsFromTracerouteIncludesLatencyAndPlaceholders(t *testing.T) {
+	output := strings.Join([]string{
+		" 1  10.0.0.1  0.512 ms",
+		" 2  * * *",
+		" 3  202.97.94.1  32.118 ms",
+	}, "\n")
+	details := extractTraceDetails("traceroute", output)
+	if len(details) != 3 {
+		t.Fatalf("details = %+v", details)
+	}
+	if details[0].Hop != 1 || details[0].IP != "10.0.0.1" || details[0].Latency != "0.512 ms" || details[0].Status != "已响应" {
+		t.Fatalf("first detail = %+v", details[0])
+	}
+	if details[1].Hop != 2 || details[1].IP != "—" || details[1].Latency != "—" || details[1].ASN != "—" || details[1].Status != "无响应" {
+		t.Fatalf("missing-hop detail = %+v", details[1])
+	}
+	if details[2].IP != "202.97.94.1" || details[2].Latency != "32.118 ms" {
+		t.Fatalf("backbone detail = %+v", details[2])
+	}
+}
+
 func TestExtractTraceHopsAcceptsIPv6Text(t *testing.T) {
 	output := " 1  2001:db8::1  0.5 ms\n 2  * * *\n 3  2408:8120:2::108  10 ms"
 	hops := extractTraceHops("traceroute", output)
@@ -44,6 +65,32 @@ func TestExtractTraceHopsFromNextTraceJSON(t *testing.T) {
 	hops := extractTraceHops("nexttrace", output)
 	if len(hops) != 3 || hops[2] != "219.158.16.1" {
 		t.Fatalf("nexttrace hops = %v", hops)
+	}
+}
+
+func TestExtractNextTraceDetailsParsesMetadataWithoutInventingGeo(t *testing.T) {
+	output := `{"Hops":[[{"Address":"59.43.130.22","RTT":"3.5 ms","ASN":4809,"ASName":"China Telecom","Location":"Shanghai"}],[{"Address":""}],[{"Address":"203.0.113.8","RTT":2.0,"Owner":"Example Net","PTR":"edge.example","country":"CN","prov":"BJ","city":"Beijing","district":"Haidian"}]]}`
+	details, ok := extractNextTraceDetails(output)
+	if !ok || len(details) != 3 {
+		t.Fatalf("details = %+v, ok=%v", details, ok)
+	}
+	if details[0].IP != "59.43.130.22" || details[0].Latency != "3.5 ms" || details[0].ASN != "AS4809" || details[0].Network != "China Telecom" || details[0].Location != "Shanghai" {
+		t.Fatalf("metadata detail = %+v", details[0])
+	}
+	if details[1].Status != "无响应" || details[1].IP != "—" || details[1].ASN != "—" || details[1].Location != "—" {
+		t.Fatalf("unknown detail = %+v", details[1])
+	}
+	if details[2].IP != "203.0.113.8" || details[2].Latency != "2 ms" || details[2].ASN != "—" || details[2].Network != "Example Net" || details[2].Location != "CN / BJ / Beijing / Haidian" {
+		t.Fatalf("partial metadata detail = %+v", details[2])
+	}
+	annotateBacktraceDetails(details)
+	if details[0].Network != "China Telecom" || details[0].ASN != "AS4809" {
+		t.Fatalf("existing metadata should not be overwritten: %+v", details[0])
+	}
+	withoutMetadata := []backtraceHop{{IP: "59.43.130.22", ASN: "—", Network: "—"}}
+	annotateBacktraceDetails(withoutMetadata)
+	if withoutMetadata[0].ASN != "—" || withoutMetadata[0].Network == "—" {
+		t.Fatalf("route signature must not fabricate ASN, but may label line: %+v", withoutMetadata[0])
 	}
 }
 

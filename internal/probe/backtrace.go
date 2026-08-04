@@ -7,6 +7,7 @@ import (
 	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -95,18 +96,33 @@ type backtraceHit struct {
 	IP        string
 }
 
+// backtraceHop is the structured, bounded view of one traceroute hop used by
+// the terminal report.  Unknown fields stay as an em dash; they are never
+// inferred from a hostname or filled with fabricated geolocation.
+type backtraceHop struct {
+	Hop      int
+	IP       string
+	Latency  string
+	ASN      string
+	Network  string
+	Location string
+	Status   string
+}
+
 // backtraceRow 是一个参考目标的追踪结论。
 type backtraceRow struct {
-	Target config.Endpoint
-	Hits   []backtraceHit
-	Hops   []string
-	Raw    string
-	Err    error
+	Target  config.Endpoint
+	Hits    []backtraceHit
+	Hops    []string
+	Details []backtraceHop
+	Raw     string
+	Err     error
 }
 
 // hopPrefixPattern 匹配 traceroute 文本输出的跳号前缀。
 var (
 	hopLinePattern = regexp.MustCompile(`^\s*(\d{1,2})\s+(.*)$`)
+	latencyPattern = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*ms`)
 )
 
 func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -212,7 +228,35 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		})
 		summaries = append(summaries, row.Target.Kind+" "+best.Signature.Code)
 	}
-	result.Tables = []model.Table{table}
+	detailTable := model.Table{
+		Title:   "逐跳明细",
+		Columns: []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"},
+		// IP 会暴露机房出口位置，默认按段遮盖；其余列来自路径工具或
+		// 已知骨干特征，未知值统一使用占位符。
+		SensitiveColumns: []int{4},
+	}
+	for _, row := range rows {
+		if row.Err != nil || len(row.Details) == 0 {
+			detailTable.Rows = append(detailTable.Rows, []string{
+				row.Target.Name, row.Target.Kind, "—", "—", "—", "—", "—", "—", "追踪失败",
+			})
+			continue
+		}
+		for _, hop := range row.Details {
+			detailTable.Rows = append(detailTable.Rows, []string{
+				row.Target.Name,
+				row.Target.Kind,
+				strconv.Itoa(hop.Hop),
+				fallbackBacktraceValue(hop.Latency),
+				fallbackBacktraceValue(hop.IP),
+				fallbackBacktraceValue(hop.ASN),
+				fallbackBacktraceValue(hop.Network),
+				fallbackBacktraceValue(hop.Location),
+				fallbackBacktraceValue(hop.Status),
+			})
+		}
+	}
+	result.Tables = []model.Table{table, detailTable}
 	result.Measurements = []model.Measurement{
 		{
 			Key: "backtrace_identified", Label: "已识别线路",
@@ -248,7 +292,13 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 	defer cancel()
 	output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, backtraceMaxHops, family)
 	row.Raw = sanitizeCommandOutput(output)
-	row.Hops = extractTraceHops(engine.Name, row.Raw)
+	row.Details = extractTraceDetails(engine.Name, row.Raw)
+	row.Hops = make([]string, len(row.Details))
+	for index, detail := range row.Details {
+		if detail.IP != "—" {
+			row.Hops[index] = detail.IP
+		}
+	}
 	// traceroute 到国内 IP 时末段被丢弃是常态，只要拿到跳就继续分析；
 	// 一跳都没有才算失败。
 	if len(row.Hops) == 0 {
@@ -260,20 +310,43 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 		return row
 	}
 	row.Hits = matchRouteSignatures(row.Hops)
+	annotateBacktraceDetails(row.Details)
 	return row
 }
 
 // extractTraceHops 按顺序取出每一跳的 IP，无响应的跳用空串占位。
 func extractTraceHops(engineName, output string) []string {
-	if engineName == "nexttrace" {
-		if hops, ok := extractNextTraceHops(output); ok {
-			return hops
+	details := extractTraceDetails(engineName, output)
+	hops := make([]string, len(details))
+	for index, detail := range details {
+		if detail.IP != "—" {
+			hops[index] = detail.IP
 		}
 	}
-	var hops []string
+	return hops
+}
+
+// extractTraceDetails parses both NextTrace JSON and classic traceroute text.
+// The parser intentionally keeps only bounded structured fields; raw output
+// remains in the sensitive TextBlock for JSON consumers and later auditing.
+func extractTraceDetails(engineName, output string) []backtraceHop {
+	if engineName == "nexttrace" {
+		if details, ok := extractNextTraceDetails(output); ok {
+			return details
+		}
+	}
+	return extractClassicTraceDetails(output)
+}
+
+func extractClassicTraceDetails(output string) []backtraceHop {
+	details := []backtraceHop{}
 	for _, line := range strings.Split(output, "\n") {
 		match := hopLinePattern.FindStringSubmatch(line)
 		if match == nil {
+			continue
+		}
+		hopNumber, err := strconv.Atoi(match[1])
+		if err != nil {
 			continue
 		}
 		address := ""
@@ -287,33 +360,246 @@ func extractTraceHops(engineName, output string) []string {
 				break
 			}
 		}
-		hops = append(hops, address)
+		latency := "—"
+		if matched := latencyPattern.FindStringSubmatch(match[2]); len(matched) > 1 {
+			latency = matched[1] + " ms"
+		}
+		status := "已响应"
+		if address == "" {
+			status = "无响应"
+			address = "—"
+		}
+		details = append(details, backtraceHop{
+			Hop: hopNumber, IP: address, Latency: latency,
+			ASN: "—", Network: "—", Location: "—", Status: status,
+		})
 	}
-	return hops
+	return details
 }
 
 // extractNextTraceHops 解析 NextTrace 的 JSON 输出。
 func extractNextTraceHops(output string) ([]string, bool) {
-	var payload struct {
-		Hops [][]struct {
-			Address string `json:"Address"`
-		} `json:"Hops"`
-	}
-	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+	details, ok := extractNextTraceDetails(output)
+	if !ok {
 		return nil, false
 	}
-	hops := make([]string, 0, len(payload.Hops))
-	for _, probes := range payload.Hops {
-		address := ""
-		for _, probe := range probes {
-			if probe.Address != "" {
-				address = probe.Address
-				break
+	hops := make([]string, len(details))
+	for index, detail := range details {
+		if detail.IP != "—" {
+			hops[index] = detail.IP
+		}
+	}
+	return hops, true
+}
+
+func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
+	var payload struct {
+		Hops [][]json.RawMessage `json:"Hops"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || len(payload.Hops) == 0 {
+		return nil, false
+	}
+	details := make([]backtraceHop, 0, len(payload.Hops))
+	for index, probes := range payload.Hops {
+		detail := backtraceHop{
+			Hop: index + 1, IP: "—", Latency: "—", ASN: "—",
+			Network: "—", Location: "—", Status: "无响应",
+		}
+		for _, rawProbe := range probes {
+			probe := map[string]json.RawMessage{}
+			_ = json.Unmarshal(rawProbe, &probe)
+			address := normalizeTraceAddress(jsonMapString(probe, "Address", "IP", "Ip"))
+			if address == "" {
+				var scalar string
+				if json.Unmarshal(rawProbe, &scalar) == nil {
+					address = normalizeTraceAddress(scalar)
+				}
+			}
+			if address == "" {
+				continue
+			}
+			detail.IP = address
+			detail.Latency = normalizeTraceLatency(jsonMapString(probe, "RTT", "Latency", "Delay", "Time", "AvgRTT"))
+			detail.ASN = normalizeTraceASN(jsonMapString(probe, "ASN", "ASNumber", "AS", "ASNO"))
+			detail.Network = firstNonEmptyTraceValue(jsonMapString(probe, "ASName", "Organization", "Org", "ISP", "Network", "Owner", "PTR", "Host", "Hostname"), "—")
+			detail.Location = traceLocation(probe)
+			detail.Status = "已响应"
+			break
+		}
+		details = append(details, detail)
+	}
+	return details, true
+}
+
+func jsonMapString(values map[string]json.RawMessage, names ...string) string {
+	raw, ok := jsonMapRaw(values, names...)
+	if !ok {
+		return ""
+	}
+	return jsonRawString(raw)
+}
+
+func jsonMapRaw(values map[string]json.RawMessage, names ...string) (json.RawMessage, bool) {
+	for _, name := range names {
+		for key, raw := range values {
+			if !strings.EqualFold(key, name) {
+				continue
+			}
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
+func jsonRawString(raw json.RawMessage) string {
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return strings.TrimSpace(value)
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		return number.String()
+	}
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) == nil {
+		for _, item := range values {
+			if value := jsonRawString(item); value != "" {
+				return value
 			}
 		}
-		hops = append(hops, address)
 	}
-	return hops, len(hops) > 0
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) == nil {
+		for _, key := range []string{"Name", "name", "City", "city", "Location", "location", "Value", "value"} {
+			if item, ok := object[key]; ok {
+				if value := jsonRawString(item); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeTraceAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if zone := strings.LastIndexByte(value, '%'); zone >= 0 {
+		value = value[:zone]
+	}
+	if parsed := net.ParseIP(strings.Trim(value, "[](),<>")); parsed != nil {
+		return parsed.String()
+	}
+	return ""
+}
+
+func normalizeTraceLatency(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "—"
+	}
+	if match := latencyPattern.FindStringSubmatch(value); len(match) > 1 {
+		return match[1] + " ms"
+	}
+	if number, err := strconv.ParseFloat(value, 64); err == nil {
+		return strconv.FormatFloat(number, 'f', -1, 64) + " ms"
+	}
+	return value
+}
+
+func normalizeTraceASN(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "—"
+	}
+	if strings.HasPrefix(strings.ToUpper(value), "AS") {
+		return value
+	}
+	if number, err := strconv.Atoi(value); err == nil && number > 0 {
+		return "AS" + strconv.Itoa(number)
+	}
+	return value
+}
+
+func firstNonEmptyTraceValue(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func traceLocation(values map[string]json.RawMessage) string {
+	parts := traceLocationParts(values)
+	if len(parts) > 0 {
+		return strings.Join(parts, " / ")
+	}
+	for _, name := range []string{"Location", "Geo"} {
+		raw, ok := jsonMapRaw(values, name)
+		if !ok {
+			continue
+		}
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) == nil {
+			if nestedParts := traceLocationParts(nested); len(nestedParts) > 0 {
+				return strings.Join(nestedParts, " / ")
+			}
+		}
+	}
+	if value := strings.TrimSpace(jsonMapString(values, "Location", "Geo", "Region")); value != "" {
+		return value
+	}
+	lat := strings.TrimSpace(jsonMapString(values, "lat", "latitude"))
+	lng := strings.TrimSpace(jsonMapString(values, "lng", "lon", "longitude"))
+	if lat != "" && lng != "" {
+		return lat + ", " + lng
+	}
+	return "—"
+}
+
+func traceLocationParts(values map[string]json.RawMessage) []string {
+	parts := make([]string, 0, 4)
+	for _, name := range []string{"Country", "country", "Prov", "prov", "State", "state", "City", "city", "District", "district"} {
+		if value := strings.TrimSpace(jsonMapString(values, name)); value != "" {
+			duplicate := false
+			for _, existing := range parts {
+				if strings.EqualFold(existing, value) {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				parts = append(parts, value)
+			}
+		}
+	}
+	return parts
+}
+
+func fallbackBacktraceValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "—"
+	}
+	return value
+}
+
+func annotateBacktraceDetails(details []backtraceHop) {
+	for index := range details {
+		if details[index].IP == "" || details[index].IP == "—" {
+			continue
+		}
+		for _, signature := range chinaRouteSignatures {
+			if !strings.HasPrefix(strings.ToLower(details[index].IP), strings.ToLower(signature.Prefix)) {
+				continue
+			}
+			// A prefix signature identifies the route label, not the exact
+			// ASN of this hop.  Keep ASN unknown unless the probe supplied it;
+			// otherwise the inferred signature would look like fabricated
+			// metadata in the hop table.
+			if details[index].Network == "" || details[index].Network == "—" {
+				details[index].Network = signature.Label
+			}
+			break
+		}
+	}
 }
 
 // matchRouteSignatures 按跳序匹配所有已知骨干特征。
