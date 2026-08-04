@@ -691,6 +691,15 @@ prepare_dependencies() {
       *) add_package "$(package_for_tool "$tool")" ;;
     esac
   done
+  # The official .deb metadata currently declares ca-certificates (the RPM
+  # builds rely on the same trust bundle).  Resolve it from the normal distro
+  # repository before apt/dnf/yum is restricted to the temporary Ookla source;
+  # this keeps vendor metadata isolated while handling a minimal base image.
+  if [ "$OOKLA_MISSING" -eq 1 ]; then
+    case "$PACKAGE_MANAGER" in
+      apt|dnf|yum) add_package ca-certificates ;;
+    esac
+  fi
   # gpg is only needed to turn the downloaded, pinned Ookla key into an apt
   # keyring.  Install it from the regular distro repository before touching
   # the temporary vendor source; rpm/yum verifies the same key directly.
