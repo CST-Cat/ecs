@@ -257,6 +257,7 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	source := flags.String("source", "", i18n.T("flag.baselineSource"))
 	annotateFlag := flags.Bool("annotate", false, i18n.T("flag.baselineAnnotate"))
 	verboseFlag := flags.Bool("verbose", false, i18n.T("flag.baselineVerbose"))
+	strictFlag := flags.Bool("strict", false, i18n.T("flag.baselineStrict"))
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, i18n.T("help.baselineUsage"))
 		flags.PrintDefaults()
@@ -268,7 +269,27 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	annotate, verbose := *annotateFlag, *verboseFlag
+	annotate, verbose, strict := *annotateFlag, *verboseFlag, *strictFlag
+	inputIssue := func(path string, issue error) bool {
+		if !strict {
+			skipped := fmt.Sprintf("%s: %v", filepath.Base(path), issue)
+			fmt.Fprintf(stderr, "%s %s\n", i18n.T("baseline.skipped"), skipped)
+			return false
+		}
+		fmt.Fprintln(stderr, fmt.Sprintf(i18n.T("baseline.strictFailure"), filepath.Base(path), issue))
+		return true
+	}
+	if strict {
+		// expandReportPaths deliberately ignores missing paths for the default
+		// batch workflow.  Strict mode must make those mistakes visible before
+		// any aggregation or output write can occur.
+		for _, path := range flags.Args() {
+			if _, err := os.Stat(path); err != nil {
+				inputIssue(path, err)
+				return 1
+			}
+		}
+	}
 	// 输入按位置参数给出，方便直接用 shell 展开：ecs baseline reports/*.json
 	paths := expandReportPaths(flags.Args())
 	if len(paths) == 0 {
@@ -280,7 +301,6 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	// 提交会被转成最小报告，因此聚合只有一条代码路径。
 	var reports []model.Report
 	var submissions []score.Submission
-	var skipped []string
 	seen := make(map[string]string)
 	for _, path := range paths {
 		// 目录里通常就放着上一次生成的基线，它不是输入。
@@ -289,8 +309,10 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		if submission, err := score.LoadSubmission(path); err == nil {
 			if previous, duplicated := seen[submission.ID]; duplicated {
-				skipped = append(skipped, fmt.Sprintf("%s: %s (%s)",
-					filepath.Base(path), i18n.T("baseline.duplicate"), filepath.Base(previous)))
+				issue := fmt.Errorf("%s (%s)", i18n.T("baseline.duplicate"), filepath.Base(previous))
+				if inputIssue(path, issue) {
+					return 1
+				}
 				continue
 			}
 			seen[submission.ID] = path
@@ -300,14 +322,19 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		data, err := reporter.LoadJSON(path)
 		if err != nil {
-			// 一份坏输入不该让整批失败，但必须说出来是哪一份、为什么。
-			skipped = append(skipped, fmt.Sprintf("%s: %v", filepath.Base(path), err))
+			// 一份坏输入默认不该让整批失败，但必须说出来是哪一份、为什么。
+			if inputIssue(path, err) {
+				return 1
+			}
+			continue
+		}
+		if err := validateBaselineReport(data); err != nil {
+			if inputIssue(path, err) {
+				return 1
+			}
 			continue
 		}
 		reports = append(reports, data)
-	}
-	for _, item := range skipped {
-		fmt.Fprintf(stderr, "%s %s\n", i18n.T("baseline.skipped"), item)
 	}
 	if len(reports) == 0 {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), i18n.Errorf("err.baselineNoReports"))
@@ -385,6 +412,14 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// validateBaselineReport rejects a syntactically valid full report that has
+// no scoreable measurements. BuildBaseline is the single source of truth for
+// scoreability, so this check cannot drift from the eventual aggregation.
+func validateBaselineReport(report model.Report) error {
+	_, err := score.BuildBaseline([]model.Report{report}, "")
+	return err
 }
 
 // expandReportPaths 展开位置参数，目录递归收集其中的 .json 文件。

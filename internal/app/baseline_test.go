@@ -11,6 +11,7 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/model"
 	reporter "ecs/internal/report"
+	"ecs/internal/score"
 )
 
 // 提交库按月份分子目录存放，只扫一层会什么都找不到——CI 上就是这么红的。
@@ -191,5 +192,105 @@ func TestWriteSubmissionExclusiveIsAtomicAndPrivate(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".ecs-submit-") {
 			t.Fatalf("temporary submission link was left behind: %s", entry.Name())
 		}
+	}
+}
+
+func writeBaselineReport(t *testing.T, name string, report model.Report) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	content, err := reporter.JSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestBaselineStrictRejectsBadInputWithoutWriting(t *testing.T) {
+	valid := writeBaselineReport(t, "valid.json", submitTestReport(true))
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte("{not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	status := baselineCommand([]string{
+		"--strict", "--output", target, valid, bad,
+	}, &stdout, &stderr)
+	if status == 0 {
+		t.Fatalf("strict baseline accepted bad JSON: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("strict baseline wrote output after bad input: err=%v", err)
+	}
+	if !strings.Contains(stderr.String(), "严格模式") {
+		t.Fatalf("strict error did not identify strict mode: %s", stderr.String())
+	}
+}
+
+func TestBaselineDefaultSkipsBadInput(t *testing.T) {
+	valid := writeBaselineReport(t, "valid.json", submitTestReport(true))
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte("{not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if status := baselineCommand([]string{
+		"--output", target, valid, bad,
+	}, &stdout, &stderr); status != 0 {
+		t.Fatalf("default baseline should skip bad JSON: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("default baseline did not write output: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "已跳过") {
+		t.Fatalf("default baseline did not report skipped input: %s", stderr.String())
+	}
+}
+
+func TestBaselineStrictRejectsDuplicateSubmissionWithoutWriting(t *testing.T) {
+	submission, err := score.BuildSubmission(submitTestReport(true), score.SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := submission.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(t.TempDir(), "first.json")
+	second := filepath.Join(t.TempDir(), "second.json")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if status := baselineCommand([]string{
+		"--strict", "--output", target, first, second,
+	}, &stdout, &stderr); status == 0 {
+		t.Fatalf("strict baseline accepted duplicate submission: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("strict baseline wrote output after duplicate: err=%v", err)
+	}
+}
+
+func TestBaselineStrictRejectsUnscorableReportWithoutWriting(t *testing.T) {
+	path := writeBaselineReport(t, "empty.json", model.Report{
+		SchemaVersion: buildinfo.SchemaVersion,
+	})
+	target := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if status := baselineCommand([]string{
+		"--strict", "--output", target, path,
+	}, &stdout, &stderr); status == 0 {
+		t.Fatalf("strict baseline accepted unscorable report: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("strict baseline wrote output after unscorable report: err=%v", err)
 	}
 }
