@@ -13,7 +13,7 @@
 
 提交格式 `ecs.submission/v1` 只带两类信息：
 
-- **机器规格**：vCPU 数、内存、虚拟化类型、CPU 型号、架构，以及提交者自报的地区与商家；
+- **机器规格**：vCPU 数、内存、虚拟化类型、CPU 型号、架构，以及从安全白名单元数据自动识别的云厂商与地区（缺失时留空，可用 `--provider`/`--region` 覆盖）；
 - **跑分数值**：CPU、内存、磁盘、带宽四个维度的原始实测值，加上产出它们的工具版本。
 
 字段是白名单：加字段要显式改 `internal/score/submission.go`，不会因为报告新增了
@@ -32,14 +32,16 @@
 # 1. 正常跑一次测试
 ecs --profile full
 
-# 2. 从报告导出提交文件（自报地区与商家，用于分组）
+# 2. 从报告导出提交文件（自动识别云厂商与地区；缺失时留空）
 ecs submit --input ./reports/ecs-report-*.json \
-  --region jp --provider vultr --output ./submissions/2026-08/
+  --output ./submissions/2026-08/
 
 # 3. fork 本仓库，把生成的文件放进 submissions/YYYY-MM/，开 PR
 ```
 
-导出时会打印这份提交都带了什么，请自己过目一遍再提交。
+导出时会优先读取报告中的 cloud-init/DMI 明确信号；不会使用公网 IP、ASN、地理定位、
+主机名或原始云元数据。无法识别时对应字段留空；需要手动分组时，可用
+`--provider`/`--region` 显式覆盖。导出时会打印这份提交都带了什么，请自己过目一遍再提交。
 
 ## 目录约定
 

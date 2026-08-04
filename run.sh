@@ -6,7 +6,7 @@
 #       └ 自动下载已校验的 ecs，按当前配置准备缺失组件，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后只清理本次安装的组件
-#   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes --provider vultr --region jp-tokyo
+#   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
@@ -64,6 +64,7 @@ case "${1:-}" in
         'Downloads a checksummed ecs release, prepares missing distro packages, and writes reports directly to ${TMPDIR:-/tmp} by default.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
+        'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
         'Ookla is never installed automatically; use the ecs CLI with --accept ookla.'
     else
@@ -74,6 +75,7 @@ case "${1:-}" in
         '下载并校验 ecs Release，准备缺失的发行版组件，并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
+        '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
         'Ookla 不会自动安装；请用 ecs --accept ookla 显式启用。'
     fi

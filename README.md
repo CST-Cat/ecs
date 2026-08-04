@@ -425,9 +425,12 @@ ecs render --input report.json --score-baseline baseline.json --format txt
 
 ```bash
 ecs submit --input ./reports/ecs-report-*.json \
-  --region jp --provider vultr --output ./submissions/2026-08/
+  --output ./submissions/2026-08/
 ```
 
+导出时会优先从报告中安全白名单的本机元数据自动识别云厂商和地区（例如
+cloud-init 或明确的 DMI 签名）；不会读取公网 IP、ASN、地理定位、主机名或原始
+元数据。无法识别时对应字段留空；如需手动分组，可用 `--provider`/`--region` 显式覆盖。
 字段是白名单——加字段要显式改 `internal/score/submission.go`，不会因为报告新增了
 什么就悄悄多带出去。文件名前 12 位是内容指纹，手改数值而不重算会被 CI 发现。
 
