@@ -60,6 +60,30 @@ func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T
 	}
 }
 
+func TestProgressViewNonTTYWritesOnlyCompletedHistory(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	progress := terminal.BeginProgress(2)
+	if output.Len() != 0 {
+		t.Fatalf("non-TTY begin should not write a live placeholder: %q", output.String())
+	}
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 2, Title: "one"})
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 2, Total: 2, Title: "two"})
+	if output.Len() != 0 {
+		t.Fatalf("non-TTY starts should not create history lines: %q", output.String())
+	}
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
+	if lines := strings.Count(output.String(), "\n"); lines != 1 {
+		t.Fatalf("non-TTY first completion should add one history line, got %d: %q", lines, output.String())
+	}
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 2, Title: "two", Result: model.Result{Status: model.StatusOK}})
+	progress.Stop()
+	if lines := strings.Count(output.String(), "\n"); lines != 2 {
+		t.Fatalf("non-TTY duplicate/start events should not add lines, got %d: %q", lines, output.String())
+	}
+}
+
 func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
@@ -85,6 +109,24 @@ func TestProgressViewTTYRefreshesOneLine(t *testing.T) {
 	text := output.String()
 	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 2 {
 		t.Fatalf("TTY progress should fix the completed line and refresh one line: %q", text)
+	}
+}
+
+func TestProgressViewTTYTickRefreshesWithoutHistoryLines(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
+	// to exercise the real one-second refresh ticker without a platform PTY.
+	terminal.tty = true
+	progress := terminal.BeginProgress(2)
+	time.Sleep(1100 * time.Millisecond)
+	progress.Stop()
+	text := output.String()
+	if lines := strings.Count(text, "\n"); lines != 1 {
+		t.Fatalf("TTY timer refresh must not append history lines; stop should finalize one line: %q", text)
+	}
+	if refreshes := strings.Count(text, "\r"); refreshes < 2 {
+		t.Fatalf("TTY timer should refresh the live line, got %d writes: %q", refreshes, text)
 	}
 }
 

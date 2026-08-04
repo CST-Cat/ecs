@@ -85,13 +85,18 @@ func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 		return view
 	}
 
-	view.mu.Lock()
-	view.renderLocked()
-	view.mu.Unlock()
+	if terminal.tty {
+		view.mu.Lock()
+		view.renderLocked()
+		view.mu.Unlock()
+	} else {
+		// Pipes and captured output have no live cursor to refresh.  Wait for
+		// completion events so a long-running module cannot produce a stream
+		// of intermediate start/timer lines.
+		close(view.stopped)
+	}
 	if terminal.tty {
 		go view.tick()
-	} else {
-		close(view.stopped)
 	}
 	return view
 }
@@ -114,6 +119,7 @@ func (view *ProgressView) Update(event runner.Progress) {
 	if index <= 0 {
 		return
 	}
+	completed := false
 	switch event.Phase {
 	case runner.PhaseStart:
 		if _, alreadyDone := view.done[index]; alreadyDone {
@@ -123,6 +129,7 @@ func (view *ProgressView) Update(event runner.Progress) {
 		view.running[index] = event.Title
 	case runner.PhaseDone:
 		_, alreadyDone := view.done[index]
+		completed = !alreadyDone
 		if !alreadyDone && view.terminal.tty && view.hasLine {
 			// Keep the last live line visible as history before drawing the next
 			// state. Duplicate completion callbacks must not create blank lines.
@@ -145,7 +152,9 @@ func (view *ProgressView) Update(event runner.Progress) {
 	default:
 		return
 	}
-	view.renderLocked()
+	if view.terminal.tty || completed {
+		view.renderLocked()
+	}
 }
 
 // Stop ends the elapsed-time ticker and leaves the final progress line above
