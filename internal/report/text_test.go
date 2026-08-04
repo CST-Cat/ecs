@@ -113,6 +113,40 @@ func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
 	}
 }
 
+func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
+	data := textSampleReport()
+	result := &data.Results[0]
+	result.Fields = append(result.Fields,
+		model.Field{Key: "arguments", Label: "参数模板", Value: "sysbench --threads=N"},
+		model.Field{Key: "command_args", Label: "命令参数", Value: "--time=15s"},
+		model.Field{Key: "mbw_args", Label: "mbw 参数", Value: "mbw -q -n 5"},
+		model.Field{Key: "real", Label: "实际值", Value: "保留"},
+	)
+	result.Tables = append(result.Tables, model.Table{
+		Title:   "风险表",
+		Columns: []string{"事实", "为什么值得看", "指标口径", "分段规则", "备注", "来源"},
+		Rows:    [][]string{{"低", "解释", "实现", "规则", "注释", "官方"}},
+	})
+	result.Sources = []model.Source{
+		{Name: "primary", URL: "https://example.com/primary"},
+		{Name: "secondary", URL: "https://example.com/secondary"},
+	}
+	out := Text(data, TextOptions{Color: termcolor.LevelNone})
+	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "secondary"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("实现/解释性文本不应出现在 txt (%q):\n%s", forbidden, out)
+		}
+	}
+	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "https://example.com/primary"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("纯文本缺少保留事实 %q:\n%s", want, out)
+		}
+	}
+	if count := strings.Count(out, "https://example.com/primary"); count != 1 {
+		t.Fatalf("banner 来源应只显示一次，出现 %d 次", count)
+	}
+}
+
 // 中英混排的表格必须列对齐：用字符数而不是显示宽度对齐会让整张表歪掉。
 func TestTextTableAlignsCJK(t *testing.T) {
 	data := textSampleReport()

@@ -428,7 +428,7 @@ func (r *textRenderer) result(result model.Result) {
 	r.section++
 	r.subsectionNo = 0
 	r.moduleBanner(result)
-	if result.Description != "" {
+	if result.Status != model.StatusOK && result.Description != "" {
 		r.indented(result.Description)
 	}
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
@@ -437,26 +437,14 @@ func (r *textRenderer) result(result model.Result) {
 	if result.Summary != "" {
 		status += " · " + result.Summary
 	}
-	r.indented(status, true)
+	if result.Status != model.StatusOK || result.Error != "" {
+		r.indented(status, true)
+	}
 	if result.Error != "" {
 		r.indented(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), true)
 	}
 	for _, group := range textGroups(result) {
 		r.renderGroup(group)
-	}
-	firstExtraSource := 0
-	if len(result.Sources) > 0 && strings.TrimSpace(result.Sources[0].URL) != "" {
-		firstExtraSource = 1
-	}
-	if firstExtraSource < len(result.Sources) {
-		r.indented("来源链接" + i18n.T("punct.colon"))
-		for _, source := range result.Sources[firstExtraSource:] {
-			parts := []string{source.Name}
-			if source.URL != "" {
-				parts = append(parts, source.URL)
-			}
-			r.indented("· " + strings.Join(parts, " · "))
-		}
 	}
 	r.blank()
 }
@@ -465,8 +453,11 @@ func (r *textRenderer) moduleBanner(result model.Result) {
 	r.line(r.palette.Bold(strings.Repeat("*", textWidth)))
 	r.centered(resultTitle(result))
 	source := "https://github.com/CST-Cat/ecs"
-	if len(result.Sources) > 0 && strings.TrimSpace(result.Sources[0].URL) != "" {
-		source = result.Sources[0].URL
+	for _, candidate := range result.Sources {
+		if strings.TrimSpace(candidate.URL) != "" {
+			source = candidate.URL
+			break
+		}
 	}
 	r.centered(source)
 	command := "bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)"
@@ -500,7 +491,7 @@ func (r *textRenderer) renderGroup(group textGroup) {
 	}
 	r.line(r.palette.Bold("  " + heading))
 	r.line(r.palette.Dim("  " + strings.Repeat("-", textWidth-2)))
-	fields := dedupeFields(group.fields)
+	fields := dedupeFields(visibleFields(group.fields))
 	measurements := dedupeMeasurements(fields, group.measurements)
 	if len(fields) > 0 {
 		r.fields(fields)
@@ -536,6 +527,31 @@ func dedupeFields(items []model.Field) []model.Field {
 		out = append(out, item)
 	}
 	return out
+}
+
+func visibleFields(items []model.Field) []model.Field {
+	out := make([]model.Field, 0, len(items))
+	for _, item := range items {
+		if isImplementationText(item.Key + " " + item.Label) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func isImplementationText(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, token := range []string{
+		"参数模板", "命令参数", "mbw 参数", "命令行",
+		"command", "commandline", "command_line", "cmd", "args", "argument", "arguments",
+		"parameter", "parameters", "template", "cli",
+	} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func dedupeMeasurements(fields []model.Field, items []model.Measurement) []model.Measurement {
@@ -829,6 +845,7 @@ func (r *textRenderer) fields(items []model.Field) {
 // resultTable 渲染带边框的表格。
 func (r *textRenderer) resultTable(table model.Table) {
 	table = normalizeMatrixTable(table)
+	table = visibleTableColumns(table)
 	if table.Title != "" {
 		title := table.Title
 		if kind := matrixKindForTable(title); kind == matrixCrystal || kind == matrixATTO {
@@ -838,6 +855,70 @@ func (r *textRenderer) resultTable(table model.Table) {
 	}
 	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
 	r.blank()
+}
+
+func visibleTableColumns(table model.Table) model.Table {
+	if len(table.Columns) == 0 {
+		return table
+	}
+	keep := make([]int, 0, len(table.Columns))
+	for index, column := range table.Columns {
+		if !isExplanatoryColumn(column) {
+			keep = append(keep, index)
+		}
+	}
+	if len(keep) == 0 || len(keep) == len(table.Columns) {
+		return table
+	}
+	columnMap := make(map[int]int, len(keep))
+	out := table
+	out.Columns = make([]string, 0, len(keep))
+	for index, original := range keep {
+		columnMap[original] = index
+		out.Columns = append(out.Columns, table.Columns[original])
+	}
+	out.Rows = make([][]string, len(table.Rows))
+	for rowIndex, row := range table.Rows {
+		filtered := make([]string, 0, len(keep))
+		for _, original := range keep {
+			if original < len(row) {
+				filtered = append(filtered, row[original])
+			} else {
+				filtered = append(filtered, "")
+			}
+		}
+		out.Rows[rowIndex] = filtered
+	}
+	out.NumericColumns = nil
+	out.NumericHigherIsBetter = nil
+	for index, original := range table.NumericColumns {
+		if mapped, ok := columnMap[original]; ok {
+			out.NumericColumns = append(out.NumericColumns, mapped)
+			if index < len(table.NumericHigherIsBetter) {
+				out.NumericHigherIsBetter = append(out.NumericHigherIsBetter, table.NumericHigherIsBetter[index])
+			}
+		}
+	}
+	out.SensitiveColumns = nil
+	for _, original := range table.SensitiveColumns {
+		if mapped, ok := columnMap[original]; ok {
+			out.SensitiveColumns = append(out.SensitiveColumns, mapped)
+		}
+	}
+	return out
+}
+
+func isExplanatoryColumn(column string) bool {
+	lower := strings.ToLower(strings.TrimSpace(column))
+	for _, token := range []string{
+		"为什么值得看", "指标口径", "分段规则", "备注", "说明", "解释",
+		"why", "rationale", "definition", "segment", "note", "comment", "description", "guidance",
+	} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeMatrixTable(table model.Table) model.Table {
