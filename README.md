@@ -195,7 +195,7 @@ ecs --format txt
 ecs --format txt --color always      # 把颜色一并写进文件
 
 # 从多台机器的报告聚合排行榜参考，再用它算分
-ecs baseline --source "我的 VPS 集群" --output baseline.json ./reports
+ecs leaderboard --source "我的 VPS 集群" --output baseline.json ./reports
 ecs --score-baseline baseline.json
 
 # 从已有 JSON 重新导出
@@ -411,7 +411,7 @@ Oracle Cloud Classic Free Tier 的单台 4 vCPU/约 24 GiB VPS 参考快照，�
 
 ```bash
 # 跑完多台机器后，从报告聚合排行榜参考（每项取算术平均；离群值由 CI 另行提醒）
-ecs baseline --source "我的 VPS 集群" --output baseline.json ./reports
+ecs leaderboard --source "我的 VPS 集群" --output baseline.json ./reports
 
 # 之后用这份排行榜参考算分
 ecs --score-baseline baseline.json
@@ -470,9 +470,10 @@ fork 仓库把文件放进 `submissions/YYYY-MM/` 开 PR，CI 校验格式、指
 
 CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只标记不阻断**。
 
-`ecs baseline` 会逐项列出样本数，并指出这批报告没覆盖到的指标——某个指标只有一两台
+`ecs leaderboard` 会逐项列出样本数，并指出这批报告没覆盖到的指标——某个指标只有一两台
 机器测到时，它对排行榜参考的代表性远低于其他项，这件事必须看得见。样本数为 1 时报告会明确提示
-分数仅供自查。
+分数仅供自查。旧命令 `ecs baseline` 仍是兼容别名；输出文件名 `baseline.json`、`--score-baseline`
+参数和 `ecs.baseline/v1` schema 均保持不变。
 
 ## 隐私与网络请求
 

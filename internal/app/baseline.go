@@ -250,7 +250,18 @@ func writeSubmissionExclusive(path string, content []byte) error {
 }
 
 func baselineCommand(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("ecs baseline", flag.ContinueOnError)
+	return leaderboardCommandNamed("baseline", args, stdout, stderr)
+}
+
+// leaderboardCommand is the preferred name for aggregating reports.  Keep
+// baselineCommand above as a compatibility wrapper so existing callers and
+// scripts continue to use the same implementation and artifact schema.
+func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
+	return leaderboardCommandNamed("leaderboard", args, stdout, stderr)
+}
+
+func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("ecs "+command, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	output := flags.String("output", "ecs-baseline.json", i18n.T("flag.baselineOutput"))
@@ -259,7 +270,11 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	verboseFlag := flags.Bool("verbose", false, i18n.T("flag.baselineVerbose"))
 	strictFlag := flags.Bool("strict", false, i18n.T("flag.baselineStrict"))
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, i18n.T("help.baselineUsage"))
+		usageKey := "help.baselineUsage"
+		if command == "leaderboard" {
+			usageKey = "help.leaderboardUsage"
+		}
+		fmt.Fprintln(stderr, i18n.T(usageKey))
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {

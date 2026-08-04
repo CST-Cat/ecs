@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,24 @@ func TestExpandReportPathsAcceptsExplicitFiles(t *testing.T) {
 	}
 	if got := expandReportPaths([]string{filepath.Join(root, "missing.json")}); len(got) != 0 {
 		t.Fatalf("不存在的路径应被忽略：%v", got)
+	}
+}
+
+func TestLeaderboardAliasDispatchesAndShowsDistinctHelp(t *testing.T) {
+	var leaderboardOut, leaderboardErr bytes.Buffer
+	if status := Main(context.Background(), []string{"leaderboard", "--lang", "zh", "--help"}, &leaderboardOut, &leaderboardErr); status != 0 {
+		t.Fatalf("leaderboard help status = %d, stdout=%s stderr=%s", status, leaderboardOut.String(), leaderboardErr.String())
+	}
+	if !strings.Contains(leaderboardErr.String(), "ecs leaderboard") {
+		t.Fatalf("leaderboard help did not identify the preferred command: %s", leaderboardErr.String())
+	}
+
+	var baselineOut, baselineErr bytes.Buffer
+	if status := Main(context.Background(), []string{"baseline", "--lang", "zh", "--help"}, &baselineOut, &baselineErr); status != 0 {
+		t.Fatalf("baseline compatibility help status = %d, stdout=%s stderr=%s", status, baselineOut.String(), baselineErr.String())
+	}
+	if !strings.Contains(baselineErr.String(), "ecs baseline") {
+		t.Fatalf("baseline compatibility help lost its command name: %s", baselineErr.String())
 	}
 }
 

@@ -47,6 +47,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return configCommand(args, stdout, stderr)
 	case "doctor":
 		return doctorCommand(ctx, stdout)
+	case "leaderboard":
+		return leaderboardCommand(args, stdout, stderr)
 	case "baseline":
 		return baselineCommand(args, stdout, stderr)
 	case "submit":
@@ -610,7 +612,8 @@ func printHelp(writer io.Writer) {
   ecs render --input FILE     从 JSON 重新导出 Markdown/HTML
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
-  ecs baseline REPORTS...     从多份报告聚合评分基线
+  ecs leaderboard REPORTS...  从多份报告聚合排行榜参考
+  ecs baseline REPORTS...     leaderboard 的兼容别名（输出格式不变）
   ecs submit --input FILE     导出可公开入库的瘦身提交
   ecs version                 显示版本
 
