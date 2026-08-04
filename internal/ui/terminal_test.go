@@ -96,50 +96,54 @@ func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
 	}
 }
 
-func TestProgressViewTTYRefreshesOneLine(t *testing.T) {
+func TestProgressViewTTYUsesCompletionOnlyLines(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelBasic)
-	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
-	// to verify the escape sequence without requiring a platform-specific PTY.
+	// A bytes.Buffer is intentionally non-TTY; force the TTY flag to ensure the
+	// completion-only path is identical for terminals and log collectors.
 	terminal.tty = true
 	progress := terminal.BeginProgress(1)
+	if output.Len() != 0 {
+		t.Fatalf("begin should not emit a placeholder: %q", output.String())
+	}
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 1, Title: "disk"})
+	if output.Len() != 0 {
+		t.Fatalf("phase start should not emit a history line: %q", output.String())
+	}
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 2 {
-		t.Fatalf("TTY progress should fix the completed line and refresh one line: %q", text)
+	if strings.ContainsAny(text, "\r\x1b") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") {
+		t.Fatalf("TTY progress should append one plain completion line: %q", text)
 	}
 }
 
-func TestProgressViewTTYTickRefreshesWithoutHistoryLines(t *testing.T) {
+func TestProgressViewDisablesTickerForCollectorCompatibility(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
-	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
-	// to exercise the real one-second refresh ticker without a platform PTY.
+	// A bytes.Buffer is intentionally non-TTY; force the TTY flag to prove that
+	// even a terminal-like sink never receives timer/CR refresh writes.
 	terminal.tty = true
 	progress := terminal.BeginProgress(2)
 	time.Sleep(1100 * time.Millisecond)
+	if output.Len() != 0 {
+		t.Fatalf("ticker/placeholder output must remain empty before completion: %q", output.String())
+	}
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
 	progress.Stop()
 	text := output.String()
-	if lines := strings.Count(text, "\n"); lines != 1 {
-		t.Fatalf("TTY timer refresh must not append history lines; stop should finalize one line: %q", text)
-	}
-	if refreshes := strings.Count(text, "\r"); refreshes < 2 {
-		t.Fatalf("TTY timer should refresh the live line, got %d writes: %q", refreshes, text)
+	if strings.ContainsAny(text, "\r\x1b") || strings.Count(text, "\n") != 2 {
+		t.Fatalf("completion plus stopped state should be two plain lines: %q", text)
 	}
 }
 
-func TestProgressViewTTYKeepsCompletedHistory(t *testing.T) {
+func TestProgressViewKeepsCompletedHistory(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
-	// A bytes.Buffer is intentionally non-TTY; force the renderer branch here
-	// so completed lines can be inspected without requiring a platform PTY.
-	terminal.tty = true
 	progress := terminal.BeginProgress(3)
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 3, Title: "one"})
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
-	// Duplicate completion callbacks must redraw the live line, not add history.
+	// Duplicate completion callbacks must not add history.
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 2, Total: 3, Title: "two"})
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 3, Title: "two", Result: model.Result{Status: model.StatusOK}})
@@ -148,8 +152,8 @@ func TestProgressViewTTYKeepsCompletedHistory(t *testing.T) {
 	progress.EndProgress()
 
 	lines := progressLines(output.String())
-	if len(lines) != 4 {
-		t.Fatalf("TTY progress history lines = %d, want 4: %q", len(lines), output.String())
+	if len(lines) != 3 {
+		t.Fatalf("progress history lines = %d, want 3: %q", len(lines), output.String())
 	}
 	for _, progressCount := range []string{"1/3", "2/3", "3/3"} {
 		seen := 0

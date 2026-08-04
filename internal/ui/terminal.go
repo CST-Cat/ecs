@@ -58,18 +58,12 @@ type ProgressView struct {
 	warningCount int
 	skippedCount int
 	lastStatus   model.Status
-	lastLineLen  int
-	hasLine      bool
 	closed       bool
-
-	stop     chan struct{}
-	stopped  chan struct{}
-	stopOnce sync.Once
 }
 
-// BeginProgress starts the run-level progress display.  A zero-module run is
-// intentionally silent and does not start a ticker, which also covers the
-// ECS_PLAN_FILE planning path (that path returns before this is called).
+// BeginProgress starts the run-level progress state.  It deliberately emits
+// no placeholder: every output sink, including terminals and log collectors,
+// receives at most one ordinary line for each unique module completion.
 func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 	view := &ProgressView{
 		terminal: terminal,
@@ -77,26 +71,6 @@ func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 		started:  time.Now(),
 		done:     make(map[int]struct{}),
 		running:  make(map[int]string),
-		stop:     make(chan struct{}),
-		stopped:  make(chan struct{}),
-	}
-	if total <= 0 {
-		close(view.stopped)
-		return view
-	}
-
-	if terminal.tty {
-		view.mu.Lock()
-		view.renderLocked()
-		view.mu.Unlock()
-	} else {
-		// Pipes and captured output have no live cursor to refresh.  Wait for
-		// completion events so a long-running module cannot produce a stream
-		// of intermediate start/timer lines.
-		close(view.stopped)
-	}
-	if terminal.tty {
-		go view.tick()
 	}
 	return view
 }
@@ -130,11 +104,6 @@ func (view *ProgressView) Update(event runner.Progress) {
 	case runner.PhaseDone:
 		_, alreadyDone := view.done[index]
 		completed = !alreadyDone
-		if !alreadyDone && view.terminal.tty && view.hasLine {
-			// Keep the last live line visible as history before drawing the next
-			// state. Duplicate completion callbacks must not create blank lines.
-			fmt.Fprintln(view.terminal.out)
-		}
 		delete(view.running, index)
 		if !alreadyDone {
 			view.done[index] = struct{}{}
@@ -152,55 +121,33 @@ func (view *ProgressView) Update(event runner.Progress) {
 	default:
 		return
 	}
-	if view.terminal.tty || completed {
-		view.renderLocked()
+	if completed {
+		view.renderCompletionLocked()
 	}
 }
 
-// Stop ends the elapsed-time ticker and leaves the final progress line above
-// the complete report.  It is safe to call more than once.
+// Stop emits at most one final stopped line when the run is incomplete.  It is
+// safe to call more than once and never relies on cursor control sequences.
 func (view *ProgressView) Stop() {
 	if view == nil {
 		return
 	}
-	view.stopOnce.Do(func() {
-		close(view.stop)
-		<-view.stopped
-		view.mu.Lock()
-		view.closed = true
-		if view.doneCount < view.total {
-			view.renderLocked()
-		}
-		if view.hasLine && view.terminal.tty {
-			fmt.Fprintln(view.terminal.out)
-		}
-		view.mu.Unlock()
-	})
+	view.mu.Lock()
+	defer view.mu.Unlock()
+	if view.closed {
+		return
+	}
+	view.closed = true
+	if view.doneCount < view.total {
+		view.renderCompletionLocked()
+	}
 }
 
 // EndProgress is the descriptive alias used by callers that treat progress as
 // a begin/end scope. It shares Stop's idempotent shutdown behavior.
 func (view *ProgressView) EndProgress() { view.Stop() }
 
-func (view *ProgressView) tick() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	defer close(view.stopped)
-	for {
-		select {
-		case <-ticker.C:
-			view.mu.Lock()
-			if !view.closed {
-				view.renderLocked()
-			}
-			view.mu.Unlock()
-		case <-view.stop:
-			return
-		}
-	}
-}
-
-func (view *ProgressView) renderLocked() {
+func (view *ProgressView) renderCompletionLocked() {
 	if view.total <= 0 {
 		return
 	}
@@ -208,23 +155,6 @@ func (view *ProgressView) renderLocked() {
 	state := view.stateLocked()
 	elapsed := formatElapsed(time.Since(view.started))
 	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
-	if view.terminal.tty {
-		if view.terminal.color {
-			colored := view.terminal.style("36", bar) + " " + fmt.Sprintf("%d/%d  elapsed %s  %s", view.doneCount, view.total, elapsed, view.terminal.style(progressStateCode(state), state))
-			fmt.Fprintf(view.terminal.out, "\r\x1b[2K%s", colored)
-		} else {
-			padding := ""
-			if extra := view.lastLineLen - len(line); extra > 0 {
-				padding = strings.Repeat(" ", extra)
-			}
-			fmt.Fprintf(view.terminal.out, "\r%s%s", line, padding)
-		}
-		view.lastLineLen = len(line)
-		view.hasLine = true
-		return
-	}
-	// Pipes and captured output get ordinary lines only: no carriage returns,
-	// ANSI escapes, or per-probe result details.
 	fmt.Fprintln(view.terminal.out, line)
 }
 
@@ -265,21 +195,6 @@ func (view *ProgressView) stateLocked() string {
 		return "status: skipped"
 	}
 	return "status: waiting"
-}
-
-func progressStateCode(state string) string {
-	switch {
-	case strings.HasPrefix(state, "status: error"):
-		return "31"
-	case strings.HasPrefix(state, "status: warning"):
-		return "33"
-	case strings.HasPrefix(state, "status: skipped"):
-		return "2"
-	case strings.HasPrefix(state, "status: done"):
-		return "32"
-	default:
-		return "36"
-	}
 }
 
 func progressBar(done, total int) string {
