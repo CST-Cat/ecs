@@ -5,11 +5,24 @@ import (
 	"strings"
 	"testing"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
 func reportWith(results ...model.Result) model.Report {
 	return model.Report{Results: results}
+}
+
+func TestDimensionsRequireExplicitModuleOptIn(t *testing.T) {
+	if err := ValidateDimensions(); err != nil {
+		t.Fatal(err)
+	}
+	for _, dimension := range Dimensions() {
+		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
+		if !ok || !descriptor.ScoreEnabled || descriptor.ScoreKey != dimension.Key {
+			t.Fatalf("dimension %q is not explicitly enabled by its module descriptor", dimension.Key)
+		}
+	}
 }
 
 func benchResult(id string, status model.Status, metrics map[string]float64) model.Result {

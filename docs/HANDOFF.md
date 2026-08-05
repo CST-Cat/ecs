@@ -2,6 +2,9 @@
 
 > 更新于 2026-07-31。仓库 <https://github.com/CST-Cat/ecs>，默认分支 `main`。
 > 后续一律直接在 `main` 上开发，不再新建分支。
+>
+> 本文中的旧工具名和历史实跑命令仅记录当时状态；当前路由实现已收敛为 NextTrace-only，
+> 请以 README、SECURITY 和 `run.sh` 的现行行为为准。
 
 ## 一、当前状态
 
@@ -49,7 +52,7 @@
 | `internal/probe/system.go` | `switch runtime.GOOS` 改为直接调用 `collectLinuxSystem`；`collectDarwinSystem`/`collectBSDSystem`/`collectWindowsSystem` 三个函数已删除；`collectDisk` 的 windows 提前返回已删除；随之成为孤儿的 `parseHumanBytes`（macOS `vm.swapusage` 专用）与 `parseIntDefault`（sysctl 专用）一并清理 |
 | `internal/probe/icmp.go` | `pingCommandName()` 换成常量 `pingCommand = "ping"`；`pingArguments` 只保留 Linux 形态（`-W` 以秒计、不足一秒进位） |
 | `internal/probe/disk_fio.go` | 删除非 Linux 直返 psync 的提前返回，始终走 `--enghelp` 探测 |
-| `internal/probe/route.go` | 候选固定为 `nexttrace`/`traceroute`/`tracepath`；删除 `.exe` 后缀处理与 `tracert` 参数分支 |
+| `internal/probe/route.go` | 路由引擎固定为 `nexttrace`；删除其他实现、`.exe` 后缀处理与 `tracert` 参数分支 |
 | `internal/probe/container.go` | 删除 `detectCPUAllowance`、`cgroupMemoryLimit`、`readCPUTimes` 里的三处 GOOS 检查 |
 | `cmd/ecs/signals_windows.go` | 已删除 |
 | `cmd/ecs/signals_unix.go` | 已重命名为 `signals.go`，去掉 `//go:build !windows` |
@@ -104,11 +107,11 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 | sysbench | 真实 `sysbench` 跑 CPU 与 memory；断言 steal 指标与原始输出留存 |
 | iperf3 | 在回环起真实 `iperf3 -s`，跑 TCP 双向与 UDP |
 | ping | 真实 `ping 127.0.0.1` |
-| traceroute | 真实 `traceroute 127.0.0.1` |
+| NextTrace | 真实 `nexttrace --json 127.0.0.1`（本机缺失时由 `run.sh` 临时准备） |
 
 全部不依赖公网。`requireTool` 在 CI（`CI` 环境变量）下缺工具直接 `Fatal`，
 本地缺工具才 `Skip`，避免测试静默跳过后仍然显示为绿；`ci.yml` 的 `test` 与 `race`
-两个 job 已加 `apt-get install fio sysbench iperf3 traceroute`。
+两个 job 安装基准依赖，NextTrace 由路由测试按需准备。
 
 第三方 HTTP 数据源（IP 质量、流媒体）的解析器仍用固定样本，但**不再以此为终点**：
 真实调用的验证已补成 `//go:build live` 测试，见 3.3。原先援引"测试不依赖公网"来
@@ -127,7 +130,7 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 
 ### 3.1 已在真实 Linux + 真实工具上验证
 
-开发机装上 fio 3.39 / sysbench 1.0.20 / iperf3 3.18 / traceroute 2.1.6 后实跑，结论：
+开发机装上 fio 3.39 / sysbench 1.0.20 / iperf3 3.18，并准备 NextTrace 后实跑，结论：
 
 - **fio 引擎探测成立**。真实 `--enghelp` 每行带 TAB 缩进、首行是 `Available IO engines:`，
   `TrimSpace` 能正确处理；该机命中 `io_uring`，报告按 QD32/QD64 标注，10 项指标齐全，
@@ -135,8 +138,8 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 - **sysbench 解析成立**。CPU 单/多线程事件率、内存四项、`cpu_steal_percent_during_test`
   都由真实运行产出。
 - **iperf3 解析成立**。回环起真实服务端跑通 TCP 双向与 UDP 丢包/抖动。
-- **ping 与 traceroute 解析成立**。iputils 四段统计行与 traceroute 跳点均正确解析。
-- **测试已全部改用真实工具**，三个脚本替身删除，CI 会安装这三个工具并在缺失时直接失败。
+- **ping 与 NextTrace 解析成立**。iputils 四段统计行与 NextTrace JSON 跳点均正确解析。
+- **测试已全部改用真实工具**，三个脚本替身删除，CI 会安装基准工具；路由测试缺失 NextTrace 时按设计跳过。
 
 ### 3.2 本次验证中发现并修复的缺陷
 
@@ -175,7 +178,7 @@ go test -tags=live ./internal/probe/ -run TestLive -v
 
 **开发机虽然出口 IP 是 DigitalOcean，但它在家用 NAT 后面，经网关透明代理落地。**
 因此本机的 `latency`、`speed`、`route`、`backtrace`、`media` 与 `network` 地理判断
-全部不具代表性——实测中 6 个回程目标 20/20 跳无响应，正是代理吃掉了 traceroute 探测包。
+全部不具代表性——实测中 6 个回程目标 20/20 跳无响应，正是代理吃掉了 NextTrace 探测包。
 需要真正的海外 VPS（美西、日本、香港各一台为佳）重跑并校准：
 
 1. **三网回程**：特征表是否命中，并校准 `backtraceMaxHops = 20` 是否足够、
@@ -270,7 +273,7 @@ sh -n install.sh
 bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
-apt-get install -y sysbench fio iperf3 traceroute
+apt-get install -y sysbench fio iperf3 mbw ioping smartmontools
 # 或 ./install.sh --with-benchmarks
 ```
 
@@ -286,7 +289,7 @@ apt-get install -y sysbench fio iperf3 traceroute
    `go test` 快、稳、可重复，**不是**禁止联网测试。别再拿这条当不做真实调用的理由，
    本项目自己犯过这个错；
 6. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、
-   iperf3、ping 或 traceroute，需要隔离时用回环；
+   iperf3、ping 或 NextTrace，需要隔离时用回环；
 7. 依赖第三方服务或公共节点的能力，除确定性测试外**还必须有 `//go:build live`
    的实网测试**。固定样本只能证明解析器认得历史格式，证明不了上游没变；
    实网测试不挂在 push/PR 上，由定时任务与手动触发运行；

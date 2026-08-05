@@ -10,7 +10,7 @@ package i18n
 
 var probeEnglishCross = map[string]string{
 	// methodology.engine 与 measurement.method 里混入的中文描述。
-	"NextTrace/traceroute + 骨干网段特征表":     "NextTrace/traceroute + backbone prefix signatures",
+	"NextTrace + 骨干网段特征表":                "NextTrace + backbone prefix signatures",
 	"公司滥用概率；官方免密直连":                      "Company abuse probability; official keyless endpoint",
 	"ASN 滥用概率；官方免密直连":                    "ASN abuse probability; official keyless endpoint",
 	"90 天滥用置信度；IPQuality/check.place 中转": "90-day abuse confidence; IPQuality/check.place relay",

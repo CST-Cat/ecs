@@ -96,7 +96,7 @@ type backtraceHit struct {
 	IP        string
 }
 
-// backtraceHop is the structured, bounded view of one traceroute hop used by
+// backtraceHop is the structured, bounded view of one NextTrace hop used by
 // the terminal report.  Unknown fields stay as an em dash; they are never
 // inferred from a hostname or filled with fabricated geolocation.
 type backtraceHop struct {
@@ -119,7 +119,8 @@ type backtraceRow struct {
 	Err     error
 }
 
-// hopPrefixPattern 匹配 traceroute 文本输出的跳号前缀。
+// hopPrefixPattern 匹配历史文本解析器的跳号前缀。该解析器只保留给离线
+// fixture/兼容性单测，运行时探针始终使用 NextTrace JSON。
 var (
 	hopLinePattern = regexp.MustCompile(`^\s*(\d{1,2})\s+(.*)$`)
 	latencyPattern = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*ms`)
@@ -132,15 +133,15 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
 		Label:           "启发式判断",
-		Engine:          "NextTrace/traceroute + 骨干网段特征表",
+		Engine:          "NextTrace + 骨干网段特征表",
 		Profile:         "china backbone signatures v2, max 20 hops, IPv4+IPv6 targets",
 		ComparisonScope: "当次探测的路径特征；不是性能基准，也不等同于反向抓包",
 	}
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 nexttrace、traceroute 或 tracepath")
-		result.Notes = append(result.Notes, "run.sh 会在支持的系统上临时准备 traceroute；也可安装 traceroute 或 NextTrace 后重跑以识别三网回程线路。")
+		result.Skip("未发现 NextTrace")
+		result.Notes = append(result.Notes, "当前运行环境没有 NextTrace；run.sh 只会在 ECS_AUTO_DEPS 未关闭时从 NextTrace 官方 GitHub Release 临时准备已校验的 full 二进制，失败时跳过回程探测。")
 		result.Finish(start)
 		return result
 	}
@@ -299,7 +300,7 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 			row.Hops[index] = detail.IP
 		}
 	}
-	// traceroute 到国内 IP 时末段被丢弃是常态，只要拿到跳就继续分析；
+	// NextTrace 到国内 IP 时末段被丢弃是常态，只要拿到跳就继续分析；
 	// 一跳都没有才算失败。
 	if len(row.Hops) == 0 {
 		if err != nil {
@@ -326,16 +327,15 @@ func extractTraceHops(engineName, output string) []string {
 	return hops
 }
 
-// extractTraceDetails parses both NextTrace JSON and classic traceroute text.
-// The parser intentionally keeps only bounded structured fields; raw output
-// remains in the sensitive TextBlock for JSON consumers and later auditing.
+// extractTraceDetails parses NextTrace JSON. The historical classic-text
+// parser remains available as an explicit parser-only helper, but is never a
+// runtime fallback when NextTrace output is missing or malformed.
 func extractTraceDetails(engineName, output string) []backtraceHop {
-	if engineName == "nexttrace" {
-		if details, ok := extractNextTraceDetails(output); ok {
-			return details
-		}
+	if engineName != "nexttrace" {
+		return nil
 	}
-	return extractClassicTraceDetails(output)
+	details, _ := extractNextTraceDetails(output)
+	return details
 }
 
 func extractClassicTraceDetails(output string) []backtraceHop {

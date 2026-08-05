@@ -72,7 +72,7 @@ func TestEndpointFamilySelectsIPv6Hostname(t *testing.T) {
 	if got := endpointFamily(target, config.IPVersionAuto); got != config.IPVersion6 {
 		t.Fatalf("endpoint family = %q, want 6", got)
 	}
-	args := routeCommandArgsForFamily(routeEngine{Name: "traceroute"}, target.Address, 20, endpointFamily(target, config.IPVersionAuto))
+	args := routeCommandArgsForFamily(routeEngine{Name: "nexttrace"}, target.Address, 20, endpointFamily(target, config.IPVersionAuto))
 	if len(args) == 0 || args[0] != "-6" {
 		t.Fatalf("IPv6 hostname route args = %v", args)
 	}
@@ -85,7 +85,7 @@ func TestFamilySpecificArguments(t *testing.T) {
 	if got := strings.Join(pingArgumentsForFamily("::1", 1, time.Second, config.IPVersion6), " "); !strings.Contains(got, " -6 ") && !strings.HasPrefix(got, "-6 ") {
 		t.Fatalf("IPv6 ping arguments = %q", got)
 	}
-	engine := routeEngine{Name: "traceroute"}
+	engine := routeEngine{Name: "nexttrace"}
 	args := routeCommandArgsForFamily(engine, "2001:db8::1", 5, config.IPVersion6)
 	if len(args) == 0 || args[0] != "-6" {
 		t.Fatalf("IPv6 route arguments = %v", args)

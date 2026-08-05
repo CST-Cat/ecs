@@ -3220,28 +3220,28 @@
     {
       "id": "route",
       "title": "路由追踪",
-      "description": "使用系统现有路由工具追踪多个参考目标",
+      "description": "使用 NextTrace 追踪多个参考目标",
       "methodology": {
         "kind": "protocol-measurement",
         "label": "协议诊断",
-        "engine": "NextTrace/traceroute/tracepath",
+        "engine": "NextTrace",
         "profile": "max 12 hops, one query",
         "comparison_scope": "当次正向路径快照；不是性能基准，也不代表回程"
       },
       "status": "ok",
-      "summary": "3/3 个目标完成 · traceroute",
+      "summary": "3/3 个目标完成 · NextTrace",
       "started_at": "2026-08-01T12:45:55.712144151Z",
       "duration_ms": 3010,
       "fields": [
         {
           "key": "engine",
           "label": "引擎",
-          "value": "traceroute"
+          "value": "NextTrace"
         },
         {
           "key": "version",
           "label": "版本",
-          "value": "Modern traceroute for Linux, version 2.1.5"
+          "value": "NextTrace v1.7.1"
         },
         {
           "key": "binary_sha256",
@@ -3251,7 +3251,7 @@
         {
           "key": "arguments",
           "label": "命令参数",
-          "value": "-n -m 12 -q 1 -w 1 <target>"
+          "value": "--no-color --json -M --max-hops 12 --queries 1 --parallel-requests 1 --timeout 1000 <target>"
         }
       ],
       "tables": [
@@ -3292,20 +3292,20 @@
       "text_blocks": [
         {
           "title": "Cloudflare (203.0.113.x)",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 12 hops max, 60 byte packets\n 1  203.0.113.x  0.290 ms\n 2  203.0.113.x  0.491 ms\n 3  *\n 4  203.0.113.x  1.409 ms\n 5  203.0.113.x  0.815 ms",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "Google (203.0.113.x)",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 12 hops max, 60 byte packets\n 1  203.0.113.x  0.261 ms\n 2  203.0.113.x  0.500 ms\n 3  *\n 4  *\n 5  203.0.113.x  0.912 ms\n 6  203.0.113.x  0.714 ms",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "AliDNS (203.0.113.x)",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 12 hops max, 60 byte packets\n 1  203.0.113.x  0.235 ms\n 2  203.0.113.x  14.002 ms\n 3  203.0.113.x  1.895 ms\n 4  203.0.113.x  59.940 ms\n 5  *\n 6  *\n 7  203.0.113.x  52.949 ms\n 8  *\n 9  *\n10  203.0.113.x  71.619 ms\n11  *\n12  *",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         }
       ],
@@ -3321,7 +3321,7 @@
       "methodology": {
         "kind": "heuristic",
         "label": "启发式判断",
-        "engine": "NextTrace/traceroute + 骨干网段特征表",
+        "engine": "NextTrace + 骨干网段特征表",
         "profile": "china backbone signatures v1, max 30 hops",
         "comparison_scope": "当次探测的路径特征；不是性能基准，也不等同于反向抓包"
       },
@@ -3409,38 +3409,38 @@
       "text_blocks": [
         {
           "title": "北京电信 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.270 ms\n 2  203.0.113.x  0.899 ms\n 3  203.0.113.x  0.788 ms\n 4  203.0.113.x  2.066 ms\n 5  *\n 6  203.0.113.x  3.037 ms\n 7  203.0.113.x  167.034 ms\n 8  203.0.113.x  146.339 ms\n 9  203.0.113.x  152.205 ms\n10  203.0.113.x  186.003 ms\n11  203.0.113.x  193.147 ms\n12  *\n13  *\n14  *\n15  *\n16  *\n17  *\n18  *\n19  *\n20  *",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "北京联通 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.284 ms\n 2  203.0.113.x  0.794 ms\n 3  203.0.113.x  0.767 ms\n 4  203.0.113.x  4.373 ms\n 5  203.0.113.x  185.055 ms\n 6  203.0.113.x  148.312 ms\n 7  203.0.113.x  148.508 ms\n 8  203.0.113.x  65.557 ms\n 9  203.0.113.x  211.349 ms\n10  203.0.113.x  163.668 ms\n11  *\n12  203.0.113.x  210.245 ms",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "北京移动 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.249 ms\n 2  203.0.113.x  0.623 ms\n 3  *\n 4  203.0.113.x  9.246 ms\n 5  203.0.113.x  8.685 ms\n 6  203.0.113.x  8.517 ms\n 7  203.0.113.x  197.510 ms\n 8  203.0.113.x  196.900 ms\n 9  203.0.113.x  198.022 ms\n10  203.0.113.x  199.450 ms\n11  203.0.113.x  202.994 ms\n12  *\n13  *\n14  *\n15  *\n16  *\n17  *\n18  *\n19  *\n20  *",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "广州电信 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.283 ms\n 2  203.0.113.x  0.966 ms\n 3  203.0.113.x  0.738 ms\n 4  203.0.113.x  3.776 ms\n 5  203.0.113.x  149.699 ms\n 6  203.0.113.x  154.483 ms\n 7  203.0.113.x  150.137 ms\n 8  203.0.113.x  169.495 ms\n 9  *\n10  *\n11  *\n12  *\n13  *\n14  *\n15  *\n16  *\n17  *\n18  *\n19  *\n20  *",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "广州联通 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.301 ms\n 2  203.0.113.x  0.515 ms\n 3  203.0.113.x  0.816 ms\n 4  203.0.113.x  4.175 ms\n 5  203.0.113.x  10.278 ms\n 6  203.0.113.x  12.826 ms\n 7  203.0.113.x  202.799 ms\n 8  *\n 9  *\n10  203.0.113.x  224.479 ms\n11  203.0.113.x  206.928 ms",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         },
         {
           "title": "广州移动 (203.0.113.x) 原始路径",
-          "language": "text",
-          "content": "traceroute to 203.0.113.x (203.0.113.x), 20 hops max, 60 byte packets\n 1  203.0.113.x  0.375 ms\n 2  203.0.113.x  0.855 ms\n 3  *\n 4  *\n 5  *\n 6  203.0.113.x  152.584 ms\n 7  *\n 8  203.0.113.x  160.354 ms\n 9  203.0.113.x  275.079 ms\n10  203.0.113.x  280.503 ms\n11  203.0.113.x  278.228 ms\n12  203.0.113.x  170.450 ms\n13  *\n14  *\n15  *\n16  *\n17  *\n18  *\n19  *\n20  *",
+          "language": "json",
+          "content": "{\"Hops\":[[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"203.0.113.x\"}],[{\"Address\":\"\"}],[{\"Address\":\"\"}],[{\"Address\":\"\"}],[{\"Address\":\"203.0.113.x\"}]]}",
           "sensitive": true
         }
       ],

@@ -37,51 +37,15 @@ jobs:
           go test
           -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
-      - name: Install i18n report tools
-        if: matrix.go == 'stable'
-        run: |
-          # memory 报告需要真实 sysbench 输出；mbw 是可选补充口径，发行版有包时一并覆盖。
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sysbench
-          if apt-cache show mbw >/dev/null 2>&1; then
-            sudo apt-get install -y -qq mbw
-          fi
-      # 翻译覆盖率：跑一遍真实模块产出报告，再检查英文渲染后是否还有中文。
-      # 用真实产出而不是源码字面量——源码里大量分支从不触发。
+      # 翻译覆盖率使用仓库内固定 JSON 样本；它覆盖完整报告结构，
+      # 不执行探针，也不需要安装或调用任何基准工具。
       - name: i18n coverage
         if: matrix.go == 'stable'
+        env:
+          ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: |
-          mkdir -p /tmp/i18n-samples
-          # 内存报告足以覆盖结果、状态、说明和 JSON 翻译；刻意不选 disk，
-          # 也不选带宿主机 CPU-steal 动态说明的 cpu，避免矩阵里的压测与
-          # 非确定性文本。缺少基准工具时报告仍会记录可见的降级状态，翻译覆盖
-          # 依然检查真实落盘 JSON。
-          go run ./cmd/ecs --profile quick --exposure local --only memory \
-            --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-samples --no-color
-          ECS_I18N_SAMPLES=/tmp/i18n-samples go test ./internal/report/ -run TestLocalizeCovers -v
-          # 再直接扫一遍英文 JSON：翻译覆盖的是渲染层，这里确认落盘文件本身也没有中文。
-          go run ./cmd/ecs --lang en --profile quick --exposure local --only memory \
-            --cpu-time 1s --disk-mib 32 --format json --output /tmp/i18n-en --no-color
-          python3 - <<'SCAN'
-          import json,glob,re,sys
-          han=re.compile(r'[\u4e00-\u9fff]'); bad=[]
-          for f in glob.glob('/tmp/i18n-en/*.json'):
-              d=json.load(open(f))
-              def walk(o,path=''):
-                  if isinstance(o,dict):
-                      for k,v in o.items(): walk(v,path+'.'+k)
-                  elif isinstance(o,list):
-                      for i,v in enumerate(o): walk(v,path+f'[{i}]')
-                  elif isinstance(o,str) and han.search(o):
-                      if '.text_blocks[' in path and path.endswith('.content'): return
-                      bad.append((path,o[:80]))
-              walk(d)
-          if bad:
-              print(f'英文 JSON 里有 {len(bad)} 处中文:')
-              for p,v in bad: print('  ',p,':',v)
-              sys.exit(1)
-          print('英文 JSON 零中文残留')
-          SCAN
+          go test ./internal/report/ -run '^TestLocalizeCoversRealReports$' -v
+          go test ./internal/i18n/ -v
       - run: go vet ./...
       - run: go build ./cmd/ecs
       - run: sh -n install.sh
@@ -167,9 +131,8 @@ jobs:
           cache: false
       - run: make cross
 
-  # 实网测试：真实调用第三方数据源与公共 iperf3 节点，确认上游格式没变、链路还在。
-  # 只在定时任务与手动触发时运行；固定样本永远发现不了 check.place 全线 403
-  # 或节点域名不存在这类问题。
+  # 实网协议/解析检查：确认第三方数据源与公共服务的当前响应仍能解析。
+  # 只在定时任务与手动触发时运行；push/PR 不触发外部网络请求。
   live:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -180,12 +143,11 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - name: Install live-check tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fio sysbench iperf3 traceroute
-      - name: Live upstream checks
-        run: go test -tags=live ./internal/probe/ -run TestLive -v -timeout 20m
+      - name: Live upstream protocol checks
+        run: >-
+          go test -tags=live ./internal/probe/
+          -run '^TestLive(IPLookup|IPQualityProviders|CommunityGateway|MediaStrongRules|STUNServers)$'
+          -v -timeout 20m
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

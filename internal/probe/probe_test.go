@@ -613,11 +613,11 @@ func TestRunICMPPingAgainstLoopback(t *testing.T) {
 		stats.MinMS, stats.AvgMS, stats.MaxMS, stats.StdDevKnown)
 }
 
-// 真实 traceroute：跳点解析必须对本机安装的实现成立。
+// 真实 NextTrace：跳点解析必须对本机安装的实现成立。
 func TestRouteEngineTracesLoopback(t *testing.T) {
 	engine := detectRouteEngine(context.Background())
 	if engine.Path == "" {
-		requireTool(t, "traceroute")
+		t.Skip("本机没有 NextTrace，跳过真实路由探测")
 	}
 	if engine.SHA256 == "" || len(engine.SHA256) != 64 {
 		t.Fatalf("路由引擎缺少可复核的 SHA-256：%+v", engine)
@@ -693,6 +693,17 @@ func TestMethodologyCoversEveryModule(t *testing.T) {
 
 // 注册表与 ModuleOrder 必须一致，否则模块要么选不到，要么选了不跑。
 func TestRegistryMatchesModuleOrder(t *testing.T) {
+	if err := ValidateRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	// Registry also binds concrete constructors back into the canonical
+	// descriptors. Check that contract separately from the order check below.
+	Registry()
+	for _, descriptor := range config.ModuleDescriptors() {
+		if descriptor.ProbeFactory == nil {
+			t.Errorf("模块 %q 缺少集中描述符中的 probe factory", descriptor.ID)
+		}
+	}
 	registered := make(map[string]bool)
 	for _, item := range Registry() {
 		registered[item.ID()] = true

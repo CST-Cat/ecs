@@ -117,12 +117,25 @@ type wizardModule struct {
 }
 
 func wizardModules() []wizardModule {
-	return []wizardModule{
-		{Key: "ipquality", Modules: []string{"network", "blacklist"}, DefaultOn: true, QuestionKey: "wizard.askIPQuality"},
-		{Key: "throughput", Modules: []string{"speed", "cnspeed"}, DefaultOn: true, QuestionKey: "wizard.askThroughput"},
-		{Key: "media", Modules: []string{"media"}, DefaultOn: true, QuestionKey: "wizard.askMedia"},
-		{Key: "routing", Modules: []string{"route", "backtrace"}, DefaultOn: true, QuestionKey: "wizard.askRouting"},
+	groups := make([]wizardModule, 0)
+	positions := make(map[string]int)
+	for _, descriptor := range config.ModuleDescriptors() {
+		if descriptor.WizardGroup == "" {
+			continue
+		}
+		position, ok := positions[descriptor.WizardGroup]
+		if !ok {
+			positions[descriptor.WizardGroup] = len(groups)
+			groups = append(groups, wizardModule{
+				Key:         descriptor.WizardGroup,
+				DefaultOn:   descriptor.WizardDefaultOn,
+				QuestionKey: descriptor.WizardQuestionKey,
+			})
+			position = len(groups) - 1
+		}
+		groups[position].Modules = append(groups[position].Modules, descriptor.ID)
 	}
+	return groups
 }
 
 // runWizard 引导用户调整配置。返回 false 表示用户放弃本次运行。
@@ -217,7 +230,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	cfg.Reveal = prompt.confirm(i18n.T("wizard.askReveal"), cfg.Reveal)
 
 	modules := make([]string, 0, len(selected))
-	for _, id := range config.ModuleOrder {
+	for _, id := range config.ModuleIDs() {
 		if selected[id] {
 			modules = append(modules, id)
 		}

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestExtractTraceHopsFromTracerouteText(t *testing.T) {
+func TestExtractClassicTraceHopsFromText(t *testing.T) {
 	output := strings.Join([]string{
 		" 1  10.0.0.1  0.512 ms",
 		" 2  * * *",
@@ -13,7 +13,13 @@ func TestExtractTraceHopsFromTracerouteText(t *testing.T) {
 		" 4  59.43.130.22  35.900 ms",
 		"lines without a hop number are ignored",
 	}, "\n")
-	hops := extractTraceHops("traceroute", output)
+	details := extractClassicTraceDetails(output)
+	hops := make([]string, len(details))
+	for index, detail := range details {
+		if detail.IP != "—" {
+			hops[index] = detail.IP
+		}
+	}
 	want := []string{"10.0.0.1", "", "202.97.94.1", "59.43.130.22"}
 	if len(hops) != len(want) {
 		t.Fatalf("hops = %v, want %v", hops, want)
@@ -25,13 +31,13 @@ func TestExtractTraceHopsFromTracerouteText(t *testing.T) {
 	}
 }
 
-func TestExtractTraceDetailsFromTracerouteIncludesLatencyAndPlaceholders(t *testing.T) {
+func TestExtractClassicTraceDetailsIncludesLatencyAndPlaceholders(t *testing.T) {
 	output := strings.Join([]string{
 		" 1  10.0.0.1  0.512 ms",
 		" 2  * * *",
 		" 3  202.97.94.1  32.118 ms",
 	}, "\n")
-	details := extractTraceDetails("traceroute", output)
+	details := extractClassicTraceDetails(output)
 	if len(details) != 3 {
 		t.Fatalf("details = %+v", details)
 	}
@@ -48,7 +54,13 @@ func TestExtractTraceDetailsFromTracerouteIncludesLatencyAndPlaceholders(t *test
 
 func TestExtractTraceHopsAcceptsIPv6Text(t *testing.T) {
 	output := " 1  2001:db8::1  0.5 ms\n 2  * * *\n 3  2408:8120:2::108  10 ms"
-	hops := extractTraceHops("traceroute", output)
+	details := extractClassicTraceDetails(output)
+	hops := make([]string, len(details))
+	for index, detail := range details {
+		if detail.IP != "—" {
+			hops[index] = detail.IP
+		}
+	}
 	want := []string{"2001:db8::1", "", "2408:8120:2::108"}
 	if len(hops) != len(want) {
 		t.Fatalf("hops = %v, want %v", hops, want)

@@ -19,10 +19,12 @@ package score
 // 不从主机数目推造排名。
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -125,10 +127,62 @@ func Dimensions() []Dimension {
 			},
 		},
 	}
-	dimensions[2].Metrics = append(dimensions[2].Metrics, crystalScoreMetrics()...)
-	dimensions[2].Metrics = append(dimensions[2].Metrics, mixedScoreMetrics()...)
-	dimensions[2].Metrics = append(dimensions[2].Metrics, attoScoreMetrics()...)
-	return dimensions
+	for index := range dimensions {
+		if dimensions[index].Key != "disk" {
+			continue
+		}
+		dimensions[index].Metrics = append(dimensions[index].Metrics, crystalScoreMetrics()...)
+		dimensions[index].Metrics = append(dimensions[index].Metrics, mixedScoreMetrics()...)
+		dimensions[index].Metrics = append(dimensions[index].Metrics, attoScoreMetrics()...)
+	}
+
+	// A module only participates in the leaderboard when its descriptor opts in
+	// explicitly.  This keeps ordinary diagnostic modules report-only by
+	// default; adding a new score dimension therefore requires an intentional
+	// descriptor change as well as metric definitions here.
+	filtered := dimensions[:0]
+	for _, dimension := range dimensions {
+		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
+		if !ok || !descriptor.ScoreEnabled || descriptor.ScoreKey != dimension.Key {
+			continue
+		}
+		filtered = append(filtered, dimension)
+	}
+	return filtered
+}
+
+// ValidateDimensions verifies the explicit score opt-in contract.  It is
+// called by tests and can also be used by CI or tooling before generating a
+// leaderboard.  The score package still owns metric definitions; descriptors
+// only decide which module dimensions are allowed to enter the composite.
+func ValidateDimensions() error {
+	dimensions := Dimensions()
+	seen := make(map[string]bool, len(dimensions))
+	for _, dimension := range dimensions {
+		if seen[dimension.Key] {
+			return fmt.Errorf("duplicate score dimension %q", dimension.Key)
+		}
+		seen[dimension.Key] = true
+		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
+		if !ok {
+			return fmt.Errorf("score dimension %q references unknown module %q", dimension.Key, dimension.ModuleID)
+		}
+		if !descriptor.ScoreEnabled {
+			return fmt.Errorf("score dimension %q is not explicitly enabled by module descriptor", dimension.Key)
+		}
+		if descriptor.ScoreKey != dimension.Key {
+			return fmt.Errorf("score dimension %q disagrees with descriptor score key %q", dimension.Key, descriptor.ScoreKey)
+		}
+	}
+	for _, descriptor := range config.ModuleDescriptors() {
+		if !descriptor.ScoreEnabled {
+			continue
+		}
+		if descriptor.ScoreKey == "" || !seen[descriptor.ScoreKey] {
+			return fmt.Errorf("score-enabled module %q has no registered dimension %q", descriptor.ID, descriptor.ScoreKey)
+		}
+	}
+	return nil
 }
 
 func crystalScoreMetrics() []Metric {

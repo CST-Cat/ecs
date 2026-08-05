@@ -69,14 +69,14 @@ func TestEnglishFallsBackToChinese(t *testing.T) {
 }
 
 func TestModuleTitlesCoverAllModules(t *testing.T) {
-	// 每个模块都必须有标题译文，否则英文界面会露出中文模块名。
-	for _, id := range []string{
-		"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
-		"ports", "nat", "blacklist", "apps", "cnspeed", "ookla", "media", "route", "backtrace",
-	} {
-		key := "module." + id + ".title"
+	// 模块标题表的中英文 key 必须一一对应；descriptor 与两种语言的
+	// 完整覆盖由外部 module_descriptor_test.go 统一检查。
+	for key := range chinese {
+		if !strings.HasPrefix(key, "module.") || !strings.HasSuffix(key, ".title") {
+			continue
+		}
 		if !Has(LangZH, key) || !Has(LangEN, key) {
-			t.Errorf("模块 %q 缺少标题译文", id)
+			t.Errorf("模块文案 %q 缺少标题译文", key)
 		}
 	}
 }

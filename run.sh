@@ -3,18 +3,22 @@
 #
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
-#       └ 自动下载已校验的 ecs，按当前配置准备缺失组件，运行并在 ${TMPDIR:-/tmp} 生成本地报告
+#       └ 自动下载已校验的 ecs，把缺失组件解包到临时前缀，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
-#       └ 带参数时跳过向导；组件仍会自动准备，测试结束后只清理本次安装的组件
+#       └ 带参数时跳过向导；组件仍会自动准备，测试结束后删除本次临时前缀
 #   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
 #   - 已有的 sysbench/fio/iperf3/speedtest 等组件不会改动。
-#   - 缺失组件只从系统包管理器的官方配置源安装；不下载未经校验的裸二进制。
-#   - 运行前记录已安装包集合，结束时只移除本次新增的包；不执行 autoremove 或全局 clean。
-#   - ECS_AUTO_DEPS=0 可关闭自动安装，让 ecs 自己报告缺失组件。
-#   - ECS_KEEP=1 只保留临时工作目录用于排障，不会阻止已安装组件的清理。
+#   - 缺失组件只从发行版的已配置、签名软件源下载到本次 WORK，并解包到
+#     WORK/root；绝不调用系统包安装器，也不改动系统数据库。当前 Debian/Ubuntu
+#     路径使用 apt-get download + dpkg-deb -x；其它发行版无法安全解包时明确跳过。
+#   - 路由模块仅例外地从 NextTrace 官方 GitHub Release 下载 full 二进制，并校验
+#     API digest 后放入本次 WORK。
+#   - ECS_AUTO_DEPS=0 可关闭自动依赖准备，让 ecs 自己报告缺失组件。
+#   - ECS_KEEP=1 只保留临时工作目录用于排障；没有系统包需要清理。
+#   - WORK 默认位于 /tmp；显式 TMPDIR 仅作为高级覆盖，必须是绝对路径。
 
 set -eu
 
@@ -61,23 +65,25 @@ case "${1:-}" in
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
         '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
         '' \
-        'Downloads a checksummed ecs release, prepares missing distro packages, and writes reports directly to ${TMPDIR:-/tmp} by default.' \
+        'Downloads a checksummed ecs release, stages missing tools under a temporary prefix (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
+        'When route/backtrace needs NextTrace, run.sh may download a verified temporary full Linux asset; ECS_AUTO_DEPS=0 skips it.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'The full profile includes Ookla; if speedtest is missing, run.sh prepares it from a temporary, verified official package source.'
+        'The full profile includes Ookla; if speedtest is missing, run.sh downloads and extracts it from a verified official package source under WORK.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
         '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
         '' \
-        '下载并校验 ecs Release，准备缺失的发行版组件，并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
+        '下载并校验 ecs Release，把缺失组件解包到临时前缀（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
+        '选中 route/backtrace 且缺少 NextTrace 时，run.sh 可下载并校验临时 full Linux 组件；ECS_AUTO_DEPS=0 会跳过。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        'full 档包含 Ookla；缺少 speedtest 时，脚本会从临时、已验证的官方包源准备。'
+        'full 档包含 Ookla；缺少 speedtest 时，脚本会从临时、已验证的官方包源下载并解包到 WORK。'
     fi
     exit 0
     ;;
@@ -241,24 +247,47 @@ else
 fi
 ASSET="ecs_linux_${ARCH}.tar.gz"
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/ecs-run.XXXXXX")
+# Keep the default work root unambiguously under /tmp.  TMPDIR remains an
+# explicit advanced override for administrators who need a different
+# filesystem (for example, a larger encrypted tmpfs); mktemp still creates a
+# private 0700 directory below that root.
+WORK_ROOT="/tmp"
+if [ -n "${TMPDIR:-}" ]; then
+  case "$TMPDIR" in
+    /*) WORK_ROOT=$TMPDIR ;;
+    *) die "TMPDIR 必须是绝对路径" "TMPDIR must be an absolute path" ;;
+  esac
+fi
+[ -d "$WORK_ROOT" ] || die "临时工作根目录不存在：$WORK_ROOT" "temporary work root does not exist: $WORK_ROOT"
+WORK=$(mktemp -d "$WORK_ROOT/ecs-run.XXXXXX")
 REPORT_DIR=""
 REPORT_NAME=""
 REPORT_BEFORE=""
 SUBMIT_REPORT_DIR=""
 SUBMIT_REPORT=""
 PACKAGE_MANAGER=""
-BEFORE_PACKAGES=""
-AFTER_INSTALL_PACKAGES=""
-DEPS_ATTEMPTED=0
-CLEANUP_DONE=0
-CLEANUP_FAILED=0
+TEMP_TOOL_ROOT="$WORK/root"
+TEMP_TOOL_BIN="$WORK/bin"
+TEMP_TOOL_CACHE="$WORK/packages"
+ORIGINAL_PATH=${PATH:-}
+TEMP_TOOL_PATH_READY=0
+TEMP_PREPARED_TOOLS=""
+APT_TEMP_LISTS="$WORK/apt/lists"
+APT_TEMP_CACHE="$WORK/apt/cache"
+APT_TEMP_SOURCES=""
 MISSING_TOOLS=""
 PACKAGES=""
+NEXTTRACE_BIN_DIR="$WORK/bin"
+NEXTTRACE_API_FILE="$WORK/nexttrace-release.json"
+NEXTTRACE_DOWNLOAD_FILE="$WORK/nexttrace.download"
+NEXTTRACE_READY=0
+NEXTTRACE_REQUESTED=0
+NEXTTRACE_FAILED=0
 OOKLA_MISSING=0
 OOKLA_REPO_READY=0
 OOKLA_KEY_ASC=""
 OOKLA_KEYRING=""
+OOKLA_GNUPGHOME=""
 OOKLA_APT_SOURCES=""
 OOKLA_APT_LISTS=""
 OOKLA_RPM_REPO=""
@@ -268,34 +297,25 @@ OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
 
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
+# Install the cleanup trap as soon as WORK exists.  This also covers argument
+# validation and manifest failures that happen before the test body starts.
+cleanup() {
+  exit_status=$?
+  trap - EXIT INT TERM HUP
+
+  if [ "$KEEP" = "1" ]; then
+    say "临时目录保留在 $WORK" "temporary directory kept at $WORK"
   else
-    return 1
+    if ! rm -rf "$WORK"; then
+      say "临时目录清理失败，现场保留在 $WORK" "failed to remove the temporary directory; preserving it at $WORK"
+      [ "$exit_status" -eq 0 ] && exit_status=1
+    fi
   fi
+  exit "$exit_status"
 }
 
-package_state() {
-  case "$PACKAGE_MANAGER" in
-    apt)
-      dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' 2>/dev/null |
-        awk -F '\t' '$2 == "installed" {print $1}' | sort -u
-      ;;
-    dnf|yum|rpm)
-      rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u
-      ;;
-    apk)
-      apk info -e 2>/dev/null | sed -E 's/-[0-9][^-]*-[^-]*$//' | sort -u
-      ;;
-    pacman)
-      pacman -Qq 2>/dev/null | sort -u
-      ;;
-    *) return 1 ;;
-  esac
-}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
 select_package_manager() {
   if command -v apt-get >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then
@@ -350,8 +370,9 @@ list_contains() {
   esac
 }
 
-# 包管理器的正常输出很长，收进临时日志，避免把 curl|sh 的终端刷满。
-# 失败时只显示末尾诊断；日志会随 ECS_KEEP=1 或清理失败一起保留。
+# Package-manager output is kept in the private work directory.  This helper
+# is used only for download/update/extraction commands; no package-manager
+# command in this script is allowed to mutate the host package database.
 package_command() {
   PACKAGE_LOG="$WORK/package-manager.log"
   if "$@" >"$PACKAGE_LOG" 2>&1; then
@@ -362,16 +383,230 @@ package_command() {
   return 1
 }
 
+prepare_temp_tool_dirs() {
+  mkdir -p "$TEMP_TOOL_ROOT" "$TEMP_TOOL_BIN" "$TEMP_TOOL_CACHE" \
+    "$APT_TEMP_LISTS/partial" "$APT_TEMP_CACHE/archives/partial" || return 1
+  EXTRACTED_DEBS="$WORK/extracted.debs"
+  : >"$EXTRACTED_DEBS"
+  TEMP_PACKAGE_DIGESTS="$WORK/packages.sha256"
+  : >"$TEMP_PACKAGE_DIGESTS"
+}
+
+# Point apt at private list/cache directories.  The host's sources and trust
+# database are read-only inputs; apt-get update/download never invokes dpkg,
+# writes /var/lib/dpkg, or acquires the host package lock.
+apt_temp_command() {
+  apt-get \
+    -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+    -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+    -o "Dir::State::lists=$APT_TEMP_LISTS" \
+    -o "Dir::Cache::archives=$APT_TEMP_CACHE/archives" \
+    -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+    -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+    "$@"
+}
+
+apt_cache_command() {
+  apt-cache \
+    -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+    -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+    -o "Dir::State::lists=$APT_TEMP_LISTS" \
+    -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+    -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+    "$@"
+}
+
+apt_update_temp() {
+  [ "${APT_TEMP_UPDATED:-0}" -eq 1 ] && return 0
+  prepare_temp_tool_dirs || return 1
+  if ! package_command apt_temp_command update; then
+    return 1
+  fi
+  APT_TEMP_UPDATED=1
+  return 0
+}
+
+apt_download_one() {
+  apt_package=$1
+  [ -n "$apt_package" ] || return 1
+  case " ${APT_DOWNLOADED_PACKAGES:-} " in
+    *" $apt_package "*) return 0 ;;
+  esac
+  APT_DOWNLOADED_PACKAGES="${APT_DOWNLOADED_PACKAGES:+$APT_DOWNLOADED_PACKAGES }$apt_package"
+  APT_LOG="$WORK/package-manager.log"
+  if ! (cd "$TEMP_TOOL_CACHE" && apt_temp_command download "$apt_package") \
+      >>"$APT_LOG" 2>&1; then
+    say "无法从已配置的 apt 源下载 $apt_package，相关测试将跳过（日志：$APT_LOG）" \
+      "could not download $apt_package from the configured apt sources; related tests will be skipped (log: $APT_LOG)"
+    return 1
+  fi
+  return 0
+}
+
+extract_debs() {
+  for deb in "$TEMP_TOOL_CACHE"/*.deb; do
+    [ -f "$deb" ] || continue
+    if grep -F -x "$deb" "$EXTRACTED_DEBS" >/dev/null 2>&1; then
+      continue
+    fi
+    if ! dpkg-deb --extract "$deb" "$TEMP_TOOL_ROOT" >>"$WORK/package-manager.log" 2>&1; then
+      say "无法安全解包 $deb，相关测试将跳过" "could not safely extract $deb; related tests will be skipped"
+      return 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+      deb_digest=$(sha256sum "$deb" | awk '{print $1}')
+      printf '%s  %s\n' "$deb_digest" "${deb##*/}" >>"$TEMP_PACKAGE_DIGESTS"
+    fi
+    printf '%s\n' "$deb" >>"$EXTRACTED_DEBS"
+  done
+}
+
+temp_candidate_for_tool() {
+  temp_tool=$1
+  for temp_candidate in \
+    "$TEMP_TOOL_ROOT/usr/local/bin/$temp_tool" \
+    "$TEMP_TOOL_ROOT/usr/bin/$temp_tool" \
+    "$TEMP_TOOL_ROOT/bin/$temp_tool" \
+    "$TEMP_TOOL_ROOT/usr/local/sbin/$temp_tool" \
+    "$TEMP_TOOL_ROOT/usr/sbin/$temp_tool" \
+    "$TEMP_TOOL_ROOT/sbin/$temp_tool"; do
+    [ -x "$temp_candidate" ] || continue
+    temp_resolved=$(readlink -f "$temp_candidate" 2>/dev/null || true)
+    case "$temp_resolved" in
+      "$TEMP_TOOL_ROOT"/*) printf '%s\n' "$temp_candidate"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+stage_temp_tool() {
+  stage_tool=$1
+  stage_candidate=$(temp_candidate_for_tool "$stage_tool" || true)
+  [ -n "$stage_candidate" ] || return 1
+  rm -f "$TEMP_TOOL_BIN/$stage_tool"
+  ln -s "$stage_candidate" "$TEMP_TOOL_BIN/$stage_tool" || return 1
+  case " $TEMP_PREPARED_TOOLS " in
+    *" $stage_tool "*) ;;
+    *) TEMP_PREPARED_TOOLS="${TEMP_PREPARED_TOOLS:+$TEMP_PREPARED_TOOLS }$stage_tool" ;;
+  esac
+  return 0
+}
+
+activate_temp_tool_path() {
+  [ "$TEMP_TOOL_PATH_READY" -eq 1 ] && return 0
+  # Only the explicitly staged tool links are prepended.  Keeping the rest of
+  # the host PATH intact guarantees that a pre-installed helper is never
+  # shadowed by an incidental executable shipped in a dependency package.
+  TEMP_PATH="$TEMP_TOOL_BIN"
+  if [ -n "$ORIGINAL_PATH" ]; then
+    PATH="$TEMP_PATH:$ORIGINAL_PATH"
+  else
+    PATH=$TEMP_PATH
+  fi
+  export PATH
+  TEMP_LIB_PATH=""
+  for temp_lib_part in \
+    "$TEMP_TOOL_ROOT/lib" "$TEMP_TOOL_ROOT/lib64" \
+    "$TEMP_TOOL_ROOT/usr/lib" "$TEMP_TOOL_ROOT/usr/lib64"; do
+    [ -d "$temp_lib_part" ] || continue
+    TEMP_LIB_PATH="${TEMP_LIB_PATH:+$TEMP_LIB_PATH:}$temp_lib_part"
+  done
+  # Debian/Ubuntu place most ELF objects below a multi-arch directory (for
+  # example usr/lib/aarch64-linux-gnu).  Add only the conventional ABI
+  # directory names, all of which are confined below WORK/root.
+  for temp_lib_parent in "$TEMP_TOOL_ROOT/lib" "$TEMP_TOOL_ROOT/usr/lib"; do
+    for temp_lib_part in "$temp_lib_parent"/*; do
+      [ -d "$temp_lib_part" ] || continue
+      case "${temp_lib_part##*/}" in
+        *-linux-gnu*|*-linux-musl*|*-gnu*|*-musl*)
+          TEMP_LIB_PATH="${TEMP_LIB_PATH:+$TEMP_LIB_PATH:}$temp_lib_part"
+          ;;
+      esac
+    done
+  done
+  if [ -n "$TEMP_LIB_PATH" ]; then
+    if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+      LD_LIBRARY_PATH="$TEMP_LIB_PATH:$LD_LIBRARY_PATH"
+    else
+      LD_LIBRARY_PATH=$TEMP_LIB_PATH
+    fi
+    export LD_LIBRARY_PATH
+  fi
+  # A staged Ookla/dependency package may be the only trust bundle on a
+  # minimal image.  Prefer it without touching the host's /etc/ssl tree.
+  if [ -f "$TEMP_TOOL_ROOT/etc/ssl/certs/ca-certificates.crt" ]; then
+    SSL_CERT_FILE="$TEMP_TOOL_ROOT/etc/ssl/certs/ca-certificates.crt"
+    export SSL_CERT_FILE
+  fi
+  if [ -d "$TEMP_TOOL_ROOT/etc/ssl/certs" ]; then
+    SSL_CERT_DIR="$TEMP_TOOL_ROOT/etc/ssl/certs"
+    export SSL_CERT_DIR
+  fi
+  TEMP_TOOL_PATH_READY=1
+}
+
+apt_dependency_names() {
+  apt_cache_command depends --no-recommends "$1" 2>/dev/null |
+    awk '$1 == "Depends:" || $1 == "PreDepends:" || $1 == "|Depends:" || $1 == "|PreDepends:" {dep=$2; if (dep ~ /^</) next; sub(/\(.*/, "", dep); if (dep != "") print dep}'
+}
+
+prepare_apt_tools() {
+  command -v dpkg-deb >/dev/null 2>&1 || {
+    say "系统缺少 dpkg-deb，无法安全临时解包 Debian 包；相关测试将跳过" \
+      "dpkg-deb is unavailable, so Debian packages cannot be safely extracted temporarily; related tests will be skipped"
+    return 1
+  }
+  apt_update_temp || return 1
+  APT_DOWNLOADED_PACKAGES=""
+  APT_PENDING="$WORK/apt.pending"
+  APT_SEEN="$WORK/apt.seen"
+  : >"$APT_PENDING"
+  : >"$APT_SEEN"
+  for apt_package in $PACKAGES; do
+    printf '%s\n' "$apt_package" >>"$APT_PENDING"
+  done
+
+  # Resolve the small dependency closure using apt's signed package metadata,
+  # then download and unpack every .deb under WORK.  This intentionally uses
+  # apt-get's `download` subcommand rather than `install`: dpkg is never
+  # invoked and no privilege authorization is requested.
+  while IFS= read -r apt_package; do
+    [ -n "$apt_package" ] || continue
+    if grep -F -x "$apt_package" "$APT_SEEN" >/dev/null 2>&1; then
+      continue
+    fi
+    printf '%s\n' "$apt_package" >>"$APT_SEEN"
+    if ! apt_download_one "$apt_package"; then
+      continue
+    fi
+    apt_dependency_names "$apt_package" >>"$APT_PENDING" || true
+  done <"$APT_PENDING"
+
+  extract_debs || return 1
+  prepared_any=0
+  for missing_tool in $MISSING_TOOLS; do
+    if stage_temp_tool "$missing_tool"; then
+      prepared_any=1
+      remove_missing_tool "$missing_tool"
+    else
+      say "无法在临时前缀中找到 $missing_tool，相关测试将跳过" \
+        "could not find $missing_tool in the temporary prefix; related tests will be skipped"
+    fi
+  done
+  [ "$prepared_any" -eq 1 ] && activate_temp_tool_path
+  return 0
+}
+
 # Ookla publishes the CLI through a signed Packagecloud repository.  The
 # repository setup is deliberately kept under WORK: no source list, keyring,
-# or repo file is installed in /etc, and apt/yum are pointed at the temporary
+# or repo file is installed in /etc, and apt is pointed at the temporary
 # metadata/cache directories below.  Never execute the vendor's install
 # script (the documented curl|sh command); fetch the key as data and verify
-# its pinned fingerprint before asking the package manager to verify metadata.
+# its pinned fingerprint before asking apt to verify metadata.
 verify_ookla_key() {
   [ -s "$OOKLA_KEY_ASC" ] || return 1
   command -v gpg >/dev/null 2>&1 || return 1
-  OOKLA_KEY_FPRS=$(gpg --batch --no-options --show-keys --with-colons "$OOKLA_KEY_ASC" 2>/dev/null |
+  OOKLA_KEY_FPRS=$(GNUPGHOME="$OOKLA_GNUPGHOME" gpg --batch --no-options --show-keys --with-colons "$OOKLA_KEY_ASC" 2>/dev/null |
     awk -F: '$1 == "fpr" {print toupper($10)}') || return 1
   printf '%s\n' "$OOKLA_KEY_FPRS" |
     awk -v expected="$OOKLA_KEY_FINGERPRINT" '$0 == expected {found=1} END {exit !found}'
@@ -380,16 +615,18 @@ verify_ookla_key() {
 prepare_ookla_key() {
   OOKLA_KEY_ASC="$WORK/ookla-packagecloud-key.asc"
   OOKLA_KEYRING="$WORK/ookla-packagecloud-keyring.gpg"
+  OOKLA_GNUPGHOME="$WORK/gnupg"
+  mkdir -m 700 -p "$OOKLA_GNUPGHOME" || return 1
   fetch "https://packagecloud.io/ookla/speedtest-cli/gpgkey" "$OOKLA_KEY_ASC" || return 1
   verify_ookla_key || return 1
-  if ! gpg --batch --no-options --dearmor --yes -o "$OOKLA_KEYRING" "$OOKLA_KEY_ASC"; then
+  if ! GNUPGHOME="$OOKLA_GNUPGHOME" gpg --batch --no-options --dearmor --yes -o "$OOKLA_KEYRING" "$OOKLA_KEY_ASC"; then
     return 1
   fi
   [ -s "$OOKLA_KEYRING" ]
 }
 
 apt_ookla_command() {
-  package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get \
+  apt-get \
     -o "Dir::Etc::sourcelist=$OOKLA_APT_SOURCES" \
     -o "Dir::Etc::sourceparts=-" \
     -o "Dir::State::lists=$OOKLA_APT_LISTS" \
@@ -446,8 +683,22 @@ prepare_ookla_apt() {
   [ -n "$OOKLA_DEB_SUITE" ] || return 1
   printf '%s\n' "deb [signed-by=$OOKLA_KEYRING] https://packagecloud.io/ookla/speedtest-cli/$OOKLA_DEB_OS $OOKLA_DEB_SUITE main" >"$OOKLA_APT_SOURCES"
 
-  apt_ookla_command update || return 1
-  apt_ookla_command install -y speedtest || return 1
+  OOKLA_LOG="$WORK/package-manager.log"
+  if ! apt_ookla_command update >>"$OOKLA_LOG" 2>&1; then
+    say "Ookla 签名源元数据下载失败，speedtest 将跳过（日志：$OOKLA_LOG）" \
+      "Ookla signed-source metadata download failed; speedtest will be skipped (log: $OOKLA_LOG)"
+    return 1
+  fi
+  # Download the vendor package only.  `apt-get download` verifies the
+  # Packagecloud Release metadata with the pinned key but never invokes dpkg.
+  if ! (cd "$TEMP_TOOL_CACHE" && apt_ookla_command download speedtest) >>"$OOKLA_LOG" 2>&1; then
+    say "Ookla speedtest 包下载失败，相关测试将跳过（日志：$OOKLA_LOG）" \
+      "Ookla speedtest package download failed; related tests will be skipped (log: $OOKLA_LOG)"
+    return 1
+  fi
+  extract_debs || return 1
+  stage_temp_tool speedtest || return 1
+  activate_temp_tool_path
   OOKLA_REPO_READY=1
 }
 
@@ -495,16 +746,12 @@ prepare_ookla_rpm() {
     "gpgkey=file://$OOKLA_KEY_ASC" \
     'sslverify=1' \
     'metadata_expire=300' >"$OOKLA_RPM_REPO"
-  case "$PACKAGE_MANAGER" in
-    dnf)
-      package_command as_root dnf --setopt=reposdir="$WORK" --disablerepo='*' --enablerepo=ookla-speedtest-cli install -y speedtest
-      ;;
-    yum)
-      package_command as_root yum --setopt=reposdir="$WORK" --disablerepo='*' --enablerepo=ookla-speedtest-cli install -y speedtest
-      ;;
-    *) return 1 ;;
-  esac || return 1
-  OOKLA_REPO_READY=1
+  # RPM metadata can be verified without installation, but extracting an RPM
+  # safely requires rpm2cpio/cpio (and dnf's download plugin).  Do not guess or
+  # install those helpers globally: report a controlled degradation instead.
+  say "当前 RPM 路径没有安全的临时解包器，speedtest 将跳过；请预先放入 PATH" \
+    "the RPM path lacks a safe temporary extractor; speedtest will be skipped (preinstall it on PATH if needed)"
+  return 1
 }
 
 install_ookla() {
@@ -526,6 +773,15 @@ SKIP=""
 LOCAL_ONLY=0
 CONFIG_GIVEN=0
 EXPECT=""
+# The downloaded binary is the source of truth for module/profile membership
+# and tool metadata.  The manifest is required after download so a stale
+# wrapper can never silently prepare the wrong dependency set.
+MODULE_MANIFEST=0
+MODULE_STANDARD_MODULES=""
+MODULE_FULL_MODULES=""
+MODULE_ALL_MODULES=""
+MODULE_EXPOSURES=""
+MODULE_TOOLS=""
 for arg in "$@"; do
   if [ -n "$EXPECT" ]; then
     case "$EXPECT" in
@@ -559,84 +815,324 @@ if [ "$CONFIG_GIVEN" -eq 0 ]; then
   esac
 fi
 
+# Read the locale-independent descriptor manifest emitted by the downloaded
+# ecs binary.  Any missing header, malformed field, or incomplete profile is a
+# hard failure: continuing with a copied module list could install the wrong
+# packages or skip a newly added dependency.
+load_module_manifest() {
+  MODULE_MANIFEST=0
+  MODULE_STANDARD_MODULES=""
+  MODULE_FULL_MODULES=""
+  MODULE_ALL_MODULES=""
+  MODULE_EXPOSURES=""
+  MODULE_TOOLS=""
+  MANIFEST_FILE="$WORK/modules.manifest"
+  if ! "${WORK}/ecs" list --machine >"$MANIFEST_FILE" 2>/dev/null; then
+    return 1
+  fi
+  MANIFEST_HEADER=$(sed -n '1p' "$MANIFEST_FILE" 2>/dev/null || true)
+  [ "$MANIFEST_HEADER" = "ecs-module-manifest$(printf '\t')1" ] || return 1
+
+  manifest_standard=""
+  manifest_full=""
+  manifest_all=""
+  manifest_exposures=""
+  manifest_tools=""
+  manifest_valid=1
+  manifest_modules=0
+  while IFS="$(printf '\t')" read -r manifest_kind manifest_id manifest_field manifest_extra; do
+    case "$manifest_kind" in
+      profile)
+        case "$manifest_id" in
+          standard) manifest_standard="$manifest_field" ;;
+          full) manifest_full="$manifest_field" ;;
+          *) manifest_valid=0 ;;
+        esac
+        ;;
+      module)
+        case "$manifest_id" in
+          ""|*[!A-Za-z0-9_-]*) manifest_valid=0; continue ;;
+        esac
+        if list_contains "$manifest_all" "$manifest_id"; then
+          manifest_valid=0
+          continue
+        fi
+        case "$manifest_field" in
+          local|public|thirdparty|any) ;;
+          *) manifest_valid=0; continue ;;
+        esac
+        manifest_modules=$((manifest_modules + 1))
+        manifest_all="${manifest_all}${manifest_all:+,}${manifest_id}"
+        manifest_exposures="${manifest_exposures}${manifest_exposures:+
+}${manifest_id}$(printf '\t')${manifest_field}"
+        manifest_tools="${manifest_tools}${manifest_tools:+
+}${manifest_id}$(printf '\t')${manifest_extra}"
+        ;;
+      "ecs-module-manifest"|"")
+        # Header is checked above; an empty line is harmless.
+        ;;
+      *) manifest_valid=0 ;;
+    esac
+  done <"$MANIFEST_FILE"
+
+  [ "$manifest_valid" -eq 1 ] || return 1
+  [ "$manifest_modules" -gt 0 ] || return 1
+  [ -n "$manifest_standard" ] && [ -n "$manifest_full" ] || return 1
+  for profile_modules in "$manifest_standard" "$manifest_full"; do
+    profile_words=$(printf '%s' "$profile_modules" | tr ',' ' ')
+    for profile_module in $profile_words; do
+      list_contains "$manifest_all" "$profile_module" || return 1
+    done
+  done
+  MODULE_STANDARD_MODULES="$manifest_standard"
+  MODULE_FULL_MODULES="$manifest_full"
+  MODULE_ALL_MODULES="$manifest_all"
+  MODULE_EXPOSURES="$manifest_exposures"
+  MODULE_TOOLS="$manifest_tools"
+  MODULE_MANIFEST=1
+}
+
+manifest_exposure() {
+  [ "$MODULE_MANIFEST" -eq 1 ] || return 1
+  printf '%s\n' "$MODULE_EXPOSURES" | awk -F '\t' -v wanted="$1" '$1 == wanted {print $2; exit}'
+}
+
+manifest_tools_for() {
+  [ "$MODULE_MANIFEST" -eq 1 ] || return 1
+  printf '%s\n' "$MODULE_TOOLS" | awk -F '\t' -v wanted="$1" '$1 == wanted {print $2; exit}'
+}
+
+# NextTrace is the only route engine.  When the selected module set needs it,
+# the wrapper may place the verified full release binary in WORK/bin.  Parsing
+# the release metadata locally avoids jq/python dependencies while still
+# requiring both the exact official asset URL and GitHub's SHA-256 digest.
+nexttrace_asset_metadata() {
+  wanted=$1
+  awk -v wanted="$wanted" '
+    function field(line, key, p, rest) {
+      p = index(line, "\"" key "\"")
+      if (!p) return ""
+      rest = substr(line, p + length(key) + 2)
+      sub(/^[[:space:]]*:[[:space:]]*/, "", rest)
+      # The GitHub API declares name, digest, and browser_download_url as JSON
+      # strings.  Reject an unquoted value rather than coercing arbitrary JSON
+      # into a shell URL or digest.
+      if (substr(rest, 1, 1) != "\"") return ""
+      rest = substr(rest, 2)
+      end = index(rest, "\"")
+      if (!end) return ""
+      return substr(rest, 1, end - 1)
+    }
+    {
+      name = field($0, "name")
+      if (name != "") active = (name == wanted)
+      if (active) {
+        value = field($0, "browser_download_url")
+        if (value != "") url = value
+        value = field($0, "digest")
+        if (value != "") digest = value
+      }
+    }
+    END {
+      if (url != "" && digest != "") print url "\t" digest
+    }
+  ' "$NEXTTRACE_API_FILE"
+}
+
+nexttrace_cleanup_partial() {
+  rm -f "$NEXTTRACE_API_FILE" "$NEXTTRACE_DOWNLOAD_FILE"
+}
+
+prepare_nexttrace() {
+  # Keep this allow-list aligned with the Linux assets published by
+  # nxtrace/NTrace-core.  The ECS release ARCH mapping above is intentionally
+  # not reused blindly if a future wrapper adds another platform.
+  case "$ARCH" in
+    amd64|arm64|armv7|386|s390x|riscv64|ppc64le) ;;
+    *) return 1 ;;
+  esac
+  NEXTTRACE_ASSET="nexttrace_linux_${ARCH}"
+  NEXTTRACE_API_URL="https://api.github.com/repos/nxtrace/NTrace-core/releases/latest"
+  NEXTTRACE_URL=""
+  NEXTTRACE_DIGEST=""
+  NEXTTRACE_EXPECTED=""
+  nexttrace_cleanup_partial
+  if ! fetch "$NEXTTRACE_API_URL" "$NEXTTRACE_API_FILE"; then
+    nexttrace_cleanup_partial
+    return 1
+  fi
+  NEXTTRACE_METADATA=$(nexttrace_asset_metadata "$NEXTTRACE_ASSET" 2>/dev/null || true)
+  NEXTTRACE_TAB=$(printf '\t')
+  case "$NEXTTRACE_METADATA" in
+    *"$NEXTTRACE_TAB"*) ;;
+    *) nexttrace_cleanup_partial; return 1 ;;
+  esac
+  NEXTTRACE_URL=${NEXTTRACE_METADATA%%"$NEXTTRACE_TAB"*}
+  NEXTTRACE_DIGEST=${NEXTTRACE_METADATA#*"$NEXTTRACE_TAB"}
+  # Never follow a URL supplied by a release field unless it is the expected
+  # asset on the pinned official repository.  The asset name is also exact,
+  # so a tiny build or a different platform cannot be substituted silently.
+  case "$NEXTTRACE_URL" in
+    https://github.com/nxtrace/NTrace-core/releases/download/*/"$NEXTTRACE_ASSET") ;;
+    *) nexttrace_cleanup_partial; return 1 ;;
+  esac
+  case "$NEXTTRACE_DIGEST" in
+    sha256:*) NEXTTRACE_EXPECTED=${NEXTTRACE_DIGEST#sha256:} ;;
+    *) nexttrace_cleanup_partial; return 1 ;;
+  esac
+  case "$NEXTTRACE_EXPECTED" in
+    ''|*[!A-Fa-f0-9]*) nexttrace_cleanup_partial; return 1 ;;
+  esac
+  [ "${#NEXTTRACE_EXPECTED}" -eq 64 ] || {
+    nexttrace_cleanup_partial
+    return 1
+  }
+  if ! fetch "$NEXTTRACE_URL" "$NEXTTRACE_DOWNLOAD_FILE"; then
+    nexttrace_cleanup_partial
+    return 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    NEXTTRACE_ACTUAL=$(sha256sum "$NEXTTRACE_DOWNLOAD_FILE" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    NEXTTRACE_ACTUAL=$(shasum -a 256 "$NEXTTRACE_DOWNLOAD_FILE" | awk '{print $1}')
+  else
+    nexttrace_cleanup_partial
+    return 1
+  fi
+  [ "$NEXTTRACE_ACTUAL" = "$NEXTTRACE_EXPECTED" ] || {
+    nexttrace_cleanup_partial
+    return 1
+  }
+  mkdir -p "$NEXTTRACE_BIN_DIR" || {
+    nexttrace_cleanup_partial
+    return 1
+  }
+  if ! mv "$NEXTTRACE_DOWNLOAD_FILE" "$NEXTTRACE_BIN_DIR/nexttrace"; then
+    nexttrace_cleanup_partial
+    rm -f "$NEXTTRACE_BIN_DIR/nexttrace"
+    return 1
+  fi
+  if ! chmod 700 "$NEXTTRACE_BIN_DIR/nexttrace" ||
+    [ ! -f "$NEXTTRACE_BIN_DIR/nexttrace" ] ||
+    [ -L "$NEXTTRACE_BIN_DIR/nexttrace" ]; then
+    nexttrace_cleanup_partial
+    rm -f "$NEXTTRACE_BIN_DIR/nexttrace"
+    return 1
+  fi
+  rm -f "$NEXTTRACE_API_FILE"
+  PATH="$NEXTTRACE_BIN_DIR:${PATH:-}"
+  export PATH
+  NEXTTRACE_READY=1
+  return 0
+}
+
+remove_missing_tool() {
+  wanted=$1
+  remaining=""
+  for tool in $MISSING_TOOLS; do
+    [ "$tool" = "$wanted" ] && continue
+    remaining="${remaining}${remaining:+ }$tool"
+  done
+  MISSING_TOOLS=$remaining
+}
+
 module_enabled() {
   module=$1
   if [ "$CONFIG_GIVEN" -eq 1 ]; then
-    base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace"
+    base_modules="$MODULE_FULL_MODULES"
   elif [ -n "$ONLY" ]; then
     base_modules="$ONLY"
   else
     case "$PROFILE" in
-      standard) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,media,route,backtrace" ;;
-      full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace" ;;
-      *) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace" ;;
+      standard)
+        base_modules="$MODULE_STANDARD_MODULES"
+        ;;
+      full)
+        base_modules="$MODULE_FULL_MODULES"
+        ;;
+      *)
+        base_modules="$MODULE_FULL_MODULES"
+        ;;
     esac
   fi
   list_contains "$base_modules" "$module" || return 1
   list_contains "$SKIP" "$module" && return 1
   if [ "$LOCAL_ONLY" -eq 1 ]; then
-    case "$module" in
-      network|bgp|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|ookla|media|route|backtrace) return 1 ;;
-    esac
+    [ "$(manifest_exposure "$module")" = local ] || return 1
   fi
   return 0
 }
 
 collect_missing_tools() {
   MISSING_TOOLS=""
-  if module_enabled cpu || module_enabled memory; then
-    tool_exists sysbench || add_missing_tool sysbench
-  fi
-  if module_enabled memory; then
-    tool_exists mbw || add_missing_tool mbw
-  fi
-  if module_enabled disk; then
-    tool_exists fio || add_missing_tool fio
-    tool_exists ioping || add_missing_tool ioping
-    tool_exists smartctl || add_missing_tool smartctl
-  elif module_enabled system; then
-    # The system inventory can include read-only SMART summaries even when
-    # the disk benchmark itself is not selected.
-    tool_exists smartctl || add_missing_tool smartctl
-  fi
-  if module_enabled speed; then
-    tool_exists iperf3 || add_missing_tool iperf3
-  fi
-  if module_enabled ookla; then
-    tool_exists speedtest || add_missing_tool speedtest
-  fi
-  if module_enabled latency; then
-    tool_exists ping || add_missing_tool ping
-  fi
-  if module_enabled route || module_enabled backtrace; then
-    if ! tool_exists nexttrace && ! tool_exists traceroute && ! tool_exists tracepath; then
-      add_missing_tool traceroute
-    fi
-  fi
+  NEXTTRACE_REQUESTED=0
+
+  # RequiredTools is metadata consumed as an execution contract.  Route and
+  # backtrace both require the one supported engine, NextTrace.
+  module_words=$(printf '%s' "$MODULE_ALL_MODULES" | tr ',' ' ')
+  for module in $module_words; do
+    module_enabled "$module" || continue
+    tools=$(manifest_tools_for "$module" || true)
+    [ -n "$tools" ] || continue
+    tool_words=$(printf '%s' "$tools" | tr ',' ' ')
+    for tool in $tool_words; do
+      if [ "$tool" = "nexttrace" ]; then
+        NEXTTRACE_REQUESTED=1
+      fi
+      tool_exists "$tool" || add_missing_tool "$tool"
+    done
+  done
 }
 
 install_packages() {
+  install_status=0
   if [ -n "$PACKAGES" ]; then
-    say "准备测试组件：$PACKAGES" "preparing test components: $PACKAGES"
+    say "把测试组件下载并解包到临时前缀：$PACKAGES" "downloading and extracting test components into the temporary prefix: $PACKAGES"
     case "$PACKAGE_MANAGER" in
       apt)
-        package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get update || return 1
-        package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACKAGES || return 1
+        prepare_apt_tools || install_status=1
+        # gpg is a helper for verifying the pinned Ookla key, not a benchmark
+        # dependency.  If it was absent on the host, use only a staged copy.
+        if [ "$OOKLA_MISSING" -eq 1 ] && ! command -v gpg >/dev/null 2>&1; then
+          if stage_temp_tool gpg; then
+            activate_temp_tool_path
+          fi
+        fi
         ;;
-      dnf) package_command as_root dnf install -y $PACKAGES || return 1 ;;
-      yum) package_command as_root yum install -y $PACKAGES || return 1 ;;
-      apk) package_command as_root apk add --no-cache $PACKAGES || return 1 ;;
-      pacman) package_command as_root pacman -Sy --noconfirm $PACKAGES || return 1 ;;
-      *) return 1 ;;
+      dnf|yum|apk|pacman)
+        say "当前发行版的包格式没有受支持的临时解包路径，跳过：$PACKAGES" \
+          "this distro has no supported temporary extractor for its package format; skipping: $PACKAGES"
+        install_status=1
+        ;;
+      *) install_status=1 ;;
     esac
   fi
   if [ "$OOKLA_MISSING" -eq 1 ]; then
-    install_ookla || return 1
+    case "$PACKAGE_MANAGER" in
+      apt)
+        if install_ookla; then
+          remove_missing_tool speedtest
+        else
+          install_status=1
+        fi
+        ;;
+      *)
+        say "speedtest 只能在 Debian/Ubuntu 临时校验解包；此处跳过" \
+          "speedtest temporary verified extraction is supported only on Debian/Ubuntu; skipping here"
+        install_status=1
+        ;;
+    esac
   fi
+  # A failed download is a controlled degradation, not permission to fall back
+  # to a global package install.  The caller leaves unresolved tools in the
+  # missing list so ecs records the skipped modules explicitly.
+  [ "$install_status" -eq 0 ] || return 0
+  return 0
 }
 
 prepare_dependencies() {
   collect_missing_tools
+  NEXTTRACE_FAILED=0
   OOKLA_MISSING=0
   for tool in $MISSING_TOOLS; do
     [ "$tool" = speedtest ] && OOKLA_MISSING=1
@@ -648,119 +1144,73 @@ prepare_dependencies() {
 
   say "缺少组件：$MISSING_TOOLS" "missing components: $MISSING_TOOLS"
   if [ "$AUTO_DEPS" -eq 0 ]; then
-    say "已关闭自动安装，继续运行；报告会标明未运行的标准基准。" "automatic dependency setup is disabled; continuing with explicit missing-tool warnings"
+    if [ "$NEXTTRACE_REQUESTED" -eq 1 ]; then
+      NEXTTRACE_FAILED=1
+      say "已关闭自动依赖准备，NextTrace 路由模块将跳过。" "automatic dependency setup is disabled; NextTrace route modules will be skipped"
+    fi
+    say "继续运行；报告会明确标注缺少的组件。" "continuing with explicit missing-tool warnings"
+    return 0
+  fi
+
+  # A missing NextTrace is intentionally handled outside the system package
+  # manager.  The verified full asset lives only in WORK/bin and is removed by
+  # the EXIT trap, so pre-existing binaries and packages are never changed.
+  if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! tool_exists nexttrace; then
+    say "缺少 NextTrace，正在从官方 GitHub Release 临时准备已校验的 full 二进制" "NextTrace is missing; temporarily preparing its verified full binary from the official GitHub Release"
+    if prepare_nexttrace; then
+      remove_missing_tool nexttrace
+      say "NextTrace 已就绪（仅在本次 WORK 中使用）" "NextTrace is ready (scoped to this run's temporary WORK directory)"
+    else
+      remove_missing_tool nexttrace
+      NEXTTRACE_FAILED=1
+      say "NextTrace 下载或 SHA-256 校验失败，路由模块将跳过" "NextTrace download or SHA-256 verification failed; route modules will be skipped"
+    fi
+  fi
+  if [ -z "$MISSING_TOOLS" ]; then
+    if [ "$NEXTTRACE_FAILED" -eq 1 ]; then
+      say "其他测试组件已就绪；NextTrace 不可用，路由模块将跳过" "other test components are ready; NextTrace is unavailable and route modules will be skipped"
+    else
+      say "测试组件已就绪" "test components are ready"
+    fi
     return 0
   fi
   if ! select_package_manager; then
-    die "找不到支持的包管理器；可设置 ECS_AUTO_DEPS=0 运行并接受降级报告" "no supported package manager; set ECS_AUTO_DEPS=0 to run with a degraded report"
+    say "找不到可用的包管理器，缺失组件将跳过；可预先放入 PATH" \
+      "no supported package manager; missing components will be skipped (preinstall them on PATH if needed)"
+    return 0
   fi
-  if [ "$OOKLA_MISSING" -eq 1 ]; then
-    case "$PACKAGE_MANAGER" in
-      apt|dnf|yum) ;;
-      *) die "当前发行版没有可验证的 Ookla 官方包源；请预先安装 speedtest，或设置 ECS_AUTO_DEPS=0" "this distribution has no verifiable official Ookla package source; install speedtest first or set ECS_AUTO_DEPS=0" ;;
-    esac
-  fi
-  if [ "$(id -u)" -ne 0 ]; then
-    if ! command -v sudo >/dev/null 2>&1; then
-      die "准备测试组件需要 root 或 sudo；可设置 ECS_AUTO_DEPS=0 运行降级测试" "preparing test components requires root or sudo; set ECS_AUTO_DEPS=0 to run with a degraded report"
-    fi
-    if ! sudo -n true 2>/dev/null; then
-      if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-        say "准备组件需要 sudo 权限；请按提示授权。" "sudo permission is required to prepare components; follow the prompt"
-        if ! sudo -v </dev/tty >/dev/tty 2>/dev/tty; then
-          die "sudo 授权失败；可设置 ECS_AUTO_DEPS=0 运行降级测试" "sudo authorization failed; set ECS_AUTO_DEPS=0 to run with a degraded report"
-        fi
-      else
-        die "当前不是 root 且没有可用的 sudo 会话；请先运行 sudo -v，或设置 ECS_AUTO_DEPS=0" "not root and no cached sudo session is available; run sudo -v first or set ECS_AUTO_DEPS=0"
-      fi
-    fi
-  fi
+  PACKAGES=""
   for tool in $MISSING_TOOLS; do
     case "$tool" in
       speedtest) OOKLA_MISSING=1 ;;
       *) add_package "$(package_for_tool "$tool")" ;;
     esac
   done
-  # The official .deb metadata currently declares ca-certificates (the RPM
-  # builds rely on the same trust bundle).  Resolve it from the normal distro
-  # repository before apt/dnf/yum is restricted to the temporary Ookla source;
-  # this keeps vendor metadata isolated while handling a minimal base image.
+  # The official .deb metadata currently declares ca-certificates.  Download
+  # it into WORK before touching the temporary Ookla source; it is never
+  # installed into the host.
   if [ "$OOKLA_MISSING" -eq 1 ]; then
-    case "$PACKAGE_MANAGER" in
-      apt|dnf|yum) add_package ca-certificates ;;
-    esac
+    add_package ca-certificates
   fi
   # gpg is only needed to turn the downloaded, pinned Ookla key into an apt
-  # keyring.  Install it from the regular distro repository before touching
-  # the temporary vendor source; rpm/yum verifies the same key directly.
+  # keyring.  If it is absent, unpack gnupg into WORK as a helper; never ask
+  # the host package manager to install it.
   if [ "$OOKLA_MISSING" -eq 1 ] && [ "$PACKAGE_MANAGER" = apt ] && ! command -v gpg >/dev/null 2>&1; then
     add_package gnupg
   fi
-  BEFORE_PACKAGES="$WORK/packages.before"
-  if ! package_state >"$BEFORE_PACKAGES"; then
-    die "无法记录安装前的软件包状态，已停止以避免误删" "cannot record the pre-install package state; stopping to avoid unsafe cleanup"
-  fi
-  DEPS_ATTEMPTED=1
-  AFTER_INSTALL_PACKAGES="$WORK/packages.after-install"
-  if ! install_packages; then
-    package_state >"$AFTER_INSTALL_PACKAGES" 2>/dev/null || true
-    die "测试组件安装失败，未开始测试" "test component installation failed; tests were not started"
-  fi
-  for tool in $MISSING_TOOLS; do
-    if ! tool_exists "$tool"; then
-      die "组件安装后仍找不到 $tool，未开始测试" "${tool} is still unavailable after installation; tests were not started"
-    fi
-  done
-  if ! package_state >"$AFTER_INSTALL_PACKAGES"; then
-    die "无法记录安装后的软件包状态，已停止以避免不安全清理" "cannot record the post-install package state; stopping to avoid unsafe cleanup"
-  fi
-  say "测试组件准备完成；测试结束后将只清理本次新增包。" "test components ready; only packages added by this run will be removed afterward"
-}
 
-cleanup_packages() {
-  [ "$DEPS_ATTEMPTED" -eq 1 ] || return 0
-  [ -s "$BEFORE_PACKAGES" ] || return 1
-  [ -s "$AFTER_INSTALL_PACKAGES" ] || return 1
-  AFTER_PACKAGES="$WORK/packages.after"
-  package_state >"$AFTER_PACKAGES" || return 1
-  if ! cmp -s "$AFTER_INSTALL_PACKAGES" "$AFTER_PACKAGES"; then
-    say "安装完成后软件包状态发生变化，已跳过清理以避免误删；临时目录保留在 $WORK" "package state changed after installation; cleanup skipped to avoid collateral removal; temporary state kept at $WORK"
-    return 1
-  fi
-  NEW_PACKAGES=$(comm -13 "$BEFORE_PACKAGES" "$AFTER_PACKAGES")
-  [ -n "$NEW_PACKAGES" ] || return 0
-  say "清理本次新增组件：$NEW_PACKAGES" "removing packages added by this run: $NEW_PACKAGES"
-  case "$PACKAGE_MANAGER" in
-    apt) package_command as_root env DEBIAN_FRONTEND=noninteractive apt-get purge -y $NEW_PACKAGES ;;
-    dnf) package_command as_root dnf remove -y $NEW_PACKAGES ;;
-    yum) package_command as_root yum remove -y $NEW_PACKAGES ;;
-    apk) package_command as_root apk del $NEW_PACKAGES ;;
-    pacman) package_command as_root pacman -R --noconfirm $NEW_PACKAGES ;;
-    *) return 1 ;;
-  esac
-}
-
-cleanup() {
-  exit_status=$?
-  [ "$CLEANUP_DONE" -eq 0 ] || exit "$exit_status"
-  CLEANUP_DONE=1
-  trap - EXIT INT TERM HUP
-
-  if ! cleanup_packages; then
-    CLEANUP_FAILED=1
-    say "组件清理失败；临时目录保留在 $WORK，请勿直接重复删除包，先检查 packages.after" "component cleanup failed; temporary state kept at $WORK; inspect packages.after before manual removal"
-    [ "$exit_status" -eq 0 ] && exit_status=1
-  fi
-  if [ "$KEEP" = "1" ] || [ "$CLEANUP_FAILED" -eq 1 ]; then
-    say "临时目录保留在 $WORK" "temporary directory kept at $WORK"
+  install_packages
+  if [ -n "$MISSING_TOOLS" ]; then
+    say "以下组件未能安全放入临时前缀，将按缺失组件降级：$MISSING_TOOLS" \
+      "the following components could not be safely staged in the temporary prefix; tests will degrade: $MISSING_TOOLS"
+  elif [ "$NEXTTRACE_FAILED" -eq 1 ]; then
+    say "测试组件已就绪；NextTrace 不可用，路由模块将跳过" \
+      "test components are ready; NextTrace is unavailable and route modules will be skipped"
   else
-    rm -rf "$WORK"
+    say "测试组件已就绪（仅位于本次临时前缀）" \
+      "test components are ready (scoped to this run's temporary prefix)"
   fi
-  exit "$exit_status"
 }
-
-trap cleanup EXIT
-trap 'exit 130' INT TERM HUP
 
 snapshot_report_paths() {
   for report_glob in "$REPORT_DIR"/*.json "$REPORT_DIR"/*.md "$REPORT_DIR"/*.html "$REPORT_DIR"/*.txt; do
@@ -877,6 +1327,12 @@ say "SHA-256 已校验" "SHA-256 verified"
 tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
 [ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
+
+# The canonical module/profile registry is required for wrapper planning.  A
+# stale release fails clearly here instead of letting copied module IDs drive
+# package installation.
+load_module_manifest ||
+  die "下载的 ecs 不支持模块 manifest，请使用最新 Release" "the downloaded ecs does not provide a module manifest; use a current Release"
 
 if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Check the downloaded binary before dependencies or benchmarks.  This is a

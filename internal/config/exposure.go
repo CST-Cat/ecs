@@ -42,10 +42,8 @@ const (
 	DefaultExposure = ExposureNameThirdParty
 )
 
-// ModuleExposure 描述一个模块的外联性质。
-//
-// 这是一张按 ID 分派的属性表，与 runner 的 moduleClass、probe 的 MethodologyFor
-// 同一个模式：新增模块时只改表，不改控制流。
+// ModuleExposure 描述一个模块的外联性质。具体值来自 ModuleDescriptor；这个
+// 兼容视图保留给既有 ExposureFor 调用方，新增模块不应再单独修改此处。
 type ModuleExposure struct {
 	// Level 是该模块的外联级别。
 	Level Exposure
@@ -53,39 +51,20 @@ type ModuleExposure struct {
 	NeedsEgressIP bool
 }
 
-var moduleExposure = map[string]ModuleExposure{
-	// 本地：只读 /proc、/sys 与本机设备，或只跑本地基准引擎。
-	"system": {Level: ExposureLocal},
-	"cpu":    {Level: ExposureLocal},
-	"memory": {Level: ExposureLocal},
-	"disk":   {Level: ExposureLocal},
+// moduleExposure is derived from the canonical module descriptors.  Keep this
+// map as a compatibility implementation detail: existing callers and tests
+// still use ExposureFor, while new modules only need one descriptor entry.
+var moduleExposure = descriptorModuleExposure()
 
-	// 公共基础设施：对端只看到本机出口 IP，判定逻辑在 ecs 这边。
-	"dns":       {Level: ExposurePublic},
-	"latency":   {Level: ExposurePublic},
-	"ports":     {Level: ExposurePublic},
-	"nat":       {Level: ExposurePublic},
-	"apps":      {Level: ExposurePublic},
-	"speed":     {Level: ExposurePublic},
-	"cnspeed":   {Level: ExposurePublic},
-	"media":     {Level: ExposurePublic},
-	"route":     {Level: ExposurePublic},
-	"backtrace": {Level: ExposurePublic},
-
-	// 同为公共级，但需要先知道自己的出口 IP 才能查。
-	// DNSBL 与 RouteViews 本身不接收 ecs 的其他信息，出口 IP 也可以由 STUN 得到，
-	// 因此不必因为"默认经 ipapi.is 拿 IP"就把它们提到第三方级。
-	"blacklist": {Level: ExposurePublic, NeedsEgressIP: true},
-	"bgp":       {Level: ExposurePublic, NeedsEgressIP: true},
-
-	// 第三方情报：把出口 IP 提交给十余家商业 API，风险分是对方的闭源判定；
-	// 无密钥时还会经社区中转和网页读取兜底，中间方同样看到被查询的 IP。
-	"network": {Level: ExposureThirdParty, NeedsEgressIP: true},
-
-	// Ookla remains a third-party measurement service. Its own licence/privacy
-	// terms are surfaced in reports, but selecting it does not require a
-	// separate consent flag.
-	"ookla": {Level: ExposureThirdParty},
+func descriptorModuleExposure() map[string]ModuleExposure {
+	out := make(map[string]ModuleExposure, len(moduleDescriptors))
+	for _, descriptor := range moduleDescriptors {
+		out[descriptor.ID] = ModuleExposure{
+			Level:         descriptor.Exposure,
+			NeedsEgressIP: descriptor.NeedsEgressIP,
+		}
+	}
+	return out
 }
 
 // ExposureFor 返回模块的外联性质。

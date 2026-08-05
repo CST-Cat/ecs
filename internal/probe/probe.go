@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -97,7 +98,7 @@ func endpointsForIPVersion(endpoints []config.Endpoint, mode string) []config.En
 // endpointFamily chooses the concrete family for a single target.  It is
 // intentionally kept at the last possible moment: auto mode can test both
 // families, while a target marked family=6 must still reach an IPv6 hostname
-// with an explicit -6 traceroute flag.
+// with an explicit -6 NextTrace flag.
 func endpointFamily(endpoint config.Endpoint, fallback string) string {
 	if endpoint.Family == config.IPVersion4 || endpoint.Family == config.IPVersion6 {
 		return endpoint.Family
@@ -148,68 +149,132 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func Registry() []Probe {
-	return []Probe{
-		systemProbe{},
-		networkProbe{},
-		bgpProbe{},
-		cpuProbe{},
-		memoryProbe{},
-		diskProbe{},
-		dnsProbe{},
-		latencyProbe{},
-		speedProbe{},
-		portsProbe{},
-		natProbe{},
-		blacklistProbe{},
-		appsProbe{},
-		cnSpeedProbe{},
-		ooklaProbe{},
-		mediaProbe{},
-		routeProbe{},
-		backtraceProbe{},
+// probeFactories contains implementation constructors only.  The concrete
+// instance supplies its own ID when the factory is registered below; IDs and
+// ordering therefore have a single source of truth in config's descriptor
+// registry instead of being repeated in a second string-keyed table.
+var probeFactories = []func() Probe{
+	func() Probe { return systemProbe{} },
+	func() Probe { return networkProbe{} },
+	func() Probe { return bgpProbe{} },
+	func() Probe { return cpuProbe{} },
+	func() Probe { return memoryProbe{} },
+	func() Probe { return diskProbe{} },
+	func() Probe { return dnsProbe{} },
+	func() Probe { return latencyProbe{} },
+	func() Probe { return speedProbe{} },
+	func() Probe { return portsProbe{} },
+	func() Probe { return natProbe{} },
+	func() Probe { return blacklistProbe{} },
+	func() Probe { return appsProbe{} },
+	func() Probe { return cnSpeedProbe{} },
+	func() Probe { return ooklaProbe{} },
+	func() Probe { return mediaProbe{} },
+	func() Probe { return routeProbe{} },
+	func() Probe { return backtraceProbe{} },
+}
+
+func init() {
+	registerProbeFactories()
+}
+
+func registerProbeFactories() {
+	for _, factory := range probeFactories {
+		if factory == nil {
+			continue
+		}
+		instance := factory()
+		if instance == nil {
+			continue
+		}
+		id := instance.ID()
+		if id == "" {
+			continue
+		}
+		factory := factory
+		// The descriptor registry is the source of ordering and metadata; this
+		// package only supplies the concrete constructor behind each instance ID.
+		_ = config.RegisterModuleFactory(id, func() any { return factory() })
 	}
 }
 
-func MethodologyFor(id string) model.Methodology {
-	switch id {
-	case "system":
-		return model.Methodology{Kind: "inventory", Label: "事实采集", Engine: "OS/runtime inspection", ComparisonScope: "资源快照；不是性能基准"}
-	case "network":
-		return model.Methodology{Kind: "provider-assessment", Label: "第三方评估", Engine: "multi-provider IP intelligence", ComparisonScope: "不同供应商分数不可直接混算"}
-	case "bgp":
-		return model.Methodology{Kind: "provider-assessment", Label: "第三方评估", Engine: "RouteViews current RIB API", ComparisonScope: "当前公共观测；不是私有互联全图或历史 BGP 分析"}
-	case "cpu":
-		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "cpu prime=20000"}
-	case "memory":
-		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "memory seq 1 MiB"}
-	case "disk":
-		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio", Profile: "Direct I/O"}
-	case "dns":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNS/UDP", ComparisonScope: "现场诊断；不是基准分"}
-	case "latency":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "现场诊断；不是 ICMP ping"}
-	case "speed":
-		return model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "iperf3", Profile: "TCP multi-stream forward/reverse + UDP 50M/5s"}
-	case "ports":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "可达性诊断；不是性能基准"}
-	case "nat":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "STUN (RFC 5389/5780)", ComparisonScope: "当次 UDP 路径上的 NAT 行为；不代表 TCP"}
-	case "blacklist":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNSBL over DNS A lookup", ComparisonScope: "各名单收录标准不同，不可合并计分"}
-	case "apps":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "native TCP connect", ComparisonScope: "网络可达性诊断；不代表服务本身可用"}
-	case "cnspeed":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "HTTP download against speedtest.cn nodes", ComparisonScope: "到具体节点的 HTTP 带宽；不代表到该运营商全网"}
-	case "ookla":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "official Ookla Speedtest CLI", ComparisonScope: "外部服务测量；Ookla 的条款与数据处理独立于 ecs"}
-	case "media":
-		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"}
-	case "route":
-		return model.Methodology{Kind: "protocol-measurement", Label: "协议诊断", Engine: "NextTrace/traceroute/tracepath", ComparisonScope: "正向路径快照；不是性能基准"}
-	case "backtrace":
-		return model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "NextTrace/traceroute + 骨干网段特征表", ComparisonScope: "路径特征推断；不是反向抓包"}
-	default:
-		return model.Methodology{}
+// ValidateRegistry verifies that every concrete probe is represented exactly
+// once by the canonical descriptor registry and that the two pieces of
+// execution metadata agree.  Keeping this check next to registration catches
+// the easy-to-miss failure modes when a new probe is added: a typo in ID, a
+// stale NeedsNetwork declaration, or a missing constructor binding.
+func ValidateRegistry() error {
+	factoryIDs := make(map[string]bool, len(probeFactories))
+	for index, factory := range probeFactories {
+		if factory == nil {
+			return fmt.Errorf("probe factory %d is nil", index)
+		}
+		instance := factory()
+		if instance == nil {
+			return fmt.Errorf("probe factory %d returned nil", index)
+		}
+		id := instance.ID()
+		if id == "" {
+			return fmt.Errorf("probe factory %d returned a probe with empty ID", index)
+		}
+		if factoryIDs[id] {
+			return fmt.Errorf("duplicate probe ID %q", id)
+		}
+		factoryIDs[id] = true
+		descriptor, ok := config.ModuleDescriptorFor(id)
+		if !ok {
+			return fmt.Errorf("probe %q has no module descriptor", id)
+		}
+		if instance.NeedsNetwork() != descriptor.NeedsNetwork {
+			return fmt.Errorf("probe %q NeedsNetwork=%v disagrees with descriptor=%v", id, instance.NeedsNetwork(), descriptor.NeedsNetwork)
+		}
 	}
+
+	descriptors := config.ModuleDescriptors()
+	if len(factoryIDs) != len(descriptors) {
+		return fmt.Errorf("probe factory count=%d, descriptor count=%d", len(factoryIDs), len(descriptors))
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.ProbeFactory == nil {
+			return fmt.Errorf("module %q has no registered probe factory", descriptor.ID)
+		}
+		candidate, ok := descriptor.ProbeFactory().(Probe)
+		if !ok || candidate == nil {
+			return fmt.Errorf("module %q factory does not return a Probe", descriptor.ID)
+		}
+		if candidate.ID() != descriptor.ID {
+			return fmt.Errorf("module descriptor %q factory returned probe %q", descriptor.ID, candidate.ID())
+		}
+		if candidate.NeedsNetwork() != descriptor.NeedsNetwork {
+			return fmt.Errorf("module %q factory NeedsNetwork=%v disagrees with descriptor=%v", descriptor.ID, candidate.NeedsNetwork(), descriptor.NeedsNetwork)
+		}
+	}
+	return nil
+}
+
+func Registry() []Probe {
+	registerProbeFactories()
+	descriptors := config.ModuleDescriptors()
+	registry := make([]Probe, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.ProbeFactory == nil {
+			// A missing constructor is intentionally omitted here.  Registry
+			// consistency tests report the actionable ID rather than panicking
+			// during package initialization.
+			continue
+		}
+		candidate, ok := descriptor.ProbeFactory().(Probe)
+		if !ok || candidate == nil {
+			continue
+		}
+		registry = append(registry, candidate)
+	}
+	return registry
+}
+
+func MethodologyFor(id string) model.Methodology {
+	if descriptor, ok := config.ModuleDescriptorFor(id); ok {
+		return descriptor.Methodology
+	}
+	return model.Methodology{}
 }

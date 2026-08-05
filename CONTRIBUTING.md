@@ -15,7 +15,7 @@
 9. 从 GPL/AGPL 上游适配代码或规则时，必须在 `NOTICE` 和 `THIRD_PARTY.md` 标明项目、版本、许可证和改动；不要移除上游归属。
 10. 性能成绩必须直接来自公开维护、可审计的标准工具；不得加入自研 CPU、内存、磁盘或网络吞吐工作负载、替代分数、跨样本聚合分或综合跑分。
 11. 项目只面向 Linux。不要引入 `runtime.GOOS` 分支、其他操作系统的采集函数或发布目标；测试断言真实 Linux 行为，不放宽到"哪个平台都成立"。架构维度（`GOARCH`）仍需保留。
-12. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、iperf3、ping 或 traceroute：替身只能证明解析器认得自己造出来的输出。需要隔离时用回环（iperf3 起本地服务端、ping/traceroute 打 `127.0.0.1`）。
+12. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、iperf3、ping 或 NextTrace：替身只能证明解析器认得自己造出来的输出。需要隔离时用回环（iperf3 起本地服务端、ping/NextTrace 打 `127.0.0.1`）。
 13. 凡是依赖第三方服务或公共节点的能力，除确定性测试外**还必须有真实调用的实网测试**，放在 `//go:build live` 文件里。固定样本只能证明解析器认得历史格式，证明不了上游没变——`ipinfo.check.place` 全线 403、iperf3 节点池里两个域名根本不存在，都是实网测试才发现的。
     实网测试不挂在 push/PR 上：第三方限流或改版让每个 PR 变红，只会训练所有人忽略红灯。由定时任务与手动触发运行，并遵守"个别源失败只记录、全部失败才判失败"。
 14. 数据源清单、节点地址、端口范围一律照抄上游并注明版本，**不得凭记忆填写**；改动后用实网测试复核每一条。
@@ -36,3 +36,22 @@ go test -tags=live ./internal/probe/ -run TestLive -v
 ```
 
 性能工作负载一旦进入稳定版本，不应原地改变语义。需要调整块大小、并发、算法或计时方式时，请升级 `measurement.method`。
+
+## 模块扩展边界
+
+模块的跨切面元数据集中在 [`internal/config/modules.go`](internal/config/modules.go)：
+ID、配置档归属、外联级别、并发分类、方法学、依赖、文案键、估算和可选评分维度都从
+`ModuleDescriptor` 派生。探针包只负责把具体构造器注册到 descriptor 的
+`ProbeFactory`，不再维护执行顺序、曝光或方法学副本。
+
+新增或删除模块后，先运行：
+
+```sh
+go run ./cmd/ecs list --machine
+go test ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./internal/app ./internal/score
+sh -n run.sh
+```
+
+`run.sh` 下载二进制后会读取并校验同一份机器可读 manifest；manifest 缺失或非法会直接停止，
+不会使用另一套过期模块列表。只有显式设置 `ScoreEnabled`/`ScoreKey` 的 descriptor 才能进入
+排行榜；指标定义仍由 `internal/score` 单独维护。

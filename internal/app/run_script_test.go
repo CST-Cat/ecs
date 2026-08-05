@@ -119,8 +119,8 @@ func TestRunScriptOoklaPreparationUsesTemporarySource(t *testing.T) {
 		"prepare_ookla_apt",
 		"prepare_ookla_rpm",
 		"install_ookla",
-		"packages.before",
-		"packages.after-install",
+		"TEMP_TOOL_CACHE",
+		"dpkg-deb --extract",
 		"gpgcheck=1",
 		"signed-by=",
 		"ECS_AUTO_DEPS=0",
@@ -132,14 +132,22 @@ func TestRunScriptOoklaPreparationUsesTemporarySource(t *testing.T) {
 	if strings.Contains(text, "Ookla is never installed automatically") || strings.Contains(text, "Ookla 不会自动安装") {
 		t.Fatal("run.sh still claims that the explicit Ookla path never installs the client")
 	}
-	// Full includes Ookla directly; standard remains the ordinary 16-module set.
-	fullProfile := `full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace"`
-	if !strings.Contains(text, fullProfile) {
-		t.Fatal("run.sh full profile unexpectedly changed its default module set")
+	// Profile membership is supplied by the downloaded descriptor manifest;
+	// the wrapper must not carry a second module registry.
+	for _, required := range []string{
+		`load_module_manifest`,
+		`"${WORK}/ecs" list --machine`,
+		`MODULE_STANDARD_MODULES`,
+		`MODULE_FULL_MODULES`,
+		`manifest_tools_for`,
+		`ecs-module-manifest`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh is missing descriptor manifest integration %q", required)
+		}
 	}
-	standardProfile := `standard) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,media,route,backtrace"`
-	if !strings.Contains(text, standardProfile) {
-		t.Fatal("run.sh standard profile unexpectedly changed its default module set")
+	if strings.Contains(text, "LEGACY_STANDARD_MODULES") || strings.Contains(text, "LEGACY_FULL_MODULES") {
+		t.Fatal("run.sh must not carry a copied profile module registry")
 	}
 }
 
@@ -150,7 +158,8 @@ func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
 	}
 	text := string(contents)
 	for _, required := range []string{
-		`tool_exists speedtest || add_missing_tool speedtest`,
+		`manifest_tools_for "$module"`,
+		`tool_exists "$tool" || add_missing_tool "$tool"`,
 		`speedtest) OOKLA_MISSING=1`,
 		`ECS_AUTO_DEPS=0`,
 		`https://packagecloud.io/ookla/speedtest-cli/gpgkey`,
@@ -159,9 +168,8 @@ func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
 		`OOKLA_KEYRING="$WORK/ookla-packagecloud-keyring.gpg"`,
 		`OOKLA_APT_SOURCES="$WORK/ookla-packagecloud.list"`,
 		`OOKLA_RPM_REPO="$WORK/ookla-packagecloud.repo"`,
-		`packages.before`,
-		`packages.after`,
-		`comm -13 "$BEFORE_PACKAGES" "$AFTER_PACKAGES"`,
+		`apt_ookla_command download speedtest`,
+		`stage_temp_tool speedtest`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh missing Ookla dependency guard %q", required)
@@ -172,5 +180,74 @@ func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
 	}
 	if strings.Contains(text, "OOKLA_ACCEPTED") || strings.Contains(text, "$ACCEPT") {
 		t.Fatal("run.sh must not gate Ookla on the removed consent flag")
+	}
+}
+
+func TestRunScriptNeverInstallsSystemPackages(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		`WORK_ROOT="/tmp"`,
+		`WORK=$(mktemp -d "$WORK_ROOT/ecs-run.XXXXXX")`,
+		`TEMP_TOOL_ROOT="$WORK/root"`,
+		`TEMP_TOOL_BIN="$WORK/bin"`,
+		`apt_temp_command download`,
+		`dpkg-deb --extract`,
+		`activate_temp_tool_path`,
+		`Debian/Ubuntu`,
+		`相关测试将跳过`,
+		`trap cleanup EXIT`,
+		`trap 'exit 130' INT TERM HUP`,
+		`if [ "$KEEP" = "1" ]; then`,
+		`rm -rf "$WORK"`,
+	} {
+		if ! strings.Contains(text, required) {
+			t.Fatalf("run.sh is missing temporary dependency isolation guard %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`apt-get install`,
+		`apt-get purge`,
+		`apt-get remove`,
+		`as_root`,
+		`package_state`,
+		`packages.before`,
+		`packages.after-install`,
+		`CLEANUP_FAILED`,
+		`CLEANUP_DONE`,
+		`cleanup_packages`,
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("run.sh must not use host package installation/cleanup path %q", forbidden)
+		}
+	}
+}
+
+func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		"prepare_nexttrace",
+		"NEXTTRACE_API_URL=\"https://api.github.com/repos/nxtrace/NTrace-core/releases/latest\"",
+		"nexttrace_linux_${ARCH}",
+		"sha256:",
+		"NEXTTRACE_BIN_DIR=\"$WORK/bin\"",
+		"PATH=\"$NEXTTRACE_BIN_DIR:${PATH:-}\"",
+		"NEXTTRACE_DOWNLOAD_FILE",
+		"nexttrace_cleanup_partial",
+		"remove_missing_tool nexttrace",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh is missing NextTrace dependency guard %q", required)
+		}
+	}
+	if strings.Contains(text, "trace"+"route") || strings.Contains(text, "trace"+"path") {
+		t.Fatal("run.sh must not mention or prepare alternate route engines")
 	}
 }

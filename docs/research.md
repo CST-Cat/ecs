@@ -2,6 +2,9 @@
 
 > 调研快照：2026-07-31  
 > 方法：阅读公开 README、入口代码、输出格式、依赖下载逻辑和许可证。IPQuality 的多源覆盖、字段语义与分段规则按 AGPL 合规吸收并明确归属；其他项目只吸收功能思想与工程经验。
+>
+> 文中早期研究记录可能出现已弃用的基础路由工具名；当前实现和依赖策略已收敛为
+> NextTrace-only，路由模块不再安装或调用其他实现。
 
 ## 样本选择
 
@@ -33,7 +36,7 @@
 2. **默认零上传**：所有报告只写本地。首个稳定版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、Markdown 和独立 HTML 都由同一份数据渲染，避免三套结果互相漂移。
 4. **标准性能工具唯一**：所有配置档的 CPU、内存、磁盘和网络吞吐原始成绩分别调用 sysbench、fio、mbw、iperf3（mbw 仅作内存补充口径）。项目不保留自研替代基准、自动回退、并行效率或跨节点均值；综合评分是独立的、基于可替换基线的相对视图。
-5. **外部引擎必须可审计**：sysbench、fio、iperf3、NextTrace 等只作为可关闭的本地适配器；调用时记录可安全读取的版本、命令参数、程序摘要和数据来源。安装器只有在显式 `--with-benchmarks` 时才调用系统包管理器，不下载无摘要的裸二进制。
+5. **外部引擎必须可审计**：sysbench、fio、iperf3、NextTrace 等只作为可关闭的本地适配器；调用时记录可安全读取的版本、命令参数、程序摘要和数据来源。`run.sh` 只把 Debian/Ubuntu 签名源中的缺失工具下载并解包到临时 WORK，不调用系统安装器；需要持久安装时才显式使用 `install.sh --with-benchmarks`。
 6. **资源预算可见**：`standard`、`full` 是 16/18 个模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
 7. **结果必须可比较**：每个性能结果记录引擎版本、块大小、队列深度、线程数、测试时长、样本数和时间戳。不同方法不混成一个总分。
 8. **双栈是一等公民**：IPv4/IPv6 分开探测、分开记录失败原因，不能用“有地址”代替“可联网”。
@@ -63,11 +66,11 @@
 | 常用及邮件端口出站能力 | ✓ | — | ✓ | ✓ |
 | NAT 类型与 UDP 映射/过滤行为 | ✓ | 自实现 STUN（RFC 5389/5780） | ✓ | ✓ |
 | 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | ✓ | ✓ |
-| 多目标正向路由 | 基础 traceroute | NextTrace JSON（可用） | ✓ | ✓ |
-| 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | ✓ | ✓ |
+| 多目标正向路由 | NextTrace JSON | NextTrace full release（run.sh 临时校验） | ✓ | ✓ |
+| 三网回程线路识别 | 骨干网段特征表 | NextTrace JSON | ✓ | ✓ |
 | 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
 | 中国三网 HTTP 下载带宽（显式选中） | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
-| Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（full 或显式 `--only ookla` 时运行；run.sh 可按需从官方签名源准备） | — | ✓ |
+| Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（full 或显式 `--only ookla` 时运行；run.sh 可按需从官方签名源下载并临时解包） | — | ✓ |
 | JSON、Markdown、独立 HTML | ✓ | — | ✓ | ✓ |
 
 两档配置只改变默认模块集合（standard 16、full 18）；表中标注“选中时”的模块
@@ -80,7 +83,7 @@
 - IPQuality 的多源清单、字段对应关系、类型归类和供应商风险分段构成明确的实现输入；`ecs` 因此整体改用 AGPL-3.0-only，并在 `NOTICE`、报告来源和文档中保留项目、提交与许可证归属；
 - 没有移植 IPQuality 的广告、赞助素材、运行计数、在线报告上传、依赖安装、流媒体或邮件检测代码；
 - 网络实现、并发、密钥路由、结构化模型、终端/Markdown/HTML 渲染和错误隔离由 `ecs` 重新实现；
-- sysbench、fio、iperf3、NextTrace 等程序仍作为独立进程调用，发行包不捆绑它们；显式依赖安装走操作系统包管理器。
+- sysbench、fio、iperf3、NextTrace 等程序仍作为独立进程调用，发行包不捆绑它们；`run.sh` 的缺失依赖只在 WORK 内解包，显式持久依赖安装才走操作系统包管理器。
 
 ## 首版之后的实测校准
 
@@ -89,7 +92,7 @@
 1. **回程跳数上限**：路径快照的 12 跳沿用到回程识别时，骨干特征段来不及出现——
    海外到中国通常在第 10–15 跳才进入 `202.97` / `59.43` / `219.158`。两个模块的跳数
    已拆开，回程用 20 跳。
-2. **探测并发导致误判**：并发 6 个 traceroute 时关键跳全部变成 `*`，同一目标单独跑
+2. **探测并发导致误判**：并发 6 个 NextTrace 时关键跳全部变成 `*`，同一目标单独跑
    却能稳定命中。运营商对 ICMP/UDP 探测普遍限速，因此回程追踪限制为 2 并发，并在
    多数跳无响应时明确标注"可能被限速"，而不是报告"未识别"。
 3. **区域信号误报**：从最终 URL 提取两字母地区码会把 `youku.com/ku/` 读成 `KU`、
@@ -113,7 +116,7 @@
    它认得工具的真实输出——真实 `fio --enghelp` 每行带 TAB 缩进、首行是
    `Available IO engines:`，真实 iperf3 的 JSON 字段名也随版本变过。三个替身已全部删除，
    改用真实工具：fio 与 sysbench 直接跑，iperf3 在回环起一个真实服务端，
-   ping 与 traceroute 打 `127.0.0.1`。全部不依赖公网。
+   ping 与 NextTrace 打 `127.0.0.1`。全部不依赖公网。
    CI 因此会安装 fio/sysbench/iperf3，并在工具缺失时直接失败而不是静默跳过。
 
 6. **TCP 与 ICMP 背离说明握手被代答**：一次真实运行里 `latency` 报告到 Cloudflare 的
@@ -232,7 +235,7 @@
 - 17 个 DNSBL 区域与 FCrDNS 组合检查：不把公共解析器拒绝码误报成黑名单命中。
 - 带版本的结构化 JSON schema，Markdown/HTML 由同一份数据渲染，可 `ecs render` 重放。
 - 每项指标标注 `methodology.kind`（标准基准/协议测量/第三方评估/启发式/事实采集）与可比范围。
-- 默认遮盖主机名与 IP，覆盖字段、表格与 traceroute 原文。
+- 默认遮盖主机名与 IP，覆盖字段、表格与 NextTrace 原文。
 - 零广告、零上传、不串联下载他人脚本。
 
 ## 两个项目的技术栈与开源替代评估（2026-08-01 实测）
@@ -249,7 +252,7 @@
 | 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟）+ **smartmontools**（SMART） | 已用 fio + ioping；system/disk 只读接入 smartctl |
 | 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
 | 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
-| 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + traceroute/NextTrace 适配器 | 已自实现 |
+| 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + NextTrace 适配器 | 已自实现 |
 | DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
 | IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
 | **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 作为第三方模块适配本机 CLI；full 默认包含，直接运行需预装，run.sh 可从官方签名源按需准备，三网需配置服务器 ID |

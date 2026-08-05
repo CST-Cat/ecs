@@ -66,7 +66,7 @@
 `methodology.kind` 明确结果证据等级：
 
 - `standard-benchmark`：由 sysbench、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
-- `protocol-measurement`：DNS、TCP、traceroute 等协议级现场测量，不是基准分；
+- `protocol-measurement`：DNS、TCP、NextTrace 等协议级现场测量，不是基准分；
 - `provider-assessment`：IP 情报供应商各自的评分或分类；
 - `heuristic`：公开页面和规则得出的启发式判断；
 - `inventory`：系统事实采集；

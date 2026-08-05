@@ -20,6 +20,7 @@ import (
 	"strings"
 	"unicode"
 
+	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
@@ -167,11 +168,6 @@ func (r *textRenderer) overview(data model.Report) {
 	r.blank()
 }
 
-var reportModuleIDs = []string{
-	"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
-	"ports", "nat", "blacklist", "apps", "cnspeed", "ookla", "media", "route", "backtrace",
-}
-
 // moduleNavigation 显示完整模块目录以及本次报告实际选择的模块。Run.Requested
 // 为空时从结果回退，兼容旧 JSON 报告。
 func (r *textRenderer) moduleNavigation(data model.Report) {
@@ -199,6 +195,9 @@ func moduleTitles(ids []string) []string {
 			continue
 		}
 		key := "module." + id + ".title"
+		if descriptor, ok := config.ModuleDescriptorFor(id); ok && descriptor.TitleKey != "" {
+			key = descriptor.TitleKey
+		}
 		if i18n.Has(i18n.Current(), key) {
 			titles = append(titles, i18n.T(key))
 		} else {

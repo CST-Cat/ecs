@@ -28,27 +28,6 @@ const (
 	IPVersion6    = "6"
 )
 
-var ModuleOrder = []string{
-	"system",
-	"network",
-	"bgp",
-	"cpu",
-	"memory",
-	"disk",
-	"dns",
-	"latency",
-	"speed",
-	"ports",
-	"nat",
-	"blacklist",
-	"apps",
-	"cnspeed",
-	"ookla",
-	"media",
-	"route",
-	"backtrace",
-}
-
 // stunServerPool 是 NAT 行为发现使用的公共 STUN 服务器。
 //
 // RFC 5780 的映射行为判定需要服务器提供**另一个 IP** 的备用地址，只换端口不够。
@@ -215,7 +194,7 @@ type File struct {
 // 完全不响应，已换成实测 0% 丢包的 202.96.209.133）。
 //
 // 需要说明：北京电信、广州电信、广州联通这三个上游选点实测不响应 ICMP echo。
-// 这不影响回程识别——traceroute 依赖沿途路由器的 TTL 超时应答，不需要终点响应，
+// 这不影响回程识别——NextTrace 依赖沿途路由器的 TTL 超时应答，不需要终点响应，
 // 骨干特征恰恰出现在中间跳上。
 var backtraceCityTargets = map[string][]Endpoint{
 	"beijing": {
@@ -355,10 +334,10 @@ func Defaults(profile string) (Runtime, error) {
 
 	switch profile {
 	case ProfileStandard:
-		base.Modules = []string{"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
+		base.Modules = ModulesForProfile(ProfileStandard)
 	case ProfileFull:
 		// Full directly selects every registered module, including Ookla.
-		base.Modules = append([]string(nil), ModuleOrder...)
+		base.Modules = ModulesForProfile(ProfileFull)
 	default:
 		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
 	}
@@ -763,75 +742,58 @@ func EstimateFor(runtime Runtime) Estimate {
 }
 
 func estimateTypicalDuration(runtime Runtime) time.Duration {
-	networkModule := map[string]bool{
-		"network": true, "bgp": true, "dns": true, "latency": true, "speed": true,
-		"ports": true, "media": true, "route": true, "backtrace": true,
-		"ookla": true,
-	}
 	var total time.Duration
 	for _, module := range runtime.Modules {
-		if runtime.OfflineOnly() && networkModule[module] {
+		descriptor, registered := ModuleDescriptorFor(module)
+		if !registered {
+			continue
+		}
+		if runtime.OfflineOnly() && descriptor.NeedsNetwork {
 			total += 100 * time.Millisecond
 			continue
 		}
-		switch module {
-		case "system":
-			total += time.Second
-		case "network":
-			total += 5 * time.Second
-		case "bgp":
-			// One public prefix observation per enabled family, rate-limited by
-			// the RouteViews API client.
-			total += 4 * time.Second
-		case "cpu":
-			// sysbench CPU 跑单线程与多线程两轮。
-			total += 2*runtime.CPUTime + time.Second
-		case "memory":
-			// sysbench memory 跑读/写 × 单/多线程共四轮。
-			total += 4*runtime.CPUTime + time.Second
-		case "disk":
-			randomDuration := runtime.CPUTime
-			if randomDuration > 3*time.Second {
-				randomDuration = 3 * time.Second
-			}
-			if randomDuration < 500*time.Millisecond {
-				randomDuration = 500 * time.Millisecond
-			}
-			total += 5*time.Second + 2*randomDuration + time.Duration(runtime.DiskMiB/50)*time.Second
-		case "dns":
-			total += time.Duration(runtime.DNSAttempts) * time.Second
-		case "latency":
-			total += time.Duration(runtime.LatencyAttempts) * 1500 * time.Millisecond
-		case "speed":
-			// Typical estimate assumes IPv4 only and no busy-server retry.
-			total += time.Duration(len(runtime.IPerfTargets)*2) * runtime.IPerfDuration
-		case "ports":
-			total += 4 * time.Second
-		case "media":
-			total += 10 * time.Second
-		case "route":
-			total += time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
-		case "blacklist":
-			total += 10 * time.Second
-		case "apps":
-			total += 8 * time.Second
-		case "cnspeed":
-			// 三个运营商各选点后串行下载。
-			total += 40 * time.Second
-		case "ookla":
-			total += 90 * time.Second
-		case "nat":
-			// 多次 UDP 事务，无响应时按超时累计。
-			total += 12 * time.Second
-		case "backtrace":
-			// 参考目标并发追踪，耗时取决于最慢的一个而不是总和。
-			total += 30 * time.Second
-		}
+		total += estimateModuleDuration(runtime, descriptor)
 	}
 	if total < 5*time.Second {
 		return 5 * time.Second
 	}
 	return total
+}
+
+func estimateModuleDuration(runtime Runtime, descriptor ModuleDescriptor) time.Duration {
+	switch descriptor.EstimateMode {
+	case EstimateModeCPU:
+		// sysbench CPU 跑单线程与多线程两轮。
+		return 2*runtime.CPUTime + time.Second
+	case EstimateModeMemory:
+		// sysbench memory 跑读/写 × 单/多线程共四轮。
+		return 4*runtime.CPUTime + time.Second
+	case EstimateModeDisk:
+		randomDuration := runtime.CPUTime
+		if randomDuration > 3*time.Second {
+			randomDuration = 3 * time.Second
+		}
+		if randomDuration < 500*time.Millisecond {
+			randomDuration = 500 * time.Millisecond
+		}
+		return 5*time.Second + 2*randomDuration + time.Duration(runtime.DiskMiB/50)*time.Second
+	case EstimateModeDNS:
+		return time.Duration(runtime.DNSAttempts) * time.Second
+	case EstimateModeLatency:
+		return time.Duration(runtime.LatencyAttempts) * 1500 * time.Millisecond
+	case EstimateModeSpeed:
+		// Typical estimate assumes IPv4 only and no busy-server retry.
+		return time.Duration(len(runtime.IPerfTargets)*2) * runtime.IPerfDuration
+	case EstimateModeRoute:
+		return time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
+	case EstimateModeFixed:
+		return descriptor.Estimate
+	default:
+		// ValidateModuleDescriptors rejects unknown modes for the canonical
+		// registry. Treat one defensively as a fixed descriptor for callers that
+		// pass a value assembled outside that registry.
+		return descriptor.Estimate
+	}
 }
 
 func durationEstimateText(lower, upper time.Duration) string {

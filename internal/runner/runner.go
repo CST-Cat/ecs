@@ -63,11 +63,16 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			"性能结果只应在相同测试方法、版本和资源参数下比较。",
 		},
 	}
+	requested := make(map[string]bool, len(cfg.Modules))
 	for _, id := range cfg.Modules {
-		if id == "ookla" {
-			report.Notices = append(report.Notices,
-				"Ookla 调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。")
-			break
+		requested[id] = true
+	}
+	// Keep optional privacy/external-policy notices in descriptor order.  The
+	// runner deliberately does not special-case a module ID here: adding an
+	// external client only requires metadata in config's registry.
+	for _, descriptor := range config.ModuleDescriptors() {
+		if requested[descriptor.ID] && descriptor.PrivacyNotice != "" {
+			report.Notices = append(report.Notices, descriptor.PrivacyNotice)
 		}
 	}
 
@@ -149,8 +154,17 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 
 // runOne 执行单个探针，统一处理离线跳过与方法学补全。
 func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment) model.Result {
+	descriptor, hasDescriptor := config.ModuleDescriptorFor(item.ID())
+	displayTitle := item.Title()
+	needsNetwork := item.NeedsNetwork()
+	if hasDescriptor {
+		// Descriptor metadata is authoritative for cross-cutting runner policy;
+		// the probe title remains the fallback only when localization is absent.
+		displayTitle = localizedDescriptorTitle(descriptor, displayTitle)
+		needsNetwork = descriptor.NeedsNetwork
+	}
 	var result model.Result
-	if cfg.OfflineOnly() && item.NeedsNetwork() {
+	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
 		result.Skip("离线模式")
@@ -159,9 +173,13 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 		result = safeRun(ctx, item, env)
 	}
 	if result.Methodology.Label == "" {
-		result.Methodology = probe.MethodologyFor(item.ID())
+		if hasDescriptor {
+			result.Methodology = descriptor.Methodology
+		} else {
+			result.Methodology = probe.MethodologyFor(item.ID())
+		}
 	}
-	result.Title = localizedTitle(item.ID(), result.Title)
+	result.Title = displayTitle
 	return result
 }
 
@@ -169,8 +187,15 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 //
 // ID 是稳定的机器标识，正适合做 i18n 的 key；没有译文时保留探针自带的标题。
 func localizedTitle(id, fallback string) string {
-	if key := "module." + id + ".title"; i18n.Has(i18n.Current(), key) {
-		return i18n.T(key)
+	if descriptor, ok := config.ModuleDescriptorFor(id); ok {
+		return localizedDescriptorTitle(descriptor, fallback)
+	}
+	return fallback
+}
+
+func localizedDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {
+	if descriptor.TitleKey != "" && i18n.Has(i18n.Current(), descriptor.TitleKey) {
+		return i18n.T(descriptor.TitleKey)
 	}
 	return fallback
 }

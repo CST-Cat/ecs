@@ -45,14 +45,14 @@ func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
 			t.Errorf("%q 必须独占运行", id)
 		}
 	}
-	// route/backtrace 尤其重要：实测并发 traceroute 会让关键跳全部变成 *。
+	// route/backtrace 尤其重要：实测并发 NextTrace 会让关键跳全部变成 *。
 	for _, group := range groups {
 		if len(group.Indices) <= 1 {
 			continue
 		}
 		for _, index := range group.Indices {
 			if ids[index] == "route" || ids[index] == "backtrace" {
-				t.Fatal("traceroute 类模块并发会被限速，绝不能进并行组")
+				t.Fatal("NextTrace 路由模块并发会被限速，绝不能进并行组")
 			}
 		}
 	}

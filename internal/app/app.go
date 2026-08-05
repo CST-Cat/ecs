@@ -42,7 +42,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "render":
 		return renderCommand(args, stdout, stderr)
 	case "list":
-		return listCommand(stdout)
+		return listCommand(args, stdout, stderr)
 	case "config":
 		return configCommand(args, stdout, stderr)
 	case "doctor":
@@ -445,14 +445,45 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func listCommand(stdout io.Writer) int {
+func listCommand(args []string, stdout, stderr io.Writer) int {
+	format := ""
+	for index := 0; index < len(args); index++ {
+		switch {
+		case args[index] == "--machine":
+			format = "machine"
+		case args[index] == "--format" && index+1 < len(args):
+			format = strings.ToLower(strings.TrimSpace(args[index+1]))
+			index++
+		case strings.HasPrefix(args[index], "--format="):
+			format = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(args[index], "--format=")))
+		case args[index] == "--lang" && index+1 < len(args):
+			// resolveLanguage already handled this before command dispatch.
+			index++
+		case strings.HasPrefix(args[index], "--lang="):
+			// Keep list --lang compatible with the historical command.
+		default:
+			fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), i18n.T("help.extraArgs"))
+			return 1
+		}
+	}
+	if format == "machine" || format == "manifest" {
+		return writeModuleManifest(stdout)
+	}
+	if format != "" {
+		fmt.Fprintf(stderr, "%s: unsupported list format %q\n", i18n.T("cli.error"), format)
+		return 1
+	}
 	fmt.Fprintln(stdout, i18n.T("list.profilesHeader"))
 	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
 		fmt.Fprintf(stdout, "  %-10s %s\n", profile, i18n.T("profile."+profile))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
-	for _, id := range config.ModuleOrder {
-		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", id, config.ModuleExposureName(id), i18n.T("module."+id+".desc"))
+	for _, descriptor := range config.ModuleDescriptors() {
+		descriptionKey := descriptor.DescriptionKey
+		if descriptionKey == "" {
+			descriptionKey = "module." + descriptor.ID + ".desc"
+		}
+		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", descriptor.ID, descriptor.Exposure.String(), i18n.T(descriptionKey))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.exposureHeader"))
 	for _, name := range config.ExposureNames() {
@@ -463,6 +494,22 @@ func listCommand(stdout io.Writer) int {
 	fmt.Fprintln(stdout, "  maxmind, ipinfo, ipregistry, ipapi, ip2location, abuseipdb,")
 	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois, ipapicom, ipsb")
 	fmt.Fprintln(stdout, "  "+i18n.T("list.sourcesNote"))
+	return 0
+}
+
+// writeModuleManifest emits a locale-independent, line-oriented descriptor
+// view for wrappers such as run.sh.  It is deliberately additive: the normal
+// `ecs list` output remains the human-facing interface, while this mode gives
+// downloaded wrappers a stable way to plan modules and tools without copying
+// the registry into shell code.
+func writeModuleManifest(stdout io.Writer) int {
+	fmt.Fprintln(stdout, "ecs-module-manifest\t1")
+	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
+		fmt.Fprintf(stdout, "profile\t%s\t%s\n", profile, strings.Join(config.ModulesForProfile(profile), ","))
+	}
+	for _, descriptor := range config.ModuleDescriptors() {
+		fmt.Fprintf(stdout, "module\t%s\t%s\t%s\n", descriptor.ID, descriptor.Exposure.String(), strings.Join(descriptor.RequiredTools, ","))
+	}
 	return 0
 }
 
@@ -482,22 +529,7 @@ func configCommand(args []string, stdout, stderr io.Writer) int {
 
 func doctorCommand(ctx context.Context, stdout io.Writer) int {
 	fmt.Fprintln(stdout, i18n.T("doctor.header"))
-	tools := []struct {
-		name     string
-		required bool
-		purpose  string
-		args     []string
-	}{
-		{name: "sysbench", required: true, purpose: i18n.T("doctor.purpose.sysbench"), args: []string{"--version"}},
-		{name: "fio", required: true, purpose: i18n.T("doctor.purpose.fio"), args: []string{"--version"}},
-		{name: "iperf3", required: true, purpose: i18n.T("doctor.purpose.iperf3"), args: []string{"--version"}},
-		{name: "nexttrace", purpose: i18n.T("doctor.purpose.nexttrace"), args: []string{"--version"}},
-		{name: "traceroute", purpose: i18n.T("doctor.purpose.traceroute"), args: []string{"--version"}},
-		{name: "mbw", purpose: i18n.T("doctor.purpose.mbw"), args: []string{"-h"}},
-		{name: "ioping", purpose: i18n.T("doctor.purpose.ioping"), args: []string{"-v"}},
-		{name: "smartctl", purpose: i18n.T("doctor.purpose.smartctl"), args: []string{"--version"}},
-		{name: "speedtest", purpose: i18n.T("doctor.purpose.speedtest"), args: []string{"--version"}},
-	}
+	tools := doctorTools()
 	missingRequired := false
 	for _, tool := range tools {
 		path, err := exec.LookPath(tool.name)
@@ -529,6 +561,91 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("doctor.allReady"))
 	return 0
+}
+
+type doctorTool struct {
+	name     string
+	required bool
+	purpose  string
+	args     []string
+}
+
+// doctorTools derives the dependency list from the module descriptors.  The
+// order and human-facing purpose strings remain stable for existing users,
+// while newly described tools are surfaced automatically instead of being
+// silently omitted from `ecs doctor`.
+func doctorTools() []doctorTool {
+	type toolMeta struct {
+		name     string
+		required bool
+		purpose  string
+		args     []string
+	}
+	catalog := []toolMeta{
+		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
+		{name: "fio", required: true, purpose: "doctor.purpose.fio", args: []string{"--version"}},
+		{name: "iperf3", required: true, purpose: "doctor.purpose.iperf3", args: []string{"--version"}},
+		{name: "nexttrace", purpose: "doctor.purpose.nexttrace", args: []string{"--version"}},
+		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
+		{name: "mbw", purpose: "doctor.purpose.mbw", args: []string{"-h"}},
+		{name: "ioping", purpose: "doctor.purpose.ioping", args: []string{"-v"}},
+		{name: "smartctl", purpose: "doctor.purpose.smartctl", args: []string{"--version"}},
+		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
+	}
+	meta := make(map[string]toolMeta, len(catalog))
+	for _, item := range catalog {
+		meta[item.name] = item
+	}
+	descriptors := config.ModuleDescriptors()
+	known := make(map[string]bool)
+	toolOrder := make([]string, 0)
+	for _, descriptor := range descriptors {
+		for _, name := range descriptor.RequiredTools {
+			name = strings.TrimSpace(name)
+			if name == "" || known[name] {
+				continue
+			}
+			known[name] = true
+			toolOrder = append(toolOrder, name)
+			if _, ok := meta[name]; ok {
+				continue
+			}
+			// Unknown tools are still checked.  A descriptor can add a tool
+			// before its dedicated purpose text is added; keeping the id visible
+			// is safer than silently treating the dependency as optional.
+			meta[name] = toolMeta{name: name, purpose: name, args: []string{"--version"}}
+		}
+	}
+	// Keep the historical required benchmark checks even if an older binary
+	// has no descriptor data.  This also gives a clear diagnostic if a future
+	// descriptor accidentally drops one of the core benchmark dependencies.
+	for _, item := range catalog {
+		if item.required {
+			known[item.name] = true
+		}
+	}
+	if len(descriptors) == 0 {
+		for _, item := range catalog {
+			known[item.name] = true
+		}
+	}
+	tools := make([]doctorTool, 0, len(known))
+	for _, item := range catalog {
+		if !known[item.name] {
+			continue
+		}
+		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args})
+		delete(known, item.name)
+	}
+	// Preserve descriptor order for tools not in the stable catalog.
+	for _, name := range toolOrder {
+		if !known[name] {
+			continue
+		}
+		item := meta[name]
+		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args})
+	}
+	return tools
 }
 
 // resolveLanguage 在解析命令前先把 --lang 取出来。
@@ -622,6 +739,6 @@ func printHelp(writer io.Writer) {
 func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
 	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
-	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleOrder, ","))
+	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleIDs(), ","))
 	fmt.Fprintln(writer, i18n.T("cli.sources")+": maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois,ipapicom,ipsb")
 }

@@ -8,7 +8,7 @@
 
 磁盘模块只在用户指定目录创建名称随机的 `.ecs-fio-*` 临时文件，并在完成、错误或取消时清理。它会把文件限制在测试前可用空间的 20% 以内。
 
-路由模块只调用机器上已经存在的 `nexttrace`、`traceroute` 或 `tracepath`，参数以数组传递，不经过 shell。当前版本不会自动下载这些程序，并在报告中记录参数与程序 SHA-256。NextTrace 只使用无启动横幅的 JSON 输出模式。
+路由模块只调用 NextTrace，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 NextTrace 仅从官方 GitHub Release 选取对应 Linux full asset，先校验 GitHub API 提供的 SHA-256 digest，再放入本次 `$WORK/bin`；脚本退出时随工作目录清理。`ECS_AUTO_DEPS=0` 或下载/校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace 只使用无启动横幅的 JSON 输出模式。
 
 磁盘模块只会调用 `PATH` 中现有的 `fio`，解析其本地 JSON 输出并记录参数、版本与程序 SHA-256。运行 `ecs` 本身不会调用包管理器；只有用户显式执行 `install.sh --with-benchmarks` 才会安装依赖。fio 临时文件仍受 20% 可用空间上限约束。
 
@@ -28,8 +28,8 @@ UDP 上任何人都能往该端口发包，不校验就等于让第三方决定�
 `bgp` 只向 RouteViews 当前 RIB API 查询出口前缀的公共观测结果；它不上传 ecs 报告，也不声称能看到
 私有互联或完整历史。`ookla` 是单独的外部适配器：standard 普通档不默认运行，full 或显式选中后，
 官方客户端才会执行真实测速。若通过 `run.sh` 运行且本机缺少 `speedtest`，
-脚本只会从 Ookla 官方 Packagecloud HTTPS 源准备一次性依赖：先校验固定 GPG 指纹，再由 apt/dnf/yum
-验证签名；源文件、key、索引和缓存均位于 `$WORK`，不会写入 `/etc`，退出时随工作目录清理。脚本
+脚本只会在 Debian/Ubuntu 从 Ookla 官方 Packagecloud HTTPS 源准备一次性依赖：先校验固定 GPG 指纹，再由 apt
+验证签名并下载/解包到 `$WORK`；源文件、key、索引和缓存均位于 `$WORK`，不会写入 `/etc`，退出时随工作目录清理。脚本
 不会执行供应商提供的 `curl | sh` 安装脚本；`ECS_AUTO_DEPS=0` 可关闭该准备步骤并让报告标记缺失。
 Ookla 可能接收测量所需的出口 IP、客户端和服务器元数据，ecs 只提取选择后的字段，不能把该模式表述为零上传。
 

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -207,16 +208,30 @@ func extractToolSpec(data model.Report) ToolSpec {
 			if field.Key != "version" {
 				continue
 			}
-			switch result.ID {
-			case "cpu", "memory":
+			descriptor, ok := config.ModuleDescriptorFor(result.ID)
+			if !ok || !descriptor.ScoreEnabled {
+				continue
+			}
+			tool := ""
+			for _, candidate := range descriptor.RequiredTools {
+				switch candidate {
+				case "sysbench", "fio", "iperf3":
+					tool = candidate
+				}
+				if tool != "" {
+					break
+				}
+			}
+			switch tool {
+			case "sysbench":
 				if spec.Sysbench == "" {
 					spec.Sysbench = shortVersion(field.Value)
 				}
-			case "disk":
+			case "fio":
 				if spec.Fio == "" {
 					spec.Fio = shortVersion(field.Value)
 				}
-			case "speed":
+			case "iperf3":
 				if spec.IPerf3 == "" {
 					spec.IPerf3 = shortVersion(field.Value)
 				}

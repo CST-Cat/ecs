@@ -9,7 +9,7 @@
 ## 快速开始
 
 `ecs` 只支持 Linux。下面三条命令均为非交互模式：自动下载并校验 Release 二进制，准备缺失的
-测试组件，生成本地报告，并在结束时清理本次新增组件。
+测试组件到一次性的 `/tmp/ecs-run.*` 临时前缀，生成本地报告，并在结束时清理临时目录。
 
 ```bash
 # 完整测试：所有模块
@@ -47,8 +47,10 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 测不到。发布二进制覆盖 Linux 的 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、
 `ppc64le`。
 
-脚本会下载并校验 `ecs`，按所选配置识别缺失的标准工具，从系统包管理器准备临时组件，
-生成本地报告后清理本次新增的包。
+脚本会下载并校验 `ecs`，按所选配置识别缺失的标准工具。Debian/Ubuntu 上会从已配置且签名的
+软件源把缺失工具下载到临时目录并解包到 `WORK/root`，再通过 `WORK/bin` 和临时库路径调用；
+不会执行系统包安装或卸载。其他发行版没有安全解包路径时明确跳过相关模块。`WORK` 默认在
+`/tmp` 下，显式 `TMPDIR=/absolute/path` 可作为高级覆盖；`ECS_KEEP=1` 可保留现场排障。
 
 如果不指定档位并且当前有终端，`run.sh` 会进入交互向导；没有终端时按 `standard` 档直接运行。
 
@@ -76,29 +78,30 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私或流量代价，关掉只会让报告残缺。
 没有终端时（cron、CI、容器）向导自动跳过，按默认配置直接跑，不会卡在等输入。
 
-`run.sh` 的依赖准备有明确边界：开始前记录已安装包集合，只在缺失时调用系统包管理器，
-结束时只清理本次新增的包；不执行 `autoremove` 或全局缓存清理，也不碰开始前已有的包。
+`run.sh` 的依赖准备有明确边界：预先存在的程序保持原路径；缺失组件只从 Debian/Ubuntu
+已配置且签名的软件源下载到 `$WORK/packages`，解包到 `$WORK/root`，并通过 `$WORK/bin` 与
+临时库路径调用。脚本绝不执行系统包安装、卸载或全局缓存清理，测试结束时删除整个 `$WORK`。
 Ookla (`speedtest`) 属于 `full` 档和显式 `--only ookla` 的模块；本机缺失时脚本使用
 Ookla 官方 Packagecloud HTTPS 源，下载并固定校验 GPG 公钥指纹，把临时源、key、索引和缓存
-全部放在 `$WORK`，由 apt/dnf/yum 验证签名后安装，不执行供应商的 `curl | sh` 脚本。`standard`
-档不默认选择 Ookla。交互向导会先确定最终档位和模块，再准备对应组件。测试期间不要并行运行其他包管理器操作；若安装完成后的包状态被外部改变，脚本会
-复用 `packages.before`/`packages.after` 快照并跳过清理，保留临时目录避免把外部新增包当成测试依赖删除。
-包管理器的正常安装、更新和清理输出会收进临时日志，只在失败时显示末尾诊断；设置 `ECS_KEEP=1`
-或发生清理失败时会保留现场日志。
-无法获得 root/`sudo` 或没有受支持的包管理器时，脚本会停止并提示原因；可用 `ECS_AUTO_DEPS=0`
-接受缺失组件警告继续运行。
+全部放在 `$WORK`，由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 脚本。`standard`
+档不默认选择 Ookla。交互向导会先确定最终档位和模块，再准备对应组件。其他发行版没有安全
+临时解包器时明确跳过相关测试；可用 `ECS_AUTO_DEPS=0` 直接接受缺失组件警告继续运行。
+下载和解包诊断会收进 `$WORK/package-manager.log`；设置 `ECS_KEEP=1` 可保留现场。
 
 ```bash
-# 禁止自动安装，保留 ecs 的降级行为
+# 禁用自动依赖准备，保留 ecs 的降级行为
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_AUTO_DEPS=0 sh
 
-# 排障时保留临时工作目录；本次新增的系统包仍会清理
+# 排障时保留临时工作目录（不会安装或清理系统包）
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_KEEP=1 sh -s -- --profile standard
 ```
 
 `curl | sh` 把信任完全交给下载源，这一点无法靠脚本自身解决——能做的是让下载的二进制
-必须通过 SHA-256 校验，并让依赖只来自系统包管理器配置的仓库。想长期安装二进制和基准
-工具，使用 `install.sh`；它仍然只在显式 `--with-benchmarks` 时持久安装组件。
+必须通过 SHA-256 校验，并让依赖只来自系统包管理器配置的仓库；依赖包也只在 WORK 内解包。
+想长期安装二进制和基准
+工具，使用 `install.sh`；它仍然只在显式 `--with-benchmarks` 时持久安装基准组件。路由模块只使用
+NextTrace；`run.sh` 在选中 route/backtrace 且本机缺失时，从官方 GitHub Release 下载对应 Linux
+full asset，校验 API 提供的 SHA-256 digest 后放入本次临时 WORK，退出时清理。
 
 **界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
 `config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按
@@ -112,7 +115,7 @@ curl -fsSL .../run.sh | sh -s -- --lang en --profile full
 **选定的语言适用于全部输出**：终端、Markdown、HTML 与 JSON 一致。机器标识符不参与翻译
 （模块 `id`、`measurement.key`/`method`/`unit`、`status`、`methodology.kind`），
 因此下游按这些字段解析不受语言影响。外部工具的原始输出（sysbench/fio 的 stdout、
-traceroute 路径）本身就是英文，原样保留——那是证据。
+NextTrace JSON 路径）本身就是英文，原样保留——那是证据。
 
 从源码构建需要 Go 1.22 或更高版本：
 
@@ -147,7 +150,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ECS_REPOSITORY=owner/ecs ./install.sh --with-benchmarks
 ```
 
-默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3 和 traceroute。远程仓库尚未确定，因此项目没有硬编码一个虚假的下载地址。
+默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3、mbw、ioping 和 smartmontools。路由依赖不由安装器持久安装；`run.sh` 负责临时准备已校验的 NextTrace。
 
 ## 常用命令
 
@@ -186,7 +189,7 @@ ecs --only backtrace -6 --backtrace-city all
 # 官方 Ookla 客户端（完整档自动包含；也可单独选择）
 ecs --profile full --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
 
-# 一键脚本会从官方签名包源临时准备缺失的 speedtest
+# 一键脚本会从官方签名包源下载并临时解包缺失的 speedtest
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
 
 # 终端友好的纯文本报告（彩色柱状图，自适应终端能力）
@@ -284,11 +287,11 @@ ecs --profile full --only ookla
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（显式选中即可，8 秒/100 MiB） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
 | `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；缺失时 run.sh 可通过临时签名官方源准备 | standard 默认不启用，full 或显式 `--only ookla` 可运行；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
-| `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
-| `backtrace` | 启发式判断 | 四城三网 IPv4/IPv6 参考目标路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
+| `route` | 协议诊断 | NextTrace；正向路径快照 | 不等同回程，也不是性能基准 |
+| `backtrace` | 启发式判断 | NextTrace 追踪四城三网 IPv4/IPv6 参考目标 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
 
 模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed/ookla）、
-路由类（route/backtrace）各自独占运行，避免互相污染——traceroute 尤其敏感，实测并发
+路由类（route/backtrace）各自独占运行，避免互相污染——NextTrace 探测对并发较敏感，实测并发
 会让关键跳全部无响应。轻量探测（dns/latency/ports/nat/blacklist/apps/media/network/bgp）
 并行执行，它们等的是网络往返，并行只是把等待时间叠起来。
 本机实测这组模块串行需 37.7 秒、并行 12.1 秒，省 67%。
@@ -480,7 +483,7 @@ CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只�
 
 默认情况下，主机名显示为 `hidden`，IPv4 显示为 `A.B.C.x`，IPv6 只保留 `/48` 前缀。遮盖在写入 JSON 之前完成，因此默认生成的三个文件都不保存完整值。
 
-遮盖同时覆盖表格与原始命令输出：`route` 与 `backtrace` 保存的 traceroute 原文会逐个 IP 按段遮盖，既不泄露完整地址，又保留 `59.43`、`202.97` 这类前缀供你复核线路判定是否成立。
+遮盖同时覆盖表格与原始命令输出：`route` 与 `backtrace` 保存的 NextTrace JSON 原文会逐个 IP 按段遮盖，既不泄露完整地址，又保留 `59.43`、`202.97` 这类前缀供你复核线路判定是否成立。
 
 在线配置可能连接以下第三方：
 
@@ -495,7 +498,7 @@ CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只�
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
 - `bgp`：RouteViews 当前公共 RIB API，查询本机 IPv4/IPv6 出口的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS 路径样本；只做当前公共观测，不上传 ecs 报告；
 - `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
-- `ookla`：选中后运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源准备并在退出时清理新增包，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
+- `ookla`：选中后运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源下载并解包到 WORK，退出时删除临时目录，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
