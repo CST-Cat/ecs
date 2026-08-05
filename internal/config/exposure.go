@@ -1,7 +1,6 @@
 package config
 
 import (
-	"sort"
 	"strings"
 
 	"ecs/internal/i18n"
@@ -19,7 +18,7 @@ import (
 //   - Local       不发包；
 //   - Public      连公共基础设施，对方只看到出口 IP。任何联网都免不了这一层；
 //   - ThirdParty  把被查询对象交给第三方，或结论依赖第三方的闭源判定；
-//   - Consent     闭源客户端/服务，有独立于 ecs 的许可与隐私条款。
+//   - Consent     保留为最高级别名称，供显式 --exposure any 配置使用。
 //
 // 用户真正想表达的意图是横切的（"别碰商业 API""我只要本地"），所以这里用一个
 // 上限过滤器表达，而不是让用户逐个模块记住该关什么。
@@ -32,8 +31,7 @@ const (
 	ExposureConsent
 )
 
-// CLI 取值。最高一级叫 any 而不是 consent：它表达的是"允许到任何级别"，
-// 而单个模块的 consent 属性另有 --accept 逐个放行。
+// CLI 取值。最高一级叫 any 而不是 consent：它表达的是"允许到任何级别"。
 const (
 	ExposureNameLocal      = "local"
 	ExposureNamePublic     = "public"
@@ -53,8 +51,6 @@ type ModuleExposure struct {
 	Level Exposure
 	// NeedsEgressIP 表示模块依赖出口 IP 发现的结果。
 	NeedsEgressIP bool
-	// RequiresConsent 表示模块必须经 --accept 逐个放行。
-	RequiresConsent bool
 }
 
 var moduleExposure = map[string]ModuleExposure{
@@ -86,8 +82,10 @@ var moduleExposure = map[string]ModuleExposure{
 	// 无密钥时还会经社区中转和网页读取兜底，中间方同样看到被查询的 IP。
 	"network": {Level: ExposureThirdParty, NeedsEgressIP: true},
 
-	// 需显式同意：闭源客户端连接闭源测量服务，条款独立于 ecs。
-	"ookla": {Level: ExposureConsent, RequiresConsent: true},
+	// Ookla remains a third-party measurement service. Its own licence/privacy
+	// terms are surfaced in reports, but selecting it does not require a
+	// separate consent flag.
+	"ookla": {Level: ExposureThirdParty},
 }
 
 // ExposureFor 返回模块的外联性质。
@@ -98,7 +96,7 @@ func ExposureFor(id string) ModuleExposure {
 	if info, ok := moduleExposure[id]; ok {
 		return info
 	}
-	return ModuleExposure{Level: ExposureConsent, RequiresConsent: true}
+	return ModuleExposure{Level: ExposureConsent}
 }
 
 // ParseExposure 解析 --exposure 的取值。
@@ -139,32 +137,21 @@ func (e Exposure) String() string {
 }
 
 // ModuleExposureName 返回模块自身级别的名称，用于 list 命令与报告。
-//
-// 需要同意的模块单列，因为对用户来说"要额外签字"比"级别很高"更有信息量。
 func ModuleExposureName(id string) string {
-	info := ExposureFor(id)
-	if info.RequiresConsent {
-		return "consent"
-	}
-	return info.Level.String()
+	return ExposureFor(id).Level.String()
 }
 
 // AllowsModule 判断模块是否在给定上限内。
-//
-// accepted 里的模块单独放行：--accept 本身就是比级别更强的显式表态。
-func AllowsModule(limit Exposure, accepted []string, id string) bool {
+func AllowsModule(limit Exposure, id string) bool {
 	info := ExposureFor(id)
-	if info.RequiresConsent {
-		return containsFold(accepted, id)
-	}
 	return info.Level <= limit
 }
 
 // FilterModulesByExposure 按上限裁剪模块集，保持原有顺序。
-func FilterModulesByExposure(modules []string, limit Exposure, accepted []string) []string {
+func FilterModulesByExposure(modules []string, limit Exposure) []string {
 	out := make([]string, 0, len(modules))
 	for _, id := range modules {
-		if AllowsModule(limit, accepted, id) {
+		if AllowsModule(limit, id) {
 			out = append(out, id)
 		}
 	}
@@ -197,48 +184,6 @@ func EgressNeedsIPIntel(modules []string, limit Exposure) bool {
 	return false
 }
 
-// ConsentModules 返回全部需要显式同意的模块 ID。
-func ConsentModules() []string {
-	var out []string
-	for id, info := range moduleExposure {
-		if info.RequiresConsent {
-			out = append(out, id)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// ValidateAccepted 检查 --accept 的取值都是真实存在、且确实需要同意的模块。
-//
-// 拒绝给不需要同意的模块签字：那说明用户误解了这个开关的作用。
-func ValidateAccepted(accepted []string) error {
-	for _, id := range accepted {
-		info, known := moduleExposure[id]
-		if !known {
-			return i18n.Errorf("err.acceptUnknownModule", id)
-		}
-		if !info.RequiresConsent {
-			return i18n.Errorf("err.acceptNotNeeded", id, i18n.JoinList(ConsentModules()))
-		}
-	}
-	return nil
-}
-
-// MergeAccepted 把显式同意的模块并入模块集。
-//
-// --accept 同时表达"我知道这是什么"和"我要跑它"：为一个模块签了字却还要再写
-// 一次 --only 是多余的仪式。顺序仍由 ModuleOrder 决定。
-func MergeAccepted(modules, accepted []string) []string {
-	out := append([]string(nil), modules...)
-	for _, id := range accepted {
-		if !containsFold(out, id) {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
 // OfflineOnly 表示本次运行完全不联网。
 func (r Runtime) OfflineOnly() bool { return r.Exposure == ExposureLocal }
 
@@ -246,26 +191,14 @@ func (r Runtime) OfflineOnly() bool { return r.Exposure == ExposureLocal }
 //
 // 只对 --only 点名的模块报错：档位带进来的模块被静默过滤是预期行为，
 // 而用户亲手写下的模块被悄悄丢掉不是。
-func CheckModuleExposure(named []string, limit Exposure, accepted []string) error {
+func CheckModuleExposure(named []string, limit Exposure) error {
 	for _, id := range named {
-		if AllowsModule(limit, accepted, id) {
+		if AllowsModule(limit, id) {
 			continue
 		}
 		info := ExposureFor(id)
-		if info.RequiresConsent {
-			return i18n.Errorf("err.moduleNeedsConsent", id, id)
-		}
 		return i18n.Errorf("err.moduleAboveLimit",
 			id, info.Level.String(), limit.String(), info.Level.String())
 	}
 	return nil
-}
-
-func containsFold(list []string, value string) bool {
-	for _, item := range list {
-		if strings.EqualFold(item, value) {
-			return true
-		}
-	}
-	return false
 }

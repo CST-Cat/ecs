@@ -28,9 +28,8 @@ var chinese = map[string]string{
 	"cli.error":          "错误",
 
 	// ── 配置档 ──────────────────────────────────────────────
-	"profile.quick":    "快捷选择 7 个模块；所有选中模块使用 full 级别统一口径（可用 --only 扩展）",
-	"profile.standard": "快捷选择 16 个模块；所有选中模块使用 full 级别统一口径（推荐）",
-	"profile.full":     "快捷选择全部 18 个模块；所有选中模块使用 full 级别统一口径",
+	"profile.standard": "标准配置：选择 16 个常规模块（推荐）",
+	"profile.full":     "完整配置：选择全部 18 个模块（含 Ookla）",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
@@ -97,12 +96,11 @@ var chinese = map[string]string{
 	"report.totalDuration":    "总耗时",
 	"report.networkMode":      "网络模式",
 	"report.exposure":         "外联级别",
-	"report.accepted":         "已显式同意",
 	"exposure.local":          "不联网",
 	"exposure.public":         "仅公共基础设施，对方只看到出口 IP",
 	"exposure.thirdparty":     "含第三方情报服务",
-	"exposure.any":            "含需显式同意的闭源服务",
-	"exposure.consent":        "需显式同意",
+	"exposure.any":            "允许所有已登记的第三方服务",
+	"exposure.consent":        "最高外联级别",
 	"report.ipVersion":        "IP 协议族",
 	"report.privacy":          "隐私",
 	"report.online":           "在线",
@@ -184,9 +182,8 @@ var english = map[string]string{
 	"cli.error":          "error",
 
 	// ── Profiles ────────────────────────────────────────────
-	"profile.quick":    "Shortcut selecting 7 modules; selected modules use the same full-depth methodology (extend with --only)",
-	"profile.standard": "Shortcut selecting 16 modules; selected modules use the same full-depth methodology (recommended)",
-	"profile.full":     "Shortcut selecting all 18 modules; selected modules use the same full-depth methodology",
+	"profile.standard": "Standard profile: 16 common modules (recommended)",
+	"profile.full":     "Full profile: all 18 modules, including Ookla",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",
@@ -253,12 +250,11 @@ var english = map[string]string{
 	"report.totalDuration":    "Total duration",
 	"report.networkMode":      "Network mode",
 	"report.exposure":         "Outbound exposure",
-	"report.accepted":         "Explicitly accepted",
 	"exposure.local":          "no network",
 	"exposure.public":         "public infrastructure only; peers see just the egress IP",
 	"exposure.thirdparty":     "includes third-party intelligence services",
-	"exposure.any":            "includes closed-source services requiring explicit consent",
-	"exposure.consent":        "explicit consent required",
+	"exposure.any":            "allows all registered third-party services",
+	"exposure.consent":        "highest outbound exposure",
 	"report.ipVersion":        "IP protocol family",
 	"report.privacy":          "Privacy",
 	"report.online":           "Online",

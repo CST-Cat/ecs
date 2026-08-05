@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	ProfileQuick    = "quick"
 	ProfileStandard = "standard"
 	ProfileFull     = "full"
 
@@ -146,9 +145,7 @@ type Runtime struct {
 	Profile string
 	Modules []string
 	// Exposure 是本次运行允许的最高外联级别，见 exposure.go。
-	Exposure Exposure
-	// Accepted 是经 --accept 逐个放行的模块，优先于 Exposure。
-	Accepted         []string
+	Exposure         Exposure
 	Reveal           bool
 	IPVersion        string
 	IPQualitySources []string
@@ -186,7 +183,6 @@ type File struct {
 	Only             []string        `json:"only,omitempty"`
 	Skip             []string        `json:"skip,omitempty"`
 	Exposure         string          `json:"exposure,omitempty"`
-	Accept           []string        `json:"accept,omitempty"`
 	Reveal           *bool           `json:"reveal,omitempty"`
 	IPVersion        string          `json:"ip_version,omitempty"`
 	IPQualitySources []string        `json:"ip_quality_sources,omitempty"`
@@ -358,13 +354,10 @@ func Defaults(profile string) (Runtime, error) {
 	}
 
 	switch profile {
-	case ProfileQuick:
-		base.Modules = []string{"system", "network", "cpu", "memory", "disk", "dns", "latency"}
 	case ProfileStandard:
 		base.Modules = []string{"system", "network", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "blacklist", "apps", "media", "route", "backtrace"}
 	case ProfileFull:
-		// 全集直接给出，需显式同意的模块由外联过滤器挡住（见 exposure.go），
-		// 不必在这里逐个特判。
+		// Full directly selects every registered module, including Ookla.
 		base.Modules = append([]string(nil), ModuleOrder...)
 	default:
 		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
@@ -400,13 +393,6 @@ func ApplyFile(runtime *Runtime, file File) error {
 			return err
 		}
 		runtime.Exposure = level
-	}
-	if len(file.Accept) > 0 {
-		accepted := normalizeList(file.Accept)
-		if err := ValidateAccepted(accepted); err != nil {
-			return err
-		}
-		runtime.Accepted = accepted
 	}
 	if file.Reveal != nil {
 		runtime.Reveal = *file.Reveal
@@ -601,17 +587,11 @@ func Validate(runtime Runtime) error {
 			return i18n.Errorf("err.unknownModule", id)
 		}
 	}
-	if err := ValidateAccepted(runtime.Accepted); err != nil {
-		return err
-	}
 	// 到这一步模块集已经过滤过；仍然复核一遍，挡住直接构造 Runtime 的调用方
 	// 绕过外联上限的可能。
 	for _, id := range runtime.Modules {
-		if !AllowsModule(runtime.Exposure, runtime.Accepted, id) {
+		if !AllowsModule(runtime.Exposure, id) {
 			info := ExposureFor(id)
-			if info.RequiresConsent {
-				return i18n.Errorf("err.moduleConsentShort", id, id)
-			}
 			return i18n.Errorf("err.moduleAboveLimitFix", id, info.Level.String(), runtime.Exposure.String())
 		}
 	}

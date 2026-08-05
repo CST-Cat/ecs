@@ -34,9 +34,6 @@ func Markdown(data model.Report, scored *score.Report) string {
 	if data.Run.Exposure != "" {
 		writeMarkdownRow(&out, i18n.T("report.exposure"), data.Run.Exposure+" — "+i18n.T("exposure."+data.Run.Exposure))
 	}
-	if len(data.Run.Accepted) > 0 {
-		writeMarkdownRow(&out, i18n.T("report.accepted"), strings.Join(data.Run.Accepted, ", "))
-	}
 	if data.Run.IPVersion != "" {
 		writeMarkdownRow(&out, i18n.T("report.ipVersion"), data.Run.IPVersion)
 	}

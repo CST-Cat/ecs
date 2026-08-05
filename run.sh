@@ -58,7 +58,7 @@ case "${1:-}" in
   -h|--help)
     if [ "$UI" = "en" ]; then
       printf '%s\n' \
-        'Usage: run.sh [--profile quick|standard|full] [--only MODULES] [options]' \
+        'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
         '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
         '' \
         'Downloads a checksummed ecs release, prepares missing distro packages, and writes reports directly to ${TMPDIR:-/tmp} by default.' \
@@ -66,10 +66,10 @@ case "${1:-}" in
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'Ookla is prepared only after explicit --accept ookla via a temporary, verified official package source.'
+        'The full profile includes Ookla; if speedtest is missing, run.sh prepares it from a temporary, verified official package source.'
     else
       printf '%s\n' \
-        '用法：run.sh [--profile quick|standard|full] [--only 模块] [选项]' \
+        '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
         '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
         '' \
         '下载并校验 ecs Release，准备缺失的发行版组件，并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
@@ -77,7 +77,7 @@ case "${1:-}" in
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        '只有显式使用 --accept ookla 才会通过临时、已验证的官方包源准备 Ookla。'
+        'full 档包含 Ookla；缺少 speedtest 时，脚本会从临时、已验证的官方包源准备。'
     fi
     exit 0
     ;;
@@ -255,7 +255,6 @@ CLEANUP_DONE=0
 CLEANUP_FAILED=0
 MISSING_TOOLS=""
 PACKAGES=""
-OOKLA_ACCEPTED=0
 OOKLA_MISSING=0
 OOKLA_REPO_READY=0
 OOKLA_KEY_ASC=""
@@ -268,7 +267,6 @@ OOKLA_RPM_OS=""
 OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
-ACCEPT=""
 
 as_root() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -524,7 +522,7 @@ PROFILE=standard
 ONLY=""
 SKIP=""
 # 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 是纯 HTTP，
-# 不需要外部程序）。Ookla 只有在命令行显式 --accept ookla 时才加入依赖规划。
+# 不需要外部程序）。full 或显式 --only ookla 时，speedtest 进入依赖规划。
 LOCAL_ONLY=0
 CONFIG_GIVEN=0
 EXPECT=""
@@ -534,7 +532,6 @@ for arg in "$@"; do
       profile) PROFILE="$arg" ;;
       only) ONLY="$arg" ;;
       skip) SKIP="$arg" ;;
-      accept) ACCEPT="$arg" ;;
       config) CONFIG_GIVEN=1 ;;
       exposure) [ "$arg" = "local" ] && LOCAL_ONLY=1 ;;
     esac
@@ -548,8 +545,6 @@ for arg in "$@"; do
     --only=*) ONLY="${arg#--only=}" ;;
     --skip) EXPECT=skip ;;
     --skip=*) SKIP="${arg#--skip=}" ;;
-    --accept) EXPECT=accept ;;
-    --accept=*) ACCEPT="${arg#--accept=}" ;;
     --config) EXPECT=config ;;
     --config=*) CONFIG_GIVEN=1 ;;
     --exposure) EXPECT=exposure ;;
@@ -557,12 +552,12 @@ for arg in "$@"; do
   esac
 done
 
-# The ecs CLI intentionally requires an explicit consent flag for the
-# third-party Ookla adapter.  Keep this preflight in lockstep with that
-# decision so dependency preparation cannot silently install the client.
-case ",$ACCEPT," in
-  *,ookla,*) OOKLA_ACCEPTED=1 ;;
-esac
+if [ "$CONFIG_GIVEN" -eq 0 ]; then
+  case "$PROFILE" in
+    standard|full) ;;
+    *) die "未知配置档：$PROFILE，可选 standard、full" "unknown profile: $PROFILE; choose standard or full" ;;
+  esac
+fi
 
 module_enabled() {
   module=$1
@@ -572,18 +567,13 @@ module_enabled() {
     base_modules="$ONLY"
   else
     case "$PROFILE" in
-      quick) base_modules="system,network,cpu,memory,disk,dns,latency" ;;
       standard) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,media,route,backtrace" ;;
-      full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
-      *) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,media,route,backtrace" ;;
+      full) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace" ;;
+      *) base_modules="system,network,bgp,cpu,memory,disk,dns,latency,speed,ports,nat,blacklist,apps,cnspeed,ookla,media,route,backtrace" ;;
     esac
-  fi
-  if [ "$OOKLA_ACCEPTED" -eq 1 ] && [ -z "$ONLY" ] && [ "$CONFIG_GIVEN" -eq 0 ]; then
-    base_modules="$base_modules,ookla"
   fi
   list_contains "$base_modules" "$module" || return 1
   list_contains "$SKIP" "$module" && return 1
-  [ "$module" != "ookla" ] || [ "$OOKLA_ACCEPTED" -eq 1 ] || return 1
   if [ "$LOCAL_ONLY" -eq 1 ]; then
     case "$module" in
       network|bgp|dns|latency|speed|ports|nat|blacklist|apps|cnspeed|ookla|media|route|backtrace) return 1 ;;

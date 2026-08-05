@@ -50,12 +50,11 @@ func TestOoklaBandwidthRejectsNonPositiveValues(t *testing.T) {
 }
 
 func TestOoklaSkipIncludesReasonAndNextStepInText(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.Exposure = config.ExposureThirdParty
-	cfg.Accepted = nil
 	result := (ooklaProbe{}).Run(context.Background(), Environment{Config: cfg})
 	if result.Status != model.StatusSkipped {
 		t.Fatalf("status = %s, want skipped", result.Status)
@@ -68,7 +67,7 @@ func TestOoklaSkipIncludesReasonAndNextStepInText(t *testing.T) {
 		Summary: model.Summary{Headline: "1 项跳过"},
 		Results: []model.Result{result},
 	}, report.TextOptions{Color: termcolor.LevelNone})
-	for _, want := range []string{"跳过原因", "未确认 Ookla 许可与隐私条款", "下一步", "显式接受 Ookla 许可与隐私条款后重跑模块"} {
+	for _, want := range []string{"跳过原因", "未找到官方 speedtest 客户端", "下一步", "run.sh 按需准备"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("skip text missing %q:\n%s", want, out)
 		}

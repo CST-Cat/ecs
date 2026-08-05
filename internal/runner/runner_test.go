@@ -9,7 +9,7 @@ import (
 )
 
 func TestLocalExposureSkipsNetworkProbe(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

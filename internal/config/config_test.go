@@ -40,11 +40,10 @@ func TestProfilesOnlyChangeModulePreset(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantCounts := map[string]int{
-		ProfileQuick:    7,
 		ProfileStandard: 16,
 		ProfileFull:     18,
 	}
-	for _, profile := range []string{ProfileQuick, ProfileStandard, ProfileFull} {
+	for _, profile := range []string{ProfileStandard, ProfileFull} {
 		cfg, err := Defaults(profile)
 		if err != nil {
 			t.Fatal(err)
@@ -62,7 +61,7 @@ func TestProfilesOnlyChangeModulePreset(t *testing.T) {
 }
 
 func TestOnlyCanSelectModulesOutsideProfile(t *testing.T) {
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +107,7 @@ func TestIPVersionSelection(t *testing.T) {
 			t.Errorf("IPVersions(%q) = %v, want %v", testCase.mode, got, testCase.want)
 		}
 	}
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +126,14 @@ func TestIPVersionSelection(t *testing.T) {
 func TestLoadFileRejectsUnknownAndTrailingJSON(t *testing.T) {
 	directory := t.TempDir()
 	unknown := filepath.Join(directory, "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"profile":"quick","typo":true}`), 0o600); err != nil {
+	if err := os.WriteFile(unknown, []byte(`{"profile":"standard","typo":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadFile(unknown); err == nil {
 		t.Fatal("expected unknown field error")
 	}
 	trailing := filepath.Join(directory, "trailing.json")
-	if err := os.WriteFile(trailing, []byte(`{"profile":"quick"} {"profile":"full"}`), 0o600); err != nil {
+	if err := os.WriteFile(trailing, []byte(`{"profile":"standard"} {"profile":"full"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadFile(trailing); err == nil {
@@ -184,7 +183,7 @@ func TestEstimateOnlyCountsSelectedPressureModules(t *testing.T) {
 }
 
 func TestValidateRejectsUnknownModule(t *testing.T) {
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +206,7 @@ func TestParseOoklaServersAndValidation(t *testing.T) {
 	if len(servers) != 3 || servers[0].Carrier != "电信" || servers[2].Carrier != "移动" {
 		t.Fatalf("servers = %+v", servers)
 	}
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +234,7 @@ func TestParseEndpointListInfersFamily(t *testing.T) {
 }
 
 func TestValidateRejectsUnknownEndpointFamily(t *testing.T) {
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +245,7 @@ func TestValidateRejectsUnknownEndpointFamily(t *testing.T) {
 }
 
 func TestIPQualitySourceValidation(t *testing.T) {
-	cfg, err := Defaults(ProfileQuick)
+	cfg, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

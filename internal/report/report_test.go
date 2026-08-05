@@ -19,7 +19,7 @@ func sampleReport() model.Report {
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
 		Run: model.RunInfo{
 			ID:          "run-1",
-			Profile:     "quick",
+			Profile:     "standard",
 			StartedAt:   start,
 			CompletedAt: start.Add(time.Second),
 			DurationMS:  1000,
@@ -70,7 +70,6 @@ func TestMarkdownAndHTML(t *testing.T) {
 func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	data := sampleReport()
 	data.Run.Exposure = "public"
-	data.Run.Accepted = []string{"ookla"}
 	data.Run.IPVersion = "4"
 	data.Run.Canceled = true
 	data.Summary = model.Summary{

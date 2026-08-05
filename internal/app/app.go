@@ -102,7 +102,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
 	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
 	exposureFlag := flags.String("exposure", cfg.Exposure.String(), i18n.T("flag.exposure"))
-	acceptFlag := flags.String("accept", strings.Join(cfg.Accepted, ","), i18n.T("flag.accept"))
 	revealFlag := flags.Bool("reveal", cfg.Reveal, i18n.T("flag.reveal"))
 	ipVersionFlag := flags.String("ip-version", cfg.IPVersion, i18n.T("flag.ipVersion"))
 	ipv4Flag := flags.Bool("4", false, i18n.T("flag.ipv4"))
@@ -159,11 +158,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	cfg.Exposure = exposure
-	cfg.Accepted = config.ParseList(*acceptFlag)
-	if err := config.ValidateAccepted(cfg.Accepted); err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
-		return 1
-	}
 	cfg.Reveal = *revealFlag
 	cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
 	if *ipv4Flag && *ipv6Flag {
@@ -249,16 +243,14 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 		cfg.OoklaServers = servers
 	}
-	// --accept 同时表达"我知道这是什么"和"我要跑它"，因此并入模块集。
-	cfg.Modules = config.MergeAccepted(cfg.Modules, cfg.Accepted)
 	named := config.ParseList(*onlyFlag)
 	cfg.Modules = config.SelectModules(cfg.Modules, named, config.ParseList(*skipFlag))
 	// 用户亲手点名的模块若越过外联上限就报错；档位带进来的静默过滤。
-	if err := config.CheckModuleExposure(named, cfg.Exposure, cfg.Accepted); err != nil {
+	if err := config.CheckModuleExposure(named, cfg.Exposure); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure, cfg.Accepted)
+	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure)
 	// 交互向导：显式 --interactive 才启动，--yes 永远跳过。
 	// run.sh 在检测到可用终端且用户没传测试参数时会自动加上 --interactive，
 	// 因此 `curl … | sh` 会进向导，而带参数的调用直接开跑。
@@ -455,7 +447,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 
 func listCommand(stdout io.Writer) int {
 	fmt.Fprintln(stdout, i18n.T("list.profilesHeader"))
-	for _, profile := range []string{config.ProfileQuick, config.ProfileStandard, config.ProfileFull} {
+	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
 		fmt.Fprintf(stdout, "  %-10s %s\n", profile, i18n.T("profile."+profile))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
@@ -619,7 +611,7 @@ func printHelp(writer io.Writer) {
 
 常用示例:
   ecs
-  ecs --profile quick --exposure local
+  ecs --profile standard --exposure local
   ecs --profile full --exposure public
   ecs --profile full --skip media --output ./reports
   ecs --only system,cpu,memory,disk --format json,html

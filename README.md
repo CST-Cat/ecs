@@ -18,8 +18,6 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 # 标准测试：日常综合测试
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile standard --yes
 
-# 快速测试：低资源快速筛查
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile quick --yes
 ```
 
 通过 `run.sh` 运行时，报告默认直接写入 `${TMPDIR:-/tmp}`，不会创建新的报告目录；如需固定目录，显式传入 `--output PATH`。默认文件名前缀带有本次运行的唯一后缀，也可以用 `--name PREFIX` 自定义。启用全部模块可能运行数分钟，`iperf3` 流量不封顶。
@@ -58,10 +56,9 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 
 ```
 选择配置档
-  1) quick     快捷选择 7 个模块（统一 full 级别测试口径）
-→ 2) standard  快捷选择 16 个模块（推荐）
-  3) full      快捷选择全部 18 个模块（统一 full 级别测试口径）
-请选择 [2]
+→ 1) standard  标准配置：16 个常规模块（推荐）
+  2) full      完整配置：全部 18 个模块（含 Ookla）
+请选择 [1]
 
 检测 IP 质量与黑名单？会把出口 IP 发给 13 个数据源 [Y/n]
 测试网络吞吐？iperf3 会跑满带宽，流量不封顶 [Y/n]
@@ -81,11 +78,10 @@ CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私�
 
 `run.sh` 的依赖准备有明确边界：开始前记录已安装包集合，只在缺失时调用系统包管理器，
 结束时只清理本次新增的包；不执行 `autoremove` 或全局缓存清理，也不碰开始前已有的包。
-Ookla (`speedtest`) 只有在命令行显式 `--accept ookla` 且本机缺失时才会准备：脚本使用
+Ookla (`speedtest`) 属于 `full` 档和显式 `--only ookla` 的模块；本机缺失时脚本使用
 Ookla 官方 Packagecloud HTTPS 源，下载并固定校验 GPG 公钥指纹，把临时源、key、索引和缓存
-全部放在 `$WORK`，由 apt/dnf/yum 验证签名后安装，不执行供应商的 `curl | sh` 脚本。普通
-`full`/`standard` 未显式同意时不会安装 speedtest。交互向导会先确定最终档位和模块，再准备
-对应组件。测试期间不要并行运行其他包管理器操作；若安装完成后的包状态被外部改变，脚本会
+全部放在 `$WORK`，由 apt/dnf/yum 验证签名后安装，不执行供应商的 `curl | sh` 脚本。`standard`
+档不默认选择 Ookla。交互向导会先确定最终档位和模块，再准备对应组件。测试期间不要并行运行其他包管理器操作；若安装完成后的包状态被外部改变，脚本会
 复用 `packages.before`/`packages.after` 快照并跳过清理，保留临时目录避免把外部新增包当成测试依赖删除。
 包管理器的正常安装、更新和清理输出会收进临时日志，只在失败时显示末尾诊断；设置 `ECS_KEEP=1`
 或发生清理失败时会保留现场日志。
@@ -97,7 +93,7 @@ Ookla 官方 Packagecloud HTTPS 源，下载并固定校验 GPG 公钥指纹，�
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_AUTO_DEPS=0 sh
 
 # 排障时保留临时工作目录；本次新增的系统包仍会清理
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_KEEP=1 sh -s -- --profile quick
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_KEEP=1 sh -s -- --profile standard
 ```
 
 `curl | sh` 把信任完全交给下载源，这一点无法靠脚本自身解决——能做的是让下载的二进制
@@ -159,17 +155,14 @@ ECS_REPOSITORY=owner/ecs ./install.sh --with-benchmarks
 # 默认综合测试
 ecs
 
-# 低资源快速筛查
-ecs --profile quick
-
 # 完整测试，但跳过服务可达性
 ecs --profile full --skip media
 
 # 标准性能主链路：固定使用 sysbench + fio + iperf3
 ecs --only system,cpu,memory,disk,speed
 
-# 快速档仍只使用标准工具，只缩短时长和磁盘文件
-ecs --profile quick --only system,cpu,memory,disk --exposure local
+# 标准档只运行本地性能主链路
+ecs --profile standard --only system,cpu,memory,disk --exposure local
 
 # 只保留 JSON 和 HTML
 ecs --format json,html --output ./my-report
@@ -190,12 +183,11 @@ ecs --only bgp
 # 四城三网 IPv4/IPv6 回程目标
 ecs --only backtrace -6 --backtrace-city all
 
-# 可选的官方 Ookla 客户端；直接运行 ecs 需预先安装并显式接受条款
-ecs --accept ookla
-ecs --accept ookla --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
+# 官方 Ookla 客户端（完整档自动包含；也可单独选择）
+ecs --profile full --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
 
-# 一键脚本在显式接受条款后，可从官方签名包源临时准备缺失的 speedtest
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes --accept ookla
+# 一键脚本会从官方签名包源临时准备缺失的 speedtest
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
 
 # 终端友好的纯文本报告（彩色柱状图，自适应终端能力）
 ecs --format txt
@@ -224,13 +216,12 @@ ecs config example
 
 | 配置档 | 默认模块数 | 性能主引擎 | CPU/内存每轮 | 临时磁盘上限 | 选中 `speed` 时的网络口径 |
 | --- | --- | --- | ---: | ---: | --- |
-| `quick` | 7（快捷预设） | sysbench + fio | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包/抖动 |
-| `standard` | 16（快捷预设） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 同 quick；所有选中模块使用同一口径 |
-| `full` | 18（快捷预设） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 同 quick；所有选中模块使用同一口径 |
+| `standard` | 16（常规模块） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包/抖动 |
+| `full` | 18（全部模块，含 Ookla） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 与 standard 相同；额外包含 cnspeed 和 Ookla |
 
-三档只改变默认模块数量，不改变已选模块的测试深度：CPU/内存 15 秒，fio 使用完整
+两档只改变默认模块数量，不改变已选模块的测试深度：CPU/内存 15 秒，fio 使用完整
 混合/Crystal/ATTO 矩阵，iperf3 使用 7 个节点、双方向 15 秒并附带 UDP 50 Mbps/5 秒；
-显式 `--only` 可以从任意档位选中任意模块（例如 quick + `--only cnspeed,disk`）。
+显式 `--only` 可以从任意档位选中任意模块（例如 standard + `--only cnspeed,disk`）。
 
 fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力跑满链路，实际流量随 VPS 带宽变化，无法用 MiB 预封顶；启动前会显示节点数、时长和并发流。
 
@@ -244,7 +235,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `local` | 不联网 | 什么都看不到 |
 | `public` | 只连公共基础设施 | 你的出口 IP——任何联网都免不了这一层 |
 | `thirdparty`（默认） | 加上第三方情报服务 | 出口 IP，外加**被查询的 IP** 交给十余家商业 API |
-| `any` | 放开上限到闭源服务 | 同上；具体模块仍需 `--accept` 逐个签字 |
+| `any` | 放开上限到所有已登记的第三方服务 | 与 `thirdparty` 相同（为兼容保留的最高级别） |
 
 级别是**上限过滤器**，作用在 `--profile`/`--only`/`--skip` 选出的模块集上。
 `ecs list` 会列出每个模块的级别。
@@ -256,12 +247,12 @@ ecs --exposure local
 # 全套测试，但不把出口 IP 交给商业风控 API
 ecs --profile full --exposure public
 
-# 需显式同意的闭源服务逐个放行；--accept 同时把模块加入本次运行
-ecs --accept ookla
+# 完整测试包含 Ookla；其客户端条款与数据处理独立于 ecs
+ecs --profile full --only ookla
 ```
 
-`--accept` 比级别更强：签过字的模块在任何级别下都能跑，不必再写 `--exposure any`。
-反过来，`--exposure any` 只是放开上限，不会替你接受任何条款。
+`--exposure any` 是为旧配置保留的最高外联级别；当前所有模块均按 `local`、`public` 或
+`thirdparty` 归类，Ookla 也属于 `thirdparty`，并在报告中保留其独立隐私说明。
 
 被档位带进来的模块超出级别时静默过滤；被你用 `--only` 亲手点名的模块超出级别时
 报错并给出该用哪个开关——显式的选择不该被悄悄丢掉。
@@ -291,7 +282,7 @@ ecs --accept ookla
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（显式选中即可，8 秒/100 MiB） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
-| `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；`run.sh --accept ookla` 缺失时可通过临时签名官方源准备 | 默认不启用、不安装、不自动接受条款；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
+| `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；缺失时 run.sh 可通过临时签名官方源准备 | standard 默认不启用，full 或显式 `--only ookla` 可运行；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
 | `route` | 协议诊断 | NextTrace/traceroute/tracepath | 正向路径快照不等同回程，也不是性能基准 |
 | `backtrace` | 启发式判断 | 四城三网 IPv4/IPv6 参考目标路径 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
@@ -504,7 +495,7 @@ CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只�
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
 - `bgp`：RouteViews 当前公共 RIB API，查询本机 IPv4/IPv6 出口的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS 路径样本；只做当前公共观测，不上传 ecs 报告；
 - `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
-- `ookla`：只有显式启用并接受条款后，才运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源准备并在退出时清理新增包，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
+- `ookla`：选中后运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源准备并在退出时清理新增包，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
@@ -531,7 +522,6 @@ ecs --config ecs.json
 {
   "profile": "standard",
   "exposure": "thirdparty",
-  "accept": [],
   "ip_version": "auto",
   "skip": ["media"],
   "ip_quality_sources": ["all"],
@@ -552,8 +542,8 @@ ecs --config ecs.json
 }
 ```
 
-`exposure` 与 `accept` 对应命令行的 `--exposure` 和 `--accept`；把 `accept`
-写进配置文件等于持久接受该模块的条款，请只对自己确实同意的服务这么做。
+`exposure` 对应命令行的 `--exposure`。Ookla 的独立许可与隐私条款只在该模块实际运行
+时生效，报告会保留相应说明。
 
 未知字段会直接报错，避免拼写错误被静默忽略。命令行参数优先于配置文件。
 

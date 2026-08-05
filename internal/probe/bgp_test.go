@@ -89,7 +89,7 @@ func TestBGPMethodologyIsPublicObservation(t *testing.T) {
 	if method.Engine != "RouteViews current RIB API" || method.Kind != "provider-assessment" {
 		t.Fatalf("methodology = %+v", method)
 	}
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

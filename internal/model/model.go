@@ -45,8 +45,6 @@ type RunInfo struct {
 	DurationMS  int64     `json:"duration_ms"`
 	// Exposure 是本次运行允许的最高外联级别：local、public、thirdparty、any。
 	Exposure string `json:"exposure"`
-	// Accepted 列出经显式同意放行的模块。
-	Accepted []string `json:"accepted_modules,omitempty"`
 	// Offline 是 Exposure == "local" 的派生值，保留给既有的报告消费方。
 	Offline       bool     `json:"offline"`
 	IPVersion     string   `json:"ip_version,omitempty"`

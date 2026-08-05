@@ -17,7 +17,7 @@ func textSampleReport() model.Report {
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run: model.RunInfo{
-			ID: "abc", Profile: "quick", Exposure: "local", Offline: true,
+			ID: "abc", Profile: "standard", Exposure: "local", Offline: true,
 			StartedAt: time.Unix(0, 0).UTC(), Redacted: true, Requested: []string{"cpu"},
 		},
 		Summary: model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项完成"},

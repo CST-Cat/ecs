@@ -52,7 +52,6 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			Profile:       cfg.Profile,
 			StartedAt:     started,
 			Exposure:      cfg.Exposure.String(),
-			Accepted:      append([]string(nil), cfg.Accepted...),
 			Offline:       cfg.OfflineOnly(),
 			IPVersion:     cfg.IPVersion,
 			Redacted:      !cfg.Reveal,
@@ -65,9 +64,9 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		},
 	}
 	for _, id := range cfg.Modules {
-		if id == "ookla" && config.AllowsModule(cfg.Exposure, cfg.Accepted, "ookla") {
+		if id == "ookla" {
 			report.Notices = append(report.Notices,
-				"Ookla 已按显式同意调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。")
+				"Ookla 调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。")
 			break
 		}
 	}

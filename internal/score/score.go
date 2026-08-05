@@ -307,7 +307,7 @@ func (r Report) EffectiveRankMinSamples() int {
 // Compute 按基线为一份报告算分。
 //
 // 没有任何维度可算时返回 nil：与其给一个 0 分，不如明确表示"这次运行不产生
-// 评分"——quick 档或 --only network 本来就不该有综合分。
+// 评分"——仅运行 network 等单一维度本来就不该有综合分。
 func Compute(data model.Report, baseline Baseline) *Report {
 	values := collectMeasurements(data)
 	ran := make(map[string]bool, len(data.Results))

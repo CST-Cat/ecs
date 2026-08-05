@@ -34,7 +34,7 @@
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、Markdown 和独立 HTML 都由同一份数据渲染，避免三套结果互相漂移。
 4. **标准性能工具唯一**：所有配置档的 CPU、内存、磁盘和网络吞吐原始成绩分别调用 sysbench、fio、mbw、iperf3（mbw 仅作内存补充口径）。项目不保留自研替代基准、自动回退、并行效率或跨节点均值；综合评分是独立的、基于可替换基线的相对视图。
 5. **外部引擎必须可审计**：sysbench、fio、iperf3、NextTrace 等只作为可关闭的本地适配器；调用时记录可安全读取的版本、命令参数、程序摘要和数据来源。安装器只有在显式 `--with-benchmarks` 时才调用系统包管理器，不下载无摘要的裸二进制。
-6. **资源预算可见**：`quick`、`standard`、`full` 只是 7/16/18 个模块的快捷预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一 full-depth 口径；任何网络压力测试都可单独关闭。
+6. **资源预算可见**：`standard`、`full` 是 16/18 个模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
 7. **结果必须可比较**：每个性能结果记录引擎版本、块大小、队列深度、线程数、测试时长、样本数和时间戳。不同方法不混成一个总分。
 8. **双栈是一等公民**：IPv4/IPv6 分开探测、分开记录失败原因，不能用“有地址”代替“可联网”。
 9. **IP 质量不迷信单一分数**：保存每个数据源的原始判定、查询时间和错误；聚合结论必须显示置信度与冲突项。
@@ -48,29 +48,29 @@
 
 ## 首版功能矩阵
 
-| 模块 | 非基准诊断 | 标准基准工具 | quick | standard | full |
-| --- | :---: | --- | :---: | :---: | :---: |
-| 系统、虚拟化、资源、温度、SMART 与内核网络栈 | ✓ | smartctl + `/proc`/`/sys` 只读采集 | ✓ | ✓ | ✓ |
-| IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ | ✓ |
-| CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s | 15s |
-| 内存顺序读写、事件时延与 memcpy 补充带宽 | — | sysbench memory + 可选 mbw；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s | 15s |
-| 磁盘 legacy、Crystal、ATTO 与 50/50 混合矩阵 | — | fio JSON，Direct I/O，引擎探测回退 | 52 作业 | 52 作业 | 52 作业 |
-| DNS 延迟、失败率与抖动 | ✓ | — | ✓ | ✓ | ✓ |
-| TCP 延迟与可达率 | ✓ | 系统 ping 的 ICMP 往返 | ✓ | ✓ | ✓ |
-| 多节点上传/下载吞吐 | — | iperf3 JSON（唯一，逐节点原值） | 7 节点 × 15s（选中时） | 7 节点 × 15s | 7 节点 × 15s |
-| UDP 丢包与抖动 | — | iperf3 UDP JSON | 与 speed 同时执行 | 与 speed 同时执行 | 与 speed 同时执行 |
-| CPU steal 与容器资源真值 | ✓ | /proc/stat + cgroup v1/v2 | ✓ | ✓ | ✓ |
-| 常用及邮件端口出站能力 | ✓ | — | — | ✓ | ✓ |
-| NAT 类型与 UDP 映射/过滤行为 | ✓ | 自实现 STUN（RFC 5389/5780） | — | ✓ | ✓ |
-| 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | — | ✓ | ✓ |
-| 多目标正向路由 | 基础 traceroute | NextTrace JSON（可用） | — | ✓ | ✓ |
-| 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | — | ✓ | ✓ |
-| 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | — | ✓ | ✓ |
-| 中国三网 HTTP 下载带宽（显式选中） | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB | 8s/100 MiB |
-| Ookla 三网测速（显式启用） | 外部官方客户端 | 本机 speedtest CLI（直接运行需预装；`run.sh --accept ookla` 可按需从官方签名源准备） | — | 可选 | 可选 |
-| JSON、Markdown、独立 HTML | ✓ | — | ✓ | ✓ | ✓ |
+| 模块 | 非基准诊断 | 标准基准工具 | standard | full |
+| --- | :---: | --- | :---: | :---: |
+| 系统、虚拟化、资源、温度、SMART 与内核网络栈 | ✓ | smartctl + `/proc`/`/sys` 只读采集 | ✓ | ✓ |
+| IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ |
+| CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s |
+| 内存顺序读写、事件时延与 memcpy 补充带宽 | — | sysbench memory + 可选 mbw；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s |
+| 磁盘 legacy、Crystal、ATTO 与 50/50 混合矩阵 | — | fio JSON，Direct I/O，引擎探测回退 | 52 作业 | 52 作业 |
+| DNS 延迟、失败率与抖动 | ✓ | — | ✓ | ✓ |
+| TCP 延迟与可达率 | ✓ | 系统 ping 的 ICMP 往返 | ✓ | ✓ |
+| 多节点上传/下载吞吐 | — | iperf3 JSON（唯一，逐节点原值） | 7 节点 × 15s | 7 节点 × 15s |
+| UDP 丢包与抖动 | — | iperf3 UDP JSON | 与 speed 同时执行 | 与 speed 同时执行 |
+| CPU steal 与容器资源真值 | ✓ | /proc/stat + cgroup v1/v2 | ✓ | ✓ |
+| 常用及邮件端口出站能力 | ✓ | — | ✓ | ✓ |
+| NAT 类型与 UDP 映射/过滤行为 | ✓ | 自实现 STUN（RFC 5389/5780） | ✓ | ✓ |
+| 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | ✓ | ✓ |
+| 多目标正向路由 | 基础 traceroute | NextTrace JSON（可用） | ✓ | ✓ |
+| 三网回程线路识别 | 骨干网段特征表 | traceroute / NextTrace | ✓ | ✓ |
+| 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
+| 中国三网 HTTP 下载带宽（显式选中） | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
+| Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（full 或显式 `--only ookla` 时运行；run.sh 可按需从官方签名源准备） | — | ✓ |
+| JSON、Markdown、独立 HTML | ✓ | — | ✓ | ✓ |
 
-三档配置只改变默认模块集合（quick 7、standard 16、full 18）；表中标注“选中时”的模块
+两档配置只改变默认模块集合（standard 16、full 18）；表中标注“选中时”的模块
 可以用 `--only` 从任意档位启用，并始终采用同一 full 深度参数。
 
 ## 许可证与复用边界
@@ -252,7 +252,7 @@
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + traceroute/NextTrace 适配器 | 已自实现 |
 | DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
 | IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
-| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 显式适配本机 CLI；不默认同意，直接运行需预装，`run.sh --accept ookla` 可从官方签名源按需准备，三网需配置服务器 ID |
+| **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 作为第三方模块适配本机 CLI；full 默认包含，直接运行需预装，run.sh 可从官方签名源按需准备，三网需配置服务器 ID |
 | 三网 Ping | pingtest（借鉴 ecsspeed） | ✅ | ICMP 已具备，缺的是节点数据而非技术 | `latency` 为固定全球站点 |
 
 ### librespeed-cli 实跑结论（开源替代，但不是中国三网等价物）
@@ -288,20 +288,19 @@
 - 商业 IP 数据库无开源替代，这是行业事实；ecs 能做的是保留原值、通道与失败状态，
   不平均、不顶替——这一点已经做到。
 
-## 三档配置的模块快捷入口（2026-08-03）
+## 两档配置的模块入口（2026-08-03）
 
-三档不是质量等级，而是预先列好模块集合的快捷入口。所有被选中的模块都使用同一套
+两档不是质量等级，而是预先列好模块集合的入口。所有被选中的模块都使用同一套
 full 深度参数，保证直接运行与 `--only` 运行的结果可以比较。
 
-| | quick | standard | full |
-| --- | ---: | ---: | ---: |
-| 默认模块数 | 7 | 16 | 18 |
-| CPU/内存每轮 | 15 s | 15 s | 15 s |
-| fio 临时文件与作业 | 2048 MiB，上限安全检查；52 项完整 mixed/Crystal/ATTO | 同左 | 同左 |
-| iperf3（选中 `speed` 时） | 7 节点 × 双方向 × 15 s，附 UDP 50 Mbps/5 s | 同左 | 同左 |
-| `cnspeed`（显式选中） | 8 s/100 MiB 每运营商 | 同左 | 同左 |
+| | standard | full |
+| --- | ---: | ---: |
+| 默认模块数 | 16 | 18 |
+| CPU/内存每轮 | 15 s | 15 s |
+| fio 临时文件与作业 | 2048 MiB，上限安全检查；52 项完整 mixed/Crystal/ATTO | 同左 |
+| iperf3（选中 `speed` 时） | 7 节点 × 双方向 × 15 s，附 UDP 50 Mbps/5 s | 同左 |
+| `cnspeed`（选中时） | 8 s/100 MiB 每运营商 | 同左 |
 
-`quick`、`standard`、`full` 仅分别预选 7、16、18 个模块。`SelectModules` 先处理
-`--only` 再处理 `--skip`，因此 quick 也可以直接运行 `--only cnspeed,disk`，而
-`--skip` 仍可从任何预设中移除模块。Ookla 仍需显式 `--accept ookla`，这是外联同意而
-不是配置档限制。
+`standard`、`full` 仅分别预选 16、18 个模块。`SelectModules` 先处理
+`--only` 再处理 `--skip`，因此 standard 也可以直接运行 `--only cnspeed,disk`，而
+`--skip` 仍可从任何预设中移除模块。Ookla 属于普通 thirdparty 模块，不需要额外确认。

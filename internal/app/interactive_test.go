@@ -70,7 +70,7 @@ func TestWizardTextsAreTranslated(t *testing.T) {
 
 // 没有可用终端时向导必须放行，否则 cron 与 CI 会永远卡在等输入。
 func TestWizardWithoutTerminalDoesNotBlock(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

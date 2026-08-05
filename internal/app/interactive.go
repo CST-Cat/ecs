@@ -140,9 +140,9 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	prompt.line("")
 
 	// 一、配置档
-	profiles := []string{config.ProfileQuick, config.ProfileStandard, config.ProfileFull}
+	profiles := []string{config.ProfileStandard, config.ProfileFull}
 	labels := make([]string, len(profiles))
-	defaultIndex := 1 // standard
+	defaultIndex := 0 // standard
 	for index, profile := range profiles {
 		labels[index] = fmt.Sprintf("%-9s %s", profile, i18n.T("profile."+profile))
 		if profile == cfg.Profile {
@@ -158,7 +158,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 			updated.NoColor, updated.Reveal = cfg.NoColor, cfg.Reveal
 			updated.IPVersion = cfg.IPVersion
 			// 外联设置同样是用户的显式选择：换档位不该悄悄把它放宽回默认值。
-			updated.Exposure, updated.Accepted = cfg.Exposure, cfg.Accepted
+			updated.Exposure = cfg.Exposure
 			*cfg = updated
 		}
 	}
@@ -181,19 +181,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	if err == nil {
 		cfg.Exposure = chosenExposure
 	}
-	// any 只是放开上限，具体的闭源模块仍要逐个签字。
-	if cfg.Exposure == config.ExposureConsent {
-		for _, id := range config.ConsentModules() {
-			if config.AllowsModule(cfg.Exposure, cfg.Accepted, id) {
-				continue
-			}
-			if prompt.confirm(fmt.Sprintf(i18n.T("wizard.askConsent"), id), false) {
-				cfg.Accepted = append(cfg.Accepted, id)
-			}
-		}
-	}
-	cfg.Modules = config.FilterModulesByExposure(
-		config.MergeAccepted(cfg.Modules, cfg.Accepted), cfg.Exposure, cfg.Accepted)
+	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure)
 	if len(cfg.Modules) == 0 {
 		prompt.line("")
 		prompt.line("%s", prompt.style("33", i18n.T("wizard.noModules")))
@@ -247,9 +235,6 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	prompt.line("%s", prompt.style("1", i18n.T("wizard.summaryTitle")))
 	prompt.line("  %s %s", i18n.T("term.profileLine"), cfg.Profile)
 	prompt.line("  %s %s — %s", i18n.T("report.exposure"), cfg.Exposure.String(), i18n.T("exposure."+cfg.Exposure.String()))
-	if len(cfg.Accepted) > 0 {
-		prompt.line("  %s %s", i18n.T("report.accepted"), strings.Join(cfg.Accepted, ", "))
-	}
 	prompt.line("  %s %d — %s", i18n.T("term.moduleCount"), len(modules), strings.Join(modules, ", "))
 	prompt.line("  %s %s", i18n.T("term.estimate"), estimate.DurationText)
 	if estimate.NetworkMiB < 0 {

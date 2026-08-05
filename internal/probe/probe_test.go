@@ -208,7 +208,7 @@ func TestDetectFIOEngineAgreesWithEnghelp(t *testing.T) {
 func TestRunFIODiskWithRealFIO(t *testing.T) {
 	fioPath := requireTool(t, "fio")
 	directory := t.TempDir()
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ Latency (ms):
 // 真实 sysbench 端到端：解析器必须认得当前安装版本的实际输出格式。
 func TestRunSysbenchWithRealBinary(t *testing.T) {
 	sysbenchPath := requireTool(t, "sysbench")
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func startIPerf3Server(t *testing.T, path string) int {
 func TestRunIPerfWithRealServer(t *testing.T) {
 	iperfPath := requireTool(t, "iperf3")
 	port := startIPerf3Server(t, iperfPath)
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

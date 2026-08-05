@@ -15,11 +15,11 @@ import (
 	"ecs/internal/model"
 )
 
-// ooklaProbe is an adapter around the official Ookla CLI.  Direct ecs runs
+// ooklaProbe is an adapter around the official Ookla CLI. Direct ecs runs
 // expect the client to be installed already; run.sh may prepare it from the
-// signed official source only after the user explicitly accepts Ookla.
-// Keeping it as an explicit module matters: the client has its own licence,
-// privacy terms and measurement service, unlike ecs's local-only report.
+// signed official source when the selected profile/module needs it. Keeping
+// it as an explicit module matters: the client has its own licence, privacy
+// terms and measurement service, unlike ecs's local-only report.
 type ooklaProbe struct{}
 
 func (ooklaProbe) ID() string         { return "ookla" }
@@ -65,13 +65,11 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "同一 Ookla 客户端、服务器选择与协议族；外部服务数据不等同 ecs 本地报告",
 	}
 
-	if !config.AllowsModule(env.Config.Exposure, env.Config.Accepted, "ookla") {
-		reason := "未确认 Ookla 许可与隐私条款"
+	if !config.AllowsModule(env.Config.Exposure, "ookla") {
+		reason := "当前外联级别不允许 Ookla"
 		result.Skip(reason)
-		appendOoklaSkipDetails(&result, reason, "显式接受 Ookla 许可与隐私条款后重跑模块。")
-		result.Notes = append(result.Notes,
-			"Ookla 不是 ecs 的零上传探针；如需运行，请显式使用 --accept ookla。",
-		)
+		appendOoklaSkipDetails(&result, reason, "请提高 --exposure 后重跑模块。")
+		result.Notes = append(result.Notes, "Ookla 不是 ecs 的零上传探针；其客户端会按自身条款处理测量元数据。")
 		result.Finish(start)
 		return result
 	}
@@ -79,8 +77,8 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	if err != nil {
 		reason := "未找到官方 speedtest 客户端"
 		result.Skip(reason)
-		appendOoklaSkipDetails(&result, reason, "直接运行 ecs 请先从 Ookla 官方渠道安装；也可用 run.sh --accept ookla 让脚本按需准备后重跑。")
-		result.Notes = append(result.Notes, "直接运行 ecs 不会自动安装 Ookla 客户端；只有 run.sh 显式使用 --accept ookla 时，才会从 Ookla 官方签名包源按需准备（ECS_AUTO_DEPS=0 可关闭）。")
+		appendOoklaSkipDetails(&result, reason, "直接运行 ecs 请先从 Ookla 官方渠道安装；也可用 run.sh 按需准备后重跑。")
+		result.Notes = append(result.Notes, "直接运行 ecs 不会自动安装 Ookla 客户端；run.sh 会在选中 Ookla 且客户端缺失时，从 Ookla 官方签名包源按需准备（ECS_AUTO_DEPS=0 可关闭）。")
 		result.Finish(start)
 		return result
 	}

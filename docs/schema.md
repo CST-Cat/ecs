@@ -16,9 +16,8 @@
 ```
 
 - `tool`：生成器版本、提交和构建时间。
-- `run`：报告 ID、配置档、时间、外联级别与已同意模块、离线/遮盖/中断状态、IP 协议族、请求模块和输出格式。
+- `run`：报告 ID、配置档、时间、外联级别、离线/遮盖/中断状态、IP 协议族、请求模块和输出格式。
   - `exposure`：本次运行允许的最高外联级别，取值 `local`、`public`、`thirdparty`、`any`；
-  - `accepted_modules`：经 `--accept` 显式放行的模块，无则省略；
   - `offline`：`exposure == "local"` 的派生布尔值，保留给既有的报告消费方。
 - `results`：按实际执行顺序排列的探针结果。
 - `summary`：`ok`、`warning`、`skipped`、`error` 数量与人类可读摘要。
@@ -117,7 +116,7 @@ DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
 `mbw_array_size_mib`，以便知道动态数组大小。
 
 磁盘 `disk` 结果保留旧的 fio/YABS 兼容指标；只要选中 `disk`（无论配置档预设还是
-`--only`），就增加下面三组完整表。三档配置只预选模块集合，不改变这些表的深度：
+`--only`），就增加下面三组完整表。两档配置只预选模块集合，不改变这些表的深度：
 
 - `50/50 混合读写`：4K、64K、512K、1M，读写吞吐保存为
   `fio_mixed_{4k,64k,512k,1m}_{read,write}_mib_s`；提交与基线沿用同一组键名，
@@ -189,9 +188,8 @@ IP 质量指标尤其需要保留 `method`：
 遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者。
 
 配置文件中的 `Endpoint` 可选 `family` 字段，值为 `"4"` 或 `"6"`；空值表示自动选择。
-IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。`accept`
-与 `ookla_servers` 只控制显式的外部 Ookla 适配器，不会改变本地报告 schema，也不代表 Ookla
-客户端本身不发送测量数据。
+IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。
+`ookla_servers` 只控制外部 Ookla 适配器的服务器选择，不代表 Ookla 客户端本身不发送测量数据。
 
 ## 兼容策略
 

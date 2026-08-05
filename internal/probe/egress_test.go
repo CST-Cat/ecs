@@ -10,7 +10,7 @@ import (
 )
 
 func TestDiscoverEgressSkippedWhenNobodyNeedsIt(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestDiscoverEgressSkippedWhenNobodyNeedsIt(t *testing.T) {
 }
 
 func TestDiscoverEgressSkippedWhenOffline(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestEgressAddressMatchesVersion(t *testing.T) {
 
 // STUN 路径必须在没有可用服务器时干净地失败，而不是挂起或 panic。
 func TestEgressViaSTUNFailsWithoutServers(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileQuick)
+	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

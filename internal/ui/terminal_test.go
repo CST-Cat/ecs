@@ -38,7 +38,7 @@ func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T
 	progressText := output.String()
 	terminal.FullReport(model.Report{
 		SchemaVersion: "ecs.report/v1",
-		Run:           model.RunInfo{Profile: "quick", StartedAt: time.Unix(0, 0).UTC()},
+		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
 		Summary:       model.Summary{Status: model.StatusOK, Headline: "最终报告"},
 		Results: []model.Result{{
 			ID: "final", Title: "final-only", Status: model.StatusOK,
@@ -225,7 +225,7 @@ func TestFullReportPrintsCompleteTextAndPaths(t *testing.T) {
 	terminal.FullReport(model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{Profile: "quick", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
+		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
 		Summary:       model.Summary{Status: model.StatusOK, Headline: "完成"},
 		Results: []model.Result{{
 			ID: "full", Title: "完整结果", Status: model.StatusOK, Summary: "全部完成",

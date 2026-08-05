@@ -20,7 +20,7 @@ func TestRenderStripsLegacyRawTextBlocks(t *testing.T) {
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Run: model.RunInfo{
-			Profile:   "quick",
+			Profile:   "standard",
 			StartedAt: time.Unix(0, 0).UTC(),
 		},
 		Summary: model.Summary{Status: model.StatusOK, Headline: "完成"},

@@ -10,7 +10,7 @@ package i18n
 
 var errorChinese = map[string]string{
 	// ── 配置档与模块 ────────────────────────────────────────
-	"err.unknownProfile":     "未知配置档 %q，可选 quick、standard、full",
+	"err.unknownProfile":     "未知配置档 %q，可选 standard、full",
 	"err.unknownModule":      "未知测试模块 %q",
 	"err.noModules":          "至少需要选择一个测试模块",
 	"err.unknownIPVersion":   "未知 IP 协议族 %q，可选 auto、4、6",
@@ -21,10 +21,6 @@ var errorChinese = map[string]string{
 
 	// ── 外联级别与同意 ──────────────────────────────────────
 	"err.unknownExposure":     "未知外联级别 %q，可选 %s",
-	"err.acceptUnknownModule": "--accept 指定了未知模块 %q",
-	"err.acceptNotNeeded":     "模块 %q 不需要显式同意；需要同意的模块：%s",
-	"err.moduleNeedsConsent":  "模块 %q 是需显式同意的外部服务，请加 --accept %s",
-	"err.moduleConsentShort":  "模块 %q 需要显式同意：--accept %s",
 	"err.moduleAboveLimit":    "模块 %q 的外联级别是 %s，超过当前 --exposure %s；请改用 --exposure %s",
 	"err.moduleAboveLimitFix": "模块 %q 的外联级别 %s 超过 --exposure %s",
 
@@ -108,7 +104,7 @@ var errorChinese = map[string]string{
 
 var errorEnglish = map[string]string{
 	// ── Profiles and modules ────────────────────────────────
-	"err.unknownProfile":     "unknown profile %q; choose quick, standard, or full",
+	"err.unknownProfile":     "unknown profile %q; choose standard or full",
 	"err.unknownModule":      "unknown module %q",
 	"err.noModules":          "at least one module must be selected",
 	"err.unknownIPVersion":   "unknown IP family %q; choose auto, 4, or 6",
@@ -119,10 +115,6 @@ var errorEnglish = map[string]string{
 
 	// ── Exposure and consent ────────────────────────────────
 	"err.unknownExposure":     "unknown exposure level %q; choose %s",
-	"err.acceptUnknownModule": "--accept names an unknown module %q",
-	"err.acceptNotNeeded":     "module %q does not require explicit consent; modules that do: %s",
-	"err.moduleNeedsConsent":  "module %q is an external service requiring explicit consent; add --accept %s",
-	"err.moduleConsentShort":  "module %q requires explicit consent: --accept %s",
 	"err.moduleAboveLimit":    "module %q has exposure level %s, above the current --exposure %s; use --exposure %s instead",
 	"err.moduleAboveLimitFix": "module %q has exposure level %s, above --exposure %s",
 
