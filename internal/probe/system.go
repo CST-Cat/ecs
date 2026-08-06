@@ -141,6 +141,19 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "temperatures", Label: "温度", Value: joinHardwareList(hardware.Temperatures)},
 		{Key: "smart", Label: "SMART 健康", Value: joinHardwareList(hardware.SMART)},
 	}
+	if len(hardware.SMART) > 0 {
+		if path, err := exec.LookPath("smartctl"); err == nil {
+			appendToolVersion(ctx, &result, "smartctl_version", "smartctl 版本", path)
+			result.Fields = append(result.Fields, model.Field{
+				Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: fallback(binarySHA256(path), "unavailable"),
+			})
+		} else if _, statErr := os.Stat("/usr/sbin/smartctl"); statErr == nil {
+			appendToolVersion(ctx, &result, "smartctl_version", "smartctl 版本", "/usr/sbin/smartctl")
+			result.Fields = append(result.Fields, model.Field{
+				Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: fallback(binarySHA256("/usr/sbin/smartctl"), "unavailable"),
+			})
+		}
+	}
 	result.Measurements = []model.Measurement{
 		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
 		{Key: "usable_cpus", Label: "可用 CPU", Value: float64(snapshot.Allowance.Threads), Unit: "线程", Display: strconv.Itoa(snapshot.Allowance.Threads)},

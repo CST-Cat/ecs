@@ -57,6 +57,68 @@ func TestTextColoredEmitsEscapes(t *testing.T) {
 	}
 }
 
+func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
+	data := textSampleReport()
+	data.Results[0].Fields = []model.Field{
+		{Key: "sysbench_version", Label: "sysbench 版本", Value: "sysbench 1.0.20"},
+		{Key: "sysbench_binary_sha256", Label: "sysbench SHA-256", Value: "sha-sysbench"},
+		{Key: "mbw_version", Label: "mbw 版本", Value: "mbw 1.2.2"},
+		{Key: "mbw_binary_sha256", Label: "mbw SHA-256", Value: "sha-mbw"},
+		{Key: "fio_version", Label: "fio 版本", Value: "fio-3.42"},
+		{Key: "fio_binary_sha256", Label: "fio SHA-256", Value: "sha-fio"},
+		{Key: "ioping_version", Label: "ioping 版本", Value: "ioping 1.3"},
+		{Key: "ioping_binary_sha256", Label: "ioping SHA-256", Value: "sha-ioping"},
+		{Key: "iperf3_version", Label: "iperf3 版本", Value: "iperf 3.16"},
+		{Key: "iperf3_binary_sha256", Label: "iperf3 SHA-256", Value: "sha-iperf3"},
+		{Key: "speedtest_version", Label: "speedtest 版本", Value: "speedtest 1.2.3"},
+		{Key: "speedtest_binary_sha256", Label: "speedtest SHA-256", Value: "sha-speedtest"},
+		{Key: "nexttrace_version", Label: "NextTrace 版本", Value: "NextTrace v0.1.0"},
+		{Key: "nexttrace_binary_sha256", Label: "NextTrace SHA-256", Value: "abc123"},
+		{Key: "smartctl_version", Label: "smartctl 版本", Value: "smartctl 7.4"},
+		{Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: "sha-smartctl"},
+	}
+	out := Text(data, TextOptions{Color: termcolor.LevelTrueColor})
+	p := termcolor.Palette{Level: termcolor.LevelTrueColor}
+	labels := []string{
+		"sysbench 版本", "sysbench SHA-256", "mbw 版本", "mbw SHA-256", "fio 版本", "fio SHA-256",
+		"ioping 版本", "ioping SHA-256", "iperf3 版本", "iperf3 SHA-256", "speedtest 版本", "speedtest SHA-256",
+		"NextTrace 版本", "NextTrace SHA-256", "smartctl 版本", "smartctl SHA-256",
+	}
+	labelWidth := 0
+	for _, label := range labels {
+		labelWidth = maxInt(labelWidth, textwidth.Width(label))
+	}
+	for _, label := range labels {
+		if count := strings.Count(out, label); count != 1 {
+			t.Fatalf("版本标签 %q 应各自出现一次，实际 %d 次:\n%s", label, count, out)
+		}
+		styledLabel := p.Label(textwidth.Pad(label, labelWidth) + i18n.T("punct.colon"))
+		if !strings.Contains(out, styledLabel) {
+			t.Fatalf("版本标签 %q 未复用字段标签颜色层次:\n%s", label, out)
+		}
+	}
+	for _, version := range []string{
+		"sysbench 1.0.20", "sha-sysbench", "mbw 1.2.2", "sha-mbw", "fio-3.42", "sha-fio",
+		"ioping 1.3", "sha-ioping", "iperf 3.16", "sha-iperf3", "speedtest 1.2.3", "sha-speedtest",
+		"NextTrace v0.1.0", "abc123", "smartctl 7.4", "sha-smartctl",
+	} {
+		if !strings.Contains(out, version) {
+			t.Fatalf("报告缺少工具版本值 %q:\n%s", version, out)
+		}
+	}
+	for _, pair := range [][2]string{
+		{"sysbench 版本", "sysbench SHA-256"}, {"mbw 版本", "mbw SHA-256"}, {"fio 版本", "fio SHA-256"},
+		{"ioping 版本", "ioping SHA-256"}, {"iperf3 版本", "iperf3 SHA-256"}, {"speedtest 版本", "speedtest SHA-256"},
+		{"NextTrace 版本", "NextTrace SHA-256"}, {"smartctl 版本", "smartctl SHA-256"},
+	} {
+		versionIndex := strings.Index(out, pair[0])
+		shaIndex := strings.Index(out, pair[1])
+		if shaIndex < versionIndex {
+			t.Fatalf("%s 应显示在 %s 之后:\n%s", pair[1], pair[0], out)
+		}
+	}
+}
+
 func TestTextSemanticColorsAndWidth(t *testing.T) {
 	data := textSampleReport()
 	data.Results = []model.Result{

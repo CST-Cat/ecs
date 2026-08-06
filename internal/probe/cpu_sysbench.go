@@ -119,8 +119,8 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "标准工具", Value: "sysbench"},
-		{Key: "version", Label: "工具版本", Value: version},
-		{Key: "binary_sha256", Label: "程序 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+		{Key: "version", Label: "sysbench 版本", Value: version},
+		{Key: "binary_sha256", Label: "sysbench SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},
@@ -195,13 +195,26 @@ func executeSysbenchCPU(ctx context.Context, path string, threads, seconds int) 
 }
 
 func commandVersion(ctx context.Context, path string) string {
-	versionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(versionCtx, path, "--version").CombinedOutput()
-	if err != nil {
-		return "unknown"
+	for _, argument := range []string{"--version", "-V"} {
+		versionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		output, err := exec.CommandContext(versionCtx, path, argument).CombinedOutput()
+		cancel()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				return line
+			}
+		}
 	}
-	return fallback(strings.TrimSpace(sanitizeCommandOutput(output)), "unknown")
+	return "unknown"
+}
+
+func appendToolVersion(ctx context.Context, result *model.Result, key, label, path string) {
+	result.Fields = append(result.Fields, model.Field{
+		Key: key, Label: label, Value: commandVersion(ctx, path),
+	})
 }
 
 func parseFirstFloat(pattern *regexp.Regexp, text string) (float64, bool) {

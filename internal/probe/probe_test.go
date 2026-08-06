@@ -79,6 +79,48 @@ func TestHelpers(t *testing.T) {
 	}
 }
 
+func TestCommandVersionUsesOneLineAndSupportsFallbackFlag(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name: "long output",
+			script: `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'tool 1.2.3\nbuild details\n'
+  exit 0
+fi
+exit 1
+`,
+			want: "tool 1.2.3",
+		},
+		{
+			name: "short flag fallback",
+			script: `#!/bin/sh
+if [ "$1" = "-V" ]; then
+  printf 'tool 4.5.6\nmore details\n'
+  exit 0
+fi
+exit 1
+`,
+			want: "tool 4.5.6",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "tool")
+			if err := os.WriteFile(path, []byte(testCase.script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if got := commandVersion(context.Background(), path); got != testCase.want {
+				t.Fatalf("commandVersion() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestFIOJSONHelpers(t *testing.T) {
 	var output fioOutput
 	raw := []byte(`{

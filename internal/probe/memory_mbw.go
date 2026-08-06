@@ -98,6 +98,7 @@ func appendMBWMemory(ctx context.Context, result *model.Result, availableBytes u
 			"未安装 mbw，内存带宽（memcpy 口径）未测量；sysbench 的顺序读写成绩不受影响。")
 		return
 	}
+	appendToolVersion(ctx, result, "mbw_version", "mbw 版本", path)
 	sizeMiB := mbwArraySizeMiB(availableBytes)
 	const runs = 5
 	args := []string{"-q", "-n", strconv.Itoa(runs), strconv.Itoa(sizeMiB)}

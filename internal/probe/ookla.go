@@ -89,8 +89,9 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "引擎", Value: "official speedtest"},
+		{Key: "speedtest_version", Label: "speedtest 版本", Value: commandVersion(ctx, path)},
 		{Key: "binary", Label: "客户端路径", Value: path},
-		{Key: "binary_sha256", Label: "客户端 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+		{Key: "binary_sha256", Label: "speedtest SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "arguments", Label: "命令参数", Value: strings.Join(args, " ")},
 		{Key: "external_service", Label: "外部测量服务", Value: "Ookla"},
 	}
