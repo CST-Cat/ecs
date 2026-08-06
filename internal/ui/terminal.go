@@ -225,7 +225,7 @@ func (view *ProgressView) renderLiveLocked() {
 	state := view.stateLocked()
 	elapsed := formatElapsed(time.Since(view.started))
 	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
-	_, _ = fmt.Fprintf(view.terminal.out, "\r\x1b[2K%s", line)
+	_, _ = fmt.Fprintf(view.terminal.out, "\x1b[1G\x1b[2K%s", line)
 	view.liveLine = true
 }
 
@@ -233,7 +233,7 @@ func (view *ProgressView) clearLiveLineLocked() {
 	if !view.live || !view.liveLine {
 		return
 	}
-	_, _ = io.WriteString(view.terminal.out, "\r\x1b[2K\r")
+	_, _ = io.WriteString(view.terminal.out, "\x1b[1G\x1b[2K")
 	view.liveLine = false
 }
 

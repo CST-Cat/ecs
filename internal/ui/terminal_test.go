@@ -110,6 +110,9 @@ func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
 	if strings.Count(output.String(), "status: stopped") != 1 {
 		t.Fatalf("stopped history should be emitted once: %q", output.String())
 	}
+	if strings.Contains(output.String(), "\r") {
+		t.Fatalf("stopped history must not contain a bare carriage return: %q", output.String())
+	}
 }
 
 func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
@@ -144,13 +147,17 @@ func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
 	progress.mu.Lock()
 	afterTick := output.String()
 	progress.mu.Unlock()
-	if strings.Contains(afterTick[len(beforeTick):], "\n") {
-		t.Fatalf("TTY tick wrote a newline: %q", afterTick[len(beforeTick):])
+	tickOutput := afterTick[len(beforeTick):]
+	if strings.ContainsAny(tickOutput, "\r\n") {
+		t.Fatalf("TTY tick wrote a line terminator: %q", tickOutput)
+	}
+	if !strings.Contains(tickOutput, "\x1b[1G\x1b[2K") {
+		t.Fatalf("TTY tick did not use ANSI column positioning and erase: %q", tickOutput)
 	}
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || !strings.Contains(text, "elapsed ") {
+	if strings.Contains(text, "\r") || !strings.Contains(text, "\x1b[1G\x1b[2K") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || !strings.Contains(text, "elapsed ") {
 		t.Fatalf("TTY progress should refresh one line and append completion history: %q", text)
 	}
 }
