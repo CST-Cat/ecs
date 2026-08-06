@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -87,34 +88,70 @@ func TestProgressViewNonTTYWritesOnlyCompletedHistory(t *testing.T) {
 func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
+	terminal.tty = true
+	terminal.progressTTY = true
+	terminal.progressInterval = time.Millisecond
 	progress := terminal.BeginProgress(2)
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 2, Title: "disk"})
-	progress.Stop()
-	progress.Stop()
+	done := make(chan struct{})
+	go func() {
+		progress.Stop()
+		progress.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("live progress Stop did not return")
+	}
 	if text := output.String(); !strings.Contains(text, "status: stopped") {
 		t.Fatalf("partial progress output missing stopped state: %q", text)
 	}
+	if strings.Count(output.String(), "status: stopped") != 1 {
+		t.Fatalf("stopped history should be emitted once: %q", output.String())
+	}
 }
 
-func TestProgressViewTTYUsesCompletionOnlyLines(t *testing.T) {
+func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelBasic)
-	// A bytes.Buffer is intentionally non-TTY; force the TTY flag to ensure the
-	// completion-only path is identical for terminals and log collectors.
+	// The buffer stands in for the byte sink after production capability checks;
+	// the real constructor enables this path only for an actual TTY.
 	terminal.tty = true
+	terminal.progressTTY = true
+	terminal.progressInterval = time.Millisecond
 	progress := terminal.BeginProgress(1)
 	if output.Len() != 0 {
 		t.Fatalf("begin should not emit a placeholder: %q", output.String())
 	}
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 1, Title: "disk"})
-	if output.Len() != 0 {
-		t.Fatalf("phase start should not emit a history line: %q", output.String())
+	progress.mu.Lock()
+	beforeTick := output.String()
+	progress.mu.Unlock()
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for {
+		progress.mu.Lock()
+		current := output.String()
+		progress.mu.Unlock()
+		if strings.Count(current, "\x1b[2K") >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("TTY ticker did not refresh: %q", current)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	progress.mu.Lock()
+	afterTick := output.String()
+	progress.mu.Unlock()
+	if strings.Contains(afterTick[len(beforeTick):], "\n") {
+		t.Fatalf("TTY tick wrote a newline: %q", afterTick[len(beforeTick):])
 	}
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if strings.ContainsAny(text, "\r\x1b") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") {
-		t.Fatalf("TTY progress should append one plain completion line: %q", text)
+	if !strings.Contains(text, "\r\x1b[2K") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || !strings.Contains(text, "elapsed ") {
+		t.Fatalf("TTY progress should refresh one line and append completion history: %q", text)
 	}
 }
 
@@ -124,8 +161,9 @@ func TestProgressViewDisablesTickerForCollectorCompatibility(t *testing.T) {
 	// A bytes.Buffer is intentionally non-TTY; force the TTY flag to prove that
 	// even a terminal-like sink never receives timer/CR refresh writes.
 	terminal.tty = true
+	terminal.progressInterval = time.Millisecond
 	progress := terminal.BeginProgress(2)
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	if output.Len() != 0 {
 		t.Fatalf("ticker/placeholder output must remain empty before completion: %q", output.String())
 	}
@@ -134,6 +172,50 @@ func TestProgressViewDisablesTickerForCollectorCompatibility(t *testing.T) {
 	text := output.String()
 	if strings.ContainsAny(text, "\r\x1b") || strings.Count(text, "\n") != 2 {
 		t.Fatalf("completion plus stopped state should be two plain lines: %q", text)
+	}
+}
+
+func TestProgressTTYCapabilityUsesOutputAndEnvironment(t *testing.T) {
+	tests := []struct {
+		name          string
+		stdoutTTY, ci bool
+		term, mode    string
+		want          bool
+	}{
+		{name: "interactive xterm", stdoutTTY: true, term: "xterm-256color", want: true},
+		{name: "curl pipe with terminal stdout", stdoutTTY: true, term: "xterm-256color", want: true},
+		{name: "redirected stdout", term: "xterm-256color"},
+		{name: "CI", stdoutTTY: true, term: "xterm-256color", ci: true},
+		{name: "dumb terminal", stdoutTTY: true, term: "dumb"},
+		{name: "explicit plain", stdoutTTY: true, term: "xterm-256color", mode: "plain"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := progressTTYAllowed(test.stdoutTTY, test.term, test.ci, test.mode); got != test.want {
+				t.Fatalf("progressTTYAllowed() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestProgressTTYIgnoresNOColor(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("CI", "")
+	t.Setenv("ECS_PROGRESS_MODE", "")
+	t.Setenv("NO_COLOR", "1")
+	if !progressTTYFromEnvironment(true) {
+		t.Fatal("NO_COLOR must not disable live elapsed refresh")
+	}
+}
+
+func TestTerminalDetectionRejectsCharacterDeviceWithoutTTYIoctl(t *testing.T) {
+	file, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if isTerminal(file) {
+		t.Fatal("/dev/null must not enable live cursor output")
 	}
 }
 

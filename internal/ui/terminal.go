@@ -21,9 +21,11 @@ import (
 )
 
 type Terminal struct {
-	out   io.Writer
-	color bool
-	tty   bool
+	out              io.Writer
+	color            bool
+	tty              bool
+	progressTTY      bool
+	progressInterval time.Duration
 }
 
 func New(out io.Writer, noColor bool) *Terminal {
@@ -38,7 +40,14 @@ func New(out io.Writer, noColor bool) *Terminal {
 // Header/Error 仍使用兼容的 ANSI 层次样式；完整报告由 reporter.Text 按
 // termcolor.Level 渲染，因此 --color 的层级不会在摘要和正文之间分叉。
 func NewWithColor(out io.Writer, level termcolor.Level) *Terminal {
-	return &Terminal{out: out, color: level != termcolor.LevelNone, tty: isTerminal(out)}
+	tty := isTerminal(out)
+	return &Terminal{
+		out:              out,
+		color:            level != termcolor.LevelNone,
+		tty:              tty,
+		progressTTY:      progressTTYFromEnvironment(tty),
+		progressInterval: time.Second,
+	}
 }
 
 // ProgressView renders a small run-level progress indicator.  It deliberately
@@ -59,11 +68,15 @@ type ProgressView struct {
 	skippedCount int
 	lastStatus   model.Status
 	closed       bool
+	live         bool
+	liveLine     bool
+	stopTicker   chan struct{}
+	tickerDone   chan struct{}
 }
 
-// BeginProgress starts the run-level progress state.  It deliberately emits
-// no placeholder: every output sink, including terminals and log collectors,
-// receives at most one ordinary line for each unique module completion.
+// BeginProgress starts the run-level progress state. A real TTY gets one live
+// line refreshed by a timer; redirected and collected output receives only
+// ordinary completion lines.
 func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 	view := &ProgressView{
 		terminal: terminal,
@@ -72,7 +85,40 @@ func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 		done:     make(map[int]struct{}),
 		running:  make(map[int]string),
 	}
+	if terminal != nil && terminal.tty && terminal.progressTTY && total > 0 {
+		view.live = true
+		view.stopTicker = make(chan struct{})
+		view.tickerDone = make(chan struct{})
+		interval := terminal.progressInterval
+		if interval <= 0 {
+			interval = time.Second
+		}
+		go view.refreshLoop(interval)
+	}
 	return view
+}
+
+func (view *ProgressView) refreshLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	defer close(view.tickerDone)
+	for {
+		select {
+		case <-ticker.C:
+			view.refreshLive()
+		case <-view.stopTicker:
+			return
+		}
+	}
+}
+
+func (view *ProgressView) refreshLive() {
+	view.mu.Lock()
+	defer view.mu.Unlock()
+	if view.closed || !view.live {
+		return
+	}
+	view.renderLiveLocked()
 }
 
 // Update consumes one runner event.  Completion is keyed by the stable module
@@ -101,6 +147,7 @@ func (view *ProgressView) Update(event runner.Progress) {
 			return
 		}
 		view.running[index] = event.Title
+		view.renderLiveLocked()
 	case runner.PhaseDone:
 		_, alreadyDone := view.done[index]
 		completed = !alreadyDone
@@ -123,23 +170,34 @@ func (view *ProgressView) Update(event runner.Progress) {
 	}
 	if completed {
 		view.renderCompletionLocked()
+		if view.doneCount < view.total {
+			view.renderLiveLocked()
+		}
 	}
 }
 
-// Stop emits at most one final stopped line when the run is incomplete.  It is
-// safe to call more than once and never relies on cursor control sequences.
+// Stop stops the refresh loop and emits at most one final stopped line when the
+// run is incomplete. It is safe to call more than once, including while a
+// callback or timer refresh is in flight.
 func (view *ProgressView) Stop() {
 	if view == nil {
 		return
 	}
 	view.mu.Lock()
-	defer view.mu.Unlock()
 	if view.closed {
+		view.mu.Unlock()
 		return
 	}
 	view.closed = true
+	stopTicker, tickerDone := view.stopTicker, view.tickerDone
+	view.clearLiveLineLocked()
 	if view.doneCount < view.total {
 		view.renderCompletionLocked()
+	}
+	view.mu.Unlock()
+	if stopTicker != nil {
+		close(stopTicker)
+		<-tickerDone
 	}
 }
 
@@ -151,11 +209,32 @@ func (view *ProgressView) renderCompletionLocked() {
 	if view.total <= 0 {
 		return
 	}
+	view.clearLiveLineLocked()
 	bar := progressBar(view.doneCount, view.total)
 	state := view.stateLocked()
 	elapsed := formatElapsed(time.Since(view.started))
 	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
 	fmt.Fprintln(view.terminal.out, line)
+}
+
+func (view *ProgressView) renderLiveLocked() {
+	if !view.live || view.total <= 0 || view.closed {
+		return
+	}
+	bar := progressBar(view.doneCount, view.total)
+	state := view.stateLocked()
+	elapsed := formatElapsed(time.Since(view.started))
+	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
+	_, _ = fmt.Fprintf(view.terminal.out, "\r\x1b[2K%s", line)
+	view.liveLine = true
+}
+
+func (view *ProgressView) clearLiveLineLocked() {
+	if !view.live || !view.liveLine {
+		return
+	}
+	_, _ = io.WriteString(view.terminal.out, "\r\x1b[2K\r")
+	view.liveLine = false
 }
 
 func (view *ProgressView) stateLocked() string {
@@ -420,6 +499,31 @@ func isTerminal(writer io.Writer) bool {
 	if !ok {
 		return false
 	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return isTerminalFile(file)
+}
+
+// progressTTYFromEnvironment keeps live progress independent from color.
+// NO_COLOR is intentionally not read here: it only changes palette output.
+func progressTTYFromEnvironment(stdoutTTY bool) bool {
+	return progressTTYAllowed(
+		stdoutTTY,
+		os.Getenv("TERM"),
+		strings.TrimSpace(os.Getenv("CI")) != "",
+		os.Getenv("ECS_PROGRESS_MODE"),
+	)
+}
+
+func progressTTYAllowed(stdoutTTY bool, term string, ci bool, mode string) bool {
+	if !stdoutTTY || ci {
+		return false
+	}
+	if mode = strings.ToLower(strings.TrimSpace(mode)); mode == "plain" || mode == "off" || mode == "disabled" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(term)) {
+	case "", "dumb", "unknown":
+		return false
+	default:
+		return true
+	}
 }
