@@ -18,6 +18,7 @@ import (
 	"ecs/internal/runner"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
+	"ecs/internal/textwidth"
 )
 
 type Terminal struct {
@@ -26,7 +27,17 @@ type Terminal struct {
 	tty              bool
 	progressTTY      bool
 	progressInterval time.Duration
+	progressWidth    int
 }
+
+const (
+	// Save the beginning of the active progress region. Every redraw restores
+	// this anchor and erases all physical rows occupied after a terminal resize.
+	progressAnchorSequence    = "\x1b[1G\x1b7"
+	progressRestoreSequence   = "\x1b8\x1b[1G"
+	progressEraseLineSequence = "\x1b[2K"
+	progressNextLineSequence  = "\x1b[1B"
+)
 
 func New(out io.Writer, noColor bool) *Terminal {
 	level := termcolor.Detect(isTerminal(out))
@@ -70,6 +81,7 @@ type ProgressView struct {
 	closed       bool
 	live         bool
 	liveLine     bool
+	liveWidth    int
 	stopTicker   chan struct{}
 	tickerDone   chan struct{}
 }
@@ -210,10 +222,9 @@ func (view *ProgressView) renderCompletionLocked() {
 		return
 	}
 	view.clearLiveLineLocked()
-	bar := progressBar(view.doneCount, view.total)
 	state := view.stateLocked()
 	elapsed := formatElapsed(time.Since(view.started))
-	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
+	line := view.formatLineLocked(elapsed, state)
 	fmt.Fprintln(view.terminal.out, line)
 }
 
@@ -221,20 +232,54 @@ func (view *ProgressView) renderLiveLocked() {
 	if !view.live || view.total <= 0 || view.closed {
 		return
 	}
-	bar := progressBar(view.doneCount, view.total)
 	state := view.stateLocked()
 	elapsed := formatElapsed(time.Since(view.started))
-	line := fmt.Sprintf("%s %d/%d  elapsed %s  %s", bar, view.doneCount, view.total, elapsed, state)
-	_, _ = fmt.Fprintf(view.terminal.out, "\x1b[1G\x1b[2K%s", line)
+	line := view.formatLineLocked(elapsed, state)
+	if view.liveLine {
+		view.clearLiveLineLocked()
+	}
+	_, _ = io.WriteString(view.terminal.out, progressAnchorSequence)
+	_, _ = io.WriteString(view.terminal.out, line)
 	view.liveLine = true
+	view.liveWidth = textwidth.Width(line)
+}
+
+func (view *ProgressView) formatLineLocked(elapsed, state string) string {
+	columns := 0
+	if view.live && view.terminal != nil {
+		columns = view.terminal.progressColumns()
+	}
+	return formatProgressLine(view.doneCount, view.total, elapsed, state, columns)
 }
 
 func (view *ProgressView) clearLiveLineLocked() {
 	if !view.live || !view.liveLine {
 		return
 	}
-	_, _ = io.WriteString(view.terminal.out, "\x1b[1G\x1b[2K")
+	_, _ = io.WriteString(view.terminal.out, progressRestoreSequence)
+	columns := 0
+	if view.terminal != nil {
+		columns = view.terminal.progressColumns()
+	}
+	rows := progressLineRows(view.liveWidth, columns)
+	for row := 0; row < rows; row++ {
+		_, _ = io.WriteString(view.terminal.out, progressEraseLineSequence)
+		if row+1 < rows {
+			_, _ = io.WriteString(view.terminal.out, progressNextLineSequence)
+		}
+	}
+	if rows > 1 {
+		_, _ = io.WriteString(view.terminal.out, progressRestoreSequence)
+	}
 	view.liveLine = false
+	view.liveWidth = 0
+}
+
+func progressLineRows(width, columns int) int {
+	if width <= 0 || columns <= 0 {
+		return 1
+	}
+	return max(1, (width+columns-1)/columns)
 }
 
 func (view *ProgressView) stateLocked() string {
@@ -251,7 +296,7 @@ func (view *ProgressView) stateLocked() string {
 		for _, index := range indices {
 			names = append(names, view.running[index])
 		}
-		return "running: " + strings.Join(names, ", ")
+		return strings.Join(names, ", ")
 	}
 	if view.doneCount >= view.total {
 		if view.errorCount > 0 {
@@ -277,9 +322,15 @@ func (view *ProgressView) stateLocked() string {
 }
 
 func progressBar(done, total int) string {
-	const width = 20
+	return progressBarWithWidth(done, total, 20)
+}
+
+func progressBarWithWidth(done, total, width int) string {
+	if width < 1 {
+		return "[]"
+	}
 	if total <= 0 {
-		return "[--------------------]"
+		return "[" + strings.Repeat("-", width) + "]"
 	}
 	if done < 0 {
 		done = 0
@@ -292,6 +343,48 @@ func progressBar(done, total int) string {
 		filled = 1
 	}
 	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
+// formatProgressLine keeps a live redraw on one physical terminal row. A line
+// that reaches the final column may trigger terminal auto-wrap, so interactive
+// output deliberately leaves that column unused. Roomy terminals retain the
+// full bar; narrow terminals first tighten spacing, then shrink the
+// bar, and only truncate the state as a last resort so elapsed time remains
+// visible.
+func formatProgressLine(done, total int, elapsed, state string, terminalColumns int) string {
+	bar := progressBar(done, total)
+	standard := fmt.Sprintf("%s %d/%d  %s  %s", bar, done, total, elapsed, state)
+	if terminalColumns <= 0 {
+		return standard
+	}
+	maxWidth := terminalColumns - 1
+	if maxWidth <= 0 {
+		return ""
+	}
+	if textwidth.Width(standard) <= maxWidth {
+		return standard
+	}
+
+	count := fmt.Sprintf("%d/%d", done, total)
+	core := fmt.Sprintf("%s %s %s", count, elapsed, state)
+	const minBarWidth = 5
+	availableBarWidth := maxWidth - textwidth.Width(core) - 1
+	if availableBarWidth >= minBarWidth+2 {
+		barWidth := min(20, availableBarWidth-2)
+		return progressBarWithWidth(done, total, barWidth) + " " + core
+	}
+	if textwidth.Width(core) <= maxWidth {
+		return core
+	}
+
+	fixed := count + " " + elapsed
+	if stateWidth := maxWidth - textwidth.Width(fixed) - 1; stateWidth > 0 {
+		return fixed + " " + textwidth.Truncate(state, stateWidth)
+	}
+	if textwidth.Width(fixed) <= maxWidth {
+		return fixed
+	}
+	return textwidth.Truncate(elapsed, maxWidth)
 }
 
 func formatElapsed(elapsed time.Duration) string {
@@ -500,6 +593,20 @@ func isTerminal(writer io.Writer) bool {
 		return false
 	}
 	return isTerminalFile(file)
+}
+
+func (terminal *Terminal) progressColumns() int {
+	if terminal == nil {
+		return 0
+	}
+	if terminal.progressWidth > 0 {
+		return terminal.progressWidth
+	}
+	file, ok := terminal.out.(*os.File)
+	if !ok {
+		return 0
+	}
+	return terminalFileWidth(file)
 }
 
 // progressTTYFromEnvironment keeps live progress independent from color.
