@@ -155,8 +155,8 @@ func runSysbenchMemory(ctx context.Context, env Environment, path string) model.
 
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "标准工具", Value: "sysbench"},
-		{Key: "version", Label: "工具版本", Value: commandVersion(ctx, path)},
-		{Key: "binary_sha256", Label: "程序 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+		{Key: "version", Label: "sysbench 版本", Value: commandVersion(ctx, path)},
+		{Key: "binary_sha256", Label: "sysbench SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},

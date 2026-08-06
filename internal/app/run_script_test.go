@@ -194,8 +194,12 @@ func TestRunScriptNeverInstallsSystemPackages(t *testing.T) {
 		`WORK=$(mktemp -d "$WORK_ROOT/ecs-run.XXXXXX")`,
 		`TEMP_TOOL_ROOT="$WORK/root"`,
 		`TEMP_TOOL_BIN="$WORK/bin"`,
+		`APT_HOST_LISTS="/var/lib/apt/lists"`,
+		`APT_STATE_MODE="host"`,
 		`apt_temp_command download`,
+		`apt_temp_command download $APT_RESOLVED_PACKAGES`,
 		`dpkg-deb --extract`,
+		`rm -f "$deb"`,
 		`activate_temp_tool_path`,
 		`Debian/Ubuntu`,
 		`相关测试将跳过`,
@@ -204,7 +208,7 @@ func TestRunScriptNeverInstallsSystemPackages(t *testing.T) {
 		`if [ "$KEEP" = "1" ]; then`,
 		`rm -rf "$WORK"`,
 	} {
-		if ! strings.Contains(text, required) {
+		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh is missing temporary dependency isolation guard %q", required)
 		}
 	}

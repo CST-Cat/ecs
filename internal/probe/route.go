@@ -63,8 +63,8 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "引擎", Value: engine.Name},
-		{Key: "version", Label: "版本", Value: fallback(engine.Version, "unknown")},
-		{Key: "binary_sha256", Label: "外部程序 SHA-256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "version", Label: "NextTrace 版本", Value: fallback(engine.Version, "unknown")},
+		{Key: "binary_sha256", Label: "NextTrace SHA-256", Value: fallback(engine.SHA256, "unavailable")},
 		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ") + "（按目标协议族）"},
 	}
 	result.Sources = append(result.Sources, model.Source{

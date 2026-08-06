@@ -159,6 +159,10 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
+	result.Fields = []model.Field{
+		{Key: "nexttrace_version", Label: "NextTrace 版本", Value: fallback(engine.Version, "unknown")},
+		{Key: "nexttrace_binary_sha256", Label: "NextTrace SHA-256", Value: fallback(engine.SHA256, "unavailable")},
+	}
 
 	rows := make([]backtraceRow, len(targets))
 	semaphore := make(chan struct{}, backtraceConcurrency)

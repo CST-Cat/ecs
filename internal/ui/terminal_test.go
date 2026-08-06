@@ -12,6 +12,7 @@ import (
 	"ecs/internal/runner"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
+	"ecs/internal/textwidth"
 )
 
 func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T) {
@@ -52,8 +53,10 @@ func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T
 	}
 	if strings.Contains(progressText, "\x1b") {
 		t.Fatalf("non-TTY progress contains ANSI escape: %q", progressText)
-	} else if !strings.Contains(progressText, "2/2") || !strings.Contains(progressText, "elapsed ") || !strings.Contains(progressText, "status: done") {
+	} else if !strings.Contains(progressText, "2/2") || !strings.Contains(progressText, "status: done") {
 		t.Fatalf("progress output missing final state: %q", progressText)
+	} else if strings.Contains(progressText, "elapsed") || strings.Contains(progressText, "running:") {
+		t.Fatalf("progress output retained redundant labels: %q", progressText)
 	} else if strings.Contains(progressText, "private probe details") {
 		t.Fatalf("progress output leaked probe result details: %q", progressText)
 	} else if strings.Count(output.String(), "最终报告") != 1 {
@@ -136,7 +139,7 @@ func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
 		progress.mu.Lock()
 		current := output.String()
 		progress.mu.Unlock()
-		if strings.Count(current, "\x1b[2K") >= 2 {
+		if strings.Contains(current, progressRestoreSequence) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -151,14 +154,102 @@ func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
 	if strings.ContainsAny(tickOutput, "\r\n") {
 		t.Fatalf("TTY tick wrote a line terminator: %q", tickOutput)
 	}
-	if !strings.Contains(tickOutput, "\x1b[1G\x1b[2K") {
-		t.Fatalf("TTY tick did not use ANSI column positioning and erase: %q", tickOutput)
+	if !strings.Contains(tickOutput, progressRestoreSequence) || !strings.Contains(tickOutput, progressEraseLineSequence) || !strings.Contains(tickOutput, progressAnchorSequence) {
+		t.Fatalf("TTY tick did not restore and clear the live region: %q", tickOutput)
 	}
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if strings.Contains(text, "\r") || !strings.Contains(text, "\x1b[1G\x1b[2K") || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || !strings.Contains(text, "elapsed ") {
+	if strings.Contains(text, "\r") || !strings.Contains(text, progressAnchorSequence) || !strings.Contains(text, progressRestoreSequence) || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || strings.Contains(text, "elapsed") || strings.Contains(text, "running:") {
 		t.Fatalf("TTY progress should refresh one line and append completion history: %q", text)
+	}
+}
+
+func TestProgressViewTTYNarrowRefreshNeverAutoWraps(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	terminal.tty = true
+	terminal.progressTTY = true
+	terminal.progressInterval = time.Hour
+	terminal.progressWidth = 60
+	progress := terminal.BeginProgress(18)
+	progress.mu.Lock()
+	progress.doneCount = 8
+	progress.started = time.Now().Add(-136 * time.Second)
+	progress.mu.Unlock()
+
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 9, Total: 18, Title: "网络吞吐"})
+	progress.refreshLive()
+	text := output.String()
+	if strings.ContainsAny(text, "\r\n") {
+		progress.Stop()
+		t.Fatalf("live refresh must not commit a line: %q", text)
+	}
+	if !strings.Contains(text, "网络吞吐") || strings.Contains(text, "elapsed") || strings.Contains(text, "running") {
+		progress.Stop()
+		t.Fatalf("narrow live line lost its module or retained redundant labels: %q", text)
+	}
+	for _, redraw := range progressRedrawPayloads(text) {
+		if width := textwidth.Width(redraw); width >= terminal.progressWidth {
+			progress.Stop()
+			t.Fatalf("live redraw width = %d, terminal columns = %d: %q", width, terminal.progressWidth, redraw)
+		}
+	}
+	progress.Stop()
+}
+
+func TestProgressViewTTYResizeClearsAllReflowedRows(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	terminal.tty = true
+	terminal.progressTTY = true
+	terminal.progressInterval = time.Hour
+	terminal.progressWidth = 60
+	progress := terminal.BeginProgress(18)
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 9, Total: 18, Title: "网络吞吐"})
+
+	progress.mu.Lock()
+	oldWidth := progress.liveWidth
+	beforeResize := output.Len()
+	progress.mu.Unlock()
+	terminal.progressWidth = 20
+	progress.refreshLive()
+	delta := output.String()[beforeResize:]
+	wantRows := progressLineRows(oldWidth, terminal.progressWidth)
+	if erased := strings.Count(delta, progressEraseLineSequence); erased != wantRows {
+		progress.Stop()
+		t.Fatalf("resize erased %d rows, want %d: %q", erased, wantRows, delta)
+	}
+	if moved := strings.Count(delta, progressNextLineSequence); moved != wantRows-1 {
+		progress.Stop()
+		t.Fatalf("resize moved across %d rows, want %d: %q", moved, wantRows-1, delta)
+	}
+	payloads := progressRedrawPayloads(delta)
+	if len(payloads) == 0 || textwidth.Width(payloads[len(payloads)-1]) >= terminal.progressWidth {
+		progress.Stop()
+		t.Fatalf("resized redraw does not fit %d columns: %q", terminal.progressWidth, delta)
+	}
+	progress.Stop()
+}
+
+func TestFormatProgressLinePreservesWideFormatAndFitsNarrowTTY(t *testing.T) {
+	const (
+		elapsed = "02:16"
+		state   = "网络吞吐"
+	)
+	wide := formatProgressLine(8, 18, elapsed, state, 80)
+	wantWide := "[########------------] 8/18  02:16  网络吞吐"
+	if wide != wantWide {
+		t.Fatalf("wide progress format changed:\n got %q\nwant %q", wide, wantWide)
+	}
+
+	const columns = 60
+	narrow := formatProgressLine(8, 18, elapsed, state, columns)
+	if width := textwidth.Width(narrow); width >= columns {
+		t.Fatalf("narrow progress width = %d, must stay below %d: %q", width, columns, narrow)
+	}
+	if !strings.Contains(narrow, elapsed) || !strings.Contains(narrow, "网络吞吐") {
+		t.Fatalf("narrow progress must retain elapsed time and current module: %q", narrow)
 	}
 }
 
@@ -268,6 +359,21 @@ func progressLines(text string) []string {
 		lines[index] = line
 	}
 	return lines
+}
+
+func progressRedrawPayloads(text string) []string {
+	text = strings.ReplaceAll(text, progressRestoreSequence, "\n")
+	text = strings.ReplaceAll(text, progressEraseLineSequence, "")
+	text = strings.ReplaceAll(text, progressNextLineSequence, "")
+	text = strings.ReplaceAll(text, progressAnchorSequence, "")
+	raw := strings.Split(text, "\n")
+	payloads := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if value != "" {
+			payloads = append(payloads, value)
+		}
+	}
+	return payloads
 }
 
 func TestNetworkSummaryPrintsDetailedTables(t *testing.T) {

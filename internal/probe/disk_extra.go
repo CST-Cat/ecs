@@ -95,6 +95,10 @@ func appendIOPingLatency(ctx context.Context, result *model.Result, diskPath str
 			"未安装 ioping，未测量空载 I/O 延迟；fio 的吞吐与 IOPS 不受影响。")
 		return
 	}
+	appendToolVersion(ctx, result, "ioping_version", "ioping 版本", path)
+	result.Fields = append(result.Fields, model.Field{
+		Key: "ioping_binary_sha256", Label: "ioping SHA-256", Value: fallback(binarySHA256(path), "unavailable"),
+	})
 	// -D 走 Direct I/O，与 fio 的 direct=1 同口径，避免测到页缓存。
 	const requests = 20
 	args := []string{"-D", "-c", strconv.Itoa(requests), "-q", diskPath}
@@ -267,6 +271,17 @@ func appendSMARTHealth(ctx context.Context, result *model.Result, diskPath strin
 	if device == "" {
 		return
 	}
+	path, err := exec.LookPath("smartctl")
+	if err != nil {
+		if _, statErr := os.Stat("/usr/sbin/smartctl"); statErr != nil {
+			return
+		}
+		path = "/usr/sbin/smartctl"
+	}
+	appendToolVersion(ctx, result, "smartctl_version", "smartctl 版本", path)
+	result.Fields = append(result.Fields, model.Field{
+		Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: fallback(binarySHA256(path), "unavailable"),
+	})
 	info, ok := readSMART(ctx, device)
 	if !ok {
 		// 失败原因常含 smartctl 的英文原文，拼进句子会让整句无法翻译；

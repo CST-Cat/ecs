@@ -274,6 +274,8 @@ TEMP_TOOL_PATH_READY=0
 TEMP_PREPARED_TOOLS=""
 APT_TEMP_LISTS="$WORK/apt/lists"
 APT_TEMP_CACHE="$WORK/apt/cache"
+APT_HOST_LISTS="/var/lib/apt/lists"
+APT_STATE_MODE="host"
 APT_TEMP_SOURCES=""
 MISSING_TOOLS=""
 PACKAGES=""
@@ -385,40 +387,82 @@ package_command() {
 
 prepare_temp_tool_dirs() {
   mkdir -p "$TEMP_TOOL_ROOT" "$TEMP_TOOL_BIN" "$TEMP_TOOL_CACHE" \
-    "$APT_TEMP_LISTS/partial" "$APT_TEMP_CACHE/archives/partial" || return 1
+    "$APT_TEMP_CACHE/archives/partial" || return 1
   EXTRACTED_DEBS="$WORK/extracted.debs"
   : >"$EXTRACTED_DEBS"
   TEMP_PACKAGE_DIGESTS="$WORK/packages.sha256"
   : >"$TEMP_PACKAGE_DIGESTS"
 }
 
-# Point apt at private list/cache directories.  The host's sources and trust
-# database are read-only inputs; apt-get update/download never invokes dpkg,
-# writes /var/lib/dpkg, or acquires the host package lock.
+# Use the test machine's configured source list and already downloaded package
+# metadata when available.  Only the package archives and extracted runtime
+# files belong to WORK.  On a fresh image with no usable host metadata, fall
+# back to a private apt state under WORK; that fallback still never invokes
+# dpkg, writes /var/lib/dpkg, or acquires the host package lock.
 apt_temp_command() {
-  apt-get \
-    -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
-    -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
-    -o "Dir::State::lists=$APT_TEMP_LISTS" \
-    -o "Dir::Cache::archives=$APT_TEMP_CACHE/archives" \
-    -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
-    -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
-    "$@"
+  if [ "$APT_STATE_MODE" = "host" ]; then
+    apt-get \
+      -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+      -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+      -o "Dir::State::lists=$APT_HOST_LISTS" \
+      -o "Dir::Cache::archives=$APT_TEMP_CACHE/archives" \
+      -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+      -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+      "$@"
+  else
+    apt-get \
+      -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+      -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+      -o "Dir::State::lists=$APT_TEMP_LISTS" \
+      -o "Dir::Cache::archives=$APT_TEMP_CACHE/archives" \
+      -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+      -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+      "$@"
+  fi
 }
 
 apt_cache_command() {
-  apt-cache \
-    -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
-    -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
-    -o "Dir::State::lists=$APT_TEMP_LISTS" \
-    -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
-    -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
-    "$@"
+  if [ "$APT_STATE_MODE" = "host" ]; then
+    apt-cache \
+      -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+      -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+      -o "Dir::State::lists=$APT_HOST_LISTS" \
+      -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+      -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+      "$@"
+  else
+    apt-cache \
+      -o "Dir::Etc::sourcelist=/etc/apt/sources.list" \
+      -o "Dir::Etc::sourceparts=/etc/apt/sources.list.d" \
+      -o "Dir::State::lists=$APT_TEMP_LISTS" \
+      -o "Dir::Cache::pkgcache=$APT_TEMP_CACHE/pkgcache.bin" \
+      -o "Dir::Cache::srcpkgcache=$APT_TEMP_CACHE/srcpkgcache.bin" \
+      "$@"
+  fi
 }
 
 apt_update_temp() {
   [ "${APT_TEMP_UPDATED:-0}" -eq 1 ] && return 0
   prepare_temp_tool_dirs || return 1
+  APT_STATE_MODE="host"
+  host_metadata=1
+  [ -d "$APT_HOST_LISTS" ] || host_metadata=0
+  if [ "$host_metadata" -eq 1 ]; then
+    for apt_package in $PACKAGES; do
+      apt_candidate=$(apt_cache_command policy "$apt_package" 2>/dev/null |
+        awk '/^[[:space:]]*Candidate:/ {print $2; exit}')
+      case "$apt_candidate" in
+        ''|'(none)') host_metadata=0; break ;;
+      esac
+    done
+  fi
+  if [ "$host_metadata" -eq 1 ]; then
+    APT_TEMP_UPDATED=1
+    return 0
+  fi
+
+  APT_STATE_MODE="temp"
+  mkdir -p "$APT_TEMP_LISTS/partial" "$APT_TEMP_CACHE/archives/partial" || return 1
   if ! package_command apt_temp_command update; then
     return 1
   fi
@@ -426,18 +470,13 @@ apt_update_temp() {
   return 0
 }
 
-apt_download_one() {
-  apt_package=$1
-  [ -n "$apt_package" ] || return 1
-  case " ${APT_DOWNLOADED_PACKAGES:-} " in
-    *" $apt_package "*) return 0 ;;
-  esac
-  APT_DOWNLOADED_PACKAGES="${APT_DOWNLOADED_PACKAGES:+$APT_DOWNLOADED_PACKAGES }$apt_package"
+apt_download_resolved() {
+  [ -n "${APT_RESOLVED_PACKAGES:-}" ] || return 1
   APT_LOG="$WORK/package-manager.log"
-  if ! (cd "$TEMP_TOOL_CACHE" && apt_temp_command download "$apt_package") \
+  if ! (cd "$TEMP_TOOL_CACHE" && apt_temp_command download $APT_RESOLVED_PACKAGES) \
       >>"$APT_LOG" 2>&1; then
-    say "无法从已配置的 apt 源下载 $apt_package，相关测试将跳过（日志：$APT_LOG）" \
-      "could not download $apt_package from the configured apt sources; related tests will be skipped (log: $APT_LOG)"
+    say "无法从测试机已配置的 apt 源下载测试组件，相关测试将跳过（日志：$APT_LOG）" \
+      "could not download the test components from the test machine's configured apt sources; related tests will be skipped (log: $APT_LOG)"
     return 1
   fi
   return 0
@@ -458,6 +497,9 @@ extract_debs() {
       printf '%s  %s\n' "$deb_digest" "${deb##*/}" >>"$TEMP_PACKAGE_DIGESTS"
     fi
     printf '%s\n' "$deb" >>"$EXTRACTED_DEBS"
+    # The executable runtime is what this run needs.  Keep the downloaded
+    # archive out of the final WORK footprint after successful extraction.
+    rm -f "$deb" || return 1
   done
 }
 
@@ -557,31 +599,31 @@ prepare_apt_tools() {
     return 1
   }
   apt_update_temp || return 1
-  APT_DOWNLOADED_PACKAGES=""
   APT_PENDING="$WORK/apt.pending"
   APT_SEEN="$WORK/apt.seen"
+  APT_RESOLVED_PACKAGES=""
   : >"$APT_PENDING"
   : >"$APT_SEEN"
   for apt_package in $PACKAGES; do
     printf '%s\n' "$apt_package" >>"$APT_PENDING"
   done
 
-  # Resolve the small dependency closure using apt's signed package metadata,
-  # then download and unpack every .deb under WORK.  This intentionally uses
-  # apt-get's `download` subcommand rather than `install`: dpkg is never
-  # invoked and no privilege authorization is requested.
+  # Resolve the dependency closure using the test machine's signed package
+  # metadata, then download the complete closure in one apt invocation and
+  # unpack every .deb under WORK.  Batching avoids one network transaction per
+  # dependency while still using apt-get's `download` subcommand rather than
+  # `install`: dpkg is never invoked and no privilege authorization is requested.
   while IFS= read -r apt_package; do
     [ -n "$apt_package" ] || continue
     if grep -F -x "$apt_package" "$APT_SEEN" >/dev/null 2>&1; then
       continue
     fi
     printf '%s\n' "$apt_package" >>"$APT_SEEN"
-    if ! apt_download_one "$apt_package"; then
-      continue
-    fi
+    APT_RESOLVED_PACKAGES="${APT_RESOLVED_PACKAGES:+$APT_RESOLVED_PACKAGES }$apt_package"
     apt_dependency_names "$apt_package" >>"$APT_PENDING" || true
   done <"$APT_PENDING"
 
+  apt_download_resolved || return 1
   extract_debs || return 1
   prepared_any=0
   for missing_tool in $MISSING_TOOLS; do

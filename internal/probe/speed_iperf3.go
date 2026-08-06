@@ -322,8 +322,8 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "标准工具", Value: "iperf3"},
-		{Key: "version", Label: "工具版本", Value: commandVersion(ctx, path)},
-		{Key: "binary_sha256", Label: "程序 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+		{Key: "version", Label: "iperf3 版本", Value: commandVersion(ctx, path)},
+		{Key: "binary_sha256", Label: "iperf3 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		{Key: "threads", Label: "并发流", Value: strconv.Itoa(threads)},
 		{Key: "duration", Label: "每节点每方向", Value: fmt.Sprintf("%ds", seconds)},
 		{Key: "targets", Label: "配置节点", Value: strconv.Itoa(len(env.Config.IPerfTargets))},
