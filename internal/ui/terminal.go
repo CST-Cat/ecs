@@ -70,25 +70,21 @@ type ProgressView struct {
 	total    int
 	started  time.Time
 
-	mu           sync.Mutex
-	done         map[int]struct{}
-	running      map[int]string
-	doneCount    int
-	errorCount   int
-	warningCount int
-	skippedCount int
-	lastStatus   model.Status
-	closed       bool
-	live         bool
-	liveLine     bool
-	liveWidth    int
-	stopTicker   chan struct{}
-	tickerDone   chan struct{}
+	mu         sync.Mutex
+	done       map[int]struct{}
+	running    map[int]string
+	doneCount  int
+	closed     bool
+	live       bool
+	liveLine   bool
+	liveWidth  int
+	stopTicker chan struct{}
+	tickerDone chan struct{}
 }
 
 // BeginProgress starts the run-level progress state. A real TTY gets one live
-// line refreshed by a timer; redirected and collected output receives only
-// ordinary completion lines.
+// line refreshed by a timer; redirected and collected output stays silent
+// unless a module fails.
 func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 	view := &ProgressView{
 		terminal: terminal,
@@ -151,7 +147,6 @@ func (view *ProgressView) Update(event runner.Progress) {
 	if index <= 0 {
 		return
 	}
-	completed := false
 	switch event.Phase {
 	case runner.PhaseStart:
 		if _, alreadyDone := view.done[index]; alreadyDone {
@@ -162,35 +157,31 @@ func (view *ProgressView) Update(event runner.Progress) {
 		view.renderLiveLocked()
 	case runner.PhaseDone:
 		_, alreadyDone := view.done[index]
-		completed = !alreadyDone
-		delete(view.running, index)
-		if !alreadyDone {
-			view.done[index] = struct{}{}
-			view.doneCount++
-			switch event.Result.Status {
-			case model.StatusError:
-				view.errorCount++
-			case model.StatusWarning:
-				view.warningCount++
-			case model.StatusSkipped:
-				view.skippedCount++
-			}
+		if alreadyDone {
+			return
 		}
-		view.lastStatus = event.Result.Status
+		// Remove the transient title before committing an error line. Successful,
+		// warning and skipped completions deliberately leave no progress history;
+		// their details belong to the final report.
+		view.clearLiveLineLocked()
+		delete(view.running, index)
+		view.done[index] = struct{}{}
+		view.doneCount++
+		if event.Result.Status == model.StatusError {
+			view.renderErrorLocked(event.Title)
+		}
+		if len(view.running) > 0 {
+			view.renderLiveLocked()
+		}
 	default:
 		return
 	}
-	if completed {
-		view.renderCompletionLocked()
-		if view.doneCount < view.total {
-			view.renderLiveLocked()
-		}
-	}
 }
 
-// Stop stops the refresh loop and emits at most one final stopped line when the
-// run is incomplete. It is safe to call more than once, including while a
-// callback or timer refresh is in flight.
+// Stop stops the refresh loop and removes the transient live title. It is safe
+// to call more than once, including while a callback or timer refresh is in
+// flight. Cancellation is reported by the final report/exit code, not by an
+// extra progress-history line.
 func (view *ProgressView) Stop() {
 	if view == nil {
 		return
@@ -203,9 +194,6 @@ func (view *ProgressView) Stop() {
 	view.closed = true
 	stopTicker, tickerDone := view.stopTicker, view.tickerDone
 	view.clearLiveLineLocked()
-	if view.doneCount < view.total {
-		view.renderCompletionLocked()
-	}
 	view.mu.Unlock()
 	if stopTicker != nil {
 		close(stopTicker)
@@ -217,12 +205,14 @@ func (view *ProgressView) Stop() {
 // a begin/end scope. It shares Stop's idempotent shutdown behavior.
 func (view *ProgressView) EndProgress() { view.Stop() }
 
-func (view *ProgressView) renderCompletionLocked() {
+func (view *ProgressView) renderErrorLocked(title string) {
 	if view.total <= 0 {
 		return
 	}
-	view.clearLiveLineLocked()
-	state := view.stateLocked()
+	state := "error"
+	if title = strings.TrimSpace(title); title != "" {
+		state += ": " + title
+	}
 	elapsed := formatElapsed(time.Since(view.started))
 	line := view.formatLineLocked(elapsed, state)
 	fmt.Fprintln(view.terminal.out, line)
@@ -233,6 +223,9 @@ func (view *ProgressView) renderLiveLocked() {
 		return
 	}
 	state := view.stateLocked()
+	if state == "" {
+		return
+	}
 	elapsed := formatElapsed(time.Since(view.started))
 	line := view.formatLineLocked(elapsed, state)
 	if view.liveLine {
@@ -283,9 +276,6 @@ func progressLineRows(width, columns int) int {
 }
 
 func (view *ProgressView) stateLocked() string {
-	if view.closed && view.doneCount < view.total {
-		return "status: stopped"
-	}
 	if len(view.running) > 0 {
 		indices := make([]int, 0, len(view.running))
 		for index := range view.running {
@@ -298,27 +288,7 @@ func (view *ProgressView) stateLocked() string {
 		}
 		return strings.Join(names, ", ")
 	}
-	if view.doneCount >= view.total {
-		if view.errorCount > 0 {
-			return "status: error"
-		}
-		if view.warningCount > 0 {
-			return "status: warning"
-		}
-		if view.skippedCount == view.doneCount && view.doneCount > 0 {
-			return "status: skipped"
-		}
-		return "status: done"
-	}
-	switch view.lastStatus {
-	case model.StatusError:
-		return "status: error"
-	case model.StatusWarning:
-		return "status: warning"
-	case model.StatusSkipped:
-		return "status: skipped"
-	}
-	return "status: waiting"
+	return ""
 }
 
 func progressBar(done, total int) string {

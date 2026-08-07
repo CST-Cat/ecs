@@ -288,7 +288,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	terminal.Header(cfg, config.EstimateFor(cfg))
 	// runner 只负责收集结果；终端报告必须等所有模块完成后一次性渲染，
 	// 否则并行模块的进度行会把完整报告拆成无法复制的碎片。进度视图只显示
-	// 模块计数、当前运行模块和总耗时，不提前渲染任何探针结果。
+	// 模块计数、当前运行模块和总耗时；只有错误会留下进度历史，warning 等
+	// 结果统一留给最终报告，不提前渲染任何探针详情。
 	progress := terminal.BeginProgress(len(cfg.Modules))
 	raw := func() model.Report {
 		defer progress.EndProgress()

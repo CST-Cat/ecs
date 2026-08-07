@@ -534,6 +534,23 @@ stage_temp_tool() {
   return 0
 }
 
+append_temp_library_path() {
+  append_lib_dir=$1
+  [ -d "$append_lib_dir" ] || return 0
+  case ":${TEMP_LIB_PATH:-}:" in
+    *":$append_lib_dir:"*) ;;
+    *) TEMP_LIB_PATH="${TEMP_LIB_PATH:+$TEMP_LIB_PATH:}$append_lib_dir" ;;
+  esac
+}
+
+temp_library_dir_has_shared_objects() {
+  # A literal unmatched glob is harmless here: it is not a regular file.
+  for temp_lib_object in "$1"/*.so "$1"/*.so.*; do
+    [ -f "$temp_lib_object" ] && return 0
+  done
+  return 1
+}
+
 activate_temp_tool_path() {
   [ "$TEMP_TOOL_PATH_READY" -eq 1 ] && return 0
   # Only the explicitly staged tool links are prepended.  Keeping the rest of
@@ -550,8 +567,7 @@ activate_temp_tool_path() {
   for temp_lib_part in \
     "$TEMP_TOOL_ROOT/lib" "$TEMP_TOOL_ROOT/lib64" \
     "$TEMP_TOOL_ROOT/usr/lib" "$TEMP_TOOL_ROOT/usr/lib64"; do
-    [ -d "$temp_lib_part" ] || continue
-    TEMP_LIB_PATH="${TEMP_LIB_PATH:+$TEMP_LIB_PATH:}$temp_lib_part"
+    append_temp_library_path "$temp_lib_part"
   done
   # Debian/Ubuntu place most ELF objects below a multi-arch directory (for
   # example usr/lib/aarch64-linux-gnu).  Add only the conventional ABI
@@ -561,7 +577,18 @@ activate_temp_tool_path() {
       [ -d "$temp_lib_part" ] || continue
       case "${temp_lib_part##*/}" in
         *-linux-gnu*|*-linux-musl*|*-gnu*|*-musl*)
-          TEMP_LIB_PATH="${TEMP_LIB_PATH:+$TEMP_LIB_PATH:}$temp_lib_part"
+          append_temp_library_path "$temp_lib_part"
+          # Some distro libraries keep a required SONAME in a private
+          # directory and encode its installed absolute path as RUNPATH.
+          # Ceph is the common fio case: librados needs
+          # usr/lib/<triplet>/ceph/libceph-common.so.2.  The package is
+          # extracted below WORK instead of /usr, so mirror each immediate
+          # private directory containing shared objects in LD_LIBRARY_PATH.
+          for temp_private_lib_dir in "$temp_lib_part"/*; do
+            [ -d "$temp_private_lib_dir" ] || continue
+            temp_library_dir_has_shared_objects "$temp_private_lib_dir" || continue
+            append_temp_library_path "$temp_private_lib_dir"
+          done
           ;;
       esac
     done
