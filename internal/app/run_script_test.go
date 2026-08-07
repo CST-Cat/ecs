@@ -230,6 +230,25 @@ func TestRunScriptNeverInstallsSystemPackages(t *testing.T) {
 	}
 }
 
+func TestRunScriptStagesPrivateMultiarchLibraries(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		`append_temp_library_path`,
+		`temp_library_dir_has_shared_objects`,
+		`for temp_private_lib_dir in "$temp_lib_part"/*`,
+		`append_temp_library_path "$temp_private_lib_dir"`,
+		`libceph-common.so.2`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh is missing private multiarch library support %q", required)
+		}
+	}
+}
+
 func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
 	contents, err := os.ReadFile(runScriptPath(t))
 	if err != nil {

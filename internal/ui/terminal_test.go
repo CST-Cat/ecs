@@ -53,18 +53,14 @@ func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T
 	}
 	if strings.Contains(progressText, "\x1b") {
 		t.Fatalf("non-TTY progress contains ANSI escape: %q", progressText)
-	} else if !strings.Contains(progressText, "2/2") || !strings.Contains(progressText, "status: done") {
-		t.Fatalf("progress output missing final state: %q", progressText)
-	} else if strings.Contains(progressText, "elapsed") || strings.Contains(progressText, "running:") {
-		t.Fatalf("progress output retained redundant labels: %q", progressText)
-	} else if strings.Contains(progressText, "private probe details") {
-		t.Fatalf("progress output leaked probe result details: %q", progressText)
+	} else if progressText != "" {
+		t.Fatalf("successful non-TTY progress should stay silent: %q", progressText)
 	} else if strings.Count(output.String(), "最终报告") != 1 {
 		t.Fatalf("complete report should be emitted once after progress: %q", output.String())
 	}
 }
 
-func TestProgressViewNonTTYWritesOnlyCompletedHistory(t *testing.T) {
+func TestProgressViewNonTTYWritesOnlyErrorsAndKeepsFailedTitle(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
 	progress := terminal.BeginProgress(2)
@@ -76,15 +72,24 @@ func TestProgressViewNonTTYWritesOnlyCompletedHistory(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatalf("non-TTY starts should not create history lines: %q", output.String())
 	}
-	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
-	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusError}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusError}})
 	if lines := strings.Count(output.String(), "\n"); lines != 1 {
-		t.Fatalf("non-TTY first completion should add one history line, got %d: %q", lines, output.String())
+		t.Fatalf("one failed module should add one history line, got %d: %q", lines, output.String())
 	}
-	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 2, Title: "two", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 2, Title: "two", Result: model.Result{Status: model.StatusWarning}})
 	progress.Stop()
-	if lines := strings.Count(output.String(), "\n"); lines != 2 {
-		t.Fatalf("non-TTY duplicate/start events should not add lines, got %d: %q", lines, output.String())
+	text := output.String()
+	if lines := strings.Count(text, "\n"); lines != 1 {
+		t.Fatalf("warning, duplicate and stop events should not add lines, got %d: %q", lines, text)
+	}
+	if !strings.Contains(text, "error: one") {
+		t.Fatalf("error history lost the failed module title: %q", text)
+	}
+	for _, unwanted := range []string{"warning", "waiting", "skipped", "status: done", "status: stopped"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("progress retained unwanted state %q: %q", unwanted, text)
+		}
 	}
 }
 
@@ -107,14 +112,12 @@ func TestProgressViewStopsPartialRunWithoutHanging(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("live progress Stop did not return")
 	}
-	if text := output.String(); !strings.Contains(text, "status: stopped") {
-		t.Fatalf("partial progress output missing stopped state: %q", text)
+	text := output.String()
+	if strings.Contains(text, "status: stopped") || strings.Contains(text, "waiting") || strings.Contains(text, "warning") {
+		t.Fatalf("partial progress should not commit a status line: %q", text)
 	}
-	if strings.Count(output.String(), "status: stopped") != 1 {
-		t.Fatalf("stopped history should be emitted once: %q", output.String())
-	}
-	if strings.Contains(output.String(), "\r") {
-		t.Fatalf("stopped history must not contain a bare carriage return: %q", output.String())
+	if strings.ContainsAny(text, "\r\n") {
+		t.Fatalf("stopping live progress must not commit a line: %q", text)
 	}
 }
 
@@ -160,8 +163,36 @@ func TestProgressViewTTYRefreshesElapsedWithoutTickNewlines(t *testing.T) {
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Title: "disk", Result: model.Result{Status: model.StatusOK}})
 	progress.EndProgress()
 	text := output.String()
-	if strings.Contains(text, "\r") || !strings.Contains(text, progressAnchorSequence) || !strings.Contains(text, progressRestoreSequence) || strings.Count(text, "\n") != 1 || !strings.Contains(text, "1/1") || strings.Contains(text, "elapsed") || strings.Contains(text, "running:") {
-		t.Fatalf("TTY progress should refresh one line and append completion history: %q", text)
+	if strings.ContainsAny(text, "\r\n") || !strings.Contains(text, progressAnchorSequence) || !strings.Contains(text, progressRestoreSequence) || !strings.Contains(text, "disk") || strings.Contains(text, "waiting") || strings.Contains(text, "warning") || strings.Contains(text, "status:") {
+		t.Fatalf("TTY progress should refresh only the transient module title: %q", text)
+	}
+}
+
+func TestProgressViewTTYErrorKeepsFailedAndRunningTitles(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelNone)
+	terminal.tty = true
+	terminal.progressTTY = true
+	terminal.progressInterval = time.Hour
+	terminal.progressWidth = 100
+	progress := terminal.BeginProgress(2)
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 2, Title: "硬盘测试"})
+	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 2, Total: 2, Title: "网络测试"})
+	beforeError := output.Len()
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "硬盘测试", Result: model.Result{Status: model.StatusError}})
+	delta := output.String()[beforeError:]
+	progress.Stop()
+
+	if strings.Count(delta, "\n") != 1 || !strings.Contains(delta, "error: 硬盘测试") {
+		t.Fatalf("failed module did not retain its title in one error line: %q", delta)
+	}
+	if !strings.Contains(delta, "网络测试") {
+		t.Fatalf("remaining live module title was swallowed by the error: %q", delta)
+	}
+	for _, unwanted := range []string{"warning", "waiting", "status:"} {
+		if strings.Contains(delta, unwanted) {
+			t.Fatalf("error redraw retained unwanted state %q: %q", unwanted, delta)
+		}
 	}
 }
 
@@ -268,8 +299,8 @@ func TestProgressViewDisablesTickerForCollectorCompatibility(t *testing.T) {
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 2, Title: "one", Result: model.Result{Status: model.StatusOK}})
 	progress.Stop()
 	text := output.String()
-	if strings.ContainsAny(text, "\r\x1b") || strings.Count(text, "\n") != 2 {
-		t.Fatalf("completion plus stopped state should be two plain lines: %q", text)
+	if text != "" {
+		t.Fatalf("collector-compatible progress should stay silent without errors: %q", text)
 	}
 }
 
@@ -317,34 +348,30 @@ func TestTerminalDetectionRejectsCharacterDeviceWithoutTTYIoctl(t *testing.T) {
 	}
 }
 
-func TestProgressViewKeepsCompletedHistory(t *testing.T) {
+func TestProgressViewKeepsOnlyErrorHistory(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
 	progress := terminal.BeginProgress(3)
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 3, Title: "one"})
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
-	// Duplicate completion callbacks must not add history.
 	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 3, Title: "one", Result: model.Result{Status: model.StatusOK}})
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 2, Total: 3, Title: "two"})
-	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 3, Title: "two", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 2, Total: 3, Title: "two", Result: model.Result{Status: model.StatusWarning}})
 	progress.Update(runner.Progress{Phase: runner.PhaseStart, Index: 3, Total: 3, Title: "three"})
-	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 3, Total: 3, Title: "three", Result: model.Result{Status: model.StatusOK}})
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 3, Total: 3, Title: "three", Result: model.Result{Status: model.StatusError}})
+	// Duplicate completion callbacks must not add a second error line.
+	progress.Update(runner.Progress{Phase: runner.PhaseDone, Index: 3, Total: 3, Title: "three", Result: model.Result{Status: model.StatusError}})
 	progress.EndProgress()
 
 	lines := progressLines(output.String())
-	if len(lines) != 3 {
-		t.Fatalf("progress history lines = %d, want 3: %q", len(lines), output.String())
+	if len(lines) != 1 {
+		t.Fatalf("progress history lines = %d, want one error: %q", len(lines), output.String())
 	}
-	for _, progressCount := range []string{"1/3", "2/3", "3/3"} {
-		seen := 0
-		for _, line := range lines {
-			if strings.Contains(line, progressCount) {
-				seen++
-			}
-		}
-		if seen != 1 {
-			t.Fatalf("TTY progress count %s appears %d times, want once: %q", progressCount, seen, output.String())
-		}
+	if !strings.Contains(lines[0], "3/3") || !strings.Contains(lines[0], "error: three") {
+		t.Fatalf("error history missing count or title: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "warning") || strings.Contains(lines[0], "waiting") {
+		t.Fatalf("error history contains a discarded state: %q", lines[0])
 	}
 }
 
