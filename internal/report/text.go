@@ -7,7 +7,8 @@ package report
 //
 // 呈现上借鉴了社区里流传的体检报告排版（分区标题块、中文数字章节、紧凑的
 // label:value 列），但柱状图部分是重做的：那些报告里的柱子大多不随数值变化，
-// 183ms 与 113ms 画成一样长，等于把装饰当信息。这里的柱长一律按比例。
+// 183ms 与 113ms 画成一样长，等于把装饰当信息。柱子按同一指标组的范围绘制；
+// 普通跨度保持线性，跨数量级时改用最小值相对的对数刻度，避免短柱全部挤成一格。
 //
 // 颜色按终端能力自适应（见 internal/termcolor），并且层次不单独依赖颜色：
 // 密度字符在无色环境里照样把高低分出来。默认写进文件时不带转义序列，
@@ -15,6 +16,7 @@ package report
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -849,7 +851,7 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		}
 		bar := ""
 		if group, ok := groups[item.Key]; ok {
-			bar = "  " + r.palette.BarRelative(comparableValue(item, group), group.max, barWidth)
+			bar = "  " + r.palette.BarRelativeRange(comparableValue(item, group), group.min, group.max, barWidth)
 		}
 		rating := ""
 		if item.Rating != "" {
@@ -870,6 +872,7 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 // comparableGroup 是一组可以互相比较的指标。
 type comparableGroup struct {
 	max     float64
+	min     float64
 	inverse bool
 }
 
@@ -893,6 +896,12 @@ func riskScoreMeasurement(item model.Measurement) bool {
 func comparisonSemantic(item model.Measurement) string {
 	if riskScoreMeasurement(item) {
 		return "risk"
+	}
+	// Matrix measurements can appear without their table in legacy JSON.  The
+	// unit alone is then insufficient: Crystal, ATTO, mixed and legacy fio
+	// throughput all use MiB/s, but their workloads are not one comparison set.
+	if semantic := matrixMeasurementSemantic(item.Key); semantic != "" {
+		return semantic
 	}
 	lower := strings.ToLower(item.Key + " " + item.Label)
 	switch strings.TrimSpace(item.Unit) {
@@ -936,6 +945,30 @@ func comparisonSemantic(item model.Measurement) string {
 	return ""
 }
 
+func matrixMeasurementSemantic(key string) string {
+	switch matrixKindForMeasurement(key) {
+	case matrixCrystal:
+		return "matrix-crystal"
+	case matrixATTO:
+		return "matrix-atto"
+	case matrixMixed:
+		return "matrix-mixed"
+	}
+	lower := strings.ToLower(strings.TrimSpace(key))
+	switch {
+	case strings.HasPrefix(lower, "fio_mount_"):
+		return "disk-mount"
+	case strings.HasPrefix(lower, "fio_"):
+		return "disk-legacy"
+	case strings.HasPrefix(lower, "sysbench_memory_"):
+		return "memory"
+	case strings.HasPrefix(lower, "sysbench_cpu_"):
+		return "cpu"
+	default:
+		return ""
+	}
+}
+
 // groupComparable 找出可以画组内相对柱的指标。
 func groupComparable(items []model.Measurement) map[string]comparableGroup {
 	type bucket struct {
@@ -945,7 +978,8 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 	}
 	buckets := make(map[string]*bucket)
 	for _, item := range items {
-		if item.Unit == "" || item.Value < 0 || item.HigherIsBetter == nil {
+		if item.Unit == "" || item.Value < 0 || item.HigherIsBetter == nil ||
+			math.IsNaN(item.Value) || math.IsInf(item.Value, 0) {
 			continue
 		}
 		semantic := comparisonSemantic(item)
@@ -970,6 +1004,7 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 			continue
 		}
 		var maximum float64
+		minimum := 0.0
 		for _, value := range entry.values {
 			converted := value
 			if entry.inverse && value > 0 {
@@ -977,6 +1012,9 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 			}
 			if converted > maximum {
 				maximum = converted
+			}
+			if converted > 0 && (minimum == 0 || converted < minimum) {
+				minimum = converted
 			}
 		}
 		if maximum <= 0 {
@@ -986,7 +1024,7 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 			maximum = 1
 		}
 		for _, key := range entry.keys {
-			out[key] = comparableGroup{max: maximum, inverse: entry.inverse}
+			out[key] = comparableGroup{max: maximum, min: minimum, inverse: entry.inverse}
 		}
 	}
 	return out
@@ -1269,10 +1307,19 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 	if len(table.NumericColumns) == 0 || len(table.Rows) == 0 {
 		return table.Rows
 	}
-	maxValues := make(map[int]float64, len(table.NumericColumns))
-	directions := make(map[int]bool, len(table.NumericColumns))
+	// A table column is not necessarily a metric group.  Crystal/ATTO, for
+	// example, put read and write throughput in adjacent columns; calculating a
+	// maximum independently for each column makes a 4.63 MiB/s read hit a full
+	// bar when that column has no faster read, even though a 1000 MiB/s write in
+	// the same table is orders of magnitude faster.  Group columns by metric and
+	// unit first, then scale every member against the group's range.  The shared
+	// helper keeps compact ranges linear and switches wide ranges to a
+	// min-relative logarithmic scale, while the table itself remains the scope
+	// so values from different matrices never borrow a scale.
+	stats := make(map[tableBarGroup]tableBarStats, len(table.NumericColumns))
 	valueWidths := make(map[int]int, len(table.NumericColumns))
-	zeroValues := make(map[int]bool, len(table.NumericColumns))
+	semantics := make(map[int]string, len(table.NumericColumns))
+	directions := make(map[int]bool, len(table.NumericColumns))
 	for index, column := range table.NumericColumns {
 		higher := true
 		if index < len(table.NumericHigherIsBetter) {
@@ -1284,56 +1331,146 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 			// direction metadata is lower-is-better.
 			higher = true
 		}
+		semantics[column] = tableBarSemantic(table, column)
 		directions[column] = higher
 		for _, row := range table.Rows {
 			if column >= len(row) {
 				continue
 			}
-			value, ok := numericCellValue(row[column])
+			value, unit, ok := numericCell(row[column])
 			if !ok || value < 0 {
 				continue
 			}
+			group := tableBarGroup{semantic: semantics[column], unit: unit, higher: higher}
 			valueWidths[column] = maxInt(valueWidths[column], textwidth.Width(row[column]))
 			if value == 0 {
-				zeroValues[column] = true
+				entry := stats[group]
+				entry.zero = true
+				stats[group] = entry
 			}
 			if !higher && value > 0 {
 				value = 1 / value
 			}
-			if value > maxValues[column] {
-				maxValues[column] = value
+			if value > 0 {
+				entry := stats[group]
+				if value > entry.max {
+					entry.max = value
+				}
+				if entry.min == 0 || value < entry.min {
+					entry.min = value
+				}
+				stats[group] = entry
 			}
 		}
-		if maxValues[column] <= 0 && zeroValues[column] {
+	}
+	for group, entry := range stats {
+		if entry.max <= 0 && entry.zero {
 			// A real all-zero column still gets a visible semantic bar: empty
 			// for magnitude metrics, full quality for lower-is-better metrics.
-			maxValues[column] = 1
+			entry.max = 1
 		}
+		stats[group] = entry
 	}
 	rows := make([][]string, len(table.Rows))
 	for rowIndex, original := range table.Rows {
 		rows[rowIndex] = append([]string(nil), original...)
 		for _, column := range table.NumericColumns {
-			if column >= len(rows[rowIndex]) || maxValues[column] <= 0 {
+			if column >= len(rows[rowIndex]) {
 				continue
 			}
-			value, ok := numericCellValue(rows[rowIndex][column])
+			value, unit, ok := numericCell(rows[rowIndex][column])
 			if !ok || value < 0 {
 				continue
 			}
-			if !directions[column] && value == 0 {
-				value = maxValues[column]
-			} else if !directions[column] {
+			higher := directions[column]
+			group := tableBarGroup{semantic: semantics[column], unit: unit, higher: higher}
+			entry, ok := stats[group]
+			if !ok || entry.max <= 0 {
+				continue
+			}
+			if !higher && value == 0 {
+				value = entry.max
+			} else if !higher {
 				value = 1 / value
 			}
 			// Reserve one stable value field before the bar.  Without this
 			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
 			// row and the visual column drifts with digit count or unit text.
 			cell := textwidth.Pad(rows[rowIndex][column], valueWidths[column])
-			rows[rowIndex][column] = cell + " " + palette.BarRelative(value, maxValues[column], 8)
+			rows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, 8)
 		}
 	}
 	return rows
+}
+
+// tableBarGroup is the scale identity for a numeric table cell.  Unit is
+// taken from the cell rather than inferred solely from the heading, so a
+// malformed/mixed-unit table cannot silently compare MiB/s with IOPS.  Higher
+// is part of the identity because a lower-is-better latency column uses the
+// reciprocal magnitude.
+type tableBarGroup struct {
+	semantic string
+	unit     string
+	higher   bool
+}
+
+type tableBarStats struct {
+	max  float64
+	min  float64
+	zero bool
+}
+
+// tableBarSemantic canonicalizes only the direction decoration shared by
+// matrix columns.  More specific metric qualifiers (for example average vs
+// P95 latency) stay in the key and therefore do not get a misleading common
+// scale.  Direction-only headings such as "读"/"写" intentionally return an
+// empty semantic; the cell unit then becomes the safe grouping boundary.
+func tableBarSemantic(table model.Table, column int) string {
+	if column < 0 || column >= len(table.Columns) {
+		return ""
+	}
+	heading := strings.ToLower(strings.TrimSpace(table.Columns[column]))
+	// Direction words are often attached to the metric token (读吞吐,
+	// upload bandwidth), so remove them before splitting English-style
+	// separators.  The direction is not a metric: read/write and upload/download
+	// throughput should share one scale, while qualifiers such as P50/P95 stay.
+	for _, direction := range []string{
+		"读取", "写入", "上行", "下行", "发送", "接收", "上传", "下载", "读", "写",
+	} {
+		heading = strings.ReplaceAll(heading, direction, " ")
+	}
+	for _, separator := range []string{"/", "_", "-", "(", ")", ":", "·"} {
+		heading = strings.ReplaceAll(heading, separator, " ")
+	}
+	fields := strings.Fields(heading)
+	kept := fields[:0]
+	for _, field := range fields {
+		// Do not remove substrings ("thread" contains "read").
+		if field == "read" || field == "write" || field == "upload" || field == "download" ||
+			field == "send" || field == "receive" || field == "sent" || field == "received" ||
+			field == "inbound" || field == "outbound" || field == "tx" || field == "rx" ||
+			field == "r" || field == "w" {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	joined := strings.Join(kept, " ")
+	switch {
+	case strings.Contains(joined, "iops"):
+		return "iops"
+	case strings.Contains(joined, "吞吐"), strings.Contains(joined, "throughput"),
+		strings.Contains(joined, "bandwidth"), strings.Contains(joined, "带宽"):
+		return "throughput"
+	case joined == "合计", joined == "total":
+		// Mixed/ATTO tables may call the sum simply "合计".  Its unit keeps
+		// it separate from any same-table non-throughput column.
+		return ""
+	default:
+		return joined
+	}
 }
 
 func riskNumericColumn(table model.Table, column int) bool {
@@ -1353,15 +1490,30 @@ func riskNumericColumn(table model.Table, column int) bool {
 }
 
 func numericCellValue(cell string) (float64, bool) {
+	value, _, ok := numericCell(cell)
+	return value, ok
+}
+
+// numericCell returns the leading number and the unit token that follows it.
+// Keeping the unit with the parsed value lets table bars share a scale across
+// read/write columns without ever comparing unlike units.
+func numericCell(cell string) (float64, string, bool) {
 	fields := strings.Fields(strings.TrimSpace(cell))
 	if len(fields) == 0 || fields[0] == "—" || fields[0] == "-" {
-		return 0, false
+		return 0, "", false
 	}
 	value, err := strconv.ParseFloat(strings.ReplaceAll(fields[0], ",", ""), 64)
-	if err != nil {
-		return 0, false
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, "", false
 	}
-	return value, true
+	unit := ""
+	if len(fields) > 1 {
+		// Generated reports use one token (MiB/s, IOPS, ms, %, /100).  Only
+		// the first suffix token is part of the unit; trailing prose should
+		// not accidentally create a second scale for an otherwise equal cell.
+		unit = strings.ToLower(strings.TrimSpace(fields[1]))
+	}
+	return value, unit, true
 }
 
 // table 渲染一张对齐的表格。

@@ -2,6 +2,7 @@ package termcolor
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -75,6 +76,46 @@ func TestBarRelativeHandlesEmptyGroup(t *testing.T) {
 	p := Palette{Level: LevelNone}
 	if got := p.BarRelative(5, 0, 10); strings.ContainsAny(got, "░▒▓█") {
 		t.Fatalf("组内最大值为 0 时不该有填充：%q", got)
+	}
+}
+
+func TestBarRelativeRangeKeepsWideValuesVisible(t *testing.T) {
+	p := Palette{Level: LevelNone}
+	count := func(value string) int {
+		return strings.Count(value, "░") + strings.Count(value, "▒") +
+			strings.Count(value, "▓") + strings.Count(value, "█")
+	}
+	low := p.BarRelativeRange(4, 4, 10000, 8)
+	middle := p.BarRelativeRange(1000, 4, 10000, 8)
+	high := p.BarRelativeRange(10000, 4, 10000, 8)
+	if count(low) >= count(middle) || count(middle) >= count(high) || count(high) != 8 {
+		t.Fatalf("wide relative range collapsed: 4=%q 1000=%q 10000=%q", low, middle, high)
+	}
+}
+
+func TestBarRelativeRangeUsesLinearScaleForCompactValues(t *testing.T) {
+	p := Palette{Level: LevelNone}
+	if got := p.BarRelativeRange(5, 1, 10, 20); strings.Count(got, "▒") != 10 {
+		t.Fatalf("compact ranges should remain linear: %q", got)
+	}
+}
+
+func TestBarRelativeRangeRejectsNonFiniteBounds(t *testing.T) {
+	p := Palette{Level: LevelNone}
+	for _, got := range []string{
+		p.BarRelativeRange(1, 1, math.Inf(1), 8),
+		p.BarRelativeRange(math.Inf(1), 1, 10, 8),
+		p.BarRelativeRange(math.NaN(), 1, 10, 8),
+	} {
+		if strings.ContainsAny(got, "░▒▓█") {
+			t.Fatalf("non-finite relative range should be empty: %q", got)
+		}
+	}
+}
+
+func TestBarRejectsNaNRatio(t *testing.T) {
+	if got := (Palette{Level: LevelNone}).Bar(math.NaN(), 8); strings.ContainsAny(got, "░▒▓█") {
+		t.Fatalf("NaN ratio should render an empty bar: %q", got)
 	}
 }
 

@@ -1,6 +1,8 @@
 package report
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -504,6 +506,76 @@ func firstDensityStart(value string) int {
 	return -1
 }
 
+func barDensityCountForTest(value string) int {
+	return strings.Count(value, "░") + strings.Count(value, "▒") +
+		strings.Count(value, "▓") + strings.Count(value, "█")
+}
+
+// ATTO's read and write throughput columns are one metric group.  Scaling each
+// column independently makes the 4.63 MiB/s read maximum look as long as a
+// 1000+ MiB/s write maximum; the complete block-size matrix must expose that
+// difference instead.
+func TestATTOMatrixBarsUseSharedThroughputScale(t *testing.T) {
+	blocks := []string{"512B", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M"}
+	read := []float64{0.21, 0.42, 0.83, 1.12, 1.48, 1.91, 2.14, 2.49, 2.87, 3.12, 3.35, 3.61, 3.82, 4.01, 4.19, 4.36, 4.52, 4.63}
+	write := []float64{12, 24, 41, 68, 107, 155, 211, 278, 344, 421, 503, 594, 677, 748, 819, 1000, 5000, 10000}
+	table := model.Table{
+		Title:                 "ATTO",
+		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+		NumericColumns:        []int{1, 2, 3, 4},
+		NumericHigherIsBetter: []bool{true, true, true, true},
+	}
+	for index, block := range blocks {
+		table.Rows = append(table.Rows, []string{
+			block,
+			fmt.Sprintf("%.2f MiB/s", read[index]), "1 IOPS",
+			fmt.Sprintf("%.0f MiB/s", write[index]), "1 IOPS", "完成",
+		})
+	}
+	rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+	low := barDensityCountForTest(rows[len(rows)-1][1])
+	thousand := barDensityCountForTest(rows[len(rows)-2][3])
+	tenThousand := barDensityCountForTest(rows[len(rows)-1][3])
+	if low >= thousand || thousand >= tenThousand || tenThousand != 8 {
+		t.Fatalf("ATTO read/write throughput scale should separate 4.63/1000/10000: 4.63=%d 1000=%d 10000=%d\nread=%q\nwrite=%q", low, thousand, tenThousand, rows[len(rows)-1][1], rows[len(rows)-1][3])
+	}
+}
+
+// Units and metric qualifiers remain scale boundaries.  A GiB/s column must
+// not borrow the MiB/s maximum, and P50/P95 latency are distinct metrics even
+// though both cells carry milliseconds.
+func TestTableBarsDoNotMixUnitsOrMetricQualifiers(t *testing.T) {
+	unitTable := model.Table{
+		Columns: []string{"样本", "读吞吐", "写吞吐"},
+		Rows: [][]string{
+			{"A", "4.63 MiB/s", "1.00 GiB/s"},
+			{"B", "100 MiB/s", "0.50 GiB/s"},
+		},
+		NumericColumns: []int{1, 2}, NumericHigherIsBetter: []bool{true, true},
+	}
+	unitRows := tableRowsWithBars(unitTable, termcolor.Palette{Level: termcolor.LevelNone})
+	miBBar := barDensityCountForTest(unitRows[0][1])
+	giBBar := barDensityCountForTest(unitRows[0][2])
+	if miBBar >= giBBar {
+		t.Fatalf("different units should not share a numeric scale: MiB/s=%d GiB/s=%d\n%q", miBBar, giBBar, unitRows[0])
+	}
+
+	metricTable := model.Table{
+		Columns: []string{"样本", "P50 时延", "P95 时延"},
+		Rows: [][]string{
+			{"A", "1 ms", "100 ms"},
+			{"B", "2 ms", "101 ms"},
+		},
+		NumericColumns: []int{1, 2}, NumericHigherIsBetter: []bool{true, true},
+	}
+	metricRows := tableRowsWithBars(metricTable, termcolor.Palette{Level: termcolor.LevelNone})
+	p50Bar := barDensityCountForTest(metricRows[0][1])
+	p95Bar := barDensityCountForTest(metricRows[0][2])
+	if p50Bar == p95Bar {
+		t.Fatalf("different metric qualifiers should keep separate scales: P50=%d P95=%d\n%q", p50Bar, p95Bar, metricRows[0])
+	}
+}
+
 // 中英混排的表格必须列对齐：用字符数而不是显示宽度对齐会让整张表歪掉。
 func TestTextTableAlignsCJK(t *testing.T) {
 	data := textSampleReport()
@@ -769,5 +841,78 @@ func TestMeasurementBarsKeepSemanticDirectionAndZeroValues(t *testing.T) {
 	if resourceGroups["memory_used_bytes"].max == resourceGroups["disk_used_bytes"].max ||
 		resourceGroups["memory_available_bytes"].max == resourceGroups["disk_available_bytes"].max {
 		t.Fatal("内存与磁盘容量不应共用同一柱状图刻度")
+	}
+}
+
+func TestMeasurementBarsUseAdaptiveScaleForWideRanges(t *testing.T) {
+	items := []model.Measurement{
+		{Key: "throughput_low", Label: "吞吐", Value: 4, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "throughput_mid", Label: "吞吐", Value: 1000, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "throughput_high", Label: "吞吐", Value: 10000, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+	}
+	groups := groupComparable(items)
+	for _, item := range items {
+		if group, ok := groups[item.Key]; !ok {
+			t.Fatalf("wide-range measurement %q did not form a comparison group", item.Key)
+		} else if group.min != 4 {
+			t.Fatalf("wide-range group minimum = %v, want 4", group.min)
+		}
+	}
+	p := termcolor.Palette{Level: termcolor.LevelNone}
+	bar := func(item model.Measurement, group comparableGroup) int {
+		return barDensityCountForTest(p.BarRelativeRange(comparableValue(item, group), group.min, group.max, barWidth))
+	}
+	low := bar(items[0], groups[items[0].Key])
+	mid := bar(items[1], groups[items[1].Key])
+	high := bar(items[2], groups[items[2].Key])
+	if !(low < mid && mid < high) {
+		t.Fatalf("adaptive measurement bars should preserve 4<1000<10000: low=%d mid=%d high=%d", low, mid, high)
+	}
+
+	near := []model.Measurement{
+		{Key: "near_low", Label: "吞吐", Value: 100, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "near_mid", Label: "吞吐", Value: 200, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "near_high", Label: "吞吐", Value: 300, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+	}
+	nearGroups := groupComparable(near)
+	nearLow := bar(near[0], nearGroups[near[0].Key])
+	nearHigh := bar(near[2], nearGroups[near[2].Key])
+	if nearLow >= nearHigh {
+		t.Fatalf("compact-range bars should remain linear and ordered: low=%d high=%d", nearLow, nearHigh)
+	}
+
+	latency := []model.Measurement{
+		{Key: "latency_best", Label: "延迟", Value: 1, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "latency_mid", Label: "延迟", Value: 1000, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "latency_worst", Label: "延迟", Value: 10000, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+	}
+	latencyGroups := groupComparable(latency)
+	best := bar(latency[0], latencyGroups[latency[0].Key])
+	worst := bar(latency[2], latencyGroups[latency[2].Key])
+	if best <= worst {
+		t.Fatalf("lower-is-better adaptive bars should keep the best value longest: best=%d worst=%d", best, worst)
+	}
+}
+
+func TestMeasurementBarsIgnoreNonFiniteValues(t *testing.T) {
+	items := []model.Measurement{
+		{Key: "nan", Label: "吞吐", Value: math.NaN(), Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "inf", Label: "吞吐", Value: math.Inf(1), Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+	}
+	if groups := groupComparable(items); len(groups) != 0 {
+		t.Fatalf("NaN/Inf measurements should not create scales: %v", groups)
+	}
+}
+
+func TestMeasurementBarsKeepMatrixScopesSeparate(t *testing.T) {
+	items := []model.Measurement{
+		{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal 读吞吐", Value: 1, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "crystal_seq1m_q1_read_mib_s", Label: "Crystal 读吞吐", Value: 2, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "atto_512b_read_mib_s", Label: "ATTO 读吞吐", Value: 100, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "atto_64m_read_mib_s", Label: "ATTO 读吞吐", Value: 200, Unit: "MiB/s", HigherIsBetter: model.BoolPtr(true)},
+	}
+	groups := groupComparable(items)
+	if groups[items[0].Key].max == groups[items[2].Key].max {
+		t.Fatalf("Crystal and ATTO measurements should not share a MiB/s scale: %+v", groups)
 	}
 }

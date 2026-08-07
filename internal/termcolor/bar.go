@@ -9,7 +9,10 @@ package termcolor
 // 层次由两条腿共同支撑：颜色随比例连续变化，字符密度随比例分四档。任何一条腿
 // 断了（单色终端、纯文本文件、被 grep 的输出）另一条仍然站得住。
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Bar 渲染一条比例柱。
 //
@@ -18,6 +21,9 @@ import "strings"
 func (p Palette) Bar(ratio float64, width int) string {
 	if width <= 0 {
 		return ""
+	}
+	if math.IsNaN(ratio) {
+		return p.Dim(strings.Repeat("·", width))
 	}
 	if ratio < 0 {
 		ratio = 0
