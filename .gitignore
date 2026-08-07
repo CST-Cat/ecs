@@ -5,5 +5,6 @@
 /ecs.exe
 *.test
 *.out
+/AGENTS.md
 ecs-report-*
 .DS_Store
