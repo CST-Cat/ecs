@@ -167,10 +167,12 @@ jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=2
 
 echo "building sysbench ${sysbench_tag} (${sysbench_commit})"
-# The upstream sysbench release owns its bundled LuaJIT build. If that
-# upstream dependency or the target distro toolchain lacks the requested
-# architecture (for example a future LuaJIT port gap), configure must fail;
-# there is intentionally no substitute benchmark or shell placeholder.
+# Build the upstream CPU benchmark with the target container's static LuaJIT
+# and Concurrency Kit development libraries. The bundled copies do not cover
+# all seven release architectures; using the system libraries keeps sysbench's
+# benchmark implementation intact while allowing the real target toolchain to
+# build every package. The runtime package still contains only this final
+# sysbench binary, never a distribution-provided benchmark executable.
 (
   cd "$sysbench_src"
   ./autogen.sh
@@ -184,9 +186,17 @@ echo "building sysbench ${sysbench_tag} (${sysbench_commit})"
 # the command that configured this binary.
 sysbench_configure_args=(
   "--prefix=$work/sysbench-prefix"
+  '--with-system-luajit'
+  '--with-system-ck'
   '--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed'
 )
+sysbench_luajit_version=$(pkg-config --modversion luajit) ||
+  die 'target container is missing the LuaJIT pkg-config metadata'
+sysbench_ck_version=$(pkg-config --modversion ck) ||
+  die 'target container is missing the Concurrency Kit pkg-config metadata'
 sysbench_manifest_flags=(
+  '--with-system-luajit'
+  '--with-system-ck'
   '--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed'
 )
 sysbench_disabled_features=('database-drivers')
@@ -469,6 +479,8 @@ jq -n \
   --arg sysbench_source "$sysbench_source" \
   --arg sysbench_sha "$sysbench_sha" \
   --arg sysbench_commit "$sysbench_commit" \
+  --arg sysbench_luajit_version "$sysbench_luajit_version" \
+  --arg sysbench_ck_version "$sysbench_ck_version" \
   --argjson sysbench_build_flags "$sysbench_build_flags_json" \
   --argjson sysbench_disabled_features "$sysbench_disabled_features_json" \
   --arg fio_version "$fio_version" \
@@ -518,12 +530,12 @@ jq -n \
           tag_or_commit: $sysbench_tag,
           source: $sysbench_source,
           build_flags: $sysbench_build_flags,
-          enabled_features: ["cpu", "LuaJIT"],
+          enabled_features: ["cpu", "LuaJIT", "Concurrency Kit"],
           disabled_features: $sysbench_disabled_features,
           architecture: $architecture,
           license: "GPL-2.0-only",
           sha256: $sysbench_sha,
-          parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags}
+          parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags, system_luajit_version: $sysbench_luajit_version, system_ck_version: $sysbench_ck_version}
         },
         {
           name: "stream",

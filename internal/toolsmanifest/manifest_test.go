@@ -76,6 +76,11 @@ func TestExampleRecordsRequiredFeatureFlags(t *testing.T) {
 		}
 	}
 	assertContains("sysbench", byName["sysbench"].DisabledFeatures, "database-drivers")
+	for _, flag := range []string{"--with-system-luajit", "--with-system-ck"} {
+		if !contains(byName["sysbench"].BuildFlags, flag) {
+			t.Fatalf("sysbench build_flags missing %q: %v", flag, byName["sysbench"].BuildFlags)
+		}
+	}
 	assertContains("fio", byName["fio"].EnabledFeatures, "io_uring", "libaio", "psync")
 	assertContains("fio", byName["fio"].DisabledFeatures, "ceph", "rbd", "rados", "gluster", "rdma")
 	assertContains("iperf3", byName["iperf3"].DisabledFeatures, "sctp")

@@ -19,17 +19,21 @@
       "source": "upstream-source",
       "build_flags": [
         "illustrative: scripts/build_tools.sh derives supported --without-* flags from this exact checkout",
+        "--with-system-luajit",
+        "--with-system-ck",
         "--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed"
       ],
       "enabled_features": [
         "cpu",
-        "LuaJIT"
+        "LuaJIT",
+        "Concurrency Kit"
       ],
       "disabled_features": [
         "database-drivers",
         "mysql",
         "pgsql",
         "drizzle",
+        "attachsql",
         "oracle"
       ],
       "architecture": "amd64",
@@ -38,7 +42,9 @@
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown",
-        "configure_flags_source": "./configure --help plus configure.ac"
+        "configure_flags_source": "./configure --help plus configure.ac",
+        "system_luajit_version": "unknown",
+        "system_ck_version": "unknown"
       }
     },
     {

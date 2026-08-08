@@ -66,25 +66,25 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
-            image: ubuntu:24.04
+            image: debian:trixie
           - arch: arm64
             platform: linux/arm64
-            image: ubuntu:24.04
+            image: debian:trixie
           - arch: armv7
             platform: linux/arm/v7
-            image: ubuntu:24.04
+            image: debian:trixie
           - arch: "386"
             platform: linux/386
-            image: debian:bookworm
+            image: debian:trixie
           - arch: s390x
             platform: linux/s390x
-            image: ubuntu:24.04
+            image: debian:trixie
           - arch: riscv64
             platform: linux/riscv64
-            image: ubuntu:24.04
+            image: debian:trixie
           - arch: ppc64le
             platform: linux/ppc64le
-            image: ubuntu:24.04
+            image: debian:sid
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
@@ -110,7 +110,7 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends \
                 autoconf automake binutils build-essential ca-certificates curl \
-                git jq libaio-dev libtool libtool-bin meson ninja-build pkg-config \
+                git jq libaio-dev libck-dev libluajit-5.1-dev libtool libtool-bin meson ninja-build pkg-config \
                 zlib1g-dev
               scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
             '
