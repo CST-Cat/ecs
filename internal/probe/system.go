@@ -342,7 +342,7 @@ func collectLinuxSystem(s *systemSnapshot) {
 
 	mem := parseMemInfo("/proc/meminfo")
 	// Read the cgroup limit before computing the effective benchmark view.  The
-	// host-visible values remain in the historical fields below; the memory
+	// host-visible values remain in the current fields below; the memory
 	// probe uses the same helper and applies the limit to allocation decisions.
 	if limit, via, ok := cgroupMemoryLimit(); ok {
 		s.MemoryLimit = limit

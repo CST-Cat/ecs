@@ -2,7 +2,7 @@
   "schema": "ecs.baseline/v1",
   "source": "社区提交聚合",
   "sample_count": 2,
-  "generated_at": "2026-08-07T15:07:12.70463643Z",
+  "generated_at": "2026-08-08T16:26:10.574244406Z",
   "metrics": {
     "atto_128k_read_iops": 264.8735125,
     "atto_128k_read_mib_s": 33.10918855667114,
@@ -107,12 +107,7 @@
     "fio_mixed_512k_read_mib_s": 31.551025867462158,
     "fio_mixed_512k_write_mib_s": 32.23265504837036,
     "fio_mixed_64k_read_mib_s": 39.559261322021484,
-    "fio_mixed_64k_write_mib_s": 40.01462459564209,
-    "memory_copy": 9454.9735,
-    "memory_latency": 0.0625,
-    "memory_read": 51488.88,
-    "memory_write": 15295.384999999998,
-    "memory_write_multi": 59274.045
+    "fio_mixed_64k_write_mib_s": 40.01462459564209
   },
   "tiers": [
     {
@@ -222,18 +217,13 @@
         "fio_mixed_512k_read_mib_s": 31.551025867462158,
         "fio_mixed_512k_write_mib_s": 32.23265504837036,
         "fio_mixed_64k_read_mib_s": 39.559261322021484,
-        "fio_mixed_64k_write_mib_s": 40.01462459564209,
-        "memory_copy": 9454.9735,
-        "memory_latency": 0.0625,
-        "memory_read": 51488.88,
-        "memory_write": 15295.384999999998,
-        "memory_write_multi": 59274.045
+        "fio_mixed_64k_write_mib_s": 40.01462459564209
       }
     }
   ],
   "score_samples": [
-    941.2379085334164,
-    1058.9624119794041
+    931.9863352917382,
+    1068.0136647082618
   ],
   "rank_min_samples": 5
 }

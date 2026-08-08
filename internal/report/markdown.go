@@ -15,6 +15,10 @@ import (
 )
 
 func Markdown(data model.Report, scored *score.Report) string {
+	// Markdown is also used as a standalone renderer in tests and by callers
+	// that already loaded a report.  Apply the same language boundary as the
+	// file writer instead of requiring every caller to remember Localize.
+	data = Localize(data)
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")

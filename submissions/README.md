@@ -22,9 +22,10 @@
 白名单中的磁盘扩展键包括 `fio_mixed_*`（4K/64K/512K/1M 混合读写吞吐）、
 `crystal_*`（4 个 Crystal 工作负载 × 读写 × 吞吐/IOPS）和 `atto_*`（18 个 ATTO
 块大小 × 读写 × 吞吐/IOPS）；ATTO 清单到 `64m`，不含 5M。
-内存扩展键包括 sysbench 的单/多线程读写吞吐与四个对应的平均时延键。缺少新键的旧
-提交仍然可以通过 schema 校验并参与已有指标的基线聚合；评分会把缺失项明确列出，绝不
-把缺失当成零或宣称完整覆盖。新聚合基线若包含这些键，便会按新公式正常评分。
+包含 STREAM 内存分数的提交必须写 `memory_backend: "stream"`，并使用
+`memory_copy`、`memory_scale`、`memory_add`、`memory_triad` 四个当前聚合键。
+提交只允许当前 schema 定义的指标；缺少 STREAM 键的提交只会在其它维度有效，不会伪装成内存基线。评分会把缺失项明确列出，
+绝不把缺失当成零或宣称完整覆盖。
 
 ## 怎么提交
 
@@ -48,8 +49,8 @@ ecs submit --input ./reports/ecs-report-*.json \
 ```
 submissions/
   2026-08/
-    8109db82d028-vultr-jp.json
-    b8e4d2f10c93-hetzner-fsn.json
+    e8ee186c40c1-oracle-cloud-us-sanjose-1.json
+    92d7ce3c401b-oracle-cloud-us-sanjose-1.json
   baseline.json        ← 由 CI 从上面所有提交重建，不要手改
 ```
 
@@ -66,9 +67,9 @@ submissions/
 
 ## 当前库存
 
-**目前只有 1 份样本**，来自 Oracle Cloud Classic Free Tier（4 vCPU、约 24 GiB、
-ARM64 KVM）。它可以作为真实 VPS 的临时参考，但样本数仍只有 1，**不构成稳定的
-公共基线**——报告里会明确提示样本数为 1 时分数仅供自查。
+当前有 2 份样本，来自 Oracle Cloud Classic Free Tier（4 vCPU、约 24 GiB、
+ARM64 KVM）。它们构成当前发布基线，但样本数仍不足以代表公共 VPS 群体；报告会明确
+提示分档样本不足。
 
 真正的参考价值要等跨机器样本积累起来。每档至少 5 台才会启用分档，
 每档至少 8 台才能做离群判定。
@@ -76,9 +77,9 @@ ARM64 KVM）。它可以作为真实 VPS 的临时参考，但样本数仍只有
 ## 分档
 
 基线按 vCPU 分档（1/2/4/8/16/32/64+），评分时自动选对应档位：多线程分数几乎
-正比于核数，用全体中位数当基线会让小机器永远不及格、大机器永远满分。
+正比于核数，用全体平均值当基线会让小机器永远不及格、大机器永远满分。
 
-每档至少要 5 台机器才会启用，否则回落到全局基线——三台机器算出来的中位数
+每档至少要 5 台机器才会启用，否则回落到全局基线——三台机器算出来的平均值
 没有代表性。所以**提交越多，分档越细、参考价值越高**；同一机型的样本尤其有用。
 
 ## 基线怎么重建
@@ -89,11 +90,13 @@ ARM64 KVM）。它可以作为真实 VPS 的临时参考，但样本数仍只有
 ecs baseline --source "社区提交聚合" --output submissions/baseline.json submissions/
 ```
 
-每个指标取**中位数**而不是平均：一台异常快或异常慢的机器不该把基线拽走。
+每个指标取**算术平均**；离群值由独立的 MAD 检查标记，不把离群检测的规则
+偷偷混入基线定义。
 只有至少一台机器测到的指标才会进入基线，凭空补齐会让缺失伪装成数据。
-评分时磁盘的 legacy、混合、Crystal、ATTO 是四个等权子组；每个子组先平均内部单元，
-所以混合矩阵的 8 个单元和 ATTO 的 72 个读写表格单元不会按数量放大。内存的 memcpy、
-读、写、时延也按等权子组处理，缺失子组不补零。
+评分时磁盘的 baseline、混合、Crystal、ATTO 是四个等权子组；每个子组先平均内部单元，
+所以混合矩阵的 8 个单元和 ATTO 的 72 个读写表格单元不会按数量放大。内存按
+STREAM 的 Copy、Scale、Add、Triad 四个等权子组处理，每个 kernel 的 1T/NT
+先取中位数，缺失子组不补零。
 
 重建后的 `baseline.json` 会在下次发版时由 CI 写进
 `internal/score/embedded/baseline.json`，随二进制编译进去——新用户

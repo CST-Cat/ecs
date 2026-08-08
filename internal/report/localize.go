@@ -36,6 +36,8 @@ func localizeResult(result model.Result) model.Result {
 	out.Summary = i18n.Text(result.Summary)
 	out.Error = i18n.Text(result.Error)
 	out.Methodology.Label = i18n.Text(result.Methodology.Label)
+	// Engine and profile are human-facing methodology text. Stable machine
+	// identifiers remain untouched below in measurement.key/method/unit.
 	out.Methodology.Engine = i18n.Text(result.Methodology.Engine)
 	out.Methodology.Profile = i18n.Text(result.Methodology.Profile)
 	out.Methodology.ComparisonScope = i18n.Text(result.Methodology.ComparisonScope)
@@ -52,12 +54,9 @@ func localizeResult(result model.Result) model.Result {
 		measurement.Label = i18n.Text(measurement.Label)
 		measurement.Display = i18n.Text(measurement.Display)
 		measurement.Rating = i18n.Text(measurement.Rating)
-		// unit 是给人看的量纲（"线程"/"项"/"小时"），跟随语言；
-		// key、method 是机器标识符，不动。
-		measurement.Unit = i18n.Text(measurement.Unit)
-		// method 多数是稳定标识符（sysbench-cpu-prime20000-v1），但 IP 质量模块
-		// 会把口径与通道拼进去，那部分是给人看的，也要翻译。
-		measurement.Method = i18n.Text(measurement.Method)
+		// unit is part of the machine-readable measurement contract, even when
+		// its spelling happens to be human-readable (for example "线程").  Keep
+		// both unit and method byte-for-byte stable across language exports.
 		out.Measurements[index] = measurement
 	}
 	out.Tables = make([]model.Table, len(result.Tables))

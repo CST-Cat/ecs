@@ -1,24 +1,14 @@
 # 工作交接与后续计划
 
-> 更新于 2026-07-31。仓库 <https://github.com/CST-Cat/ecs>，默认分支 `main`。
+> 更新于 2026-08-08。仓库 <https://github.com/CST-Cat/ecs>，默认分支 `main`，当前发布目标为 `v0.6.0`。
 > 后续一律直接在 `main` 上开发，不再新建分支。
 >
-> 本文中的旧工具名和历史实跑命令仅记录当时状态；当前路由实现已收敛为 NextTrace-only，
-> 请以 README、SECURITY 和 `run.sh` 的现行行为为准。
+> 当前路由实现为 NextTrace Tiny，性能链路为官方 STREAM 1T/NT 四 kernel、fio JSON
+> QD1 latency 和 sysbench CPU；报告默认四格式 JSON/txt/md/html。
 
 ## 一、当前状态
 
-`main` 已包含 7 个提交，CI（`test` × Go 1.22/stable、`race`、`cross`）在提交前于本地全绿。
-
-| 提交 | 内容 |
-| --- | --- |
-| `11259b1` | 初始提交 |
-| `73a2445` | 标准化：采样窗口、cgroup、steal、fio 引擎探测与混合矩阵、延迟与 DNS 采样 |
-| `fd003b0` | 功能补齐：三网回程、流媒体规则引擎、ICMP、UDP 丢包、脱敏边界、节点池 |
-| `4457bda` | CI 修复（临时方案，已被 `a829a54` 撤销） |
-| `668eb7d` | 合并 `standardize-benchmarks`（分支保留未删） |
-| `bb4cf2e` | 补充工作交接文档 |
-| `a829a54` | **P0：Linux-only 重构（见第二节）** |
+`main` 当前维护 Linux-only 的 v0.6.0 重构：标准性能链路固定为 sysbench CPU、官方 STREAM、fio、iperf3；路由与回程固定使用官方 NextTrace Tiny；CI 负责七架构工具构建、manifest、摘要和真实 smoke test。
 
 ### 已解决的问题
 
@@ -26,7 +16,7 @@
 - **不感知 cgroup**：新增 `internal/probe/container.go`，读 cgroup v1/v2 的 CPU 配额与内存上限，线程数取 `min(NumCPU, ceil(quota))`。
 - **无超售指标**：CPU 探针记录压测窗口内的 steal 增量，`system` 记录自开机累计值，累计超 5% 告警。
 - **fio 硬选 libaio**：改用 `--enghelp` 探测，按 `io_uring → libaio → psync` 回退；同步引擎下队列深度降级标注。
-- **磁盘矩阵不全**：补上 YABS 兼容的 4k/64k/512k/1m 50/50 混合随机读写（QD64、numjobs=2）。
+- **磁盘矩阵不全**：补上 YABS 口径的 4k/64k/512k/1m 50/50 混合随机读写（QD64、numjobs=2）。
 - **延迟混入 DNS**：改为先解析一次再固定对 IP 拨号，解析耗时单列；DNS 增加不计入统计的预热查询。
 - **无三网回程**：新增 `backtrace` 模块，识别 CN2/163/CUII/169/CMI/CMNET。
 - **流媒体误报**：重写为规则引擎（33 平台），Netflix 用双非自制剧区分"仅自制剧"，403/404 一律不判"不解锁"。
@@ -52,7 +42,7 @@
 | `internal/probe/system.go` | `switch runtime.GOOS` 改为直接调用 `collectLinuxSystem`；`collectDarwinSystem`/`collectBSDSystem`/`collectWindowsSystem` 三个函数已删除；`collectDisk` 的 windows 提前返回已删除；随之成为孤儿的 `parseHumanBytes`（macOS `vm.swapusage` 专用）与 `parseIntDefault`（sysctl 专用）一并清理 |
 | `internal/probe/icmp.go` | `pingCommandName()` 换成常量 `pingCommand = "ping"`；`pingArguments` 只保留 Linux 形态（`-W` 以秒计、不足一秒进位） |
 | `internal/probe/disk_fio.go` | 删除非 Linux 直返 psync 的提前返回，始终走 `--enghelp` 探测 |
-| `internal/probe/route.go` | 路由引擎固定为 `nexttrace`；删除其他实现、`.exe` 后缀处理与 `tracert` 参数分支 |
+| `internal/probe/route.go` | 路由引擎固定为官方 `nexttrace-tiny`；删除其他实现、`.exe` 后缀处理与 `tracert` 参数分支 |
 | `internal/probe/container.go` | 删除 `detectCPUAllowance`、`cgroupMemoryLimit`、`readCPUTimes` 里的三处 GOOS 检查 |
 | `cmd/ecs/signals_windows.go` | 已删除 |
 | `cmd/ecs/signals_unix.go` | 已重命名为 `signals.go`，去掉 `//go:build !windows` |
@@ -69,8 +59,9 @@
   以及 `pkg`（FreeBSD）与 `brew`（macOS）包管理器分支。
 - `.github/workflows/ci.yml`：`cross` job 调用 `make cross`，随 Makefile 自动收敛，未改动。
 
-已实跑验证：七个架构全部构建成功；`scripts/package.sh` 产出 7 个 tar.gz 与格式正确的
-`checksums.txt`，资产名与 `install.sh` 的期望一致。
+当前 CI 通过七架构 matrix 逐架构真实构建和 smoke；任一上游工具/架构不满足配置能力会
+诚实失败，不用 fixture 或假 binary 继续打包。release 只消费 tools job 传递的真实 stage，
+并由 `scripts/package.sh` 产出 7 个 tar.zst 与 `checksums.txt`。
 
 ### 2.3 已重写的测试（`4457bda` 的妥协已撤销）
 
@@ -103,15 +94,16 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 
 | 工具 | 测试方式 |
 | --- | --- |
-| fio | 真实 `fio` 在临时目录跑完整 52 作业矩阵（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
-| sysbench | 真实 `sysbench` 跑 CPU 与 memory；断言 steal 指标与原始输出留存 |
+| fio | 真实 `fio` 在临时目录跑完整 52 作业矩阵和固定 QD1 latency（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
+| STREAM/sysbench | 真实官方 STREAM 跑 1T/NT 的 Copy/Scale/Add/Triad；STREAM 缺失时明确报告内存基准未运行；CPU 仍跑 sysbench |
 | iperf3 | 在回环起真实 `iperf3 -s`，跑 TCP 双向与 UDP |
 | ping | 真实 `ping 127.0.0.1` |
-| NextTrace | 真实 `nexttrace --json 127.0.0.1`（本机缺失时由 `run.sh` 临时准备） |
+| NextTrace | 真实官方 Tiny 的 JSON 路径探测（缺失时由 `run.sh` 临时准备） |
 
 全部不依赖公网。`requireTool` 在 CI（`CI` 环境变量）下缺工具直接 `Fatal`，
 本地缺工具才 `Skip`，避免测试静默跳过后仍然显示为绿；`ci.yml` 的 `test` 与 `race`
-两个 job 安装基准依赖，NextTrace 由路由测试按需准备。
+tools job 在架构容器中安装并真实验证 sysbench、STREAM、fio、iperf3、ping 和 NextTrace Tiny；
+宿主机只运行 parser/renderer/config 等确定性 Go tests，真实外部工具 live tests 在容器 smoke 中完成。
 
 第三方 HTTP 数据源（IP 质量、流媒体）的解析器仍用固定样本，但**不再以此为终点**：
 真实调用的验证已补成 `//go:build live` 测试，见 3.3。原先援引"测试不依赖公网"来
@@ -130,13 +122,13 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 
 ### 3.1 已在真实 Linux + 真实工具上验证
 
-开发机装上 fio 3.39 / sysbench 1.0.20 / iperf3 3.18，并准备 NextTrace 后实跑，结论：
+开发机装上官方 STREAM、fio 3.39 / sysbench 1.0.20 / iperf3 3.18，并准备 NextTrace 后实跑，结论：
 
 - **fio 引擎探测成立**。真实 `--enghelp` 每行带 TAB 缩进、首行是 `Available IO engines:`，
   `TrimSpace` 能正确处理；该机命中 `io_uring`，报告按 QD32/QD64 标注，10 项指标齐全，
   混合矩阵与临时文件清理均正常。
-- **sysbench 解析成立**。CPU 单/多线程事件率、内存四项、`cpu_steal_percent_during_test`
-  都由真实运行产出。
+- **STREAM 解析成立**。官方 STREAM 1T/NT 四 kernel 由真实运行产出；sysbench CPU
+  单/多线程事件率与 `cpu_steal_percent_during_test` 也由真实运行产出。
 - **iperf3 解析成立**。回环起真实服务端跑通 TCP 双向与 UDP 丢包/抖动。
 - **ping 与 NextTrace 解析成立**。iputils 四段统计行与 NextTrace JSON 跳点均正确解析。
 - **测试已全部改用真实工具**，三个脚本替身删除，CI 会安装基准工具；路由测试缺失 NextTrace 时按设计跳过。
@@ -249,10 +241,7 @@ DNS 轮询会落到备用地址等于自身的那台，已剔除。
 - **离线 GeoIP**：MaxMind/DB-IP/IP2Location 本地库，降低对在线 API 的依赖。
 - **UnixBench/Phoronix**：可选长测套件。
 - **回归样本库**：KVM、LXC、OpenVZ、低内存 NAT VPS 的基线数据。
-- **发布**：仓库已建但**尚未发 Release**。`install.sh` 的 `ECS_REPOSITORY` 仍需手动传。
-  发版后应把默认值填成 `CST-Cat/ecs`，并把 README 的"快速开始"从 `go build` 改成 `install.sh` 优先。
-  **在 Release 存在之前不要填默认值**，否则 `install.sh` 会指向一个 404 的下载地址；
-  `SECURITY.md` 当前的"必须显式设置 `ECS_REPOSITORY`"说明也要同步改。
+- **发布**：v0.6.0 只从 `main` 的已验证提交打包；发布顺序是提交、推送 `main`、确认远端提交、创建并推送 `v0.6.0` tag。工具包由 CI 的真实七架构 stage 生成，Ookla 保持独立，不进入 `ecs-tools`。
 
 ---
 
@@ -273,15 +262,16 @@ sh -n install.sh
 bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
-apt-get install -y sysbench fio iperf3 mbw ioping
-# 或 ./install.sh --with-benchmarks
+apt-get install -y sysbench fio iperf3
+# STREAM、NextTrace Tiny 和 iputils ping 由 run.sh/ecs-tools 按架构临时提供
+# ./install.sh --with-benchmarks 只持久安装上面的三个系统包
 ```
 
 `.gitignore` 已排除 `bin/`、`dist/`、`reports/`，构建产物不会入库。
 
 ## 六、开发约束（摘自 CONTRIBUTING.md，以该文件为准）
 
-1. 性能成绩只能来自 sysbench / fio / iperf3，**不得引入自研工作负载或替代分数**；
+1. 性能成绩只能来自 sysbench / 官方 STREAM / fio / iperf3，**不得引入自研工作负载或替代分数**；
 2. 不做跨供应商平均、跨节点均值、综合跑分；
 3. 反爬、超时、限流一律返回"未知"，不得判成"不解锁"；
 4. 外部程序只作可关闭的适配器，记录版本与 SHA-256，参数以数组传入不经过 shell；
@@ -291,7 +281,7 @@ apt-get install -y sysbench fio iperf3 mbw ioping
 6. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、
    iperf3、ping 或 NextTrace，需要隔离时用回环；
 7. 依赖第三方服务或公共节点的能力，除确定性测试外**还必须有 `//go:build live`
-   的实网测试**。固定样本只能证明解析器认得历史格式，证明不了上游没变；
+   的实网测试**。固定样本只能证明解析器认得样本格式，证明不了上游没变；
    实网测试不挂在 push/PR 上，由定时任务与手动触发运行；
 8. 工作负载语义变化时升级 `measurement.method` 的版本号；
 9. 数据源清单与节点地址一律照抄上游并注明版本，不得凭记忆填写；

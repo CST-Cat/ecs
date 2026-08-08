@@ -31,6 +31,10 @@ import (
 // SubmissionSchema 是提交文件的格式标识。
 const SubmissionSchema = "ecs.submission/v1"
 
+const (
+	memoryBackendStream = "stream"
+)
+
 // Submission 是一份可公开入库的跑分记录。
 type Submission struct {
 	Schema string `json:"schema"`
@@ -44,6 +48,9 @@ type Submission struct {
 	// Profile 记录用户选中的模块预设；各档位使用相同的 full-depth 基准口径，
 	// 因此分组时应按实际模块覆盖与机器规格解释，而不是按采样窗口区分。
 	Profile string `json:"profile"`
+	// MemoryBackend identifies the STREAM scoring contract whenever memory
+	// metrics are present.
+	MemoryBackend string `json:"memory_backend,omitempty"`
 	// Note 是提交者的自由备注，长度受限，用于说明特殊情况。
 	Note string `json:"note,omitempty"`
 }
@@ -110,14 +117,19 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	if len(metrics) == 0 {
 		return Submission{}, fmt.Errorf("report contains no scoreable measurements")
 	}
+	memoryBackend := ""
+	if hasCurrentMemorySubmissionMetrics(metrics) {
+		memoryBackend = memoryBackendStream
+	}
 
 	submission := Submission{
-		Schema:  SubmissionSchema,
-		Host:    extractHostSpec(data, values),
-		Tool:    extractToolSpec(data),
-		RanAt:   data.Run.StartedAt,
-		Metrics: metrics,
-		Profile: data.Run.Profile,
+		Schema:        SubmissionSchema,
+		Host:          extractHostSpec(data, values),
+		Tool:          extractToolSpec(data),
+		RanAt:         data.Run.StartedAt,
+		Metrics:       metrics,
+		Profile:       data.Run.Profile,
+		MemoryBackend: memoryBackend,
 	}
 	// System metadata is a narrow, non-sensitive whitelist.  Explicit CLI
 	// values remain authoritative, while empty values safely leave the
@@ -256,6 +268,10 @@ func (s Submission) fingerprint() string {
 	builder.WriteString(s.Host.Virtualization)
 	builder.WriteString("|")
 	builder.WriteString(s.RanAt.UTC().Format(time.RFC3339))
+	if s.MemoryBackend != "" {
+		builder.WriteString("|memory_backend=")
+		builder.WriteString(s.MemoryBackend)
+	}
 	for _, key := range sortedMetricKeys(s.Metrics) {
 		builder.WriteString("|")
 		builder.WriteString(key)
@@ -320,6 +336,12 @@ func (s Submission) Validate() error {
 	}
 	if len(s.Metrics) == 0 {
 		return fmt.Errorf("submission contains no metrics")
+	}
+	if s.MemoryBackend != "" && s.MemoryBackend != memoryBackendStream {
+		return fmt.Errorf("unsupported memory backend %q", s.MemoryBackend)
+	}
+	if hasCurrentMemorySubmissionMetrics(s.Metrics) != (s.MemoryBackend == memoryBackendStream) {
+		return fmt.Errorf("STREAM metrics require memory_backend %q, and the marker is forbidden without STREAM metrics", memoryBackendStream)
 	}
 	known := make(map[string]bool)
 	for _, dimension := range Dimensions() {
@@ -396,6 +418,20 @@ func (s Submission) AsReport() model.Report {
 		})
 	}
 	return report
+}
+
+func hasCurrentMemorySubmissionMetrics(metrics map[string]float64) bool {
+	for _, dimension := range Dimensions() {
+		if dimension.Key != "memory" {
+			continue
+		}
+		for _, metric := range dimension.Metrics {
+			if _, ok := metrics[metric.Key]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func safeMetadataValue(value string, limit int) string {

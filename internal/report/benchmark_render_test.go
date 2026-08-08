@@ -25,10 +25,10 @@ func benchmarkRenderReport() model.Report {
 					{Key: "ksm_merging", Label: "KSM merging", Value: "unavailable"},
 				},
 				Tables: []model.Table{{
-					Title:          "sysbench memory 读写与时延",
-					Columns:        []string{"操作 / 线程", "吞吐", "平均时延", "P95 时延", "证据"},
-					Rows:           [][]string{{"单线程读", "100 MiB/s", "2.000 ms", "3.000 ms", "原生"}, {"多线程读", "200 MiB/s", "1.000 ms", "1.500 ms", "派生"}},
-					NumericColumns: []int{1, 2, 3}, NumericHigherIsBetter: []bool{true, false, false},
+					Title:          "STREAM 四 kernel 带宽（Copy/Triad 主结果）",
+					Columns:        []string{"内核 / 线程", "最佳速率", "原始单位", "方法", "证据"},
+					Rows:           [][]string{{"Copy / 1T", "100 MiB/s", "MB/s", "stream-official-copy-1t-v1", "STREAM 最佳速率"}, {"Triad / NT", "200 MiB/s", "MB/s", "stream-official-triad-nt-v1", "STREAM 最佳速率"}},
+					NumericColumns: []int{1}, NumericHigherIsBetter: []bool{true},
 				}},
 			},
 			{
@@ -79,14 +79,14 @@ func TestBenchmarkTextRenderingUsesPaletteLevels(t *testing.T) {
 	}
 }
 
-func TestTextHidesMatrixMeasurementKeysAndMethods(t *testing.T) {
+func TestTextHidesMatrixMeasurementKeysAndKeepsMethods(t *testing.T) {
 	data := benchmarkRenderReport()
 	disk := &data.Results[1]
 	disk.Measurements = []model.Measurement{
-		{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-legacy"},
-		{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
-		{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Display: "20 IOPS", Method: "fio-direct-atto"},
-		{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "30 MiB/s", Method: "fio-direct-mixed"},
+		{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-baseline"},
+		{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal RND4K/Q1 读吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
+		{Key: "atto_512b_write_iops", Label: "ATTO 512B 写 IOPS", Display: "20 IOPS", Method: "fio-direct-atto"},
+		{Key: "fio_mixed_4k_read_mib_s", Label: "混合 4K 读吞吐", Display: "30 MiB/s", Method: "fio-direct-mixed"},
 	}
 	disk.Tables[0].Rows = [][]string{
 		{"RND4K/Q1", "10 MiB/s", "100 IOPS", "20 MiB/s", "200 IOPS", "完成"},
@@ -103,14 +103,19 @@ func TestTextHidesMatrixMeasurementKeysAndMethods(t *testing.T) {
 		}
 	}
 	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, forbidden := range []string{"fio-direct-", "crystal crystal_", "atto atto_", "fio_mixed_"} {
+	for _, forbidden := range []string{"crystal crystal_", "atto atto_", "fio_mixed_"} {
 		if strings.Contains(plain, forbidden) {
 			t.Fatalf("纯文本不应显示内部标识 %q:\n%s", forbidden, plain)
 		}
 	}
 	for _, want := range append(blocks, "RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8", "顺序读", "100 MiB/s", "块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS") {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("矩阵/legacy 文本缺少 %q:\n%s", want, plain)
+			t.Fatalf("矩阵/基线文本缺少 %q:\n%s", want, plain)
+		}
+	}
+	for _, want := range []string{"fio-direct-baseline", "fio-direct-mixed"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("当前 txt 缺少工作负载方法 %q:\n%s", want, plain)
 		}
 	}
 	scored := &score.Report{
@@ -119,8 +124,8 @@ func TestTextHidesMatrixMeasurementKeysAndMethods(t *testing.T) {
 			Key: "disk", Score: 800, Ratio: 0.8,
 			Metrics: []score.MetricScore{
 				{Key: "fio_sequential_read_mib_s", Label: "磁盘顺序读", Value: 100, Unit: "MiB/s", Ratio: 1},
-				{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Value: 10, Unit: "MiB/s", Ratio: 1},
-				{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Value: 20, Unit: "IOPS", Ratio: 1},
+				{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal RND4K/Q1 读吞吐", Value: 10, Unit: "MiB/s", Ratio: 1},
+				{Key: "atto_512b_write_iops", Label: "ATTO 512B 写 IOPS", Value: 20, Unit: "IOPS", Ratio: 1},
 			},
 			Groups: []score.GroupScore{
 				{Key: "crystal", MetricCount: 16},
@@ -131,35 +136,12 @@ func TestTextHidesMatrixMeasurementKeysAndMethods(t *testing.T) {
 	withScore := Text(data, TextOptions{Color: termcolor.LevelNone, Score: scored})
 	for _, want := range []string{"Crystal 16 项", "ATTO 72 项", "磁盘顺序读"} {
 		if !strings.Contains(withScore, want) {
-			t.Fatalf("评分区缺少矩阵摘要/legacy 指标 %q:\n%s", want, withScore)
+			t.Fatalf("评分区缺少矩阵摘要/基线指标 %q:\n%s", want, withScore)
 		}
 	}
-	for _, forbidden := range []string{"crystal crystal_", "atto atto_", "fio-direct-"} {
+	for _, forbidden := range []string{"crystal crystal_", "atto atto_"} {
 		if strings.Contains(withScore, forbidden) {
 			t.Fatalf("评分区不应显示冗余标识 %q:\n%s", forbidden, withScore)
-		}
-	}
-}
-
-func TestTextMatrixFallbackLabelsWithoutTables(t *testing.T) {
-	data := benchmarkRenderReport()
-	data.Results = []model.Result{{
-		ID: "disk", Title: "磁盘性能", Status: model.StatusOK,
-		Measurements: []model.Measurement{
-			{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
-			{Key: "atto_512b_write_iops", Label: "ATTO atto_512b write IOPS", Display: "20 IOPS", Method: "fio-direct-atto"},
-			{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "30 MiB/s", Method: "fio-direct-mixed"},
-		},
-	}}
-	plain := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, want := range []string{"RND4K/Q1 读吞吐", "512B 写 IOPS", "4K 混合读吞吐"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("旧 JSON 无表格时缺少 fallback label %q:\n%s", want, plain)
-		}
-	}
-	for _, forbidden := range []string{"fio-direct-", "crystal crystal_", "atto atto_", "fio_mixed_"} {
-		if strings.Contains(plain, forbidden) {
-			t.Fatalf("fallback 文本不应显示内部标识 %q:\n%s", forbidden, plain)
 		}
 	}
 }

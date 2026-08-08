@@ -2,9 +2,9 @@
 
 无广告、默认零上传、可审计的 VPS 综合测试工具。
 
-`ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出终端、Markdown 和独立 HTML 报告。所有性能原始成绩只读取 sysbench、fio、mbw、iperf3 等明确记录版本与口径的工具；综合评分单独按显式排行榜参考计算，不伪造替代工具成绩、不生成并行效率或跨节点平均值。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
+`ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出 JSON、txt、Markdown 和独立 HTML 报告。CPU 使用官方 sysbench CPU 工作负载；内存使用官方 STREAM；磁盘矩阵和 4KiB QD1 延迟统一来自 fio；网络吞吐使用 iperf3。综合评分单独按显式排行榜参考计算，不伪造替代工具成绩、不生成并行效率或跨节点平均值。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
 
-> 当前处于首个开发版本，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、公共 BGP 观测、路由、三网回程、可选 Ookla 三网测速、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
+> 当前重构目标为 v0.6.0，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、公共 BGP 观测、路由、三网回程、full 默认包含的 Ookla 三网测速，以及 JSON/txt/md/html 四种输出已按当前实现维护。standard 可用 `--only ookla` 显式启用它。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
 ## 快速开始
 
@@ -44,13 +44,21 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 
 `ecs` **只支持 Linux**。VPS 几乎全是 Linux 发行版，因此项目不保留 macOS、Windows 或
 BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台都成立"，真实生产路径反而
-测不到。发布二进制覆盖 Linux 的 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、
-`ppc64le`。
+测不到。发布目标只覆盖 Linux 的七个架构：`amd64`、`arm64`、`armv7`、`386`、`s390x`、
+`riscv64`、`ppc64le`。`armv7` 对应 `GOARCH=arm`、`GOARM=7`；不提供其他操作系统目标。
+工具包的 `ecs-tools.manifest/v1`、每架构 `manifest.json` 与 CI 生成的 `checksums.txt`
+是版本、来源、许可证和 SHA-256 的核对依据。源码中的 manifest 示例允许 `unknown`/
+`unavailable`，实际版本、tag、摘要、许可证文件和 Release 资产在 CI 产出前不作任何猜测；
+工作区里的本地 `dist/` 也不代表已发布资产。
 
-脚本会下载并校验 `ecs`，按所选配置识别缺失的标准工具。Debian/Ubuntu 上会从已配置且签名的
-软件源把缺失工具下载到临时目录并解包到 `WORK/root`，再通过 `WORK/bin` 和临时库路径调用；
-不会执行系统包安装或卸载。其他发行版没有安全解包路径时明确跳过相关模块。`WORK` 默认在
-`/tmp` 下，显式 `TMPDIR=/absolute/path` 可作为高级覆盖；`ECS_KEEP=1` 可保留现场排障。
+脚本会下载并校验 `ecs`，并优先复用系统中已有的标准工具。本机缺少 `sysbench`、官方
+`stream`、`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，才从与当前 Linux 架构匹配的
+`ecs-tools` `tar.zst` 包临时提供；下载和使用前按 `checksums.txt`、`manifest.json` 及必要的
+二进制 digest 核对架构、来源、版本和 SHA-256。工具只解包到本次运行的 `$WORK`，通过临时
+`PATH`/库路径调用，退出时清理。APT/Packagecloud 不用于这些通用缺失工具；它们只在用户显式
+选择 `--only ookla` 时作为 Ookla 的独立路径使用。没有可核对的资产时明确跳过相关模块，
+不虚构版本或摘要。`WORK` 默认在 `/tmp` 下，显式 `TMPDIR=/absolute/path` 可作为高级覆盖；
+`ECS_KEEP=1` 可保留现场排障。
 
 如果不指定档位并且当前有终端，`run.sh` 会进入交互向导；没有终端时按 `standard` 档直接运行。
 
@@ -59,7 +67,7 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 ```
 选择配置档
 → 1) standard  标准配置：16 个常规模块（推荐）
-  2) full      完整配置：全部 18 个模块（含 Ookla）
+  2) full      完整配置：全部 18 个默认模块（含 Ookla；缺失时走独立官方路径）
 请选择 [1]
 
 检测 IP 质量与黑名单？会把出口 IP 发给 13 个数据源 [Y/n]
@@ -78,32 +86,39 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 CPU、内存、磁盘这类本地基准不做成开关——它们没有隐私或流量代价，关掉只会让报告残缺。
 没有终端时（cron、CI、容器）向导自动跳过，按默认配置直接跑，不会卡在等输入。
 
-`run.sh` 的依赖准备有明确边界：预先存在的程序保持原路径；缺失组件直接使用测试机已配置且签名
-的软件源，优先复用测试机已有的 APT 包索引，只把本次需要的依赖包下载到 `$WORK/packages`，
-解包到 `$WORK/root`，并通过 `$WORK/bin` 与临时库路径调用。解包成功后会删除 `.deb` 归档，
-不把完整 APT 索引重复塞进每次运行目录；只有测试机没有可用索引时才在 `$WORK` 内临时更新。
-脚本绝不执行系统包安装、卸载或全局缓存清理，测试结束时删除整个 `$WORK`。
-Ookla (`speedtest`) 属于 `full` 档和显式 `--only ookla` 的模块；本机缺失时脚本使用
+`standard` 默认不包含 Ookla，`full` 默认包含 Ookla；full 缺失 `speedtest` 时会走独立的
+Ookla 官方签名源路径。显式给出 `--only ookla` 仍可从任意配置档单独选择 Ookla。
+
+`run.sh` 的依赖准备有明确边界：预先存在的程序保持原路径；缺失 `sysbench`、官方 `stream`、
+`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，从当前 Linux 架构匹配的 `ecs-tools` `tar.zst`
+包临时提供，并核对 `checksums.txt`、`manifest.json` 及必要的二进制 digest。工具只解包到
+本次运行的 `$WORK`，经临时 `PATH`/库路径调用，退出时清理；不从发行版 APT 获取这些通用缺失
+工具，也不安装到系统目录。没有可核对的架构资产时明确跳过相关测试。
+Ookla (`speedtest`) 在 `full` 默认运行，`standard` 只有显式选择 `--only ookla` 才运行；
+`--only ookla` 也可从任意配置档单独选择。本机缺失时脚本使用
 Ookla 官方 Packagecloud HTTPS 源，下载并固定校验 GPG 公钥指纹，把临时源、key、索引和缓存
-全部放在 `$WORK`，由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 脚本。`standard`
-档不默认选择 Ookla。交互向导会先确定最终档位和模块，再准备对应组件。其他发行版没有安全
+全部放在 `$WORK`，由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 脚本。
+Ookla 永不进入 `ecs-tools`。交互向导会先确定最终档位和模块，再准备对应组件。其他发行版没有安全
 临时解包器时明确跳过相关测试；可用 `ECS_AUTO_DEPS=0` 直接接受缺失组件警告继续运行。
 下载和解包诊断会收进 `$WORK/package-manager.log`；设置 `ECS_KEEP=1` 可保留现场。
 
 ```bash
-# 禁用自动依赖准备，保留 ecs 的降级行为
+# 禁用自动依赖准备，保留缺失组件警告
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_AUTO_DEPS=0 sh
 
 # 排障时保留临时工作目录（不会安装或清理系统包）
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | ECS_KEEP=1 sh -s -- --profile standard
 ```
 
-`curl | sh` 把信任完全交给下载源，这一点无法靠脚本自身解决——能做的是让下载的二进制
-必须通过 SHA-256 校验，并让依赖只来自系统包管理器配置的仓库；依赖包也只在 WORK 内解包。
-想长期安装二进制和基准
-工具，使用 `install.sh`；它仍然只在显式 `--with-benchmarks` 时持久安装基准组件。路由模块只使用
-NextTrace；`run.sh` 在选中 route/backtrace 且本机缺失时，从官方 GitHub Release 下载对应 Linux
-full asset，校验 API 提供的 SHA-256 digest 后放入本次临时 WORK，退出时清理。
+`curl | sh` 把信任完全交给下载源，这一点无法靠脚本自身解决——能做的是让下载的 `ecs-tools`
+`tar.zst` 通过 `checksums.txt`、`manifest.json` 和必要 digest 校验，并且只在本次 WORK 内
+解包使用。想长期安装二进制和基准工具，使用 `install.sh`；它的 `--with-benchmarks` 当前只安装
+`sysbench`、`fio`、`iperf3`；官方 STREAM 不写入系统，由
+`ecs-tools`/`run.sh` 临时提供，或由用户自行提供；CI 已对七架构构建、manifest、依赖审查和真实
+smoke 做硬校验，运行时若缺少已核对资产则明确标记不可用，不生成替代成绩。路由模块只使用
+官方 NextTrace Tiny；`run.sh` 在选中 route/backtrace 且本机缺失时，
+按已核对的发布 manifest 选择对应 Linux 资产并校验 SHA-256 后放入本次临时 WORK，退出时清理；
+没有已核对的资产就明确跳过，不虚构版本或摘要。
 
 **界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
 `config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按
@@ -114,7 +129,7 @@ ecs --lang en doctor
 ecs list --lang en
 curl -fsSL .../run.sh | sh -s -- --lang en --profile full
 ```
-**选定的语言适用于全部输出**：终端、Markdown、HTML 与 JSON 一致。机器标识符不参与翻译
+**选定的语言适用于全部输出**：终端、JSON、txt、Markdown 与 HTML 一致。机器标识符不参与翻译
 （模块 `id`、`measurement.key`/`method`/`unit`、`status`、`methodology.kind`），
 因此下游按这些字段解析不受语言影响。外部工具的原始输出（sysbench/fio 的 stdout、
 NextTrace JSON 路径）本身就是英文，原样保留——那是证据。
@@ -126,10 +141,11 @@ go build -trimpath -o ecs ./cmd/ecs
 ./ecs
 ```
 
-直接运行编译好的 `ecs` 时，默认执行 `standard` 配置，并在 `./reports` 同时生成：
+直接运行编译好的 `ecs` 时，默认执行 `standard` 配置，并在 `./reports` 同时生成所选的四种格式：
 
 ```text
 ecs-report-YYYYMMDD-HHMMSS.json
+ecs-report-YYYYMMDD-HHMMSS.txt
 ecs-report-YYYYMMDD-HHMMSS.md
 ecs-report-YYYYMMDD-HHMMSS.html
 ```
@@ -152,7 +168,12 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ECS_REPOSITORY=owner/ecs ./install.sh --with-benchmarks
 ```
 
-默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3、mbw 和 ioping。路由依赖不由安装器持久安装；`run.sh` 负责临时准备已校验的 NextTrace。
+默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。`--with-benchmarks` 当前只安装
+`sysbench`、`fio`、`iperf3`，也不把 STREAM 交给系统包管理器；STREAM 由架构匹配的
+`ecs-tools`/`run.sh` 临时提供，或由用户自行提供；缺少系统工具或已核对资产时明确标记不可用，不
+生成替代成绩。`ping` 优先使用
+系统已有实现，缺失时按上述 `ecs-tools` 临时路径处理。路由依赖不由安装器持久安装；`run.sh`
+负责临时准备已校验的 NextTrace Tiny。Ookla 不属于 `ecs-tools`；full 缺失时由 run.sh 走独立官方签名源，standard 仅在显式选择时走该路径。
 
 ## 常用命令
 
@@ -163,14 +184,14 @@ ecs
 # 完整测试，但跳过服务可达性
 ecs --profile full --skip media
 
-# 标准性能主链路：固定使用 sysbench + fio + iperf3
+# 标准性能主链路：官方 STREAM（内存）+ sysbench CPU + fio + iperf3
 ecs --only system,cpu,memory,disk,speed
 
 # 标准档只运行本地性能主链路
 ecs --profile standard --only system,cpu,memory,disk --exposure local
 
-# 只保留 JSON 和 HTML
-ecs --format json,html --output ./my-report
+# 显式写法与默认四格式一致，可用于覆盖输出目录
+ecs --format json,txt,md,html --output ./my-report
 
 # 报告中保留完整主机名与 IP（默认不会）
 ecs --reveal
@@ -188,11 +209,11 @@ ecs --only bgp
 # 四城三网 IPv4/IPv6 回程目标
 ecs --only backtrace -6 --backtrace-city all
 
-# 官方 Ookla 客户端（完整档自动包含；也可单独选择）
+# standard 默认不启用；显式选择可在任意档位启用官方 Ookla 客户端
 ecs --profile full --only ookla --ookla-servers "telecom=123,unicom=456,mobile=789"
 
-# 一键脚本会从官方签名包源下载并临时解包缺失的 speedtest
-curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --yes
+# 仅显式选中 Ookla 时，从官方签名包源临时解包 speedtest
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --only ookla --yes
 
 # 终端友好的纯文本报告（彩色柱状图，自适应终端能力）
 ecs --format txt
@@ -203,12 +224,12 @@ ecs leaderboard --source "我的 VPS 集群" --output baseline.json ./reports
 ecs --score-baseline baseline.json
 
 # 从已有 JSON 重新导出
-ecs render --input ./reports/ecs-report-20260731-120000.json --format txt,md,html
+ecs render --input ./reports/ecs-report-20260731-120000.json --format json,txt,md,html
 
 # 查看全部模块
 ecs list
 
-# 检查 sysbench、fio、iperf3 与路由工具
+# 检查 sysbench、STREAM、fio、iperf3、ping、NextTrace Tiny 与 Ookla（若已安装）
 ecs doctor
 
 # 输出可修改的 JSON 配置样例
@@ -221,8 +242,8 @@ ecs config example
 
 | 配置档 | 默认模块数 | 性能主引擎 | CPU/内存每轮 | 临时磁盘上限 | 选中 `speed` 时的网络口径 |
 | --- | --- | --- | ---: | ---: | --- |
-| `standard` | 16（常规模块） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包/抖动 |
-| `full` | 18（全部模块，含 Ookla） | sysbench + fio + iperf3 | 15 秒 | 2048 MiB | 与 standard 相同；额外包含 cnspeed 和 Ookla |
+| `standard` | 16（常规模块） | STREAM + sysbench CPU + fio + iperf3 | 15 秒 | 2048 MiB | 7 节点、双方向、每方向 15 秒，含 UDP 丢包/抖动 |
+| `full` | 全部 18 个默认模块（含 Ookla） | STREAM + sysbench CPU + fio + iperf3 + Ookla | 15 秒 | 2048 MiB | 与 standard 相同；额外包含 cnspeed 与 Ookla |
 
 两档只改变默认模块数量，不改变已选模块的测试深度：CPU/内存 15 秒，fio 使用完整
 混合/Crystal/ATTO 矩阵，iperf3 使用 7 个节点、双方向 15 秒并附带 UDP 50 Mbps/5 秒；
@@ -240,7 +261,7 @@ fio 文件最多使用测试前可用空间的 20%。iperf3 是按时长尽力�
 | `local` | 不联网 | 什么都看不到 |
 | `public` | 只连公共基础设施 | 你的出口 IP——任何联网都免不了这一层 |
 | `thirdparty`（默认） | 加上第三方情报服务 | 出口 IP，外加**被查询的 IP** 交给十余家商业 API |
-| `any` | 放开上限到所有已登记的第三方服务 | 与 `thirdparty` 相同（为兼容保留的最高级别） |
+| `any` | 放开上限到所有已登记的第三方服务 | 与 `thirdparty` 相同（最高级别） |
 
 级别是**上限过滤器**，作用在 `--profile`/`--only`/`--skip` 选出的模块集上。
 `ecs list` 会列出每个模块的级别。
@@ -252,11 +273,11 @@ ecs --exposure local
 # 全套测试，但不把出口 IP 交给商业风控 API
 ecs --profile full --exposure public
 
-# 完整测试包含 Ookla；其客户端条款与数据处理独立于 ecs
-ecs --profile full --only ookla
+# 显式启用 Ookla；其客户端条款与数据处理独立于 ecs，且不进入 ecs-tools
+ecs --exposure thirdparty --only ookla
 ```
 
-`--exposure any` 是为旧配置保留的最高外联级别；当前所有模块均按 `local`、`public` 或
+`--exposure any` 是最高外联级别；当前所有模块均按 `local`、`public` 或
 `thirdparty` 归类，Ookla 也属于 `thirdparty`，并在报告中保留其独立隐私说明。
 
 被档位带进来的模块超出级别时静默过滤；被你用 `--only` 亲手点名的模块超出级别时
@@ -276,9 +297,9 @@ ecs --profile full --only ookla
 | `system` | 事实采集 | OS/runtime inspection，含 DMI/主板/BIOS、GPU/网卡/块设备、CPU 缓存、VT-x/AMD-V | 某些容器会隐藏 DMI/内核字段；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `bgp` | 第三方评估 | RouteViews 当前 RIB：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本 | 轻量公共观测；不是私有互联全图，也不含历史 MRT；每个协议族约 1 次查询 |
-| `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
-| `memory` | 标准基准 | sysbench memory 单/多线程读写与实际/明确派生时延 + mbw memcpy 带宽；并报告内存使用与可选 Balloon/KSM 证据 | sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运；可选内核接口缺失时明确 unavailable |
-| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 | 所有档位都使用相同 10 秒完整 mixed/Crystal/ATTO 口径；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
+| `cpu` | 标准基准 | sysbench CPU，prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较；不派生并行效率 |
+| `memory` | 标准基准 | 官方 STREAM 5.10 的 10,000,000 elements/10 iterations，`Copy`/`Scale`/`Add`/`Triad` 分别 1T/NT；缺失时模块明确告警且不生成替代成绩 | STREAM 原始单位、线程和版本必须留在报告证据中 |
+| `disk` | 标准基准 | fio Direct I/O 基础/YABS 口径 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 4KiB QD1 latency + 磁盘库存 | 矩阵和 4KiB QD1 均由同一 fio JSON 产出；只与相同 fio/ecs 参数和文件系统比较 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向 + UDP 50 Mbps/5 秒、多节点 | 公共节点可能繁忙；按时长测试不封顶流量；所有档位同一节点/时长口径 |
@@ -287,18 +308,18 @@ ecs --profile full --only ookla
 | `nat` | 协议测量 | 自实现 STUN（RFC 5389/5780）映射与过滤行为发现 | 只反映 UDP 路径，不代表 TCP；服务器不支持 CHANGE-REQUEST 时过滤行为报"未知"而不硬判 |
 | `apps` | 协议测量 | Telegram 五个 DC 与代码/镜像/软件源/证书服务的 TCP 握手 | 可达不等于可用；CDN 会让握手在边缘节点完成 |
 | `cnspeed` | 协议测量 | 三网就近节点 HTTP 下载（显式选中即可，8 秒/100 MiB） | 到具体节点的带宽，不代表到该运营商全网；清单来自社区且实时抓取 |
-| `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；缺失时 run.sh 可通过临时签名官方源准备 | standard 默认不启用，full 或显式 `--only ookla` 可运行；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
+| `ookla` | 协议测量 | 本机官方 Ookla Speedtest CLI，可按用户提供的电信/联通/移动服务器 ID 串行测试；full 默认运行，缺失时 run.sh 可通过临时签名官方源准备 | standard 默认不运行；full 默认运行；`--only ookla` 可从任意档位显式选择；不进入 `ecs-tools`；Ookla 独立处理测量数据，不能称为零上传；会产生实际流量 |
 | `media` | 启发式判断 | 33 个平台的分平台规则，含 Netflix 自制剧判定，可按 `--media-region` 筛选 | 不等同账号权益、注册、支付或实际播放；规则分强/弱证据标注 |
-| `route` | 协议诊断 | NextTrace；正向路径快照 | 不等同回程，也不是性能基准 |
-| `backtrace` | 启发式判断 | NextTrace 追踪四城三网 IPv4/IPv6 参考目标 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
+| `route` | 协议诊断 | 官方 NextTrace Tiny；正向路径快照 | 不等同回程，也不是性能基准 |
+| `backtrace` | 启发式判断 | 官方 NextTrace Tiny，追踪四城三网 IPv4/IPv6 参考目标 + 骨干网段特征表，可按 `--backtrace-city` 选北京/广州/上海/成都 | 主动探测推断，非反向抓包；IPv6 目标依赖 DNS/IPv6 出口；未命中特征返回未识别 |
 
-模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed/ookla）、
+模块按干扰特性分组调度：性能基准（cpu/memory/disk）、大流量测速（speed/cnspeed/显式 ookla）、
 路由类（route/backtrace）各自独占运行，避免互相污染——NextTrace 探测对并发较敏感，实测并发
 会让关键跳全部无响应。轻量探测（dns/latency/ports/nat/blacklist/apps/media/network/bgp）
 并行执行，它们等的是网络往返，并行只是把等待时间叠起来。
 本机实测这组模块串行需 37.7 秒、并行 12.1 秒，省 67%。
 
-任意配置档缺少标准工具时，对应模块显示黄色“标准基准未运行”警告，不产生替代成绩。所有终端、JSON、Markdown、HTML 都保留 `methodology.kind`、引擎、工作负载和可比范围。
+任意配置档缺少标准工具时，对应模块显示黄色“标准基准未运行”警告，不产生替代成绩。所有终端、JSON、txt、Markdown、HTML 都保留 `methodology.kind`、引擎、工作负载和可比范围。
 
 CPU、内存、磁盘和网络吞吐仍展示标准工具直接返回或按其公开单位换算的原始指标；网络吞吐逐节点、逐方向保存，不跨节点求平均或中位数。综合评分是单独的、相对所选排行榜参考均值的可解释视图，不会改写这些原始测量。
 
@@ -362,8 +383,8 @@ JSON 是事实来源，schema 当前为 `ecs.report/v1`。四种格式由同一�
 导出不依赖 Pandoc、Node.js 或浏览器：
 
 ```bash
-ecs --format txt,md,html,json
-ecs render --input report.json --format txt,md,html --output ./exported
+ecs --format json,txt,md,html
+ecs render --input report.json --format json,txt,md,html --output ./exported
 ```
 
 详细字段见 [报告 schema](docs/schema.md)。
@@ -390,26 +411,18 @@ NO_COLOR=1 ecs                    # 遵循跨工具约定，一律关闭
 
 ### 综合评分
 
-分项分是**一步除法**：实测值 ÷ 排行榜参考均值 × 1000（延迟类为排行榜参考均值 ÷ 实测值 × 1000），读者可以手算复核。四个维度（CPU、内存、磁盘、带宽）均等权重，总分是已覆盖维度的算术平均。磁盘内部按 legacy、`fio_mixed_*`、Crystal、ATTO 四个等权子组平均；内存按 memcpy、写、读、时延四个等权子组平均。混合矩阵的 8 个单元、ATTO 的 36 个读写单元都不会按数量放大，缺失项会显式列出且不补零。当前内嵌排行榜参考已包含本机完整模块测试的新矩阵，但只有 1 台 Oracle VPS 样本；收集更多提交后应重建 baseline。
+分项分是**一步除法**：实测值 ÷ 排行榜参考均值 × 1000（延迟类为排行榜参考均值 ÷ 实测值 × 1000），读者可以手算复核。四个维度（CPU、内存、磁盘、带宽）均等权重，总分是已覆盖维度的算术平均。磁盘内部按基线、`fio_mixed_*`、Crystal、ATTO 四个等权子组平均；内存按 STREAM 的 Copy、Scale、Add、Triad 四个等权子组平均，每个 kernel 的 1T/NT 取中位数。缺失的 STREAM 基线或指标会显式列出且不补零。混合矩阵的 8 个单元、ATTO 的 72 个读写单元都不会按数量放大。收集更多真实 STREAM 提交后应重建 baseline。
 
-```
-总分              570   基于 3/4 个维度
-CPU           ░░░░░░░·················      286
-    单线程事件率                  785.9 events/s  排行榜参考均值的 29%
-内存          ▒▒▒▒▒▒▒▒▒▒▒▒▒···········      556
-磁盘          █████████████████████···      870
-带宽          未测（未计入）
-```
+示例分数会随当前内嵌基线和报告覆盖度变化；请直接使用 `ecs render --format txt` 查看本次报告的真实分数，不能把文档示例当作基线数据。
 
 三条规则让分数可解释：
 
-- **只累加真正跑过的维度**，覆盖度与分数并排显示。缺的维度既不按 0 也不按满分——
-  参考实现里出现过“总分 3867 = CPU N/A + GPU N/A + 内存 2850 + 磁盘 1017”，两项缺失却照给总分；
+- **只累加真正跑过的维度**，覆盖度与分数并排显示。缺的维度既不按 0 也不按满分，缺失原因会直接列出；
 - **分数不封顶**，跑赢排行榜参考均值一倍就是两倍分，截断会抹掉真实差距；
-- **只在有分数分布时显示排行榜排名**。排行榜参考会保存不含主机标识的样本分数；少于 5 台或旧参考未保存分布时明确显示样本不足/暂不排名，不凭空捏造百分位。
+- **只在有分数分布时显示排行榜排名**。排行榜参考会保存不含主机标识的样本分数；少于 5 台或参考未保存分布时明确显示样本不足/暂不排名，不凭空捏造百分位。
 
 **排行榜参考决定分数的含义**，因此它是可替换的数据而不是算法里的常数。当前内嵌排行榜参考是
-Oracle Cloud Classic Free Tier 的单台 4 vCPU/约 24 GiB VPS 参考快照，样本数为 1，
+Oracle Cloud Classic Free Tier 的 2 份 4 vCPU/约 24 GiB VPS 当前参考样本，
 只能用于自查；横向比较仍应使用多台真实 VPS 重建：
 
 ```bash
@@ -477,13 +490,13 @@ fork 仓库把文件放进 `submissions/YYYY-MM/` 开 PR，CI 校验格式、指
 CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只标记不阻断**。
 
 `ecs leaderboard` 会逐项列出样本数，并指出这批报告没覆盖到的指标——某个指标只有一两台
-机器测到时，它对排行榜参考的代表性远低于其他项，这件事必须看得见。样本数为 1 时报告会明确提示
-分数仅供自查。旧命令 `ecs baseline` 仍是兼容别名；输出文件名 `baseline.json`、`--score-baseline`
-参数和 `ecs.baseline/v1` schema 均保持不变。
+机器测到时，它对排行榜参考的代表性远低于其他项，这件事必须看得见。样本数不足时报告会明确提示
+分数仅供自查。`ecs leaderboard`/`ecs baseline` 都可生成当前 `ecs.baseline/v1` 基线，
+输出文件名使用 `baseline.json`，评分通过 `--score-baseline` 指定。
 
 ## 隐私与网络请求
 
-默认情况下，主机名显示为 `hidden`，IPv4 显示为 `A.B.C.x`，IPv6 只保留 `/48` 前缀。遮盖在写入 JSON 之前完成，因此默认生成的三个文件都不保存完整值。
+默认情况下，主机名显示为 `hidden`，IPv4 显示为 `A.B.C.x`，IPv6 只保留 `/48` 前缀。遮盖在写入 JSON 之前完成，因此默认生成的所有选中格式（JSON/txt/md/html）都不保存完整值。
 
 遮盖同时覆盖表格与原始命令输出：`route` 与 `backtrace` 保存的 NextTrace JSON 原文会逐个 IP 按段遮盖，既不泄露完整地址，又保留 `59.43`、`202.97` 这类前缀供你复核线路判定是否成立。
 
@@ -496,15 +509,15 @@ CI 用 `--annotate` 把结果转成 GitHub 注解显示在 PR 页面上，**只�
 - `speed`：使用 YABS 维护清单中的 Clouvider/Leaseweb 公共 iperf3 节点；
 - `ports`：Example、GitHub、Cloudflare DNS、Gmail 的公开端口；
 - `media`：被检测服务自己的公开网页；
-- `route`：配置中的路由目标；若使用 NextTrace，其在线 GeoIP 行为由 NextTrace 自身决定；
+- `route`：配置中的路由目标；NextTrace Tiny 的在线 GeoIP 行为由 NextTrace 自身决定；
 - `backtrace`：电信、联通、移动的公开参考 IP，用于识别路径上的骨干线路；
 - `bgp`：RouteViews 当前公共 RIB API，查询本机 IPv4/IPv6 出口的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS 路径样本；只做当前公共观测，不上传 ecs 报告；
 - `cnspeed`：从 GitHub 抓取社区维护的中国测速节点清单，并对选中的三网节点做 HTTP 下载；
-- `ookla`：选中后运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源下载并解包到 WORK，退出时删除临时目录，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；
+- `ookla`：`full` 默认或显式 `--only ookla` 选中后运行本机官方 speedtest 客户端；`run.sh` 缺失时仅从临时的 Ookla 官方签名源下载并解包到 WORK，退出时删除临时目录，客户端会连接 Ookla 测量服务并处理测速所需元数据，ecs 不保留原始 JSON；该客户端不进入 `ecs-tools`；
 - `apps`：Telegram 官方 DC 域名，以及 GitHub、Docker Hub、npm、PyPI、Debian/Ubuntu/Alpine 源、Let's Encrypt、Cloudflare 的 TCP 端口；
 - `blacklist`：17 个 DNS 黑名单的解析服务，只把反转后的出口 IP 作为域名查询；
 - `nat`：公共 STUN 服务器（小米、1&1、Hoiio、Google、Cloudflare），只发送 STUN Binding 请求；
-- `latency`：除 TCP 建连外，还会调用系统 `ping` 对同一目标发 ICMP。
+- `latency`：优先调用系统 `ping` 对同一目标发 ICMP；支持精简 ping（如 busybox）的三段统计行；系统 ping 完全不可用时只保留 TCP 建连，并明确标记，不用 TCP 数字冒充 ICMP。
 
 显式选择协议族时，HTTP、TCP、UDP、iperf3、路由工具和能按族解析的目标都会使用对应的 `tcp4`/`tcp6`、`udp4`/`udp6` 或 `-4`/`-6` 参数；无法支持该协议族的固定目标会如实显示失败/跳过，不会用另一族的结果替代。
 
@@ -523,6 +536,8 @@ ecs --config ecs.json
 
 配置文件支持覆盖资源参数，以及 DNS、延迟和路由目标。例如：
 
+下面的示例显式写出 JSON/txt/Markdown/HTML 四种输出，与默认四格式一致，也可用于覆盖配置文件中的格式。
+
 ```json
 {
   "profile": "standard",
@@ -530,7 +545,7 @@ ecs --config ecs.json
   "ip_version": "auto",
   "skip": ["media"],
   "ip_quality_sources": ["all"],
-  "formats": ["json", "md", "html"],
+  "formats": ["json", "txt", "md", "html"],
   "output": "./reports",
   "disk_path": "/var/tmp",
   "iperf_duration": "5s",
@@ -590,7 +605,13 @@ make build
 make cross
 ```
 
-`scripts/package.sh VERSION` 会生成 Linux 七个架构的压缩包和 `checksums.txt`。GitHub Actions 同时在最低 Go 1.22 和当前稳定版测试，并在 `v*` 标签上生成 Release。
+`scripts/package.sh VERSION` 的发布契约是 Linux 七个架构；`ecs-tools` 每个架构 `tar.zst` 包的
+`manifest.json` 记录 sysbench、官方 STREAM、fio、iperf3、NextTrace Tiny、ping 六项，
+并随包携带 `LICENSE`、`NOTICE` 和 CI 填充的 `LICENSES/`。Ookla 不进入 `ecs-tools`，只在
+显式启用时调用本机官方客户端。CI 只对实际生成的资产写入 `checksums.txt`，并填充 manifest
+中的版本、来源、许可证和 SHA-256；源码和本地 `dist/` 不承诺任何已发布版本或资产。报告
+仍只写本地，输出格式固定保持 JSON/txt/md/html，schema 仍为 `ecs.report/v1`；新增字段
+保持可选，工作负载变化只升级 `measurement.method`，破坏性变更才升级 schema。
 
 ## 调研与取舍
 

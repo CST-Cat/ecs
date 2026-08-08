@@ -40,7 +40,7 @@ func testBaseline() Baseline {
 		Schema: BaselineSchema, Source: "test", SampleCount: 3,
 		Metrics: map[string]float64{
 			"cpu_single": 100, "cpu_multi": 100,
-			"memory_copy": 100, "memory_write": 100,
+			"memory_copy": 100, "memory_scale": 100, "memory_add": 100, "memory_triad": 100,
 			"disk_seq_read": 100, "disk_seq_write": 100,
 			"disk_rand_read_iops": 100, "disk_rand_write_iops": 100,
 			"bandwidth_download": 100, "bandwidth_upload": 100,
@@ -97,9 +97,6 @@ func TestDimensionsIncludeCompleteFioMixedMatrix(t *testing.T) {
 
 func expandedMemoryBaseline() Baseline {
 	baseline := testBaseline()
-	baseline.Metrics["memory_write_multi"] = 100
-	baseline.Metrics["memory_read"] = 100
-	baseline.Metrics["memory_latency"] = 2
 	return baseline
 }
 
@@ -212,17 +209,16 @@ func TestBandwidthAggregatesByMedian(t *testing.T) {
 	}
 }
 
-func TestMemoryExpansionUsesEqualSubgroupsAndLatencyDirection(t *testing.T) {
+func TestMemoryUsesStreamKernelAggregates(t *testing.T) {
 	data := reportWith(benchResult("memory", model.StatusOK, map[string]float64{
-		"mbw_memcpy_mib_s":                        100,
-		"sysbench_memory_write_single_mib_s":      100,
-		"sysbench_memory_write_multi_mib_s":       300,
-		"sysbench_memory_read_single_mib_s":       200,
-		"sysbench_memory_read_multi_mib_s":        400,
-		"sysbench_memory_write_single_latency_ms": 2,
-		"sysbench_memory_write_multi_latency_ms":  1,
-		"sysbench_memory_read_single_latency_ms":  2,
-		"sysbench_memory_read_multi_latency_ms":   1,
+		"stream_copy_1t_mib_s":  100,
+		"stream_copy_nt_mib_s":  300,
+		"stream_scale_1t_mib_s": 100,
+		"stream_scale_nt_mib_s": 300,
+		"stream_add_1t_mib_s":   100,
+		"stream_add_nt_mib_s":   300,
+		"stream_triad_1t_mib_s": 100,
+		"stream_triad_nt_mib_s": 300,
 	}))
 	got := Compute(data, expandedMemoryBaseline())
 	if got == nil {
@@ -239,18 +235,18 @@ func TestMemoryExpansionUsesEqualSubgroupsAndLatencyDirection(t *testing.T) {
 		t.Fatalf("memory dimension missing: %+v", got)
 	}
 	if len(memory.Groups) != 4 {
-		t.Fatalf("memory groups = %+v, want copy/write/read/latency", memory.Groups)
+		t.Fatalf("memory groups = %+v, want copy/scale/add/triad", memory.Groups)
 	}
 	groupScores := make(map[string]float64)
 	for _, group := range memory.Groups {
 		groupScores[group.Key] = group.Score
 	}
-	for group, want := range map[string]float64{"copy": 1000, "write": 2000, "read": 3000, "latency": 1333.3333333333333} {
+	for group, want := range map[string]float64{"copy": 2000, "scale": 2000, "add": 2000, "triad": 2000} {
 		if math.Abs(groupScores[group]-want) > 0.001 {
 			t.Fatalf("memory group %s = %v, want %v", group, groupScores[group], want)
 		}
 	}
-	wantMemoryScore := (1000 + 2000 + 3000 + 1333.3333333333333) / 4
+	wantMemoryScore := 2000.0
 	if math.Abs(memory.Score-wantMemoryScore) > 0.001 {
 		t.Fatalf("memory score = %v, want equal subgroup average %v", memory.Score, wantMemoryScore)
 	}
@@ -294,40 +290,11 @@ func TestDiskCrystalAndATTOUseEqualSubgroups(t *testing.T) {
 	for _, group := range disk.Groups {
 		groups[group.Key] = group
 	}
-	if groups["legacy"].MetricCount != 4 || groups["crystal"].MetricCount != 16 || groups["mixed"].MetricCount != 8 || groups["atto"].MetricCount != 72 {
+	if groups["baseline"].MetricCount != 4 || groups["crystal"].MetricCount != 16 || groups["mixed"].MetricCount != 8 || groups["atto"].MetricCount != 72 {
 		t.Fatalf("matrix cells were not grouped: %+v", groups)
 	}
 	if math.Abs(disk.Score-1250) > 0.001 {
-		t.Fatalf("disk score = %v, want equal legacy/mixed/Crystal/ATTO average", disk.Score)
-	}
-}
-
-func TestOldBaselinesExposeMissingExpandedMetrics(t *testing.T) {
-	data := reportWith(benchResult("memory", model.StatusOK, map[string]float64{
-		"mbw_memcpy_mib_s":                   100,
-		"sysbench_memory_write_single_mib_s": 100,
-	}))
-	got := Compute(data, testBaseline())
-	if got == nil {
-		t.Fatal("legacy memory metrics should still score")
-	}
-	var memory *DimensionScore
-	for index := range got.Dimensions {
-		if got.Dimensions[index].Key == "memory" {
-			memory = &got.Dimensions[index]
-			break
-		}
-	}
-	if memory == nil || memory.Missing || len(memory.MissingMetrics) < 3 {
-		t.Fatalf("missing expanded metrics were not explicit: %+v", memory)
-	}
-	if got.Complete {
-		t.Fatal("a legacy baseline without expanded metrics must not claim complete coverage")
-	}
-	for _, metric := range memory.Metrics {
-		if metric.Score == 0 || metric.Baseline == 0 {
-			t.Fatalf("missing metrics must not be represented as zero scores: %+v", metric)
-		}
+		t.Fatalf("disk score = %v, want equal baseline/mixed/Crystal/ATTO average", disk.Score)
 	}
 }
 
@@ -393,7 +360,7 @@ func TestBuildBaselineStoresScoreDistributionAndRanks(t *testing.T) {
 	}
 }
 
-func TestComputeDoesNotInventRankForSparseOrLegacyReference(t *testing.T) {
+func TestComputeDoesNotInventRankForSparseReference(t *testing.T) {
 	reports := []model.Report{
 		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 100})),
 		reportWith(benchResult("cpu", model.StatusOK, map[string]float64{"sysbench_cpu_single_events_s": 200})),
@@ -407,16 +374,16 @@ func TestComputeDoesNotInventRankForSparseOrLegacyReference(t *testing.T) {
 	if got == nil || got.RankStatus != RankStatusInsufficient || got.RankSamples != 3 || got.RankMinSamples != DefaultRankMinSamples {
 		t.Fatalf("sparse rank = %+v", got)
 	}
-	legacy := testBaseline()
-	legacyScore := Compute(reports[0], legacy)
-	if legacyScore == nil || legacyScore.RankStatus != RankStatusInsufficient || legacyScore.RankSamples != 3 || legacyScore.TopPercent != 0 {
-		t.Fatalf("legacy sparse rank should be insufficient without distribution: %+v", legacyScore)
+	noDistribution := testBaseline()
+	noDistributionScore := Compute(reports[0], noDistribution)
+	if noDistributionScore == nil || noDistributionScore.RankStatus != RankStatusInsufficient || noDistributionScore.RankSamples != 3 || noDistributionScore.TopPercent != 0 {
+		t.Fatalf("sparse rank should be insufficient without distribution: %+v", noDistributionScore)
 	}
-	legacyLarge := legacy
-	legacyLarge.SampleCount = 10
-	legacyLargeScore := Compute(reports[0], legacyLarge)
-	if legacyLargeScore == nil || legacyLargeScore.RankStatus != RankStatusUnavailable || legacyLargeScore.TopPercent != 0 {
-		t.Fatalf("legacy rank should be unavailable without distribution: %+v", legacyLargeScore)
+	noDistributionLarge := noDistribution
+	noDistributionLarge.SampleCount = 10
+	noDistributionLargeScore := Compute(reports[0], noDistributionLarge)
+	if noDistributionLargeScore == nil || noDistributionLargeScore.RankStatus != RankStatusUnavailable || noDistributionLargeScore.TopPercent != 0 {
+		t.Fatalf("rank should be unavailable without distribution: %+v", noDistributionLargeScore)
 	}
 }
 
@@ -461,9 +428,8 @@ func TestBuiltinBaselineCoversEveryMetric(t *testing.T) {
 	for _, dimension := range Dimensions() {
 		for _, metric := range dimension.Metrics {
 			if metric.Optional {
-				// The embedded baseline predates the Crystal/ATTO and memory
-				// latency expansion. Missing optional values are surfaced by
-				// Compute and populated by newly aggregated baselines.
+				// The fallback contains only required current metrics; optional
+				// matrix and STREAM values come from aggregation.
 				continue
 			}
 			if value, ok := baseline.Metrics[metric.Key]; !ok || value <= 0 {
@@ -474,8 +440,8 @@ func TestBuiltinBaselineCoversEveryMetric(t *testing.T) {
 	if !baseline.IsBuiltin() {
 		t.Fatal("内置基线应能被识别，报告才能提示它只是单机快照")
 	}
-	if baseline.SampleCount != 1 {
-		t.Fatalf("内置基线样本数 = %d，应为 1", baseline.SampleCount)
+	if baseline.SampleCount != 2 {
+		t.Fatalf("内置基线样本数 = %d，应为 2", baseline.SampleCount)
 	}
 }
 

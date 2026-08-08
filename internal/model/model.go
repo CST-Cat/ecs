@@ -244,19 +244,6 @@ func RedactedCopy(in Report, reveal bool) Report {
 	return out
 }
 
-// StripRawOutput removes unbounded external-tool transcripts before a report
-// is rendered or written. Structured fields, tables, notes, sources and
-// errors remain available for comparison and diagnosis; TextBlocks stays in
-// the schema so older JSON can still be decoded by callers that need it.
-func StripRawOutput(report *Report) {
-	if report == nil {
-		return
-	}
-	for index := range report.Results {
-		report.Results[index].TextBlocks = nil
-	}
-}
-
 var (
 	textIPv4Pattern = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d{1,3})\b`)
 	textIPv6Pattern = regexp.MustCompile(`\b([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){2})(:[0-9a-fA-F:]{2,})\b`)

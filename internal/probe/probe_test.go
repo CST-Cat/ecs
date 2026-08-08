@@ -71,8 +71,12 @@ func TestHelpers(t *testing.T) {
 	if got := sanitizeCommandOutput([]byte("\x1b[31m 1  1.1.1.1\x1b[0m\n")); got != "1  1.1.1.1" {
 		t.Fatalf("sanitized = %q", got)
 	}
-	if got := routeHopCount("nexttrace", `{"Hops":[[{"TTL":1}],[],[{"TTL":3}]]}`); got != 2 {
-		t.Fatalf("nexttrace hops = %d", got)
+	routeFixture := `{"Hops":[[{"TTL":1,"Address":"10.0.0.1"}],[],[{"TTL":3,"Address":"192.0.2.1"}]]}`
+	if got := routeHopCount("nexttrace", routeFixture); got != 0 {
+		t.Fatalf("unsupported nexttrace hops = %d", got)
+	}
+	if got := routeHopCount("nexttrace-tiny", routeFixture); got != 2 {
+		t.Fatalf("nexttrace-tiny hops = %d", got)
 	}
 	if got := parseUintDefault("2048", 0); got != 2048 {
 		t.Fatalf("uint = %d", got)
@@ -132,7 +136,7 @@ func TestFIOJSONHelpers(t *testing.T) {
 	      "bw": 2048,
 	      "bw_bytes": 2097152,
 	      "iops": 512,
-	      "clat_ns": {"percentile": {"95.000000": 2500000}}
+	      "clat_ns": {"mean": 1500000, "max": 4000000, "percentile": {"95.000000": 2500000, "99.000000": 3000000}}
 	    }
 	  }]
 	}`)
@@ -147,6 +151,10 @@ func TestFIOJSONHelpers(t *testing.T) {
 	}
 	if got := fioP95Milliseconds(output.Jobs[0].Read); got != 2.5 {
 		t.Fatalf("fio p95 = %f", got)
+	}
+	stats, ok := fioLatencyStatsFor(output.Jobs[0].Read)
+	if !ok || !stats.AvgOK || !stats.P95OK || !stats.P99OK || !stats.MaxOK || stats.AvgMS != 1.5 || stats.P95MS != 2.5 || stats.P99MS != 3 || stats.MaxMS != 4 {
+		t.Fatalf("fio latency stats = %+v, ok=%v", stats, ok)
 	}
 	asyncEngine := fioEngine{Name: "libaio", AsyncQueue: true, Detected: true}
 	plan := fioJobPlan()
@@ -243,6 +251,44 @@ func TestDetectFIOEngineAgreesWithEnghelp(t *testing.T) {
 	t.Logf("fio %s 探测到引擎 %s（异步=%v）", fioPath, engine.Name, engine.AsyncQueue)
 }
 
+// 真实 fio 端到端：单独跑固定 QD1 作业，快速验证 fio JSON 的 clat 统计和
+// 参数口径；完整矩阵由 TestRunFIODiskWithRealFIO 覆盖。
+func TestRunFIOD1LatencyWithRealFIO(t *testing.T) {
+	fioPath := requireTool(t, "fio")
+	file, err := os.CreateTemp(t.TempDir(), ".ecs-fio-latency-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := file.Name()
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	engine := detectFIOEngine(context.Background(), fioPath)
+	plan := []fioJobSpec{{Name: fioQD1LatencyJobName, RW: "randread", BlockSize: "4k", IODepth: 1, NumJobs: 1}}
+	args := fioArguments(filename, 16*1024*1024, time.Second, engine, plan)
+	command := exec.Command(fioPath, args...)
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("real fio QD1 run: %v", err)
+	}
+	jobs, err := parseFIOJobs(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := jobs[fioQD1LatencyJobName]
+	if !ok {
+		t.Fatalf("real fio output missing %q: %v", fioQD1LatencyJobName, jobs)
+	}
+	stats, ok := fioLatencyStatsFor(job.Read)
+	if !ok || !stats.AvgOK || !stats.P95OK || !stats.P99OK || !stats.MaxOK {
+		t.Fatalf("real fio QD1 clat stats = %+v, ok=%v", stats, ok)
+	}
+	if stats.AvgMS <= 0 || stats.P95MS <= 0 || stats.P99MS <= 0 || stats.MaxMS <= 0 {
+		t.Fatalf("real fio QD1 clat stats are non-positive: %+v", stats)
+	}
+}
+
 // 真实 fio 端到端：报告标注的队列深度必须与实际生效的引擎能力一致。
 //
 // 断言写成不变式而不是硬编码某个引擎名——同一份代码在有 io_uring 的内核、
@@ -284,6 +330,12 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 	}
 	randomMethod := methods["fio_random_read_4k_iops"]
 	mixedMethod := methods["fio_mixed_4k_read_mib_s"]
+	for _, key := range []string{fioQD1LatencyAvgKey, fioQD1LatencyP95Key, fioQD1LatencyP99Key, fioQD1LatencyMaxKey} {
+		measurement, ok := findMeasurement(result.Measurements, key)
+		if !ok || measurement.Value <= 0 || measurement.Unit != "ms" || measurement.Method != fioQD1LatencyMethod || measurement.HigherIsBetter == nil || *measurement.HigherIsBetter {
+			t.Fatalf("real fio QD1 latency contract for %q = %+v", key, measurement)
+		}
+	}
 	if engine.AsyncQueue {
 		if !strings.Contains(randomMethod, "qd32") || !strings.Contains(mixedMethod, "qd64") {
 			t.Fatalf("async methods = %q / %q, want qd32 / qd64", randomMethod, mixedMethod)
@@ -311,10 +363,10 @@ func TestRunFIODiskWithRealFIO(t *testing.T) {
 		}
 	}
 
-	// 四项基础指标 + 两个 P95 + 四档混合各读写两项 +
+	// 四项基础指标 + 两个 qd32 P95 字段 + 四项固定 QD1 延迟 + 四档混合各读写两项 +
 	// Crystal 8 个读写单元 × 吞吐/IOPS + ATTO 36 个读写单元 × 吞吐/IOPS。
-	if len(result.Measurements) != 102 {
-		t.Fatalf("fio measurements = %d, want 102: %+v", len(result.Measurements), result.Measurements)
+	if len(result.Measurements) != 106 {
+		t.Fatalf("fio measurements = %d, want 106: %+v", len(result.Measurements), result.Measurements)
 	}
 	measurementKeys := make(map[string]bool, len(result.Measurements))
 	for _, measurement := range result.Measurements {
@@ -398,9 +450,6 @@ Latency (ms):
 	if rate, ok := parseFirstFloat(sysbenchEventsRatePattern, cpuOutput); !ok || rate != 1234.5 {
 		t.Fatalf("CPU rate = %f, %v", rate, ok)
 	}
-	if rate := memoryRateToMiB(2, "GiB"); rate != 2048 {
-		t.Fatalf("memory rate = %f", rate)
-	}
 }
 
 // 真实 sysbench 端到端：解析器必须认得当前安装版本的实际输出格式。
@@ -418,8 +467,10 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
 	}
 	cpuValues := make(map[string]float64, len(cpu.Measurements))
+	cpuMeasurements := make(map[string]model.Measurement, len(cpu.Measurements))
 	for _, measurement := range cpu.Measurements {
 		cpuValues[measurement.Key] = measurement.Value
+		cpuMeasurements[measurement.Key] = measurement
 		if strings.Contains(measurement.Key, "efficiency") {
 			t.Fatalf("CPU must not emit derived score: %+v", measurement)
 		}
@@ -437,8 +488,41 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	if cpuValues["sysbench_cpu_single_events_s"] <= 0 {
 		t.Fatalf("real sysbench returned a non-positive event rate: %+v", cpu.Measurements)
 	}
+	for _, key := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
+		measurement := cpuMeasurements[key]
+		if measurement.Unit != "events/s" || measurement.Method != "sysbench-cpu-prime20000-v1" ||
+			measurement.HigherIsBetter == nil || !*measurement.HigherIsBetter {
+			t.Fatalf("CPU measurement contract for %q = %+v", key, measurement)
+		}
+	}
+	stealMeasurement := cpuMeasurements["cpu_steal_percent_during_test"]
+	if stealMeasurement.Unit != "%" || stealMeasurement.Method != "proc-stat-steal-delta-v1" ||
+		stealMeasurement.HigherIsBetter == nil || *stealMeasurement.HigherIsBetter {
+		t.Fatalf("CPU steal measurement contract = %+v", stealMeasurement)
+	}
 	if steal := cpuValues["cpu_steal_percent_during_test"]; steal < 0 || steal > 100 {
 		t.Fatalf("steal percentage out of range: %f", steal)
+	}
+	fieldValues := make(map[string]string, len(cpu.Fields))
+	for _, field := range cpu.Fields {
+		fieldValues[field.Key] = field.Value
+	}
+	for _, key := range []string{"engine", "version", "binary_sha256", "threads", "duration", "prime", "single_events", "multi_events"} {
+		if fieldValues[key] == "" {
+			t.Fatalf("sysbench CPU missing field %q: %+v", key, cpu.Fields)
+		}
+	}
+	if got, want := fieldValues["engine"], "sysbench"; got != want {
+		t.Fatalf("sysbench engine field = %q, want %q", got, want)
+	}
+	if got, want := fieldValues["threads"], "1 / "+strconv.Itoa(detectCPUAllowance().Threads); got != want {
+		t.Fatalf("sysbench threads field = %q, want %q", got, want)
+	}
+	if got, want := fieldValues["duration"], "1s"; got != want {
+		t.Fatalf("sysbench duration field = %q, want %q", got, want)
+	}
+	if got, want := fieldValues["prime"], "20000"; got != want {
+		t.Fatalf("sysbench prime field = %q, want %q", got, want)
 	}
 	if version := resultField(cpu, "version"); !strings.Contains(strings.ToLower(version), "sysbench") {
 		t.Fatalf("sysbench version field = %q", version)
@@ -446,22 +530,15 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	if got := resultField(cpu, "arguments"); got != "" {
 		t.Fatalf("sysbench report must omit command arguments, got %q", got)
 	}
-	if len(cpu.TextBlocks) == 0 || !strings.Contains(cpu.TextBlocks[0].Content, "events per second") {
-		t.Fatalf("raw sysbench output was not preserved: %+v", cpu.TextBlocks)
+	if len(cpu.TextBlocks) != 2 {
+		t.Fatalf("raw sysbench output blocks = %d, want 2: %+v", len(cpu.TextBlocks), cpu.TextBlocks)
 	}
-
-	memory := runSysbenchMemory(context.Background(), Environment{Config: cfg}, sysbenchPath)
-	if memory.Status != model.StatusOK || memory.Methodology.Kind != "standard-benchmark" {
-		t.Fatalf("sysbench memory result = %+v", memory)
-	}
-	if len(memory.Measurements) < 8 {
-		t.Fatalf("sysbench memory measurements = %d, want throughput plus latency for four contexts: %+v", len(memory.Measurements), memory.Measurements)
-	}
-	for _, measurement := range memory.Measurements {
-		if measurement.Value <= 0 {
-			t.Fatalf("real sysbench memory returned a non-positive rate: %+v", measurement)
+	for _, block := range cpu.TextBlocks {
+		if !strings.Contains(block.Content, "events per second") {
+			t.Fatalf("raw sysbench output lost events/s statistic: %+v", cpu.TextBlocks)
 		}
 	}
+
 }
 
 // steal 采样必须夹住压测窗口，且累计口径与增量口径分开。

@@ -49,6 +49,25 @@ func TestParseAndFallback(t *testing.T) {
 	}
 }
 
+func TestFullProfileTranslationKeepsOoklaDefaultAndExplicitSelection(t *testing.T) {
+	for _, testCase := range []struct {
+		lang      Lang
+		required  string
+		forbidden string
+	}{
+		{LangZH, "含 Ookla；--only ookla 可在任意配置档显式选择", "不含 Ookla"},
+		{LangEN, "including Ookla; --only ookla may select it explicitly from any profile", "Ookla excluded"},
+	} {
+		text := TL(testCase.lang, "profile.full")
+		if !strings.Contains(text, testCase.required) {
+			t.Errorf("profile.full %s text %q lacks %q", testCase.lang, text, testCase.required)
+		}
+		if strings.Contains(text, testCase.forbidden) {
+			t.Errorf("profile.full %s text retains stale wording %q: %q", testCase.lang, testCase.forbidden, text)
+		}
+	}
+}
+
 // 未登记的 key 必须原样可见，绝不能变成空串——空串会让信息凭空消失。
 func TestMissingKeyStaysVisible(t *testing.T) {
 	Set(LangEN)

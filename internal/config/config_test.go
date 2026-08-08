@@ -19,6 +19,9 @@ func TestDefaultsAndModuleSelection(t *testing.T) {
 	if cfg.IPVersion != IPVersionAuto {
 		t.Fatalf("default IP version = %q", cfg.IPVersion)
 	}
+	if want := []string{"json", "txt", "md", "html"}; !reflect.DeepEqual(cfg.Formats, want) {
+		t.Fatalf("default report formats = %v, want %v", cfg.Formats, want)
+	}
 	if !contains(cfg.Modules, "route") || !contains(cfg.Modules, "speed") {
 		t.Fatalf("standard modules = %v", cfg.Modules)
 	}
@@ -31,6 +34,12 @@ func TestDefaultsAndModuleSelection(t *testing.T) {
 	selected := SelectModules(cfg.Modules, []string{"disk", "system", "disk"}, []string{"disk"})
 	if want := []string{"system"}; !reflect.DeepEqual(selected, want) {
 		t.Fatalf("selected = %v, want %v", selected, want)
+	}
+}
+
+func TestExampleFileUsesAllDefaultReportFormats(t *testing.T) {
+	if want := []string{"json", "txt", "md", "html"}; !reflect.DeepEqual(ExampleFile().Formats, want) {
+		t.Fatalf("example report formats = %v, want %v", ExampleFile().Formats, want)
 	}
 }
 
@@ -50,6 +59,12 @@ func TestProfilesOnlyChangeModulePreset(t *testing.T) {
 		}
 		if len(cfg.Modules) != wantCounts[profile] {
 			t.Fatalf("%s module count = %d, want %d", profile, len(cfg.Modules), wantCounts[profile])
+		}
+		if profile == ProfileStandard && contains(cfg.Modules, "ookla") {
+			t.Fatal("standard profile must omit Ookla by default")
+		}
+		if profile == ProfileFull && !contains(cfg.Modules, "ookla") {
+			t.Fatal("full profile must include Ookla by default")
 		}
 		if cfg.CPUTime != full.CPUTime || cfg.DiskMiB != full.DiskMiB ||
 			cfg.DNSAttempts != full.DNSAttempts || cfg.LatencyAttempts != full.LatencyAttempts ||

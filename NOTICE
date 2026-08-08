@@ -16,8 +16,8 @@ bands for IP2Location, Scamalytics, AbuseIPDB, IPQualityScore, and DB-IP.
 
 ecs reimplements these capabilities in Go around a versioned report model. It
 adds official API-key routing, preserves provider failures and disagreements,
-supports local JSON/Markdown/HTML rendering, and never averages unlike scores
-into an opaque overall score.
+supports local JSON/txt/Markdown/HTML rendering, and never averages unlike
+scores into an opaque overall score.
 
 The following IPQuality behavior and assets are intentionally not included:
 
@@ -31,12 +31,35 @@ Provider data remains subject to each provider's own terms, quotas, and privacy
 policy. IPQuality and the provider names are trademarks or project names of
 their respective owners; no endorsement is implied.
 
+Optional ecs-tools packages are separate-process aggregates, not Go code linked
+into ecs. Each Linux architecture package carries its own manifest.json,
+LICENSE, NOTICE, and CI-populated LICENSES/ directory. The manifest schema
+supports unknown/unavailable version, license, and SHA-256 fields until CI has
+built and audited a real artifact. This notice does not claim that a release
+asset or tool version exists merely because a manifest example exists.
+
+When run.sh needs sysbench, official STREAM, fio, iperf3, NextTrace Tiny, or
+ping, it prefers an existing system tool and otherwise uses only the
+architecture-matched ecs-tools tar.zst artifact. The artifact is accepted only
+after checks against checksums.txt, manifest.json, and any required binary
+digest, then is unpacked into the temporary run directory and exposed through
+the temporary PATH. APT/Packagecloud is reserved for an explicitly selected
+Ookla adapter and is not a source for these general missing tools.
+
+The ecs-tools set intentionally excludes the Ookla speedtest client. Ookla is
+an explicit external adapter with its own terms and privacy policy: it is part
+of the full default profile, omitted from the standard default profile, and
+can be explicitly selected from any profile. It is never part of ecs-tools.
+System-provided ping likewise has no single project-wide license: the
+applicable notice is the distribution package actually used.
+
 The default public iperf3 endpoint registry is derived from:
 
   Yet-Another-Bench-Script (YABS)
   https://github.com/masonr/yet-another-bench-script
-  Audited script version: v2026-07-24
-  License: WTFPL-2.0
+  License: WTFPL-2.0 (see https://github.com/masonr/yet-another-bench-script/blob/master/LICENSE)
+  Exact registry revision used by this source: f8c6a48cd6ff
+  Registry snapshot: YABS v2026-07-24 IPERF_LOCS
 
 No YABS executable code, banners, upload behavior, or bundled binaries are
 included. ecs invokes the user's installed iperf3 process, records the exact

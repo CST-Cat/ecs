@@ -10,7 +10,10 @@ package i18n
 
 var probeEnglishCross = map[string]string{
 	// methodology.engine 与 measurement.method 里混入的中文描述。
-	"NextTrace + 骨干网段特征表":                "NextTrace + backbone prefix signatures",
+	"使用官方 NextTrace Tiny 追踪多个参考目标": "Uses official NextTrace Tiny to trace multiple reference targets",
+	"使用官方 NextTrace Tiny 向北京、上海、广州、成都的三网 IPv4/IPv6 参考目标追踪路径，识别中国骨干线路": "Uses official NextTrace Tiny to trace IPv4/IPv6 reference targets for Beijing, Shanghai, Guangzhou and Chengdu and identify Chinese backbone routes",
+	"NextTrace Tiny + 骨干网段特征表":           "NextTrace Tiny + backbone prefix signatures",
+	"未发现 NextTrace Tiny":                 "NextTrace Tiny was not found",
 	"公司滥用概率；官方免密直连":                      "Company abuse probability; official keyless endpoint",
 	"ASN 滥用概率；官方免密直连":                    "ASN abuse probability; official keyless endpoint",
 	"90 天滥用置信度；IPQuality/check.place 中转": "90-day abuse confidence; IPQuality/check.place relay",
@@ -27,8 +30,6 @@ var probeEnglishCross = map[string]string{
 	"网易云音乐":        "NetEase Cloud Music",
 	"Bilibili 港澳台": "Bilibili (HK/MO/TW)",
 	// 拆分后的固定说明句与新增字段
-	"ioping 延迟测试失败，详见下方失败原因。": "ioping latency test failed; see the failure reason below.",
-	"ioping 失败原因": "ioping failure reason",
 	"\x1f \x1f · \x1f \x1f 内存 · \x1f \x1f 可用盘 · \x1f":                     "\x1f \x1f · \x1f \x1f RAM · \x1f \x1f free disk · \x1f",
 	"\x1f \x1f 总计 / \x1f \x1f 可用 (/)":                                     "\x1f \x1f total / \x1f \x1f available (/)",
 	"\x1f \x1f 总计 / \x1f \x1f 可用 (/tmp)":                                  "\x1f \x1f total / \x1f \x1f available (/tmp)",

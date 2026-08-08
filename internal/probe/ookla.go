@@ -51,6 +51,14 @@ type ooklaResult struct {
 	Result struct {
 		Persisted bool `json:"persisted"`
 	} `json:"result"`
+	presence ooklaFieldPresence `json:"-"`
+}
+
+type ooklaFieldPresence struct {
+	PingJitter        bool
+	PingLatency       bool
+	DownloadBandwidth bool
+	UploadBandwidth   bool
 }
 
 func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -138,21 +146,26 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		appendOoklaMeasurementsFor(&result, parsed, prefix, label)
 		serverName := formatOoklaServer(parsed)
-		download := ooklaBandwidthMbps(parsed.Download.Bandwidth)
-		upload := ooklaBandwidthMbps(parsed.Upload.Bandwidth)
-		loss := "—"
-		if parsed.PacketLoss != nil {
-			loss = fmt.Sprintf("%.2f %%", *parsed.PacketLoss)
-		}
+		hasMetric := ooklaHasValidMetric(parsed)
+		complete := ooklaMeasurementsComplete(parsed)
 		status := "完成"
+		if !complete {
+			status = "部分完成"
+			result.Status = model.StatusWarning
+			result.Notes = append(result.Notes, "Ookla JSON 测速字段不完整；缺失值按未返回处理，结果按部分完成处理。")
+		}
 		if runErr != nil {
 			status = "部分完成"
 			result.Status = model.StatusWarning
 			result.Notes = append(result.Notes, label+" Ookla 客户端返回非零状态，但仍解析到了部分 JSON；结果按部分完成处理。")
 		}
-		table.Rows = append(table.Rows, []string{label, serverName, fmt.Sprintf("%.2f ms", parsed.Ping.Latency), fmt.Sprintf("%.2f Mbps", download), fmt.Sprintf("%.2f Mbps", upload), loss, status})
-		successes++
-		summaries = append(summaries, fmt.Sprintf("%s 下载 %.2f Mbps / 上传 %.2f Mbps", label, download, upload))
+		table.Rows = append(table.Rows, []string{label, serverName, ooklaLatencyDisplay(parsed.Ping.Latency), ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth), ooklaPacketLossDisplay(parsed), status})
+		if hasMetric {
+			summaries = append(summaries, fmt.Sprintf("%s 下载 %s / 上传 %s", label, ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth)))
+			if complete && runErr == nil {
+				successes++
+			}
+		}
 		if parsed.ISP != "" {
 			result.Fields = append(result.Fields, model.Field{Key: "isp_" + ooklaCarrierKey(label), Label: label + " ISP", Value: parsed.ISP})
 		}
@@ -173,7 +186,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = []model.Table{table}
-	if successes == 0 {
+	if successes == 0 && len(summaries) == 0 {
 		result.Status = model.StatusWarning
 		result.Summary = "Ookla 没有返回可用测速结果"
 	} else if len(result.Measurements) == 0 {
@@ -255,10 +268,92 @@ func parseOoklaJSON(output []byte) (ooklaResult, error) {
 	if start < 0 || end < start {
 		return parsed, fmt.Errorf("未找到 JSON 对象")
 	}
-	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
+	jsonObject := []byte(text[start : end+1])
+	if err := json.Unmarshal(jsonObject, &parsed); err != nil {
 		return parsed, fmt.Errorf("解析 JSON 失败")
 	}
+	markOoklaFieldPresence(jsonObject, &parsed)
 	return parsed, nil
+}
+
+func markOoklaFieldPresence(data []byte, parsed *ooklaResult) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return
+	}
+	nested := func(name string) map[string]json.RawMessage {
+		raw, ok := object[name]
+		if !ok || strings.TrimSpace(string(raw)) == "null" {
+			return nil
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil
+		}
+		return fields
+	}
+	present := func(fields map[string]json.RawMessage, name string) bool {
+		raw, ok := fields[name]
+		return ok && strings.TrimSpace(string(raw)) != "null"
+	}
+	ping := nested("ping")
+	download := nested("download")
+	upload := nested("upload")
+	parsed.presence = ooklaFieldPresence{
+		PingJitter:        present(ping, "jitter"),
+		PingLatency:       present(ping, "latency"),
+		DownloadBandwidth: present(download, "bandwidth"),
+		UploadBandwidth:   present(upload, "bandwidth"),
+	}
+}
+
+// ooklaPacketLoss returns packet loss only when the client supplied a value in
+// its documented percentage range.  A missing, null, or out-of-range value is
+// deliberately not turned into zero: zero is a valid measured loss value.
+func ooklaPacketLoss(parsed ooklaResult) (float64, bool) {
+	if parsed.PacketLoss == nil || *parsed.PacketLoss < 0 || *parsed.PacketLoss > 100 {
+		return 0, false
+	}
+	return *parsed.PacketLoss, true
+}
+
+// ooklaHasValidMetric distinguishes a parsed JSON object from a usable result.
+// In particular, an empty object must not count as a successful speedtest.
+func ooklaHasValidMetric(parsed ooklaResult) bool {
+	return parsed.Ping.Latency > 0 ||
+		ooklaBandwidthMbps(parsed.Download.Bandwidth) > 0 ||
+		ooklaBandwidthMbps(parsed.Upload.Bandwidth) > 0
+}
+
+// ooklaMeasurementsComplete requires all three core measurements.  Jitter and
+// packet loss are valid even when measured as zero, and are not required for a
+// row to be complete; when absent they remain visibly unavailable.
+func ooklaMeasurementsComplete(parsed ooklaResult) bool {
+	return parsed.Ping.Latency > 0 &&
+		ooklaBandwidthMbps(parsed.Download.Bandwidth) > 0 &&
+		ooklaBandwidthMbps(parsed.Upload.Bandwidth) > 0
+}
+
+func ooklaLatencyDisplay(value float64) string {
+	if value <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.2f ms", value)
+}
+
+func ooklaBandwidthDisplay(bytesPerSecond float64) string {
+	if speed := ooklaBandwidthMbps(bytesPerSecond); speed > 0 {
+		return fmt.Sprintf("%.2f Mbps", speed)
+	}
+	return "—"
+}
+
+func ooklaPacketLossDisplay(parsed ooklaResult) string {
+	loss, ok := ooklaPacketLoss(parsed)
+	if !ok {
+		return "—"
+	}
+	return fmt.Sprintf("%.2f %%", loss)
 }
 
 func appendOoklaMeasurements(result *model.Result, parsed ooklaResult) {
@@ -275,7 +370,7 @@ func appendOoklaMeasurementsFor(result *model.Result, parsed ooklaResult, prefix
 			Method: "ookla-cli-json-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
-	if parsed.Ping.Jitter > 0 {
+	if (parsed.presence.PingJitter || parsed.Ping.Jitter > 0) && parsed.Ping.Jitter >= 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: prefix + "ookla_jitter_ms", Label: labelPrefix + " 抖动", Value: parsed.Ping.Jitter, Unit: "ms", Display: fmt.Sprintf("%.2f ms", parsed.Ping.Jitter),
 			Method: "ookla-cli-json-v1", HigherIsBetter: model.BoolPtr(false),
@@ -293,9 +388,9 @@ func appendOoklaMeasurementsFor(result *model.Result, parsed ooklaResult, prefix
 			Method: "ookla-cli-json-v1-bandwidth-bytes-per-second", HigherIsBetter: model.BoolPtr(true),
 		})
 	}
-	if parsed.PacketLoss != nil {
+	if loss, ok := ooklaPacketLoss(parsed); ok {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: prefix + "ookla_packet_loss_percent", Label: labelPrefix + " 丢包", Value: *parsed.PacketLoss, Unit: "%", Display: fmt.Sprintf("%.2f %%", *parsed.PacketLoss),
+			Key: prefix + "ookla_packet_loss_percent", Label: labelPrefix + " 丢包", Value: loss, Unit: "%", Display: fmt.Sprintf("%.2f %%", loss),
 			Method: "ookla-cli-json-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
@@ -309,7 +404,5 @@ func ooklaBandwidthMbps(bytesPerSecond float64) float64 {
 }
 
 func ooklaSummary(parsed ooklaResult) string {
-	download := ooklaBandwidthMbps(parsed.Download.Bandwidth)
-	upload := ooklaBandwidthMbps(parsed.Upload.Bandwidth)
-	return fmt.Sprintf("下载 %.2f Mbps · 上传 %.2f Mbps · 延迟 %.2f ms", download, upload, parsed.Ping.Latency)
+	return fmt.Sprintf("下载 %s · 上传 %s · 延迟 %s", ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth), ooklaLatencyDisplay(parsed.Ping.Latency))
 }

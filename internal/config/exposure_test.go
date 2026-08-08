@@ -121,18 +121,24 @@ func TestEgressIntelOnlyWhenAThirdPartyModuleNeedsIt(t *testing.T) {
 	}
 }
 
-func TestFullProfileIncludesOoklaByDefault(t *testing.T) {
+func TestProfileOoklaMembershipIsExplicit(t *testing.T) {
+	standard, err := Defaults(ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(standard.Modules, "ookla") {
+		t.Fatal("standard 档默认不应包含 Ookla")
+	}
 	cfg, err := Defaults(ProfileFull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// full 档给出全集，Ookla 在 thirdparty 默认级别下直接可运行。
 	if !contains(cfg.Modules, "ookla") {
-		t.Fatal("full 档的模块全集应当包含 ookla")
+		t.Fatal("full 档默认应包含 Ookla")
 	}
-	filtered := FilterModulesByExposure(cfg.Modules, cfg.Exposure)
-	if !contains(filtered, "ookla") {
-		t.Fatal("默认级别下 ookla 应进入运行集")
+	descriptor, ok := ModuleDescriptorFor("ookla")
+	if !ok || descriptor.ProfileExplicitOnly || descriptor.ProfileStandard || !descriptor.ProfileFull {
+		t.Fatalf("Ookla profile metadata = %+v, want full-only default module", descriptor)
 	}
 }
 

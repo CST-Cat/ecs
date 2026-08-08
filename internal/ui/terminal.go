@@ -48,7 +48,7 @@ func New(out io.Writer, noColor bool) *Terminal {
 }
 
 // NewWithColor 创建一个终端，显式指定终端报告的颜色能力。
-// Header/Error 仍使用兼容的 ANSI 层次样式；完整报告由 reporter.Text 按
+// Header/Error 使用一致的 ANSI 层次样式；完整报告由 reporter.Text 按
 // termcolor.Level 渲染，因此 --color 的层级不会在摘要和正文之间分叉。
 func NewWithColor(out io.Writer, level termcolor.Level) *Terminal {
 	tty := isTerminal(out)
@@ -438,7 +438,7 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 // 方法学长说明，避免把实现细节混入模板正文。
 func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
 	terminal.line("")
-	text := reporter.Text(data, reporter.TextOptions{Color: color, Score: scored})
+	text := reporter.Text(data, reporter.TextOptions{Color: color, Score: scored, Compact: true})
 	_, _ = io.WriteString(terminal.out, text)
 	if text != "" && !strings.HasSuffix(text, "\n") {
 		terminal.line("")

@@ -64,25 +64,23 @@ func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
 	data.Results[0].Fields = []model.Field{
 		{Key: "sysbench_version", Label: "sysbench 版本", Value: "sysbench 1.0.20"},
 		{Key: "sysbench_binary_sha256", Label: "sysbench SHA-256", Value: "sha-sysbench"},
-		{Key: "mbw_version", Label: "mbw 版本", Value: "mbw 1.2.2"},
-		{Key: "mbw_binary_sha256", Label: "mbw SHA-256", Value: "sha-mbw"},
+		{Key: "stream_version", Label: "STREAM 版本", Value: "STREAM 5.10"},
+		{Key: "stream_binary_sha256", Label: "STREAM SHA-256", Value: "sha-stream"},
 		{Key: "fio_version", Label: "fio 版本", Value: "fio-3.42"},
 		{Key: "fio_binary_sha256", Label: "fio SHA-256", Value: "sha-fio"},
-		{Key: "ioping_version", Label: "ioping 版本", Value: "ioping 1.3"},
-		{Key: "ioping_binary_sha256", Label: "ioping SHA-256", Value: "sha-ioping"},
 		{Key: "iperf3_version", Label: "iperf3 版本", Value: "iperf 3.16"},
 		{Key: "iperf3_binary_sha256", Label: "iperf3 SHA-256", Value: "sha-iperf3"},
 		{Key: "speedtest_version", Label: "speedtest 版本", Value: "speedtest 1.2.3"},
 		{Key: "speedtest_binary_sha256", Label: "speedtest SHA-256", Value: "sha-speedtest"},
-		{Key: "nexttrace_version", Label: "NextTrace 版本", Value: "NextTrace v0.1.0"},
-		{Key: "nexttrace_binary_sha256", Label: "NextTrace SHA-256", Value: "abc123"},
+		{Key: "nexttrace_version", Label: "NextTrace Tiny 版本", Value: "NextTrace Tiny v0.1.0"},
+		{Key: "nexttrace_binary_sha256", Label: "NextTrace Tiny SHA-256", Value: "abc123"},
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelTrueColor})
 	p := termcolor.Palette{Level: termcolor.LevelTrueColor}
 	labels := []string{
-		"sysbench 版本", "sysbench SHA-256", "mbw 版本", "mbw SHA-256", "fio 版本", "fio SHA-256",
-		"ioping 版本", "ioping SHA-256", "iperf3 版本", "iperf3 SHA-256", "speedtest 版本", "speedtest SHA-256",
-		"NextTrace 版本", "NextTrace SHA-256",
+		"sysbench 版本", "sysbench SHA-256", "STREAM 版本", "STREAM SHA-256",
+		"fio 版本", "fio SHA-256", "iperf3 版本", "iperf3 SHA-256",
+		"speedtest 版本", "speedtest SHA-256", "NextTrace Tiny 版本", "NextTrace Tiny SHA-256",
 	}
 	labelWidth := 0
 	for _, label := range labels {
@@ -90,31 +88,31 @@ func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
 	}
 	for _, label := range labels {
 		if count := strings.Count(out, label); count != 1 {
-			t.Fatalf("版本标签 %q 应各自出现一次，实际 %d 次:\n%s", label, count, out)
+			t.Fatalf("版本标签 %q 应各自出现一次，实际 %d 次:\\n%s", label, count, out)
 		}
 		styledLabel := p.Label(textwidth.Pad(label, labelWidth) + i18n.T("punct.colon"))
 		if !strings.Contains(out, styledLabel) {
-			t.Fatalf("版本标签 %q 未复用字段标签颜色层次:\n%s", label, out)
+			t.Fatalf("版本标签 %q 未复用字段标签颜色层次:\\n%s", label, out)
 		}
 	}
 	for _, version := range []string{
-		"sysbench 1.0.20", "sha-sysbench", "mbw 1.2.2", "sha-mbw", "fio-3.42", "sha-fio",
-		"ioping 1.3", "sha-ioping", "iperf 3.16", "sha-iperf3", "speedtest 1.2.3", "sha-speedtest",
-		"NextTrace v0.1.0", "abc123",
+		"sysbench 1.0.20", "sha-sysbench", "STREAM 5.10", "sha-stream",
+		"fio-3.42", "sha-fio", "iperf 3.16", "sha-iperf3",
+		"speedtest 1.2.3", "sha-speedtest", "NextTrace Tiny v0.1.0", "abc123",
 	} {
 		if !strings.Contains(out, version) {
-			t.Fatalf("报告缺少工具版本值 %q:\n%s", version, out)
+			t.Fatalf("报告缺少工具版本值 %q:\\n%s", version, out)
 		}
 	}
 	for _, pair := range [][2]string{
-		{"sysbench 版本", "sysbench SHA-256"}, {"mbw 版本", "mbw SHA-256"}, {"fio 版本", "fio SHA-256"},
-		{"ioping 版本", "ioping SHA-256"}, {"iperf3 版本", "iperf3 SHA-256"}, {"speedtest 版本", "speedtest SHA-256"},
-		{"NextTrace 版本", "NextTrace SHA-256"},
+		{"sysbench 版本", "sysbench SHA-256"}, {"STREAM 版本", "STREAM SHA-256"},
+		{"fio 版本", "fio SHA-256"}, {"iperf3 版本", "iperf3 SHA-256"},
+		{"speedtest 版本", "speedtest SHA-256"}, {"NextTrace Tiny 版本", "NextTrace Tiny SHA-256"},
 	} {
 		versionIndex := strings.Index(out, pair[0])
 		shaIndex := strings.Index(out, pair[1])
 		if shaIndex < versionIndex {
-			t.Fatalf("%s 应显示在 %s 之后:\n%s", pair[1], pair[0], out)
+			t.Fatalf("%s 应显示在 %s 之后:\\n%s", pair[1], pair[0], out)
 		}
 	}
 }
@@ -205,7 +203,7 @@ func TestTextNavigationAndWidthBudget(t *testing.T) {
 		Measurements: []model.Measurement{{Label: "超长指标名称", Display: strings.Repeat("123 ", 10), Value: 123}},
 		Notes:        []string{strings.Repeat("长说明文字 ", 20)},
 	})
-	scored := &score.Report{Total: 720, Ratio: 0.72, Covered: 2, Possible: 3, BaselineSource: "builtinSingleHost", BaselineSample: 1}
+	scored := &score.Report{Total: 720, Ratio: 0.72, Covered: 2, Possible: 3, BaselineSource: "builtinCurrentFallback", BaselineSample: 2}
 	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
 		out := Text(data, TextOptions{Color: level, Score: scored})
 		for lineNumber, line := range strings.Split(out, "\n") {
@@ -244,7 +242,10 @@ func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
 			t.Fatalf("模板文本缺少 %q:\n%s", want, out)
 		}
 	}
-	for _, forbidden := range []string{"关键指标", "测试口径", "原始文本", "third-method"} {
+	if !strings.Contains(out, "测试口径") {
+		t.Fatalf("完整 txt 应包含当前方法学说明:\n%s", out)
+	}
+	for _, forbidden := range []string{"原始文本", "third-method"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("模板文本不应包含通用/原始前缀 %q:\n%s", forbidden, out)
 		}
@@ -329,7 +330,6 @@ func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 	result.Fields = append(result.Fields,
 		model.Field{Key: "arguments", Label: "参数模板", Value: "sysbench --threads=N"},
 		model.Field{Key: "command_args", Label: "命令参数", Value: "--time=15s"},
-		model.Field{Key: "mbw_args", Label: "mbw 参数", Value: "mbw -q -n 5"},
 		model.Field{Key: "real", Label: "实际值", Value: "保留"},
 	)
 	result.Tables = append(result.Tables, model.Table{
@@ -342,18 +342,21 @@ func TestTextFiltersImplementationFieldsAndExplanatoryColumns(t *testing.T) {
 		{Name: "secondary", URL: "https://example.com/secondary"},
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelNone})
-	for _, forbidden := range []string{"参数模板", "命令参数", "mbw 参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接", "https://example.com/secondary", "secondary"} {
+	for _, forbidden := range []string{"参数模板", "命令参数", "sysbench --threads=N", "为什么值得看", "指标口径", "分段规则", "备注", "来源链接"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("实现/解释性文本不应出现在 txt (%q):\n%s", forbidden, out)
 		}
 	}
-	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "https://example.com/primary"} {
+	for _, want := range []string{"实际值：", "保留", "事实", "来源", "低", "https://example.com/primary", "https://example.com/secondary"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("纯文本缺少保留事实 %q:\n%s", want, out)
 		}
 	}
 	if count := strings.Count(out, "https://example.com/primary"); count != 1 {
 		t.Fatalf("banner 来源应只显示一次，出现 %d 次", count)
+	}
+	if count := strings.Count(out, "https://example.com/secondary"); count != 1 {
+		t.Fatalf("正文来源应保留一次，出现 %d 次", count)
 	}
 }
 
@@ -364,7 +367,7 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 	data.Results = []model.Result{{
 		ID: "disk", Title: "磁盘性能", Status: model.StatusOK,
 		Measurements: []model.Measurement{
-			{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-legacy"},
+			{Key: "fio_sequential_read_mib_s", Label: "顺序读", Display: "100 MiB/s", Method: "fio-direct-baseline"},
 			{Key: "crystal_rnd4k_q1_read_mib_s", Label: "Crystal crystal_rnd4k_q1 read 吞吐", Display: "10 MiB/s", Method: "fio-direct-crystal"},
 			{Key: "atto_512b_read_mib_s", Label: "ATTO atto_512b read 吞吐", Display: "1 MiB/s", Method: "fio-direct-atto"},
 			{Key: "fio_mixed_4k_read_mib_s", Label: "混合 fio_mixed_4k read 吞吐", Display: "15 MiB/s", Method: "fio-direct-mixed"},
@@ -378,7 +381,7 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 				{"512B", "1 MiB/s", "10 IOPS", "2 MiB/s", "20 IOPS", "完成"},
 				{"64M", "8 MiB/s", "80 IOPS", "16 MiB/s", "160 IOPS", "完成"},
 			}},
-			{Title: "50/50 混合随机读写 QD64 × 2 作业（YABS 兼容口径）", Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"}, Rows: [][]string{
+			{Title: "50/50 混合随机读写 QD64 × 2 作业（YABS 口径）", Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"}, Rows: [][]string{
 				{"4k", "15 MiB/s", "150 IOPS", "25 MiB/s", "250 IOPS", "40 MiB/s"},
 				{"1m", "35 MiB/s", "350 IOPS", "45 MiB/s", "450 IOPS", "80 MiB/s"},
 			}},
@@ -390,7 +393,7 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 			t.Fatalf("磁盘矩阵缺少 %q:\n%s", want, out)
 		}
 	}
-	for _, forbidden := range []string{"crystal_", "atto_", "fio_mixed_", "内部 notice"} {
+	for _, forbidden := range []string{"crystal_", "atto_", "fio_mixed_"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("txt 不应扁平化/输出冗余内容 %q:\n%s", forbidden, out)
 		}
@@ -399,7 +402,7 @@ func TestTextDiskMatricesRemainCompleteAndNotFlattened(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(jsonBytes), "内部 notice") || !strings.Contains(string(jsonBytes), "crystal_rnd4k_q1_read_mib_s") {
+	if !strings.Contains(string(out), "内部 notice") || !strings.Contains(string(jsonBytes), "内部 notice") || !strings.Contains(string(jsonBytes), "crystal_rnd4k_q1_read_mib_s") {
 		t.Fatal("隐藏 txt notice/flat metrics 不应修改 JSON 数据")
 	}
 }
@@ -634,7 +637,7 @@ func TestWrapTextRespectsDisplayWidth(t *testing.T) {
 func TestTextScoreSectionStatesCoverageAndBaseline(t *testing.T) {
 	scored := &score.Report{
 		Total: 800, Ratio: 0.8, Covered: 2, Possible: 4, Complete: false,
-		BaselineSource: "builtinSingleHost", BaselineSample: 1,
+		BaselineSource: "builtinCurrentFallback", BaselineSample: 2,
 		Dimensions: []score.DimensionScore{
 			{Key: "cpu", Score: 800, Ratio: 0.8, Metrics: []score.MetricScore{
 				{Key: "cpu_single", Label: "单线程", Value: 800, Unit: "events/s", Baseline: 1000, Ratio: 0.8, Score: 800},
@@ -643,7 +646,7 @@ func TestTextScoreSectionStatesCoverageAndBaseline(t *testing.T) {
 		},
 	}
 	out := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scored})
-	for _, want := range []string{"2/4", "未覆盖全部维度", "样本 1 台", "内置单机快照"} {
+	for _, want := range []string{"2/4", "未覆盖全部维度", "样本 2 台", "内置当前基线兜底快照"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("评分区缺少 %q", want)
 		}
@@ -723,11 +726,11 @@ func TestTextIncludesEveryResultDetail(t *testing.T) {
 			t.Fatalf("完整文本报告缺少 %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "third-method") {
-		t.Fatalf("纯文本不应显示 Measurement.Method: %s", out)
+	if !strings.Contains(out, "third-method") {
+		t.Fatalf("完整文本报告应保留当前工作负载方法: %s", out)
 	}
-	if strings.Contains(out, "第三个文本块内容") || strings.Contains(out, "第三条备注") {
-		t.Fatal("纯文本不应恢复原始文本块或长注释")
+	if !strings.Contains(out, "第三个文本块内容") || !strings.Contains(out, "第三条备注") {
+		t.Fatal("完整文本报告缺少当前原始输出或说明")
 	}
 }
 

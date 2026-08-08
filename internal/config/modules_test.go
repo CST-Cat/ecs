@@ -33,9 +33,46 @@ func TestModuleDescriptorsAreCanonical(t *testing.T) {
 	if got := ModulesForProfile(ProfileFull); len(got) != 18 {
 		t.Fatalf("full profile module count = %d, want 18: %v", len(got), got)
 	}
+	if !contains(ModulesForProfile(ProfileFull), "ookla") {
+		t.Fatal("Ookla must be part of the full preset")
+	}
+	if contains(ModulesForProfile(ProfileStandard), "ookla") {
+		t.Fatal("Ookla must not be part of the standard preset")
+	}
+	if descriptor, ok := ModuleDescriptorFor("ookla"); !ok || descriptor.ProfileStandard || !descriptor.ProfileFull || descriptor.ProfileExplicitOnly {
+		t.Fatalf("Ookla profile metadata = %+v, want full-only default module", descriptor)
+	}
 }
 
-func TestModuleDescriptorMetadataMatchesCompatibilityTables(t *testing.T) {
+func TestBenchmarkRequiredToolsMatchRuntimeFallbacks(t *testing.T) {
+	cases := map[string][]string{
+		"memory": {"stream"},
+		"disk":   {"fio"},
+	}
+	for module, want := range cases {
+		descriptor, ok := ModuleDescriptorFor(module)
+		if !ok {
+			t.Fatalf("missing descriptor %q", module)
+		}
+		if got := descriptor.RequiredTools; len(got) != len(want) {
+			t.Fatalf("%s RequiredTools = %v, want %v", module, got, want)
+		}
+		for index := range want {
+			if descriptor.RequiredTools[index] != want[index] {
+				t.Fatalf("%s RequiredTools = %v, want %v", module, descriptor.RequiredTools, want)
+			}
+		}
+	}
+	for _, descriptor := range ModuleDescriptors() {
+		for _, tool := range descriptor.RequiredTools {
+			if tool == "mbw" || tool == "ioping" {
+				t.Fatalf("removed tool %q is still required by %s", tool, descriptor.ID)
+			}
+		}
+	}
+}
+
+func TestModuleDescriptorMetadataMatchesDerivedExposure(t *testing.T) {
 	scoreCount := 0
 	for _, descriptor := range ModuleDescriptors() {
 		info, ok := moduleExposure[descriptor.ID]

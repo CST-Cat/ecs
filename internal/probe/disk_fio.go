@@ -39,7 +39,30 @@ type fioDirection struct {
 
 type fioClat struct {
 	Mean       float64            `json:"mean"`
+	Max        float64            `json:"max"`
 	Percentile map[string]float64 `json:"percentile"`
+}
+
+const (
+	fioQD1LatencyJobName = "latency_qd1"
+	fioQD1LatencyMethod  = "fio-direct-4KiB-randread-qd1-latency-v1"
+	fioQD1LatencyAvgKey  = "fio_random_read_4k_qd1_latency_avg_ms"
+	fioQD1LatencyP95Key  = "fio_random_read_4k_qd1_latency_p95_ms"
+	fioQD1LatencyP99Key  = "fio_random_read_4k_qd1_latency_p99_ms"
+	fioQD1LatencyMaxKey  = "fio_random_read_4k_qd1_latency_max_ms"
+)
+
+// fioLatencyStats 是同一个 fio clat 单位下的延迟统计，统一换算为毫秒。
+// 每个字段都带有存在标志：fio 可能返回部分 clat 统计，缺失值不能被当作 0。
+type fioLatencyStats struct {
+	AvgMS float64
+	AvgOK bool
+	P95MS float64
+	P95OK bool
+	P99MS float64
+	P99OK bool
+	MaxMS float64
+	MaxOK bool
 }
 
 // fioEngine 描述实际使用的 ioengine 及其队列深度能力。
@@ -96,12 +119,12 @@ func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 func runFIODisk(ctx context.Context, env Environment, fioPath string) (result model.Result) {
 	start := time.Now()
 	result = model.NewResult("disk", "磁盘性能")
-	result.Description = "fio Direct I/O 的基础口径、Crystal 矩阵、ATTO 矩阵与 YABS 兼容补充矩阵"
+	result.Description = "fio Direct I/O 的基础口径、固定 QD1 4K 随机读延迟、Crystal 矩阵、ATTO 矩阵与 YABS 口径补充矩阵"
 	result.Methodology = model.Methodology{
 		Kind:            "standard-benchmark",
 		Label:           "标准基准",
 		Engine:          "fio",
-		Profile:         "Direct I/O legacy + Crystal RND4K/SEQ1M + ATTO 512B–64M + YABS mixed",
+		Profile:         "Direct I/O baseline + Crystal RND4K/SEQ1M + ATTO 512B–64M + YABS mixed",
 		ComparisonScope: "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
 	}
 
@@ -187,6 +210,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	seqRead := fioBandwidthMiB(jobs["seqread"].Read)
 	randomRead := jobs["randread"].Read.IOPS
 	randomWrite := jobs["randwrite"].Write.IOPS
+	appendFIOQD1LatencyMeasurements(&result, jobs)
 	if seqWrite <= 0 && seqRead <= 0 && randomRead <= 0 && randomWrite <= 0 {
 		result.Fail(fmt.Errorf("fio JSON 未包含可用的磁盘统计"))
 		result.Finish(start)
@@ -221,6 +245,9 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
 			Method: "fio-clat-p95-v1", HigherIsBetter: model.BoolPtr(false),
 		})
+	} else {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, "fio 4K 随机读 QD32 P95 未返回；该指标未生成。")
 	}
 	if p95 := fioP95Milliseconds(jobs["randwrite"].Write); p95 > 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
@@ -228,11 +255,14 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
 			Method: "fio-clat-p95-v1", HigherIsBetter: model.BoolPtr(false),
 		})
+	} else {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, "fio 4K 随机写 QD32 P95 未返回；该指标未生成。")
 	}
 
 	mixDepth := engine.EffectiveDepth(64)
 	mixTable := model.Table{
-		Title:   fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 兼容口径）", mixDepth),
+		Title:   fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
 		Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
 	}
 	for _, job := range plan {
@@ -322,13 +352,14 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Name: "YABS", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "50/50 混合随机读写矩阵的块大小与队列深度口径"},
 	}
 	result.Notes = append(result.Notes,
-		"fio 可由用户预先安装，也可由 run.sh 从系统包管理器临时准备；ecs 不下载未经校验的裸二进制。",
+		"fio 可由用户预先安装；缺失时 run.sh 从当前架构的已校验 ecs-tools 包临时提供。ecs 不下载未经校验的裸二进制。",
 		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
+		"固定低延迟作业使用 4 KiB randread、Direct I/O、iodepth=1、numjobs=1；avg/P95/P99/max 均来自同一 fio JSON 的 clat 统计。",
 		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
 	)
 	if matrixJobsEnabled() {
 		result.Notes = append(result.Notes,
-			"混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：legacy、混合、Crystal、ATTO 各占四分之一；缺失单元不补零。",
+			"基线、混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：四组各占四分之一；缺失单元不补零。",
 			"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
 		)
 	}
@@ -503,6 +534,57 @@ func formatMatrixRate(value float64, unit string) string {
 	return model.FormatRate(value, unit)
 }
 
+// appendFIOQD1LatencyMeasurements 从固定的 QD1 randread 作业追加延迟指标。
+// 延迟来自该作业自己的 clat，而不是基础 QD32 作业或其他工具的结果。
+func appendFIOQD1LatencyMeasurements(result *model.Result, jobs map[string]fioJob) {
+	job, ok := jobs[fioQD1LatencyJobName]
+	if !ok {
+		markFIOQD1LatencyMissing(result, []string{"avg", "P95", "P99", "max"})
+		return
+	}
+
+	stats, ok := fioLatencyStatsFor(job.Read)
+	if !ok {
+		markFIOQD1LatencyMissing(result, []string{"avg", "P95", "P99", "max"})
+		return
+	}
+
+	missing := make([]string, 0, 4)
+	appendMetric := func(key, label string, value float64, present bool) {
+		if !present {
+			missing = append(missing, label)
+			return
+		}
+		displayLabel := label
+		if label == "P95" || label == "P99" {
+			displayLabel = " " + label
+		}
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: key, Label: "fio QD1 4K 随机读延迟" + displayLabel,
+			Value: value, Unit: "ms", Display: fmt.Sprintf("%.3f ms", value),
+			Method: fioQD1LatencyMethod, HigherIsBetter: model.BoolPtr(false),
+		})
+	}
+	appendMetric(fioQD1LatencyAvgKey, "均值", stats.AvgMS, stats.AvgOK)
+	appendMetric(fioQD1LatencyP95Key, "P95", stats.P95MS, stats.P95OK)
+	appendMetric(fioQD1LatencyP99Key, "P99", stats.P99MS, stats.P99OK)
+	appendMetric(fioQD1LatencyMaxKey, "最大", stats.MaxMS, stats.MaxOK)
+	if len(missing) > 0 {
+		markFIOQD1LatencyMissing(result, missing)
+	}
+}
+
+func markFIOQD1LatencyMissing(result *model.Result, missing []string) {
+	if len(missing) == 0 {
+		return
+	}
+	if result.Status == model.StatusOK {
+		result.Status = model.StatusWarning
+	}
+	result.Notes = append(result.Notes,
+		fmt.Sprintf("fio QD1 4K 随机读延迟有 %d 项指标未返回；缺失项不补零。", len(missing)))
+}
+
 // parseFIOJobs 把 fio 的 JSON 输出按作业名索引。
 func parseFIOJobs(output []byte) (map[string]fioJob, error) {
 	var parsed fioOutput
@@ -550,7 +632,7 @@ func fioDiskSize(requestedBytes, freeBytes uint64, matrix bool) (int64, error) {
 		// single-window cache effect on small VPS disks.
 		alignment = 64 * 1024 * 1024
 		minimum = 128 * 1024 * 1024
-		// A caller may configure a smaller legacy file size.  Expand it to the
+		// A caller may configure a smaller baseline file size.  Expand it to the
 		// matrix minimum when the 20% free-space safety limit permits; otherwise
 		// refusing the run is safer than silently dropping ATTO cells.
 		if actualBytes < minimum {
@@ -601,16 +683,18 @@ func (s fioJobSpec) Mixed() bool { return s.RW == "randrw" }
 // fioJobPlan 给出本次磁盘测试的作业集合。
 //
 // 前四项是 ecs 既有口径：1 MiB 顺序读写反映带宽上限，4 KiB 随机读写反映 IOPS。
-// 后面是 YABS 兼容矩阵：4k/64k/512k/1m 四档 50/50 混合随机读写，iodepth=64、
+// 后面是 YABS 口径矩阵：4k/64k/512k/1m 四档 50/50 混合随机读写，iodepth=64、
 // numjobs=2，这是社区里流传最广、样本量最大的磁盘口径，补上它才能和主流测评
 // 贴的数字对得上。所有被选中的 disk 模块都执行完整混合与 Crystal/ATTO 矩阵，
-// 避免同一模块因为默认模块预设不同而产生不可比的作业集合。
+// 避免同一模块因为默认模块预设不同而产生不可比的作业集合。固定低延迟作业
+// 单独使用 4 KiB randread、iodepth=1、numjobs=1，且与这些作业一起写入同一份 fio JSON。
 func fioJobPlan() []fioJobSpec {
 	plan := []fioJobSpec{
 		{Name: "seqwrite", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, EndFsync: true},
 		{Name: "seqread", RW: "read", BlockSize: "1m", IODepth: 1, NumJobs: 1},
 		{Name: "randread", RW: "randread", BlockSize: "4k", IODepth: 32, NumJobs: 1},
 		{Name: "randwrite", RW: "randwrite", BlockSize: "4k", IODepth: 32, NumJobs: 1, EndFsync: true},
+		{Name: fioQD1LatencyJobName, RW: "randread", BlockSize: "4k", IODepth: 1, NumJobs: 1, Matrix: "latency", Direction: "read"},
 	}
 	blocks := []string{"4k", "64k", "512k", "1m"}
 	for _, blockSize := range blocks {
@@ -670,7 +754,7 @@ func attoJobSpecs() []fioJobSpec {
 }
 
 func fioArguments(filename string, size int64, duration time.Duration, engine fioEngine, plan []fioJobSpec) []string {
-	args := []string{"--output-format=json", "--eta=never"}
+	args := []string{"--output-format=json", "--eta=never", "--clat_percentiles=1"}
 	for index, job := range plan {
 		args = append(args, "--name="+job.Name)
 		// stonewall 让每个作业串行执行，避免顺序与随机负载互相干扰。
@@ -717,22 +801,67 @@ func fioBandwidthMiB(direction fioDirection) float64 {
 	return 0
 }
 
+// fioLatencyStatsFor 兼容 fio JSON 可能使用的 clat_ns、clat_us、clat_ms。
+// 一个方向通常只会有其中一个字段；按 fio 的精度从 ns 到 ms 选择第一个有数据的字段。
+func fioLatencyStatsFor(direction fioDirection) (fioLatencyStats, bool) {
+	candidates := []struct {
+		clat   fioClat
+		factor float64
+	}{
+		{direction.ClatNS, 1 / 1_000_000.0},
+		{direction.ClatUS, 1 / 1_000.0},
+		{direction.ClatMS, 1},
+	}
+	for _, candidate := range candidates {
+		if !candidate.clat.hasData() {
+			continue
+		}
+		stats := fioLatencyStats{}
+		stats.AvgMS, stats.AvgOK = fioLatencyValue(candidate.clat.Mean, candidate.factor)
+		stats.MaxMS, stats.MaxOK = fioLatencyValue(candidate.clat.Max, candidate.factor)
+		if value, ok := fioPercentileValue(candidate.clat.Percentile, 95); ok {
+			stats.P95MS, stats.P95OK = value*candidate.factor, true
+		}
+		if value, ok := fioPercentileValue(candidate.clat.Percentile, 99); ok {
+			stats.P99MS, stats.P99OK = value*candidate.factor, true
+		}
+		return stats, true
+	}
+	return fioLatencyStats{}, false
+}
+
+func (c fioClat) hasData() bool {
+	return c.Mean > 0 || c.Max > 0 || len(c.Percentile) > 0
+}
+
+func fioLatencyValue(value, factor float64) (float64, bool) {
+	if value <= 0 {
+		return 0, false
+	}
+	return value * factor, true
+}
+
 func fioP95Milliseconds(direction fioDirection) float64 {
-	if value := fioPercentile(direction.ClatNS.Percentile, "95."); value > 0 {
-		return value / 1_000_000
-	}
-	if value := fioPercentile(direction.ClatUS.Percentile, "95."); value > 0 {
-		return value / 1_000
-	}
-	if value := fioPercentile(direction.ClatMS.Percentile, "95."); value > 0 {
-		return value
+	if stats, ok := fioLatencyStatsFor(direction); ok && stats.P95OK {
+		return stats.P95MS
 	}
 	return 0
 }
 
+func fioPercentileValue(values map[string]float64, target float64) (float64, bool) {
+	for key, value := range values {
+		percentile, err := strconv.ParseFloat(strings.TrimSpace(key), 64)
+		if err != nil || percentile != target || value <= 0 {
+			continue
+		}
+		return value, true
+	}
+	return 0, false
+}
+
 func fioPercentile(values map[string]float64, prefix string) float64 {
 	for key, value := range values {
-		if strings.HasPrefix(key, prefix) {
+		if strings.HasPrefix(key, prefix) && value > 0 {
 			return value
 		}
 	}

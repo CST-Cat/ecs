@@ -72,9 +72,11 @@ func TestEndpointFamilySelectsIPv6Hostname(t *testing.T) {
 	if got := endpointFamily(target, config.IPVersionAuto); got != config.IPVersion6 {
 		t.Fatalf("endpoint family = %q, want 6", got)
 	}
-	args := routeCommandArgsForFamily(routeEngine{Name: "nexttrace"}, target.Address, 20, endpointFamily(target, config.IPVersionAuto))
-	if len(args) == 0 || args[0] != "-6" {
-		t.Fatalf("IPv6 hostname route args = %v", args)
+	for _, engineName := range []string{routeEngineTiny} {
+		args := routeCommandArgsForFamily(routeEngine{Name: engineName}, target.Address, 20, endpointFamily(target, config.IPVersionAuto))
+		if len(args) == 0 || args[0] != "-6" {
+			t.Fatalf("%s IPv6 hostname route args = %v", engineName, args)
+		}
 	}
 	if got := latencyFamiliesForEndpoint(target, config.IPVersionAuto, true); !reflect.DeepEqual(got, []string{config.IPVersion6}) {
 		t.Fatalf("IPv6 hostname latency families = %v", got)
@@ -85,13 +87,25 @@ func TestFamilySpecificArguments(t *testing.T) {
 	if got := strings.Join(pingArgumentsForFamily("::1", 1, time.Second, config.IPVersion6), " "); !strings.Contains(got, " -6 ") && !strings.HasPrefix(got, "-6 ") {
 		t.Fatalf("IPv6 ping arguments = %q", got)
 	}
-	engine := routeEngine{Name: "nexttrace"}
-	args := routeCommandArgsForFamily(engine, "2001:db8::1", 5, config.IPVersion6)
-	if len(args) == 0 || args[0] != "-6" {
-		t.Fatalf("IPv6 route arguments = %v", args)
+	for _, engineName := range []string{routeEngineTiny} {
+		engine := routeEngine{Name: engineName}
+		args := routeCommandArgsForFamily(engine, "2001:db8::1", 5, config.IPVersion6)
+		if len(args) == 0 || args[0] != "-6" {
+			t.Fatalf("%s IPv6 route arguments = %v", engineName, args)
+		}
+		if got := routeCommandArgs(engine, "127.0.0.1", 5); len(got) == 0 || got[0] == "-4" || got[0] == "-6" {
+			t.Fatalf("%s auto route arguments unexpectedly force a family: %v", engineName, got)
+		}
 	}
-	if got := routeCommandArgs(engine, "127.0.0.1", 5); len(got) == 0 || got[0] == "-4" || got[0] == "-6" {
-		t.Fatalf("auto route arguments unexpectedly force a family: %v", got)
+}
+
+func TestNextTraceCLIArgumentsUseOfficialFlags(t *testing.T) {
+	want := []string{"-6", "--no-color", "--json", "-M", "--max-hops", "5", "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", "2001:db8::1"}
+	for _, engineName := range []string{routeEngineTiny} {
+		got := routeCommandArgsForFamily(routeEngine{Name: engineName}, "2001:db8::1", 5, config.IPVersion6)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s CLI arguments = %v, want %v", engineName, got, want)
+		}
 	}
 }
 

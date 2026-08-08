@@ -42,8 +42,8 @@ const (
 	DefaultExposure = ExposureNameThirdParty
 )
 
-// ModuleExposure 描述一个模块的外联性质。具体值来自 ModuleDescriptor；这个
-// 兼容视图保留给既有 ExposureFor 调用方，新增模块不应再单独修改此处。
+// ModuleExposure 描述一个模块的外联性质。具体值来自 ModuleDescriptor；
+// ExposureFor 通过这个派生视图提供查询。
 type ModuleExposure struct {
 	// Level 是该模块的外联级别。
 	Level Exposure
@@ -51,9 +51,8 @@ type ModuleExposure struct {
 	NeedsEgressIP bool
 }
 
-// moduleExposure is derived from the canonical module descriptors.  Keep this
-// map as a compatibility implementation detail: existing callers and tests
-// still use ExposureFor, while new modules only need one descriptor entry.
+// moduleExposure is derived from the canonical module descriptors so new
+// modules only need one descriptor entry.
 var moduleExposure = descriptorModuleExposure()
 
 func descriptorModuleExposure() map[string]ModuleExposure {

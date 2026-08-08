@@ -5,78 +5,66 @@ import (
 	"testing"
 )
 
-func TestExtractClassicTraceHopsFromText(t *testing.T) {
-	output := strings.Join([]string{
-		" 1  10.0.0.1  0.512 ms",
-		" 2  * * *",
-		" 3  202.97.94.1  32.118 ms",
-		" 4  59.43.130.22  35.900 ms",
-		"lines without a hop number are ignored",
-	}, "\n")
-	details := extractClassicTraceDetails(output)
-	hops := make([]string, len(details))
-	for index, detail := range details {
-		if detail.IP != "—" {
-			hops[index] = detail.IP
-		}
-	}
-	want := []string{"10.0.0.1", "", "202.97.94.1", "59.43.130.22"}
-	if len(hops) != len(want) {
-		t.Fatalf("hops = %v, want %v", hops, want)
-	}
-	for index, address := range want {
-		if hops[index] != address {
-			t.Fatalf("hop %d = %q, want %q", index+1, hops[index], address)
-		}
-	}
-}
-
-func TestExtractClassicTraceDetailsIncludesLatencyAndPlaceholders(t *testing.T) {
-	output := strings.Join([]string{
-		" 1  10.0.0.1  0.512 ms",
-		" 2  * * *",
-		" 3  202.97.94.1  32.118 ms",
-	}, "\n")
-	details := extractClassicTraceDetails(output)
-	if len(details) != 3 {
-		t.Fatalf("details = %+v", details)
-	}
-	if details[0].Hop != 1 || details[0].IP != "10.0.0.1" || details[0].Latency != "0.512 ms" || details[0].Status != "已响应" {
-		t.Fatalf("first detail = %+v", details[0])
-	}
-	if details[1].Hop != 2 || details[1].IP != "—" || details[1].Latency != "—" || details[1].ASN != "—" || details[1].Status != "无响应" {
-		t.Fatalf("missing-hop detail = %+v", details[1])
-	}
-	if details[2].IP != "202.97.94.1" || details[2].Latency != "32.118 ms" {
-		t.Fatalf("backbone detail = %+v", details[2])
-	}
-}
-
-func TestExtractTraceHopsAcceptsIPv6Text(t *testing.T) {
-	output := " 1  2001:db8::1  0.5 ms\n 2  * * *\n 3  2408:8120:2::108  10 ms"
-	details := extractClassicTraceDetails(output)
-	hops := make([]string, len(details))
-	for index, detail := range details {
-		if detail.IP != "—" {
-			hops[index] = detail.IP
-		}
-	}
-	want := []string{"2001:db8::1", "", "2408:8120:2::108"}
-	if len(hops) != len(want) {
-		t.Fatalf("hops = %v, want %v", hops, want)
-	}
-	for index, address := range want {
-		if hops[index] != address {
-			t.Fatalf("hop %d = %q, want %q", index+1, hops[index], address)
-		}
-	}
-}
-
 func TestExtractTraceHopsFromNextTraceJSON(t *testing.T) {
 	output := `{"Hops":[[{"Address":"10.0.0.1"}],[{"Address":""}],[{"Address":"219.158.16.1"}]]}`
-	hops := extractTraceHops("nexttrace", output)
-	if len(hops) != 3 || hops[2] != "219.158.16.1" {
-		t.Fatalf("nexttrace hops = %v", hops)
+	for _, engineName := range []string{routeEngineTiny} {
+		hops := extractTraceHops(engineName, output)
+		if len(hops) != 3 || hops[2] != "219.158.16.1" {
+			t.Fatalf("%s hops = %v", engineName, hops)
+		}
+	}
+}
+
+func TestExtractNextTraceDetailsParsesOfficialNestedAddress(t *testing.T) {
+	output := `{"Hops":[[{"Success":true,"Address":{"IP":"59.43.130.22","Zone":""},"RTT":3500000,"Hostname":"edge.example","Geo":{"asnumber":"4809","owner":"China Telecom","country":"CN","prov":"Shanghai","city":"Shanghai","district":"Pudong"}}],[{"Success":false,"Address":null,"RTT":0}],[{"Success":true,"Address":"2001:db8::1","RTT":"2 ms"}]]}`
+	details, ok := extractNextTraceDetails(output)
+	if !ok || len(details) != 3 {
+		t.Fatalf("official details = %+v, ok=%v", details, ok)
+	}
+	if details[0].IP != "59.43.130.22" || details[0].Latency != "3.5 ms" || details[0].ASN != "AS4809" || details[0].Network != "China Telecom" || details[0].Location != "CN / Shanghai / Pudong" || details[0].Status != "已响应" {
+		t.Fatalf("official nested detail = %+v", details[0])
+	}
+	if details[1].IP != "—" || details[1].Status != "无响应" {
+		t.Fatalf("official timeout detail = %+v", details[1])
+	}
+	if details[2].IP != "2001:db8::1" || details[2].Latency != "2 ms" {
+		t.Fatalf("official scalar detail = %+v", details[2])
+	}
+}
+
+func TestExtractNextTraceDetailsPrioritizesGeoNetworkOverHostname(t *testing.T) {
+	output := `{"Hops":[[{"Address":"203.0.113.8","Hostname":"edge.example","Geo":{"owner":"Example Carrier"}}]]}`
+	details, ok := extractNextTraceDetails(output)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %+v, ok=%v", details, ok)
+	}
+	if details[0].Network != "Example Carrier" {
+		t.Fatalf("network = %q, want Geo.owner instead of Hostname", details[0].Network)
+	}
+}
+
+func TestNextTraceParserRejectsMalformedOrUnresponsiveOutput(t *testing.T) {
+	cases := []struct {
+		name       string
+		output     string
+		wantOK     bool
+		wantHops   int
+		wantDetail int
+	}{
+		{name: "malformed", output: `{"Hops":`, wantOK: false, wantHops: 0, wantDetail: 0},
+		{name: "empty hops", output: `{"Hops":[]}`, wantOK: false, wantHops: 0, wantDetail: 0},
+		{name: "all unresponsive", output: `{"Hops":[[{"Address":null}],[{"Address":""}],[]]}`, wantOK: true, wantHops: 0, wantDetail: 3},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			details, ok := extractNextTraceDetails(testCase.output)
+			if ok != testCase.wantOK || len(details) != testCase.wantDetail {
+				t.Fatalf("details = %+v, ok=%v", details, ok)
+			}
+			if got := routeHopCount(routeEngineTiny, testCase.output); got != testCase.wantHops {
+				t.Fatalf("tiny hop count = %d, want %d", got, testCase.wantHops)
+			}
+		})
 	}
 }
 

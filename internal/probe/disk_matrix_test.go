@@ -47,6 +47,10 @@ func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
 			t.Fatalf("missing complete mixed %s job: %+v", block, job)
 		}
 	}
+	latencyJob, ok := findFIOJobSpec(plan, fioQD1LatencyJobName)
+	if !ok || latencyJob.RW != "randread" || latencyJob.BlockSize != "4k" || latencyJob.IODepth != 1 || latencyJob.NumJobs != 1 {
+		t.Fatalf("fixed QD1 latency job = %+v", latencyJob)
+	}
 	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
 		read, write := false, false
 		for _, job := range crystalJobSpecs() {
@@ -73,10 +77,21 @@ func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
 
 func TestFIOArgumentsSafelySupportLargestATTOJob(t *testing.T) {
 	engine := fioEngine{Name: "io_uring", AsyncQueue: true, Detected: true}
-	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, fioJobPlan()), " ")
-	for _, want := range []string{"--name=atto_read_64m", "--name=atto_write_64m", "--bs=64m", "--size=134217728", "--direct=1", "--iodepth=1"} {
+	plan := fioJobPlan()
+	latencyJob, ok := findFIOJobSpec(plan, fioQD1LatencyJobName)
+	if !ok {
+		t.Fatalf("fixed QD1 latency job missing from plan: %v", plan)
+	}
+	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, plan), " ")
+	for _, want := range []string{"--name=atto_read_64m", "--name=atto_write_64m", "--name=" + fioQD1LatencyJobName, "--bs=64m", "--size=134217728", "--direct=1", "--iodepth=1", "--output-format=json", "--clat_percentiles=1"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("fio args missing %q", want)
+		}
+	}
+	latencyArgs := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, []fioJobSpec{latencyJob}), " ")
+	for _, want := range []string{"--output-format=json", "--direct=1", "--rw=randread", "--bs=4k", "--iodepth=1", "--numjobs=1", "--clat_percentiles=1"} {
+		if !strings.Contains(latencyArgs, want) {
+			t.Fatalf("fixed QD1 fio args missing %q: %s", want, latencyArgs)
 		}
 	}
 
@@ -204,5 +219,92 @@ func TestATTOJobNamesRemainStable(t *testing.T) {
 				t.Fatalf("missing stable ATTO job name %q", want)
 			}
 		}
+	}
+}
+
+func findFIOJobSpec(plan []fioJobSpec, name string) (fioJobSpec, bool) {
+	for _, job := range plan {
+		if job.Name == name {
+			return job, true
+		}
+	}
+	return fioJobSpec{}, false
+}
+
+func findMeasurement(measurements []model.Measurement, key string) (model.Measurement, bool) {
+	for _, measurement := range measurements {
+		if measurement.Key == key {
+			return measurement, true
+		}
+	}
+	return model.Measurement{}, false
+}
+
+func TestFIOLatencyStatsConvertAllClatUnits(t *testing.T) {
+	cases := []struct {
+		name   string
+		factor float64
+		clat   fioClat
+	}{
+		{name: "ns", factor: 1_000_000, clat: fioClat{Mean: 1_500_000, Max: 4_000_000, Percentile: map[string]float64{"95.000000": 2_500_000, "99.000000": 3_000_000}}},
+		{name: "us", factor: 1_000, clat: fioClat{Mean: 1_500, Max: 4_000, Percentile: map[string]float64{"95.000000": 2_500, "99.000000": 3_000}}},
+		{name: "ms", factor: 1, clat: fioClat{Mean: 1.5, Max: 4, Percentile: map[string]float64{"95.000000": 2.5, "99.000000": 3}}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			direction := fioDirection{}
+			switch testCase.name {
+			case "ns":
+				direction.ClatNS = testCase.clat
+			case "us":
+				direction.ClatUS = testCase.clat
+			case "ms":
+				direction.ClatMS = testCase.clat
+			}
+			stats, ok := fioLatencyStatsFor(direction)
+			if !ok || !stats.AvgOK || !stats.P95OK || !stats.P99OK || !stats.MaxOK {
+				t.Fatalf("latency stats = %+v, ok=%v", stats, ok)
+			}
+			for name, got := range map[string]float64{
+				"avg": stats.AvgMS, "p95": stats.P95MS, "p99": stats.P99MS, "max": stats.MaxMS,
+			} {
+				want := map[string]float64{"avg": 1.5, "p95": 2.5, "p99": 3, "max": 4}[name]
+				if diff := got - want; diff > 1e-12 || diff < -1e-12 {
+					t.Errorf("%s = %g ms, want %g ms", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFIOLatencyMissingValuesRemainMissing(t *testing.T) {
+	result := model.Result{ID: "disk", Status: model.StatusOK}
+	appendFIOQD1LatencyMeasurements(&result, map[string]fioJob{
+		fioQD1LatencyJobName: {Name: fioQD1LatencyJobName, Read: fioDirection{ClatNS: fioClat{
+			Mean: 1_000_000, Max: 2_000_000, Percentile: map[string]float64{"95.000000": 1_500_000},
+		}}},
+	})
+	if result.Status != model.StatusWarning {
+		t.Fatalf("partial latency result status = %s, want warning", result.Status)
+	}
+	if len(result.Measurements) != 3 {
+		t.Fatalf("partial latency measurements = %d, want 3: %+v", len(result.Measurements), result.Measurements)
+	}
+	for _, measurement := range result.Measurements {
+		if measurement.Value <= 0 || measurement.Unit != "ms" || measurement.Method != fioQD1LatencyMethod || measurement.HigherIsBetter == nil || *measurement.HigherIsBetter {
+			t.Fatalf("invalid partial latency measurement: %+v", measurement)
+		}
+	}
+	if !containsNote(result.Notes, "未返回") || !containsNote(result.Notes, "不补零") {
+		t.Fatalf("missing latency warning = %v", result.Notes)
+	}
+
+	missingJob := model.Result{ID: "disk", Status: model.StatusOK}
+	appendFIOQD1LatencyMeasurements(&missingJob, nil)
+	if missingJob.Status != model.StatusWarning || len(missingJob.Measurements) != 0 {
+		t.Fatalf("missing latency job = %+v", missingJob)
+	}
+	if !containsNote(missingJob.Notes, "4 项") || !containsNote(missingJob.Notes, "未返回") {
+		t.Fatalf("missing latency job warning = %v", missingJob.Notes)
 	}
 }

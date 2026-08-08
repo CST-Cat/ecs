@@ -113,44 +113,6 @@ func TestOptionalMemoryFacilitiesUseOnlyLinuxEvidence(t *testing.T) {
 	}
 }
 
-func TestSysbenchMemoryLatencyParsingAndFormula(t *testing.T) {
-	output := `
-Transferred (256.00 MiB/sec)
-total time:                          2.0000s
-total number of events:              2000
-Latency (ms):
-         min:                                    0.10
-         avg:                                    1.25
-         max:                                    5.00
-         95th percentile:                        2.50
-`
-	rateMatch := sysbenchMemoryRatePattern.FindStringSubmatch(output)
-	if len(rateMatch) != 3 || memoryRateToMiB(256, rateMatch[2]) != 256 {
-		t.Fatalf("rate parse = %v", rateMatch)
-	}
-	avg, p95 := parseSysbenchMemoryLatency(output)
-	if avg != 1.25 || p95 != 2.5 {
-		t.Fatalf("native latency = %f/%f", avg, p95)
-	}
-	seconds, events, ok := parseSysbenchMemoryTiming(output)
-	if !ok || seconds != 2 || events != 2000 {
-		t.Fatalf("timing parse = %f/%d/%v", seconds, events, ok)
-	}
-	derived := seconds * 1000 / float64(events)
-	if derived != 1 {
-		t.Fatalf("derived latency = %f, want 1 ms per event", derived)
-	}
-
-	derivedOutput := "Transferred (128.00 MiB/sec)\ntotal time: 1.500s\ntotal number of events: 3000\n"
-	if avg, _ := parseSysbenchMemoryLatency(derivedOutput); avg != 0 {
-		t.Fatalf("missing native latency should remain missing, got %f", avg)
-	}
-	seconds, events, ok = parseSysbenchMemoryTiming(derivedOutput)
-	if !ok || seconds*1000/float64(events) != 0.5 {
-		t.Fatalf("derived-only timing = %f/%d/%v", seconds, events, ok)
-	}
-}
-
 // This tiny constructor avoids coupling the facility test to the full probe
 // runner while keeping the field assertions on the public report shape.
 func modelResultForMemoryInventory() model.Result {

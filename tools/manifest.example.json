@@ -1,0 +1,246 @@
+{
+  "schema_version": "ecs-tools.manifest/v1",
+  "architecture": "amd64",
+  "supported_architectures": [
+    "amd64",
+    "arm64",
+    "armv7",
+    "386",
+    "s390x",
+    "riscv64",
+    "ppc64le"
+  ],
+  "tools": [
+    {
+      "name": "sysbench",
+      "upstream": "https://github.com/akopytov/sysbench",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "upstream-source",
+      "build_flags": [
+        "illustrative: scripts/build_tools.sh derives supported --without-* flags from this exact checkout",
+        "--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed"
+      ],
+      "enabled_features": [
+        "cpu",
+        "LuaJIT"
+      ],
+      "disabled_features": [
+        "database-drivers",
+        "mysql",
+        "pgsql",
+        "drizzle",
+        "oracle"
+      ],
+      "architecture": "amd64",
+      "license": "GPL-2.0-only",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "unknown",
+        "configure_flags_source": "./configure --help plus configure.ac"
+      }
+    },
+    {
+      "name": "stream",
+      "upstream": "https://www.cs.virginia.edu/stream/",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "official-stream-source",
+      "build_flags": [
+        "gcc",
+        "-O3",
+        "-fopenmp",
+        "-static",
+        "-static-libgcc",
+        "-DSTREAM_ARRAY_SIZE=10000000",
+        "-DNTIMES=10"
+      ],
+      "enabled_features": [
+        "Copy",
+        "Scale",
+        "Add",
+        "Triad",
+        "OpenMP"
+      ],
+      "disabled_features": [],
+      "architecture": "amd64",
+      "license": "STREAM-custom (illustrative)",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "kernels": [
+          "Copy",
+          "Scale",
+          "Add",
+          "Triad"
+        ],
+        "thread_modes": [
+          "1T",
+          "NT"
+        ],
+        "thread_control": "OMP_NUM_THREADS",
+        "single_thread_count": 1,
+        "multi_thread_count": "detected_cpu_allowance",
+        "array_size": 10000000,
+        "ntimes": 10,
+        "run_rules": "official STREAM 5.10: each array >= 4x cache where required; default 10M elements and 10 iterations",
+        "source_defaults_preserved": true
+      }
+    },
+    {
+      "name": "fio",
+      "upstream": "https://github.com/axboe/fio",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "upstream-source",
+      "build_flags": [
+        "--build-static",
+        "--disable-numa",
+        "--disable-rdma",
+        "--disable-rados",
+        "--disable-rbd",
+        "--disable-gfapi",
+        "--disable-http",
+        "--disable-pmem",
+        "--disable-libzbc",
+        "--disable-xnvme",
+        "--disable-libblkio",
+        "--disable-libnfs",
+        "--disable-dfs",
+        "--disable-tcmalloc",
+        "--disable-native",
+        "generated-config: require CONFIG_LIBAIO=y",
+        "generated-config: omit CONFIG_POSIXAIO"
+      ],
+      "enabled_features": [
+        "io_uring",
+        "libaio",
+        "psync"
+      ],
+      "disabled_features": [
+        "ceph",
+        "rbd",
+        "rados",
+        "gluster",
+        "gfapi",
+        "rdma",
+        "posix-aio"
+      ],
+      "architecture": "amd64",
+      "license": "GPL-2.0-only",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "unknown",
+        "runtime_linkage": "static"
+      }
+    },
+    {
+      "name": "iperf3",
+      "upstream": "https://github.com/esnet/iperf",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "upstream-source",
+      "build_flags": [
+        "LDFLAGS=-static",
+        "--disable-shared",
+        "--enable-static",
+        "--without-sctp",
+        "--without-openssl",
+        "--without-ldconfig"
+      ],
+      "enabled_features": [
+        "tcp",
+        "udp",
+        "ipv4",
+        "ipv6",
+        "parallel",
+        "reverse",
+        "json"
+      ],
+      "disabled_features": [
+        "sctp",
+        "openssl/auth"
+      ],
+      "architecture": "amd64",
+      "license": "BSD-3-Clause",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "unknown"
+      }
+    },
+    {
+      "name": "nexttrace-tiny",
+      "upstream": "https://github.com/nxtrace/NTrace-core",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "official GitHub release asset: nexttrace-tiny_linux_<architecture>",
+      "build_flags": [
+        "official-release-asset",
+        "tiny"
+      ],
+      "enabled_features": [
+        "tiny",
+        "json"
+      ],
+      "disabled_features": [
+        "full",
+        "mtr",
+        "globalping",
+        "webui"
+      ],
+      "architecture": "amd64",
+      "license": "GPL-3.0-only",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "asset_digest": "unknown"
+      },
+      "fallback": "CI fails if the official Tiny asset is unavailable"
+    },
+    {
+      "name": "ping",
+      "upstream": "https://github.com/iputils/iputils",
+      "version": "unknown",
+      "tag_or_commit": "unknown",
+      "source": "official iputils release source",
+      "build_flags": [
+        "LDFLAGS=-static",
+        "meson",
+        "-DBUILD_PING=true",
+        "-DBUILD_ARPING=false",
+        "-DBUILD_CLOCKDIFF=false",
+        "-DBUILD_TRACEPATH=false",
+        "-DUSE_CAP=false",
+        "-DUSE_IDN=false",
+        "-DUSE_GETTEXT=false",
+        "-DNO_SETCAP_OR_SUID=true"
+      ],
+      "enabled_features": [
+        "icmp",
+        "ipv4",
+        "ipv6",
+        "iputils-parser"
+      ],
+      "disabled_features": [
+        "arping",
+        "clockdiff",
+        "tracepath",
+        "capabilities",
+        "idn",
+        "gettext",
+        "setcap"
+      ],
+      "architecture": "amd64",
+      "license": "GPL-2.0-or-later",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "unknown"
+      },
+      "fallback": "CI fails if official iputils ping cannot be built"
+    }
+  ]
+}

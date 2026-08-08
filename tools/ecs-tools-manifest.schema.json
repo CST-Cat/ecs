@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CST-Cat/ecs/blob/main/tools/ecs-tools-manifest.schema.json",
+  "title": "ecs-tools Linux architecture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "architecture",
+    "tools"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ecs-tools.manifest/v1"
+    },
+    "architecture": {
+      "$ref": "#/$defs/architecture"
+    },
+    "supported_architectures": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/architecture"
+      }
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/tool"
+      }
+    }
+  },
+  "$defs": {
+    "architecture": {
+      "type": "string",
+      "enum": [
+        "amd64",
+        "arm64",
+        "armv7",
+        "386",
+        "s390x",
+        "riscv64",
+        "ppc64le"
+      ]
+    },
+    "sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9A-Fa-f]{64}$"
+        },
+        {
+          "enum": [
+            "unknown",
+            "unavailable"
+          ]
+        }
+      ]
+    },
+    "string_array": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "upstream",
+        "version",
+        "tag_or_commit",
+        "source",
+        "build_flags",
+        "enabled_features",
+        "disabled_features",
+        "architecture",
+        "license",
+        "sha256",
+        "parameters"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "sysbench",
+            "stream",
+            "fio",
+            "iperf3",
+            "nexttrace-tiny",
+            "ping"
+          ]
+        },
+        "upstream": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag_or_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_flags": {
+          "$ref": "#/$defs/string_array"
+        },
+        "enabled_features": {
+          "$ref": "#/$defs/string_array"
+        },
+        "disabled_features": {
+          "$ref": "#/$defs/string_array"
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "fallback": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -15,7 +15,7 @@ package score
 //   - 排行榜参考是可替换的数据，不是写死在算法里的常数——它决定了分数的含义，
 //     必须能随实测样本更新。
 //
-// 排名只使用参考文件明确保存的样本分数分布；旧文件或样本不足时不显示百分位，
+// 排名只使用参考文件明确保存的样本分数分布；样本不足时不显示百分位，
 // 不从主机数目推造排名。
 
 import (
@@ -40,7 +40,7 @@ type Dimension struct {
 
 // Metric 是维度下的一项指标。
 type Metric struct {
-	// Key 是排行榜参考文件里的键（JSON 字段名保持兼容）。
+	// Key 是当前排行榜参考文件里的指标键。
 	Key string
 	// MeasurementKey 直接匹配一个 measurement 的 key。
 	MeasurementKey string
@@ -55,11 +55,11 @@ type Metric struct {
 	// Group controls weighting inside a dimension. Metrics in the same group
 	// are averaged first, so a wide matrix such as ATTO cannot outweigh CPU or
 	// bandwidth merely because it has more cells. Empty means the metric is its
-	// own group for backward-compatible legacy dimensions.
+	// own group.
 	Group string
-	// Optional marks metrics introduced after the legacy embedded baseline. A
-	// missing optional baseline is reported explicitly and never treated as a
-	// zero; newly aggregated baselines score it normally.
+	// Optional marks a metric that may be absent from a partially populated
+	// current baseline. A missing value is reported explicitly and never treated
+	// as zero; newly aggregated baselines score it normally.
 	Optional bool
 }
 
@@ -93,14 +93,13 @@ func Dimensions() []Dimension {
 			Key:      "memory",
 			ModuleID: "memory",
 			Metrics: []Metric{
-				// 用 mbw 的 memcpy 口径而不是 sysbench 的多线程读：后者在本机
-				// 实测 329 GiB/s，那是缓存命中而非内存带宽，拿它当基线会让所有
-				// 缓存较小的机器凭空吃亏。
-				{Key: "memory_copy", MeasurementKey: "mbw_memcpy_mib_s", HigherIsBetter: true, Group: "copy"},
-				{Key: "memory_write", MeasurementKey: "sysbench_memory_write_single_mib_s", HigherIsBetter: true, Group: "write"},
-				{Key: "memory_write_multi", MeasurementKey: "sysbench_memory_write_multi_mib_s", HigherIsBetter: true, Group: "write", Optional: true},
-				{Key: "memory_read", Prefix: "sysbench_memory_read_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "read", Optional: true},
-				{Key: "memory_latency", Prefix: "sysbench_memory_", Suffix: "_latency_ms", Aggregate: AggregateMedian, HigherIsBetter: false, Group: "latency", Optional: true},
+				// STREAM is the current memory backend. Each kernel is its own
+				// equal-weight subgroup, and the 1T/NT values are explicitly
+				// aggregated by median so neither thread context silently dominates.
+				{Key: "memory_copy", Prefix: "stream_copy_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "copy", Optional: true},
+				{Key: "memory_scale", Prefix: "stream_scale_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "scale", Optional: true},
+				{Key: "memory_add", Prefix: "stream_add_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "add", Optional: true},
+				{Key: "memory_triad", Prefix: "stream_triad_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "triad", Optional: true},
 			},
 		},
 		{
@@ -110,10 +109,10 @@ func Dimensions() []Dimension {
 				// 顺序吞吐、4K 随机 IOPS、50/50 混合读写和 Crystal/ATTO
 				// 矩阵覆盖不同负载，缺一不可：只看顺序会让机械盘阵列显得够用，
 				// 只看随机会埋没大文件场景。各组等权，宽矩阵不会按单元数放大。
-				{Key: "disk_seq_read", MeasurementKey: "fio_sequential_read_mib_s", HigherIsBetter: true, Group: "legacy"},
-				{Key: "disk_seq_write", MeasurementKey: "fio_sequential_write_mib_s", HigherIsBetter: true, Group: "legacy"},
-				{Key: "disk_rand_read_iops", MeasurementKey: "fio_random_read_4k_iops", HigherIsBetter: true, Group: "legacy"},
-				{Key: "disk_rand_write_iops", MeasurementKey: "fio_random_write_4k_iops", HigherIsBetter: true, Group: "legacy"},
+				{Key: "disk_seq_read", MeasurementKey: "fio_sequential_read_mib_s", HigherIsBetter: true, Group: "baseline"},
+				{Key: "disk_seq_write", MeasurementKey: "fio_sequential_write_mib_s", HigherIsBetter: true, Group: "baseline"},
+				{Key: "disk_rand_read_iops", MeasurementKey: "fio_random_read_4k_iops", HigherIsBetter: true, Group: "baseline"},
+				{Key: "disk_rand_write_iops", MeasurementKey: "fio_random_write_4k_iops", HigherIsBetter: true, Group: "baseline"},
 			},
 		},
 		{
@@ -301,8 +300,8 @@ type Report struct {
 	// HostVCPU 是被评分机器的核数，用于说明为什么落在这一档。
 	HostVCPU int `json:"host_vcpu,omitempty"`
 	// RankStatus reports whether a leaderboard position is available without
-	// pretending that an old reference file has a distribution. Values are the
-	// RankStatus* constants below.
+	// inventing a distribution when the current reference has none. Values are
+	// the RankStatus* constants below.
 	RankStatus string `json:"rank_status,omitempty"`
 	// TopPercent is the share of score samples at or above this report's total;
 	// lower is better. It is omitted when RankStatus is not available.
@@ -320,14 +319,12 @@ const (
 	RankStatusAvailable = "available"
 	// RankStatusInsufficient means a distribution exists but has too few scores.
 	RankStatusInsufficient = "insufficient"
-	// RankStatusUnavailable means the artifact has no score distribution (for
-	// example an older ecs.baseline/v1 file).
+	// RankStatusUnavailable means the current reference has no score distribution.
 	RankStatusUnavailable = "unavailable"
 )
 
-// EffectiveRankStatus normalizes reports produced by older versions, which do
-// not contain ranking fields. Such reports deliberately degrade to an
-// unavailable rank instead of deriving one from the reference's host count.
+// EffectiveRankStatus normalizes an omitted ranking state. It deliberately
+// degrades to an unavailable rank instead of deriving one from host count.
 func (r Report) EffectiveRankStatus() string {
 	switch r.RankStatus {
 	case RankStatusAvailable, RankStatusInsufficient, RankStatusUnavailable:
@@ -341,7 +338,7 @@ func (r Report) EffectiveRankStatus() string {
 }
 
 // EffectiveRankSamples returns the score distribution size, falling back to
-// the legacy reference sample count only for explanatory rendering.
+// the reference sample count only for explanatory rendering.
 func (r Report) EffectiveRankSamples() int {
 	if r.RankSamples > 0 {
 		return r.RankSamples
@@ -350,7 +347,7 @@ func (r Report) EffectiveRankSamples() int {
 }
 
 // EffectiveRankMinSamples returns the persisted threshold or the current
-// conservative default for old score reports.
+// conservative default when the reference omits one.
 func (r Report) EffectiveRankMinSamples() int {
 	if r.RankMinSamples > 0 {
 		return r.RankMinSamples
@@ -417,13 +414,12 @@ func Compute(data model.Report, baseline Baseline) *Report {
 }
 
 // populateRank computes a leaderboard position only when the reference carries
-// an explicit score distribution. SampleCount alone is not enough: old
-// ecs.baseline/v1 artifacts contain host counts but no scores to rank against.
+// an explicit score distribution. SampleCount alone is not enough to rank.
 func populateRank(out *Report, baseline Baseline) {
 	out.RankSamples = len(baseline.ScoreSamples)
 	if baseline.ScoreSamples == nil {
-		// Legacy references expose only a host count.  We can still explain that
-		// the sample is too small, but never derive a percentage without scores.
+		// A reference may expose only its host count. We can explain that the
+		// sample is too small, but never derive a percentage without scores.
 		if baseline.SampleCount > 0 && baseline.SampleCount < baseline.RankThreshold() {
 			out.RankSamples = baseline.SampleCount
 			out.RankStatus = RankStatusInsufficient

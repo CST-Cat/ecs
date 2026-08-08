@@ -15,7 +15,7 @@ var chinese = map[string]string{
 	"cli.usage":          "用法",
 	"cli.usage.run":      "运行测试（默认 standard）",
 	"cli.usage.list":     "查看配置档与模块",
-	"cli.usage.render":   "从 JSON 重新导出 Markdown/HTML",
+	"cli.usage.render":   "从 JSON 重新导出 JSON/txt/Markdown/HTML 四种格式",
 	"cli.usage.config":   "输出配置文件示例",
 	"cli.usage.doctor":   "检查标准基准工具",
 	"cli.usage.version":  "显示版本",
@@ -29,7 +29,7 @@ var chinese = map[string]string{
 
 	// ── 配置档 ──────────────────────────────────────────────
 	"profile.standard": "标准配置：选择 16 个常规模块（推荐）",
-	"profile.full":     "完整配置：选择全部 18 个模块（含 Ookla）",
+	"profile.full":     "完整配置：选择全部 18 个默认模块（含 Ookla；--only ookla 可在任意配置档显式选择）",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
@@ -75,6 +75,7 @@ var chinese = map[string]string{
 	"report.metrics":          "关键指标",
 	"report.details":          "详情",
 	"report.notes":            "说明",
+	"report.description":      "模块说明",
 	"report.sources":          "数据来源",
 	"report.notices":          "报告说明",
 	"report.item":             "项目",
@@ -113,11 +114,14 @@ var chinese = map[string]string{
 	"report.comparability":    "可比范围",
 	"report.errorPrefix":      "错误",
 	"report.generator":        "生成器",
+	"report.schema":           "Schema",
+	"report.commit":           "提交",
+	"report.rawOutput":        "原始输出",
 	"report.memoryBenchmark":  "内存测评",
 	"report.diskBenchmark":    "硬盘测评",
 
 	// ── 终端界面 ────────────────────────────────────────────
-	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML",
+	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/txt/Markdown/HTML",
 	"term.profileLine":  "配置档",
 	"term.moduleCount":  "模块",
 	"term.estimate":     "预计",
@@ -169,7 +173,7 @@ var english = map[string]string{
 	"cli.usage":          "Usage",
 	"cli.usage.run":      "Run tests (standard profile by default)",
 	"cli.usage.list":     "Show profiles and modules",
-	"cli.usage.render":   "Re-export Markdown/HTML from a JSON report",
+	"cli.usage.render":   "Re-export JSON/txt/Markdown/HTML from a JSON report",
 	"cli.usage.config":   "Print a sample configuration file",
 	"cli.usage.doctor":   "Check the standard benchmark tools",
 	"cli.usage.version":  "Show version",
@@ -183,7 +187,7 @@ var english = map[string]string{
 
 	// ── Profiles ────────────────────────────────────────────
 	"profile.standard": "Standard profile: 16 common modules (recommended)",
-	"profile.full":     "Full profile: all 18 modules, including Ookla",
+	"profile.full":     "Full profile: all 18 default modules (including Ookla; --only ookla may select it explicitly from any profile)",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",
@@ -229,6 +233,7 @@ var english = map[string]string{
 	"report.metrics":          "Key Metrics",
 	"report.details":          "Details",
 	"report.notes":            "Notes",
+	"report.description":      "Module description",
 	"report.sources":          "Data Sources",
 	"report.notices":          "About This Report",
 	"report.item":             "Item",
@@ -267,11 +272,14 @@ var english = map[string]string{
 	"report.comparability":    "Comparable scope",
 	"report.errorPrefix":      "Error",
 	"report.generator":        "Generator",
+	"report.schema":           "Schema",
+	"report.commit":           "Commit",
+	"report.rawOutput":        "Raw output",
 	"report.memoryBenchmark":  "Memory Benchmark",
 	"report.diskBenchmark":    "Disk Benchmark",
 
 	// ── Terminal ────────────────────────────────────────────
-	"term.subtitle":     "No ads · No auto-upload · Local JSON/Markdown/HTML",
+	"term.subtitle":     "No ads · No auto-upload · Local JSON/txt/Markdown/HTML",
 	"term.profileLine":  "Profile",
 	"term.moduleCount":  "Modules",
 	"term.estimate":     "ETA",

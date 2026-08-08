@@ -116,6 +116,80 @@ func TestSubmissionFingerprintIsStable(t *testing.T) {
 	}
 }
 
+func TestSubmissionMemoryBackendIsRequiredForStream(t *testing.T) {
+	data := sampleSubmissionReport()
+	data.Results = append(data.Results, model.Result{
+		ID: "memory", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "stream_copy_1t_mib_s", Value: 100},
+			{Key: "stream_copy_nt_mib_s", Value: 300},
+			{Key: "stream_scale_1t_mib_s", Value: 100},
+			{Key: "stream_scale_nt_mib_s", Value: 300},
+			{Key: "stream_add_1t_mib_s", Value: 100},
+			{Key: "stream_add_nt_mib_s", Value: 300},
+			{Key: "stream_triad_1t_mib_s", Value: 100},
+			{Key: "stream_triad_nt_mib_s", Value: 300},
+		},
+	})
+	stream, err := BuildSubmission(data, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream.MemoryBackend != memoryBackendStream {
+		t.Fatalf("stream submission backend = %q, want %q", stream.MemoryBackend, memoryBackendStream)
+	}
+	if err := stream.Validate(); err != nil {
+		t.Fatalf("stream submission should validate: %v", err)
+	}
+	encoded, err := stream.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"memory_backend": "stream"`) {
+		t.Fatalf("encoded stream submission omitted backend marker: %s", encoded)
+	}
+	streamReport := stream.AsReport()
+	var memoryResult *model.Result
+	for index := range streamReport.Results {
+		if streamReport.Results[index].ID == "memory" {
+			memoryResult = &streamReport.Results[index]
+			break
+		}
+	}
+	if memoryResult == nil {
+		t.Fatal("stream submission AsReport omitted memory result")
+	}
+	foundCopy := false
+	for _, measurement := range memoryResult.Measurements {
+		if measurement.Key == "stream_copy_submission_mib_s" {
+			foundCopy = true
+			break
+		}
+	}
+	if !foundCopy {
+		t.Fatalf("stream submission AsReport omitted synthetic STREAM copy key: %+v", memoryResult.Measurements)
+	}
+	baseline, err := BuildBaseline([]model.Report{streamReport}, "stream-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := baseline.Metrics["memory_copy"]; math.Abs(got-200) > 0.001 {
+		t.Fatalf("STREAM submission seeded memory_copy baseline = %v, want 200", got)
+	}
+}
+
+func TestSubmissionRejectsUnknownMemoryMetric(t *testing.T) {
+	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submission.Metrics["memory_read"] = 100
+	submission.ID = submission.fingerprint()
+	if err := submission.Validate(); err == nil {
+		t.Fatal("unknown memory metric should be rejected")
+	}
+}
+
 func TestSubmissionValidateRejectsBadInput(t *testing.T) {
 	base, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
 	cases := map[string]func(*Submission){

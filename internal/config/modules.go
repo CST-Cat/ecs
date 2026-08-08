@@ -62,10 +62,13 @@ type ModuleDescriptor struct {
 	ProbeFactory ModuleFactory
 
 	// Profile membership is explicit instead of inferred from an exclusion
-	// list.  ProfileFull is normally true for every registered module while
-	// ProfileStandard marks the default 16-module shortcut.
-	ProfileStandard bool
-	ProfileFull     bool
+	// list. ProfileFull is true for every default module (18 today), while
+	// ProfileStandard marks the default 16-module shortcut. Explicit-only
+	// modules, if introduced, remain reachable through --only without entering
+	// either preset.
+	ProfileStandard     bool
+	ProfileFull         bool
+	ProfileExplicitOnly bool
 
 	Exposure Exposure
 	// NeedsNetwork distinguishes a module that actively touches a remote
@@ -85,7 +88,7 @@ type ModuleDescriptor struct {
 	ScoreKey     string
 
 	// RequiredTools lists tools relevant to the module.  The route probes have a
-	// single execution contract: NextTrace.  This metadata is also consumed by
+	// single execution contract: NextTrace Tiny. This metadata is also consumed by
 	// doctor and the wrapper dependency planner.
 	RequiredTools []string
 
@@ -125,11 +128,11 @@ var moduleDescriptors = []ModuleDescriptor{
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "cpu prime=20000"},
 		true, "cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU),
 	moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "memory seq 1 MiB"},
-		true, "memory", []string{"sysbench", "mbw"}, 5*time.Second, EstimateModeMemory),
+		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "STREAM", Profile: "Copy/Scale/Add/Triad × 1T/NT"},
+		true, "memory", []string{"stream"}, 5*time.Second, EstimateModeMemory),
 	moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio", Profile: "Direct I/O"},
-		true, "disk", []string{"fio", "ioping"}, 8*time.Second, EstimateModeDisk),
+		true, "disk", []string{"fio"}, 8*time.Second, EstimateModeDisk),
 	moduleDescriptorWithEstimateMode("dns", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNS/UDP", ComparisonScope: "现场诊断；不是基准分"},
 		false, "", nil, 8*time.Second, EstimateModeDNS),
@@ -162,11 +165,11 @@ var moduleDescriptors = []ModuleDescriptor{
 		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"},
 		false, "", nil, 10*time.Second, "media", "wizard.askMedia"),
 	moduleDescriptorWithEstimateMode("route", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议诊断", Engine: "NextTrace", ComparisonScope: "正向路径快照；不是性能基准"},
-		false, "", []string{"nexttrace"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
+		model.Methodology{Kind: "protocol-measurement", Label: "协议诊断", Engine: "NextTrace Tiny", ComparisonScope: "正向路径快照；不是性能基准"},
+		false, "", []string{"nexttrace-tiny"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
 	moduleDescriptor("backtrace", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "NextTrace + 骨干网段特征表", ComparisonScope: "路径特征推断；不是反向抓包"},
-		false, "", []string{"nexttrace"}, 30*time.Second, "routing", "wizard.askRouting"),
+		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "NextTrace Tiny + 骨干网段特征表", ComparisonScope: "路径特征推断；不是反向抓包"},
+		false, "", []string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"),
 }
 
 var (
@@ -307,7 +310,7 @@ func ValidateModuleDescriptors() error {
 			return fmt.Errorf("duplicate module descriptor %q", descriptor.ID)
 		}
 		seen[descriptor.ID] = true
-		if !descriptor.ProfileFull && !descriptor.ProfileStandard {
+		if !descriptor.ProfileFull && !descriptor.ProfileStandard && !descriptor.ProfileExplicitOnly {
 			return fmt.Errorf("module %q belongs to no profile", descriptor.ID)
 		}
 		if descriptor.ProfileStandard && !descriptor.ProfileFull {
@@ -338,8 +341,7 @@ func ValidateModuleDescriptors() error {
 	return nil
 }
 
-// ModuleOrder preserves the historical exported variable while deriving its
-// value from the canonical descriptor registry.
+// ModuleOrder is derived from the canonical descriptor registry.
 var ModuleOrder = ModuleIDs()
 
 func init() {

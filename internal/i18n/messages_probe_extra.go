@@ -7,7 +7,7 @@ var probeEnglishExtra = map[string]string{
 	"IPv\x1f 失败原因":                                    "IPv\x1f failure reason",
 	"\x1f 天滥用置信度与使用类型":                                "\x1f-day abuse confidence and usage type",
 	"\x1f 跳无已知特征":                                     "no known signature in \x1f hops",
-	"\x1f/\x1f 个目标完成 · nexttrace":                     "\x1f/\x1f targets completed · nexttrace",
+	"\x1f/\x1f 个目标完成 · NextTrace Tiny":                "\x1f/\x1f targets completed · NextTrace Tiny",
 	"\x1f/\x1f 可用 · \x1f 不可用 · \x1f 未知":               "\x1f/\x1f available · \x1f blocked · \x1f unknown",
 	"\x1f/\x1f 跳无响应，可能被限速":                            "\x1f/\x1f hops silent, possibly rate-limited",
 	"\x1f：入口可能已变更":                                    "\x1f: the entry URL may have changed",

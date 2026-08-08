@@ -225,8 +225,8 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	return result
 }
 
-// probeNAT 对一台 STUN 服务器完成 RFC 5780 的行为发现。
-// probeNAT 保留 IPv4 默认行为，供旧调用方与确定性测试使用。
+// probeNAT 对一台 STUN 服务器完成 RFC 5780 的 IPv4 行为发现。
+// probeNATForVersion 负责双栈调用与协议族扩展。
 func probeNAT(ctx context.Context, server config.Endpoint) natFinding {
 	return probeNATForVersion(ctx, server, config.IPVersion4)
 }

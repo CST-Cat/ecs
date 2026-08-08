@@ -22,8 +22,8 @@ type Environment struct {
 }
 
 // tcpNetworkForMode turns the user-facing IP family setting into the network
-// name accepted by net.Dialer.  Auto deliberately leaves family selection to
-// the resolver/kernel, preserving the historical dual-stack behaviour.
+// name accepted by net.Dialer. Auto deliberately leaves family selection to
+// the resolver/kernel while keeping dual-stack results separate.
 func tcpNetworkForMode(mode string) string {
 	switch mode {
 	case config.IPVersion4:

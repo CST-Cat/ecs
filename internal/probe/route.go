@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +30,10 @@ type routeEngine struct {
 	SHA256  string
 }
 
+const (
+	routeEngineTiny = "nexttrace-tiny"
+)
+
 var (
 	ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
@@ -38,19 +41,19 @@ var (
 func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	result := model.NewResult("route", "路由追踪")
-	result.Description = "使用 NextTrace 追踪多个参考目标"
+	result.Description = "使用官方 NextTrace Tiny 追踪多个参考目标"
 	result.Methodology = model.Methodology{
 		Kind:            "protocol-measurement",
 		Label:           "协议诊断",
-		Engine:          "NextTrace",
+		Engine:          "NextTrace Tiny",
 		Profile:         "max 12 hops, one query",
 		ComparisonScope: "当次正向路径快照；不是性能基准，也不代表回程",
 	}
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 NextTrace")
-		result.Notes = append(result.Notes, "当前运行环境没有 NextTrace；run.sh 只会在 ECS_AUTO_DEPS 未关闭时从 NextTrace 官方 GitHub Release 临时准备已校验的 full 二进制，失败时跳过路由探测。")
+		result.Skip("未发现 NextTrace Tiny")
+		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过路由探测。")
 		result.Finish(start)
 		return result
 	}
@@ -63,12 +66,12 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "引擎", Value: engine.Name},
-		{Key: "version", Label: "NextTrace 版本", Value: fallback(engine.Version, "unknown")},
-		{Key: "binary_sha256", Label: "NextTrace SHA-256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "version", Label: "NextTrace Tiny 版本", Value: fallback(engine.Version, "unknown")},
+		{Key: "binary_sha256", Label: "NextTrace Tiny SHA-256", Value: fallback(engine.SHA256, "unavailable")},
 		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ") + "（按目标协议族）"},
 	}
 	result.Sources = append(result.Sources, model.Source{
-		Name: "NextTrace", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "以纯 JSON、无启动横幅模式执行路由追踪",
+		Name: "NextTrace Tiny", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "以纯 JSON、无启动横幅模式执行官方 Tiny 路由追踪",
 	})
 	table := model.Table{
 		Title:   "追踪摘要",
@@ -84,9 +87,13 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		clean := sanitizeCommandOutput(output)
 		hops := routeHopCount(engine.Name, clean)
 		status := "完成"
-		if err != nil {
+		switch {
+		case err != nil:
 			status = "部分/失败"
-		} else {
+		case hops == 0:
+			status = "NextTrace 解析失败"
+			result.Notes = append(result.Notes, fmt.Sprintf("%s 追踪失败：NextTrace JSON 解析失败或没有有效跳点", target.Name))
+		default:
 			successes++
 		}
 		table.Rows = append(table.Rows, []string{target.Name, target.Kind, status, fmt.Sprintf("%d", hops), elapsed.Round(time.Millisecond).String()})
@@ -100,33 +107,33 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = []model.Table{table}
-	if successes == 0 {
+	if successes < len(targets) {
 		result.Status = model.StatusWarning
 	}
 	result.Notes = append(result.Notes,
 		"这是从 VPS 到目标的正向路径，不等同于用户所在地到 VPS 的去程或三网回程。",
 		"外部程序通过参数数组启动，不经过 shell；ecs 记录可安全读取的版本和程序 SHA-256。一次性依赖由 run.sh 在探针外准备并在退出时清理。",
 	)
-	result.Notes = append(result.Notes, "NextTrace 使用 --json 并关闭地图 URL；不会调用会输出推广内容的版本界面。")
-	result.Summary = fmt.Sprintf("%d/%d 个目标完成 · NextTrace", successes, len(targets))
+	result.Notes = append(result.Notes,
+		"使用官方 NextTrace Tiny；报告保留实际 binary 名称、版本与 SHA-256。",
+		"NextTrace 使用 --json 并关闭地图 URL；不会调用会输出推广内容的版本界面。",
+	)
+	result.Summary = fmt.Sprintf("%d/%d 个目标完成 · NextTrace Tiny", successes, len(targets))
 	result.Finish(start)
 	return result
 }
 
 func detectRouteEngine(ctx context.Context) routeEngine {
-	path, err := exec.LookPath("nexttrace")
+	path, err := exec.LookPath(routeEngineTiny)
 	if err != nil {
 		return routeEngine{}
 	}
-	version := ""
-	commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	command := exec.CommandContext(commandCtx, path, "--version")
-	output, _ := command.CombinedOutput()
-	cancel()
-	if text := strings.TrimSpace(string(output)); text != "" {
-		version = strings.Split(sanitizeCommandOutput(output), "\n")[0]
+	return routeEngine{
+		Name:    routeEngineTiny,
+		Path:    path,
+		Version: commandVersion(ctx, path),
+		SHA256:  binarySHA256(path),
 	}
-	return routeEngine{Name: "nexttrace", Path: path, Version: version, SHA256: binarySHA256(path)}
 }
 
 // routeSnapshotHops 是路径快照的跳数上限。
@@ -137,7 +144,7 @@ func runRouteCommand(ctx context.Context, engine routeEngine, target string, max
 }
 
 func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
-	if engine.Name != "nexttrace" || engine.Path == "" {
+	if !isNextTraceEngine(engine.Name) || engine.Path == "" {
 		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)
 	}
 	args := routeCommandArgsForFamily(engine, target, maxHops, family)
@@ -172,7 +179,7 @@ func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, f
 		familyArg = "-" + family
 	}
 	switch engine.Name {
-	case "nexttrace":
+	case routeEngineTiny:
 		args := []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000"}
 		if familyArg != "" {
 			args = append([]string{familyArg}, args...)
@@ -184,22 +191,24 @@ func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, f
 }
 
 func routeHopCount(engineName, output string) int {
-	if engineName != "nexttrace" {
+	if !isNextTraceEngine(engineName) {
 		return 0
 	}
-	var payload struct {
-		Hops [][]json.RawMessage `json:"Hops"`
-	}
-	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+	details, ok := extractNextTraceDetails(output)
+	if !ok {
 		return 0
 	}
 	count := 0
-	for _, hop := range payload.Hops {
-		if len(hop) > 0 {
+	for _, hop := range details {
+		if hop.IP != "" && hop.IP != "—" {
 			count++
 		}
 	}
 	return count
+}
+
+func isNextTraceEngine(name string) bool {
+	return name == routeEngineTiny
 }
 
 func binarySHA256(path string) string {

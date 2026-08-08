@@ -3,19 +3,20 @@
 #
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
-#       └ 自动下载已校验的 ecs，把缺失组件解包到临时前缀，运行并在 ${TMPDIR:-/tmp} 生成本地报告
+#       └ 自动下载已校验的 ecs 和按架构匹配的工具包，把缺失组件放入临时 PATH，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后删除本次临时前缀
 #   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 已有的 sysbench/fio/iperf3/speedtest 等组件不会改动。
-#   - 缺失组件只从发行版的已配置、签名软件源下载到本次 WORK，并解包到
-#     WORK/root；绝不调用系统包安装器，也不改动系统数据库。当前 Debian/Ubuntu
-#     路径使用 apt-get download + dpkg-deb -x；其它发行版无法安全解包时明确跳过。
-#   - 路由模块仅例外地从 NextTrace 官方 GitHub Release 下载 full 二进制，并校验
-#     API digest 后放入本次 WORK。
+#   - 已有的 sysbench/stream/fio/iperf3/ping/nexttrace-tiny 等组件优先使用，不改动系统。
+#   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.zst 获取，
+#     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin。
+#     绝不调用系统包安装器，也不改动系统数据库。
+#   - Ookla speedtest 不放入工具包；standard 默认不启用，full 默认包含，
+#     --only ookla 仍可在任意档位显式单独选择；缺失时才走独立的 Ookla
+#     官方签名软件源路径。
 #   - ECS_AUTO_DEPS=0 可关闭自动依赖准备，让 ecs 自己报告缺失组件。
 #   - ECS_KEEP=1 只保留临时工作目录用于排障；没有系统包需要清理。
 #   - WORK 默认位于 /tmp；显式 TMPDIR 仅作为高级覆盖，必须是绝对路径。
@@ -65,25 +66,25 @@ case "${1:-}" in
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
         '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
         '' \
-        'Downloads a checksummed ecs release, stages missing tools under a temporary prefix (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
-        'When route/backtrace needs NextTrace, run.sh may download a verified temporary full Linux asset; ECS_AUTO_DEPS=0 skips it.' \
+        'Downloads a checksummed ecs release, then stages missing architecture-matched tools under a temporary PATH (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
+        'When route/backtrace needs NextTrace Tiny, run.sh stages the official nexttrace-tiny asset; ECS_AUTO_DEPS=0 skips tool preparation.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'The full profile includes Ookla; if speedtest is missing, run.sh downloads and extracts it from a verified official package source under WORK.'
+        'The standard profile omits Ookla by default; the full profile includes it. Explicit --only ookla may select it from any profile. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
         '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
         '' \
-        '下载并校验 ecs Release，把缺失组件解包到临时前缀（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
-        '选中 route/backtrace 且缺少 NextTrace 时，run.sh 可下载并校验临时 full Linux 组件；ECS_AUTO_DEPS=0 会跳过。' \
+        '下载并校验 ecs Release，再按架构下载并校验缺失工具包，把需要的 binary 放入临时 PATH（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
+        '选中 route/backtrace 时使用官方 nexttrace-tiny，缺失时跳过路由探测；ECS_AUTO_DEPS=0 会跳过依赖准备。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        'full 档包含 Ookla；缺少 speedtest 时，脚本会从临时、已验证的官方包源下载并解包到 WORK。'
+        'standard 默认不包含 Ookla；full 默认包含 Ookla；显式使用 --only ookla 可在任意档位单独选择。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
     fi
     exit 0
     ;;
@@ -279,10 +280,6 @@ APT_STATE_MODE="host"
 APT_TEMP_SOURCES=""
 MISSING_TOOLS=""
 PACKAGES=""
-NEXTTRACE_BIN_DIR="$WORK/bin"
-NEXTTRACE_API_FILE="$WORK/nexttrace-release.json"
-NEXTTRACE_DOWNLOAD_FILE="$WORK/nexttrace.download"
-NEXTTRACE_READY=0
 NEXTTRACE_REQUESTED=0
 NEXTTRACE_FAILED=0
 OOKLA_MISSING=0
@@ -298,6 +295,18 @@ OOKLA_RPM_OS=""
 OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
+TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.zst"
+TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
+TOOLS_MANIFEST_FILE="$WORK/ecs-tools.manifest.json"
+TOOLS_LIST_FILE="$WORK/ecs-tools.list"
+TOOLS_EXTRACT_ROOT="$WORK/tools"
+TOOLS_STAGING_BIN="$WORK/tools-staging-bin"
+TOOLS_REQUESTED=""
+TOOLS_READY=0
+TOOLS_ARCHIVE_DIGESTS="$WORK/ecs-tools.sha256"
+TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
+TOOLS_BASE=${TOOLS_BASE%/}
+TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
 
 # Install the cleanup trap as soon as WORK exists.  This also covers argument
 # validation and manifest failures that happen before the test body starts.
@@ -359,6 +368,264 @@ add_missing_tool() {
 
 tool_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+nexttrace_tool_exists() {
+  tool_exists nexttrace-tiny
+}
+
+stream_is_official() {
+  stream_command=$(command -v stream 2>/dev/null || true)
+  [ -n "$stream_command" ] && [ -f "$stream_command" ] && [ -x "$stream_command" ] || return 1
+  # Do not execute a candidate `stream` merely to identify it: ImageMagick
+  # ships a command with the same name.  These strings are stable markers of
+  # the official STREAM benchmark output and are absent from that utility.
+  command -v strings >/dev/null 2>&1 || return 1
+  stream_strings=$(strings "$stream_command" 2>/dev/null || true)
+  printf '%s\n' "$stream_strings" | grep -F 'Number of Threads requested' >/dev/null || return 1
+  printf '%s\n' "$stream_strings" | grep -F 'Best Rate' >/dev/null || return 1
+  printf '%s\n' "$stream_strings" | grep -F 'Function' >/dev/null || return 1
+  printf '%s\n' "$stream_strings" | grep -F 'STREAM version' >/dev/null || return 1
+  return 0
+}
+
+tool_available() {
+  case "$1" in
+    stream) stream_is_official ;;
+    nexttrace-tiny) nexttrace_tool_exists ;;
+    *) tool_exists "$1" ;;
+  esac
+}
+
+archive_tool_for() {
+  case "$1" in
+    sysbench|stream|fio|iperf3|nexttrace-tiny|ping) printf '%s\n' "$1" ;;
+    *) return 1 ;;
+  esac
+}
+
+add_tools_request() {
+  tools_request=$1
+  case " $TOOLS_REQUESTED " in
+    *" $tools_request "*) ;;
+    *) TOOLS_REQUESTED="${TOOLS_REQUESTED:+$TOOLS_REQUESTED }$tools_request" ;;
+  esac
+}
+
+# Read simple string fields from the release manifest without requiring jq.
+# The package manifest is generated in a stable, string-valued schema; the
+# optional jq check below adds strict JSON/schema validation when jq is already
+# present, while this parser keeps minimal VPS images supported.
+tools_manifest_field_values() {
+  tools_manifest_field=$1
+  tools_manifest_path=$2
+  awk -v field="$tools_manifest_field" '
+    {
+      text = $0
+      pattern = "\\\"" field "\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\""
+      while (match(text, pattern)) {
+        value = substr(text, RSTART, RLENGTH)
+        sub(".*:[[:space:]]*\\\"", "", value)
+        sub("\\\"$", "", value)
+        print value
+        text = substr(text, RSTART + RLENGTH)
+      }
+    }
+  ' "$tools_manifest_path"
+}
+
+tools_value_count() {
+  awk 'NF {count++} END {print count + 0}' "$1"
+}
+
+tools_manifest_digest_for() {
+  tools_manifest_wanted=$1
+  # Tool records are objects; splitting only JSON object delimiters keeps the
+  # lookup independent of field order and also works for compact manifests.
+  tr '{}' '\n' <"$TOOLS_MANIFEST_FILE" |
+    awk -v wanted="$tools_manifest_wanted" '
+      function string_value(text, key, pattern, value) {
+        pattern = "\\\"" key "\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\""
+        if (!match(text, pattern)) return ""
+        value = substr(text, RSTART, RLENGTH)
+        sub(".*:[[:space:]]*\\\"", "", value)
+        sub("\\\"$", "", value)
+        return value
+      }
+      {
+        name = string_value($0, "name")
+        if (name != "") active = (name == wanted)
+        if (active) {
+          digest = string_value($0, "sha256")
+          if (digest != "") {
+            print digest
+            found = 1
+            exit
+          }
+        }
+      }
+      END { if (!found) exit 1 }
+    '
+}
+
+verify_tools_binary_digest() {
+  tools_digest_tool=$1
+  tools_digest_path=$2
+  tools_digest=$(tools_manifest_digest_for "$tools_digest_tool" 2>/dev/null || true)
+  case "$tools_digest" in
+    unknown|unavailable) return 0 ;;
+    ''|*[!A-Fa-f0-9]*) return 1 ;;
+  esac
+  [ "${#tools_digest}" -eq 64 ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    tools_digest_actual=$(sha256sum "$tools_digest_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  elif command -v shasum >/dev/null 2>&1; then
+    tools_digest_actual=$(shasum -a 256 "$tools_digest_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  else
+    return 1
+  fi
+  tools_digest_expected=$(printf '%s\n' "$tools_digest" | tr '[:upper:]' '[:lower:]')
+  [ "$tools_digest_actual" = "$tools_digest_expected" ]
+}
+
+validate_tools_manifest() {
+  tools_manifest_path=$1
+  [ -s "$tools_manifest_path" ] || return 1
+
+  tools_manifest_field_values schema_version "$tools_manifest_path" >"$WORK/tools-manifest.schema"
+  [ "$(tools_value_count "$WORK/tools-manifest.schema")" -eq 1 ] || return 1
+  grep -F -x 'ecs-tools.manifest/v1' "$WORK/tools-manifest.schema" >/dev/null || return 1
+
+  tools_manifest_field_values architecture "$tools_manifest_path" >"$WORK/tools-manifest.arch"
+  tools_manifest_arch_count=$(tools_value_count "$WORK/tools-manifest.arch")
+  # One top-level architecture plus one for every declared tool.
+  [ "$tools_manifest_arch_count" -eq 7 ] || return 1
+  while IFS= read -r tools_manifest_arch; do
+    [ "$tools_manifest_arch" = "$ARCH" ] || return 1
+  done <"$WORK/tools-manifest.arch"
+
+  tools_manifest_field_values name "$tools_manifest_path" >"$WORK/tools-manifest.names"
+  [ "$(tools_value_count "$WORK/tools-manifest.names")" -eq 6 ] || return 1
+  sort -u "$WORK/tools-manifest.names" >"$WORK/tools-manifest.names.unique"
+  printf '%s\n' fio iperf3 nexttrace-tiny ping stream sysbench >"$WORK/tools-manifest.names.expected"
+  cmp -s "$WORK/tools-manifest.names.unique" "$WORK/tools-manifest.names.expected" || return 1
+
+  # Every tool record must expose a usable or explicitly unavailable digest.
+  # A concrete digest is checked against the extracted binary below when one
+  # is present; unknown/unavailable is allowed for source-built packages whose
+  # release manifest has no reproducible source digest.
+  tools_manifest_field_values sha256 "$tools_manifest_path" >"$WORK/tools-manifest.sha256"
+  [ "$(tools_value_count "$WORK/tools-manifest.sha256")" -eq 6 ] || return 1
+  while IFS= read -r tools_manifest_sha; do
+    case "$tools_manifest_sha" in
+      unknown|unavailable) ;;
+      ''|*[!A-Fa-f0-9]*) return 1 ;;
+      *) [ "${#tools_manifest_sha}" -eq 64 ] || return 1 ;;
+    esac
+  done <"$WORK/tools-manifest.sha256"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -e --arg arch "$ARCH" '
+      .schema_version == "ecs-tools.manifest/v1" and
+      .architecture == $arch and
+      (.tools | type == "array" and length == 6) and
+      ([.tools[].name] | sort) == ["fio", "iperf3", "nexttrace-tiny", "ping", "stream", "sysbench"] and
+      (all(.tools[]; has("name") and has("architecture") and has("sha256") and
+        (.architecture == $arch) and
+        ((.sha256 == "unknown") or (.sha256 == "unavailable") or (.sha256 | test("^[A-Fa-f0-9]{64}$")))))
+    ' "$tools_manifest_path" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+tools_tar_list() {
+  tools_archive_path=$1
+  if tar --zstd -tf "$tools_archive_path" 2>/dev/null; then
+    return 0
+  fi
+  command -v zstd >/dev/null 2>&1 || return 1
+  zstd -q -dc "$tools_archive_path" | tar -tf -
+}
+
+tools_tar_extract_member() {
+  tools_archive_path=$1
+  tools_extract_path=$2
+  tools_member=$3
+  if tar --zstd -xf "$tools_archive_path" -C "$tools_extract_path" "$tools_member" >/dev/null 2>&1; then
+    return 0
+  fi
+  command -v zstd >/dev/null 2>&1 || return 1
+  zstd -q -dc "$tools_archive_path" | tar -xf - -C "$tools_extract_path" "$tools_member"
+}
+
+validate_tools_archive_layout() {
+  tools_list_path=$1
+  while IFS= read -r tools_entry; do
+    case "$tools_entry" in
+      ''|/*|../*|*/../*|*/..|./*|*/./*) return 1 ;;
+    esac
+  done <"$tools_list_path"
+  grep -F -x 'bin/' "$tools_list_path" >/dev/null || return 1
+  grep -F -x 'manifest.json' "$tools_list_path" >/dev/null || return 1
+  for tools_entry in sysbench stream fio iperf3 nexttrace-tiny ping; do
+    grep -F -x "bin/$tools_entry" "$tools_list_path" >/dev/null || return 1
+  done
+  return 0
+}
+
+prepare_tools_archive() {
+  [ -n "$TOOLS_REQUESTED" ] || return 0
+  say "下载并校验架构工具包 $TOOLS_ASSET" "downloading and verifying architecture tool package $TOOLS_ASSET"
+  if [ "$TOOLS_BASE" = "$BASE" ]; then
+    cp "$WORK/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
+  else
+    fetch "${TOOLS_BASE}/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
+  fi
+  fetch "${TOOLS_BASE}/${TOOLS_ASSET}" "$TOOLS_ARCHIVE" || return 1
+
+  TOOLS_EXPECTED=$(awk -v f="$TOOLS_ASSET" '$2 == f {print $1; exit}' "$TOOLS_CHECKSUMS_FILE" | tr '[:upper:]' '[:lower:]')
+  case "$TOOLS_EXPECTED" in
+    ''|*[!A-Fa-f0-9]*) return 1 ;;
+  esac
+  [ "${#TOOLS_EXPECTED}" -eq 64 ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    TOOLS_ACTUAL=$(sha256sum "$TOOLS_ARCHIVE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  elif command -v shasum >/dev/null 2>&1; then
+    TOOLS_ACTUAL=$(shasum -a 256 "$TOOLS_ARCHIVE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  else
+    return 1
+  fi
+  [ "$TOOLS_ACTUAL" = "$TOOLS_EXPECTED" ] || return 1
+  printf '%s  %s\n' "$TOOLS_ACTUAL" "$TOOLS_ASSET" >"$TOOLS_ARCHIVE_DIGESTS"
+
+  tools_tar_list "$TOOLS_ARCHIVE" >"$TOOLS_LIST_FILE" || return 1
+  validate_tools_archive_layout "$TOOLS_LIST_FILE" || return 1
+  mkdir -p "$TOOLS_EXTRACT_ROOT" "$TOOLS_STAGING_BIN" || return 1
+  tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" manifest.json || return 1
+  [ -f "$TOOLS_EXTRACT_ROOT/manifest.json" ] && [ ! -L "$TOOLS_EXTRACT_ROOT/manifest.json" ] || return 1
+  cp "$TOOLS_EXTRACT_ROOT/manifest.json" "$TOOLS_MANIFEST_FILE" || return 1
+  validate_tools_manifest "$TOOLS_MANIFEST_FILE" || return 1
+  for tools_requested in $TOOLS_REQUESTED; do
+    tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" "bin/$tools_requested" || return 1
+    tools_source="$TOOLS_EXTRACT_ROOT/bin/$tools_requested"
+    [ -f "$tools_source" ] && [ ! -L "$tools_source" ] && [ -x "$tools_source" ] || return 1
+    verify_tools_binary_digest "$tools_requested" "$tools_source" || return 1
+    # Copy, instead of exposing the whole extracted tree, so PATH contains
+    # exactly the binaries needed by this invocation.
+    cp "$tools_source" "$TOOLS_STAGING_BIN/$tools_requested" || return 1
+    chmod 0755 "$TOOLS_STAGING_BIN/$tools_requested" || return 1
+  done
+  # Do not alter MISSING_TOOLS or PATH until every requested binary has passed
+  # its own digest check.  A later mismatch therefore keeps the whole request
+  # unresolved instead of exposing a partially verified tool set.
+  [ ! -e "$TEMP_TOOL_BIN" ] || return 1
+  mv "$TOOLS_STAGING_BIN" "$TEMP_TOOL_BIN" || return 1
+  for tools_requested in $TOOLS_REQUESTED; do
+    remove_missing_tool "$tools_requested"
+  done
+  activate_temp_tool_path
+  TOOLS_READY=1
+  return 0
 }
 
 list_contains() {
@@ -967,130 +1234,6 @@ manifest_tools_for() {
   printf '%s\n' "$MODULE_TOOLS" | awk -F '\t' -v wanted="$1" '$1 == wanted {print $2; exit}'
 }
 
-# NextTrace is the only route engine.  When the selected module set needs it,
-# the wrapper may place the verified full release binary in WORK/bin.  Parsing
-# the release metadata locally avoids jq/python dependencies while still
-# requiring both the exact official asset URL and GitHub's SHA-256 digest.
-nexttrace_asset_metadata() {
-  wanted=$1
-  awk -v wanted="$wanted" '
-    function field(line, key, p, rest) {
-      p = index(line, "\"" key "\"")
-      if (!p) return ""
-      rest = substr(line, p + length(key) + 2)
-      sub(/^[[:space:]]*:[[:space:]]*/, "", rest)
-      # The GitHub API declares name, digest, and browser_download_url as JSON
-      # strings.  Reject an unquoted value rather than coercing arbitrary JSON
-      # into a shell URL or digest.
-      if (substr(rest, 1, 1) != "\"") return ""
-      rest = substr(rest, 2)
-      end = index(rest, "\"")
-      if (!end) return ""
-      return substr(rest, 1, end - 1)
-    }
-    {
-      name = field($0, "name")
-      if (name != "") active = (name == wanted)
-      if (active) {
-        value = field($0, "browser_download_url")
-        if (value != "") url = value
-        value = field($0, "digest")
-        if (value != "") digest = value
-      }
-    }
-    END {
-      if (url != "" && digest != "") print url "\t" digest
-    }
-  ' "$NEXTTRACE_API_FILE"
-}
-
-nexttrace_cleanup_partial() {
-  rm -f "$NEXTTRACE_API_FILE" "$NEXTTRACE_DOWNLOAD_FILE"
-}
-
-prepare_nexttrace() {
-  # Keep this allow-list aligned with the Linux assets published by
-  # nxtrace/NTrace-core.  The ECS release ARCH mapping above is intentionally
-  # not reused blindly if a future wrapper adds another platform.
-  case "$ARCH" in
-    amd64|arm64|armv7|386|s390x|riscv64|ppc64le) ;;
-    *) return 1 ;;
-  esac
-  NEXTTRACE_ASSET="nexttrace_linux_${ARCH}"
-  NEXTTRACE_API_URL="https://api.github.com/repos/nxtrace/NTrace-core/releases/latest"
-  NEXTTRACE_URL=""
-  NEXTTRACE_DIGEST=""
-  NEXTTRACE_EXPECTED=""
-  nexttrace_cleanup_partial
-  if ! fetch "$NEXTTRACE_API_URL" "$NEXTTRACE_API_FILE"; then
-    nexttrace_cleanup_partial
-    return 1
-  fi
-  NEXTTRACE_METADATA=$(nexttrace_asset_metadata "$NEXTTRACE_ASSET" 2>/dev/null || true)
-  NEXTTRACE_TAB=$(printf '\t')
-  case "$NEXTTRACE_METADATA" in
-    *"$NEXTTRACE_TAB"*) ;;
-    *) nexttrace_cleanup_partial; return 1 ;;
-  esac
-  NEXTTRACE_URL=${NEXTTRACE_METADATA%%"$NEXTTRACE_TAB"*}
-  NEXTTRACE_DIGEST=${NEXTTRACE_METADATA#*"$NEXTTRACE_TAB"}
-  # Never follow a URL supplied by a release field unless it is the expected
-  # asset on the pinned official repository.  The asset name is also exact,
-  # so a tiny build or a different platform cannot be substituted silently.
-  case "$NEXTTRACE_URL" in
-    https://github.com/nxtrace/NTrace-core/releases/download/*/"$NEXTTRACE_ASSET") ;;
-    *) nexttrace_cleanup_partial; return 1 ;;
-  esac
-  case "$NEXTTRACE_DIGEST" in
-    sha256:*) NEXTTRACE_EXPECTED=${NEXTTRACE_DIGEST#sha256:} ;;
-    *) nexttrace_cleanup_partial; return 1 ;;
-  esac
-  case "$NEXTTRACE_EXPECTED" in
-    ''|*[!A-Fa-f0-9]*) nexttrace_cleanup_partial; return 1 ;;
-  esac
-  [ "${#NEXTTRACE_EXPECTED}" -eq 64 ] || {
-    nexttrace_cleanup_partial
-    return 1
-  }
-  if ! fetch "$NEXTTRACE_URL" "$NEXTTRACE_DOWNLOAD_FILE"; then
-    nexttrace_cleanup_partial
-    return 1
-  fi
-  if command -v sha256sum >/dev/null 2>&1; then
-    NEXTTRACE_ACTUAL=$(sha256sum "$NEXTTRACE_DOWNLOAD_FILE" | awk '{print $1}')
-  elif command -v shasum >/dev/null 2>&1; then
-    NEXTTRACE_ACTUAL=$(shasum -a 256 "$NEXTTRACE_DOWNLOAD_FILE" | awk '{print $1}')
-  else
-    nexttrace_cleanup_partial
-    return 1
-  fi
-  [ "$NEXTTRACE_ACTUAL" = "$NEXTTRACE_EXPECTED" ] || {
-    nexttrace_cleanup_partial
-    return 1
-  }
-  mkdir -p "$NEXTTRACE_BIN_DIR" || {
-    nexttrace_cleanup_partial
-    return 1
-  }
-  if ! mv "$NEXTTRACE_DOWNLOAD_FILE" "$NEXTTRACE_BIN_DIR/nexttrace"; then
-    nexttrace_cleanup_partial
-    rm -f "$NEXTTRACE_BIN_DIR/nexttrace"
-    return 1
-  fi
-  if ! chmod 700 "$NEXTTRACE_BIN_DIR/nexttrace" ||
-    [ ! -f "$NEXTTRACE_BIN_DIR/nexttrace" ] ||
-    [ -L "$NEXTTRACE_BIN_DIR/nexttrace" ]; then
-    nexttrace_cleanup_partial
-    rm -f "$NEXTTRACE_BIN_DIR/nexttrace"
-    return 1
-  fi
-  rm -f "$NEXTTRACE_API_FILE"
-  PATH="$NEXTTRACE_BIN_DIR:${PATH:-}"
-  export PATH
-  NEXTTRACE_READY=1
-  return 0
-}
-
 remove_missing_tool() {
   wanted=$1
   remaining=""
@@ -1130,10 +1273,11 @@ module_enabled() {
 
 collect_missing_tools() {
   MISSING_TOOLS=""
+  TOOLS_REQUESTED=""
   NEXTTRACE_REQUESTED=0
 
   # RequiredTools is metadata consumed as an execution contract.  Route and
-  # backtrace both require the one supported engine, NextTrace.
+  # backtrace both require the one supported engine, NextTrace Tiny.
   module_words=$(printf '%s' "$MODULE_ALL_MODULES" | tr ',' ' ')
   for module in $module_words; do
     module_enabled "$module" || continue
@@ -1141,41 +1285,46 @@ collect_missing_tools() {
     [ -n "$tools" ] || continue
     tool_words=$(printf '%s' "$tools" | tr ',' ' ')
     for tool in $tool_words; do
-      if [ "$tool" = "nexttrace" ]; then
-        NEXTTRACE_REQUESTED=1
-      fi
-      tool_exists "$tool" || add_missing_tool "$tool"
+      case "$tool" in
+        nexttrace-tiny)
+          NEXTTRACE_REQUESTED=1
+          if ! nexttrace_tool_exists; then
+            add_missing_tool nexttrace-tiny
+            add_tools_request nexttrace-tiny
+          fi
+          ;;
+        *)
+          if ! tool_available "$tool"; then
+            add_missing_tool "$tool"
+            archive_tool_for "$tool" >/dev/null 2>&1 && add_tools_request "$tool"
+          fi
+          ;;
+      esac
     done
   done
 }
 
 install_packages() {
   install_status=0
-  if [ -n "$PACKAGES" ]; then
-    say "把测试组件下载并解包到临时前缀：$PACKAGES" "downloading and extracting test components into the temporary prefix: $PACKAGES"
-    case "$PACKAGE_MANAGER" in
-      apt)
-        prepare_apt_tools || install_status=1
-        # gpg is a helper for verifying the pinned Ookla key, not a benchmark
-        # dependency.  If it was absent on the host, use only a staged copy.
-        if [ "$OOKLA_MISSING" -eq 1 ] && ! command -v gpg >/dev/null 2>&1; then
-          if stage_temp_tool gpg; then
-            activate_temp_tool_path
-          fi
-        fi
-        ;;
-      dnf|yum|apk|pacman)
-        say "当前发行版的包格式没有受支持的临时解包路径，跳过：$PACKAGES" \
-          "this distro has no supported temporary extractor for its package format; skipping: $PACKAGES"
-        install_status=1
-        ;;
-      *) install_status=1 ;;
-    esac
-  fi
   if [ "$OOKLA_MISSING" -eq 1 ]; then
     case "$PACKAGE_MANAGER" in
       apt)
-        if install_ookla; then
+        # Ookla remains a separate dependency from the ecs-tools archive.  Its
+        # package and helper (ca-certificates/gpg) are staged privately, but
+        # generic benchmark tools never use this package-manager path.
+        OOKLA_MISSING_TOOLS="$MISSING_TOOLS"
+        MISSING_TOOLS=""
+        PACKAGES="ca-certificates"
+        if ! command -v gpg >/dev/null 2>&1; then
+          add_package gnupg
+        fi
+        if ! prepare_apt_tools; then
+          install_status=1
+        elif ! command -v gpg >/dev/null 2>&1 && stage_temp_tool gpg; then
+          activate_temp_tool_path
+        fi
+        MISSING_TOOLS="$OOKLA_MISSING_TOOLS"
+        if [ "$install_status" -eq 0 ] && install_ookla; then
           remove_missing_tool speedtest
         else
           install_status=1
@@ -1209,7 +1358,7 @@ prepare_dependencies() {
 
   say "缺少组件：$MISSING_TOOLS" "missing components: $MISSING_TOOLS"
   if [ "$AUTO_DEPS" -eq 0 ]; then
-    if [ "$NEXTTRACE_REQUESTED" -eq 1 ]; then
+    if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! nexttrace_tool_exists; then
       NEXTTRACE_FAILED=1
       say "已关闭自动依赖准备，NextTrace 路由模块将跳过。" "automatic dependency setup is disabled; NextTrace route modules will be skipped"
     fi
@@ -1217,60 +1366,40 @@ prepare_dependencies() {
     return 0
   fi
 
-  # A missing NextTrace is intentionally handled outside the system package
-  # manager.  The verified full asset lives only in WORK/bin and is removed by
-  # the EXIT trap, so pre-existing binaries and packages are never changed.
-  if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! tool_exists nexttrace; then
-    say "缺少 NextTrace，正在从官方 GitHub Release 临时准备已校验的 full 二进制" "NextTrace is missing; temporarily preparing its verified full binary from the official GitHub Release"
-    if prepare_nexttrace; then
-      remove_missing_tool nexttrace
-      say "NextTrace 已就绪（仅在本次 WORK 中使用）" "NextTrace is ready (scoped to this run's temporary WORK directory)"
+  if [ -n "$TOOLS_REQUESTED" ]; then
+    if prepare_tools_archive; then
+      say "缺失工具已放入本次临时 PATH" "missing tools staged in this run's temporary PATH"
     else
-      remove_missing_tool nexttrace
-      NEXTTRACE_FAILED=1
-      say "NextTrace 下载或 SHA-256 校验失败，路由模块将跳过" "NextTrace download or SHA-256 verification failed; route modules will be skipped"
+      say "架构工具包下载、SHA-256 或 manifest 校验失败，相关测试将跳过" \
+        "architecture tool package download, SHA-256, or manifest verification failed; related tests will be skipped"
     fi
+  fi
+  if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! nexttrace_tool_exists; then
+    NEXTTRACE_FAILED=1
+    say "NextTrace Tiny 不可用，路由模块将跳过" "NextTrace Tiny is unavailable; route modules will be skipped"
   fi
   if [ -z "$MISSING_TOOLS" ]; then
     if [ "$NEXTTRACE_FAILED" -eq 1 ]; then
-      say "其他测试组件已就绪；NextTrace 不可用，路由模块将跳过" "other test components are ready; NextTrace is unavailable and route modules will be skipped"
+	      say "其他测试组件已就绪；NextTrace Tiny 不可用，路由模块将跳过" "other test components are ready; NextTrace Tiny is unavailable and route modules will be skipped"
     else
       say "测试组件已就绪" "test components are ready"
     fi
     return 0
   fi
-  if ! select_package_manager; then
-    say "找不到可用的包管理器，缺失组件将跳过；可预先放入 PATH" \
-      "no supported package manager; missing components will be skipped (preinstall them on PATH if needed)"
-    return 0
-  fi
-  PACKAGES=""
-  for tool in $MISSING_TOOLS; do
-    case "$tool" in
-      speedtest) OOKLA_MISSING=1 ;;
-      *) add_package "$(package_for_tool "$tool")" ;;
-    esac
-  done
-  # The official .deb metadata currently declares ca-certificates.  Download
-  # it into WORK before touching the temporary Ookla source; it is never
-  # installed into the host.
   if [ "$OOKLA_MISSING" -eq 1 ]; then
-    add_package ca-certificates
+    if ! select_package_manager; then
+      say "找不到 Ookla 所需的包管理器，speedtest 将跳过" \
+        "no package manager is available for the explicit Ookla path; speedtest will be skipped"
+    else
+      install_packages
+    fi
   fi
-  # gpg is only needed to turn the downloaded, pinned Ookla key into an apt
-  # keyring.  If it is absent, unpack gnupg into WORK as a helper; never ask
-  # the host package manager to install it.
-  if [ "$OOKLA_MISSING" -eq 1 ] && [ "$PACKAGE_MANAGER" = apt ] && ! command -v gpg >/dev/null 2>&1; then
-    add_package gnupg
-  fi
-
-  install_packages
   if [ -n "$MISSING_TOOLS" ]; then
     say "以下组件未能安全放入临时前缀，将按缺失组件降级：$MISSING_TOOLS" \
       "the following components could not be safely staged in the temporary prefix; tests will degrade: $MISSING_TOOLS"
   elif [ "$NEXTTRACE_FAILED" -eq 1 ]; then
-    say "测试组件已就绪；NextTrace 不可用，路由模块将跳过" \
-      "test components are ready; NextTrace is unavailable and route modules will be skipped"
+	    say "测试组件已就绪；NextTrace Tiny 不可用，路由模块将跳过" \
+	      "test components are ready; NextTrace Tiny is unavailable and route modules will be skipped"
   else
     say "测试组件已就绪（仅位于本次临时前缀）" \
       "test components are ready (scoped to this run's temporary prefix)"

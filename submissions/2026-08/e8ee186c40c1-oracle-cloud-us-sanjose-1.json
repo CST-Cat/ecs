@@ -1,6 +1,6 @@
 {
   "schema": "ecs.submission/v1",
-  "id": "9146d7249193",
+  "id": "e8ee186c40c1",
   "host": {
     "vcpu": 4,
     "memory_gib": 23.41,
@@ -121,12 +121,7 @@
     "fio_mixed_512k_read_mib_s": 31.496777534484863,
     "fio_mixed_512k_write_mib_s": 31.99600601196289,
     "fio_mixed_64k_read_mib_s": 40.67074966430664,
-    "fio_mixed_64k_write_mib_s": 41.094014167785645,
-    "memory_copy": 9302.934,
-    "memory_latency": 0.065,
-    "memory_read": 47816.42,
-    "memory_write": 15290.3,
-    "memory_write_multi": 59511.61
+    "fio_mixed_64k_write_mib_s": 41.094014167785645
   },
   "profile": "full"
 }

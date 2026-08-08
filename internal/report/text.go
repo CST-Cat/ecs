@@ -46,13 +46,22 @@ type TextOptions struct {
 	Color termcolor.Level
 	// Score 是可选的综合评分，为 nil 时不渲染评分区。
 	Score *score.Report
+	// Compact 只用于交互式终端摘要。文件型 txt 默认保留方法学、原始
+	// TextBlocks、说明和来源，避免四种报告格式之间发生信息丢失。
+	Compact bool
 }
 
 // Text 渲染纯文本报告。
 func Text(data model.Report, options TextOptions) string {
+	// Keep direct renderer calls consistent with WriteFiles: callers such as the
+	// terminal facade may pass the probe's source-language report directly.
+	// Localize returns a copy, so rendering never mutates the report that is
+	// still used for the machine-readable artifact.
+	data = Localize(data)
 	renderer := &textRenderer{
 		palette: termcolor.Palette{Level: options.Color},
 		score:   options.Score,
+		compact: options.Compact,
 	}
 	return renderer.render(data)
 }
@@ -61,6 +70,7 @@ type textRenderer struct {
 	out          strings.Builder
 	palette      termcolor.Palette
 	score        *score.Report
+	compact      bool
 	section      int
 	subsectionNo int
 	version      string
@@ -171,7 +181,7 @@ func (r *textRenderer) overview(data model.Report) {
 }
 
 // moduleNavigation 显示完整模块目录以及本次报告实际选择的模块。Run.Requested
-// 为空时从结果回退，兼容旧 JSON 报告。
+// 为空时从结果字段补出当前模块标题。
 func (r *textRenderer) moduleNavigation(data model.Report) {
 	selected := append([]string(nil), data.Run.Requested...)
 	if len(selected) == 0 {
@@ -355,16 +365,6 @@ func matrixScoreCounts(dimension score.DimensionScore) map[diskMatrixKind]int {
 	for _, group := range dimension.Groups {
 		if kind := matrixKindForGroup(group.Key); kind != "" && group.MetricCount > 0 {
 			counts[kind] = group.MetricCount
-		}
-	}
-	// Old score JSON may not carry Groups.  Recover a useful count from the
-	// metric list in that case, while preferring the calculation's explicit
-	// subgroup count when it is present.
-	for _, metric := range dimension.Metrics {
-		if kind := matrixKindForMeasurement(metric.Key); kind != "" {
-			if _, ok := counts[kind]; !ok {
-				counts[kind]++
-			}
 		}
 	}
 	return counts
@@ -577,7 +577,79 @@ func (r *textRenderer) result(result model.Result) {
 	for _, group := range textGroups(result) {
 		r.renderGroup(group)
 	}
+	if !r.compact {
+		r.resultEvidence(result)
+	}
 	r.blank()
+}
+
+// resultEvidence is rendered in file txt output but intentionally omitted from
+// the interactive terminal summary.  JSON remains the lossless machine
+// artifact; this keeps txt equally useful when a user only has one human-
+// readable file to inspect.
+func (r *textRenderer) resultEvidence(result model.Result) {
+	if result.Description != "" && result.Status == model.StatusOK {
+		r.subsection(i18n.T("report.description"))
+		r.indented(result.Description)
+	}
+	methodology := result.Methodology
+	if methodology.Kind != "" || methodology.Label != "" || methodology.Engine != "" || methodology.Profile != "" || methodology.ComparisonScope != "" {
+		r.subsection(i18n.T("report.methodologyLabel"))
+		if label := localizedMethodology(methodology); label != "" {
+			r.indented(label)
+		}
+		if methodology.Engine != "" {
+			r.indented(metaLabel("引擎", methodology.Engine, "Engine", methodology.Engine))
+		}
+		if methodology.Profile != "" {
+			r.indented(metaLabel("参数/工作负载", methodology.Profile, "Profile/workload", methodology.Profile))
+		}
+		if methodology.ComparisonScope != "" {
+			r.indented(metaLabel(i18n.T("report.comparability"), methodology.ComparisonScope, "Comparable scope", methodology.ComparisonScope))
+		}
+	}
+	if len(result.TextBlocks) > 0 {
+		r.subsection(i18n.T("report.rawOutput"))
+		for _, block := range result.TextBlocks {
+			r.textBlock(block)
+		}
+	}
+	if len(result.Notes) > 0 {
+		r.subsection(i18n.T("report.notes"))
+		for _, note := range result.Notes {
+			r.note(note)
+		}
+		r.blank()
+	}
+	if len(result.Sources) > 0 {
+		r.subsection(i18n.T("report.sources"))
+		bannerSource := -1
+		for index, source := range result.Sources {
+			if strings.TrimSpace(source.URL) != "" {
+				bannerSource = index
+				break
+			}
+		}
+		for index, source := range result.Sources {
+			if index == bannerSource {
+				// The banner already carries this source URL. Keep its name and
+				// purpose in the evidence section without printing the URL twice.
+				source.URL = ""
+			}
+			value := source.Name
+			if source.URL != "" {
+				if value != "" {
+					value += " "
+				}
+				value += source.URL
+			}
+			if source.Purpose != "" {
+				value += i18n.T("punct.colon") + source.Purpose
+			}
+			r.indented(value)
+		}
+		r.blank()
+	}
 }
 
 func (r *textRenderer) moduleBanner(result model.Result) {
@@ -674,7 +746,7 @@ func visibleFields(items []model.Field) []model.Field {
 func isImplementationText(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	for _, token := range []string{
-		"参数模板", "命令参数", "mbw 参数", "命令行",
+		"参数模板", "命令参数", "命令行",
 		"command", "commandline", "command_line", "cmd", "args", "argument", "arguments",
 		"parameter", "parameters", "template", "cli",
 	} {
@@ -865,6 +937,12 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 				r.line("      %s", r.semanticValue(valueLine))
 			}
 		}
+		// Workload identifiers are part of the evidence contract. The compact
+		// terminal view hides them, while file txt retains every method so it can
+		// be audited against the structured JSON artifact.
+		if !r.compact && item.Method != "" {
+			r.line("      %s%s", r.palette.Dim(i18n.T("report.method")+i18n.T("punct.colon")), r.palette.Dim(item.Method))
+		}
 	}
 	r.blank()
 }
@@ -897,8 +975,7 @@ func comparisonSemantic(item model.Measurement) string {
 	if riskScoreMeasurement(item) {
 		return "risk"
 	}
-	// Matrix measurements can appear without their table in legacy JSON.  The
-	// unit alone is then insufficient: Crystal, ATTO, mixed and legacy fio
+	// The unit alone is insufficient: Crystal, ATTO, mixed and baseline fio
 	// throughput all use MiB/s, but their workloads are not one comparison set.
 	if semantic := matrixMeasurementSemantic(item.Key); semantic != "" {
 		return semantic
@@ -959,9 +1036,7 @@ func matrixMeasurementSemantic(key string) string {
 	case strings.HasPrefix(lower, "fio_mount_"):
 		return "disk-mount"
 	case strings.HasPrefix(lower, "fio_"):
-		return "disk-legacy"
-	case strings.HasPrefix(lower, "sysbench_memory_"):
-		return "memory"
+		return "disk-baseline"
 	case strings.HasPrefix(lower, "sysbench_cpu_"):
 		return "cpu"
 	default:
@@ -1224,10 +1299,6 @@ func visibleMeasurements(result model.Result) []model.Measurement {
 		if tables[kind] {
 			continue
 		}
-		// A legacy JSON report may carry the matrix cells without the newer
-		// table.  Keep the value, but replace the internal key-like label with
-		// a compact workload label.
-		item.Label = matrixMeasurementLabel(kind, item.Key)
 		items = append(items, item)
 	}
 	return items
@@ -1245,62 +1316,6 @@ func matrixKindForMeasurement(key string) diskMatrixKind {
 	default:
 		return ""
 	}
-}
-
-func matrixMeasurementLabel(kind diskMatrixKind, key string) string {
-	stem := strings.ToLower(strings.TrimSpace(key))
-	switch kind {
-	case matrixCrystal:
-		stem = strings.TrimPrefix(stem, "crystal_")
-	case matrixATTO:
-		stem = strings.TrimPrefix(stem, "atto_")
-	case matrixMixed:
-		stem = strings.TrimPrefix(stem, "fio_mixed_")
-	}
-	direction, metric := "", ""
-	for _, suffix := range []struct {
-		name      string
-		direction string
-		metric    string
-	}{
-		{name: "_read_mib_s", direction: "read", metric: "throughput"},
-		{name: "_write_mib_s", direction: "write", metric: "throughput"},
-		{name: "_read_iops", direction: "read", metric: "IOPS"},
-		{name: "_write_iops", direction: "write", metric: "IOPS"},
-	} {
-		if strings.HasSuffix(stem, suffix.name) {
-			stem = strings.TrimSuffix(stem, suffix.name)
-			direction, metric = suffix.direction, suffix.metric
-			break
-		}
-	}
-	if stem == "" {
-		stem = strings.TrimSpace(key)
-	}
-	block := strings.ToUpper(strings.ReplaceAll(stem, "_", "/"))
-	if kind == matrixCrystal {
-		// Crystal's workload key is already in the compact RND4K/Q1 form
-		// after replacing the separator.
-	} else if kind == matrixMixed {
-		block = strings.ReplaceAll(block, "/", " ")
-	}
-	if i18n.Current() == i18n.LangEN {
-		if kind == matrixMixed {
-			return "Mixed " + block + " " + direction + " " + strings.ToLower(metric)
-		}
-		return block + " " + direction + " " + strings.ToLower(metric)
-	}
-	zhDirection := map[string]string{"read": "读", "write": "写"}[direction]
-	zhMetric := metric
-	if metric == "throughput" {
-		zhMetric = "吞吐"
-	} else if metric == "IOPS" {
-		zhMetric = " IOPS"
-	}
-	if kind == matrixMixed {
-		return block + " 混合" + zhDirection + zhMetric
-	}
-	return block + " " + zhDirection + zhMetric
 }
 
 func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string {
@@ -1640,6 +1655,13 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 }
 
 func (r *textRenderer) footer(data model.Report) {
+	if !r.compact && len(data.Notices) > 0 {
+		r.sectionTitle(i18n.T("report.notices"), "")
+		for _, notice := range data.Notices {
+			r.note(notice)
+		}
+		r.blank()
+	}
 	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
 	r.indentedStyled(i18n.T("report.generator")+" "+data.Tool.Name+" "+data.Tool.Version, r.palette.Dim)
 }

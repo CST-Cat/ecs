@@ -295,7 +295,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		defer progress.EndProgress()
 		return runner.Run(ctx, cfg, progress.Update)
 	}()
-	model.StripRawOutput(&raw)
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
@@ -339,8 +338,7 @@ func resolveTerminalColor(raw string, noColor bool, out io.Writer) termcolor.Lev
 	if level, ok := termcolor.ParseLevel(raw); ok {
 		return level
 	}
-	// 兼容旧行为：未知值不产生转义序列。flag 的帮助文本会列出合法值，
-	// 但不在这里把既有命令调用升级成新的错误路径。
+	// 未知值按无色处理；flag 的帮助文本会列出合法值。
 	return termcolor.LevelNone
 }
 
@@ -383,7 +381,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 	// 语言已由 Main 扫描原始参数设置，这里定义只为让 --lang 通过解析。
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
-	formats := flags.String("format", "md,html", i18n.T("flag.format"))
+	formats := flags.String("format", "json,txt,md,html", i18n.T("flag.format"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))
 	name := flags.String("name", "", i18n.T("flag.name"))
 	renderColor := flags.String("color", "auto", i18n.T("flag.color"))
@@ -403,7 +401,6 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	model.StripRawOutput(&data)
 	if *output == "" {
 		*output = filepath.Dir(*input)
 	}
@@ -461,7 +458,7 @@ func listCommand(args []string, stdout, stderr io.Writer) int {
 			// resolveLanguage already handled this before command dispatch.
 			index++
 		case strings.HasPrefix(args[index], "--lang="):
-			// Keep list --lang compatible with the historical command.
+			// The equals form has already been consumed by language resolution.
 		default:
 			fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), i18n.T("help.extraArgs"))
 			return 1
@@ -533,7 +530,7 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 	tools := doctorTools()
 	missingRequired := false
 	for _, tool := range tools {
-		path, err := exec.LookPath(tool.name)
+		path, err := lookupDoctorTool(tool)
 		if err != nil {
 			label := i18n.T("doctor.optional")
 			if tool.required {
@@ -544,9 +541,19 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 			continue
 		}
 		versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		output, runErr := exec.CommandContext(versionCtx, path, tool.args...).CombinedOutput()
+		var version string
+		var runErr error
+		if tool.check != nil {
+			// Some tools, notably STREAM, have no version/help mode that is
+			// safe to execute: running them starts the benchmark. Identify
+			// those binaries from their embedded official markers instead.
+			version, runErr = tool.check(versionCtx, path)
+		} else {
+			var output []byte
+			output, runErr = exec.CommandContext(versionCtx, path, tool.args...).CombinedOutput()
+			version = strings.TrimSpace(string(output))
+		}
 		cancel()
-		version := strings.TrimSpace(string(output))
 		if newline := strings.IndexByte(version, '\n'); newline >= 0 {
 			version = version[:newline]
 		}
@@ -569,6 +576,23 @@ type doctorTool struct {
 	required bool
 	purpose  string
 	args     []string
+	lookup   func() (string, error)
+	check    func(context.Context, string) (string, error)
+}
+
+func lookupDoctorTool(tool doctorTool) (string, error) {
+	if tool.lookup != nil {
+		return tool.lookup()
+	}
+	return exec.LookPath(tool.name)
+}
+
+func lookupNextTrace() (string, error) {
+	path, err := exec.LookPath("nexttrace-tiny")
+	if err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // doctorTools derives the dependency list from the module descriptors.  The
@@ -581,15 +605,16 @@ func doctorTools() []doctorTool {
 		required bool
 		purpose  string
 		args     []string
+		lookup   func() (string, error)
+		check    func(context.Context, string) (string, error)
 	}
 	catalog := []toolMeta{
 		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
 		{name: "fio", required: true, purpose: "doctor.purpose.fio", args: []string{"--version"}},
 		{name: "iperf3", required: true, purpose: "doctor.purpose.iperf3", args: []string{"--version"}},
-		{name: "nexttrace", purpose: "doctor.purpose.nexttrace", args: []string{"--version"}},
+		{name: "stream", required: true, purpose: "doctor.purpose.stream", check: identifyOfficialStream},
+		{name: "nexttrace-tiny", purpose: "doctor.purpose.nexttrace", args: []string{"--version"}, lookup: lookupNextTrace},
 		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
-		{name: "mbw", purpose: "doctor.purpose.mbw", args: []string{"-h"}},
-		{name: "ioping", purpose: "doctor.purpose.ioping", args: []string{"-v"}},
 		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
 	}
 	meta := make(map[string]toolMeta, len(catalog))
@@ -616,9 +641,8 @@ func doctorTools() []doctorTool {
 			meta[name] = toolMeta{name: name, purpose: name, args: []string{"--version"}}
 		}
 	}
-	// Keep the historical required benchmark checks even if an older binary
-	// has no descriptor data.  This also gives a clear diagnostic if a future
-	// descriptor accidentally drops one of the core benchmark dependencies.
+	// Keep required benchmark checks even if descriptor data is incomplete.
+	// This gives a clear diagnostic if a descriptor drops a core dependency.
 	for _, item := range catalog {
 		if item.required {
 			known[item.name] = true
@@ -634,7 +658,7 @@ func doctorTools() []doctorTool {
 		if !known[item.name] {
 			continue
 		}
-		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args})
+		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args, lookup: item.lookup, check: item.check})
 		delete(known, item.name)
 	}
 	// Preserve descriptor order for tools not in the stable catalog.
@@ -643,9 +667,27 @@ func doctorTools() []doctorTool {
 			continue
 		}
 		item := meta[name]
-		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args})
+		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args, lookup: item.lookup, check: item.check})
 	}
 	return tools
+}
+
+// identifyOfficialStream performs a read-only marker check. The official
+// STREAM program is a benchmark executable, not a conventional CLI: invoking
+// it with --version or --help starts a full memory run. A build from the
+// official source carries these table/header markers in its read-only data.
+func identifyOfficialStream(_ context.Context, path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	text := string(data)
+	for _, marker := range []string{"STREAM version", "Number of Threads requested", "Best Rate", "Function"} {
+		if !strings.Contains(text, marker) {
+			return "", fmt.Errorf("official STREAM marker %q not found", marker)
+		}
+	}
+	return "official STREAM", nil
 }
 
 // resolveLanguage 在解析命令前先把 --lang 取出来。
@@ -718,11 +760,11 @@ func printHelp(writer io.Writer) {
 用法:
   ecs [run] [选项]            运行测试（默认 standard）
   ecs list                    查看配置档与模块
-  ecs render --input FILE     从 JSON 重新导出 Markdown/HTML
+  ecs render --input FILE     从 JSON 重新导出 JSON/txt/md/html 四种格式
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
   ecs leaderboard REPORTS...  从多份报告聚合排行榜参考
-  ecs baseline REPORTS...     leaderboard 的兼容别名（输出格式不变）
+  ecs baseline REPORTS...     生成当前排行榜参考（与 leaderboard 相同）
   ecs submit --input FILE     导出可公开入库的瘦身提交
   ecs version                 显示版本
 

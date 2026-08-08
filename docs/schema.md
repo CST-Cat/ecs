@@ -1,6 +1,6 @@
 # ecs 报告 schema
 
-当前 schema 标识为 `ecs.report/v1`。JSON 是 Markdown 与 HTML 的唯一事实来源；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
+当前 schema 标识为 `ecs.report/v1`。JSON 是 txt、Markdown 与 HTML 的唯一事实来源（JSON 自身也可直接发布）；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
 
 ## 顶层
 
@@ -23,10 +23,13 @@
 - `summary`：`ok`、`warning`、`skipped`、`error` 数量与人类可读摘要。
 - `notices`：适用于整份报告的方法或隐私说明。
 
+`ecs render` 从同一份 JSON 可重新导出 `json`、`txt`、`md`、`html` 四种格式；渲染器
+不重新执行探针，也不把某种格式当成唯一输出。
+
 综合评分不写进报告 JSON：它依赖运行时选定的基线，把某一份基线下的分数固化进
 数据文件会让同一份 JSON 在换基线后自相矛盾。评分只在 txt/md/html 渲染时计算，
 基线来源与样本数随分数一起呈现。基线文件本身是独立的 `ecs.baseline/v1` 格式，
-由 `ecs baseline` 生成。
+由 `ecs leaderboard` 或 `ecs baseline` 生成。
 
 ## Result
 
@@ -65,7 +68,7 @@
 
 `methodology.kind` 明确结果证据等级：
 
-- `standard-benchmark`：由 sysbench、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
+- `standard-benchmark`：由 sysbench、官方 STREAM、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
 - `protocol-measurement`：DNS、TCP、NextTrace 等协议级现场测量，不是基准分；
 - `provider-assessment`：IP 情报供应商各自的评分或分类；
 - `heuristic`：公开页面和规则得出的启发式判断；
@@ -106,16 +109,14 @@
 
 不同 `method` 的数值不能直接混入同一个排名或总分。
 
-本次扩展仍只保存工具返回的原始指标。内存标准基准使用
-`sysbench_memory_{write,read}_{single,multi}_mib_s`，并为四个操作/线程上下文保存
-`sysbench_memory_{write,read}_{single,multi}_latency_ms`，并在表中保留对应的 P95 时延。
-Latency 优先使用 sysbench
-原生 `Latency (ms)` 的平均值；若该版本没有原生时延，则明确标记为派生，并按
-`total time * 1000 / total number of events` 计算每个 1 MiB 事件的平均耗时。它不是
-DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
-`mbw_array_size_mib`，以便知道动态数组大小。
+本次扩展仍只保存工具返回的原始指标。当前内存标准基准使用官方 STREAM 5.10，分别
+运行 1T 与 NT 的 `Copy`、`Scale`、`Add`、`Triad`；结构化带宽字段为
+`stream_{copy,scale,add,triad}_{1t,nt}_mib_s`，线程上下文和官方原始输出必须同时保留。
+STREAM 不可用时只报告标准内存基准未运行，不使用替代后端。评分若使用内存维度，会对
+每个 STREAM kernel 的 1T/NT 取中位数，
+四个 kernel 子组等权；缺少匹配 STREAM 基线或指标时透明列为缺失，不补替代分。
 
-磁盘 `disk` 结果保留旧的 fio/YABS 兼容指标；只要选中 `disk`（无论配置档预设还是
+磁盘 `disk` 结果使用 fio/YABS 当前指标；只要选中 `disk`（无论配置档预设还是
 `--only`），就增加下面三组完整表。两档配置只预选模块集合，不改变这些表的深度：
 
 - `50/50 混合读写`：4K、64K、512K、1M，读写吞吐保存为
@@ -129,6 +130,11 @@ DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
   `atto_{512b,1k,2k,4k,8k,16k,32k,64k,128k,256k,512k,1m,2m,4m,8m,16m,32m,64m}_{read,write}_{mib_s,iops}`。
   5M 不属于本 schema 的 ATTO 清单。缺失单元仍在表中显示为 `—`/`未返回`，不会补零。
 
+- `fio_random_read_4k_qd1_latency_avg_ms`、`_p95_ms`、`_p99_ms`、`_max_ms`：同一
+  Direct I/O、4 KiB、randread、iodepth=1、numjobs=1 的 fio JSON `clat` 统计；四项
+  分别表示均值、P95、P99 和最大值，缺失项保持未返回，不以 0 填充。它们是当前 fio
+  QD1 字段，也不与 QD32/QD64 吞吐作同一指标比较。
+
 内存库存字段 `memory_total`、`memory_used`、`memory_available`、
 `memory_usage_percent` 以及 `balloon_reclaim`/`ksm_merging` 的 status、`*_available`
 布尔值和 `*_evidence` 都是显式字段。Balloon reclaim 只有 Linux sysfs reclaim 控制项
@@ -137,7 +143,7 @@ DRAM 单次访问延迟。补充的 `mbw_memcpy_mib_s` 必须同时披露
 类型或 inflate/deflate 活动计数推断能力。
 
 如果 cgroup 暴露 `memory.current`（或 v1 等价文件），内存测评优先用它计算有效配额内的
-已用/可用值；否则保留按 `MemAvailable` 的兼容回退，并在 notes 中说明证据边界。
+已用/可用值；否则按 `MemAvailable` 回退，并在 notes 中说明证据边界。
 
 磁盘库存同时保存 `disk_device`、`disk_total`、`disk_used`、`disk_available` 和
 `disk_usage_percent`，设备与挂载点来自测试路径的 `df -P` 记录；无法读取时保留
@@ -191,10 +197,10 @@ IP 质量指标尤其需要保留 `method`：
 IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。
 `ookla_servers` 只控制外部 Ookla 适配器的服务器选择，不代表 Ookla 客户端本身不发送测量数据。
 
-## 兼容策略
+## 当前 schema 规则
 
-- `ecs.report/v1` 内只增加带 `omitempty` 的可选字段，不改变既有字段含义；
+- `ecs.report/v1` 只接收当前字段与当前单位；
 - 删除、重命名、改变单位或状态语义时升级 schema 版本；
-- `ecs render` 忽略未知的可选字段，允许旧渲染器读取同一主版本的新报告；
+- `ecs render` 对未知字段直接报错，避免报告被静默裁剪；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。

@@ -17,22 +17,23 @@ var hanPattern = regexp.MustCompile(`[\p{Han}]`)
 // 翻译覆盖率检查：把真实运行产出的报告过一遍 Localize，
 // 任何仍含中文的可见文本都说明译文表漏了一句。
 //
-// 用真实报告而不是源码字面量：源码里有大量条件分支从不触发，
-// 而运行产出的才是用户真正会看到的。样本由 ECS_I18N_SAMPLES 指向，
-// 未设置时跳过——这样普通开发者不必先跑一遍全模块才能测试。
+// 用当前报告结构而不是孤立源码字面量：源码里有大量条件分支从不触发，
+// 而运行产出的才是用户真正会看到的。CI 可以通过 ECS_I18N_SAMPLES 提供
+// 当前 JSON 样本；没有样本时使用当前 renderer contract，不重新引入已删除样本。
 func TestLocalizeCoversRealReports(t *testing.T) {
 	dir := os.Getenv("ECS_I18N_SAMPLES")
 	if dir == "" {
-		t.Skip("未设置 ECS_I18N_SAMPLES，跳过翻译覆盖率检查")
+		t.Skip("未设置 ECS_I18N_SAMPLES，跳过外部报告样本检查")
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("样本目录 %s 里没有 JSON 报告", dir)
+	if err != nil {
+		t.Fatalf("读取样本目录 %s 失败：%v", dir, err)
 	}
 	i18n.Set(i18n.LangEN)
 	defer i18n.Set(i18n.LangZH)
 
 	missing := map[string]bool{}
+	reports := make([]model.Report, 0, len(files)+1)
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
 		if err != nil {
@@ -42,6 +43,12 @@ func TestLocalizeCoversRealReports(t *testing.T) {
 		if json.Unmarshal(raw, &data) != nil {
 			continue
 		}
+		reports = append(reports, data)
+	}
+	if len(reports) == 0 {
+		reports = append(reports, rendererContractReport())
+	}
+	for _, data := range reports {
 		collectUntranslated(Localize(data), missing)
 	}
 	if len(missing) == 0 {
@@ -90,8 +97,8 @@ func collectUntranslated(data model.Report, missing map[string]bool) {
 			check(measurement.Label)
 			check(measurement.Display)
 			check(measurement.Rating)
-			check(measurement.Unit)
-			check(measurement.Method)
+			// Unit and Method are stable machine-readable fields. They are
+			// intentionally preserved byte-for-byte by Localize.
 		}
 		for _, table := range result.Tables {
 			check(table.Title)

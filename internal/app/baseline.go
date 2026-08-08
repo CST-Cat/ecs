@@ -3,7 +3,7 @@ package app
 // baseline 子命令：从多份报告聚合评分基线。
 //
 // 内置基线只是单机快照，横向比较需要跨机器的样本。这个命令就是那条路径：
-// 把多台机器的 JSON 报告喂进来，每个指标取中位数，写出一份可以用
+// 把多台机器的 JSON 报告喂进来，每个指标取算术平均，写出一份可以用
 // --score-baseline 传回去的基线文件。
 //
 // 刻意不做的事：不上传、不下载、不合并远端基线。样本从哪来、代表什么，
@@ -253,9 +253,8 @@ func baselineCommand(args []string, stdout, stderr io.Writer) int {
 	return leaderboardCommandNamed("baseline", args, stdout, stderr)
 }
 
-// leaderboardCommand is the preferred name for aggregating reports.  Keep
-// baselineCommand above as a compatibility wrapper so existing callers and
-// scripts continue to use the same implementation and artifact schema.
+// leaderboardCommand is the preferred name for aggregating reports. The
+// baseline entry point uses the same current aggregation implementation.
 func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	return leaderboardCommandNamed("leaderboard", args, stdout, stderr)
 }
@@ -306,7 +305,7 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 			}
 		}
 	}
-	// 输入按位置参数给出，方便直接用 shell 展开：ecs baseline reports/*.json
+	// 输入按位置参数给出，方便直接用 shell 展开：ecs leaderboard reports/*.json
 	paths := expandReportPaths(flags.Args())
 	if len(paths) == 0 {
 		fmt.Fprintln(stderr, i18n.T("help.baselineInputRequired"))

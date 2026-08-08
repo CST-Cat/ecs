@@ -77,6 +77,30 @@ func TestRunScriptUsesDirectTempOutputAndTracksThisRun(t *testing.T) {
 	}
 }
 
+func TestRunScriptDocumentsExplicitOoklaOnly(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		"The standard profile omits Ookla by default; the full profile includes it. Explicit --only ookla may select it from any profile.",
+		"standard 默认不包含 Ookla；full 默认包含 Ookla；显式使用 --only ookla 可在任意档位单独选择。",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh help is missing explicit Ookla policy %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"The standard and full profiles omit Ookla by default",
+		"standard 和 full 默认不包含 Ookla",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("run.sh retains stale Ookla profile wording %q", forbidden)
+		}
+	}
+}
+
 func TestRunScriptKeepsRunOptionsAndFiltersSubmitOptions(t *testing.T) {
 	contents, err := os.ReadFile(runScriptPath(t))
 	if err != nil {
@@ -159,8 +183,9 @@ func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
 	text := string(contents)
 	for _, required := range []string{
 		`manifest_tools_for "$module"`,
-		`tool_exists "$tool" || add_missing_tool "$tool"`,
-		`speedtest) OOKLA_MISSING=1`,
+		"full 或显式 --only ookla 时，speedtest 进入依赖规划。",
+		`if ! tool_available "$tool"; then`,
+		`[ "$tool" = speedtest ] && OOKLA_MISSING=1`,
 		`ECS_AUTO_DEPS=0`,
 		`https://packagecloud.io/ookla/speedtest-cli/gpgkey`,
 		`C525F88FCF3A7E56CE2CF59131EB3981E723ACAA`,
@@ -256,21 +281,88 @@ func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
 	}
 	text := string(contents)
 	for _, required := range []string{
-		"prepare_nexttrace",
-		"NEXTTRACE_API_URL=\"https://api.github.com/repos/nxtrace/NTrace-core/releases/latest\"",
-		"nexttrace_linux_${ARCH}",
-		"sha256:",
-		"NEXTTRACE_BIN_DIR=\"$WORK/bin\"",
-		"PATH=\"$NEXTTRACE_BIN_DIR:${PATH:-}\"",
-		"NEXTTRACE_DOWNLOAD_FILE",
-		"nexttrace_cleanup_partial",
-		"remove_missing_tool nexttrace",
+		"ECS_TOOLS_BASE_URL",
+		"TOOLS_BASE",
+		"TOOLS_ASSET=\"ecs-tools_linux_${ARCH}.tar.zst\"",
+		"validate_tools_manifest",
+		"validate_tools_archive_layout",
+		"tools_tar_extract_member",
+		"tools_manifest_digest_for",
+		"verify_tools_binary_digest",
+		"TOOLS_STAGING_BIN",
+		"sha256sum",
+		"shasum -a 256",
+		"nexttrace-tiny",
+		"nexttrace_tool_exists",
+		"archive_tool_for",
+		"remove_missing_tool \"$tools_requested\"",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh is missing NextTrace dependency guard %q", required)
 		}
 	}
+	for _, forbidden := range []string{
+		"prepare_nexttrace",
+		"NEXTTRACE_API_URL",
+		"nexttrace_linux_${ARCH}",
+		"nexttrace_cleanup_partial",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("run.sh must not retain an unsupported alternate NextTrace download path %q", forbidden)
+		}
+	}
 	if strings.Contains(text, "trace"+"route") || strings.Contains(text, "trace"+"path") {
 		t.Fatal("run.sh must not mention or prepare alternate route engines")
+	}
+}
+
+func TestRunScriptPrefersSystemPingAndStagesOnlyRequestedTools(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		"tool_available \"$tool\"",
+		"stream_is_official",
+		"Number of Threads requested",
+		"Best Rate",
+		"strings \"$stream_command\"",
+		"ping)",
+		"cp \"$tools_source\" \"$TOOLS_STAGING_BIN/$tools_requested\"",
+		"mv \"$TOOLS_STAGING_BIN\" \"$TEMP_TOOL_BIN\"",
+		"ECS_AUTO_DEPS=0",
+		"install_ookla",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh missing runtime fallback guard %q", required)
+		}
+	}
+	if strings.Contains(text, `archive_tool_for "$tool" && add_tools_request "$tool"`) {
+		t.Fatal("run.sh must not stage a missing tool unless it is declared by the archive")
+	}
+}
+
+func TestRunScriptVerifiesConcreteToolDigestsAndRejectsImageMagickStream(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		`case "$tools_digest" in`,
+		`unknown|unavailable) return 0`,
+		`[ "${#tools_digest}" -eq 64 ]`,
+		`[ "$tools_digest_actual" = "$tools_digest_expected" ]`,
+		`stream_is_official`,
+		`grep -F 'Number of Threads requested'`,
+		`grep -F 'Best Rate'`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh missing concrete digest/STREAM guard %q", required)
+		}
+	}
+	if strings.Contains(text, `stream --version`) {
+		t.Fatal("run.sh must not execute stream --version to identify a system command")
 	}
 }

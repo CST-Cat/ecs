@@ -20,7 +20,7 @@ var probeEnglishTemplates = map[string]string{
 	"fio \x1fK 随机写延迟 P\x1f":                       "fio \x1fK random write latency P\x1f",
 	"fio \x1fK 随机读 QD\x1f":                        "fio \x1fK random read QD\x1f",
 	"fio \x1fK 随机读延迟 P\x1f":                       "fio \x1fK random read latency P\x1f",
-	"fio Direct I/O 的顺序吞吐、\x1fK 随机 IOPS 与 YABS 兼容的 \x1f/\x1f 混合矩阵":    "fio Direct I/O sequential throughput, \x1fK random IOPS and the YABS-compatible \x1f/\x1f mixed matrix",
+	"fio Direct I/O 的顺序吞吐、\x1fK 随机 IOPS 与 YABS 口径的 \x1f/\x1f 混合矩阵":    "fio Direct I/O sequential throughput, \x1fK random IOPS and the YABS-style \x1f/\x1f mixed matrix",
 	"fio 写 \x1f MiB/s · 读 \x1f MiB/s · \x1fK 读/写 \x1f IOPS/\x1f IOPS": "fio write \x1f MiB/s · read \x1f MiB/s · \x1fK read/write \x1f/\x1f IOPS",
 	"疑似被代答的目标":  "Targets likely answered by a proxy",
 	"，\x1f 项跳过": ", \x1f skipped",

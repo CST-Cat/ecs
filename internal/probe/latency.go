@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"sort"
 	"strings"
@@ -218,7 +219,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	table := model.Table{
 		Title:   "TCP 建连与 ICMP 往返",
-		Columns: []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 平均", "ICMP 丢包", "DNS 解析"},
+		Columns: []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 最小", "ICMP 平均", "ICMP 最大", "ICMP mdev", "ICMP 丢包", "DNS 解析"},
 	}
 	var best time.Duration
 	var bestName string
@@ -244,9 +245,16 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		} else if item.ResolveTime == 0 {
 			resolveText = "无需解析"
 		}
-		icmpAvg, icmpLoss := "n/a", "n/a"
-		if item.ICMP.Available {
-			icmpAvg = fmt.Sprintf("%.2f ms", item.ICMP.AvgMS)
+		icmpMin, icmpAvg, icmpMax, icmpMDev, icmpLoss := "n/a", "n/a", "n/a", "n/a", "n/a"
+		if item.ICMP.RTTKnown {
+			icmpMin = formatICMPMilliseconds(item.ICMP.MinMS)
+			icmpAvg = formatICMPMilliseconds(item.ICMP.AvgMS)
+			icmpMax = formatICMPMilliseconds(item.ICMP.MaxMS)
+			if item.ICMP.StdDevKnown {
+				icmpMDev = formatICMPMilliseconds(item.ICMP.StdDevMS)
+			}
+		}
+		if item.ICMP.LossKnown {
 			icmpLoss = fmt.Sprintf("%.0f %%", item.ICMP.LossPercent)
 		}
 		table.Rows = append(table.Rows, []string{
@@ -257,21 +265,17 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			formatMilliseconds(median),
 			formatMilliseconds(p95),
 			fmt.Sprintf("%.2f ms", stddevFloat(floatValues)),
+			icmpMin,
 			icmpAvg,
+			icmpMax,
+			icmpMDev,
 			icmpLoss,
 			resolveText,
 		})
 		if item.ResolveErr != nil {
 			result.Notes = append(result.Notes, fmt.Sprintf("%s 解析失败：%s", item.Endpoint.Name, compactError(item.ResolveErr)))
 		}
-		if item.ICMP.Available {
-			result.Measurements = append(result.Measurements, model.Measurement{
-				Key:   "icmp_avg_ms_" + strings.ToLower(strings.ReplaceAll(item.Endpoint.Name, " ", "_")),
-				Label: item.Endpoint.Name + " ICMP 平均",
-				Value: item.ICMP.AvgMS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", item.ICMP.AvgMS),
-				Method: "icmp-echo-v1", HigherIsBetter: model.BoolPtr(false),
-			})
-		}
+		appendICMPMeasurements(&result, item.Endpoint.Name, item.ICMP)
 		if tcpLikelyIntercepted(median, item.ICMP) {
 			intercepted = append(intercepted, item.Endpoint.Name)
 		}
@@ -318,6 +322,45 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Finish(start)
 	return result
+}
+
+func formatICMPMilliseconds(value float64) string {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f ms", value)
+}
+
+func appendICMPMeasurements(result *model.Result, targetName string, stats icmpStats) {
+	if result == nil || !stats.Available {
+		return
+	}
+	slug := strings.ToLower(strings.ReplaceAll(targetName, " ", "_"))
+	appendMeasurement := func(suffix, label, unit, display string, value float64) {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return
+		}
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key:            "icmp_" + suffix + "_" + slug,
+			Label:          targetName + " ICMP " + label,
+			Value:          value,
+			Unit:           unit,
+			Display:        display,
+			Method:         "icmp-echo-v1",
+			HigherIsBetter: model.BoolPtr(false),
+		})
+	}
+	if stats.RTTKnown {
+		appendMeasurement("min_ms", "最小", "ms", formatICMPMilliseconds(stats.MinMS), stats.MinMS)
+		appendMeasurement("avg_ms", "平均", "ms", formatICMPMilliseconds(stats.AvgMS), stats.AvgMS)
+		appendMeasurement("max_ms", "最大", "ms", formatICMPMilliseconds(stats.MaxMS), stats.MaxMS)
+		if stats.StdDevKnown {
+			appendMeasurement("mdev_ms", "mdev", "ms", formatICMPMilliseconds(stats.StdDevMS), stats.StdDevMS)
+		}
+	}
+	if stats.LossKnown {
+		appendMeasurement("loss_percent", "丢包", "%", fmt.Sprintf("%.2f %%", stats.LossPercent), stats.LossPercent)
+	}
 }
 
 func latencyFamiliesForEndpoint(endpoint config.Endpoint, mode string, hasIPv6 bool) []string {

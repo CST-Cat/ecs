@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-// memoryUsageSnapshot keeps both the host-visible values used historically by
+// memoryUsageSnapshot keeps the host-visible values used by
 // the system report and the effective values after a cgroup limit is applied.
 // A container can expose host MemTotal while its cgroup limit is much smaller;
 // the memory benchmark should size itself against Effective*, not the host
@@ -45,7 +45,7 @@ func memoryUsageFromMemInfo(mem map[string]uint64, limit uint64) memoryUsageSnap
 		result.AvailableKnown = true
 	} else {
 		// MemAvailable was added in Linux 3.14.  This fallback mirrors the
-		// historical ecs behaviour while making the evidence boundary explicit.
+		// current ecs behaviour while making the evidence boundary explicit.
 		result.HostAvailableBytes = (mem["MemFree"] + mem["Buffers"] + mem["Cached"]) * 1024
 	}
 	if result.HostTotalBytes > 0 && result.HostAvailableBytes > result.HostTotalBytes {

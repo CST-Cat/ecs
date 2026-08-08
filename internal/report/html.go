@@ -25,7 +25,13 @@ type htmlTableCell struct {
 }
 
 func HTML(data model.Report, scored *score.Report) ([]byte, error) {
+	// Keep the standalone HTML renderer language-aware.  WriteFiles already
+	// supplies a localized copy; Localize is deliberately idempotent here.
+	data = Localize(data)
 	functions := template.FuncMap{
+		"t":           i18n.T,
+		"htmlLang":    reportHTMLLanguage,
+		"methodology": localizedMethodology,
 		"statusLabel": statusLabel,
 		"statusIcon":  statusIcon,
 		"duration":    formatDurationMS,
@@ -121,15 +127,22 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 	return output.Bytes(), nil
 }
 
+func reportHTMLLanguage() string {
+	if i18n.Current() == i18n.LangEN {
+		return "en"
+	}
+	return "zh-CN"
+}
+
 const htmlTemplate = `<!doctype html>
-<html lang="zh-CN">
+<html lang="{{htmlLang}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-  <title>ecs VPS 综合测试报告</title>
+  <title>{{t "report.title"}}</title>
   <style>
     :root {
       --bg: #f4f6fb; --panel: #ffffff; --text: #182033; --muted: #65708a;
@@ -221,24 +234,24 @@ const htmlTemplate = `<!doctype html>
 <body>
 <main>
   <header class="hero">
-    <h1>ecs VPS 综合测试报告</h1>
-    <p>{{statusIcon .Summary.Status}} {{.Summary.Headline}} · 本地生成，零广告，零自动上传</p>
+    <h1>{{t "report.title"}}</h1>
+    <p>{{statusIcon .Summary.Status}} {{.Summary.Headline}} · {{t "report.local"}}</p>
     <div class="hero-meta">
-      <span class="pill">报告 {{.Run.ID}}</span>
-      <span class="pill">{{.Run.Profile}}</span>
-      {{if .Run.IPVersion}}<span class="pill">IP {{.Run.IPVersion}}</span>{{end}}
-      <span class="pill">{{time .Run.StartedAt}}</span>
-      <span class="pill">{{duration .Run.DurationMS}}</span>
-      <span class="pill">{{boolText .Run.Redacted "敏感字段已遮盖" "包含完整敏感字段"}}</span>
-      {{if .Run.Canceled}}<span class="pill">运行已中断 · 部分报告</span>{{end}}
+      <span class="pill">{{t "report.reportID"}} {{.Run.ID}}</span>
+      <span class="pill">{{t "report.profile"}}: {{.Run.Profile}}</span>
+      {{if .Run.IPVersion}}<span class="pill">{{t "report.ipVersion"}}: {{.Run.IPVersion}}</span>{{end}}
+      <span class="pill">{{t "report.startedAt"}}: {{time .Run.StartedAt}}</span>
+      <span class="pill">{{t "report.totalDuration"}}: {{duration .Run.DurationMS}}</span>
+      <span class="pill">{{boolText .Run.Redacted (t "report.redacted") (t "report.revealed")}}</span>
+      {{if .Run.Canceled}}<span class="pill">{{t "report.canceled"}}</span>{{end}}
     </div>
   </header>
 
   <div class="summary-grid">
-    <div class="summary-card"><strong class="ok">{{.Summary.OK}}</strong><span>完成</span></div>
-    <div class="summary-card"><strong class="warning">{{.Summary.Warnings}}</strong><span>需留意</span></div>
-    <div class="summary-card"><strong class="error">{{.Summary.Errors}}</strong><span>异常</span></div>
-    <div class="summary-card"><strong class="skipped">{{.Summary.Skipped}}</strong><span>跳过</span></div>
+    <div class="summary-card"><strong class="ok">{{.Summary.OK}}</strong><span>{{t "status.ok"}}</span></div>
+    <div class="summary-card"><strong class="warning">{{.Summary.Warnings}}</strong><span>{{t "status.warning"}}</span></div>
+    <div class="summary-card"><strong class="error">{{.Summary.Errors}}</strong><span>{{t "status.error"}}</span></div>
+    <div class="summary-card"><strong class="skipped">{{.Summary.Skipped}}</strong><span>{{t "status.skipped"}}</span></div>
   </div>
 
   {{range .Results}}
@@ -246,19 +259,19 @@ const htmlTemplate = `<!doctype html>
     <div class="section-head">
       <div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{.Description}}</p>{{end}}</div>
       <div class="badges">
-        {{if .Methodology.Label}}<span class="badge method-badge">{{.Methodology.Label}}</span>{{end}}
+        {{if .Methodology.Label}}<span class="badge method-badge">{{methodology .Methodology}}</span>{{end}}
         <span class="badge {{.Status}}">{{statusIcon .Status}} {{statusLabel .Status}}</span>
       </div>
     </div>
     {{if .Methodology.Label}}
-    <div class="methodology"><strong>{{.Methodology.Label}}</strong>
+    <div class="methodology"><strong>{{methodology .Methodology}}</strong>
       {{if .Methodology.Engine}} · {{.Methodology.Engine}}{{end}}
       {{if .Methodology.Profile}} · <code>{{.Methodology.Profile}}</code>{{end}}
-      {{if .Methodology.ComparisonScope}}<div class="muted">可比范围：{{.Methodology.ComparisonScope}}</div>{{end}}
+      {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{.Methodology.ComparisonScope}}</div>{{end}}
     </div>
     {{end}}
     {{if .Summary}}<p class="headline">{{.Summary}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
-    {{if .Error}}<p class="error">错误：{{.Error}}</p>{{end}}
+    {{if .Error}}<p class="error">{{t "report.errorPrefix"}}{{t "punct.colon"}}{{.Error}}</p>{{end}}
 
     {{if .Measurements}}
     <div class="metrics">
@@ -273,7 +286,7 @@ const htmlTemplate = `<!doctype html>
     {{end}}
 
     {{if .Fields}}
-    <h3>详情</h3>
+    <h3>{{t "report.details"}}</h3>
     <dl class="fields">{{range .Fields}}<div class="field"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
     {{end}}
 
@@ -285,11 +298,11 @@ const htmlTemplate = `<!doctype html>
     {{end}}
 
     {{range .TextBlocks}}
-    <details><summary>{{.Title}}</summary><pre><code>{{.Content}}</code></pre></details>
+    <details><summary>{{if .Title}}{{.Title}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
     {{end}}
 
-    {{if .Notes}}<h3>说明</h3><ul>{{range .Notes}}<li>{{.}}</li>{{end}}</ul>{{end}}
-    {{if .Sources}}<h3>数据来源</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Purpose}}：{{.Purpose}}{{end}}</li>{{end}}</ul>{{end}}
+    {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{.Purpose}}{{end}}</li>{{end}}</ul>{{end}}
   </section>
   {{end}}
 
@@ -330,7 +343,7 @@ const htmlTemplate = `<!doctype html>
 
   <footer>
     <p>{{range .Notices}}{{.}} · {{end}}</p>
-    <p>Schema {{.SchemaVersion}} · {{.Tool.Name}} {{.Tool.Version}} · Commit {{.Tool.Commit}}</p>
+    <p>{{t "report.schema"}}: {{.SchemaVersion}} · {{t "report.generator"}}: {{.Tool.Name}} {{.Tool.Version}}{{if .Tool.Commit}} · {{t "report.commit"}}: {{.Tool.Commit}}{{end}}</p>
   </footer>
 </main>
 </body>

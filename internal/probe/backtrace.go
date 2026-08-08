@@ -119,29 +119,28 @@ type backtraceRow struct {
 	Err     error
 }
 
-// hopPrefixPattern 匹配历史文本解析器的跳号前缀。该解析器只保留给离线
-// fixture/兼容性单测，运行时探针始终使用 NextTrace JSON。
+// latencyPattern extracts latency values from the structured NextTrace hop
+// fields that are rendered in the current report.
 var (
-	hopLinePattern = regexp.MustCompile(`^\s*(\d{1,2})\s+(.*)$`)
 	latencyPattern = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*ms`)
 )
 
 func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	result := model.NewResult("backtrace", "三网回程")
-	result.Description = "向北京、上海、广州、成都的三网 IPv4/IPv6 参考目标追踪路径，识别中国骨干线路"
+	result.Description = "使用官方 NextTrace Tiny 向北京、上海、广州、成都的三网 IPv4/IPv6 参考目标追踪路径，识别中国骨干线路"
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
 		Label:           "启发式判断",
-		Engine:          "NextTrace + 骨干网段特征表",
+		Engine:          "NextTrace Tiny + 骨干网段特征表",
 		Profile:         "china backbone signatures v2, max 20 hops, IPv4+IPv6 targets",
 		ComparisonScope: "当次探测的路径特征；不是性能基准，也不等同于反向抓包",
 	}
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 NextTrace")
-		result.Notes = append(result.Notes, "当前运行环境没有 NextTrace；run.sh 只会在 ECS_AUTO_DEPS 未关闭时从 NextTrace 官方 GitHub Release 临时准备已校验的 full 二进制，失败时跳过回程探测。")
+		result.Skip("未发现 NextTrace Tiny")
+		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过回程探测。")
 		result.Finish(start)
 		return result
 	}
@@ -160,8 +159,9 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		return result
 	}
 	result.Fields = []model.Field{
-		{Key: "nexttrace_version", Label: "NextTrace 版本", Value: fallback(engine.Version, "unknown")},
-		{Key: "nexttrace_binary_sha256", Label: "NextTrace SHA-256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "nexttrace_binary", Label: "NextTrace Tiny 二进制", Value: engine.Name},
+		{Key: "nexttrace_version", Label: "NextTrace Tiny 版本", Value: fallback(engine.Version, "unknown")},
+		{Key: "nexttrace_binary_sha256", Label: "NextTrace Tiny SHA-256", Value: fallback(engine.SHA256, "unavailable")},
 	}
 
 	rows := make([]backtraceRow, len(targets))
@@ -281,9 +281,10 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Notes = append(result.Notes,
 		"这是从 VPS 主动发出的路径探测，不是反向抓包；路由不对称或运营商调度会让结论失真。",
-		"线路判定只依据路径上出现的骨干网段前缀，报告仅保留命中跳号、IP 等结构化信息供复核，不写入原始工具输出。",
+		"使用官方 NextTrace Tiny；报告保留实际 binary 名称、版本与 SHA-256。",
+		"线路判定只依据路径上出现的骨干网段前缀，报告保留命中跳号、IP 等结构化信息供复核，完整 NextTrace JSON 同时保留在原始证据块中；默认展示按敏感列脱敏。",
 		"CN2 的 GIA 与 GT 依据 59.43 段出现位置推断，带“推测”标注；精确区分需要更细的入口段表。",
-		"IPv6 目标采用各省三网 TCP-Ping 节点域名，地址可能随 CDN 调度变化；报告仅保留目标名与结构化路径信息供复核，不写入原始路径。",
+		"IPv6 目标采用各省三网 TCP-Ping 节点域名，地址可能随 CDN 调度变化；报告保留目标名与结构化路径信息，完整原始路径同时保留在原始证据块中，默认展示按敏感列脱敏。",
 		"未命中任何已知特征时返回“未识别”，不会猜测线路类型。",
 	)
 	result.Finish(start)
@@ -304,13 +305,13 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 			row.Hops[index] = detail.IP
 		}
 	}
-	// NextTrace 到国内 IP 时末段被丢弃是常态，只要拿到跳就继续分析；
-	// 一跳都没有才算失败。
-	if len(row.Hops) == 0 {
+	// NextTrace 到国内 IP 时末段被丢弃是常态，只要拿到一个有效跳就继续分析；
+	// malformed JSON、空 Hops、或所有探针都无响应都算失败。
+	if countValidTraceHops(row.Details) == 0 {
 		if err != nil {
 			row.Err = err
 		} else {
-			row.Err = fmt.Errorf("未解析到任何跳")
+			row.Err = fmt.Errorf("NextTrace JSON 解析失败或未解析到任何有效跳")
 		}
 		return row
 	}
@@ -331,53 +332,12 @@ func extractTraceHops(engineName, output string) []string {
 	return hops
 }
 
-// extractTraceDetails parses NextTrace JSON. The historical classic-text
-// parser remains available as an explicit parser-only helper, but is never a
-// runtime fallback when NextTrace output is missing or malformed.
+// extractTraceDetails parses the supported NextTrace Tiny JSON output.
 func extractTraceDetails(engineName, output string) []backtraceHop {
-	if engineName != "nexttrace" {
+	if !isNextTraceEngine(engineName) {
 		return nil
 	}
 	details, _ := extractNextTraceDetails(output)
-	return details
-}
-
-func extractClassicTraceDetails(output string) []backtraceHop {
-	details := []backtraceHop{}
-	for _, line := range strings.Split(output, "\n") {
-		match := hopLinePattern.FindStringSubmatch(line)
-		if match == nil {
-			continue
-		}
-		hopNumber, err := strconv.Atoi(match[1])
-		if err != nil {
-			continue
-		}
-		address := ""
-		for _, token := range strings.Fields(match[2]) {
-			token = strings.Trim(token, "[](),<>")
-			if zone := strings.LastIndexByte(token, '%'); zone >= 0 {
-				token = token[:zone]
-			}
-			if parsed := net.ParseIP(token); parsed != nil {
-				address = parsed.String()
-				break
-			}
-		}
-		latency := "—"
-		if matched := latencyPattern.FindStringSubmatch(match[2]); len(matched) > 1 {
-			latency = matched[1] + " ms"
-		}
-		status := "已响应"
-		if address == "" {
-			status = "无响应"
-			address = "—"
-		}
-		details = append(details, backtraceHop{
-			Hop: hopNumber, IP: address, Latency: latency,
-			ASN: "—", Network: "—", Location: "—", Status: status,
-		})
-	}
 	return details
 }
 
@@ -412,7 +372,7 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 		for _, rawProbe := range probes {
 			probe := map[string]json.RawMessage{}
 			_ = json.Unmarshal(rawProbe, &probe)
-			address := normalizeTraceAddress(jsonMapString(probe, "Address", "IP", "Ip"))
+			address := normalizeTraceAddress(jsonRawAddress(jsonMapRawValue(probe, "Address", "IP", "Ip")))
 			if address == "" {
 				var scalar string
 				if json.Unmarshal(rawProbe, &scalar) == nil {
@@ -424,8 +384,8 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 			}
 			detail.IP = address
 			detail.Latency = normalizeTraceLatency(jsonMapString(probe, "RTT", "Latency", "Delay", "Time", "AvgRTT"))
-			detail.ASN = normalizeTraceASN(jsonMapString(probe, "ASN", "ASNumber", "AS", "ASNO"))
-			detail.Network = firstNonEmptyTraceValue(jsonMapString(probe, "ASName", "Organization", "Org", "ISP", "Network", "Owner", "PTR", "Host", "Hostname"), "—")
+			detail.ASN = normalizeTraceASN(traceProbeValue(probe, "ASN", "ASNumber", "AS", "ASNO", "Asnumber"))
+			detail.Network = firstNonEmptyTraceValue(traceNetworkValue(probe), "—")
 			detail.Location = traceLocation(probe)
 			detail.Status = "已响应"
 			break
@@ -433,6 +393,69 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 		details = append(details, detail)
 	}
 	return details, true
+}
+
+func countValidTraceHops(details []backtraceHop) int {
+	count := 0
+	for _, detail := range details {
+		if detail.IP != "" && detail.IP != "—" {
+			count++
+		}
+	}
+	return count
+}
+
+func jsonMapRawValue(values map[string]json.RawMessage, names ...string) json.RawMessage {
+	raw, _ := jsonMapRaw(values, names...)
+	return raw
+}
+
+func jsonRawAddress(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if value := jsonRawString(raw); value != "" {
+		return value
+	}
+	var nested map[string]json.RawMessage
+	if json.Unmarshal(raw, &nested) != nil {
+		return ""
+	}
+	return jsonRawString(jsonMapRawValue(nested, "IP", "Ip", "Address", "Addr"))
+}
+
+func traceProbeValue(probe map[string]json.RawMessage, names ...string) string {
+	if value := jsonMapString(probe, names...); value != "" {
+		return value
+	}
+	geoRaw, ok := jsonMapRaw(probe, "Geo")
+	if !ok {
+		return ""
+	}
+	var geo map[string]json.RawMessage
+	if json.Unmarshal(geoRaw, &geo) != nil {
+		return ""
+	}
+	return jsonMapString(geo, names...)
+}
+
+// traceNetworkValue keeps network identity ahead of presentation-only host
+// names. Official NextTrace JSON commonly puts the carrier in Geo.owner while
+// also exposing a reverse-DNS Hostname at the probe level; checking every
+// probe key in one flat list would let that Hostname mask the carrier.
+func traceNetworkValue(probe map[string]json.RawMessage) string {
+	if value := jsonMapString(probe, "ASName", "Organization", "Org", "ISP", "Isp", "Network"); value != "" {
+		return value
+	}
+	if geoRaw, ok := jsonMapRaw(probe, "Geo"); ok {
+		var geo map[string]json.RawMessage
+		if json.Unmarshal(geoRaw, &geo) == nil {
+			if value := jsonMapString(geo, "ASName", "Organization", "Org", "ISP", "Isp", "Network", "Owner"); value != "" {
+				return value
+			}
+		}
+	}
+	return jsonMapString(probe, "Owner", "PTR", "Host", "Hostname")
 }
 
 func jsonMapString(values map[string]json.RawMessage, names ...string) string {
@@ -474,7 +497,7 @@ func jsonRawString(raw json.RawMessage) string {
 	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(raw, &object) == nil {
-		for _, key := range []string{"Name", "name", "City", "city", "Location", "location", "Value", "value"} {
+		for _, key := range []string{"Name", "name", "City", "city", "Location", "location", "Value", "value", "IP", "Ip", "Address", "Addr"} {
 			if item, ok := object[key]; ok {
 				if value := jsonRawString(item); value != "" {
 					return value
@@ -505,6 +528,11 @@ func normalizeTraceLatency(value string) string {
 		return match[1] + " ms"
 	}
 	if number, err := strconv.ParseFloat(value, 64); err == nil {
+		// NextTrace serializes net.Duration RTT values as nanoseconds.  Keep
+		// Small numeric RTT values are emitted as milliseconds by some Tiny builds.
+		if number >= 1000 {
+			number /= float64(time.Millisecond)
+		}
 		return strconv.FormatFloat(number, 'f', -1, 64) + " ms"
 	}
 	return value

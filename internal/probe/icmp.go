@@ -29,7 +29,9 @@ var (
 // icmpStats 是一次 ICMP 探测的统计结果。
 type icmpStats struct {
 	Available   bool
+	LossKnown   bool
 	LossPercent float64
+	RTTKnown    bool
 	MinMS       float64
 	AvgMS       float64
 	MaxMS       float64
@@ -94,6 +96,7 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 	if match := pingLossPattern.FindStringSubmatch(text); len(match) == 2 {
 		if loss, parseErr := strconv.ParseFloat(match[1], 64); parseErr == nil {
 			stats.LossPercent = loss
+			stats.LossKnown = true
 			stats.Available = true
 		}
 	}
@@ -103,12 +106,14 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 		stats.MaxMS = parseFloatDefault(match[3], 0)
 		stats.StdDevMS = parseFloatDefault(match[4], 0)
 		stats.StdDevKnown = true
+		stats.RTTKnown = true
 		stats.Available = true
 	} else if match := pingRTTThreePattern.FindStringSubmatch(text); len(match) == 4 {
 		// busybox ping 不报告标准差，此处只能留空而不是填 0 冒充测量值。
 		stats.MinMS = parseFloatDefault(match[1], 0)
 		stats.AvgMS = parseFloatDefault(match[2], 0)
 		stats.MaxMS = parseFloatDefault(match[3], 0)
+		stats.RTTKnown = true
 		stats.Available = true
 	}
 	if !stats.Available {

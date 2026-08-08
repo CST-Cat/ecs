@@ -7,7 +7,7 @@ package score
 // 数据——它必须能随实测样本更新，也必须让读者看得到当前用的是哪一份。
 //
 // 内置参考只是让首次运行有分可算的起点。真正可信的排行榜统计来自跨机器的实测样本，
-// 用兼容命令 `ecs baseline` 从多份报告聚合生成，再用 --score-baseline 传入。
+// 用 `ecs leaderboard` 或 `ecs baseline` 从多份报告聚合生成，再用 --score-baseline 传入。
 
 import (
 	"encoding/json"
@@ -22,14 +22,14 @@ import (
 	"ecs/internal/model"
 )
 
-// BaselineSchema 是排行榜参考文件的格式标识（保留旧 schema 名称）。
+// BaselineSchema 是当前排行榜参考文件的格式标识。
 const BaselineSchema = "ecs.baseline/v1"
 
 // DefaultRankMinSamples is the minimum number of score samples needed before
 // a report may claim a leaderboard position.
 const DefaultRankMinSamples = 5
 
-// Baseline 是一份排行榜参考（类型名和 JSON 字段保持兼容）。
+// Baseline 是一份排行榜参考。
 type Baseline struct {
 	Schema string `json:"schema"`
 	// Source 说明这份基线是怎么来的，直接呈现在报告里。
@@ -43,47 +43,33 @@ type Baseline struct {
 	// Tiers 是按 vCPU 分档的基线。样本少时为空，评分自动用全局值。
 	Tiers []Tier `json:"tiers,omitempty"`
 	// ScoreSamples stores only aggregate scores, never host identifiers or raw
-	// report fields. A nil slice means that the artifact predates distributions.
+	// report fields. An empty slice means that no score distribution was built.
 	ScoreSamples []float64 `json:"score_samples,omitempty"`
-	// RankMinSamples records the threshold used for ranking. Zero preserves
-	// compatibility with older ecs.baseline/v1 artifacts.
+	// RankMinSamples records the threshold used for ranking.
 	RankMinSamples int `json:"rank_min_samples,omitempty"`
 }
 
 // builtinBaseline 是内嵌 JSON 损坏或缺失时的最后兜底。
 //
-// 数值仍取自旧版开发机（AMD Ryzen 7 PRO 4750U，16 逻辑核，NVMe，tmpfs 上的
-// fio）的一次实测，**不是 VPS 的标准基线**。正常发行二进制优先加载
-// internal/score/embedded/baseline.json；该文件由提交样本重建，当前是 Oracle
-// Cloud Classic Free Tier 单台参考样本。保留这里的常量只是保证坏文件不会让评分
-// 消失，报告会显示来源与样本数。
+// 这是发行包内嵌基线损坏或缺失时的安全兜底，不代表当前排行榜样本。
 func builtinBaseline() Baseline {
 	return Baseline{
 		Schema:         BaselineSchema,
-		Source:         "builtinSingleHost",
-		SampleCount:    1,
+		Source:         "builtinCurrentFallback",
+		SampleCount:    2,
 		RankMinSamples: DefaultRankMinSamples,
 		Metrics: map[string]float64{
-			"cpu_single": 785.85,
-			"cpu_multi":  6152.04,
+			"cpu_single": 1278.07,
+			"cpu_multi":  5052.00,
 
-			"memory_copy":  6389.17,
-			"memory_write": 25719.54,
-			// The embedded snapshot intentionally keeps only measurements that
-			// existed when it was captured.  Crystal/ATTO and the expanded
-			// sysbench memory metrics enter scoring as soon as an aggregated
-			// baseline contains them; inventing values here would misrepresent
-			// the single-host evidence.
+			"disk_seq_read":        42.54,
+			"disk_seq_write":       47.56,
+			"disk_rand_read_iops":  31772.89,
+			"disk_rand_write_iops": 6092.14,
 
-			"disk_seq_read":        6912.04,
-			"disk_seq_write":       2309.85,
-			"disk_rand_read_iops":  451266.5,
-			"disk_rand_write_iops": 367767.62,
-
-			// 带宽基线按千兆链路取整：公共 iperf3 节点的实测值受对端负载影响
-			// 很大，用一个整数刻度比用某次抽样更好解释。
-			"bandwidth_download": 1000,
-			"bandwidth_upload":   1000,
+			// 带宽值来自当前提交聚合；公共 iperf3 节点的实测值仍会随对端负载变化。
+			"bandwidth_download": 3017.99,
+			"bandwidth_upload":   1132.26,
 		},
 	}
 }
@@ -99,8 +85,8 @@ func DefaultBaseline() Baseline {
 	return base
 }
 
-// IsBuiltin 报告这份基线是否仍是内置的单机快照。
-func (b Baseline) IsBuiltin() bool { return b.Source == "builtinSingleHost" }
+// IsBuiltin 报告这份基线是否为代码内置的当前兜底参考。
+func (b Baseline) IsBuiltin() bool { return b.Source == "builtinCurrentFallback" }
 
 // LoadBaseline 从文件读入基线。
 func LoadBaseline(path string) (Baseline, error) {
@@ -217,7 +203,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 }
 
 // RankThreshold returns the minimum distribution size for a trustworthy rank,
-// falling back to the current default for legacy artifacts with no field.
+// falling back to the current default when the field is omitted.
 func (b Baseline) RankThreshold() int {
 	if b.RankMinSamples > 0 {
 		return b.RankMinSamples

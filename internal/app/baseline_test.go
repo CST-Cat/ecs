@@ -76,10 +76,10 @@ func TestLeaderboardAliasDispatchesAndShowsDistinctHelp(t *testing.T) {
 
 	var baselineOut, baselineErr bytes.Buffer
 	if status := Main(context.Background(), []string{"baseline", "--lang", "zh", "--help"}, &baselineOut, &baselineErr); status != 0 {
-		t.Fatalf("baseline compatibility help status = %d, stdout=%s stderr=%s", status, baselineOut.String(), baselineErr.String())
+		t.Fatalf("baseline help status = %d, stdout=%s stderr=%s", status, baselineOut.String(), baselineErr.String())
 	}
 	if !strings.Contains(baselineErr.String(), "ecs baseline") {
-		t.Fatalf("baseline compatibility help lost its command name: %s", baselineErr.String())
+		t.Fatalf("baseline help lost its command name: %s", baselineErr.String())
 	}
 }
 

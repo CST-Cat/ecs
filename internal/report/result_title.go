@@ -6,8 +6,7 @@ import (
 )
 
 // resultTitle gives benchmark sections a stable, explicit name in every
-// renderer.  The JSON result title remains backward compatible; only the
-// presentation makes the benchmark/inventory distinction clearer.
+// renderer. The presentation makes the benchmark/inventory distinction clear.
 func resultTitle(result model.Result) string {
 	switch result.ID {
 	case "memory":

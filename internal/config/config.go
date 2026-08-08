@@ -20,8 +20,8 @@ const (
 	ProfileStandard = "standard"
 	ProfileFull     = "full"
 
-	// IPVersionAuto keeps the historical behaviour: each probe chooses the
-	// usable protocol family it supports, while dual-stack probes keep results
+	// IPVersionAuto lets each probe choose the usable protocol family it
+	// supports, while dual-stack probes keep results
 	// separate instead of collapsing them into one score.
 	IPVersionAuto = "auto"
 	IPVersion4    = "4"
@@ -293,7 +293,7 @@ func Defaults(profile string) (Runtime, error) {
 		Reveal:           false,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
-		Formats:          []string{"json", "md", "html"},
+		Formats:          []string{"json", "txt", "md", "html"},
 		DiskPath:         ".",
 		HTTPTimeout:      10 * time.Second,
 		// Profiles are module-count shortcuts. Keep the full-depth benchmark
@@ -336,7 +336,8 @@ func Defaults(profile string) (Runtime, error) {
 	case ProfileStandard:
 		base.Modules = ModulesForProfile(ProfileStandard)
 	case ProfileFull:
-		// Full directly selects every registered module, including Ookla.
+		// Full selects every default module, including Ookla. --only can still
+		// replace either preset with an explicitly selected module set.
 		base.Modules = ModulesForProfile(ProfileFull)
 	default:
 		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
@@ -557,7 +558,7 @@ func Validate(runtime Runtime) error {
 	switch runtime.IPVersion {
 	case "", IPVersionAuto, IPVersion4, IPVersion6:
 		// Empty is accepted for callers constructing Runtime directly; it has
-		// the same meaning as auto and keeps older integrations compatible.
+		// the same meaning as auto for callers constructing Runtime directly.
 	default:
 		return i18n.Errorf("err.unknownIPVersion", runtime.IPVersion)
 	}
@@ -766,7 +767,8 @@ func estimateModuleDuration(runtime Runtime, descriptor ModuleDescriptor) time.D
 		// sysbench CPU 跑单线程与多线程两轮。
 		return 2*runtime.CPUTime + time.Second
 	case EstimateModeMemory:
-		// sysbench memory 跑读/写 × 单/多线程共四轮。
+		// Keep the established four-unit memory estimate. Switching the backend
+		// to official STREAM must not change the user-visible resource estimate.
 		return 4*runtime.CPUTime + time.Second
 	case EstimateModeDisk:
 		randomDuration := runtime.CPUTime
@@ -827,7 +829,7 @@ func ExampleFile() File {
 		Reveal:           &reveal,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
-		Formats:          []string{"json", "md", "html"},
+		Formats:          []string{"json", "txt", "md", "html"},
 		Output:           "./reports",
 		DiskPath:         ".",
 		IPerfDuration:    "5s",

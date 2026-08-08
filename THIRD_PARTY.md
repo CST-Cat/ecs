@@ -2,35 +2,49 @@
 
 `ecs` 只面向 Linux，Go 依赖仍只有标准库。IP 质量模块采用 [xykt/IPQuality](https://github.com/xykt/IPQuality) 的多源覆盖、字段映射与风险分段思路，项目因此整体按 AGPL-3.0-only 发布；归属和差异见 [NOTICE](NOTICE)。
 
+版本、tag、二进制 SHA-256 和随包许可证文件以 CI 生成的 `manifest.json`、`checksums.txt`
+和 `LICENSES/` 为准。源码中的示例 manifest 允许 `unknown`/`unavailable`，这里不填写尚未由
+CI 产出的工具版本、发布资产或许可证正文。
+
 ## 可选本地程序
 
-这些程序可以由用户预先安装，也可以由 `run.sh` 在一次性测试期间从 Debian/Ubuntu 已配置且
-签名的软件源下载并解包到本次 `$WORK/root` 临时前缀（通过 `$WORK/bin` 调用），或通过安装器的
-显式 `--with-benchmarks` 选项持久安装。`ecs` 仅以独立进程调用，
-不随发行包分发：
+这些程序优先使用系统中已有的实现，也可以由受校验的临时依赖路径提供。缺少 `sysbench`、官方
+`stream`、`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，`run.sh` 从当前 Linux 架构匹配的
+`ecs-tools` `tar.zst` 包临时提供；`ecs` 仅以独立进程调用。
+`ecs-tools` 的工具包边界由每个架构的 `manifest.json` 和 `LICENSES/` 决定，不把下表之外
+的版本或资产默认为已发布：
 
-| 程序 | 用途 | 上游 | 许可证 | ecs 行为 |
-| --- | --- | --- | --- | --- |
-| sysbench | CPU 素数计算与内存顺序读写 | [akopytov/sysbench](https://github.com/akopytov/sysbench) | GPL-2.0 | CPU、内存模块唯一基准引擎；解析文本统计；记录参数、版本与 SHA-256 |
-| fio | Direct I/O 磁盘测试 | [axboe/fio](https://github.com/axboe/fio) | GPL-2.0 | 磁盘模块唯一基准引擎；解析 JSON；记录参数、版本与 SHA-256 |
-| iperf3 | TCP 多流上传/反向下载 | [ESnet/iperf](https://github.com/esnet/iperf) | BSD-3-Clause | standard/full 的网络吞吐唯一基准；解析逐节点 JSON 原值；记录节点、参数、版本与 SHA-256 |
-| NextTrace | 带节点信息的路由追踪 | [nxtrace/NTrace-core](https://github.com/nxtrace/NTrace-core) | GPL-3.0 | 路由模块唯一引擎；本机缺失时 `run.sh` 可从官方 GitHub Release 临时下载并校验 API digest；强制 JSON、无启动横幅；记录参数与 SHA-256 |
-| mbw | memcpy 口径的内存带宽 | [ahorvath/mbw](http://ahorvath.web.cern.ch/ahorvath/mbw/) | GPL-2.0 | `memory` 的补充口径，与 sysbench 并列保留不合并；数组大小按可用内存收敛，避免小内存机器 OOM |
-| ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
-| ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
-| speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | `full` 或显式选择 `ookla` 时运行；缺失时 `run.sh` 只从 Ookla 官方 Packagecloud 签名源下载并解包到本次 `$WORK`，不写入系统包数据库；不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
+| 程序 | 用途 | 可核对来源/许可证 | ecs 行为 |
+| --- | --- | --- | --- |
+| `sysbench` | CPU 标准基准 | [上游仓库](https://github.com/akopytov/sysbench) · [LICENSE](https://github.com/akopytov/sysbench/blob/master/LICENSE) · GPL-2.0-only | 只运行 CPU 单线程/多线程工作负载；记录版本和 SHA-256 |
+| `stream` | 官方 STREAM 内存带宽：10,000,000 elements、10 iterations；`1T`/`NT` × `Copy`/`Scale`/`Add`/`Triad` | [官方来源与 Run Rules](https://www.cs.virginia.edu/stream/ref.html) · 具体许可证文本/版本待 CI 产物填充 | 只调用官方二进制并保留四 kernel、线程和原始单位；缺失时内存基准明确未运行 |
+| `fio` | Direct I/O 磁盘基础项、混合/Crystal/ATTO 矩阵和 4KiB QD1 latency | [上游仓库](https://github.com/axboe/fio) · [COPYING](https://github.com/axboe/fio/blob/master/COPYING) · GPL-2.0-only | 磁盘结果统一来自 fio JSON；记录版本和 SHA-256；QD1 延迟也由 fio 产生 |
+| `iperf3` | TCP 多流双方向与 UDP 丢包/抖动 | [上游仓库](https://github.com/esnet/iperf) · [LICENSE](https://github.com/esnet/iperf/blob/master/LICENSE) · BSD-3-Clause | 网络吞吐唯一标准工具；逐节点、逐方向保留 JSON 原值，不跨节点求平均 |
+| `nexttrace-tiny` | 路由和回程追踪 | [上游仓库](https://github.com/nxtrace/NTrace-core) · [LICENSE](https://github.com/nxtrace/NTrace-core/blob/main/LICENSE) · GPL-3.0-only | 只使用官方 Tiny 资产；实际版本和 SHA-256 由 manifest/报告记录 |
+| `ping` | 系统 ICMP 往返与丢包 | [iputils](https://github.com/iputils/iputils) 或发行版提供；许可证随实际发行版包 | 系统 ping 优先；兼容 busybox 等精简 ping 的三段统计行；完全不可用时只保留 TCP 并明确说明 |
+
+Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政策的外部适配器。`full` 默认
+运行它，`standard` 默认不运行；`--only ookla` 仍可从任意配置档显式单独选择。它不进入 `ecs-tools`；`ecs` 不在本文
+中复制其许可证文本，具体条款请核对 [官方 CLI 页面](https://www.speedtest.net/apps/cli)
+和 [隐私政策](https://www.speedtest.net/about/privacy)。
+
+`mbw` 和 `ioping` 不属于当前测试链路、`ecs-tools` 清单或报告 schema。
 
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
-`run.sh` 不调用任何系统包安装/卸载命令：缺失组件只下载到 `$WORK/packages`，用
-`dpkg-deb -x` 解包到 `$WORK/root`，并通过临时 `PATH`/库路径使用；预先存在的程序保持原路径，
-测试结束时整个 `$WORK` 一并删除。Debian/Ubuntu 之外若没有安全的临时解包器，脚本明确跳过相关
-测试，不偷偷全局安装。Ookla 缺失且模块被选中时，脚本把官方 Packagecloud 源、固定指纹的 GPG
-公钥、索引和缓存全部放在 `$WORK`，由 apt 验证签名后仅下载/解包，不执行
-供应商的 `curl | sh` 安装脚本；退出时工作目录一并消失。`ECS_AUTO_DEPS=0` 会跳过所有安装，
-让报告如实标记缺失模块。`install.sh --with-benchmarks` 是持久安装的明确入口；两条路径都不替
-用户接受闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为默认依赖；Ookla 只提供显式、可审计的本机客户端适配器。
+`run.sh` 优先使用系统中已有的程序；缺失上述六项时选择当前 Linux 架构匹配的 `ecs-tools`
+`tar.zst`，并核对 `checksums.txt`、`manifest.json` 及必要的二进制 digest 后，才解包到本次
+运行的 `$WORK`，通过临时 `PATH`/库路径使用，退出时一并删除。APT/Packagecloud 不用于这些
+通用缺失工具。Ookla 缺失且模块被 profile 选中或被 `--only` 显式选中时，才走独立的官方 Packagecloud 源、固定指纹的 GPG
+公钥、索引和缓存路径；由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 安装脚本。
+`full` 缺失 `speedtest` 时走该独立官方签名源，`standard` 只有显式 `--only ookla` 时走该路径；Ookla 永不进入
+`ecs-tools`。`ECS_AUTO_DEPS=0` 会跳过临时依赖准备，让报告如实标记缺失模块。
+`install.sh --with-benchmarks` 当前只安装 `sysbench`、`fio`、`iperf3`，也不安装
+`mbw`/`ioping` 或官方 STREAM。STREAM 由 `ecs-tools`/`run.sh`
+临时提供或由用户自行提供。两条路径都不替用户接受
+闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为依赖；Ookla 只提供可审计的
+本机客户端适配器。
 
 ## 在线服务
 
@@ -54,7 +68,7 @@
 - 电信、联通、移动的公开参考 IP：`backtrace` 模块用于识别路径上的骨干线路，只发送路由探测包；
 - [RouteViews API](https://api.routeviews.org/docs/)：`bgp` 模块查询当前公共 RIB 的匹配前缀、起源 ASN、RPKI、报告 peer 和 AS path 样本；不下载历史 MRT、不上传 ecs 报告；
 - 四城三网 IPv4/IPv6 回程目标：IPv4 使用公开参考地址，IPv6 使用地区节点域名并强制 `family: "6"`；目标服务会看到路由探测的源地址；
-- [Ookla Speedtest](https://www.speedtest.net/about/privacy)：仅在用户显式启用并确认条款后由本机官方客户端连接；Ookla 的数据处理不属于 ecs 本地报告保证范围；
+- [Ookla Speedtest](https://www.speedtest.net/about/privacy)：full 默认或用户用 `--only ookla` 显式选择后由本机官方客户端连接；Ookla 的数据处理不属于 ecs 本地报告保证范围；
 - DNS 黑名单服务（Spamhaus、SpamCop、Barracuda、CBL、PSBL、blocklist.de、UCEPROTECT、DroneBL、s5h、SpamRats、GBUdb、Mailspike、Backscatterer）：`blacklist` 模块把出口 IP 反转后作为域名查 A 记录，不发送其他信息。各名单有各自的收录标准、解除流程与查询配额；部分名单（如 Spamhaus）拒绝来自公共解析器的查询并返回 127.255.255.x，ecs 将其判为“查询被拒”而非命中；
 - [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT，每日更新）：`cnspeed` 模块的中国测速节点清单，含运营商标注。清单实时抓取而不内置快照——节点会下线，用过期清单去测已消失的节点比不测更糟。ecs 只读取清单，不复制其内容入库；测速本身直接连清单里的节点，不经过第三方；
 - 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；

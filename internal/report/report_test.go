@@ -58,15 +58,14 @@ func TestMarkdownAndHTML(t *testing.T) {
 	if strings.Contains(text, "<script") {
 		t.Fatal("standalone report must not contain scripts")
 	}
-	if !strings.Contains(text, "&lt;safe&gt;") || !strings.Contains(text, "零自动上传") || !strings.Contains(text, "事实采集") {
+	if !strings.Contains(text, "&lt;safe&gt;") || !strings.Contains(text, i18n.T("report.local")) || !strings.Contains(text, "事实采集") {
 		t.Fatalf("unexpected html: %s", text)
 	}
 }
 
-// Human-readable formats intentionally differ in density, but they must retain
-// every structured result category that a reader needs to diagnose a run.  The
-// terminal view is compact by design (see text_test.go for its explicit
-// omissions); Markdown and HTML are the complete human-facing views.
+// Human-readable formats intentionally differ in density, but file outputs
+// must retain every result category that a reader needs to diagnose a run.  The
+// interactive terminal view is compact by design; it is tested separately.
 func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	data := sampleReport()
 	data.Run.Exposure = "public"
@@ -92,8 +91,9 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 			Title: "table-title-marker", Columns: []string{"column-marker"},
 			Rows: [][]string{{"cell-marker"}},
 		}},
-		Notes:   []string{"note-marker"},
-		Sources: []model.Source{{Name: "source-name-marker", URL: "https://example.com/source", Purpose: "source-purpose-marker"}},
+		TextBlocks: []model.TextBlock{{Title: "raw-marker", Content: "raw-content-marker"}},
+		Notes:      []string{"note-marker"},
+		Sources:    []model.Source{{Name: "source-name-marker", URL: "https://example.com/source", Purpose: "source-purpose-marker"}},
 	}}
 	scored := &score.Report{
 		Total: 123, Ratio: 0.123, Covered: 1, Possible: 2,
@@ -134,6 +134,15 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	} {
 		if !strings.Contains(string(jsonBytes), marker) {
 			t.Fatalf("JSON format missing %q:\n%s", marker, jsonBytes)
+		}
+	}
+	txt := Text(data, TextOptions{})
+	for _, marker := range []string{
+		"method-label-marker", "method-engine-marker", "method-profile-marker", "method-scope-marker",
+		"raw-content-marker", "note-marker", "source-name-marker", "source-purpose-marker", "notice-marker",
+	} {
+		if !strings.Contains(txt, marker) {
+			t.Fatalf("txt format missing %q:\n%s", marker, txt)
 		}
 	}
 }
@@ -179,11 +188,11 @@ func TestRankStatusRendersAcrossHumanFormats(t *testing.T) {
 
 func TestWriteAndLoadJSON(t *testing.T) {
 	directory := t.TempDir()
-	written, err := WriteFiles(sampleReport(), directory, "report", []string{"json", "md", "html"})
+	written, err := WriteFiles(sampleReport(), directory, "report", []string{"json", "txt", "md", "html"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, format := range []string{"json", "md", "html"} {
+	for _, format := range []string{"json", "txt", "md", "html"} {
 		path := written[format]
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s missing: %v", format, err)

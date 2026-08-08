@@ -16,8 +16,8 @@ func TestIPerfPortCandidatesUsesCompleteConfiguredRange(t *testing.T) {
 		t.Fatalf("iperf port candidates = %v, want %v", got, want)
 	}
 
-	// Config validation normally rejects this, but callers that construct an
-	// endpoint directly retain the old single-attempt behavior.
+	// Config validation normally rejects this, but a directly constructed
+	// endpoint still has one concrete candidate to test.
 	if got := iperfPortCandidates(config.IPerfEndpoint{PortStart: 5300, PortEnd: 5299}); !reflect.DeepEqual(got, []int{5300}) {
 		t.Fatalf("invalid iperf port range candidates = %v, want [5300]", got)
 	}

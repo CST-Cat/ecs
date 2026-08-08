@@ -185,7 +185,7 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Status = model.StatusWarning
 	result.Summary = "未找到 iperf3，标准网络吞吐基准未运行"
-	result.Notes = append(result.Notes, "可用 run.sh 自动临时准备 iperf3，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供 HTTP 或自研替代分数。")
+	result.Notes = append(result.Notes, "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 iperf3，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供 HTTP 或自研替代分数。")
 	result.Finish(start)
 	return result
 }

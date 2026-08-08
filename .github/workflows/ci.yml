@@ -35,10 +35,10 @@ jobs:
       - name: Unit and parser tests
         run: >-
           go test
-          -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
+          -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
-      # 翻译覆盖率使用仓库内固定 JSON 样本；它覆盖完整报告结构，
-      # 不执行探针，也不需要安装或调用任何基准工具。
+      # 翻译覆盖率使用当前报告样本；样本缺失时测试使用当前 renderer contract，
+      # 不把已删除样本重新作为测试目标。
       - name: i18n coverage
         if: matrix.go == 'stable'
         env:
@@ -51,6 +51,98 @@ jobs:
       - run: sh -n install.sh
       - run: sh -n run.sh
       - run: bash -n scripts/package.sh
+      - run: bash -n scripts/build_tools.sh
+
+  # 每个架构都在对应的 Linux userspace 中从官方源码/Release asset 构建真实工具。
+  # 该 job 故意独立于快速单测；任何下载、配置、编译、smoke、依赖或 manifest
+  # 失败都会使 CI 失败，不能以 skip 或占位 binary 通过。
+  tools:
+    needs: [test, race, cross]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            image: ubuntu:24.04
+          - arch: arm64
+            platform: linux/arm64
+            image: ubuntu:24.04
+          - arch: armv7
+            platform: linux/arm/v7
+            image: ubuntu:24.04
+          - arch: "386"
+            platform: linux/386
+            image: debian:bookworm
+          - arch: s390x
+            platform: linux/s390x
+            image: ubuntu:24.04
+          - arch: riscv64
+            platform: linux/riscv64
+            image: ubuntu:24.04
+          - arch: ppc64le
+            platform: linux/ppc64le
+            image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+      - name: Prepare stage directories
+        run: mkdir -p .ci-tools-stage artifact
+      - name: Build and verify real tools in target container
+        env:
+          ARCH: ${{ matrix.arch }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --platform='${{ matrix.platform }}' \
+            --security-opt seccomp=unconfined \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/src" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/.ci-tools-stage,target=/stage" \
+            --workdir /src \
+            --env ARCH \
+            --env GITHUB_TOKEN \
+            '${{ matrix.image }}' \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                autoconf automake binutils build-essential ca-certificates curl \
+                git jq libaio-dev libtool libtool-bin meson ninja-build pkg-config \
+                zlib1g-dev
+              scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
+            '
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: Validate generated manifest with ECS parsers
+        # The real six-tool smoke tests already ran inside the architecture
+        # Docker container. Its binaries are not installed on this host
+        # runner, so skip only tests that require host-installed tools while
+        # running all manifest, parser, and renderer tests here.
+        run: |
+          go test \
+            -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback' \
+            ./internal/toolsmanifest ./internal/app ./internal/probe ./internal/report
+
+          go run ./cmd/tools-manifest-check \
+            --architecture '${{ matrix.arch }}' \
+            ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
+          jq -e --arg arch '${{ matrix.arch }}' '
+            .architecture == $arch and (.tools | length == 6) and
+            (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
+          ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
+      - name: Preserve architecture directory in artifact
+        run: cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecs-tools-stage-${{ matrix.arch }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 7
 
   # 跑分提交校验：PR 里新增的提交必须格式合法、指纹自洽、不与已有记录重复。
   # 指纹由内容派生，因此手改数值而不重算会被当场发现。
@@ -117,7 +209,7 @@ jobs:
       - name: Race tests
         run: >-
           go test -race
-          -skip 'TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestRunSysbenchWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
+          -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunFIODiskWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
 
   cross:
@@ -146,12 +238,12 @@ jobs:
       - name: Live upstream protocol checks
         run: >-
           go test -tags=live ./internal/probe/
-          -run '^TestLive(IPLookup|IPQualityProviders|CommunityGateway|MediaStrongRules|STUNServers)$'
+          -run '^TestLive(IPLookup|IPQualityProviders|CommunityGateway|MediaStrongRules|IPerfNodeReachability|STUNServers)$'
           -v -timeout 20m
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, race, cross]
+    needs: [test, race, cross, tools]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -164,11 +256,34 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - name: Download verified tools stages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ecs-tools-stage-*
+          path: tools-stage
+          merge-multiple: true
+      - name: Check all tools stages before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            test -s "tools-stage/linux_${arch}/manifest.json"
+            test -x "tools-stage/linux_${arch}/bin/sysbench"
+            test -x "tools-stage/linux_${arch}/bin/stream"
+            test -x "tools-stage/linux_${arch}/bin/fio"
+            test -x "tools-stage/linux_${arch}/bin/iperf3"
+            test -x "tools-stage/linux_${arch}/bin/nexttrace-tiny"
+            test -x "tools-stage/linux_${arch}/bin/ping"
+            test -d "tools-stage/linux_${arch}/LICENSES"
+          done
       - name: Build release assets
         shell: bash
         run: |
+          set -euo pipefail
+          command -v zstd >/dev/null 2>&1
+          zstd --version
           chmod +x scripts/package.sh
-          scripts/package.sh "${GITHUB_REF_NAME#v}"
+          scripts/package.sh "${GITHUB_REF_NAME#v}" --tools-stage tools-stage
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

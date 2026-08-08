@@ -24,9 +24,9 @@ usage() {
     "  ECS_VERSION      Release tag, or latest (default)." \
     "" \
     "By default no package manager is changed. --with-benchmarks explicitly installs" \
-    "the benchmark tools (sysbench, fio, iperf3, mbw, ioping)" \
+    "sysbench, fio and iperf3; official STREAM is staged temporarily by run.sh/ecs-tools." \
     "through the detected system package manager." \
-    "Route modules use NextTrace; run.sh prepares a verified temporary binary when needed."
+    "Route modules use official NextTrace Tiny; run.sh prepares a verified temporary binary when needed."
 }
 
 while [ "$#" -gt 0 ]; do
@@ -97,27 +97,27 @@ as_root() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    printf '%s\n' "benchmark dependencies require root; re-run as root or install sysbench fio iperf3 mbw ioping manually" >&2
+    printf '%s\n' "benchmark dependencies require root; re-run as root or install sysbench fio iperf3 manually; official STREAM is provided temporarily by run.sh/ecs-tools" >&2
     exit 1
   fi
 }
 
 install_benchmark_tools() {
   [ "$with_benchmarks" -eq 1 ] || return 0
-  printf '%s\n' "installing standard benchmark tools: sysbench fio iperf3 mbw ioping"
+  printf '%s\n' "installing benchmark tools: sysbench fio iperf3 (official STREAM is provided temporarily by run.sh/ecs-tools)"
   if command -v apt-get >/dev/null 2>&1; then
     as_root env DEBIAN_FRONTEND=noninteractive apt-get update
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y sysbench fio iperf3 mbw ioping
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y sysbench fio iperf3
   elif command -v dnf >/dev/null 2>&1; then
-    as_root dnf install -y sysbench fio iperf3 mbw ioping
+    as_root dnf install -y sysbench fio iperf3
   elif command -v yum >/dev/null 2>&1; then
-    as_root yum install -y sysbench fio iperf3 mbw ioping
+    as_root yum install -y sysbench fio iperf3
   elif command -v apk >/dev/null 2>&1; then
-    as_root apk add sysbench fio iperf3 mbw ioping
+    as_root apk add sysbench fio iperf3
   elif command -v pacman >/dev/null 2>&1; then
-    as_root pacman -Sy --noconfirm sysbench fio iperf3 mbw ioping
+    as_root pacman -Sy --noconfirm sysbench fio iperf3
   else
-    printf '%s\n' "no supported package manager found; install sysbench fio iperf3 mbw ioping manually" >&2
+    printf '%s\n' "no supported package manager found; install sysbench fio iperf3 manually; official STREAM is provided temporarily by run.sh/ecs-tools" >&2
     exit 1
   fi
   printf '%s\n' "standard benchmark tools installed"
