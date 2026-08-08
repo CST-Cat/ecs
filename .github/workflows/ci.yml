@@ -277,8 +277,11 @@ jobs:
           mkdir -p tools-stage
           for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
             source_dir="tools-artifacts/ecs-tools-stage-${arch}/linux_${arch}"
+            target_dir="tools-stage/linux_${arch}"
             test -d "$source_dir"
-            cp -a "$source_dir" tools-stage/
+            mkdir -p "$target_dir"
+            cp -a "$source_dir/." "$target_dir/"
+            chmod +x "$target_dir/bin/"*
           done
       - name: Check all tools stages before packaging
         shell: bash
