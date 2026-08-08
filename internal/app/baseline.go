@@ -2,7 +2,7 @@ package app
 
 // baseline 子命令：从多份报告聚合评分基线。
 //
-// 内置基线只是单机快照，横向比较需要跨机器的样本。这个命令就是那条路径：
+// 横向比较需要跨机器的样本。这个命令就是那条路径：
 // 把多台机器的 JSON 报告喂进来，每个指标取算术平均，写出一份可以用
 // --score-baseline 传回去的基线文件。
 //
@@ -429,7 +429,7 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 			for _, item := range outliers.Outliers {
 				fmt.Fprintf(stdout, "  %s\n", item.Describe())
 				if annotate {
-					// GitHub Actions 注解：让离群在 PR 页面上直接可见。
+					// GitHub Actions 注解：让离群在检查页面上直接可见。
 					fmt.Fprintf(stdout, "::warning::%s\n", item.Describe())
 				}
 			}

@@ -1,17 +1,16 @@
 package score
 
-// 内嵌基线。
+// 当前排行榜参考。
 //
-// 新人跑 `curl … | sh` 时不该为了拿一份参考基线再联网一次——那会多出一个外联点，
-// 而且 --exposure local 下根本拿不到。所以基线随二进制走：CI 在打包前把仓库里
-// 聚合好的 baseline.json 写进这里，发版时一并编译进去。
+// 有真实提交时，CI 会把聚合好的 baseline.json 写进这里，随发行包编译进去。
+// 没有当前样本时，文件保持为空参考；运行不会回落到历史数据，也不会为了评分额外联网。
 //
-// 加载优先级：--score-baseline 指定的文件 > 内嵌基线 > 代码里的兜底常量。
-// 三层都保证有值，因此评分永远不会因为缺基线而消失。
+// 加载优先级：--score-baseline 指定的文件 > 当前内嵌参考 > 无评分。
 
 import (
 	_ "embed"
 	"encoding/json"
+	"math"
 )
 
 //go:embed embedded/baseline.json
@@ -19,19 +18,22 @@ var embeddedBaselineJSON []byte
 
 // EmbeddedBaseline 返回随二进制编译进来的基线。
 //
-// 解析失败时回落到代码常量而不是 panic：一份坏的内嵌文件不该让整个程序跑不起来，
-// 它只该让分数退回到内置口径。
+// 解析失败时返回空参考而不是 panic：一份坏的内嵌文件不该让整个程序跑不起来，
+// 更不能让它退回到已删除的历史口径。
 func EmbeddedBaseline() Baseline {
 	var baseline Baseline
 	if err := json.Unmarshal(embeddedBaselineJSON, &baseline); err != nil {
-		return DefaultBaseline()
+		return emptyBaseline()
 	}
-	if baseline.Schema != BaselineSchema || len(baseline.Metrics) == 0 {
-		return DefaultBaseline()
+	if baseline.Schema != BaselineSchema || baseline.Source == "" || baseline.SampleCount < 0 || baseline.RankMinSamples < 0 {
+		return emptyBaseline()
+	}
+	if baseline.Metrics == nil {
+		baseline.Metrics = map[string]float64{}
 	}
 	for _, value := range baseline.Metrics {
-		if value <= 0 {
-			return DefaultBaseline()
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return emptyBaseline()
 		}
 	}
 	return baseline

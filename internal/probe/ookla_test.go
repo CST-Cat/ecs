@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,28 @@ func TestOoklaBandwidthRejectsNonPositiveValues(t *testing.T) {
 	}
 	if got := ooklaBandwidthMbps(-1); got != 0 {
 		t.Fatalf("negative bandwidth = %v", got)
+	}
+}
+
+func TestOoklaRejectsNonFiniteValues(t *testing.T) {
+	packetLoss := math.NaN()
+	parsed := ooklaResult{}
+	parsed.Ping.Latency = math.Inf(1)
+	parsed.Ping.Jitter = math.NaN()
+	parsed.Download.Bandwidth = math.Inf(1)
+	parsed.PacketLoss = &packetLoss
+
+	if ooklaHasValidMetric(parsed) || ooklaMeasurementsComplete(parsed) {
+		t.Fatalf("non-finite Ookla values were accepted: %+v", parsed)
+	}
+	if loss, ok := ooklaPacketLoss(parsed); ok || loss != 0 {
+		t.Fatalf("NaN packet loss = %v, %v; want unavailable", loss, ok)
+	}
+	if got := ooklaLatencyDisplay(parsed.Ping.Latency); got != "—" {
+		t.Fatalf("infinite latency display = %q", got)
+	}
+	if got := ooklaBandwidthDisplay(parsed.Download.Bandwidth); got != "—" {
+		t.Fatalf("infinite bandwidth display = %q", got)
 	}
 }
 

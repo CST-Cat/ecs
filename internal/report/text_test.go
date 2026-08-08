@@ -203,7 +203,7 @@ func TestTextNavigationAndWidthBudget(t *testing.T) {
 		Measurements: []model.Measurement{{Label: "超长指标名称", Display: strings.Repeat("123 ", 10), Value: 123}},
 		Notes:        []string{strings.Repeat("长说明文字 ", 20)},
 	})
-	scored := &score.Report{Total: 720, Ratio: 0.72, Covered: 2, Possible: 3, BaselineSource: "builtinCurrentFallback", BaselineSample: 2}
+	scored := &score.Report{Total: 720, Ratio: 0.72, Covered: 2, Possible: 3, BaselineSource: "test-reference", BaselineSample: 2}
 	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
 		out := Text(data, TextOptions{Color: level, Score: scored})
 		for lineNumber, line := range strings.Split(out, "\n") {
@@ -637,7 +637,7 @@ func TestWrapTextRespectsDisplayWidth(t *testing.T) {
 func TestTextScoreSectionStatesCoverageAndBaseline(t *testing.T) {
 	scored := &score.Report{
 		Total: 800, Ratio: 0.8, Covered: 2, Possible: 4, Complete: false,
-		BaselineSource: "builtinCurrentFallback", BaselineSample: 2,
+		BaselineSource: "test-reference", BaselineSample: 2,
 		Dimensions: []score.DimensionScore{
 			{Key: "cpu", Score: 800, Ratio: 0.8, Metrics: []score.MetricScore{
 				{Key: "cpu_single", Label: "单线程", Value: 800, Unit: "events/s", Baseline: 1000, Ratio: 0.8, Score: 800},
@@ -646,7 +646,7 @@ func TestTextScoreSectionStatesCoverageAndBaseline(t *testing.T) {
 		},
 	}
 	out := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scored})
-	for _, want := range []string{"2/4", "未覆盖全部维度", "样本 2 台", "内置当前基线兜底快照"} {
+	for _, want := range []string{"2/4", "未覆盖全部维度", "样本 2 台", "test-reference"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("评分区缺少 %q", want)
 		}

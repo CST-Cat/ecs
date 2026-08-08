@@ -94,7 +94,7 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 
 | 工具 | 测试方式 |
 | --- | --- |
-| fio | 真实 `fio` 在临时目录跑完整 52 作业矩阵和固定 QD1 latency（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
+| fio | 真实 `fio` 在临时目录跑完整 53 作业矩阵和固定 QD1 latency（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
 | STREAM/sysbench | 真实官方 STREAM 跑 1T/NT 的 Copy/Scale/Add/Triad；STREAM 缺失时明确报告内存基准未运行；CPU 仍跑 sysbench |
 | iperf3 | 在回环起真实 `iperf3 -s`，跑 TCP 双向与 UDP |
 | ping | 真实 `ping 127.0.0.1` |
@@ -163,8 +163,8 @@ go test -tags=live ./internal/probe/ -run TestLive -v
 | `TestLiveIPerfNodeReachability` | 节点池逐个 TCP 可达性 |
 
 策略是"个别源失败只记录、全部失败才判失败"——第三方限流、改版、地区封锁都会发生，
-让它们阻塞每个 PR 只会训练所有人忽略红灯。CI 用 `schedule`（每日）与 `workflow_dispatch`
-运行 `live` job，不挂在 push/PR 上。
+让它们阻塞每次主分支检查只会训练所有人忽略红灯。CI 用 `schedule`（每日）与
+`workflow_dispatch` 运行 `live` job，不挂在普通 push 检查上。
 
 ### 3.4 仍然需要真实海外 VPS（网络类结论一律不可信）
 
@@ -282,7 +282,7 @@ apt-get install -y sysbench fio iperf3
    iperf3、ping 或 NextTrace，需要隔离时用回环；
 7. 依赖第三方服务或公共节点的能力，除确定性测试外**还必须有 `//go:build live`
    的实网测试**。固定样本只能证明解析器认得样本格式，证明不了上游没变；
-   实网测试不挂在 push/PR 上，由定时任务与手动触发运行；
+   实网测试不挂在普通主分支检查上，由定时任务与手动触发运行；
 8. 工作负载语义变化时升级 `measurement.method` 的版本号；
 9. 数据源清单与节点地址一律照抄上游并注明版本，不得凭记忆填写；
 10. 不加入广告、推广、遥测或默认上传；

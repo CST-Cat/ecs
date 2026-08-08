@@ -7,7 +7,7 @@ package probe
 // 为什么单独用 build tag 隔离，而不是并入默认测试：
 //
 //   - 第三方限流、改版、下线都会让这些测试变红，但代码没有任何问题。让它们
-//     阻塞每一个 PR 会训练所有人忽略红灯，那比没有测试更糟。
+//     阻塞每一次普通主分支检查会训练所有人忽略红灯，那比没有测试更糟。
 //   - 它们会把运行机器的出口 IP 发给表内每一家数据源，不该在别人 clone 下来
 //     跑 go test 时悄悄发生。
 //
@@ -19,7 +19,7 @@ package probe
 //
 //	go test -tags=live ./internal/probe/ -run TestLive -v
 //
-// CI 以定时任务和手动触发运行它们，不挂在 push/PR 上。
+// CI 以定时任务和手动触发运行它们，不挂在普通 push 检查上。
 
 import (
 	"context"

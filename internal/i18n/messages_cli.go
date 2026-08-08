@@ -50,7 +50,7 @@ var cliChinese = map[string]string{
 	"submit.written":             "提交文件已写入",
 	"submit.summary":             "机器 %d vCPU / %.2f GiB，含 %d 项指标",
 	"submit.privacyNote":         "提交只含机器规格与跑分数值；出口 IP、主机名、路由路径与 ASN 均不写入。",
-	"flag.baselineAnnotate":      "输出 GitHub Actions 注解，让离群在 PR 页面可见",
+	"flag.baselineAnnotate":      "输出 GitHub Actions 检查注解，让离群在检查页面可见",
 	"flag.baselineVerbose":       "同时列出因样本不足而无法判定的档位与指标",
 	"flag.baselineStrict":        "遇到无效输入立即失败，不写出基线文件",
 	"baseline.tiersHeader":       "排行榜分档情况（按 vCPU）：",
@@ -150,7 +150,7 @@ var cliChinese = map[string]string{
 }
 
 var cliEnglish = map[string]string{
-	"flag.baselineAnnotate":      "emit GitHub Actions annotations so outliers show up on the PR page",
+	"flag.baselineAnnotate":      "emit GitHub Actions check annotations so outliers show up in the check page",
 	"flag.baselineVerbose":       "also list tier/metric combinations with too few samples to judge",
 	"flag.baselineStrict":        "fail on invalid inputs without writing a baseline file",
 	"baseline.tiersHeader":       "Leaderboard tiers (by vCPU):",

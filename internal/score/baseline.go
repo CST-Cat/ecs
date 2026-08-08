@@ -6,8 +6,8 @@ package score
 // 机器的分数就完全不同。因此参考不是算法里的魔数，而是一份带来源说明和样本数的
 // 数据——它必须能随实测样本更新，也必须让读者看得到当前用的是哪一份。
 //
-// 内置参考只是让首次运行有分可算的起点。真正可信的排行榜统计来自跨机器的实测样本，
-// 用 `ecs leaderboard` 或 `ecs baseline` 从多份报告聚合生成，再用 --score-baseline 传入。
+// 排行榜统计来自跨机器的实测样本，用 `ecs leaderboard` 或 `ecs baseline` 从多份报告聚合
+// 生成，再用 --score-baseline 传入。没有当前样本时，发行包不会使用旧的硬编码参考。
 
 import (
 	"encoding/json"
@@ -49,44 +49,18 @@ type Baseline struct {
 	RankMinSamples int `json:"rank_min_samples,omitempty"`
 }
 
-// builtinBaseline 是内嵌 JSON 损坏或缺失时的最后兜底。
+// emptyBaseline 表示发行包当前没有可用的排行榜样本。
 //
-// 这是发行包内嵌基线损坏或缺失时的安全兜底，不代表当前排行榜样本。
-func builtinBaseline() Baseline {
+// 它故意不包含任何指标：评分器会返回 nil，报告不会把旧数据伪装成当前参考。
+func emptyBaseline() Baseline {
 	return Baseline{
 		Schema:         BaselineSchema,
-		Source:         "builtinCurrentFallback",
-		SampleCount:    2,
+		Source:         "noCurrentBaseline",
+		SampleCount:    0,
 		RankMinSamples: DefaultRankMinSamples,
-		Metrics: map[string]float64{
-			"cpu_single": 1278.07,
-			"cpu_multi":  5052.00,
-
-			"disk_seq_read":        42.54,
-			"disk_seq_write":       47.56,
-			"disk_rand_read_iops":  31772.89,
-			"disk_rand_write_iops": 6092.14,
-
-			// 带宽值来自当前提交聚合；公共 iperf3 节点的实测值仍会随对端负载变化。
-			"bandwidth_download": 3017.99,
-			"bandwidth_upload":   1132.26,
-		},
+		Metrics:        map[string]float64{},
 	}
 }
-
-// DefaultBaseline 返回内置基线的副本。
-func DefaultBaseline() Baseline {
-	base := builtinBaseline()
-	metrics := make(map[string]float64, len(base.Metrics))
-	for key, value := range base.Metrics {
-		metrics[key] = value
-	}
-	base.Metrics = metrics
-	return base
-}
-
-// IsBuiltin 报告这份基线是否为代码内置的当前兜底参考。
-func (b Baseline) IsBuiltin() bool { return b.Source == "builtinCurrentFallback" }
 
 // LoadBaseline 从文件读入基线。
 func LoadBaseline(path string) (Baseline, error) {

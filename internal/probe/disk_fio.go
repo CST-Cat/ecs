@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -211,35 +212,30 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	randomRead := jobs["randread"].Read.IOPS
 	randomWrite := jobs["randwrite"].Write.IOPS
 	appendFIOQD1LatencyMeasurements(&result, jobs)
-	if seqWrite <= 0 && seqRead <= 0 && randomRead <= 0 && randomWrite <= 0 {
+	if !isPositiveFinite(seqWrite) && !isPositiveFinite(seqRead) && !isPositiveFinite(randomRead) && !isPositiveFinite(randomWrite) {
 		result.Fail(fmt.Errorf("fio JSON 未包含可用的磁盘统计"))
 		result.Finish(start)
 		return result
 	}
 	randDepth := engine.EffectiveDepth(32)
-	result.Measurements = append(result.Measurements,
-		model.Measurement{
-			Key: "fio_sequential_write_mib_s", Label: "fio 顺序写入",
-			Value: seqWrite, Unit: "MiB/s", Display: model.FormatRate(seqWrite, "MiB/s"),
-			Method: "fio-direct-1MiB-write-qd1-v1", HigherIsBetter: model.BoolPtr(true),
-		},
-		model.Measurement{
-			Key: "fio_sequential_read_mib_s", Label: "fio 顺序读取",
-			Value: seqRead, Unit: "MiB/s", Display: model.FormatRate(seqRead, "MiB/s"),
-			Method: "fio-direct-1MiB-read-qd1-v1", HigherIsBetter: model.BoolPtr(true),
-		},
-		model.Measurement{
-			Key: "fio_random_read_4k_iops", Label: fmt.Sprintf("fio 4K 随机读 QD%d", randDepth),
-			Value: randomRead, Unit: "IOPS", Display: model.FormatRate(randomRead, "IOPS"),
-			Method: fmt.Sprintf("fio-direct-4KiB-randread-qd%d-v1", randDepth), HigherIsBetter: model.BoolPtr(true),
-		},
-		model.Measurement{
-			Key: "fio_random_write_4k_iops", Label: fmt.Sprintf("fio 4K 随机写 QD%d", randDepth),
-			Value: randomWrite, Unit: "IOPS", Display: model.FormatRate(randomWrite, "IOPS"),
-			Method: fmt.Sprintf("fio-direct-4KiB-randwrite-qd%d-v1", randDepth), HigherIsBetter: model.BoolPtr(true),
-		},
-	)
-	if p95 := fioP95Milliseconds(jobs["randread"].Read); p95 > 0 {
+	missingBase := make([]string, 0, 4)
+	if !appendFIOBaseMeasurement(&result, "fio_sequential_write_mib_s", "fio 顺序写入", seqWrite, "MiB/s", "fio-direct-1MiB-write-qd1-v1") {
+		missingBase = append(missingBase, "顺序写")
+	}
+	if !appendFIOBaseMeasurement(&result, "fio_sequential_read_mib_s", "fio 顺序读取", seqRead, "MiB/s", "fio-direct-1MiB-read-qd1-v1") {
+		missingBase = append(missingBase, "顺序读")
+	}
+	if !appendFIOBaseMeasurement(&result, "fio_random_read_4k_iops", fmt.Sprintf("fio 4K 随机读 QD%d", randDepth), randomRead, "IOPS", fmt.Sprintf("fio-direct-4KiB-randread-qd%d-v1", randDepth)) {
+		missingBase = append(missingBase, "4K 随机读")
+	}
+	if !appendFIOBaseMeasurement(&result, "fio_random_write_4k_iops", fmt.Sprintf("fio 4K 随机写 QD%d", randDepth), randomWrite, "IOPS", fmt.Sprintf("fio-direct-4KiB-randwrite-qd%d-v1", randDepth)) {
+		missingBase = append(missingBase, "4K 随机写")
+	}
+	if len(missingBase) > 0 {
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fmt.Sprintf("fio 基础作业有 %d 项未返回；缺失项不补零。", len(missingBase)))
+	}
+	if p95 := fioP95Milliseconds(jobs["randread"].Read); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "fio_random_read_p95_ms", Label: "fio 4K 随机读延迟 P95",
 			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
@@ -249,7 +245,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "fio 4K 随机读 QD32 P95 未返回；该指标未生成。")
 	}
-	if p95 := fioP95Milliseconds(jobs["randwrite"].Write); p95 > 0 {
+	if p95 := fioP95Milliseconds(jobs["randwrite"].Write); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "fio_random_write_p95_ms", Label: "fio 4K 随机写延迟 P95",
 			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
@@ -261,56 +257,13 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}
 
 	mixDepth := engine.EffectiveDepth(64)
-	mixTable := model.Table{
-		Title:   fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
-		Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
-	}
-	for _, job := range plan {
-		if !job.Mixed() {
-			continue
-		}
-		sample, ok := jobs[job.Name]
-		if !ok {
-			continue
-		}
-		readMiB := fioBandwidthMiB(sample.Read)
-		writeMiB := fioBandwidthMiB(sample.Write)
-		if readMiB <= 0 && writeMiB <= 0 {
-			continue
-		}
-		mixTable.Rows = append(mixTable.Rows, []string{
-			job.BlockSize,
-			model.FormatRate(readMiB, "MiB/s"),
-			model.FormatRate(sample.Read.IOPS, "IOPS"),
-			model.FormatRate(writeMiB, "MiB/s"),
-			model.FormatRate(sample.Write.IOPS, "IOPS"),
-			model.FormatRate(readMiB+writeMiB, "MiB/s"),
-		})
-		method := fmt.Sprintf("fio-direct-%s-randrw50-qd%d-n2-v1", job.BlockSize, mixDepth)
-		result.Measurements = append(result.Measurements,
-			model.Measurement{
-				Key:   fmt.Sprintf("fio_mixed_%s_read_mib_s", job.BlockSize),
-				Label: fmt.Sprintf("混合 %s 读", job.BlockSize),
-				Value: readMiB, Unit: "MiB/s", Display: model.FormatRate(readMiB, "MiB/s"),
-				Method: method, HigherIsBetter: model.BoolPtr(true),
-			},
-			model.Measurement{
-				Key:   fmt.Sprintf("fio_mixed_%s_write_mib_s", job.BlockSize),
-				Label: fmt.Sprintf("混合 %s 写", job.BlockSize),
-				Value: writeMiB, Unit: "MiB/s", Display: model.FormatRate(writeMiB, "MiB/s"),
-				Method: method, HigherIsBetter: model.BoolPtr(true),
-			},
-		)
-	}
-	if len(mixTable.Rows) > 0 {
-		result.Tables = append(result.Tables, mixTable)
-	}
+	appendFIOMixedResults(&result, plan, jobs, mixDepth)
 	if matrixJobsEnabled() {
 		appendCrystalMatrix(&result, jobs, engine)
 		appendATTOMatrix(&result, jobs, engine)
 	}
 
-	if seqWrite <= 0 || seqRead <= 0 || randomRead <= 0 || randomWrite <= 0 {
+	if !isPositiveFinite(seqWrite) || !isPositiveFinite(seqRead) || !isPositiveFinite(randomRead) || !isPositiveFinite(randomWrite) {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "一个或多个 fio 作业没有返回有效吞吐；请检查文件系统的 Direct I/O 与 ioengine 支持。")
 	}
@@ -374,13 +327,89 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		result.Notes = append(result.Notes, "未能通过 fio --enghelp 确认可用 ioengine，已退回 psync；成绩仍然有效但队列深度受限。")
 	}
 	result.Summary = fmt.Sprintf("fio 写 %s · 读 %s · 4K 读/写 %s/%s",
-		model.FormatRate(seqWrite, "MiB/s"),
-		model.FormatRate(seqRead, "MiB/s"),
-		model.FormatRate(randomRead, "IOPS"),
-		model.FormatRate(randomWrite, "IOPS"),
+		formatMatrixRate(seqWrite, "MiB/s"),
+		formatMatrixRate(seqRead, "MiB/s"),
+		formatMatrixRate(randomRead, "IOPS"),
+		formatMatrixRate(randomWrite, "IOPS"),
 	)
 	result.Finish(start)
 	return result
+}
+
+func appendFIOBaseMeasurement(result *model.Result, key, label string, value float64, unit, method string) bool {
+	if !isPositiveFinite(value) {
+		return false
+	}
+	result.Measurements = append(result.Measurements, model.Measurement{
+		Key: key, Label: label, Value: value, Unit: unit, Display: model.FormatRate(value, unit),
+		Method: method, HigherIsBetter: model.BoolPtr(true),
+	})
+	return true
+}
+
+// appendFIOMixedResults 将四档 YABS 混合作业完整呈现出来。
+//
+// fio JSON 缺少某个 job 或某个方向时，不能把该行直接丢掉，也不能用 0
+// 假装跑出了结果。表格保留原计划的四行，缺失单元显示为“—”，并把结果标为
+// warning；只有读写吞吐都存在时才计算“合计”，避免用一侧数据冒充总吞吐。
+func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[string]fioJob, mixDepth int) {
+	table := model.Table{
+		Title:   fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
+		Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
+	}
+	incomplete := 0
+	for _, job := range plan {
+		if !job.Mixed() {
+			continue
+		}
+		sample, ok := jobs[job.Name]
+		readMiB, writeMiB := 0.0, 0.0
+		readIOPS, writeIOPS := 0.0, 0.0
+		if ok {
+			readMiB = fioBandwidthMiB(sample.Read)
+			writeMiB = fioBandwidthMiB(sample.Write)
+			readIOPS, writeIOPS = sample.Read.IOPS, sample.Write.IOPS
+		}
+		if !isPositiveFinite(readMiB) || !isPositiveFinite(readIOPS) || !isPositiveFinite(writeMiB) || !isPositiveFinite(writeIOPS) {
+			incomplete++
+		}
+		total := "—"
+		if isPositiveFinite(readMiB) && isPositiveFinite(writeMiB) {
+			total = formatMatrixRate(readMiB+writeMiB, "MiB/s")
+		}
+		table.Rows = append(table.Rows, []string{
+			job.BlockSize,
+			formatMatrixRate(readMiB, "MiB/s"),
+			formatMatrixRate(readIOPS, "IOPS"),
+			formatMatrixRate(writeMiB, "MiB/s"),
+			formatMatrixRate(writeIOPS, "IOPS"),
+			total,
+		})
+		method := fmt.Sprintf("fio-direct-%s-randrw50-qd%d-n2-v1", job.BlockSize, mixDepth)
+		if isPositiveFinite(readMiB) {
+			result.Measurements = append(result.Measurements, model.Measurement{
+				Key: fmt.Sprintf("fio_mixed_%s_read_mib_s", job.BlockSize), Label: fmt.Sprintf("混合 %s 读", job.BlockSize),
+				Value: readMiB, Unit: "MiB/s", Display: model.FormatRate(readMiB, "MiB/s"),
+				Method: method, HigherIsBetter: model.BoolPtr(true),
+			})
+		}
+		if isPositiveFinite(writeMiB) {
+			result.Measurements = append(result.Measurements, model.Measurement{
+				Key: fmt.Sprintf("fio_mixed_%s_write_mib_s", job.BlockSize), Label: fmt.Sprintf("混合 %s 写", job.BlockSize),
+				Value: writeMiB, Unit: "MiB/s", Display: model.FormatRate(writeMiB, "MiB/s"),
+				Method: method, HigherIsBetter: model.BoolPtr(true),
+			})
+		}
+	}
+	if len(table.Rows) > 0 {
+		result.Tables = append(result.Tables, table)
+	}
+	if incomplete > 0 {
+		if result.Status == model.StatusOK {
+			result.Status = model.StatusWarning
+		}
+		result.Notes = append(result.Notes, fmt.Sprintf("fio 混合矩阵有 %d 项作业未返回完整统计；缺失项不补零。", incomplete))
+	}
 }
 
 type matrixCell struct {
@@ -405,8 +434,10 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 			direction = sample.Write
 		}
 		throughput := fioBandwidthMiB(direction)
-		if throughput <= 0 && direction.IOPS <= 0 {
+		if !isPositiveFinite(throughput) || !isPositiveFinite(direction.IOPS) {
 			missing++
+		}
+		if !isPositiveFinite(throughput) && !isPositiveFinite(direction.IOPS) {
 			continue
 		}
 		actualDepth := engine.EffectiveDepth(spec.IODepth)
@@ -432,7 +463,7 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
 		cell := cells[workload]
 		status := "完成"
-		if cell.ReadMiB <= 0 && cell.ReadIOPS <= 0 || cell.WriteMiB <= 0 && cell.WriteIOPS <= 0 {
+		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
 			status = "未返回"
 		}
 		table.Rows = append(table.Rows, []string{
@@ -464,8 +495,10 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 				direction = sample.Write
 			}
 			throughput := fioBandwidthMiB(direction)
-			if throughput <= 0 && direction.IOPS <= 0 {
+			if !isPositiveFinite(throughput) || !isPositiveFinite(direction.IOPS) {
 				missing++
+			}
+			if !isPositiveFinite(throughput) && !isPositiveFinite(direction.IOPS) {
 				continue
 			}
 			method := fmt.Sprintf("fio-direct-atto-%s-%s-qd%d-v1", block.FIO, directionName, engine.EffectiveDepth(1))
@@ -490,7 +523,7 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 	for _, block := range attoBlockSizes {
 		cell := cells[block.Label]
 		status := "完成"
-		if cell.ReadMiB <= 0 && cell.ReadIOPS <= 0 || cell.WriteMiB <= 0 && cell.WriteIOPS <= 0 {
+		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
 			status = "未返回"
 		}
 		table.Rows = append(table.Rows, []string{
@@ -507,14 +540,14 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 }
 
 func appendFioMatrixMeasurements(result *model.Result, matrix, stem, direction string, throughput, iops float64, method string) {
-	if throughput > 0 {
+	if isPositiveFinite(throughput) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: stem + "_" + direction + "_mib_s", Label: matrix + " " + stem + " " + direction + " 吞吐",
 			Value: throughput, Unit: "MiB/s", Display: model.FormatRate(throughput, "MiB/s"), Method: method,
 			HigherIsBetter: model.BoolPtr(true),
 		})
 	}
-	if iops > 0 {
+	if isPositiveFinite(iops) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: stem + "_" + direction + "_iops", Label: matrix + " " + stem + " " + direction + " IOPS",
 			Value: iops, Unit: "IOPS", Display: model.FormatRate(iops, "IOPS"), Method: method,
@@ -528,7 +561,7 @@ func crystalMetricStem(workload string) string {
 }
 
 func formatMatrixRate(value float64, unit string) string {
-	if value <= 0 {
+	if !isPositiveFinite(value) {
 		return "—"
 	}
 	return model.FormatRate(value, unit)
@@ -791,12 +824,18 @@ func fioArguments(filename string, size int64, duration time.Duration, engine fi
 }
 
 func fioBandwidthMiB(direction fioDirection) float64 {
-	if direction.BWBytes > 0 {
-		return direction.BWBytes / 1024 / 1024
+	if isPositiveFinite(direction.BWBytes) {
+		value := direction.BWBytes / 1024 / 1024
+		if isPositiveFinite(value) {
+			return value
+		}
 	}
-	if direction.BW > 0 {
+	if isPositiveFinite(direction.BW) {
 		// fio documents bw as KiB/s in JSON output.
-		return direction.BW / 1024
+		value := direction.BW / 1024
+		if isPositiveFinite(value) {
+			return value
+		}
 	}
 	return 0
 }
@@ -820,10 +859,10 @@ func fioLatencyStatsFor(direction fioDirection) (fioLatencyStats, bool) {
 		stats.AvgMS, stats.AvgOK = fioLatencyValue(candidate.clat.Mean, candidate.factor)
 		stats.MaxMS, stats.MaxOK = fioLatencyValue(candidate.clat.Max, candidate.factor)
 		if value, ok := fioPercentileValue(candidate.clat.Percentile, 95); ok {
-			stats.P95MS, stats.P95OK = value*candidate.factor, true
+			stats.P95MS, stats.P95OK = fioLatencyValue(value, candidate.factor)
 		}
 		if value, ok := fioPercentileValue(candidate.clat.Percentile, 99); ok {
-			stats.P99MS, stats.P99OK = value*candidate.factor, true
+			stats.P99MS, stats.P99OK = fioLatencyValue(value, candidate.factor)
 		}
 		return stats, true
 	}
@@ -835,10 +874,14 @@ func (c fioClat) hasData() bool {
 }
 
 func fioLatencyValue(value, factor float64) (float64, bool) {
-	if value <= 0 {
+	if !isPositiveFinite(value) || !isPositiveFinite(factor) {
 		return 0, false
 	}
-	return value * factor, true
+	converted := value * factor
+	if !isPositiveFinite(converted) {
+		return 0, false
+	}
+	return converted, true
 }
 
 func fioP95Milliseconds(direction fioDirection) float64 {
@@ -851,7 +894,7 @@ func fioP95Milliseconds(direction fioDirection) float64 {
 func fioPercentileValue(values map[string]float64, target float64) (float64, bool) {
 	for key, value := range values {
 		percentile, err := strconv.ParseFloat(strings.TrimSpace(key), 64)
-		if err != nil || percentile != target || value <= 0 {
+		if err != nil || percentile != target || !isPositiveFinite(value) {
 			continue
 		}
 		return value, true
@@ -859,11 +902,6 @@ func fioPercentileValue(values map[string]float64, target float64) (float64, boo
 	return 0, false
 }
 
-func fioPercentile(values map[string]float64, prefix string) float64 {
-	for key, value := range values {
-		if strings.HasPrefix(key, prefix) && value > 0 {
-			return value
-		}
-	}
-	return 0
+func isPositiveFinite(value float64) bool {
+	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }

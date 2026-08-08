@@ -311,7 +311,7 @@ func markOoklaFieldPresence(data []byte, parsed *ooklaResult) {
 // its documented percentage range.  A missing, null, or out-of-range value is
 // deliberately not turned into zero: zero is a valid measured loss value.
 func ooklaPacketLoss(parsed ooklaResult) (float64, bool) {
-	if parsed.PacketLoss == nil || *parsed.PacketLoss < 0 || *parsed.PacketLoss > 100 {
+	if parsed.PacketLoss == nil || !nonNegativeFinite(*parsed.PacketLoss) || *parsed.PacketLoss > 100 {
 		return 0, false
 	}
 	return *parsed.PacketLoss, true
@@ -320,29 +320,29 @@ func ooklaPacketLoss(parsed ooklaResult) (float64, bool) {
 // ooklaHasValidMetric distinguishes a parsed JSON object from a usable result.
 // In particular, an empty object must not count as a successful speedtest.
 func ooklaHasValidMetric(parsed ooklaResult) bool {
-	return parsed.Ping.Latency > 0 ||
-		ooklaBandwidthMbps(parsed.Download.Bandwidth) > 0 ||
-		ooklaBandwidthMbps(parsed.Upload.Bandwidth) > 0
+	return isPositiveFinite(parsed.Ping.Latency) ||
+		isPositiveFinite(ooklaBandwidthMbps(parsed.Download.Bandwidth)) ||
+		isPositiveFinite(ooklaBandwidthMbps(parsed.Upload.Bandwidth))
 }
 
 // ooklaMeasurementsComplete requires all three core measurements.  Jitter and
 // packet loss are valid even when measured as zero, and are not required for a
 // row to be complete; when absent they remain visibly unavailable.
 func ooklaMeasurementsComplete(parsed ooklaResult) bool {
-	return parsed.Ping.Latency > 0 &&
-		ooklaBandwidthMbps(parsed.Download.Bandwidth) > 0 &&
-		ooklaBandwidthMbps(parsed.Upload.Bandwidth) > 0
+	return isPositiveFinite(parsed.Ping.Latency) &&
+		isPositiveFinite(ooklaBandwidthMbps(parsed.Download.Bandwidth)) &&
+		isPositiveFinite(ooklaBandwidthMbps(parsed.Upload.Bandwidth))
 }
 
 func ooklaLatencyDisplay(value float64) string {
-	if value <= 0 {
+	if !isPositiveFinite(value) {
 		return "—"
 	}
 	return fmt.Sprintf("%.2f ms", value)
 }
 
 func ooklaBandwidthDisplay(bytesPerSecond float64) string {
-	if speed := ooklaBandwidthMbps(bytesPerSecond); speed > 0 {
+	if speed := ooklaBandwidthMbps(bytesPerSecond); isPositiveFinite(speed) {
 		return fmt.Sprintf("%.2f Mbps", speed)
 	}
 	return "—"
@@ -364,25 +364,25 @@ func appendOoklaMeasurementsFor(result *model.Result, parsed ooklaResult, prefix
 	if labelPrefix == "" {
 		labelPrefix = "Ookla"
 	}
-	if parsed.Ping.Latency > 0 {
+	if isPositiveFinite(parsed.Ping.Latency) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: prefix + "ookla_ping_ms", Label: labelPrefix + " 延迟", Value: parsed.Ping.Latency, Unit: "ms", Display: fmt.Sprintf("%.2f ms", parsed.Ping.Latency),
 			Method: "ookla-cli-json-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
-	if (parsed.presence.PingJitter || parsed.Ping.Jitter > 0) && parsed.Ping.Jitter >= 0 {
+	if (parsed.presence.PingJitter || parsed.Ping.Jitter > 0) && nonNegativeFinite(parsed.Ping.Jitter) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: prefix + "ookla_jitter_ms", Label: labelPrefix + " 抖动", Value: parsed.Ping.Jitter, Unit: "ms", Display: fmt.Sprintf("%.2f ms", parsed.Ping.Jitter),
 			Method: "ookla-cli-json-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
-	if speed := ooklaBandwidthMbps(parsed.Download.Bandwidth); speed > 0 {
+	if speed := ooklaBandwidthMbps(parsed.Download.Bandwidth); isPositiveFinite(speed) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: prefix + "ookla_download_mbps", Label: labelPrefix + " 下载", Value: speed, Unit: "Mbps", Display: fmt.Sprintf("%.2f Mbps", speed),
 			Method: "ookla-cli-json-v1-bandwidth-bytes-per-second", HigherIsBetter: model.BoolPtr(true),
 		})
 	}
-	if speed := ooklaBandwidthMbps(parsed.Upload.Bandwidth); speed > 0 {
+	if speed := ooklaBandwidthMbps(parsed.Upload.Bandwidth); isPositiveFinite(speed) {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: prefix + "ookla_upload_mbps", Label: labelPrefix + " 上传", Value: speed, Unit: "Mbps", Display: fmt.Sprintf("%.2f Mbps", speed),
 			Method: "ookla-cli-json-v1-bandwidth-bytes-per-second", HigherIsBetter: model.BoolPtr(true),
@@ -397,10 +397,14 @@ func appendOoklaMeasurementsFor(result *model.Result, parsed ooklaResult, prefix
 }
 
 func ooklaBandwidthMbps(bytesPerSecond float64) float64 {
-	if bytesPerSecond <= 0 {
+	if !isPositiveFinite(bytesPerSecond) {
 		return 0
 	}
-	return bytesPerSecond * 8 / 1e6
+	value := bytesPerSecond * 8 / 1e6
+	if !isPositiveFinite(value) {
+		return 0
+	}
+	return value
 }
 
 func ooklaSummary(parsed ooklaResult) string {

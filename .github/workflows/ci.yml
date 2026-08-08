@@ -5,7 +5,7 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
-  # 实网测试按天跑，不挂在 push/PR 上：第三方限流或改版会让每个 PR 变红，
+  # 实网测试按天跑，不挂在普通主分支检查上：第三方限流或改版会让每次代码检查变红，
   # 那只会训练所有人忽略红灯。
   schedule:
     - cron: "37 5 * * *"
@@ -144,7 +144,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # 跑分提交校验：PR 里新增的提交必须格式合法、指纹自洽、不与已有记录重复。
+  # 跑分提交校验：新增提交必须格式合法、指纹自洽、不与已有记录重复。
   # 指纹由内容派生，因此手改数值而不重算会被当场发现。
   submissions:
     runs-on: ubuntu-latest
@@ -163,26 +163,34 @@ jobs:
           ECS_SUBMISSION_DIR: submissions
 
       # 离群检测只标记不阻断：可能是新硬件或特殊配置，由维护者判断。
-      # --annotate 把结果转成 GitHub 注解，直接显示在 PR 页面上。
+      # --annotate 把结果转成 GitHub 检查注解，直接显示在检查页面上。
       - name: Check for outliers
         run: |
-          go run ./cmd/ecs baseline \
-            --annotate --verbose \
-            --output /tmp/baseline-check.json \
-            submissions
+          if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
+            go run ./cmd/ecs baseline \
+              --annotate --verbose \
+              --output /tmp/baseline-check.json \
+              submissions
+          else
+            echo "当前没有排行榜提交，跳过离群检测"
+          fi
 
-      # 排行榜参考重建只在主分支做：PR 上重建会让每个 PR 都带一个 baseline.json 改动，
-      # 互相冲突且掩盖真正的提交内容。
+      # 排行榜参考重建只在主分支 push 做：检查阶段不改工作区，避免把生成文件
+      # 混进正在审核的代码变更。
       - name: Rebuild leaderboard reference
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          go run ./cmd/ecs baseline \
-            --source "社区提交聚合" \
-            --output submissions/baseline.json \
-            submissions
-          # 排行榜参考随二进制发布，因此同步写进内嵌副本。
-          cp submissions/baseline.json internal/score/embedded/baseline.json
-          go build ./... && go test ./internal/score/
+          if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
+            go run ./cmd/ecs baseline \
+              --source "社区提交聚合" \
+              --output submissions/baseline.json \
+              submissions
+            # 排行榜参考随二进制发布，因此同步写进内嵌副本。
+            cp submissions/baseline.json internal/score/embedded/baseline.json
+            go build ./... && go test ./internal/score/
+          else
+            echo "当前没有排行榜提交，保持无基线状态"
+          fi
 
       - name: Commit rebuilt leaderboard reference
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -224,7 +232,7 @@ jobs:
       - run: make cross
 
   # 实网协议/解析检查：确认第三方数据源与公共服务的当前响应仍能解析。
-  # 只在定时任务与手动触发时运行；push/PR 不触发外部网络请求。
+  # 只在定时任务与手动触发时运行；普通 push 不触发外部网络请求。
   live:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

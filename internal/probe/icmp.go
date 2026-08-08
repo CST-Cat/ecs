@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
@@ -94,27 +95,26 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 
 	// ping 在有丢包时返回非零退出码，但统计行依然有效，所以先解析再判错。
 	if match := pingLossPattern.FindStringSubmatch(text); len(match) == 2 {
-		if loss, parseErr := strconv.ParseFloat(match[1], 64); parseErr == nil {
+		if loss, ok := parsePingFloat(match[1]); ok && loss <= 100 {
 			stats.LossPercent = loss
 			stats.LossKnown = true
 			stats.Available = true
 		}
 	}
 	if match := pingRTTPattern.FindStringSubmatch(text); len(match) == 5 {
-		stats.MinMS = parseFloatDefault(match[1], 0)
-		stats.AvgMS = parseFloatDefault(match[2], 0)
-		stats.MaxMS = parseFloatDefault(match[3], 0)
-		stats.StdDevMS = parseFloatDefault(match[4], 0)
-		stats.StdDevKnown = true
-		stats.RTTKnown = true
-		stats.Available = true
+		if values, ok := parsePingFloats(match[1:]); ok {
+			stats.MinMS, stats.AvgMS, stats.MaxMS, stats.StdDevMS = values[0], values[1], values[2], values[3]
+			stats.StdDevKnown = true
+			stats.RTTKnown = true
+			stats.Available = true
+		}
 	} else if match := pingRTTThreePattern.FindStringSubmatch(text); len(match) == 4 {
 		// busybox ping 不报告标准差，此处只能留空而不是填 0 冒充测量值。
-		stats.MinMS = parseFloatDefault(match[1], 0)
-		stats.AvgMS = parseFloatDefault(match[2], 0)
-		stats.MaxMS = parseFloatDefault(match[3], 0)
-		stats.RTTKnown = true
-		stats.Available = true
+		if values, ok := parsePingFloats(match[1:]); ok {
+			stats.MinMS, stats.AvgMS, stats.MaxMS = values[0], values[1], values[2]
+			stats.RTTKnown = true
+			stats.Available = true
+		}
 	}
 	if !stats.Available {
 		if runCtx.Err() != nil {
@@ -126,10 +126,22 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 	return stats
 }
 
-func parseFloatDefault(value string, defaultValue float64) float64 {
+func parsePingFloat(value string) (float64, bool) {
 	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return defaultValue
+	if err != nil || parsed < 0 || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		return 0, false
 	}
-	return parsed
+	return parsed, true
+}
+
+func parsePingFloats(values []string) ([]float64, bool) {
+	parsed := make([]float64, len(values))
+	for index, value := range values {
+		item, ok := parsePingFloat(value)
+		if !ok {
+			return nil, false
+		}
+		parsed[index] = item
+	}
+	return parsed, true
 }

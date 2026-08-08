@@ -125,8 +125,8 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},
 		{Key: "prime", Label: "最大素数", Value: "20000"},
-		{Key: "single_events", Label: "单线程总事件", Value: strconv.FormatUint(single.Events, 10)},
-		{Key: "multi_events", Label: "多线程总事件", Value: strconv.FormatUint(multi.Events, 10)},
+		{Key: "single_events", Label: "单线程总事件", Value: formatSysbenchEvents(single)},
+		{Key: "multi_events", Label: "多线程总事件", Value: formatSysbenchEvents(multi)},
 	}
 	result.TextBlocks = []model.TextBlock{
 		{Title: "sysbench 单线程原始输出", Language: "text", Content: single.Output},
@@ -161,6 +161,13 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 	}
 	result.Finish(start)
 	return result
+}
+
+func formatSysbenchEvents(sample sysbenchCPUResult) string {
+	if sample.Rate <= 0 || sample.Events == 0 {
+		return "unavailable"
+	}
+	return strconv.FormatUint(sample.Events, 10)
 }
 
 func executeSysbenchCPU(ctx context.Context, path string, threads, seconds int) (sysbenchCPUResult, error) {

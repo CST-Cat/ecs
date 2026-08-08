@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -102,11 +103,12 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 	}
 	// UDP 模式下服务端回报的接收统计才带 jitter 与丢包。
 	sum := output.End.SumReceived
-	if sum.Packets == 0 {
-		sum = output.End.SumSent
-	}
-	if sum.Packets == 0 {
+	if sum.Packets <= 0 {
 		result.Err = "iperf3 未返回 UDP 包统计"
+		return result
+	}
+	if !isPositiveFinite(sum.BitsPerSecond) || !nonNegativeFinite(sum.JitterMS) || !nonNegativeFinite(sum.LostPercent) || sum.LostPercent > 100 {
+		result.Err = "iperf3 UDP 返回了无效的吞吐、抖动或丢包统计"
 		return result
 	}
 	result.Available = true
@@ -238,7 +240,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				Upload:   runIPerfDirection(ctx, path, target, family, false, threads, seconds),
 				Download: runIPerfDirection(ctx, path, target, family, true, threads, seconds),
 			}
-			if ctx.Err() == nil && (row.Upload.Mbps > 0 || row.Download.Mbps > 0) {
+			if ctx.Err() == nil && (isPositiveFinite(row.Upload.Mbps) || isPositiveFinite(row.Download.Mbps)) {
 				port := iperfUDPPort(target, row.Upload, row.Download)
 				row.UDP = runIPerfUDP(ctx, path, target.Host, port, family, "50M", 5)
 			}
@@ -255,14 +257,14 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	completedDirections := 0
 	for rowIndex, row := range rows {
 		status := "完成"
-		if row.Upload.Mbps <= 0 && row.Download.Mbps <= 0 {
+		if !isPositiveFinite(row.Upload.Mbps) && !isPositiveFinite(row.Download.Mbps) {
 			status = "失败"
 			failures++
-		} else if row.Upload.Mbps <= 0 || row.Download.Mbps <= 0 {
+		} else if !isPositiveFinite(row.Upload.Mbps) || !isPositiveFinite(row.Download.Mbps) {
 			status = "部分"
 			failures++
 		}
-		if row.Upload.Mbps > 0 {
+		if isPositiveFinite(row.Upload.Mbps) {
 			transferred += row.Upload.Bytes
 			completedDirections++
 			result.Measurements = append(result.Measurements, model.Measurement{
@@ -275,7 +277,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				HigherIsBetter: model.BoolPtr(true),
 			})
 		}
-		if row.Download.Mbps > 0 {
+		if isPositiveFinite(row.Download.Mbps) {
 			transferred += row.Download.Bytes
 			completedDirections++
 			result.Measurements = append(result.Measurements, model.Measurement{
@@ -446,7 +448,7 @@ func runIPerfDirectionWith(
 		if sample.Port == 0 {
 			sample.Port = port
 		}
-		if sample.Mbps > 0 {
+		if isPositiveFinite(sample.Mbps) {
 			return sample
 		}
 		last = sample
@@ -518,10 +520,10 @@ func checkIPerfPort(ctx context.Context, host string, port int, family string) e
 // directions retain their last attempted port for diagnostics, but that port
 // is not evidence of a listening iperf3 service and must not drive UDP.
 func iperfUDPPort(target config.IPerfEndpoint, upload, download iperfDirectionResult) int {
-	if upload.Mbps > 0 && upload.Port > 0 {
+	if isPositiveFinite(upload.Mbps) && upload.Port > 0 {
 		return upload.Port
 	}
-	if download.Mbps > 0 && download.Port > 0 {
+	if isPositiveFinite(download.Mbps) && download.Port > 0 {
 		return download.Port
 	}
 	return target.PortStart
@@ -575,8 +577,12 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 		return sample
 	}
 	sum := output.End.SumReceived
-	if sum.BitsPerSecond <= 0 {
+	if !isPositiveFinite(sum.BitsPerSecond) {
 		sum = output.End.SumSent
+	}
+	if !isPositiveFinite(sum.BitsPerSecond) || sum.Bytes < 0 || !nonNegativeFinite(sum.Seconds) {
+		sample.Error = "iperf3 未返回有效吞吐统计"
+		return sample
 	}
 	sample.Mbps = sum.BitsPerSecond / 1_000_000
 	sample.Bytes = sum.Bytes
@@ -586,7 +592,7 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 		sample.LocalHost = output.Start.Connected[0].LocalHost
 		sample.RemoteHost = output.Start.Connected[0].RemoteHost
 	}
-	if sample.Mbps <= 0 {
+	if !isPositiveFinite(sample.Mbps) {
 		sample.Error = "iperf3 未返回有效吞吐"
 	}
 	return sample
@@ -663,10 +669,14 @@ func hostHasUsableIPv6() bool {
 }
 
 func formatOptionalMbps(value float64) string {
-	if value <= 0 {
+	if !isPositiveFinite(value) {
 		return "失败"
 	}
 	return model.FormatRate(value, "Mbps")
+}
+
+func nonNegativeFinite(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func formatIPerfPorts(upload, download int) string {

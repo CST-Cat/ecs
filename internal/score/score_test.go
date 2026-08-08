@@ -422,35 +422,18 @@ func TestBuildBaselineRejectsEmptyInput(t *testing.T) {
 	}
 }
 
-// 内置基线必须覆盖全部定义的指标，否则首次运行就会有维度算不出分。
-func TestBuiltinBaselineCoversEveryMetric(t *testing.T) {
-	baseline := DefaultBaseline()
-	for _, dimension := range Dimensions() {
-		for _, metric := range dimension.Metrics {
-			if metric.Optional {
-				// The fallback contains only required current metrics; optional
-				// matrix and STREAM values come from aggregation.
-				continue
-			}
-			if value, ok := baseline.Metrics[metric.Key]; !ok || value <= 0 {
-				t.Errorf("内置基线缺少指标 %q", metric.Key)
-			}
+// 发行包没有当前参考时必须明确无评分，不能回落到已经删除的历史数据。
+func TestEmbeddedBaselineDoesNotUseHistoricalFallback(t *testing.T) {
+	baseline := EmbeddedBaseline()
+	if baseline.Source == "builtinCurrentFallback" {
+		t.Fatal("内嵌参考仍使用已删除的历史兜底")
+	}
+	if len(baseline.Metrics) == 0 {
+		if got := Compute(reportWith(benchResult("cpu", model.StatusOK, map[string]float64{
+			"sysbench_cpu_single_events_s": 100,
+		})), baseline); got != nil {
+			t.Fatalf("没有当前参考时不应生成评分：%+v", got)
 		}
-	}
-	if !baseline.IsBuiltin() {
-		t.Fatal("内置基线应能被识别，报告才能提示它只是单机快照")
-	}
-	if baseline.SampleCount != 2 {
-		t.Fatalf("内置基线样本数 = %d，应为 2", baseline.SampleCount)
-	}
-}
-
-// DefaultBaseline 必须返回副本，调用方改动不能污染下一次调用。
-func TestDefaultBaselineIsCopied(t *testing.T) {
-	first := DefaultBaseline()
-	first.Metrics["cpu_single"] = 1
-	if DefaultBaseline().Metrics["cpu_single"] == 1 {
-		t.Fatal("DefaultBaseline 返回了共享的 map")
 	}
 }
 

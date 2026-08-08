@@ -125,6 +125,26 @@ func TestATTOExpansionNoteTranslation(t *testing.T) {
 	}
 }
 
+func TestFIONewMissingValueNotesTranslate(t *testing.T) {
+	original := Current()
+	defer Set(original)
+	Set(LangEN)
+	cases := map[string]string{
+		"fio 基础作业有 2 项未返回；缺失项不补零。":        "fio has 2 baseline job(s) not returned; missing items are not filled with zero.",
+		"fio 混合矩阵有 3 项作业未返回完整统计；缺失项不补零。":  "fio has 3 mixed job(s) without complete statistics; missing items are not filled with zero.",
+		"多盘 fio 的一个或多个挂载点只返回部分统计；缺失项不补零。": "One or more extra-disk fio mount points returned partial statistics; missing items are not filled with zero.",
+	}
+	for note, want := range cases {
+		if !HasProbeText(note) {
+			t.Errorf("missing probe translation template: %q", note)
+			continue
+		}
+		if got := Text(note); got != want {
+			t.Errorf("translation for %q = %q, want %q", note, got, want)
+		}
+	}
+}
+
 // 校验错误表与其余译文表同样必须一一对应。
 func TestErrorTablesAreInSync(t *testing.T) {
 	for key, value := range errorChinese {

@@ -208,29 +208,37 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 			continue
 		}
 		tested++
+		writeAvailable := isPositiveFinite(sample.WriteMiB)
+		readAvailable := isPositiveFinite(sample.ReadIOPS)
 		table.Rows = append(table.Rows, []string{
 			mount.Path, mount.Device, mount.FSType,
-			model.FormatRate(sample.WriteMiB, "MiB/s"),
-			model.FormatRate(sample.ReadIOPS, "IOPS"),
+			formatMatrixRate(sample.WriteMiB, "MiB/s"),
+			formatMatrixRate(sample.ReadIOPS, "IOPS"),
 			"完成",
 		})
+		if !writeAvailable || !readAvailable {
+			result.Status = model.StatusWarning
+			result.Notes = append(result.Notes, "多盘 fio 的一个或多个挂载点只返回部分统计；缺失项不补零。")
+		}
 		key := strings.NewReplacer("/", "_", ".", "_", "-", "_").Replace(strings.TrimPrefix(mount.Path, "/"))
 		if key == "" {
 			key = "root"
 		}
-		result.Measurements = append(result.Measurements,
-			model.Measurement{
+		if writeAvailable {
+			result.Measurements = append(result.Measurements, model.Measurement{
 				Key: "fio_mount_" + key + "_write_mib_s", Label: mount.Path + " 顺序写",
 				Value: sample.WriteMiB, Unit: "MiB/s", Display: model.FormatRate(sample.WriteMiB, "MiB/s"),
 				Method: "fio-direct-1MiB-write-qd1-multidisk-v1", HigherIsBetter: model.BoolPtr(true),
-			},
-			model.Measurement{
+			})
+		}
+		if readAvailable {
+			result.Measurements = append(result.Measurements, model.Measurement{
 				Key: "fio_mount_" + key + "_randread_iops", Label: mount.Path + " 4K 随机读",
 				Value: sample.ReadIOPS, Unit: "IOPS", Display: model.FormatRate(sample.ReadIOPS, "IOPS"),
 				Method:         fmt.Sprintf("fio-direct-4KiB-randread-qd%d-multidisk-v1", engine.EffectiveDepth(32)),
 				HigherIsBetter: model.BoolPtr(true),
-			},
-		)
+			})
+		}
 	}
 	if len(table.Rows) > 0 {
 		result.Tables = append(result.Tables, table)
@@ -284,7 +292,7 @@ func runMultiDiskFIO(ctx context.Context, fioPath, mountPath string, engine fioE
 	}
 	sample.WriteMiB = fioBandwidthMiB(jobs["seqwrite"].Write)
 	sample.ReadIOPS = jobs["randread"].Read.IOPS
-	if sample.WriteMiB <= 0 && sample.ReadIOPS <= 0 {
+	if !isPositiveFinite(sample.WriteMiB) && !isPositiveFinite(sample.ReadIOPS) {
 		return sample, fmt.Errorf("fio 未返回有效统计")
 	}
 	return sample, nil

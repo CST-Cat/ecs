@@ -8,7 +8,8 @@
 > 当前实现口径：内存使用官方 STREAM 5.10 的
 > 10,000,000 elements/10 iterations，分别真实运行 1T/NT 的 Copy、Scale、Add、Triad；
 > STREAM 不可用时明确报告内存基准未运行。磁盘使用 fio Direct I/O，包含 fio JSON 的
-> QD1 延迟；mbw/ioping 不属于当前实现、RequiredTools 或 `ecs-tools`。当前 `full` 默认包含 Ookla，`standard` 默认不含；
+> QD1 延迟；mbw/ioping 不属于当前实现、RequiredTools 或 `ecs-tools`。综合评分只在显式提供当前参考或发行包内嵌新参考时出现；
+> 当前 `full` 默认包含 Ookla，`standard` 默认不含；
 > `--only ookla` 可从任意配置档显式单独选择。
 
 ## 样本选择
@@ -38,9 +39,9 @@
 ## 对 ecs 的直接设计约束
 
 1. **运行时零广告**：二进制、终端、JSON、txt、Markdown、HTML 和安装脚本均不展示赞助商、返利链接、二维码或推广语。
-2. **默认零上传**：所有报告只写本地。首个稳定版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
+2. **默认零上传**：所有报告只写本地。当前发行版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、JSON、txt、Markdown 和独立 HTML 都由同一份数据渲染，避免各输出路径互相漂移。
-4. **标准性能工具唯一**：CPU、内存、磁盘和网络吞吐原始成绩分别调用 sysbench CPU、官方 STREAM、fio、iperf3；STREAM 缺失时不生成替代内存成绩，fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的、基于当前基线的相对视图。
+4. **标准性能工具唯一**：CPU、内存、磁盘和网络吞吐原始成绩分别调用 sysbench CPU、官方 STREAM、fio、iperf3；STREAM 缺失时不生成替代内存成绩，fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的，只有存在同一口径的当前参考时才生成。
 5. **外部引擎必须可审计**：sysbench、fio、iperf3、NextTrace 等只作为可关闭的本地适配器；调用时记录可安全读取的版本、命令参数、程序摘要和数据来源。`run.sh` 优先使用系统程序，缺失的六项标准工具只从当前架构的已校验 `ecs-tools` 包解包到临时 WORK；Ookla 仅在选中时走独立官方签名源，不调用通用系统安装器；需要持久安装基准工具时才显式使用 `install.sh --with-benchmarks`。
 6. **资源预算可见**：`standard`、`full` 是 16/18 个默认模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
 7. **结果必须可比较**：每个性能结果记录引擎版本、块大小、队列深度、线程数、测试时长、样本数和时间戳。不同方法不混成一个总分。
@@ -62,7 +63,7 @@
 | IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s |
 | 内存带宽与资源证据 | — | 官方 STREAM 10M/10，1T/NT 四 kernel；缺失时明确报告未运行；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s |
-| 磁盘基线、Crystal、ATTO、50/50 混合矩阵与 QD1 延迟 | — | fio JSON，Direct I/O；fio 引擎探测回退只在可验证时使用 | 52 作业 | 52 作业 |
+| 磁盘基础项、Crystal、ATTO、50/50 混合矩阵与 QD1 延迟 | — | fio JSON，Direct I/O；fio 引擎探测回退只在可验证时使用 | 53 作业 | 53 作业 |
 | DNS 延迟、失败率与抖动 | ✓ | — | ✓ | ✓ |
 | TCP 延迟与可达率 | ✓ | 系统 ping 的 ICMP 往返 | ✓ | ✓ |
 | 多节点上传/下载吞吐 | — | iperf3 JSON（唯一，逐节点原值） | 7 节点 × 15s | 7 节点 × 15s |
@@ -88,7 +89,7 @@
 - IPQuality 的多源清单、字段对应关系、类型归类和供应商风险分段构成明确的实现输入；`ecs` 因此整体改用 AGPL-3.0-only，并在 `NOTICE`、报告来源和文档中保留项目、提交与许可证归属；
 - 没有移植 IPQuality 的广告、赞助素材、运行计数、在线报告上传、依赖安装、流媒体或邮件检测代码；
 - 网络实现、并发、密钥路由、结构化模型、终端/JSON/txt/Markdown/HTML 渲染和错误隔离由 `ecs` 重新实现；
-- sysbench、fio、iperf3、NextTrace Tiny 等程序仍作为独立进程调用，发行包不捆绑它们；缺失的六项标准工具由 `run.sh` 从已校验的架构 `ecs-tools` 包解包到 WORK，只有显式选中的 Ookla 才走独立官方签名源，持久安装基准工具才使用 `install.sh`。
+- sysbench、STREAM、fio、iperf3、NextTrace Tiny 和 ping 仍作为独立进程调用；缺失的六项标准工具由 `run.sh` 从已校验的架构 `ecs-tools` 包解包到 WORK，只有 full 默认或显式选中的 Ookla 才走独立官方签名源，持久安装基准工具才使用 `install.sh`。
 
 ## 首版之后的实测校准
 
@@ -220,13 +221,12 @@
    但公共观测无法看到供应商内部 peer graph、完整 MRT 历史或所有未公开会话。
 2. **三网就近 Ping**。oneclickvirt 的 `-ping`（源自 ecsspeed）按运营商选低延迟节点。
    `ecs` 的 `latency` 是固定 5 个全球站点，不是三网就近。
-3. **多挂载盘 IO**。oneclickvirt 的 `-diskmc`、spiritLHLS 的 `-mdisk` 都支持测试系统盘
-   之外的挂载盘。`ecs` 只测 `--disk-path` 指定的单个路径。
-4. **流媒体地区选择**。oneclickvirt 的 `-utregion` 有 20 种地区组合，`ecs` 目前只保留
+3. **流媒体地区选择**。oneclickvirt 的 `-utregion` 有 20 种地区组合，`ecs` 目前只保留
    global/jp/tw/hk/cn 五组，协议族可用 `--ip-version`/`-4`/`-6` 选择。
-5. **Telegram DC 测试**（oneclickvirt `-tgdc`）与**热门网站可达性**（`-web`）。
-6. **STREAM 内存带宽**。oneclickvirt 的 `-memorym` 默认就是 stream；当前 `ecs` 采用
-   官方 STREAM 10M/10。STREAM 是内存带宽的行业标准口径，缺失时不以 sysbench 微基准替代。
+4. **Telegram DC 测试**（oneclickvirt `-tgdc`）与**热门网站可达性**（`-web`）。
+
+多挂载盘 I/O 已由 `disk` 模块的简化 fio 作业覆盖；内存带宽已由官方 STREAM 1T/NT
+四 kernel 覆盖，均不再属于缺口。
 
 ### 有意不做（与项目约束冲突，不属于"缺口"）
 
@@ -260,7 +260,7 @@
 | 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
 | 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + NextTrace 适配器 | 已自实现 |
-| DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 缺，零依赖可补 |
+| DNSBL 黑名单 | IPQuality 的"400+ 数据库" | 协议是标准 DNS A 查询 | **自实现**（`dns.go` 的查询栈已具备） | 已实现多名单查询、拒绝码与 FCrDNS 组合判断 |
 | IP 质量数据库 | securityCheck + 20 余家商业 API | 代码 ✅ / **API 本身闭源黑盒** | **无替代**——只能如实标注来源与失败 | 已用 11 源并披露通道 |
 | **三网测速** | ecsspeed / oneclickvirt-speedtest，基于 speedtest.net + speedtest.cn | **Ookla 官方 CLI 闭源 + EULA + 外部数据处理**；服务器目录与出口策略会变化 | librespeed-cli ✅ LGPL-3.0（Debian 有包）；showwin/speedtest-go ✅ MIT（Ookla 协议实现） | `ookla` 作为第三方模块适配本机 CLI；standard 默认不含、full 默认包含，`--only ookla` 可从任意档位显式选择，run.sh 可从官方签名源按需准备，三网需配置服务器 ID |
 | 三网 Ping | pingtest（借鉴 ecsspeed） | ✅ | ICMP 已具备，缺的是节点数据而非技术 | `latency` 为固定全球站点 |
@@ -294,7 +294,7 @@
 - `mbw`（内存带宽）和 `ioping`（I/O 延迟）是调研过的候选，但不属于当前测试依赖或
   `ecs-tools` 内容。`librespeed-cli` 仍是通用 HTTP 测速候选。
 - **三网测速没有零外部服务的开源解**：`librespeed-cli` 可审计，但公共节点不覆盖中国三网的
-  同等服务器集合；`ookla` 适配器因此只支持显式调用官方客户端，并把条款、实际流量和外部数据处理写进报告。
+  同等服务器集合；`ookla` 适配器因此继续使用官方客户端，并把条款、实际流量和外部数据处理写进报告。
 - 商业 IP 数据库无开源替代，这是行业事实；ecs 能做的是保留原值、通道与失败状态，
   不平均、不顶替——这一点已经做到。
 
@@ -307,7 +307,7 @@ full 深度参数，保证直接运行与 `--only` 运行的结果可以比较�
 | --- | ---: | ---: |
 | 默认模块数 | 16 | 18 |
 | CPU/内存每轮 | 15 s | 15 s |
-| fio 临时文件与作业 | 2048 MiB，上限安全检查；52 项完整 mixed/Crystal/ATTO | 同左 |
+| fio 临时文件与作业 | 2048 MiB，上限安全检查；53 项完整基础/混合/Crystal/ATTO | 同左 |
 | iperf3（选中 `speed` 时） | 7 节点 × 双方向 × 15 s，附 UDP 50 Mbps/5 s | 同左 |
 | `cnspeed`（选中时） | 8 s/100 MiB 每运营商 | 同左 |
 

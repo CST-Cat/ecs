@@ -375,7 +375,9 @@ jq -e '(.jobs | length == 1) and .jobs[0].jobname == "ecs-smoke"' "$fio_json" >/
   die 'fio JSON/QD1 smoke failed'
 }
 fio_io_uring_json="$work/fio-io-uring-smoke.json"
-"$fio_bin" \
+fio_io_uring_error="$work/fio-io-uring-smoke.err"
+fio_io_uring_output="$work/fio-io-uring-smoke.out"
+if "$fio_bin" \
   --name=ecs-io-uring-smoke \
   --filename="$work/fio-smoke.data" \
   --rw=read \
@@ -386,12 +388,22 @@ fio_io_uring_json="$work/fio-io-uring-smoke.json"
   --numjobs=1 \
   --direct=1 \
   --output-format=json \
-  --output="$fio_io_uring_json"
-jq -e '(.jobs | length == 1) and .jobs[0].jobname == "ecs-io-uring-smoke"' \
-  "$fio_io_uring_json" >/dev/null || {
-  cat "$fio_io_uring_json" >&2
-  die 'fio io_uring JSON/QD1 smoke failed'
-}
+  --output="$fio_io_uring_json" \
+  >"$fio_io_uring_output" 2>"$fio_io_uring_error"; then
+  jq -e '(.jobs | length == 1) and .jobs[0].jobname == "ecs-io-uring-smoke"' \
+    "$fio_io_uring_json" >/dev/null || {
+    cat "$fio_io_uring_json" "$fio_io_uring_error" >&2
+    die 'fio io_uring JSON/QD1 smoke failed'
+  }
+else
+  if grep -Eiq "kernel.*support.*io_uring|io_uring[^[:alpha:]]+(is )?not supported" \
+    "$fio_io_uring_error" "$fio_io_uring_output"; then
+    echo 'fio io_uring runtime smoke skipped: the architecture test kernel does not support io_uring'
+  else
+    cat "$fio_io_uring_error" "$fio_io_uring_output" "$fio_io_uring_json" 2>/dev/null >&2 || true
+    die 'fio io_uring runtime smoke failed for a reason other than kernel support'
+  fi
+fi
 "$fio_bin" --version
 "$fio_bin" --enghelp >"$work/fio-engines.txt"
 for required_engine in io_uring libaio psync; do

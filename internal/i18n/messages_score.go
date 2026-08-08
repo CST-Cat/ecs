@@ -28,8 +28,6 @@ var scoreChinese = map[string]string{
 	"score.tierLine":         "本机 %d 核，与 %s 档的机器比较。",
 	"score.tierFallbackLine": "本机 %d 核，该档样本不足，改用全部机型的排行榜参考均值；跨机型比较对两端都不够公平。",
 
-	"score.baseline.builtinCurrentFallback": "内置当前基线兜底快照",
-
 	"score.metric.cpu_single":           "CPU 单线程",
 	"score.metric.cpu_multi":            "CPU 多线程",
 	"score.metric.memory_copy":          "STREAM Copy（1T/NT 中位数）",
@@ -72,8 +70,6 @@ var scoreEnglish = map[string]string{
 
 	"score.tierLine":         "This host has %d vCPU and is compared against the %s tier.",
 	"score.tierFallbackLine": "This host has %d vCPU; that tier has too few samples, so the global leaderboard reference mean across all sizes is used instead — which is unfair to both ends of the range.",
-
-	"score.baseline.builtinCurrentFallback": "built-in current-baseline fallback snapshot",
 
 	"score.metric.cpu_single":           "CPU single-thread",
 	"score.metric.cpu_multi":            "CPU multi-thread",

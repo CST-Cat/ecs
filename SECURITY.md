@@ -8,7 +8,7 @@
 
 磁盘模块只在用户指定目录创建名称随机的 `.ecs-fio-*` 临时文件，并在完成、错误或取消时清理。它会把文件限制在测试前可用空间的 20% 以内。
 
-路由模块只调用 NextTrace，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 NextTrace 仅从官方 GitHub Release 选取对应 Linux full asset，先校验 GitHub API 提供的 SHA-256 digest，再放入本次 `$WORK/bin`；脚本退出时随工作目录清理。`ECS_AUTO_DEPS=0` 或下载/校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace 只使用无启动横幅的 JSON 输出模式。
+路由模块只调用官方 NextTrace Tiny，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 Tiny 仅从官方 GitHub Release 选取对应 Linux Tiny asset，先校验 GitHub API 提供的 SHA-256 digest，再放入本次 `$WORK/bin`；脚本退出时随工作目录清理。`ECS_AUTO_DEPS=0` 或下载/校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace Tiny 只使用无启动横幅的 JSON 输出模式。
 
 磁盘模块只会调用 `PATH` 中现有的 `fio`，解析其本地 JSON 输出并记录参数、版本与程序 SHA-256。运行 `ecs` 本身不会调用包管理器；只有用户显式执行 `install.sh --with-benchmarks` 才会安装依赖。fio 临时文件仍受 20% 可用空间上限约束。
 

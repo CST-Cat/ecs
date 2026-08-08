@@ -1,7 +1,7 @@
 # 跑分提交库
 
-这里存放社区提交的跑分记录，用于聚合出评分基线（`baseline.json`）。
-新用户跑 ecs 时看到的分数，就是相对这份基线的倍率。
+这里存放经过脱敏的社区跑分记录。CI 会在有真实提交时聚合出评分参考，随下一次
+发行包编译进去；没有当前样本时，ecs 不显示综合评分，也不会使用旧数据。
 
 > 目录名刻意不叫 `reports/`：那是 ecs 默认的报告输出目录（已在 `.gitignore` 里），
 > 两者同名会让人把含出口 IP 的完整报告误提交进来。
@@ -37,7 +37,7 @@ ecs --profile full
 ecs submit --input ./reports/ecs-report-*.json \
   --output ./submissions/2026-08/
 
-# 3. fork 本仓库，把生成的文件放进 submissions/YYYY-MM/，开 PR
+# 3. 把生成的文件放进 submissions/YYYY-MM/，交给项目的正常评审流程
 ```
 
 导出时会优先读取报告中的 cloud-init/DMI 明确信号；不会使用公网 IP、ASN、地理定位、
@@ -49,9 +49,7 @@ ecs submit --input ./reports/ecs-report-*.json \
 ```
 submissions/
   2026-08/
-    e8ee186c40c1-oracle-cloud-us-sanjose-1.json
-    92d7ce3c401b-oracle-cloud-us-sanjose-1.json
-  baseline.json        ← 由 CI 从上面所有提交重建，不要手改
+  baseline.json        ← 有样本时由 CI 重建，不要手改；无样本时不生成
 ```
 
 文件名前 12 位是内容指纹，由机器规格与测量值派生，用于查重——同一台机器
@@ -67,12 +65,10 @@ submissions/
 
 ## 当前库存
 
-当前有 2 份样本，来自 Oracle Cloud Classic Free Tier（4 vCPU、约 24 GiB、
-ARM64 KVM）。它们构成当前发布基线，但样本数仍不足以代表公共 VPS 群体；报告会明确
-提示分档样本不足。
-
-真正的参考价值要等跨机器样本积累起来。每档至少 5 台才会启用分档，
-每档至少 8 台才能做离群判定。
+v0.6.0 已删除旧工具口径对应的提交和基线，当前目录没有可用于评分的样本。
+因此本版本默认报告不会给出综合分；重新收集真实 STREAM、fio、sysbench 和 iperf3
+结果后，CI 才会生成新的排行榜参考。每档至少 5 台才会启用分档，每档至少 8 台才能
+做离群判定。
 
 ## 分档
 
@@ -84,7 +80,7 @@ ARM64 KVM）。它们构成当前发布基线，但样本数仍不足以代表�
 
 ## 基线怎么重建
 
-合并到主分支后 CI 自动跑：
+新提交进入主分支后 CI 自动跑：
 
 ```bash
 ecs baseline --source "社区提交聚合" --output submissions/baseline.json submissions/
@@ -98,6 +94,5 @@ ecs baseline --source "社区提交聚合" --output submissions/baseline.json su
 STREAM 的 Copy、Scale、Add、Triad 四个等权子组处理，每个 kernel 的 1T/NT
 先取中位数，缺失子组不补零。
 
-重建后的 `baseline.json` 会在下次发版时由 CI 写进
-`internal/score/embedded/baseline.json`，随二进制编译进去——新用户
-`curl … | sh` 拿到的就自带最新基线，不需要额外联网。
+重建后的 `baseline.json` 会同步到 `internal/score/embedded/baseline.json`，随二进制
+编译进去。样本为空时两个文件都不生成/保持空参考；ecs 不联网获取排行榜数据。

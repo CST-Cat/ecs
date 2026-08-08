@@ -195,6 +195,35 @@ func TestFIOMatrixMissingCellsRemainExplicit(t *testing.T) {
 	}
 }
 
+func TestFIOMatrixPartialCellsRemainExplicit(t *testing.T) {
+	result := model.Result{ID: "disk", Status: model.StatusOK}
+	jobs := map[string]fioJob{
+		"crystal_read_rnd4k_q1": {
+			Name: "crystal_read_rnd4k_q1",
+			Read: fioDirection{BWBytes: 8 * 1024 * 1024},
+		},
+		"crystal_write_rnd4k_q1": {
+			Name:  "crystal_write_rnd4k_q1",
+			Write: fioDirection{BWBytes: 4 * 1024 * 1024, IOPS: 50},
+		},
+	}
+	appendCrystalMatrix(&result, jobs, fioEngine{Name: "psync", Detected: true})
+
+	if result.Status != model.StatusWarning {
+		t.Fatalf("partial matrix status = %s, want warning", result.Status)
+	}
+	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 4 {
+		t.Fatalf("partial matrix rows = %+v, want four retained rows", result.Tables)
+	}
+	row := result.Tables[0].Rows[0]
+	if row[1] == "—" || row[2] != "—" || row[3] == "—" || row[4] == "—" || row[5] != "未返回" {
+		t.Fatalf("partial matrix cell was not shown explicitly: %v", row)
+	}
+	if containsNote(result.Notes, "缺失项") == false && !containsNote(result.Notes, "未返回") {
+		t.Fatalf("partial matrix warning note absent: %v", result.Notes)
+	}
+}
+
 func containsNote(notes []string, needle string) bool {
 	for _, note := range notes {
 		if strings.Contains(note, needle) {
@@ -306,5 +335,48 @@ func TestFIOLatencyMissingValuesRemainMissing(t *testing.T) {
 	}
 	if !containsNote(missingJob.Notes, "4 项") || !containsNote(missingJob.Notes, "未返回") {
 		t.Fatalf("missing latency job warning = %v", missingJob.Notes)
+	}
+}
+
+func TestFIOBaseMissingValuesRemainMissing(t *testing.T) {
+	result := model.Result{ID: "disk", Status: model.StatusOK}
+	if !appendFIOBaseMeasurement(&result, "present", "present", 12.5, "MiB/s", "fio-test") {
+		t.Fatal("positive fio measurement was rejected")
+	}
+	if appendFIOBaseMeasurement(&result, "missing", "missing", 0, "MiB/s", "fio-test") {
+		t.Fatal("zero fio measurement was accepted")
+	}
+	if len(result.Measurements) != 1 || result.Measurements[0].Key != "present" || result.Measurements[0].Value <= 0 {
+		t.Fatalf("missing fio measurement was emitted: %+v", result.Measurements)
+	}
+}
+
+func TestFIOMixedMissingValuesRemainVisible(t *testing.T) {
+	result := model.Result{ID: "disk", Status: model.StatusOK}
+	plan := fioJobPlan()
+	jbs := map[string]fioJob{
+		"mix4k": {
+			Name:  "mix4k",
+			Read:  fioDirection{BWBytes: 8 * 1024 * 1024, IOPS: 100},
+			Write: fioDirection{BWBytes: 4 * 1024 * 1024, IOPS: 50},
+		},
+	}
+	appendFIOMixedResults(&result, plan, jbs, 64)
+	if result.Status != model.StatusWarning {
+		t.Fatalf("partial mixed result status = %s, want warning", result.Status)
+	}
+	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 4 {
+		t.Fatalf("mixed rows = %+v, want all four planned jobs", result.Tables)
+	}
+	if result.Tables[0].Rows[0][1] == "—" || result.Tables[0].Rows[0][3] == "—" || result.Tables[0].Rows[0][5] == "—" {
+		t.Fatalf("complete mixed row lost a value: %v", result.Tables[0].Rows[0])
+	}
+	for _, row := range result.Tables[0].Rows[1:] {
+		if row[1] != "—" || row[2] != "—" || row[3] != "—" || row[4] != "—" || row[5] != "—" {
+			t.Fatalf("missing mixed job fabricated a value: %v", row)
+		}
+	}
+	if !containsNote(result.Notes, "3 项") || !containsNote(result.Notes, "不补零") {
+		t.Fatalf("mixed missing warning = %v", result.Notes)
 	}
 }
