@@ -273,7 +273,7 @@ sh -n install.sh
 bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
-apt-get install -y sysbench fio iperf3 mbw ioping smartmontools
+apt-get install -y sysbench fio iperf3 mbw ioping
 # 或 ./install.sh --with-benchmarks
 ```
 

@@ -22,8 +22,6 @@ var probeEnglishBench = map[string]string{
 	"mbw 版本":            "mbw version",
 	"NextTrace 版本":      "NextTrace version",
 	"NextTrace SHA-256": "NextTrace SHA-256",
-	"smartctl 版本":       "smartctl version",
-	"smartctl SHA-256":  "smartctl SHA-256",
 	"speedtest 版本":      "speedtest version",
 	"speedtest SHA-256": "speedtest SHA-256",
 	"sysbench 版本":       "sysbench version",

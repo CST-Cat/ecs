@@ -53,7 +53,7 @@
 
 | 模块 | 非基准诊断 | 标准基准工具 | standard | full |
 | --- | :---: | --- | :---: | :---: |
-| 系统、虚拟化、资源、温度、SMART 与内核网络栈 | ✓ | smartctl + `/proc`/`/sys` 只读采集 | ✓ | ✓ |
+| 系统、虚拟化、资源与内核网络栈 | ✓ | `/proc`/`sys` 只读采集 | ✓ | ✓ |
 | IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s |
 | 内存顺序读写、事件时延与 memcpy 补充带宽 | — | sysbench memory + 可选 mbw；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s |
@@ -249,7 +249,7 @@
 | NAT 类型 | gostun（GPL-3.0） | ✅ | 自实现 STUN RFC 5389/5780 | 已自实现 |
 | CPU | sysbench / **geekbench** | sysbench ✅ GPL-2.0；geekbench ❌ 闭源且强制上传 | sysbench | 已用 sysbench |
 | 内存 | sysbench / dd / **mbw** / **stream** | mbw ✅ Debian 有包；STREAM ✅ 但无 Debian 包需自编译 | **mbw**（Debian `mbw` 1.2.2） | 只有 sysbench，可补 mbw |
-| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟）+ **smartmontools**（SMART） | 已用 fio + ioping；system/disk 只读接入 smartctl |
+| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + **ioping**（延迟） | 已用 fio + ioping |
 | 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
 | 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + NextTrace 适配器 | 已自实现 |
@@ -285,7 +285,7 @@
 已用更彻底的方式实现**（自实现协议、零第三方 Go 依赖，不下载他人二进制）。
 
 - 可立即采用的 Debian 官方开源包：`mbw`（内存带宽）、`ioping`（I/O 延迟）、
-  `smartmontools`（SMART 与通电时间）、`librespeed-cli`（通用 HTTP 测速）。
+  `librespeed-cli`（通用 HTTP 测速）。
 - **三网测速没有零外部服务的开源解**：`librespeed-cli` 可审计，但公共节点不覆盖中国三网的
   同等服务器集合；`ookla` 适配器因此只支持显式调用官方客户端，并把条款、实际流量和外部数据处理写进报告。
 - 商业 IP 数据库无开源替代，这是行业事实；ecs 能做的是保留原值、通道与失败状态，

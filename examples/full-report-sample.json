@@ -1231,11 +1231,6 @@
           "key": "filesystem",
           "label": "文件系统",
           "value": "ext4"
-        },
-        {
-          "key": "smart_error",
-          "label": "SMART 失败原因",
-          "value": "Smartctl open device: /dev/sda failed: Permission denied"
         }
       ],
       "measurements": [
@@ -1444,8 +1439,7 @@
         "fio 必须由用户预先安装；ecs 不会调用包管理器或下载二进制。",
         "8 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。",
         "仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
-        "ioping 用单个 Direct I/O 请求测空载延迟，回答“一次 I/O 要等多久”；fio 用队列深度压吞吐，两者不可互相替代。延迟抖动大通常说明存储被邻居争抢或走了网络存储。",
-        "未能读取磁盘 SMART 信息：需要 root 权限，或该设备不提供 SMART。VPS 的虚拟磁盘通常不透传 SMART，这不影响 fio 与 ioping 的成绩。"
+        "ioping 用单个 Direct I/O 请求测空载延迟，回答“一次 I/O 要等多久”；fio 用队列深度压吞吐，两者不可互相替代。延迟抖动大通常说明存储被邻居争抢或走了网络存储。"
       ],
       "sources": [
         {

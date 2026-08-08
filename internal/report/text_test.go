@@ -76,15 +76,13 @@ func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
 		{Key: "speedtest_binary_sha256", Label: "speedtest SHA-256", Value: "sha-speedtest"},
 		{Key: "nexttrace_version", Label: "NextTrace 版本", Value: "NextTrace v0.1.0"},
 		{Key: "nexttrace_binary_sha256", Label: "NextTrace SHA-256", Value: "abc123"},
-		{Key: "smartctl_version", Label: "smartctl 版本", Value: "smartctl 7.4"},
-		{Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: "sha-smartctl"},
 	}
 	out := Text(data, TextOptions{Color: termcolor.LevelTrueColor})
 	p := termcolor.Palette{Level: termcolor.LevelTrueColor}
 	labels := []string{
 		"sysbench 版本", "sysbench SHA-256", "mbw 版本", "mbw SHA-256", "fio 版本", "fio SHA-256",
 		"ioping 版本", "ioping SHA-256", "iperf3 版本", "iperf3 SHA-256", "speedtest 版本", "speedtest SHA-256",
-		"NextTrace 版本", "NextTrace SHA-256", "smartctl 版本", "smartctl SHA-256",
+		"NextTrace 版本", "NextTrace SHA-256",
 	}
 	labelWidth := 0
 	for _, label := range labels {
@@ -102,7 +100,7 @@ func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
 	for _, version := range []string{
 		"sysbench 1.0.20", "sha-sysbench", "mbw 1.2.2", "sha-mbw", "fio-3.42", "sha-fio",
 		"ioping 1.3", "sha-ioping", "iperf 3.16", "sha-iperf3", "speedtest 1.2.3", "sha-speedtest",
-		"NextTrace v0.1.0", "abc123", "smartctl 7.4", "sha-smartctl",
+		"NextTrace v0.1.0", "abc123",
 	} {
 		if !strings.Contains(out, version) {
 			t.Fatalf("报告缺少工具版本值 %q:\n%s", version, out)
@@ -111,7 +109,7 @@ func TestTextRendersEachToolVersionAsItsOwnColoredField(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"sysbench 版本", "sysbench SHA-256"}, {"mbw 版本", "mbw SHA-256"}, {"fio 版本", "fio SHA-256"},
 		{"ioping 版本", "ioping SHA-256"}, {"iperf3 版本", "iperf3 SHA-256"}, {"speedtest 版本", "speedtest SHA-256"},
-		{"NextTrace 版本", "NextTrace SHA-256"}, {"smartctl 版本", "smartctl SHA-256"},
+		{"NextTrace 版本", "NextTrace SHA-256"},
 	} {
 		versionIndex := strings.Index(out, pair[0])
 		shaIndex := strings.Index(out, pair[1])

@@ -4,7 +4,7 @@
 
 `ecs` 不是把一批远程 Shell 脚本重新串起来。它以结构化结果为核心：每个探针先产生同一份带版本 JSON 数据，再由本地渲染器一次导出终端、Markdown 和独立 HTML 报告。所有性能原始成绩只读取 sysbench、fio、mbw、iperf3 等明确记录版本与口径的工具；综合评分单独按显式排行榜参考计算，不伪造替代工具成绩、不生成并行效率或跨节点平均值。IP 质量模块在遵守 AGPL 的前提下吸收 IPQuality 的多源覆盖与字段映射，并移除广告、运行计数和在线报告。
 
-> 当前处于首个开发版本，仅支持 Linux。系统与资源、SMART/温度、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、公共 BGP 观测、路由、三网回程、可选 Ookla 三网测速、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
+> 当前处于首个开发版本，仅支持 Linux。系统与资源、标准 CPU/内存/磁盘/网络基准、网络/IP、DNS、延迟、端口、服务可达性、公共 BGP 观测、路由、三网回程、可选 Ookla 三网测速、JSON/Markdown/HTML 已可运行。仍需更多真实 Linux VPS 样本校准公共节点、骨干特征表和平台规则。
 
 ## 快速开始
 
@@ -152,7 +152,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ECS_REPOSITORY=owner/ecs ./install.sh --with-benchmarks
 ```
 
-默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3、mbw、ioping 和 smartmontools。路由依赖不由安装器持久安装；`run.sh` 负责临时准备已校验的 NextTrace。
+默认安装器不会调用 `sudo`、不会修改包管理器，也不会关闭 TLS 校验。只有显式给出 `--with-benchmarks` 时，才会通过检测到的 apt/dnf/yum/apk/pacman 安装 sysbench、fio、iperf3、mbw 和 ioping。路由依赖不由安装器持久安装；`run.sh` 负责临时准备已校验的 NextTrace。
 
 ## 常用命令
 
@@ -273,12 +273,12 @@ ecs --profile full --only ookla
 
 | ID | 报告口径 | 默认实现 | 关键限制 |
 | --- | --- | --- | --- |
-| `system` | 事实采集 | OS/runtime inspection，含 DMI/主板/BIOS、GPU/网卡/块设备/RAID、CPU 缓存、VT-x/AMD-V、温度与只读 SMART 摘要 | 某些容器会隐藏 DMI/内核字段；SMART 需 smartctl/root，虚拟盘通常不透传；不是基准 |
+| `system` | 事实采集 | OS/runtime inspection，含 DMI/主板/BIOS、GPU/网卡/块设备、CPU 缓存、VT-x/AMD-V | 某些容器会隐藏 DMI/内核字段；不是基准 |
 | `network` | 第三方评估 | 官方 API + IPQuality 社区兼容通道 | 各库口径不同且可能冲突，不能平均成总分 |
 | `bgp` | 第三方评估 | RouteViews 当前 RIB：出口前缀、起源 ASN、RPKI、报告 peer 与 AS 路径样本 | 轻量公共观测；不是私有互联全图，也不含历史 MRT；每个协议族约 1 次查询 |
 | `cpu` | 标准基准 | sysbench CPU prime=20000，单/多线程 | 只与相同版本、参数、线程和时长比较 |
 | `memory` | 标准基准 | sysbench memory 单/多线程读写与实际/明确派生时延 + mbw memcpy 带宽；并报告内存使用与可选 Balloon/KSM 证据 | sysbench 反复读写同一缓冲区会命中缓存，mbw 在两个大数组间搬运；可选内核接口缺失时明确 unavailable |
-| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 + smartctl 介质健康 | 所有档位都使用相同 10 秒完整 mixed/Crystal/ATTO 口径；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
+| `disk` | 标准基准 | fio Direct I/O 基础/YABS 4K/64K/512K/1M 混合矩阵 + Crystal RND4K/SEQ1M + ATTO 512B–64M + 磁盘容量/使用率/设备库存 + ioping 空载延迟 | 所有档位都使用相同 10 秒完整 mixed/Crystal/ATTO 口径；ATTO 不含 5M；只与相同 fio/ecs 参数和文件系统比较 |
 | `dns` | 协议测量 | 原生 DNS/UDP | 2–5 个样本的 P95 只作现场诊断，不是标准分 |
 | `latency` | 协议测量 | 预解析后的 TCP 建连，并列系统 ping 的 ICMP 往返 | 解析耗时单列；TCP 明显快于 ICMP 时会警告握手可能被本地代理代答；受 Anycast/CDN 调度影响 |
 | `speed` | 标准基准 | iperf3 TCP 多流正向/反向 + UDP 50 Mbps/5 秒、多节点 | 公共节点可能繁忙；按时长测试不封顶流量；所有档位同一节点/时长口径 |

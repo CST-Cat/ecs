@@ -137,22 +137,6 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "gpus", Label: "GPU", Value: joinHardwareList(hardware.GPUs)},
 		{Key: "network_adapters", Label: "网卡", Value: joinHardwareList(hardware.NICs)},
 		{Key: "block_devices", Label: "块设备", Value: joinHardwareList(hardware.BlockDevices)},
-		{Key: "raid", Label: "软件 RAID", Value: hardware.RAID},
-		{Key: "temperatures", Label: "温度", Value: joinHardwareList(hardware.Temperatures)},
-		{Key: "smart", Label: "SMART 健康", Value: joinHardwareList(hardware.SMART)},
-	}
-	if len(hardware.SMART) > 0 {
-		if path, err := exec.LookPath("smartctl"); err == nil {
-			appendToolVersion(ctx, &result, "smartctl_version", "smartctl 版本", path)
-			result.Fields = append(result.Fields, model.Field{
-				Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: fallback(binarySHA256(path), "unavailable"),
-			})
-		} else if _, statErr := os.Stat("/usr/sbin/smartctl"); statErr == nil {
-			appendToolVersion(ctx, &result, "smartctl_version", "smartctl 版本", "/usr/sbin/smartctl")
-			result.Fields = append(result.Fields, model.Field{
-				Key: "smartctl_binary_sha256", Label: "smartctl SHA-256", Value: fallback(binarySHA256("/usr/sbin/smartctl"), "unavailable"),
-			})
-		}
 	}
 	result.Measurements = []model.Measurement{
 		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
@@ -264,7 +248,7 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 	}
 
 	collectLinuxSystem(&s)
-	s.Hardware = collectHardwareInventory(ctx)
+	s.Hardware = collectHardwareInventory()
 	if kernel := commandOutput(ctx, "uname", "-sr"); kernel != "" {
 		s.Kernel = kernel
 	}

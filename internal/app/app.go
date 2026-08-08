@@ -590,7 +590,6 @@ func doctorTools() []doctorTool {
 		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
 		{name: "mbw", purpose: "doctor.purpose.mbw", args: []string{"-h"}},
 		{name: "ioping", purpose: "doctor.purpose.ioping", args: []string{"-v"}},
-		{name: "smartctl", purpose: "doctor.purpose.smartctl", args: []string{"--version"}},
 		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
 	}
 	meta := make(map[string]toolMeta, len(catalog))

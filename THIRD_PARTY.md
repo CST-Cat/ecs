@@ -17,7 +17,6 @@
 | NextTrace | 带节点信息的路由追踪 | [nxtrace/NTrace-core](https://github.com/nxtrace/NTrace-core) | GPL-3.0 | 路由模块唯一引擎；本机缺失时 `run.sh` 可从官方 GitHub Release 临时下载并校验 API digest；强制 JSON、无启动横幅；记录参数与 SHA-256 |
 | mbw | memcpy 口径的内存带宽 | [ahorvath/mbw](http://ahorvath.web.cern.ch/ahorvath/mbw/) | GPL-2.0 | `memory` 的补充口径，与 sysbench 并列保留不合并；数组大小按可用内存收敛，避免小内存机器 OOM |
 | ioping | 单请求 Direct I/O 延迟 | [koct9i/ioping](https://github.com/koct9i/ioping) | GPL-3.0 | `disk` 的补充口径；用 `-D` 与 fio 的 direct=1 同口径 |
-| smartctl | 磁盘 SMART 健康与通电时间 | [smartmontools](https://www.smartmontools.org/) | GPL-2.0 | `disk` 的介质健康；需 root，虚拟磁盘通常不透传，缺失时如实说明；**刻意不采集序列号**（可唯一标识物理硬件） |
 | ping | ICMP 往返与丢包 | 操作系统发行方 | 随发行版而异 | `latency` 模块的 ICMP 列；兼容 iputils 与 busybox 两种统计行格式；参数以数组传入、不经过 shell；不可用时只保留 TCP 结果 |
 | speedtest | Ookla 外部测速 | [Ookla Speedtest CLI](https://www.speedtest.net/apps/cli) | 闭源，独立条款 | `full` 或显式选择 `ookla` 时运行；缺失时 `run.sh` 只从 Ookla 官方 Packagecloud 签名源下载并解包到本次 `$WORK`，不写入系统包数据库；不保留原始 JSON，客户端仍会向 Ookla 测量服务发送其所需数据 |
 

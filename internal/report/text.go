@@ -775,7 +775,7 @@ func fieldGroupTitle(id, key, resultTitle string) string {
 		if strings.HasPrefix(lower, "tcp") || strings.HasPrefix(lower, "net") || strings.Contains(lower, "ipv6") || strings.Contains(lower, "forward") || strings.Contains(lower, "syn") || strings.Contains(lower, "mtu") || strings.Contains(lower, "queue") || strings.Contains(lower, "conntrack") {
 			return localizedGroup("内核网络", "Kernel networking")
 		}
-		if strings.HasPrefix(lower, "disk") || strings.HasPrefix(lower, "swap") || strings.HasPrefix(lower, "load") || strings.Contains(lower, "uptime") || strings.Contains(lower, "temperature") || strings.Contains(lower, "smart") || strings.HasPrefix(lower, "block") {
+		if strings.HasPrefix(lower, "disk") || strings.HasPrefix(lower, "swap") || strings.HasPrefix(lower, "load") || strings.Contains(lower, "uptime") || strings.HasPrefix(lower, "block") {
 			return localizedGroup("磁盘与运行状态", "Storage/runtime")
 		}
 		return localizedGroup("操作系统与硬件", "OS/hardware")

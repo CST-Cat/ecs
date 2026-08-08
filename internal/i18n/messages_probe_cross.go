@@ -29,8 +29,6 @@ var probeEnglishCross = map[string]string{
 	// 拆分后的固定说明句与新增字段
 	"ioping 延迟测试失败，详见下方失败原因。": "ioping latency test failed; see the failure reason below.",
 	"ioping 失败原因": "ioping failure reason",
-	"SMART 失败原因":  "SMART failure reason",
-	"未能读取磁盘 SMART 信息：需要 root 权限，或该设备不提供 SMART。VPS 的虚拟磁盘通常不透传 SMART，这不影响 fio 与 ioping 的成绩。": "Could not read disk SMART data: it needs root privileges, or the device exposes none. VPS virtual disks usually do not pass SMART through; this does not affect the fio or ioping results.",
 	"\x1f \x1f · \x1f \x1f 内存 · \x1f \x1f 可用盘 · \x1f":                     "\x1f \x1f · \x1f \x1f RAM · \x1f \x1f free disk · \x1f",
 	"\x1f \x1f 总计 / \x1f \x1f 可用 (/)":                                     "\x1f \x1f total / \x1f \x1f available (/)",
 	"\x1f \x1f 总计 / \x1f \x1f 可用 (/tmp)":                                  "\x1f \x1f total / \x1f \x1f available (/tmp)",

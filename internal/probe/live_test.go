@@ -23,8 +23,6 @@ package probe
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -199,9 +197,9 @@ func TestLiveMediaStrongRules(t *testing.T) {
 
 // 公共 iperf3 节点清单来自 YABS，需要定期确认还活着。
 //
-// 与 runIPerfDirection 保持一致：在端口范围内最多试三个。iperf3 服务端一次只
-// 服务一个测试，忙碌时单个端口会直接 connection refused，只探首个端口会把
-// "当时那个端口忙"误报成"节点挂了"。
+// 与 runIPerfDirection 保持一致：按配置的端口范围顺序探测，单个端口只做
+// 有界 TCP 预检。iperf3 服务端一次只服务一个测试，忙碌时单个端口会直接
+// connection refused，只探首个端口会把"当时那个端口忙"误报成"节点挂了"。
 func TestLiveIPerfNodeReachability(t *testing.T) {
 	cfg, err := config.Defaults(config.ProfileFull)
 	if err != nil {
@@ -212,35 +210,33 @@ func TestLiveIPerfNodeReachability(t *testing.T) {
 	}
 	reachable := 0
 	for _, target := range cfg.IPerfTargets {
-		attempts := target.PortEnd - target.PortStart + 1
-		if attempts > 3 {
-			attempts = 3
-		}
-		if attempts < 1 {
-			attempts = 1
-		}
+		ports := iperfPortCandidates(target)
+		targetCtx, cancel := context.WithTimeout(context.Background(), iperfDirectionBudget(1, len(ports)))
 		var lastErr error
 		connected := false
-		for attempt := 0; attempt < attempts && !connected; attempt++ {
-			port := target.PortStart + attempt
-			address := net.JoinHostPort(target.Host, strconv.Itoa(port))
+		for _, port := range ports {
+			if targetCtx.Err() != nil {
+				lastErr = targetCtx.Err()
+				break
+			}
 			start := time.Now()
-			connection, err := net.DialTimeout("tcp", address, 10*time.Second)
+			err := checkIPerfPort(targetCtx, target.Host, port, "IPv4")
 			elapsed := time.Since(start)
 			if err != nil {
 				lastErr = err
 				continue
 			}
-			_ = connection.Close()
 			connected = true
 			reachable++
 			t.Logf("%-10s %-34s 可达（%s，端口 %d，%s）",
 				target.Name, target.Host, target.Location, port, elapsed.Round(time.Millisecond))
+			break
 		}
 		if !connected {
 			t.Logf("%-10s %-34s 端口 %d-%d 均不可达：%v",
-				target.Name, target.Host, target.PortStart, target.PortStart+attempts-1, compactError(lastErr))
+				target.Name, target.Host, target.PortStart, target.PortEnd, compactError(lastErr))
 		}
+		cancel()
 	}
 	if reachable == 0 {
 		t.Fatalf("节点池里 %d 个公共 iperf3 节点全部不可达", len(cfg.IPerfTargets))

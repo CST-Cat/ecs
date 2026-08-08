@@ -1,10 +1,6 @@
 package probe
 
-import (
-	"encoding/json"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // 样本取自本机真实运行的 ioping 1.3 输出，注意 min/avg/max/mdev 同行混用了 us 与 ms。
 const realIOPingOutput = `
@@ -73,76 +69,6 @@ func TestParseIOPingOutput(t *testing.T) {
 
 	if _, ok := parseIOPingOutput("完全无关的输出"); ok {
 		t.Fatal("无统计行时必须返回失败")
-	}
-}
-
-// SMART 解析用本机真实 smartctl 7.4 的 JSON 结构作样本。
-// 关键是：序列号存在于输入里，但绝不能出现在解析结果中。
-const realSMARTJSON = `{
-  "json_format_version": [1, 0],
-  "smartctl": {"exit_status": 0, "messages": []},
-  "device": {"name": "/dev/nvme0n1", "type": "nvme", "protocol": "NVMe"},
-  "model_name": "WD PC SN540 SDDPNPF-512G",
-  "serial_number": "225202801813",
-  "firmware_version": "33006000",
-  "user_capacity": {"bytes": 512110190592},
-  "smart_status": {"passed": true},
-  "power_on_time": {"hours": 8543},
-  "temperature": {"current": 36},
-  "nvme_smart_health_information_log": {
-    "percentage_used": 5,
-    "power_on_hours": 8543,
-    "data_units_written": 31783454,
-    "unsafe_shutdowns": 63
-  }
-}`
-
-func TestSMARTPayloadNeverCarriesSerialNumber(t *testing.T) {
-	// 与 readSMART 内部使用同一套字段定义：序列号刻意没有对应字段，
-	// 因此即便上游返回它，也不会进入任何报告结构。
-	var payload struct {
-		ModelName   string `json:"model_name"`
-		SmartStatus struct {
-			Passed *bool `json:"passed"`
-		} `json:"smart_status"`
-		PowerOnTime struct {
-			Hours *int `json:"hours"`
-		} `json:"power_on_time"`
-		Temperature struct {
-			Current *int `json:"current"`
-		} `json:"temperature"`
-		RotationRate *int `json:"rotation_rate"`
-		NVMeLog      struct {
-			PercentageUsed *int `json:"percentage_used"`
-		} `json:"nvme_smart_health_information_log"`
-	}
-	if err := json.Unmarshal([]byte(realSMARTJSON), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.ModelName != "WD PC SN540 SDDPNPF-512G" {
-		t.Fatalf("型号 = %q", payload.ModelName)
-	}
-	if payload.SmartStatus.Passed == nil || !*payload.SmartStatus.Passed {
-		t.Fatal("健康状态未解析")
-	}
-	if payload.PowerOnTime.Hours == nil || *payload.PowerOnTime.Hours != 8543 {
-		t.Fatalf("通电时间 = %v", payload.PowerOnTime.Hours)
-	}
-	if payload.NVMeLog.PercentageUsed == nil || *payload.NVMeLog.PercentageUsed != 5 {
-		t.Fatalf("已用寿命 = %v", payload.NVMeLog.PercentageUsed)
-	}
-	// NVMe 没有转速概念，字段缺失时必须是 nil 而不是 0——0 会被显示成"机械硬盘 0 RPM"。
-	if payload.RotationRate != nil {
-		t.Fatalf("NVMe 不应有转速字段：%v", *payload.RotationRate)
-	}
-
-	// 兜底断言：把解析结构再序列化一次，序列号不得出现。
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "225202801813") {
-		t.Fatal("序列号泄露进了解析结构——它能唯一标识物理硬件，必须排除")
 	}
 }
 

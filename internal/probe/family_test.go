@@ -119,22 +119,7 @@ func TestHardwareHelpers(t *testing.T) {
 	}
 }
 
-func TestTemperatureAndSMARTFormatting(t *testing.T) {
-	if got, ok := formatTemperature("42500"); !ok || got != "42.5 °C" {
-		t.Fatalf("temperature = %q, %v", got, ok)
-	}
-	if _, ok := formatTemperature("999"); ok {
-		t.Fatal("unphysical direct temperature should be rejected")
-	}
-	passed := true
-	temp := 38
-	info := smartInfo{Device: "/dev/nvme0n1", ModelName: "Example SSD", Passed: &passed, Temperature: &temp}
-	if got := formatSMARTSummary(info); got != "nvme0n1 model=Example SSD health=pass temp=38 °C" {
-		t.Fatalf("SMART summary = %q", got)
-	}
-}
-
-func TestSystemReportIncludesHardwareFacts(t *testing.T) {
+func TestSystemReportHardwareFactsContract(t *testing.T) {
 	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
@@ -144,9 +129,14 @@ func TestSystemReportIncludesHardwareFacts(t *testing.T) {
 	for _, field := range result.Fields {
 		keys[field.Key] = true
 	}
-	for _, key := range []string{"system_vendor", "product_name", "motherboard", "bios", "gpus", "network_adapters", "block_devices", "raid", "temperatures", "smart"} {
+	for _, key := range []string{"system_vendor", "product_name", "motherboard", "bios", "gpus", "network_adapters", "block_devices"} {
 		if !keys[key] {
 			t.Fatalf("system report missing hardware field %q", key)
+		}
+	}
+	for _, key := range []string{"raid", "temperatures", "smart"} {
+		if keys[key] {
+			t.Fatalf("system report unexpectedly includes removed hardware field %q", key)
 		}
 	}
 }

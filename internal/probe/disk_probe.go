@@ -39,9 +39,8 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 			appendMultiDiskResults(ctx, &result, env, fioPath)
 		}
 	}
-	// 延迟与介质健康是补充口径，缺席不降级整个模块。
+	// 延迟是补充口径，缺席不降级整个模块。
 	appendIOPingLatency(ctx, &result, env.Config.DiskPath)
-	appendSMARTHealth(ctx, &result, env.Config.DiskPath)
 	result.Finish(start)
 	return result
 }

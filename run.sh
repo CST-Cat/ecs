@@ -339,7 +339,6 @@ package_for_tool() {
   case "$PACKAGE_MANAGER:$1" in
     apt:ping)      printf '%s\n' iputils-ping ;;
     dnf:ping|yum:ping|apk:ping|pacman:ping) printf '%s\n' iputils ;;
-    *:smartctl)    printf '%s\n' smartmontools ;;
     *)             printf '%s\n' "$1" ;;
   esac
 }
@@ -359,10 +358,7 @@ add_missing_tool() {
 }
 
 tool_exists() {
-  case "$1" in
-    smartctl) command -v smartctl >/dev/null 2>&1 || [ -x /usr/sbin/smartctl ] ;;
-    *) command -v "$1" >/dev/null 2>&1 ;;
-  esac
+  command -v "$1" >/dev/null 2>&1
 }
 
 list_contains() {

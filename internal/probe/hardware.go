@@ -2,14 +2,12 @@ package probe
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // hardwareInventory is the read-only part of HardwareQuality that is useful
@@ -29,12 +27,9 @@ type hardwareInventory struct {
 	GPUs           []string
 	NICs           []string
 	BlockDevices   []string
-	RAID           string
-	Temperatures   []string
-	SMART          []string
 }
 
-func collectHardwareInventory(ctx context.Context) hardwareInventory {
+func collectHardwareInventory() hardwareInventory {
 	inventory := hardwareInventory{
 		SystemVendor:   readHardwareValue("/sys/class/dmi/id/sys_vendor"),
 		ProductName:    readHardwareValue("/sys/class/dmi/id/product_name"),
@@ -48,9 +43,6 @@ func collectHardwareInventory(ctx context.Context) hardwareInventory {
 		GPUs:           collectGPUs(),
 		NICs:           collectNICs(),
 		BlockDevices:   collectBlockDevices(),
-		RAID:           collectRAID(),
-		Temperatures:   collectTemperatures(),
-		SMART:          collectSMARTHealth(ctx),
 	}
 	return inventory
 }
@@ -189,138 +181,6 @@ func collectBlockDeviceNames() []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-// collectTemperatures reads the kernel's read-only thermal and hwmon views.
-// Values are deliberately reported as labels and degrees only; no device
-// serials or other persistent identifiers are involved.
-func collectTemperatures() []string {
-	var result []string
-	seen := make(map[string]bool)
-	appendTemperature := func(label, raw string) {
-		value, ok := formatTemperature(raw)
-		if !ok {
-			return
-		}
-		item := strings.TrimSpace(label) + "=" + value
-		if strings.HasPrefix(item, "=") || seen[item] {
-			return
-		}
-		seen[item] = true
-		result = append(result, item)
-	}
-
-	thermalZones, _ := filepath.Glob("/sys/class/thermal/thermal_zone[0-9]*")
-	sort.Strings(thermalZones)
-	for _, zone := range thermalZones {
-		label := readHardwareValue(filepath.Join(zone, "type"))
-		if label == "unknown" {
-			label = filepath.Base(zone)
-		}
-		appendTemperature(label, readHardwareValue(filepath.Join(zone, "temp")))
-	}
-
-	hwmonDirs, _ := filepath.Glob("/sys/class/hwmon/hwmon[0-9]*")
-	sort.Strings(hwmonDirs)
-	for _, dir := range hwmonDirs {
-		name := readHardwareValue(filepath.Join(dir, "name"))
-		if name == "unknown" {
-			name = filepath.Base(dir)
-		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			file := entry.Name()
-			if !strings.HasPrefix(file, "temp") || !strings.HasSuffix(file, "_input") {
-				continue
-			}
-			prefix := strings.TrimSuffix(file, "_input")
-			label := readHardwareValue(filepath.Join(dir, prefix+"_label"))
-			if label == "unknown" {
-				label = prefix
-			}
-			appendTemperature(name+"/"+label, readHardwareValue(filepath.Join(dir, file)))
-		}
-	}
-	return result
-}
-
-func formatTemperature(raw string) (string, bool) {
-	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil {
-		return "", false
-	}
-	// Linux thermal and hwmon files normally use millidegrees Celsius, but a
-	// few drivers expose degrees directly.
-	if value > 1000 || value < -1000 {
-		value /= 1000
-	}
-	if value < -100 || value > 200 {
-		return "", false
-	}
-	return fmt.Sprintf("%.1f °C", value), true
-}
-
-// collectSMARTHealth inspects each whole block device when smartctl is
-// available.  It is intentionally best-effort: VPS virtio disks commonly do
-// not expose SMART, and a missing/unsupported device is not a system failure.
-func collectSMARTHealth(ctx context.Context) []string {
-	var result []string
-	for _, name := range collectBlockDeviceNames() {
-		device := "/dev/" + name
-		deviceCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		info, ok := readSMART(deviceCtx, device)
-		cancel()
-		if !ok {
-			continue
-		}
-		result = append(result, formatSMARTSummary(info))
-	}
-	return result
-}
-
-func formatSMARTSummary(info smartInfo) string {
-	parts := []string{strings.TrimPrefix(info.Device, "/dev/")}
-	if info.ModelName != "" {
-		parts = append(parts, "model="+info.ModelName)
-	}
-	if info.Passed != nil {
-		status := "fail"
-		if *info.Passed {
-			status = "pass"
-		}
-		parts = append(parts, "health="+status)
-	}
-	if info.Temperature != nil {
-		parts = append(parts, fmt.Sprintf("temp=%d °C", *info.Temperature))
-	}
-	if info.PowerOnHrs != nil {
-		parts = append(parts, fmt.Sprintf("power_on=%d h", *info.PowerOnHrs))
-	}
-	if info.PercentUsed != nil {
-		parts = append(parts, fmt.Sprintf("used=%d%%", *info.PercentUsed))
-	}
-	return strings.Join(parts, " ")
-}
-
-func collectRAID() string {
-	data, err := os.ReadFile("/proc/mdstat")
-	if err != nil {
-		return "unknown"
-	}
-	var arrays []string
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 && strings.HasPrefix(fields[0], "md") && fields[1] == ":" {
-			arrays = append(arrays, fields[0]+" "+fields[2])
-		}
-	}
-	if len(arrays) == 0 {
-		return "none detected"
-	}
-	return strings.Join(arrays, ", ")
 }
 
 func parseKeyValueFile(path string) map[string]string {

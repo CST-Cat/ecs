@@ -114,7 +114,7 @@ type ModuleDescriptor struct {
 var moduleDescriptors = []ModuleDescriptor{
 	moduleDescriptor("system", true, ExposureLocal, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "inventory", Label: "事实采集", Engine: "OS/runtime inspection", ComparisonScope: "资源快照；不是性能基准"},
-		false, "", []string{"smartctl"}, time.Second),
+		false, "", nil, time.Second),
 	moduleDescriptor("network", true, ExposureThirdParty, true, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "provider-assessment", Label: "第三方评估", Engine: "multi-provider IP intelligence", ComparisonScope: "不同供应商分数不可直接混算"},
 		false, "", nil, 5*time.Second, "ipquality", "wizard.askIPQuality"),
@@ -129,7 +129,7 @@ var moduleDescriptors = []ModuleDescriptor{
 		true, "memory", []string{"sysbench", "mbw"}, 5*time.Second, EstimateModeMemory),
 	moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio", Profile: "Direct I/O"},
-		true, "disk", []string{"fio", "ioping", "smartctl"}, 8*time.Second, EstimateModeDisk),
+		true, "disk", []string{"fio", "ioping"}, 8*time.Second, EstimateModeDisk),
 	moduleDescriptorWithEstimateMode("dns", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNS/UDP", ComparisonScope: "现场诊断；不是基准分"},
 		false, "", nil, 8*time.Second, EstimateModeDNS),
