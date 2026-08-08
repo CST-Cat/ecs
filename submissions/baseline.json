@@ -2,7 +2,7 @@
   "schema": "ecs.baseline/v1",
   "source": "社区提交聚合",
   "sample_count": 2,
-  "generated_at": "2026-08-08T18:03:53.145158399Z",
+  "generated_at": "2026-08-08T18:23:53.905398989Z",
   "metrics": {
     "atto_128k_read_iops": 264.8735125,
     "atto_128k_read_mib_s": 33.10918855667114,
