@@ -268,8 +268,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: ecs-tools-stage-*
-          path: tools-stage
-          merge-multiple: true
+          path: tools-artifacts
+          merge-multiple: false
+      - name: Normalize verified tools stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools-stage
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            source_dir="tools-artifacts/ecs-tools-stage-${arch}/linux_${arch}"
+            test -d "$source_dir"
+            cp -a "$source_dir" tools-stage/
+          done
       - name: Check all tools stages before packaging
         shell: bash
         run: |
