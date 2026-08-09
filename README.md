@@ -127,6 +127,9 @@ smoke 做硬校验，运行时若缺少已核对资产则明确标记不可用�
 工具 CI 只验证构建与功能正确性，不验证性能；即使是原生 runner，smoke 日志里的 benchmark 数值
 也不能作为正式性能结果。Manifest 会明确记录 `validation.scope=functional` 和
 `performance_valid=false`：**CI = correctness，真实用户 VPS = measurement**。
+分支与 PR 由 `ci.yml` 运行 unit/race/cross/submissions；`v*` tag 由独立的 `release.yml`
+处理 tools 与 Release。发布流程会先确认 tag 精确指向远端 `main`，并等待同一 SHA 的 main CI
+成功，不在 tag 上重复运行整套通用 CI。
 
 **界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
 `config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按
@@ -610,6 +613,14 @@ go vet ./...
 go test -race ./...
 make build
 make cross
+```
+
+日常 `go test ./...` 的真实 fio smoke 只执行 8 个代表性作业、每项 1 秒；生产运行仍使用
+完整 53-job 矩阵和每项 10 秒，不改变 benchmark 口径。需要显式复核完整真实矩阵时运行：
+
+```bash
+ECS_FULL_BENCH_TESTS=1 go test ./internal/probe \
+  -run '^TestRunFIODiskFullMatrixOptIn$' -count=1 -timeout=15m
 ```
 
 `scripts/package.sh VERSION` 的发布契约是 Linux 七个架构；`ecs-tools` 每个架构 `tar.zst` 包的

@@ -194,8 +194,9 @@ func TestFIOJSONHelpers(t *testing.T) {
 // requireTool 返回真实基准工具的路径。
 //
 // 这些测试跑真实的 fio / sysbench / iperf3，不使用脚本替身：替身只能证明解析器
-// 认得它自己造出来的输出，证明不了它认得工具的真实输出。CI 会安装这三个工具，
-// 因此在 CI 上缺失一律直接失败，避免测试静默跳过后仍然显示为绿。
+// 认得它自己造出来的输出，证明不了它认得工具的真实输出。常规 CI 显式跳过宿主
+// 未安装的真实工具测试，tools workflow 另跑发布二进制 smoke；如果 CI 主动选中这里
+// 的测试，缺少工具仍必须失败，不能静默跳过后显示为绿。
 func requireTool(t *testing.T, name string) string {
 	t.Helper()
 	path, err := exec.LookPath(name)
@@ -289,11 +290,91 @@ func TestRunFIOD1LatencyWithRealFIO(t *testing.T) {
 	}
 }
 
-// 真实 fio 端到端：报告标注的队列深度必须与实际生效的引擎能力一致。
-//
-// 断言写成不变式而不是硬编码某个引擎名——同一份代码在有 io_uring 的内核、
-// 只有 libaio 的内核和只有 psync 的精简发行版上都必须自洽。
-func TestRunFIODiskWithRealFIO(t *testing.T) {
+// 真实 fio 功能 smoke 只选取生产计划中的代表项，覆盖顺序/随机、QD1/QD32、
+// 混合读写、Crystal，以及 ATTO 的最小和最大块。完整 53-job 矩阵由纯单元测试
+// 校验结构，并可通过 TestRunFIODiskFullMatrixOptIn 显式端到端复核。
+func TestRunRepresentativeFIOJobsWithRealFIO(t *testing.T) {
+	fioPath := requireTool(t, "fio")
+	file, err := os.CreateTemp(t.TempDir(), ".ecs-fio-smoke-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := file.Name()
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fullPlan := fioJobPlan()
+	wanted := []string{
+		"seqread",
+		"randwrite",
+		fioQD1LatencyJobName,
+		"mix4k",
+		"crystal_read_rnd4k_q32",
+		"crystal_write_seq1m_q8",
+		"atto_read_512b",
+		"atto_write_64m",
+	}
+	plan := make([]fioJobSpec, 0, len(wanted))
+	for _, name := range wanted {
+		spec, ok := findFIOJobSpec(fullPlan, name)
+		if !ok {
+			t.Fatalf("representative fio job %q is missing from production plan", name)
+		}
+		plan = append(plan, spec)
+	}
+
+	engine := detectFIOEngine(context.Background(), fioPath)
+	args := fioArguments(filename, 128*1024*1024, time.Second, engine, plan)
+	command := exec.Command(fioPath, args...)
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("representative real fio run: %v", err)
+	}
+	jobs, err := parseFIOJobs(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != len(plan) {
+		t.Fatalf("representative fio jobs = %d, want %d: %v", len(jobs), len(plan), jobs)
+	}
+	for _, spec := range plan {
+		job, ok := jobs[spec.Name]
+		if !ok {
+			t.Fatalf("representative fio output missing %q", spec.Name)
+		}
+		if job.Error != 0 {
+			t.Fatalf("representative fio job %q error = %d", spec.Name, job.Error)
+		}
+	}
+
+	assertDirection := func(name, direction string, value fioDirection) {
+		t.Helper()
+		if !isPositiveFinite(value.IOPS) || !isPositiveFinite(fioBandwidthMiB(value)) {
+			t.Fatalf("representative fio %s %s statistics = %+v", name, direction, value)
+		}
+	}
+	assertDirection("seqread", "read", jobs["seqread"].Read)
+	assertDirection("randwrite", "write", jobs["randwrite"].Write)
+	assertDirection("mix4k", "read", jobs["mix4k"].Read)
+	assertDirection("mix4k", "write", jobs["mix4k"].Write)
+	assertDirection("crystal_read_rnd4k_q32", "read", jobs["crystal_read_rnd4k_q32"].Read)
+	assertDirection("crystal_write_seq1m_q8", "write", jobs["crystal_write_seq1m_q8"].Write)
+	assertDirection("atto_read_512b", "read", jobs["atto_read_512b"].Read)
+	assertDirection("atto_write_64m", "write", jobs["atto_write_64m"].Write)
+	stats, ok := fioLatencyStatsFor(jobs[fioQD1LatencyJobName].Read)
+	if !ok || !stats.AvgOK || !stats.P95OK || !stats.P99OK || !stats.MaxOK {
+		t.Fatalf("representative fio QD1 latency statistics = %+v, ok=%v", stats, ok)
+	}
+}
+
+// 完整真实 fio 端到端保留为显式诊断测试，不进入日常本地测试。它验证报告
+// 标注的队列深度与实际引擎能力一致，并检查完整 53-job/106-measurement 契约。
+func TestRunFIODiskFullMatrixOptIn(t *testing.T) {
+	if os.Getenv("ECS_FULL_BENCH_TESTS") != "1" {
+		t.Skip("set ECS_FULL_BENCH_TESTS=1 to run the complete 53-job fio matrix")
+	}
 	fioPath := requireTool(t, "fio")
 	directory := t.TempDir()
 	cfg, err := config.Defaults(config.ProfileStandard)

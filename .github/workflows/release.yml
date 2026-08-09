@@ -1,0 +1,551 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      rebuild_tools:
+        description: "Run the full seven-architecture tools build without publishing"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release_gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify remote main and its exact CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          main_commit=$(git rev-parse refs/remotes/origin/main)
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            candidate=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            candidate=$GITHUB_SHA
+          else
+            echo "unsupported release event: $GITHUB_EVENT_NAME / $GITHUB_REF" >&2
+            exit 1
+          fi
+
+          test "$candidate" = "$main_commit" || {
+            echo "release candidate $candidate is not remote main $main_commit" >&2
+            exit 1
+          }
+
+          for attempt in {1..120}; do
+            runs=$(gh run list \
+              --workflow ci.yml \
+              --commit "$candidate" \
+              --event push \
+              --limit 20 \
+              --json headBranch,headSha,status,conclusion,url)
+            main_runs=$(jq -c --arg sha "$candidate" \
+              '[.[] | select(.headBranch == "main" and .headSha == $sha)]' <<<"$runs")
+
+            if jq -e 'any(.[]; .status == "completed" and .conclusion == "success")' \
+              <<<"$main_runs" >/dev/null; then
+              echo "verified successful main CI for $candidate"
+              exit 0
+            fi
+
+            if jq -e 'length > 0 and all(.[]; .status == "completed")' \
+              <<<"$main_runs" >/dev/null; then
+              jq -r '.[] | "main CI did not succeed: \(.conclusion) \(.url)"' <<<"$main_runs" >&2
+              exit 1
+            fi
+
+            echo "waiting for main CI on $candidate (attempt $attempt/120)"
+            sleep 10
+          done
+
+          echo "timed out waiting for successful main CI on $candidate" >&2
+          exit 1
+
+  # Tag 发布先判断工具构建输入是否相对上一个稳定 Release 发生变化。
+  # 未变化时由 release job 校验并复用旧工具包；变化时才进行七架构完整编译。
+  tools_plan:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release_gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rebuild: ${{ steps.plan.outputs.rebuild }}
+      source_tag: ${{ steps.plan.outputs.source_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify tag target and choose tools source
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          tag_commit=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          main_commit=$(git rev-parse refs/remotes/origin/main)
+          test "$tag_commit" = "$main_commit" || {
+            echo "release tag $GITHUB_REF_NAME ($tag_commit) is not remote main ($main_commit)" >&2
+            exit 1
+          }
+
+          previous_tag=""
+          while IFS= read -r candidate; do
+            [[ "$candidate" == "$GITHUB_REF_NAME" ]] && continue
+            if gh release view "$candidate" --json isDraft,isPrerelease 2>/dev/null |
+              jq -e '.isDraft == false and .isPrerelease == false' >/dev/null; then
+              previous_tag=$candidate
+              break
+            fi
+          done < <(git tag --merged "$tag_commit" --list 'v*' --sort=-version:refname)
+
+          if [[ -z "$previous_tag" ]]; then
+            echo "No earlier stable release; tools must be built."
+            echo "rebuild=true" >>"$GITHUB_OUTPUT"
+            echo "source_tag=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tool_inputs=(
+            .github/workflows/release.yml
+            scripts/build_tools.sh
+            scripts/package.sh
+            cmd/tools-manifest-check
+            internal/toolsmanifest
+            LICENSE
+            NOTICE
+          )
+          if ! git diff --quiet "$previous_tag" "$GITHUB_REF_NAME" -- "${tool_inputs[@]}"; then
+            echo "Tool build inputs changed since $previous_tag; rebuilding."
+            echo "rebuild=true" >>"$GITHUB_OUTPUT"
+            echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          remote_assets=$(gh release view "$previous_tag" --json assets --jq '.assets[].name')
+          expected_assets=(checksums.txt)
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            expected_assets+=("ecs-tools_linux_${arch}.tar.zst")
+          done
+          for asset in "${expected_assets[@]}"; do
+            if ! grep -F -x "$asset" <<<"$remote_assets" >/dev/null; then
+              echo "$previous_tag is missing $asset; rebuilding tools." >&2
+              echo "rebuild=true" >>"$GITHUB_OUTPUT"
+              echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+
+          echo "Tool inputs are unchanged; reusing verified assets from $previous_tag."
+          echo "rebuild=false" >>"$GITHUB_OUTPUT"
+          echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
+
+  # amd64/arm64 使用对应的 GitHub 原生硬件，386 使用 x86-64 的原生 32 位兼容执行。
+  # 其余四个架构都由宿主原生运行交叉编译器，仅最终 smoke 显式调用对应 QEMU。
+  # 任何下载、编译、smoke 或 manifest 失败都会失败。
+  tools:
+    if: >-
+      always() &&
+      needs.release_gate.result == 'success' &&
+      ((startsWith(github.ref, 'refs/tags/v') && needs.tools_plan.result == 'success' && needs.tools_plan.outputs.rebuild == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.rebuild_tools))
+    needs: [release_gate, tools_plan]
+    name: tools (${{ matrix.arch }}, ${{ matrix.build_mode }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            runner_arch: x86_64
+            platform: linux/amd64
+            image: debian:trixie
+            build_mode: native
+            target_runner: direct
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            runner_arch: arm64
+            platform: linux/arm64
+            image: debian:trixie
+            build_mode: native
+            target_runner: direct
+          - arch: armv7
+            runner: ubuntu-24.04-arm
+            runner_arch: arm64
+            platform: linux/arm64
+            image: debian:trixie
+            build_mode: cross-qemu-smoke
+            debian_arch: armhf
+            cross_triplet: arm-linux-gnueabihf
+            target_runner: qemu-arm-static
+          - arch: "386"
+            runner: ubuntu-24.04
+            runner_arch: x86_64
+            platform: linux/386
+            image: debian:trixie
+            build_mode: native-compat
+            target_runner: direct
+          - arch: s390x
+            runner: ubuntu-24.04
+            runner_arch: x86_64
+            platform: linux/amd64
+            image: debian:trixie
+            build_mode: cross-qemu-smoke
+            debian_arch: s390x
+            cross_triplet: s390x-linux-gnu
+            target_runner: qemu-s390x-static
+          - arch: riscv64
+            runner: ubuntu-24.04
+            runner_arch: x86_64
+            platform: linux/amd64
+            image: debian:trixie
+            build_mode: cross-qemu-smoke
+            debian_arch: riscv64
+            cross_triplet: riscv64-linux-gnu
+            target_runner: qemu-riscv64-static
+          - arch: ppc64le
+            runner: ubuntu-24.04
+            runner_arch: x86_64
+            platform: linux/amd64
+            image: debian:sid
+            build_mode: cross-qemu-smoke
+            debian_arch: ppc64el
+            cross_triplet: powerpc64le-linux-gnu
+            target_runner: qemu-ppc64le
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify runner architecture
+        env:
+          EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
+        run: |
+          set -euo pipefail
+          actual=$(uname -m)
+          case "$EXPECTED_RUNNER_ARCH:$actual" in
+            x86_64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *)
+              echo "expected $EXPECTED_RUNNER_ARCH runner, got $actual" >&2
+              exit 1
+              ;;
+          esac
+      - name: Prepare stage directories
+        run: mkdir -p .ci-tools-stage artifact
+      - name: Build and verify real tools in target container
+        if: matrix.build_mode != 'cross-qemu-smoke'
+        env:
+          ARCH: ${{ matrix.arch }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --platform='${{ matrix.platform }}' \
+            --security-opt seccomp=unconfined \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/src" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/.ci-tools-stage,target=/stage" \
+            --workdir /src \
+            --env ARCH \
+            --env GITHUB_TOKEN \
+            '${{ matrix.image }}' \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                autoconf automake binutils build-essential ca-certificates curl \
+                git jq libaio-dev libck-dev libluajit-5.1-dev libtool libtool-bin meson ninja-build pkg-config \
+                zlib1g-dev
+              scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
+            '
+      - name: Cross-build target and smoke with QEMU
+        if: matrix.build_mode == 'cross-qemu-smoke'
+        env:
+          ARCH: ${{ matrix.arch }}
+          CROSS_TRIPLET: ${{ matrix.cross_triplet }}
+          DEBIAN_ARCH: ${{ matrix.debian_arch }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_RUNNER: ${{ matrix.target_runner }}
+        run: |
+          docker run --rm --platform='${{ matrix.platform }}' \
+            --security-opt seccomp=unconfined \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/src" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/.ci-tools-stage,target=/stage" \
+            --workdir /src \
+            --env ARCH \
+            --env CROSS_TRIPLET \
+            --env DEBIAN_ARCH \
+            --env GITHUB_TOKEN \
+            --env TARGET_RUNNER \
+            '${{ matrix.image }}' \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
+              dpkg --add-architecture "$DEBIAN_ARCH"
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                autoconf automake binutils build-essential ca-certificates curl git jq \
+                libtool libtool-bin meson ninja-build pkg-config qemu-user-static \
+                "binutils-$CROSS_TRIPLET" "gcc-$CROSS_TRIPLET" "g++-$CROSS_TRIPLET" \
+                "libaio-dev:$DEBIAN_ARCH" "libck-dev:$DEBIAN_ARCH" \
+                "libluajit-5.1-dev:$DEBIAN_ARCH" "zlib1g-dev:$DEBIAN_ARCH"
+              export PKG_CONFIG_PATH=
+              export PKG_CONFIG_LIBDIR="/usr/lib/$CROSS_TRIPLET/pkgconfig:/usr/share/pkgconfig"
+              export STREAM_NT_THREADS=2
+              scripts/build_tools.sh \
+                --arch "$ARCH" \
+                --stage-root /stage \
+                --cross-prefix "${CROSS_TRIPLET}-" \
+                --target-runner "$TARGET_RUNNER"
+            '
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: Validate generated manifest with ECS parsers
+        # The real six-tool smoke tests already ran inside the architecture
+        # Docker container. Its binaries are not installed on this host
+        # runner, so skip only tests that require host-installed tools while
+        # running all manifest, parser, and renderer tests here.
+        run: |
+          go test \
+            -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunRepresentativeFIOJobsWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback' \
+            ./internal/toolsmanifest ./internal/app ./internal/probe ./internal/report
+
+          go run ./cmd/tools-manifest-check \
+            --architecture '${{ matrix.arch }}' \
+            ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
+          jq -e \
+            --arg arch '${{ matrix.arch }}' \
+            --arg build_mode '${{ matrix.build_mode }}' \
+            --arg target_runner '${{ matrix.target_runner }}' '
+            .architecture == $arch and (.tools | length == 6) and
+            (.build.toolchain_mode == (if $build_mode == "cross-qemu-smoke" then "cross" else "native" end)) and
+            (.build.smoke_runner == $target_runner) and
+            (.build.build_triplet | type == "string" and length > 0) and
+            (.build.target_triplet | type == "string" and length > 0) and
+            (.build.validation.scope == "functional") and
+            (.build.validation.performance_valid == false) and
+            (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
+          ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
+      - name: Preserve architecture directory in artifact
+        run: cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecs-tools-stage-${{ matrix.arch }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/v') &&
+      needs.release_gate.result == 'success' &&
+      needs.tools_plan.result == 'success' &&
+      (needs.tools.result == 'success' || needs.tools.result == 'skipped')
+    needs: [release_gate, tools_plan, tools]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: Verify release tag is exactly remote main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-list -n 1 "$GITHUB_REF_NAME")" = "$(git rev-parse refs/remotes/origin/main)"
+      - name: Download verified tools stages
+        if: needs.tools_plan.outputs.rebuild == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ecs-tools-stage-*
+          path: tools-artifacts
+          merge-multiple: false
+      - name: Normalize verified tools stages
+        if: needs.tools_plan.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools-stage
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            source_dir="tools-artifacts/ecs-tools-stage-${arch}/linux_${arch}"
+            target_dir="tools-stage/linux_${arch}"
+            test -d "$source_dir"
+            mkdir -p "$target_dir"
+            cp -a "$source_dir/." "$target_dir/"
+            chmod +x "$target_dir/bin/"*
+          done
+      - name: Check all tools stages before packaging
+        if: needs.tools_plan.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            test -s "tools-stage/linux_${arch}/manifest.json"
+            test -x "tools-stage/linux_${arch}/bin/sysbench"
+            test -x "tools-stage/linux_${arch}/bin/stream"
+            test -x "tools-stage/linux_${arch}/bin/fio"
+            test -x "tools-stage/linux_${arch}/bin/iperf3"
+            test -x "tools-stage/linux_${arch}/bin/nexttrace-tiny"
+            test -x "tools-stage/linux_${arch}/bin/ping"
+            test -d "tools-stage/linux_${arch}/LICENSES"
+          done
+      - name: Build release assets
+        env:
+          REBUILD_TOOLS: ${{ needs.tools_plan.outputs.rebuild }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v zstd >/dev/null 2>&1
+          zstd --version
+          chmod +x scripts/package.sh
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          if [[ "$REBUILD_TOOLS" == "true" ]]; then
+            scripts/package.sh "${GITHUB_REF_NAME#v}" --tools-stage tools-stage
+          else
+            scripts/package.sh "${GITHUB_REF_NAME#v}"
+          fi
+      - name: Reuse and verify unchanged tools archives
+        if: needs.tools_plan.outputs.rebuild != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ needs.tools_plan.outputs.source_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_TAG"
+          mkdir reused-tools
+          gh release download "$SOURCE_TAG" --dir reused-tools \
+            --pattern 'ecs-tools_linux_*.tar.zst' \
+            --pattern checksums.txt
+
+          expected_tools=()
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            expected_tools+=("ecs-tools_linux_${arch}.tar.zst")
+          done
+          for asset in "${expected_tools[@]}"; do
+            test -s "reused-tools/$asset"
+          done
+          grep -E '^[0-9A-Fa-f]{64}  ecs-tools_linux_(amd64|arm64|armv7|386|s390x|riscv64|ppc64le)\.tar\.zst$' \
+            reused-tools/checksums.txt >reused-tools/tools-checksums.txt
+          test "$(wc -l <reused-tools/tools-checksums.txt)" -eq 7
+          (cd reused-tools && sha256sum -c tools-checksums.txt)
+          cp reused-tools/ecs-tools_linux_*.tar.zst dist/
+
+      - name: Finalize checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum ecs_*.tar.gz ecs-tools_*.tar.zst >checksums.txt
+          )
+      - name: Check release assets before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(
+            ecs_linux_386.tar.gz
+            ecs_linux_amd64.tar.gz
+            ecs_linux_arm64.tar.gz
+            ecs_linux_armv7.tar.gz
+            ecs_linux_ppc64le.tar.gz
+            ecs_linux_riscv64.tar.gz
+            ecs_linux_s390x.tar.gz
+            ecs-tools_linux_386.tar.zst
+            ecs-tools_linux_amd64.tar.zst
+            ecs-tools_linux_arm64.tar.zst
+            ecs-tools_linux_armv7.tar.zst
+            ecs-tools_linux_ppc64le.tar.zst
+            ecs-tools_linux_riscv64.tar.zst
+            ecs-tools_linux_s390x.tar.zst
+          )
+          for asset in "${assets[@]}"; do
+            test -s "dist/$asset"
+          done
+          test -s dist/checksums.txt
+          test "$(wc -l <dist/checksums.txt)" -eq "${#assets[@]}"
+          for asset in "${assets[@]}"; do
+            grep -F "  $asset" dist/checksums.txt >/dev/null
+          done
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep an incomplete upload private. It is published only after every
+          # expected asset is present and remotely visible. A retried job may
+          # safely resume its own draft after an interrupted asset upload.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "true"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --draft
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/ecs_linux_386.tar.gz \
+            dist/ecs_linux_amd64.tar.gz \
+            dist/ecs_linux_arm64.tar.gz \
+            dist/ecs_linux_armv7.tar.gz \
+            dist/ecs_linux_ppc64le.tar.gz \
+            dist/ecs_linux_riscv64.tar.gz \
+            dist/ecs_linux_s390x.tar.gz \
+            dist/ecs-tools_linux_386.tar.zst \
+            dist/ecs-tools_linux_amd64.tar.zst \
+            dist/ecs-tools_linux_arm64.tar.zst \
+            dist/ecs-tools_linux_armv7.tar.zst \
+            dist/ecs-tools_linux_ppc64le.tar.zst \
+            dist/ecs-tools_linux_riscv64.tar.zst \
+            dist/ecs-tools_linux_s390x.tar.zst \
+            dist/checksums.txt \
+            --clobber
+          expected_assets=(
+            checksums.txt
+            ecs_linux_386.tar.gz
+            ecs_linux_amd64.tar.gz
+            ecs_linux_arm64.tar.gz
+            ecs_linux_armv7.tar.gz
+            ecs_linux_ppc64le.tar.gz
+            ecs_linux_riscv64.tar.gz
+            ecs_linux_s390x.tar.gz
+            ecs-tools_linux_386.tar.zst
+            ecs-tools_linux_amd64.tar.zst
+            ecs-tools_linux_arm64.tar.zst
+            ecs-tools_linux_armv7.tar.zst
+            ecs-tools_linux_ppc64le.tar.zst
+            ecs-tools_linux_riscv64.tar.zst
+            ecs-tools_linux_s390x.tar.zst
+          )
+          remote_assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          for asset in "${expected_assets[@]}"; do
+            grep -F -x "$asset" <<<"$remote_assets" >/dev/null
+          done
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "true"
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "false"
