@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -128,6 +129,31 @@ type Probe interface {
 	Title() string
 	NeedsNetwork() bool
 	Run(context.Context, Environment) model.Result
+}
+
+// addFailure keeps per-target operational failures structured while retaining
+// the original error text for diagnosis. Repeated identical observations are
+// coalesced by model.Result.AddFailure.
+func addFailure(result *model.Result, stage, target string, err error, count ...int) {
+	if result == nil || err == nil {
+		return
+	}
+	entry := failure.FromError(stage, target, err)
+	if len(count) > 0 && count[0] > 0 {
+		entry.Count = count[0]
+	}
+	result.AddFailure(entry)
+}
+
+func addFailureMessage(result *model.Result, stage, target, message string, count ...int) {
+	if result == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	entry := failure.FromMessage(stage, target, message)
+	if len(count) > 0 && count[0] > 0 {
+		entry.Count = count[0]
+	}
+	result.AddFailure(entry)
 }
 
 func NewHTTPClient(timeout time.Duration) *http.Client {

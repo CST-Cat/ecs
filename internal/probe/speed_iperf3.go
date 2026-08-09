@@ -29,6 +29,11 @@ type iperfJSONOutput struct {
 			Reverse  *int   `json:"reverse"`
 		} `json:"test_start"`
 	} `json:"start"`
+	Intervals []struct {
+		Sum struct {
+			BitsPerSecond *float64 `json:"bits_per_second"`
+		} `json:"sum"`
+	} `json:"intervals"`
 	End struct {
 		SumSent     iperfJSONSum `json:"sum_sent"`
 		SumReceived iperfJSONSum `json:"sum_received"`
@@ -128,14 +133,18 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 }
 
 type iperfDirectionResult struct {
-	Mbps        float64
-	Bytes       int64
-	Seconds     float64
-	Retransmits int64
-	Port        int
-	LocalHost   string
-	RemoteHost  string
-	Error       string
+	Mbps           float64
+	Bytes          int64
+	Seconds        float64
+	Retransmits    int64
+	IntervalMbps   []float64
+	IntervalMin    float64
+	IntervalMedian float64
+	IntervalCV     float64
+	Port           int
+	LocalHost      string
+	RemoteHost     string
+	Error          string
 }
 
 type iperfRow struct {
@@ -195,6 +204,8 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Status = model.StatusWarning
 	result.Summary = "未找到 iperf3，标准网络吞吐基准未运行"
+	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "iperf3", Count: 1, Message: result.Summary})
+	result.Evidence = model.NewEvidence(0, len(env.Config.IPerfTargets)*3, "operation")
 	result.Notes = append(result.Notes, "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 iperf3，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供 HTTP 或自研替代分数。")
 	result.Finish(start)
 	return result
@@ -215,6 +226,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	if len(env.Config.IPerfTargets) == 0 {
 		result.Status = model.StatusWarning
 		result.Summary = "未配置 iperf3 节点，标准网络吞吐基准未运行"
+		result.Evidence = model.NewEvidence(0, 0, "operation")
 		result.Finish(start)
 		return result
 	}
@@ -233,6 +245,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		result.Summary = "本机没有可用的全球 IPv6 路由，IPv6 吞吐基准未运行"
 		result.Notes = append(result.Notes,
 			"显式选择 IPv6 时不会把 ULA、链路本地地址或无默认路由的 IPv6 当成可用网络；请确认 VPS 已配置全球 IPv6 与默认路由。")
+		result.Evidence = model.NewEvidence(0, len(env.Config.IPerfTargets)*3, "operation")
 		result.Finish(start)
 		return result
 	}
@@ -262,8 +275,16 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	table := model.Table{
-		Title:   "iperf3 TCP/UDP 节点",
-		Columns: []string{"服务商", "位置", "协议", "上传", "下载", "重传", "UDP 丢包", "UDP 抖动", "端口", "状态"},
+		Title:                 "iperf3 TCP/UDP 节点",
+		Columns:               []string{"服务商", "位置", "协议", "上传", "下载", "UDP 丢包", "UDP 抖动", "端口", "状态"},
+		NumericColumns:        []int{3, 4, 5, 6},
+		NumericHigherIsBetter: []bool{true, true, false, false},
+	}
+	stabilityTable := model.Table{
+		Title:                 "iperf3 TCP 分秒稳定性",
+		Columns:               []string{"服务商", "协议", "方向", "最低", "P50", "变异系数", "重传", "区间"},
+		NumericColumns:        []int{3, 4, 5, 6},
+		NumericHigherIsBetter: []bool{true, true, false, false},
 	}
 	var transferred int64
 	failures := 0
@@ -289,6 +310,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				Method:         fmt.Sprintf("iperf3-tcp-forward-p%d-%ds-v1", threads, seconds),
 				HigherIsBetter: model.BoolPtr(true),
 			})
+			appendIPerfDirectionDiagnostics(&result, &stabilityTable, rowIndex, row, "upload", "上传", row.Upload, threads, seconds)
 		}
 		if isPositiveFinite(row.Download.Mbps) {
 			transferred += row.Download.Bytes
@@ -302,8 +324,8 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				Method:         fmt.Sprintf("iperf3-tcp-reverse-p%d-%ds-v1", threads, seconds),
 				HigherIsBetter: model.BoolPtr(true),
 			})
+			appendIPerfDirectionDiagnostics(&result, &stabilityTable, rowIndex, row, "download", "下载", row.Download, threads, seconds)
 		}
-		retransmits := row.Upload.Retransmits + row.Download.Retransmits
 		ports := formatIPerfPorts(row.Upload.Port, row.Download.Port)
 		udpLoss, udpJitter := "—", "—"
 		if row.UDP.Available {
@@ -324,6 +346,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 				},
 			)
 		} else if row.UDP.Err != "" {
+			addFailureMessage(&result, "udp", row.Target.Host+" "+row.Family, row.UDP.Err)
 			result.Notes = append(result.Notes,
 				fmt.Sprintf("%s %s UDP 测试失败: %s", row.Target.Name, row.Family, row.UDP.Err))
 		}
@@ -333,7 +356,6 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			row.Family,
 			formatOptionalMbps(row.Upload.Mbps),
 			formatOptionalMbps(row.Download.Mbps),
-			strconv.FormatInt(retransmits, 10),
 			udpLoss,
 			udpJitter,
 			ports,
@@ -347,12 +369,23 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			{"下载", row.Download},
 		} {
 			if direction.sample.Error != "" {
+				addFailureMessage(&result, "tcp_"+map[string]string{"上传": "forward", "下载": "reverse"}[direction.name], row.Target.Host+" "+row.Family, direction.sample.Error)
 				result.Notes = append(result.Notes,
 					fmt.Sprintf("%s %s %s失败: %s", row.Target.Name, row.Family, direction.name, direction.sample.Error))
 			}
 		}
 	}
 	result.Tables = []model.Table{table}
+	if len(stabilityTable.Rows) > 0 {
+		result.Tables = append(result.Tables, stabilityTable)
+	}
+	validOperations := completedDirections
+	for _, row := range rows {
+		if row.UDP.Available {
+			validOperations++
+		}
+	}
+	result.Evidence = model.NewEvidence(validOperations, len(rows)*3, "operation")
 	if completedDirections == 0 {
 		result.Fail(fmt.Errorf("所有 iperf3 节点与方向均失败"))
 		result.Finish(start)
@@ -392,6 +425,63 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	)
 	result.Finish(start)
 	return result
+}
+
+func appendIPerfDirectionDiagnostics(
+	result *model.Result,
+	table *model.Table,
+	rowIndex int,
+	row iperfRow,
+	directionKey, directionLabel string,
+	sample iperfDirectionResult,
+	threads, seconds int,
+) {
+	if result == nil || table == nil || !isPositiveFinite(sample.Mbps) {
+		return
+	}
+	prefix := fmt.Sprintf("iperf3_target_%02d_%s_%s", rowIndex+1, strings.ToLower(row.Family), directionKey)
+	directionMethod := "forward"
+	if directionKey == "download" {
+		directionMethod = "reverse"
+	}
+	method := fmt.Sprintf("iperf3-tcp-%s-p%d-%ds-v1", directionMethod, threads, seconds)
+	result.Measurements = append(result.Measurements, model.Measurement{
+		Key:            prefix + "_retransmits",
+		Label:          fmt.Sprintf("%s %s %s重传", row.Target.Name, row.Family, directionLabel),
+		Value:          float64(sample.Retransmits),
+		Unit:           "retransmits",
+		Display:        strconv.FormatInt(sample.Retransmits, 10),
+		Method:         method,
+		HigherIsBetter: model.BoolPtr(false),
+	})
+	if len(sample.IntervalMbps) == 0 {
+		return
+	}
+	result.Measurements = append(result.Measurements,
+		model.Measurement{
+			Key: prefix + "_interval_min_mbps", Label: fmt.Sprintf("%s %s %s分秒最低", row.Target.Name, row.Family, directionLabel),
+			Value: sample.IntervalMin, Unit: "Mbps", Display: model.FormatRate(sample.IntervalMin, "Mbps"),
+			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(true),
+		},
+		model.Measurement{
+			Key: prefix + "_interval_p50_mbps", Label: fmt.Sprintf("%s %s %s分秒 P50", row.Target.Name, row.Family, directionLabel),
+			Value: sample.IntervalMedian, Unit: "Mbps", Display: model.FormatRate(sample.IntervalMedian, "Mbps"),
+			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(true),
+		},
+		model.Measurement{
+			Key: prefix + "_interval_cv_percent", Label: fmt.Sprintf("%s %s %s分秒变异系数", row.Target.Name, row.Family, directionLabel),
+			Value: sample.IntervalCV, Unit: "%", Display: fmt.Sprintf("%.2f %%", sample.IntervalCV),
+			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(false),
+		},
+	)
+	table.Rows = append(table.Rows, []string{
+		row.Target.Name, row.Family, directionLabel,
+		model.FormatRate(sample.IntervalMin, "Mbps"),
+		model.FormatRate(sample.IntervalMedian, "Mbps"),
+		fmt.Sprintf("%.2f %%", sample.IntervalCV),
+		strconv.FormatInt(sample.Retransmits, 10),
+		strconv.Itoa(len(sample.IntervalMbps)),
+	})
 }
 
 func runIPerfDirection(ctx context.Context, path string, target config.IPerfEndpoint, family string, reverse bool, threads, seconds int) iperfDirectionResult {
@@ -659,6 +749,27 @@ func parseIPerfTCPJSON(raw []byte, port int, reverse bool) iperfDirectionResult 
 	sample.Bytes = sum.Bytes
 	sample.Seconds = sum.Seconds
 	sample.Retransmits = output.End.SumSent.Retransmits
+	for _, interval := range output.Intervals {
+		if interval.Sum.BitsPerSecond == nil || !nonNegativeFinite(*interval.Sum.BitsPerSecond) {
+			continue
+		}
+		sample.IntervalMbps = append(sample.IntervalMbps, *interval.Sum.BitsPerSecond/1_000_000)
+	}
+	if len(sample.IntervalMbps) > 0 {
+		sample.IntervalMin = sample.IntervalMbps[0]
+		var total float64
+		for _, value := range sample.IntervalMbps {
+			if value < sample.IntervalMin {
+				sample.IntervalMin = value
+			}
+			total += value
+		}
+		sample.IntervalMedian = medianFloat(sample.IntervalMbps)
+		mean := total / float64(len(sample.IntervalMbps))
+		if mean > 0 {
+			sample.IntervalCV = stddevFloat(sample.IntervalMbps) / mean * 100
+		}
+	}
 	if len(output.Start.Connected) > 0 {
 		sample.LocalHost = output.Start.Connected[0].LocalHost
 		sample.RemoteHost = output.Start.Connected[0].RemoteHost

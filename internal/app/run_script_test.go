@@ -77,18 +77,18 @@ func TestRunScriptUsesDirectTempOutputAndTracksThisRun(t *testing.T) {
 	}
 }
 
-func TestRunScriptDocumentsExplicitOoklaOnly(t *testing.T) {
+func TestRunScriptDocumentsProfileMembership(t *testing.T) {
 	contents, err := os.ReadFile(runScriptPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(contents)
 	for _, required := range []string{
-		"The standard profile omits Ookla by default; the full profile includes it. Explicit --only ookla may select it from any profile.",
-		"standard 默认不包含 Ookla；full 默认包含 Ookla；显式使用 --only ookla 可在任意档位单独选择。",
+		"The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules.",
+		"standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。",
 	} {
 		if !strings.Contains(text, required) {
-			t.Fatalf("run.sh help is missing explicit Ookla policy %q", required)
+			t.Fatalf("run.sh help is missing profile membership policy %q", required)
 		}
 	}
 	for _, forbidden := range []string{

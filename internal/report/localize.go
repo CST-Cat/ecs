@@ -31,6 +31,12 @@ func Localize(data model.Report) model.Report {
 
 func localizeResult(result model.Result) model.Result {
 	out := result
+	out.Methodology.Parameters = make(map[string]string, len(result.Methodology.Parameters))
+	for key, value := range result.Methodology.Parameters {
+		// Parameter keys and values form the machine comparison signature and
+		// must remain byte-stable across output languages.
+		out.Methodology.Parameters[key] = value
+	}
 	out.Title = i18n.Text(result.Title)
 	out.Description = i18n.Text(result.Description)
 	out.Summary = i18n.Text(result.Summary)
@@ -51,13 +57,7 @@ func localizeResult(result model.Result) model.Result {
 	}
 	out.Measurements = make([]model.Measurement, len(result.Measurements))
 	for index, measurement := range result.Measurements {
-		measurement.Label = i18n.Text(measurement.Label)
-		measurement.Display = i18n.Text(measurement.Display)
-		measurement.Rating = i18n.Text(measurement.Rating)
-		// unit is part of the machine-readable measurement contract, even when
-		// its spelling happens to be human-readable (for example "线程").  Keep
-		// both unit and method byte-for-byte stable across language exports.
-		out.Measurements[index] = measurement
+		out.Measurements[index] = localizeMeasurement(measurement)
 	}
 	out.Tables = make([]model.Table, len(result.Tables))
 	for index, table := range result.Tables {
@@ -81,5 +81,39 @@ func localizeResult(result model.Result) model.Result {
 		source.Purpose = i18n.Text(source.Purpose)
 		out.Sources[index] = source
 	}
+	if result.Retry != nil {
+		retry := *result.Retry
+		retry.SelectionRule = i18n.Text(retry.SelectionRule)
+		retry.TriggerReasons = i18n.TextSlice(result.Retry.TriggerReasons)
+		retry.Attempts = make([]model.RetryAttempt, len(result.Retry.Attempts))
+		for attemptIndex, attempt := range result.Retry.Attempts {
+			localized := attempt
+			localized.Interference.Reasons = i18n.TextSlice(attempt.Interference.Reasons)
+			localized.Interference.Measurements = make([]model.Measurement, len(attempt.Interference.Measurements))
+			for measurementIndex, measurement := range attempt.Interference.Measurements {
+				localized.Interference.Measurements[measurementIndex] = localizeMeasurement(measurement)
+			}
+			localized.Measurements = make([]model.Measurement, len(attempt.Measurements))
+			for measurementIndex, measurement := range attempt.Measurements {
+				localized.Measurements[measurementIndex] = localizeMeasurement(measurement)
+			}
+			if attempt.Evidence != nil {
+				evidence := *attempt.Evidence
+				localized.Evidence = &evidence
+			}
+			retry.Attempts[attemptIndex] = localized
+		}
+		out.Retry = &retry
+	}
 	return out
+}
+
+func localizeMeasurement(measurement model.Measurement) model.Measurement {
+	measurement.Label = i18n.Text(measurement.Label)
+	measurement.Display = i18n.Text(measurement.Display)
+	measurement.Rating = i18n.Text(measurement.Rating)
+	// unit is part of the machine-readable measurement contract, even when
+	// its spelling happens to be human-readable (for example "线程"). Keep
+	// both unit and method byte-for-byte stable across language exports.
+	return measurement
 }

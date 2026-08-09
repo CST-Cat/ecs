@@ -110,6 +110,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	reachable := 0
+	validAttempts := 0
 	var telegramBest time.Duration
 	var telegramBestName string
 	for _, category := range categories {
@@ -120,6 +121,9 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 		items := grouped[category]
 		sortAppResults(items)
 		for _, item := range items {
+			if item.Reachable || item.Detail != "" {
+				validAttempts++
+			}
 			status := "不可达"
 			detail := item.Detail
 			if item.Reachable {
@@ -130,6 +134,9 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 					telegramBest = item.Latency
 					telegramBestName = item.Target.Name
 				}
+			}
+			if !item.Reachable && item.Detail != "" {
+				addFailureMessage(&result, "connect", net.JoinHostPort(item.Target.Host, fmt.Sprint(item.Target.Port)), item.Detail)
 			}
 			table.Rows = append(table.Rows, []string{
 				item.Target.Name,
@@ -150,6 +157,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
+	result.Evidence = model.NewEvidence(validAttempts, total, "target")
 	if telegramBestName != "" {
 		result.Fields = append(result.Fields, model.Field{
 			Key: "telegram_nearest_dc", Label: "最快 Telegram DC",

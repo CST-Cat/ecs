@@ -109,6 +109,11 @@ func LoadJSON(path string) (model.Report, error) {
 	if data.SchemaVersion != buildinfo.SchemaVersion {
 		return data, i18n.Errorf("err.reportSchemaMismatch", data.SchemaVersion, buildinfo.SchemaVersion)
 	}
+	for index := range data.Results {
+		if data.Results[index].Evidence != nil {
+			data.Results[index].Evidence.Normalize()
+		}
+	}
 	return data, nil
 }
 

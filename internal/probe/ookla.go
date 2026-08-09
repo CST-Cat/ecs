@@ -78,6 +78,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Skip(reason)
 		appendOoklaSkipDetails(&result, reason, "请提高 --exposure 后重跑模块。")
 		result.Notes = append(result.Notes, "Ookla 不是 ecs 的零上传探针；其客户端会按自身条款处理测量元数据。")
+		result.Evidence = model.NewEvidence(0, 1, "run")
 		result.Finish(start)
 		return result
 	}
@@ -85,8 +86,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	if err != nil {
 		reason := "未找到官方 speedtest 客户端"
 		result.Skip(reason)
+		addFailure(&result, "tool_lookup", "speedtest", err)
 		appendOoklaSkipDetails(&result, reason, "直接运行 ecs 请先从 Ookla 官方渠道安装；也可用 run.sh 按需准备后重跑。")
 		result.Notes = append(result.Notes, "直接运行 ecs 不会自动安装 Ookla 客户端；run.sh 会在选中 Ookla 且客户端缺失时，从 Ookla 官方签名包源按需准备（ECS_AUTO_DEPS=0 可关闭）。")
+		result.Evidence = model.NewEvidence(0, 1, "run")
 		result.Finish(start)
 		return result
 	}
@@ -120,6 +123,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		Columns: []string{"运营商标签", "服务器", "延迟", "下载", "上传", "丢包", "状态"},
 	}
 	successes := 0
+	validResults := 0
 	var summaries []string
 	for _, target := range servers {
 		targetArgs := append([]string(nil), args...)
@@ -129,6 +133,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		parsed, runErr, parseErr, timedOut := runOfficialOokla(ctx, path, targetArgs)
 		label := target.Carrier
 		if parseErr != nil {
+			addFailure(&result, "parse", label, parseErr)
+			if runErr != nil {
+				addFailure(&result, "execute", label, runErr)
+			}
 			result.Status = model.StatusWarning
 			table.Rows = append(table.Rows, []string{label, formatOoklaServer(parsed), "—", "—", "—", "—", "未解析"})
 			result.Fields = append(result.Fields, model.Field{Key: "error_" + ooklaCarrierKey(label), Label: label + " 失败原因", Value: compactError(parseErr)})
@@ -155,12 +163,14 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 			result.Notes = append(result.Notes, "Ookla JSON 测速字段不完整；缺失值按未返回处理，结果按部分完成处理。")
 		}
 		if runErr != nil {
+			addFailure(&result, "execute", label, runErr)
 			status = "部分完成"
 			result.Status = model.StatusWarning
 			result.Notes = append(result.Notes, label+" Ookla 客户端返回非零状态，但仍解析到了部分 JSON；结果按部分完成处理。")
 		}
 		table.Rows = append(table.Rows, []string{label, serverName, ooklaLatencyDisplay(parsed.Ping.Latency), ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth), ooklaPacketLossDisplay(parsed), status})
 		if hasMetric {
+			validResults++
 			summaries = append(summaries, fmt.Sprintf("%s 下载 %s / 上传 %s", label, ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth)))
 			if complete && runErr == nil {
 				successes++
@@ -186,6 +196,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = []model.Table{table}
+	result.Evidence = model.NewEvidence(validResults, len(servers), "run")
 	if successes == 0 && len(summaries) == 0 {
 		result.Status = model.StatusWarning
 		result.Summary = "Ookla 没有返回可用测速结果"

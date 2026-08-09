@@ -224,6 +224,8 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	nodes, err := fetchCNNodes(ctx, env.HTTPClient, env.UserAgent)
 	if err != nil {
 		result.Skip("无法获取中国测速节点清单")
+		addFailure(&result, "node_list", "speedtest.cn-CN-ID", err)
+		result.Evidence = model.NewEvidence(0, len(cnCarriers), "target")
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"抓取节点清单失败（%s）。清单实时获取而不内置快照：节点会下线，"+
 				"用过期清单去测已经消失的节点比不测更糟。", compactError(err)))
@@ -276,6 +278,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		status := "完成"
 		if item.Err != "" {
 			status = item.Err
+			addFailureMessage(&result, "download", item.Carrier, item.Err)
 		}
 		location, nodeName, latency, download, transferred := "—", "—", "—", "—", "—"
 		if item.Node.ID != "" {
@@ -301,6 +304,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		})
 	}
 	result.Tables = []model.Table{table}
+	result.Evidence = model.NewEvidence(succeeded, len(cnCarriers), "target")
 	result.Fields = []model.Field{
 		{Key: "node_list", Label: "节点清单来源", Value: "spiritLHLS/speedtest.cn-CN-ID（MIT，每日更新）"},
 		{Key: "nodes_available", Label: "清单可用节点", Value: fmt.Sprintf("%d", len(nodes))},

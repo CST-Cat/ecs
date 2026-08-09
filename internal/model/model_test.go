@@ -27,8 +27,10 @@ func TestMask(t *testing.T) {
 func TestRedactedCopyDoesNotMutateSource(t *testing.T) {
 	original := Report{
 		Results: []Result{{
-			Fields: []Field{{Key: "ip", Value: "203.0.113.10", Sensitive: true}},
-			Tables: []Table{{Columns: []string{"a"}, Rows: [][]string{{"b"}}}},
+			Methodology: Methodology{Parameters: map[string]string{"target": "203.0.113.10:443"}},
+			Evidence:    &Evidence{Valid: 2, Expected: 3, Unit: "sample"},
+			Fields:      []Field{{Key: "ip", Value: "203.0.113.10", Sensitive: true}},
+			Tables:      []Table{{Columns: []string{"a"}, Rows: [][]string{{"b"}}}},
 		}},
 	}
 	copy := RedactedCopy(original, false)
@@ -38,9 +40,86 @@ func TestRedactedCopyDoesNotMutateSource(t *testing.T) {
 	if original.Results[0].Fields[0].Value != "203.0.113.10" {
 		t.Fatal("source report was mutated")
 	}
+	if copy.Results[0].Methodology.Parameters["target"] != "203.0.x.x:443" || original.Results[0].Methodology.Parameters["target"] != "203.0.113.10:443" {
+		t.Fatalf("machine parameter redaction/deep copy failed: copy=%q source=%q", copy.Results[0].Methodology.Parameters["target"], original.Results[0].Methodology.Parameters["target"])
+	}
 	copy.Results[0].Tables[0].Rows[0][0] = "changed"
 	if original.Results[0].Tables[0].Rows[0][0] != "b" {
 		t.Fatal("nested table was not deep copied")
+	}
+	copy.Results[0].Evidence.Valid = 0
+	if original.Results[0].Evidence.Valid != 2 {
+		t.Fatal("evidence pointer was not deep copied")
+	}
+}
+
+func TestEvidenceNormalizationAndRatio(t *testing.T) {
+	evidence := NewEvidence(12, 10, "query")
+	if evidence.Valid != 10 || evidence.Expected != 10 || evidence.EvidenceRatio() != 1 {
+		t.Fatalf("clamped evidence = %+v ratio=%f", evidence, evidence.EvidenceRatio())
+	}
+	empty := NewEvidence(-1, -2, "sample")
+	if empty.Valid != 0 || empty.Expected != 0 || empty.EvidenceRatio() != 0 {
+		t.Fatalf("normalized empty evidence = %+v ratio=%f", empty, empty.EvidenceRatio())
+	}
+	partial := NewEvidence(3, 4, "run")
+	if partial.EvidenceRatio() != 0.75 {
+		t.Fatalf("partial evidence ratio = %f, want .75", partial.EvidenceRatio())
+	}
+}
+
+func TestEvidenceGradesAreDerivedFromCounters(t *testing.T) {
+	tests := []struct {
+		valid, expected int
+		want            EvidenceGrade
+	}{
+		{valid: 4, expected: 4, want: EvidenceComplete},
+		{valid: 2, expected: 4, want: EvidencePartial},
+		{valid: 0, expected: 4, want: EvidenceInsufficient},
+		{valid: 0, expected: 0, want: EvidenceNotPlanned},
+	}
+	for _, testCase := range tests {
+		evidence := NewEvidence(testCase.valid, testCase.expected, "sample")
+		if evidence.Grade != testCase.want || evidence.EffectiveGrade() != testCase.want {
+			t.Errorf("grade for %d/%d = %q/%q, want %q", testCase.valid, testCase.expected, evidence.Grade, evidence.EffectiveGrade(), testCase.want)
+		}
+	}
+	stale := Evidence{Valid: 0, Expected: 2, Grade: EvidenceComplete}
+	stale.Normalize()
+	if stale.Grade != EvidenceInsufficient {
+		t.Fatalf("stale serialized grade survived normalization: %+v", stale)
+	}
+}
+
+func TestAddFailureCoalescesOnlyIdenticalMachineDimensions(t *testing.T) {
+	result := Result{}
+	result.AddFailure(Failure{Category: FailureTimeout, Stage: "query", Target: "a", Retryable: true, Message: "timeout"})
+	result.AddFailure(Failure{Category: FailureTimeout, Stage: "query", Target: "a", Retryable: true, Count: 2, Message: "timeout"})
+	result.AddFailure(Failure{Category: FailureTimeout, Stage: "query", Target: "b", Retryable: true, Message: "timeout"})
+	if len(result.Failures) != 2 || result.Failures[0].Count != 3 || result.Failures[1].Count != 1 {
+		t.Fatalf("coalesced failures = %+v", result.Failures)
+	}
+}
+
+func TestRedactedCopyDeepCopiesFailuresAndRetryAttempts(t *testing.T) {
+	report := Report{Results: []Result{{
+		Failures: []Failure{{Category: FailureTimeout, Message: "original"}},
+		Retry: &RetryInfo{TriggerReasons: []string{"load"}, Attempts: []RetryAttempt{{
+			Evidence:     NewEvidence(1, 1, "run"),
+			Measurements: []Measurement{{Key: "rate", Display: "10"}},
+			Interference: Interference{Reasons: []string{"steal"}, Measurements: []Measurement{{Key: "steal"}}},
+		}}},
+	}}}
+	copy := RedactedCopy(report, true)
+	copy.Results[0].Failures[0].Message = "changed"
+	copy.Results[0].Retry.TriggerReasons[0] = "changed"
+	copy.Results[0].Retry.Attempts[0].Evidence.Valid = 0
+	copy.Results[0].Retry.Attempts[0].Measurements[0].Display = "changed"
+	copy.Results[0].Retry.Attempts[0].Interference.Reasons[0] = "changed"
+	if report.Results[0].Failures[0].Message != "original" || report.Results[0].Retry.TriggerReasons[0] != "load" ||
+		report.Results[0].Retry.Attempts[0].Evidence.Valid != 1 || report.Results[0].Retry.Attempts[0].Measurements[0].Display != "10" ||
+		report.Results[0].Retry.Attempts[0].Interference.Reasons[0] != "steal" {
+		t.Fatalf("RedactedCopy shared structured diagnostic memory: %+v", report.Results[0])
 	}
 }
 

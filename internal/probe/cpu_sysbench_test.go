@@ -2,6 +2,8 @@ package probe
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -44,5 +46,17 @@ func TestExecuteSysbenchCPUUsesStableOfficialWorkload(t *testing.T) {
 				t.Fatalf("sysbench raw output lost events/s statistic: %q", got.Output)
 			}
 		})
+	}
+}
+
+func TestExecuteSysbenchCPURejectsMissingP95(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sysbench")
+	script := "#!/bin/sh\nprintf '%s\\n' 'events per second: 1234.50' 'total number of events: 2469'\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := executeSysbenchCPU(context.Background(), path, 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "95th percentile") {
+		t.Fatalf("execute error = %v, want missing P95 error; result=%+v", err, got)
 	}
 }

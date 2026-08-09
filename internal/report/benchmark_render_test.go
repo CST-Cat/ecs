@@ -13,7 +13,7 @@ import (
 
 func benchmarkRenderReport() model.Report {
 	return model.Report{
-		SchemaVersion: "ecs.report/v1",
+		SchemaVersion: "ecs.report/v2",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{ID: "render-matrix", Profile: "full", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
 		Summary:       model.Summary{Status: model.StatusOK, OK: 2, Headline: "2 项测试完成"},

@@ -49,14 +49,14 @@ func TestParseAndFallback(t *testing.T) {
 	}
 }
 
-func TestFullProfileTranslationKeepsOoklaDefaultAndExplicitSelection(t *testing.T) {
+func TestFullProfileTranslationNamesFullOnlyModules(t *testing.T) {
 	for _, testCase := range []struct {
 		lang      Lang
 		required  string
 		forbidden string
 	}{
-		{LangZH, "含 Ookla；--only ookla 可在任意配置档显式选择", "不含 Ookla"},
-		{LangEN, "including Ookla; --only ookla may select it explicitly from any profile", "Ookla excluded"},
+		{LangZH, "额外包含多源 IP 质量与 Ookla", "额外包含 cnspeed"},
+		{LangEN, "adds multi-source IP quality and Ookla", "adds cnspeed"},
 	} {
 		text := TL(testCase.lang, "profile.full")
 		if !strings.Contains(text, testCase.required) {
@@ -141,6 +141,37 @@ func TestFIONewMissingValueNotesTranslate(t *testing.T) {
 		}
 		if got := Text(note); got != want {
 			t.Errorf("translation for %q = %q, want %q", note, got, want)
+		}
+	}
+}
+
+func TestStructuredDiagnosticLabelsTranslate(t *testing.T) {
+	original := Current()
+	defer Set(original)
+	Set(LangEN)
+	cases := map[string]string{
+		"8 线程事件延迟 P95":                             "8-thread event latency P95",
+		"STREAM Copy 多线程扩展倍率":                      "STREAM Copy multi-thread scaling ratio",
+		"iperf3 TCP 分秒稳定性":                         "iperf3 TCP interval stability",
+		"loopback IPv4 上传分秒 P50":                   "loopback IPv4 upload interval P50",
+		"Cloudflare DNS 成功率":                       "Cloudflare DNS success rate",
+		"Cloudflare DNS 抖动":                        "Cloudflare DNS jitter",
+		"Aliyun IPv4 TCP 标准差":                      "Aliyun IPv4 TCP standard deviation",
+		"Google 可见跳点":                              "Google visible hops",
+		"cgroup 与 PSI 压力诊断":                        "cgroup and PSI pressure diagnostics",
+		"cgroup CPU throttle 时间占比":                 "cgroup CPU throttled time ratio",
+		"测试窗口资源干扰":                                 "Test-window resource interference",
+		"自动复测判定":                                   "Automatic retry decision",
+		"测试前 load 4.00 高于 2 CPU allowance 的 1.5 倍": "Pre-test load 4.00 was above the 2-CPU allowance's 1.5× threshold",
+		"检测到测试干扰：测试窗口 CPU steal 2.50%。":            "Interference detected: CPU steal during the test window was 2.50%.",
+	}
+	for source, want := range cases {
+		if !HasProbeText(source) {
+			t.Errorf("missing diagnostic translation: %q", source)
+			continue
+		}
+		if got := Text(source); got != want {
+			t.Errorf("Text(%q) = %q, want %q", source, got, want)
 		}
 	}
 }

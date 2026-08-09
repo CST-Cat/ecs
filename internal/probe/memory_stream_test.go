@@ -114,6 +114,20 @@ func TestParseStreamOutputRejectsMissingLinesAndBadValues(t *testing.T) {
 			wantErr: "Triad",
 		},
 		{
+			name: "zero timing",
+			mutate: func(output string) string {
+				return strings.Replace(output, "Add:            3000.0         0.0300", "Add:            3000.0         0.0000", 1)
+			},
+			wantErr: "时间统计必须为正数",
+		},
+		{
+			name: "inconsistent timings",
+			mutate: func(output string) string {
+				return strings.Replace(output, "Triad:          4000.0         0.0400       0.0390       0.0410", "Triad:          4000.0         0.0400       0.0420       0.0410", 1)
+			},
+			wantErr: "时间统计顺序无效",
+		},
+		{
 			name: "missing header",
 			mutate: func(output string) string {
 				return strings.Replace(output, "Function      Best Rate MB/s     Avg time     Min time     Max time\n", "", 1)
@@ -257,6 +271,22 @@ func TestStreamMemoryTableUsesLocalizedSourceText(t *testing.T) {
 	}
 }
 
+func TestStreamStabilityTableUsesOfficialTimings(t *testing.T) {
+	parsed, err := parseStreamOutput(streamFixture("MiB/s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := []streamMemoryRun{{Context: "1t", Threads: 1, Sample: parsed}}
+	table := streamStabilityTable(runs)
+	if len(table.Rows) != 4 || len(table.NumericColumns) != 4 {
+		t.Fatalf("stability table = %+v", table)
+	}
+	copyRow := table.Rows[0]
+	if copyRow[1] != "0.010000 s" || copyRow[2] != "0.009000 s" || copyRow[3] != "0.011000 s" || copyRow[4] != "22.22 %" {
+		t.Fatalf("Copy stability row = %v", copyRow)
+	}
+}
+
 // TestRunStreamWithRealBinary intentionally executes only a real executable
 // discovered on PATH.  It never creates a command substitute: a missing or
 // non-STREAM `stream` command is a skip outside CI and a failure in CI.
@@ -283,8 +313,8 @@ func TestRunStreamWithRealBinary(t *testing.T) {
 	if result.Status != model.StatusOK {
 		t.Fatalf("real STREAM result = %+v", result)
 	}
-	if len(result.Measurements) != 8 {
-		t.Fatalf("STREAM measurements = %d, want 8: %+v", len(result.Measurements), result.Measurements)
+	if len(result.Measurements) != 12 {
+		t.Fatalf("STREAM measurements = %d, want 12: %+v", len(result.Measurements), result.Measurements)
 	}
 	for _, contextName := range []string{"1t", "nt"} {
 		for _, kernel := range []string{"copy", "scale", "add", "triad"} {
@@ -304,8 +334,23 @@ func TestRunStreamWithRealBinary(t *testing.T) {
 			}
 		}
 	}
-	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 8 {
+	for _, kernel := range []string{"copy", "scale", "add", "triad"} {
+		key := "stream_" + kernel + "_scaling_ratio"
+		found := false
+		for _, measurement := range result.Measurements {
+			if measurement.Key == key && measurement.Value > 0 && measurement.Unit == "x" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("STREAM missing scaling measurement %q", key)
+		}
+	}
+	if len(result.Tables) != 2 || len(result.Tables[0].Rows) != 8 || len(result.Tables[1].Rows) != 8 {
 		t.Fatalf("STREAM table rows = %+v", result.Tables)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "run" {
+		t.Fatalf("STREAM evidence = %+v, want 2/2 runs", result.Evidence)
 	}
 	if len(result.TextBlocks) != 2 {
 		t.Fatalf("STREAM raw output blocks = %d, want 2", len(result.TextBlocks))

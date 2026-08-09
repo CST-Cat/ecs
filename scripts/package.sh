@@ -229,10 +229,10 @@ for target in "${targets[@]}"; do
     CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="${goarm:-}" \
       "$go_command" build -trimpath -ldflags "$ldflags" -o "$binary" ./cmd/ecs
   )
-  cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
+  cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/README_EN.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
   tar -C "$stage" --sort=name --mtime="@$source_date_epoch" \
     --owner=0 --group=0 --numeric-owner -czf "$dist_dir/ecs_${suffix}.tar.gz" \
-    ecs LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
+    ecs LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md
   if [[ "$tools_enabled" -eq 1 ]]; then
     package_tools "$arch"
   fi

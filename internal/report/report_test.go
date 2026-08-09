@@ -15,7 +15,7 @@ import (
 func sampleReport() model.Report {
 	start := time.Date(2026, 7, 31, 1, 2, 3, 0, time.UTC)
 	return model.Report{
-		SchemaVersion: "ecs.report/v1",
+		SchemaVersion: "ecs.report/v2",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
 		Run: model.RunInfo{
 			ID:          "run-1",
@@ -82,7 +82,8 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 			Profile: "method-profile-marker", ComparisonScope: "method-scope-marker",
 		},
 		Status: model.StatusError, Summary: "result-summary-marker", Error: "error-marker",
-		Fields: []model.Field{{Label: "field-label-marker", Value: "field-value-marker"}},
+		Evidence: model.NewEvidence(3, 4, "sample"),
+		Fields:   []model.Field{{Label: "field-label-marker", Value: "field-value-marker"}},
 		Measurements: []model.Measurement{{
 			Label: "measurement-label-marker", Display: "measurement-display-marker",
 			Rating: "measurement-rating-marker", Method: "measurement-method-marker",
@@ -114,12 +115,18 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 			"error-marker", "field-label-marker", "field-value-marker", "measurement-label-marker",
 			"measurement-display-marker", "measurement-rating-marker", "measurement-method-marker",
 			"table-title-marker", "column-marker", "cell-marker", "note-marker", "source-name-marker",
-			"source-purpose-marker", "notice-marker", "score-source-marker",
+			"source-purpose-marker", "notice-marker", "score-source-marker", "3/4", "75%",
 		} {
 			if !strings.Contains(format, marker) {
 				t.Fatalf("%s format missing %q:\n%s", format, marker, format)
 			}
 		}
+	}
+	if !strings.Contains(html, `Evidence`) && !strings.Contains(html, `证据完整度`) {
+		t.Fatalf("HTML lost evidence label: %s", html)
+	}
+	if !strings.Contains(html, `style="color:var(--warn)`) || !strings.Contains(html, `background:#`) {
+		t.Fatalf("HTML evidence lost the shared semantic color scale: %s", html)
 	}
 
 	// JSON is the lossless structured artifact; unlike human renderers it does
@@ -130,7 +137,7 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"field-value-marker", "measurement-display-marker", "cell-marker", "note-marker",
-		"source-purpose-marker", "error-marker", "summary-marker", "notice-marker",
+		"source-purpose-marker", "error-marker", "summary-marker", "notice-marker", `"evidence"`,
 	} {
 		if !strings.Contains(string(jsonBytes), marker) {
 			t.Fatalf("JSON format missing %q:\n%s", marker, jsonBytes)
@@ -139,10 +146,27 @@ func TestHumanFormatsCoverStructuredDetailsAndScore(t *testing.T) {
 	txt := Text(data, TextOptions{})
 	for _, marker := range []string{
 		"method-label-marker", "method-engine-marker", "method-profile-marker", "method-scope-marker",
-		"raw-content-marker", "note-marker", "source-name-marker", "source-purpose-marker", "notice-marker",
+		"raw-content-marker", "note-marker", "source-name-marker", "source-purpose-marker", "notice-marker", "3/4",
 	} {
 		if !strings.Contains(txt, marker) {
 			t.Fatalf("txt format missing %q:\n%s", marker, txt)
+		}
+	}
+}
+
+func TestEvidenceHTMLLabelColorKeepsSemanticHierarchy(t *testing.T) {
+	cases := []struct {
+		evidence *model.Evidence
+		want     string
+	}{
+		{model.NewEvidence(1, 1, "run"), "var(--ok)"},
+		{model.NewEvidence(1, 2, "run"), "var(--warn)"},
+		{model.NewEvidence(0, 2, "run"), "var(--error)"},
+		{model.NewEvidence(0, 0, "run"), "var(--skip)"},
+	}
+	for _, testCase := range cases {
+		if got := string(evidenceHTMLLabelColor(testCase.evidence)); got != testCase.want {
+			t.Errorf("evidence label color for %+v = %q, want %q", testCase.evidence, got, testCase.want)
 		}
 	}
 }
@@ -213,7 +237,7 @@ func TestWriteAndLoadJSON(t *testing.T) {
 func TestLoadJSONIgnoresUnknownOptionalFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.json")
 	content := []byte(`{
-	  "schema_version": "ecs.report/v1",
+	  "schema_version": "ecs.report/v2",
 	  "tool": {"name": "ecs", "future_tool_field": true},
 	  "run": {"id": "future-run"},
 	  "results": [],
@@ -236,14 +260,14 @@ func TestLoadJSONIgnoresUnknownOptionalFields(t *testing.T) {
 func TestLoadJSONRejectsTrailingDataAndUnknownSchema(t *testing.T) {
 	directory := t.TempDir()
 	trailing := filepath.Join(directory, "trailing.json")
-	if err := os.WriteFile(trailing, []byte(`{"schema_version":"ecs.report/v1"} {}`), 0o600); err != nil {
+	if err := os.WriteFile(trailing, []byte(`{"schema_version":"ecs.report/v2"} {}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadJSON(trailing); err == nil {
 		t.Fatal("expected trailing JSON error")
 	}
 	unknown := filepath.Join(directory, "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"schema_version":"ecs.report/v2"}`), 0o600); err != nil {
+	if err := os.WriteFile(unknown, []byte(`{"schema_version":"ecs.report/v1"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadJSON(unknown); err == nil {

@@ -78,6 +78,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
+	resourceSnapshot := CaptureEnvironmentSnapshot()
 	hardware := snapshot.Hardware
 	cloud := discoverLocalCloudIdentity()
 	memoryValue := fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率",
@@ -150,6 +151,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "disk_free_bytes", Label: "磁盘可用", Value: float64(snapshot.DiskFree), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskFree)},
 		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: snapshot.DiskUsage, Unit: "%", Display: fmt.Sprintf("%.1f %%", snapshot.DiskUsage), HigherIsBetter: model.BoolPtr(false)},
 	}
+	AppendSystemResourceDiagnostics(&result, resourceSnapshot)
 	if snapshot.StealKnown {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "cpu_steal_percent_cumulative", Label: "CPU steal（自开机累计）",
@@ -175,11 +177,15 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	missing := 0
+	validFields := 0
 	for _, field := range result.Fields {
 		if field.Value == "" || field.Value == "unknown" || strings.Contains(field.Value, "0 B 总计") {
 			missing++
+		} else {
+			validFields++
 		}
 	}
+	result.Evidence = model.NewEvidence(validFields, len(result.Fields), "sample")
 	if missing > 3 {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "部分 /proc、/sys 或 DMI 字段不可读（常见于容器与精简镜像）；缺失字段不会影响其余测试。")

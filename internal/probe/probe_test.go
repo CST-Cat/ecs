@@ -552,14 +552,15 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	for _, measurement := range cpu.Measurements {
 		cpuValues[measurement.Key] = measurement.Value
 		cpuMeasurements[measurement.Key] = measurement
-		if strings.Contains(measurement.Key, "efficiency") {
-			t.Fatalf("CPU must not emit derived score: %+v", measurement)
-		}
 	}
 	// steal 缺失在 Linux 上就是 bug：/proc/stat 必然可读，读不到说明采样逻辑坏了。
 	for _, required := range []string{
 		"sysbench_cpu_single_events_s",
 		"sysbench_cpu_multi_events_s",
+		"sysbench_cpu_single_p95_ms",
+		"sysbench_cpu_multi_p95_ms",
+		"sysbench_cpu_scaling_ratio",
+		"sysbench_cpu_per_thread_efficiency_percent",
 		"cpu_steal_percent_during_test",
 	} {
 		if _, ok := cpuValues[required]; !ok {
@@ -568,6 +569,9 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	}
 	if cpuValues["sysbench_cpu_single_events_s"] <= 0 {
 		t.Fatalf("real sysbench returned a non-positive event rate: %+v", cpu.Measurements)
+	}
+	if cpuValues["sysbench_cpu_scaling_ratio"] <= 0 || cpuValues["sysbench_cpu_per_thread_efficiency_percent"] <= 0 {
+		t.Fatalf("CPU scaling diagnostics must be positive: %+v", cpu.Measurements)
 	}
 	for _, key := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
 		measurement := cpuMeasurements[key]
@@ -588,10 +592,13 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	for _, field := range cpu.Fields {
 		fieldValues[field.Key] = field.Value
 	}
-	for _, key := range []string{"engine", "version", "binary_sha256", "threads", "duration", "prime", "single_events", "multi_events"} {
+	for _, key := range []string{"engine", "version", "binary_sha256", "threads", "duration", "prime", "single_events", "multi_events", "result_validity", "pretest_load_1m"} {
 		if fieldValues[key] == "" {
 			t.Fatalf("sysbench CPU missing field %q: %+v", key, cpu.Fields)
 		}
+	}
+	if cpu.Evidence == nil || cpu.Evidence.Valid != 2 || cpu.Evidence.Expected != 2 || cpu.Evidence.Unit != "run" {
+		t.Fatalf("sysbench CPU evidence = %+v, want 2/2 runs", cpu.Evidence)
 	}
 	if got, want := fieldValues["engine"], "sysbench"; got != want {
 		t.Fatalf("sysbench engine field = %q, want %q", got, want)
@@ -710,16 +717,11 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 	if result.Status != model.StatusOK || result.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("iperf result = %+v", result)
 	}
-	// 一个节点、一个协议族、TCP 上传/下载与 UDP 丢包/抖动四项。
-	if len(result.Measurements) != 4 {
-		t.Fatalf("iperf measurements = %d, want 4 (TCP + UDP): %+v", len(result.Measurements), result.Measurements)
-	}
 	directions := make(map[string]float64, 2)
 	udp := make(map[string]float64, 2)
+	retransmits := make(map[string]float64, 2)
+	stability := make(map[string]float64, 6)
 	for _, measurement := range result.Measurements {
-		if strings.Contains(measurement.Key, "median") || strings.Contains(measurement.Key, "average") {
-			t.Fatalf("iperf3 must preserve per-target values: %+v", measurement)
-		}
 		switch {
 		case strings.HasSuffix(measurement.Key, "_upload_mbps"):
 			if measurement.Value <= 0 {
@@ -741,6 +743,15 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 				t.Fatalf("real iperf3 returned a negative UDP jitter: %+v", measurement)
 			}
 			udp["jitter"] = measurement.Value
+		case strings.HasSuffix(measurement.Key, "_upload_retransmits"):
+			retransmits["upload"] = measurement.Value
+		case strings.HasSuffix(measurement.Key, "_download_retransmits"):
+			retransmits["download"] = measurement.Value
+		case strings.Contains(measurement.Key, "_interval_"):
+			if measurement.Value < 0 {
+				t.Fatalf("real iperf3 returned a negative interval diagnostic: %+v", measurement)
+			}
+			stability[measurement.Key] = measurement.Value
 		default:
 			t.Fatalf("unexpected iperf3 measurement: %+v", measurement)
 		}
@@ -748,8 +759,14 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 	if len(directions) != 2 {
 		t.Fatalf("both directions must be recorded: %+v", result.Measurements)
 	}
+	if len(retransmits) != 2 || len(stability) != 6 {
+		t.Fatalf("both directions need retransmission and min/P50/CV diagnostics: %+v", result.Measurements)
+	}
 	if len(udp) != 2 {
 		t.Fatalf("UDP loss and jitter must be recorded for every selected speed module: %+v", result.Measurements)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 3 || result.Evidence.Expected != 3 || result.Evidence.Unit != "operation" {
+		t.Fatalf("iperf3 evidence = %+v, want 3/3 operations", result.Evidence)
 	}
 	if version := resultField(result, "version"); !strings.Contains(strings.ToLower(version), "iperf") {
 		t.Fatalf("iperf3 version field = %q", version)

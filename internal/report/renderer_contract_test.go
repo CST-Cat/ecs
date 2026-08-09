@@ -83,7 +83,7 @@ func rendererContractReport() model.Report {
 	}
 
 	return model.Report{
-		SchemaVersion: "ecs.report/v1",
+		SchemaVersion: "ecs.report/v2",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
 		Run:           model.RunInfo{ID: "renderer-contract", Profile: "full", StartedAt: start, DurationMS: 1000, Redacted: true},
 		Results:       []model.Result{stream, disk, route("route", "nexttrace-tiny", "NextTrace Tiny 1.4.0"), ookla},
@@ -129,7 +129,7 @@ func TestFourRenderersPreserveBenchmarkContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.SchemaVersion != "ecs.report/v1" {
+	if loaded.SchemaVersion != "ecs.report/v2" {
 		t.Fatalf("schema = %q", loaded.SchemaVersion)
 	}
 	for _, result := range loaded.Results {

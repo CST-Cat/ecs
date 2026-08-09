@@ -1,12 +1,12 @@
 # ecs 报告 schema
 
-当前 schema 标识为 `ecs.report/v1`。JSON 是 txt、Markdown 与 HTML 的唯一事实来源（JSON 自身也可直接发布）；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
+当前 schema 标识为 `ecs.report/v2`。JSON 是 txt、Markdown 与 HTML 的唯一事实来源（JSON 自身也可直接发布）；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
 
 ## 顶层
 
 ```json
 {
-  "schema_version": "ecs.report/v1",
+  "schema_version": "ecs.report/v2",
   "tool": {},
   "run": {},
   "results": [],
@@ -44,7 +44,15 @@
     "label": "标准基准",
     "engine": "fio",
     "profile": "Direct I/O seq 1 MiB QD1 + rand 4 KiB QD32 + randrw 50/50 QD64",
-    "comparison_scope": "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长"
+    "comparison_scope": "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
+    "parameters": {
+      "scope_revision": "1",
+      "tool_version": "fio-3.39",
+      "tool_sha256": "…",
+      "actual_file_size": "2.00 GiB",
+      "ioengine": "io_uring",
+      "job_duration": "15s"
+    }
   },
   "status": "ok",
   "summary": "写 500 MiB/s · 读 1.2 GiB/s",
@@ -55,7 +63,9 @@
   "tables": [],
   "text_blocks": [],
   "notes": [],
-  "sources": []
+  "sources": [],
+  "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+  "failures": []
 }
 ```
 
@@ -73,7 +83,86 @@
 - `provider-assessment`：IP 情报供应商各自的评分或分类；
 - `heuristic`：公开页面和规则得出的启发式判断；
 - `inventory`：系统事实采集；
-`engine`、`profile` 和 `comparison_scope` 必须让读者能判断两个数字是否具有可比性。不能因为结果是数值就标成 `standard-benchmark`。
+`engine`、`profile` 和 `comparison_scope` 面向读者解释口径；`parameters` 面向机器保存实际运行输入，值不参与翻译。`compare` 只信任后者，不解析说明文字。不能因为结果是数值就标成 `standard-benchmark`。
+
+`evidence` 把模块状态与采样覆盖率分开：
+
+- `valid`：取得可用结论或有效统计的样本数；
+- `expected`：本轮实际计划的样本数；
+- `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`。
+- `grade`：由 `valid` / `expected` 规范化得到的稳定等级：
+  - `complete`：所有计划证据均有效；
+  - `partial`：至少一项有效，但未达到计划数；
+  - `insufficient`：有计划样本，但没有取得有效证据；
+  - `not_planned`：本轮没有计划样本，不能误写成失败。
+
+`valid` / `expected` 是等级的唯一事实来源；若序列化等级与计数冲突，加载时按计数重新规范化，不信任陈旧标签。
+
+例如 DNS 的分母是解析器数乘每个解析器的正式查询次数，预热查询不计入；DNSBL
+只有明确“已收录”或“未收录”才是有效结论，被拒和查询失败不计入 `valid`；端口不可达
+仍是一次有效的可达性结论。四种渲染格式都从该字段显示同口径覆盖率与比例柱，不能用
+`status == ok` 推导为 100%。当前运行中若异常或自定义探针没有提供内部样本口径，
+runner 只补 `module` 级的 0/1 或 1/1。
+
+覆盖率只表示计划观测是否取得并通过协议/解析校验，不表示外部数据源的内容准确；商业
+IP 情报返回 13/13 仍可能过期、冲突或误判。
+
+## 结构化失败原因
+
+`failures[]` 记录“哪一步没有取得可用证据”，与模块 `status` 和 `evidence.grade` 分开。一个模块可以完整取得证据但结论需要留意，也可以只有部分证据而没有任何可归类的操作失败；渲染器不能把“未知”自动当成失败。
+
+```json
+{
+  "category": "timeout",
+  "stage": "query",
+  "target": "resolver.example:53",
+  "retryable": true,
+  "count": 3,
+  "message": "read udp: i/o timeout"
+}
+```
+
+- `category` 是供机器分支的稳定枚举：`timeout`、`dns_error`、`connection_refused`、`network_unreachable`、`rate_limited`、`http_rejected`、`tls_error`、`parse_error`、`tool_missing`、`permission_denied`、`unsupported`、`cancelled`、`unknown`；
+- `stage` 和 `target` 定位失败步骤与目标；
+- `retryable` 只说明该类操作通常值得重试，不代表 ecs 会无条件重跑模块；
+- `count` 合并同一目标、阶段、类别和消息的重复失败，避免逐样本膨胀；
+- `message` 保留原始诊断文本，消费者不得解析它来替代 `category`。
+
+JSON 保留枚举原值；txt、Markdown 与 HTML 使用当前语言显示类别，同时保留阶段、目标、次数、可重试性和原始信息。
+
+## cgroup、PSI 与条件复测
+
+`system` 的字段和 measurements 显式记录容器的真实 CPU quota、有效 cpuset、内存上限/当前使用、swap 上限、CPU throttle 累计值、PSI CPU/内存/I/O 的 `some` / `full` 值，以及 cgroup OOM/OOM-kill 计数。来源路径同时写入“cgroup 与 PSI 压力诊断”表；接口不存在时显示 unavailable，不按宿主机物理规格猜测。
+
+CPU、STREAM（`memory`）和 fio（`disk`）会在测试窗口前后采样：
+
+- 测试前 load、PSI `avg10` 用于识别已经存在的争抢；
+- 窗口内 `/proc/stat` steal、cgroup throttle 和 OOM 增量用于识别实际干扰；
+- 工作负载自身产生的 PSI 增量仍被报告，但不会单独触发复测；
+- 只有首轮含有效证据且命中干扰条件时才再运行一次，最多两轮。
+
+触发时 `Result.retry` 保存完整审计轨迹：
+
+```json
+{
+  "triggered": true,
+  "selected_attempt": 2,
+  "selection_rule": "...",
+  "trigger_reasons": ["..."],
+  "attempts": [
+    {
+      "number": 1,
+      "status": "ok",
+      "duration_ms": 10000,
+      "evidence": {"valid": 2, "expected": 2, "unit": "run", "grade": "complete"},
+      "interference": {"detected": true, "score": 3, "reasons": [], "measurements": []},
+      "measurements": []
+    }
+  ]
+}
+```
+
+选择规则先排除没有有效证据的轮次，再选干扰评分较低的一轮；同分保留首轮。性能数值本身不参与选择，避免自动挑选偶然更高的成绩。普通 Fields/Table/Notes 也会显示复测原因、两轮干扰评分和采用轮次，因此四种人类报告无需读取隐藏 JSON 才能发现复测。
 
 ## Field
 
@@ -149,7 +238,21 @@ STREAM 不可用时只报告标准内存基准未运行，不使用替代后端�
 `disk_usage_percent`，设备与挂载点来自测试路径的 `df -P` 记录；无法读取时保留
 `unavailable`，不猜测底层块设备。
 
-性能模块只保存标准工具直接返回或按公开单位换算的指标。CPU 不派生并行效率，网络吞吐不派生跨节点平均值、中位数或综合分；逐节点、逐方向的 iperf3 数值各自保存。
+性能模块保存标准工具直接返回的指标，以及由同一轮原始样本可复算的诊断量，不生成跨
+工具或跨节点综合分：
+
+- CPU 保留 sysbench 单/多线程 `events/s` 与各自 P95 延迟，并由两项事件率计算
+  `sysbench_cpu_scaling_ratio` 和 `sysbench_cpu_per_thread_efficiency_percent`；
+  有效性字段同时披露 CPU 配额、测试前负载与测试窗口内 steal 的干扰。
+- STREAM 保留四个 kernel 的 1T/NT 带宽，另存 NT/1T 扩展倍率；Avg/Min/Max 时间和
+  `(Max-Min)/Min` 波动率进入稳定性表，均可从同一份官方输出复核。
+- iperf3 仍逐节点、逐协议族、逐方向保存最终吞吐，不派生跨节点平均值；同时保存上传/
+  下载各自的 retransmits，并从已有 `intervals[].sum` 计算分秒最低、P50 与变异系数，
+  不为稳定性统计增加第二轮流量。
+
+DNS 与 TCP 延迟分别为每个解析器/目标保存 P50、P95、标准差和成功率；DNSBL 分开保存
+已收录、确认干净、查询被拒、查询失败四种计数；route 为每个目标保存探测跳位、可见
+跳点、超时跳点和耗时。汇总字段只用于阅读，逐项结构化数据才是机器处理依据。
 
 IP 质量指标尤其需要保留 `method`：
 
@@ -196,10 +299,71 @@ IP 质量指标尤其需要保留 `method`：
 IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。
 `ookla_servers` 只控制外部 Ookla 适配器的服务器选择，不代表 Ookla 客户端本身不发送测量数据。
 
+## 多报告比较 schema
+
+`ecs compare` 接受 2 份到任意多份 `ecs.report/v2` JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。
+
+```json
+{
+  "schema_version": "ecs.compare/v1",
+  "tool": {},
+  "generated_at": "2026-08-09T12:00:00Z",
+  "reference_report": 0,
+  "inputs": [],
+  "summary": {
+    "comparability": "partially_comparable",
+    "reports": 3,
+    "modules": 18,
+    "comparable_metrics": 120,
+    "improved": 20,
+    "regressed": 12,
+    "unchanged": 88,
+    "metric_issues": 2,
+    "observed_changes": 6,
+    "status_changes": 1,
+    "evidence_changes": 3
+  },
+  "modules": [],
+  "notices": []
+}
+```
+
+CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `report` 索引从 0 开始。`inputs[]` 按命令行输入顺序保留标签、原报告 ID、ecs 版本、配置档、开始时间、协议族与遮盖状态。
+
+### 数值比较
+
+只有以下机器口径全部一致的 measurement 才进入同一 `metrics[]` 项：
+
+- 相同模块 `id` 与 measurement `key`；
+- 相同 `method`、`unit` 和 `higher_is_better`；
+- 相同 `methodology.kind` 与 `methodology.parameters` 机器参数口径。
+
+`methodology.parameters` 是新报告直接写入的稳定键值表，记录线程数、时长、工具版本/哈希、文件大小、节点集哈希等实际运行输入；`compare` 不解析 `profile` 或 `comparison_scope` 的说明文字，也不猜测旧报告参数。显示用 `label`、`engine` 与 `profile` 不参与签名，因此中英文报告不会因翻译不同而失配。
+
+缺少稳定模块/指标 key、有限数值、`method`、`higher_is_better` 或机器参数口径，同一报告内模块 ID/指标 key 重复，只有一份报告含某项，或方法/参数分裂的指标都会进入 `metric_issues[]`，不会被静默丢弃或强行排名。若同一 key 形成两组各自可比的方法，两组数值分别保留，同时明确报告口径分裂。
+
+每个 `MetricValue` 保存：
+
+- `available`、原始 `value` 与 `display`；
+- 组内 `rank`、`best`、`worst` 和供比例柱使用的 `quality_ratio`；
+- 相对基准的 `outcome`：`improved`、`regressed`、`unchanged` 或 `no_reference`；
+- `performance_change_percent`：已按优劣方向规范化，正数始终表示性能提升，低延迟等“越低越好”的指标不会反号误导。
+
+排名与高亮只在本次输入且同口径的报告子集内有效，不是绝对质量评级。并列最佳保持相同名次；缺失报告显示 unavailable，不补零。
+
+### 事实变化
+
+唯一 `Field.key` 的变化进入 `observed_changes[]`。表格只有在标题与列 schema 相同、且能找到每行唯一身份列时，才会展开改变的单元格；无法安全对齐的表不会靠行号猜测。IP、ASN、平台状态、路由等离散值只展示每份报告的原值，不设置 best/worst，也不推断哪个更优。
+
+### 自适应渲染
+
+比较对象同样可输出 `json`、`txt`、`md`、`html` 四种格式：2 份报告使用成对并排视图，3–5 份使用紧凑矩阵，6 份及以上使用逐指标纵向排名。txt 沿用项目的终端颜色能力检测与密度柱；无色时仍保留 `★`、`▲`、`▼`、排名和柱长。HTML 使用同一色阶的比例柱、最佳值高亮、深浅色主题和窄屏单列布局，不依赖脚本或外部资源。
+
 ## 当前 schema 规则
 
-- `ecs.report/v1` 只接收当前字段与当前单位；
+- `ecs.report/v2` 只接收当前字段与当前单位；旧版报告不参与新参数口径比较；
 - 删除、重命名、改变单位或状态语义时升级 schema 版本；
-- `ecs render` 对未知字段直接报错，避免报告被静默裁剪；
+- `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
+- `ecs.compare/v1` 只消费经过 `ecs.report/v2` 校验的输入；比较 schema 的字段语义发生不兼容变化时独立升级版本。

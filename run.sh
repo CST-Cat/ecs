@@ -14,8 +14,8 @@
 #   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.zst 获取，
 #     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin。
 #     绝不调用系统包安装器，也不改动系统数据库。
-#   - Ookla speedtest 不放入工具包；standard 默认不启用，full 默认包含，
-#     --only ookla 仍可在任意档位显式单独选择；缺失时才走独立的 Ookla
+#   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
+#     Ookla speedtest 不放入工具包；--only ookla 仍可在任意档位显式单独选择，缺失时才走独立的 Ookla
 #     官方签名软件源路径。
 #   - ECS_AUTO_DEPS=0 可关闭自动依赖准备，让 ecs 自己报告缺失组件。
 #   - ECS_KEEP=1 只保留临时工作目录用于排障；没有系统包需要清理。
@@ -72,7 +72,7 @@ case "${1:-}" in
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'The standard profile omits Ookla by default; the full profile includes it. Explicit --only ookla may select it from any profile. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
+        'The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules. Explicit --only may select any module. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
@@ -84,7 +84,7 @@ case "${1:-}" in
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        'standard 默认不包含 Ookla；full 默认包含 Ookla；显式使用 --only ookla 可在任意档位单独选择。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
+        'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
     fi
     exit 0
     ;;
@@ -1100,8 +1100,9 @@ install_ookla() {
 PROFILE=standard
 ONLY=""
 SKIP=""
-# 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 是纯 HTTP，
-# 不需要外部程序）。full 或显式 --only ookla 时，speedtest 进入依赖规划。
+# 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 与 standard
+# 默认包含的 cnspeed 都是纯 HTTP，不需要外部程序）。
+# full 或显式 --only ookla 时，speedtest 进入依赖规划。
 LOCAL_ONLY=0
 CONFIG_GIVEN=0
 EXPECT=""

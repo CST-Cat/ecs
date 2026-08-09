@@ -26,12 +26,15 @@ func TestListMachineEmitsDescriptorManifest(t *testing.T) {
 		modules := "," + fields[2] + ","
 		switch fields[1] {
 		case "standard":
-			if strings.Contains(modules, ",ookla,") {
-				t.Fatal("standard manifest must omit Ookla")
+			if strings.Contains(modules, ",network,") || strings.Contains(modules, ",ookla,") {
+				t.Fatal("standard manifest must omit network and Ookla")
+			}
+			if !strings.Contains(modules, ",cnspeed,") {
+				t.Fatal("standard manifest must include cnspeed")
 			}
 		case "full":
-			if !strings.Contains(modules, ",ookla,") {
-				t.Fatal("full manifest must include Ookla")
+			if !strings.Contains(modules, ",network,") || !strings.Contains(modules, ",ookla,") {
+				t.Fatal("full manifest must include network and Ookla")
 			}
 		}
 	}

@@ -128,6 +128,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		Profile:         "Direct I/O baseline + Crystal RND4K/SEQ1M + ATTO 512B–64M + YABS mixed",
 		ComparisonScope: "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
 	}
+	expectedJobs := len(fioJobPlan())
+	result.Evidence = model.NewEvidence(0, expectedJobs, "job")
 
 	diskPath, actualBytes, disk, err := prepareFIODiskPath(ctx, env)
 	if err != nil {
@@ -206,6 +208,13 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			result.Notes = append(result.Notes, fmt.Sprintf("fio 作业 %s 返回错误码 %d", job.Name, job.Error))
 		}
 	}
+	validJobs := 0
+	for _, spec := range plan {
+		if job, ok := jobs[spec.Name]; ok && fioJobHasEvidence(spec, job) {
+			validJobs++
+		}
+	}
+	result.Evidence = model.NewEvidence(validJobs, expectedJobs, "job")
 
 	seqWrite := fioBandwidthMiB(jobs["seqwrite"].Write)
 	seqRead := fioBandwidthMiB(jobs["seqread"].Read)
@@ -334,6 +343,26 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	)
 	result.Finish(start)
 	return result
+}
+
+func fioJobHasEvidence(spec fioJobSpec, job fioJob) bool {
+	if job.Error != 0 {
+		return false
+	}
+	directionHasEvidence := func(direction fioDirection) bool {
+		return direction.IOBytes > 0 &&
+			(isPositiveFinite(direction.BW) || isPositiveFinite(direction.BWBytes) || isPositiveFinite(direction.IOPS))
+	}
+	switch spec.RW {
+	case "read", "randread":
+		return directionHasEvidence(job.Read)
+	case "write", "randwrite":
+		return directionHasEvidence(job.Write)
+	case "randrw":
+		return directionHasEvidence(job.Read) && directionHasEvidence(job.Write)
+	default:
+		return false
+	}
 }
 
 func appendFIOBaseMeasurement(result *model.Result, key, label string, value float64, unit, method string) bool {

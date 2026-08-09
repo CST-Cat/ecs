@@ -57,6 +57,28 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 			}
 		},
 		"percent": func(ratio float64) string { return fmt.Sprintf("%.0f", ratio*100) },
+		"evidenceText": func(value *model.Evidence) string {
+			if value == nil {
+				return ""
+			}
+			return evidenceText(*value)
+		},
+		"evidenceRatio": func(value *model.Evidence) float64 {
+			if value == nil {
+				return 0
+			}
+			return value.EvidenceRatio()
+		},
+		"evidenceColor":      evidenceHTMLColor,
+		"evidenceLabelColor": evidenceHTMLLabelColor,
+		"failureCategory":    failureCategoryLabel,
+		"failureRetryable":   failureRetryableLabel,
+		"failureCount": func(value int) int {
+			if value < 1 {
+				return 1
+			}
+			return value
+		},
 		// 条宽与 txt 柱状图同口径：超过基线不撑破容器，但颜色已到顶。
 		"barWidth": func(ratio float64) string {
 			if ratio > 1 {
@@ -183,6 +205,9 @@ const htmlTemplate = `<!doctype html>
     .methodology strong { color: var(--accent); }
     .ok { color: var(--ok); } .warning { color: var(--warn); } .error { color: var(--error); } .skipped { color: var(--skip); }
     .headline { margin: 16px 0 0; font-size: 17px; font-weight: 650; }
+    .evidence { display: grid; grid-template-columns: minmax(130px,auto) minmax(120px,320px); align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+		.failure-kind { font-weight: 750; color: var(--error); }
+		.retryable { color: var(--warn); font-weight: 650; }
     .metrics { margin-top: 14px; }
     .metric { padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, var(--accent)); }
     .metric .label { color: var(--muted); font-size: 12px; }
@@ -225,6 +250,13 @@ const htmlTemplate = `<!doctype html>
     pre { overflow: auto; max-height: 480px; margin: 10px -2px 0; padding: 14px; border-radius: 10px; background: #090d16; color: #d9e2f5; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
     a { color: var(--accent); }
     footer { padding: 24px 4px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 560px) {
+      main { width: min(1180px, calc(100% - 20px)); margin-top: 10px; }
+      .hero, section { padding: 18px; border-radius: 14px; }
+      .section-head { display: block; }
+      .badges { justify-content: flex-start; margin-top: 9px; }
+      .evidence { grid-template-columns: 1fr; gap: 6px; }
+    }
     @media print {
       :root { --bg: #fff; --panel: #fff; --text: #111; --muted: #555; --line: #ddd; --shadow: none; }
       main { width: 100%; margin: 0; } .hero { border-radius: 0; } section { break-inside: avoid; }
@@ -272,6 +304,17 @@ const htmlTemplate = `<!doctype html>
     {{end}}
     {{if .Summary}}<p class="headline">{{.Summary}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
     {{if .Error}}<p class="error">{{t "report.errorPrefix"}}{{t "punct.colon"}}{{.Error}}</p>{{end}}
+    {{if .Evidence}}<div class="evidence"><strong style="color:{{evidenceLabelColor .Evidence}}">{{t "report.evidence"}}{{t "punct.colon"}}{{evidenceText .Evidence}}</strong><div class="bar"><i style="width:{{barWidth (evidenceRatio .Evidence)}}%;background:{{evidenceColor .Evidence}}"></i></div></div>{{end}}
+		{{if .Failures}}
+		<h3>{{t "report.failures"}}</h3>
+		<div class="table-wrap"><table><thead><tr>
+			<th>{{t "failure.category"}}</th><th>{{t "failure.stage"}}</th><th>{{t "failure.target"}}</th>
+			<th>{{t "failure.count"}}</th><th>{{t "failure.retryable"}}</th><th>{{t "failure.message"}}</th>
+		</tr></thead><tbody>{{range .Failures}}<tr>
+			<td class="failure-kind">{{failureCategory .Category}}</td><td>{{.Stage}}</td><td>{{.Target}}</td>
+			<td>{{failureCount .Count}}</td><td class="{{if .Retryable}}retryable{{else}}muted{{end}}">{{failureRetryable .Retryable}}</td><td>{{.Message}}</td>
+		</tr>{{end}}</tbody></table></div>
+		{{end}}
 
     {{if .Measurements}}
     <div class="metrics">
@@ -349,6 +392,27 @@ const htmlTemplate = `<!doctype html>
 </body>
 </html>
 `
+
+func evidenceHTMLColor(evidence *model.Evidence) template.CSS {
+	if evidence == nil || evidence.Expected <= 0 {
+		return template.CSS("var(--skip)")
+	}
+	color := termcolor.Color(evidence.EvidenceRatio())
+	return template.CSS(fmt.Sprintf("#%02x%02x%02x", color.R, color.G, color.B))
+}
+
+func evidenceHTMLLabelColor(evidence *model.Evidence) template.CSS {
+	switch {
+	case evidence == nil || evidence.Expected <= 0:
+		return template.CSS("var(--skip)")
+	case evidence.Valid <= 0:
+		return template.CSS("var(--error)")
+	case evidence.Valid >= evidence.Expected:
+		return template.CSS("var(--ok)")
+	default:
+		return template.CSS("var(--warn)")
+	}
+}
 
 func reportValueClass(value string) string {
 	switch strings.TrimSpace(value) {

@@ -146,6 +146,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	versions := config.IPVersions(env.Config.IPVersion)
+	plannedSources := enabledIPQualitySourceCount(env.Config.IPQualitySources)
 	// 出口发现由 runner 统一做过（见 egress.go），这里只读结果：
 	// network 是第三方级模块，走到这一步一定拿到了完整的情报记录。
 	var found []ipLookup
@@ -168,6 +169,9 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		reason := "unavailable"
 		if ok && address.Err != nil {
 			reason = address.Err.Error()
+			addFailure(&result, "egress", "IPv"+version, address.Err)
+		} else if !ok {
+			addFailureMessage(&result, "egress", "IPv"+version, reason)
 		}
 		// 错误原文（Go 的网络错误）拼进句子会让整句无法翻译也无法对照，
 		// 因此说明句保持固定，具体原因单独成字段。
@@ -178,6 +182,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	if len(found) == 0 {
 		result.Fail(fmt.Errorf("IPv4 与 IPv6 出口信息均无法查询"))
+		result.Evidence = model.NewEvidence(0, len(versions)*plannedSources, "source")
 		result.Finish(start)
 		return result
 	}
@@ -216,6 +221,8 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	var summaries []string
 	var providerNotes []string
+	validSources := 0
+	expectedSources := len(versions) * plannedSources
 	for _, lookup := range found {
 		prefix := "ipv" + lookup.Version
 		data := lookup.Data
@@ -281,6 +288,18 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			fmt.Sprintf("%.0f ms", float64(lookup.Latency)/float64(time.Millisecond)),
 		})
 		result.Measurements = append(result.Measurements, bundle.measurements()...)
+		if bundle.Origin.Enabled && bundle.Origin.Err != nil {
+			addFailure(&result, "provider", "IPv"+lookup.Version+" "+qualitySourceLabels["maxmind"], bundle.Origin.Err)
+		}
+		for _, sourceID := range qualitySourceOrder {
+			if sourceID == "maxmind" {
+				continue
+			}
+			finding := bundle.Findings[sourceID]
+			if finding.Enabled && finding.Err != nil {
+				addFailure(&result, "provider", "IPv"+lookup.Version+" "+finding.Name, finding.Err)
+			}
+		}
 		result.Tables = append(
 			result.Tables,
 			bundle.typeTable(),
@@ -289,6 +308,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			bundle.statusTable(),
 		)
 		successful, enabled := bundle.successfulSources()
+		validSources += successful
 		sourceSummary := "附加源未启用"
 		if enabled > 0 {
 			sourceSummary = fmt.Sprintf("数据源响应 %d/%d", successful, enabled)
@@ -316,6 +336,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = append([]model.Table{overview}, result.Tables...)
+	result.Evidence = model.NewEvidence(validSources, expectedSources, "source")
 	result.Fields = append([]model.Field{{
 		Key: "ip_version_mode", Label: "协议族模式", Value: fallback(env.Config.IPVersion, config.IPVersionAuto),
 	}}, result.Fields...)
@@ -352,6 +373,16 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Summary = strings.Join(summaries, " · ")
 	result.Finish(start)
 	return result
+}
+
+func enabledIPQualitySourceCount(configured []string) int {
+	count := 0
+	for _, source := range qualitySourceOrder {
+		if qualitySourceEnabled(configured, source) {
+			count++
+		}
+	}
+	return count
 }
 
 func egressBGPIdentity(observations []routeViewsPrefix) (asn int, route string) {

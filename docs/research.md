@@ -60,7 +60,7 @@
 | 模块 | 非基准诊断 | 标准基准工具 | standard | full |
 | --- | :---: | --- | :---: | :---: |
 | 系统、虚拟化、资源与内核网络栈 | ✓ | `/proc`/`sys` 只读采集 | ✓ | ✓ |
-| IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | ✓ | ✓ |
+| IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | — | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s |
 | 内存带宽与资源证据 | — | 官方 STREAM 10M/10，1T/NT 四 kernel；缺失时明确报告未运行；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s |
 | 磁盘基础项、Crystal、ATTO、50/50 混合矩阵与 QD1 延迟 | — | fio JSON，Direct I/O；fio 引擎探测回退只在可验证时使用 | 53 作业 | 53 作业 |
@@ -75,12 +75,13 @@
 | 多目标正向路由 | NextTrace JSON | 官方 NextTrace Tiny release asset | ✓ | ✓ |
 | 三网回程线路识别 | 骨干网段特征表 | NextTrace JSON | ✓ | ✓ |
 | 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
-| 中国三网 HTTP 下载带宽（显式选中） | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
+| 中国三网 HTTP 下载带宽 | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
 | Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（standard 默认不运行；full 默认运行；`--only ookla` 可从任意档位显式选择；run.sh 缺失时从官方签名源下载并临时解包） | — | ✓ |
 | JSON、txt、Markdown、独立 HTML | ✓ | — | ✓ | ✓ |
 
-两档配置只改变默认模块集合（standard 16、full 18）；表中标注“选中时”的模块
-可以用 `--only` 从任意档位启用，并始终采用同一 full 深度参数。
+两档配置只改变默认模块集合（standard 16、full 18）：standard 包含 cnspeed，
+full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` 显式选择，
+并始终采用同一 full 深度参数。
 
 ## 许可证与复用边界
 
@@ -309,9 +310,9 @@ full 深度参数，保证直接运行与 `--only` 运行的结果可以比较�
 | CPU/内存每轮 | 15 s | 15 s |
 | fio 临时文件与作业 | 2048 MiB，上限安全检查；53 项完整基础/混合/Crystal/ATTO | 同左 |
 | iperf3（选中 `speed` 时） | 7 节点 × 双方向 × 15 s，附 UDP 50 Mbps/5 s | 同左 |
-| `cnspeed`（选中时） | 8 s/100 MiB 每运营商 | 同左 |
+| `cnspeed` | 8 s/100 MiB 每运营商（standard/full 默认包含） | 同左 |
 
-`standard`、`full` 仅分别预选 16、18 个模块。`SelectModules` 先处理
-`--only` 再处理 `--skip`，因此 standard 也可以直接运行 `--only cnspeed,disk`，而
-`--skip` 仍可从任何预设中移除模块。Ookla 属于 full 默认预设但不属于 standard，
-`--only ookla` 仍可从任意预设单独运行，并继续受 thirdparty exposure 约束。
+`standard`、`full` 仅分别预选 16、18 个模块。standard 默认包含 `cnspeed`，
+不包含 `network` 与 `ookla`；full 额外加入后两项。`SelectModules` 先处理
+`--only` 再处理 `--skip`，因此 standard 也可以直接运行 `--only network,ookla`，而
+`--skip` 仍可从任何预设中移除模块；显式选择的模块继续受各自 exposure 约束。

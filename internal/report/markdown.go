@@ -102,10 +102,38 @@ func Markdown(data model.Report, scored *score.Report) string {
 		out.WriteString(" · ")
 		out.WriteString(formatDurationMS(result.DurationMS))
 		out.WriteString("\n\n")
+		if result.Evidence != nil {
+			out.WriteString("**" + i18n.T("report.evidence") + "**" + i18n.T("punct.colon"))
+			out.WriteString(markdownEscape(evidenceText(*result.Evidence)))
+			out.WriteString(" · `" + termcolor.Palette{Level: termcolor.LevelNone}.Bar(result.Evidence.EvidenceRatio(), 16) + "`\n\n")
+		}
 		if result.Error != "" {
 			out.WriteString("> " + i18n.T("report.errorPrefix") + i18n.T("punct.colon"))
 			out.WriteString(markdownEscape(result.Error))
 			out.WriteString("\n\n")
+		}
+		if len(result.Failures) > 0 {
+			out.WriteString("### " + i18n.T("report.failures") + "\n\n")
+			out.WriteString("| " + i18n.T("failure.category") + " | " + i18n.T("failure.stage") + " | " +
+				i18n.T("failure.target") + " | " + i18n.T("failure.count") + " | " +
+				i18n.T("failure.retryable") + " | " + i18n.T("failure.message") + " |\n")
+			out.WriteString("| --- | --- | --- | ---: | --- | --- |\n")
+			for _, failure := range result.Failures {
+				values := []string{
+					failureCategoryLabel(failure.Category), fallbackReport(failure.Stage, "—"),
+					fallbackReport(failure.Target, "—"), fmt.Sprintf("%d", maxInt(failure.Count, 1)),
+					failureRetryableLabel(failure.Retryable), fallbackReport(failure.Message, "—"),
+				}
+				out.WriteString("| ")
+				for index, value := range values {
+					if index > 0 {
+						out.WriteString(" | ")
+					}
+					out.WriteString(markdownEscape(value))
+				}
+				out.WriteString(" |\n")
+			}
+			out.WriteString("\n")
 		}
 		if len(result.Measurements) > 0 {
 			out.WriteString("### " + i18n.T("report.metrics") + "\n\n")

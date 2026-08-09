@@ -181,6 +181,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	if env.Config.IPVersion == config.IPVersion6 {
 		result.Skip("当前仅测试 IPv6；主流 DNSBL 仍以 IPv4 为主")
+		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
 		result.Notes = append(result.Notes,
 			"本次运行显式限制为 IPv6。绝大多数 DNS 黑名单只支持 IPv4，因此不会把 IPv6 强行映射成无意义的反向查询。")
 		result.Finish(start)
@@ -192,6 +193,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 		result.Summary = "无法确定 IPv4 出口，未执行黑名单查询"
 		result.Notes = append(result.Notes, "黑名单查询需要先知道出口 IPv4；本次出口发现失败。")
+		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
 		result.Finish(start)
 		return result
 	}
@@ -202,6 +204,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Summary = "出口不是 IPv4，主流 DNSBL 不支持"
 		result.Notes = append(result.Notes,
 			"绝大多数 DNS 黑名单只收录 IPv4；本机出口为 IPv6，本项无法给出结论。")
+		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
 		result.Finish(start)
 		return result
 	}
@@ -224,8 +227,10 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	table := model.Table{
-		Title:   "DNS 黑名单查询",
-		Columns: []string{"名单", "结论", "返回码", "收录范围", "耗时"},
+		Title:                 "DNS 黑名单查询",
+		Columns:               []string{"名单", "结论", "返回码", "收录范围", "耗时"},
+		NumericColumns:        []int{4},
+		NumericHigherIsBetter: []bool{false},
 	}
 	listed, refused, failed := 0, 0, 0
 	var listedNames []string
@@ -236,8 +241,13 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 			listedNames = append(listedNames, finding.Zone.Name)
 		case dnsblRefused:
 			refused++
+			result.AddFailure(model.Failure{
+				Category: model.FailureDNS, Stage: "dnsbl_query", Target: finding.Zone.Zone,
+				Retryable: false, Count: 1, Message: finding.Detail,
+			})
 		case dnsblFailed:
 			failed++
+			addFailureMessage(&result, "dnsbl_query", finding.Zone.Zone, finding.Detail)
 		}
 		codes := strings.Join(finding.Codes, ", ")
 		if codes == "" {
@@ -262,13 +272,9 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "zones_total", Label: "查询名单数", Value: fmt.Sprintf("%d", len(zones))},
 		{Key: "resolver", Label: "使用的解析器", Value: "系统默认（部分名单拒绝公共解析器查询）"},
 	}
-	result.Measurements = []model.Measurement{
-		{
-			Key: "dnsbl_listed_count", Label: "被收录名单数",
-			Value: float64(listed), Unit: "项", Display: fmt.Sprintf("%d/%d", listed, len(zones)),
-			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
-		},
-	}
+	clean := len(zones) - listed - refused - failed
+	result.Measurements = dnsblCountMeasurements(listed, clean, refused, failed, len(zones))
+	result.Evidence = model.NewEvidence(listed+clean, len(zones), "query")
 	result.Sources = []model.Source{
 		{Name: "Spamhaus", URL: "https://www.spamhaus.org/", Purpose: "ZEN 综合黑名单"},
 		{Name: "SpamCop", URL: "https://www.spamcop.net/", Purpose: "基于举报的垃圾邮件源名单"},
@@ -303,10 +309,35 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 		result.Summary = "全部名单拒绝查询，结论不可用"
 	default:
-		result.Summary = fmt.Sprintf("未被收录（%d/%d 个名单确认干净）", len(zones)-listed-refused-failed, len(zones))
+		result.Summary = fmt.Sprintf("未被收录（%d/%d 个名单确认干净）", clean, len(zones))
 	}
 	result.Finish(start)
 	return result
+}
+
+func dnsblCountMeasurements(listed, clean, refused, failed, total int) []model.Measurement {
+	return []model.Measurement{
+		{
+			Key: "dnsbl_listed_count", Label: "被收录名单数",
+			Value: float64(listed), Unit: "项", Display: fmt.Sprintf("%d/%d", listed, total),
+			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
+		},
+		{
+			Key: "dnsbl_clean_count", Label: "确认未收录名单数",
+			Value: float64(clean), Unit: "项", Display: fmt.Sprintf("%d/%d", clean, total),
+			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(true),
+		},
+		{
+			Key: "dnsbl_refused_count", Label: "拒绝查询名单数",
+			Value: float64(refused), Unit: "项", Display: fmt.Sprintf("%d/%d", refused, total),
+			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
+		},
+		{
+			Key: "dnsbl_failed_count", Label: "查询失败名单数",
+			Value: float64(failed), Unit: "项", Display: fmt.Sprintf("%d/%d", failed, total),
+			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
+		},
+	}
 }
 
 // dnsblRowRank 决定表格排序：命中 > 被拒 > 失败 > 干净。

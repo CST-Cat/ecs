@@ -140,6 +140,8 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
 		result.Skip("未发现 NextTrace Tiny")
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "nexttrace", Count: 1, Message: result.Summary})
+		result.Evidence = model.NewEvidence(0, len(env.Config.BacktraceTargets), "target")
 		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过回程探测。")
 		result.Finish(start)
 		return result
@@ -148,12 +150,14 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	targets := env.Config.BacktraceTargets
 	if len(targets) == 0 {
 		result.Skip("未配置三网回程参考目标")
+		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Finish(start)
 		return result
 	}
 	targets = endpointsForIPVersion(targets, env.Config.IPVersion)
 	if len(targets) == 0 {
 		result.Skip("没有匹配当前协议族的三网回程目标")
+		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Notes = append(result.Notes, "当前协议族没有匹配的回程目标；IPv6 目标使用地区节点域名，需 DNS 与 IPv6 出口可用。")
 		result.Finish(start)
 		return result
@@ -183,6 +187,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		Columns: []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"},
 	}
 	identified := 0
+	validTraces := 0
 	var summaries []string
 	for _, row := range rows {
 		// 原始路径无论识别成功与否都要保留：未识别时它恰恰是判断"线路确实没走
@@ -195,12 +200,14 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			})
 		}
 		if row.Err != nil {
+			addFailure(&result, "trace", row.Target.Address, row.Err)
 			table.Rows = append(table.Rows, []string{
 				row.Target.Kind, row.Target.Name, "—", "—", "—", "追踪失败",
 			})
 			result.Notes = append(result.Notes, fmt.Sprintf("%s 追踪失败：%s", row.Target.Name, compactError(row.Err)))
 			continue
 		}
+		validTraces++
 		best, ok := bestBacktraceHit(row.Hits)
 		if !ok {
 			responded := 0
@@ -265,6 +272,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			Method:  "china-backbone-signature-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
+	result.Evidence = model.NewEvidence(validTraces, len(targets), "target")
 	if identified == 0 {
 		result.Status = model.StatusWarning
 		result.Summary = "未识别到任何已知中国骨干线路"

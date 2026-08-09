@@ -121,24 +121,29 @@ func TestEgressIntelOnlyWhenAThirdPartyModuleNeedsIt(t *testing.T) {
 	}
 }
 
-func TestProfileOoklaMembershipIsExplicit(t *testing.T) {
+func TestFullOnlyThirdPartyMembershipIsExplicit(t *testing.T) {
 	standard, err := Defaults(ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if contains(standard.Modules, "ookla") {
-		t.Fatal("standard 档默认不应包含 Ookla")
 	}
 	cfg, err := Defaults(ProfileFull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(cfg.Modules, "ookla") {
-		t.Fatal("full 档默认应包含 Ookla")
+	for _, id := range []string{"network", "ookla"} {
+		if contains(standard.Modules, id) {
+			t.Fatalf("standard 档默认不应包含 %s", id)
+		}
+		if !contains(cfg.Modules, id) {
+			t.Fatalf("full 档默认应包含 %s", id)
+		}
+		descriptor, ok := ModuleDescriptorFor(id)
+		if !ok || descriptor.ProfileExplicitOnly || descriptor.ProfileStandard || !descriptor.ProfileFull {
+			t.Fatalf("%s profile metadata = %+v, want full-only default module", id, descriptor)
+		}
 	}
-	descriptor, ok := ModuleDescriptorFor("ookla")
-	if !ok || descriptor.ProfileExplicitOnly || descriptor.ProfileStandard || !descriptor.ProfileFull {
-		t.Fatalf("Ookla profile metadata = %+v, want full-only default module", descriptor)
+	if !contains(standard.Modules, "cnspeed") {
+		t.Fatal("standard 档默认应包含 cnspeed")
 	}
 }
 

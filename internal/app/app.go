@@ -41,6 +41,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runCommand(ctx, args, stdout, stderr)
 	case "render":
 		return renderCommand(args, stdout, stderr)
+	case "compare":
+		return compareCommand(args, stdout, stderr)
 	case "list":
 		return listCommand(args, stdout, stderr)
 	case "config":
@@ -755,12 +757,39 @@ func preparse(args []string) (configPath, profile string) {
 }
 
 func printHelp(writer io.Writer) {
+	if i18n.Current() == i18n.LangEN {
+		fmt.Fprintln(writer, `ecs — ad-free VPS benchmark with local reports by default
+
+Usage:
+  ecs [run] [options]         run tests (standard by default)
+  ecs list                    show profiles and modules
+  ecs render --input FILE     re-export JSON/txt/md/html from JSON
+  ecs compare REPORTS...      compare 2 or more JSON reports safely
+  ecs config example          print a sample configuration
+  ecs doctor                  check standard benchmark tools
+  ecs leaderboard REPORTS...  aggregate a leaderboard reference
+  ecs baseline REPORTS...     generate a leaderboard reference (same as leaderboard)
+  ecs submit --input FILE     export a minimized public submission
+  ecs version                 show version
+
+Examples:
+  ecs
+  ecs --profile standard --exposure local
+  ecs --profile full --exposure public
+  ecs --profile full --skip media --output ./reports
+  ecs --only system,cpu,memory,disk --format json,html
+  ecs compare old.json new.json --format json,txt,md,html --output ./compare
+
+Run ecs run --help for all test options or ecs compare --help for comparison options.`)
+		return
+	}
 	fmt.Fprintln(writer, `ecs — 无广告、默认零上传的 VPS 综合测试工具
 
 用法:
   ecs [run] [选项]            运行测试（默认 standard）
   ecs list                    查看配置档与模块
   ecs render --input FILE     从 JSON 重新导出 JSON/txt/md/html 四种格式
+  ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
   ecs leaderboard REPORTS...  从多份报告聚合排行榜参考
@@ -774,8 +803,9 @@ func printHelp(writer io.Writer) {
   ecs --profile full --exposure public
   ecs --profile full --skip media --output ./reports
   ecs --only system,cpu,memory,disk --format json,html
+  ecs compare old.json new.json --format json,txt,md,html --output ./compare
 
-运行 ecs run --help 查看全部参数。`)
+运行 ecs run --help 查看测试参数，或运行 ecs compare --help 查看对比参数。`)
 }
 
 func printRunHelp(writer io.Writer, flags *flag.FlagSet) {

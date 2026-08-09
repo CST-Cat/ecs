@@ -123,6 +123,12 @@ func parseStreamOutput(output string) (streamParsedOutput, error) {
 		if values[0] <= 0 {
 			return streamParsedOutput{}, fmt.Errorf("STREAM %s Best Rate 必须为正数", kernel)
 		}
+		if values[1] <= 0 || values[2] <= 0 || values[3] <= 0 {
+			return streamParsedOutput{}, fmt.Errorf("STREAM %s 时间统计必须为正数", kernel)
+		}
+		if values[2] > values[1] || values[1] > values[3] {
+			return streamParsedOutput{}, fmt.Errorf("STREAM %s 时间统计顺序无效", kernel)
+		}
 		rateMiBS := values[0] * factor
 		if math.IsNaN(rateMiBS) || math.IsInf(rateMiBS, 0) || rateMiBS <= 0 {
 			return streamParsedOutput{}, fmt.Errorf("STREAM %s Best Rate 换算后无效", kernel)
@@ -314,6 +320,25 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 			HigherIsBetter: model.BoolPtr(true),
 		})
 	}
+	if len(runs) == 2 {
+		for _, kernel := range streamKernels {
+			single, singleOK := runs[0].Sample.Samples[kernel]
+			multi, multiOK := runs[1].Sample.Samples[kernel]
+			if !singleOK || !multiOK || single.RateMiBS <= 0 || multi.RateMiBS <= 0 {
+				continue
+			}
+			ratio := multi.RateMiBS / single.RateMiBS
+			result.Measurements = append(result.Measurements, model.Measurement{
+				Key:            "stream_" + strings.ToLower(kernel) + "_scaling_ratio",
+				Label:          "STREAM " + kernel + " 多线程扩展倍率",
+				Value:          ratio,
+				Unit:           "x",
+				Display:        fmt.Sprintf("%.2f×", ratio),
+				Method:         "stream-official-" + strings.ToLower(kernel) + "-scaling-v1",
+				HigherIsBetter: model.BoolPtr(true),
+			})
+		}
+	}
 
 	units := make([]string, 0, 2)
 	for _, run := range runs {
@@ -361,7 +386,14 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 		))
 	}
 
-	result.Tables = append(result.Tables, streamMemoryTable(runs))
+	result.Tables = append(result.Tables, streamMemoryTable(runs), streamStabilityTable(runs))
+	validRuns := 0
+	for _, run := range runs {
+		if run.Err == nil && len(run.Sample.Samples) == len(streamKernels) {
+			validRuns++
+		}
+	}
+	result.Evidence = model.NewEvidence(validRuns, len(runs), "run")
 	summary := make([]string, 0, 4)
 	for _, item := range measurementOrder[:4] {
 		run := runs[item.run]
@@ -382,6 +414,32 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 	}
 	result.Finish(start)
 	return result
+}
+
+func streamStabilityTable(runs []streamMemoryRun) model.Table {
+	table := model.Table{
+		Title:                 "STREAM 运行稳定性",
+		Columns:               []string{"内核 / 线程", "平均时间", "最短时间", "最长时间", "时间波动"},
+		NumericColumns:        []int{1, 2, 3, 4},
+		NumericHigherIsBetter: []bool{false, false, false, false},
+	}
+	for _, kernel := range []string{"Copy", "Triad", "Scale", "Add"} {
+		for _, run := range runs {
+			avg, minValue, maxValue, spread := "—", "—", "—", "—"
+			if sample, ok := run.Sample.Samples[kernel]; ok {
+				avg = fmt.Sprintf("%.6f s", sample.AvgTime)
+				minValue = fmt.Sprintf("%.6f s", sample.MinTime)
+				maxValue = fmt.Sprintf("%.6f s", sample.MaxTime)
+				if sample.MinTime > 0 && sample.MaxTime >= sample.MinTime {
+					spread = fmt.Sprintf("%.2f %%", (sample.MaxTime-sample.MinTime)/sample.MinTime*100)
+				}
+			}
+			table.Rows = append(table.Rows, []string{
+				kernel + " / " + streamContextLabel(run), avg, minValue, maxValue, spread,
+			})
+		}
+	}
+	return table
 }
 
 func streamMemoryTable(runs []streamMemoryRun) model.Table {

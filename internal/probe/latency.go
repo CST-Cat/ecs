@@ -30,6 +30,7 @@ type latencyResult struct {
 	ResolveErr  error
 	Values      []time.Duration
 	Failures    int
+	LastErr     error
 	// ICMP 是同一目标的 ICMP 往返统计，系统没有 ping 时为不可用。
 	ICMP icmpStats
 }
@@ -182,6 +183,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 					elapsed := time.Since(begin)
 					if dialErr != nil {
 						item.Failures++
+						item.LastErr = dialErr
 						continue
 					}
 					_ = connection.Close()
@@ -218,14 +220,17 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Title:   "TCP 建连与 ICMP 往返",
-		Columns: []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 最小", "ICMP 平均", "ICMP 最大", "ICMP mdev", "ICMP 丢包", "DNS 解析"},
+		Title:                 "TCP 建连与 ICMP 往返",
+		Columns:               []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 最小", "ICMP 平均", "ICMP 最大", "ICMP mdev", "ICMP 丢包", "DNS 解析"},
+		NumericColumns:        []int{4, 5, 6, 7, 8, 9, 10, 11, 12},
+		NumericHigherIsBetter: []bool{false, false, false, false, false, false, false, false, false},
 	}
 	var best time.Duration
 	var bestName string
 	allFailed := true
 	var intercepted []string
-	for _, item := range collected {
+	validSamples := 0
+	for itemIndex, item := range collected {
 		median := medianDuration(item.Values)
 		p95 := percentileDuration(item.Values, 0.95)
 		floatValues := make([]float64, len(item.Values))
@@ -233,6 +238,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			floatValues[i] = float64(value) / float64(time.Millisecond)
 		}
 		if len(item.Values) > 0 {
+			validSamples += len(item.Values)
 			allFailed = false
 			if best == 0 || median < best {
 				best = median
@@ -272,15 +278,49 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			icmpLoss,
 			resolveText,
 		})
+		prefix := fmt.Sprintf("tcp_target_%02d_ipv%s", itemIndex+1, item.Family)
+		successPercent := 0.0
+		if attempts > 0 {
+			successPercent = float64(len(item.Values)) / float64(attempts) * 100
+		}
+		result.Measurements = append(result.Measurements, model.Measurement{
+			Key: prefix + "_success_percent", Label: fmt.Sprintf("%s IPv%s TCP 成功率", item.Endpoint.Name, item.Family),
+			Value: successPercent, Unit: "%", Display: fmt.Sprintf("%.1f %%", successPercent),
+			Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(true),
+		})
+		if len(item.Values) > 0 {
+			jitter := stddevFloat(floatValues)
+			result.Measurements = append(result.Measurements,
+				model.Measurement{
+					Key: prefix + "_p50_ms", Label: fmt.Sprintf("%s IPv%s TCP P50", item.Endpoint.Name, item.Family),
+					Value: float64(median) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(median),
+					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
+				},
+				model.Measurement{
+					Key: prefix + "_p95_ms", Label: fmt.Sprintf("%s IPv%s TCP P95", item.Endpoint.Name, item.Family),
+					Value: float64(p95) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(p95),
+					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
+				},
+				model.Measurement{
+					Key: prefix + "_jitter_ms", Label: fmt.Sprintf("%s IPv%s TCP 标准差", item.Endpoint.Name, item.Family),
+					Value: jitter, Unit: "ms", Display: fmt.Sprintf("%.2f ms", jitter),
+					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
+				},
+			)
+		}
 		if item.ResolveErr != nil {
 			result.Notes = append(result.Notes, fmt.Sprintf("%s 解析失败：%s", item.Endpoint.Name, compactError(item.ResolveErr)))
+			addFailure(&result, "resolve", item.Endpoint.Address, item.ResolveErr, attempts)
+		} else if item.Failures > 0 && item.LastErr != nil {
+			addFailure(&result, "connect", item.DialAddress, item.LastErr, item.Failures)
 		}
-		appendICMPMeasurements(&result, item.Endpoint.Name, item.ICMP)
+		appendICMPMeasurementsForFamily(&result, item.Endpoint.Name, item.Family, item.ICMP)
 		if tcpLikelyIntercepted(median, item.ICMP) {
 			intercepted = append(intercepted, item.Endpoint.Name)
 		}
 	}
 	result.Tables = []model.Table{table}
+	result.Evidence = model.NewEvidence(validSamples, len(collected)*attempts, "sample")
 	if allFailed {
 		result.Status = model.StatusWarning
 		result.Summary = "全部 TCP 延迟目标不可达"
@@ -332,17 +372,26 @@ func formatICMPMilliseconds(value float64) string {
 }
 
 func appendICMPMeasurements(result *model.Result, targetName string, stats icmpStats) {
+	appendICMPMeasurementsForFamily(result, targetName, "", stats)
+}
+
+func appendICMPMeasurementsForFamily(result *model.Result, targetName, family string, stats icmpStats) {
 	if result == nil || !stats.Available {
 		return
 	}
 	slug := strings.ToLower(strings.ReplaceAll(targetName, " ", "_"))
+	displayName := targetName
+	if family != "" {
+		slug += "_ipv" + strings.ToLower(family)
+		displayName += " IPv" + family
+	}
 	appendMeasurement := func(suffix, label, unit, display string, value float64) {
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 			return
 		}
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key:            "icmp_" + suffix + "_" + slug,
-			Label:          targetName + " ICMP " + label,
+			Label:          displayName + " ICMP " + label,
 			Value:          value,
 			Unit:           unit,
 			Display:        display,

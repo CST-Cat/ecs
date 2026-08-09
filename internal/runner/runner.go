@@ -11,6 +11,7 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
+	"ecs/internal/failure"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/probe"
@@ -199,7 +200,7 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 		result.Skip("离线模式")
 		result.Finish(start)
 	} else {
-		result = safeRun(ctx, item, env)
+		result = runWithConditionalRetry(ctx, item, env)
 	}
 	if result.Methodology.Label == "" {
 		if hasDescriptor {
@@ -208,8 +209,59 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 			result.Methodology = probe.MethodologyFor(item.ID())
 		}
 	}
+	result.Methodology.Parameters = comparisonParameters(item.ID(), cfg, result)
+	if result.Evidence == nil {
+		// Probes normally report their real sample denominator.  This fallback
+		// keeps panic, offline and legacy/custom probe results explicit without
+		// pretending that their fields are independent observations.
+		valid := 1
+		if result.Status == model.StatusSkipped || result.Status == model.StatusError {
+			valid = 0
+		}
+		result.Evidence = model.NewEvidence(valid, 1, "module")
+	}
+	failure.EnsureResult(&result)
 	result.Title = displayTitle
 	return result
+}
+
+func runWithConditionalRetry(ctx context.Context, item probe.Probe, env probe.Environment) model.Result {
+	return runWithConditionalRetryHooks(ctx, item, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
+}
+
+func runWithConditionalRetryHooks(
+	ctx context.Context,
+	item probe.Probe,
+	env probe.Environment,
+	capture func() probe.EnvironmentSnapshot,
+	assess func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference,
+) model.Result {
+	if item.ID() != "cpu" && item.ID() != "memory" && item.ID() != "disk" {
+		return safeRun(ctx, item, env)
+	}
+	firstBefore := capture()
+	first := safeRun(ctx, item, env)
+	firstAfter := capture()
+	firstInterference := assess(item.ID(), firstBefore, firstAfter)
+	canRetry := firstInterference.Detected && ctx.Err() == nil &&
+		first.Status != model.StatusError && first.Status != model.StatusSkipped &&
+		first.Evidence != nil && first.Evidence.Valid > 0
+	if !canRetry {
+		probe.AppendInterferenceDiagnostics(&first, firstInterference)
+		return first
+	}
+
+	secondBefore := capture()
+	second := safeRun(ctx, item, env)
+	secondAfter := capture()
+	secondInterference := assess(item.ID(), secondBefore, secondAfter)
+	selected := probe.FinalizeBenchmarkRetry(first, firstInterference, second, secondInterference)
+	if selected.Retry != nil && selected.Retry.SelectedAttempt == 2 {
+		probe.AppendInterferenceDiagnostics(&selected, secondInterference)
+	} else {
+		probe.AppendInterferenceDiagnostics(&selected, firstInterference)
+	}
+	return selected
 }
 
 // localizedTitle 按模块 ID 查标题译文。
@@ -251,6 +303,10 @@ func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (resu
 			result.Status = model.StatusError
 			result.Error = fmt.Sprintf("探针发生 panic: %v", recovered)
 			result.Summary = "探针异常，已隔离并继续"
+			result.AddFailure(model.Failure{
+				Category: model.FailureUnknown, Stage: "panic", Target: item.ID(),
+				Count: 1, Message: result.Error,
+			})
 			result.Finish(start)
 		}
 	}()

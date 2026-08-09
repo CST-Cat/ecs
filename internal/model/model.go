@@ -82,7 +82,175 @@ type Result struct {
 	TextBlocks   []TextBlock   `json:"text_blocks,omitempty"`
 	Notes        []string      `json:"notes,omitempty"`
 	Sources      []Source      `json:"sources,omitempty"`
+	Evidence     *Evidence     `json:"evidence,omitempty"`
+	Failures     []Failure     `json:"failures,omitempty"`
+	Retry        *RetryInfo    `json:"retry,omitempty"`
 	Error        string        `json:"error,omitempty"`
+}
+
+// RetryInfo records a single interference-triggered benchmark retry. The
+// selected attempt is chosen by environment interference, never by whichever
+// benchmark score is higher.
+type RetryInfo struct {
+	Triggered       bool           `json:"triggered"`
+	SelectedAttempt int            `json:"selected_attempt"`
+	SelectionRule   string         `json:"selection_rule"`
+	TriggerReasons  []string       `json:"trigger_reasons,omitempty"`
+	Attempts        []RetryAttempt `json:"attempts"`
+}
+
+type RetryAttempt struct {
+	Number       int           `json:"number"`
+	Status       Status        `json:"status"`
+	DurationMS   int64         `json:"duration_ms"`
+	Evidence     *Evidence     `json:"evidence,omitempty"`
+	Interference Interference  `json:"interference"`
+	Measurements []Measurement `json:"measurements,omitempty"`
+}
+
+// Interference is a structured environment assessment for one benchmark
+// attempt. Measurements contain load, steal, PSI and cgroup counter deltas
+// using stable keys; Reasons are concise human-readable trigger explanations.
+type Interference struct {
+	Detected     bool          `json:"detected"`
+	Score        int           `json:"score"`
+	Reasons      []string      `json:"reasons,omitempty"`
+	Measurements []Measurement `json:"measurements,omitempty"`
+}
+
+// FailureCategory is a stable machine-readable explanation for an operation
+// that did not produce usable evidence.  Human-readable command output stays
+// in Message; consumers should branch on Category rather than parsing it.
+type FailureCategory string
+
+const (
+	FailureTimeout            FailureCategory = "timeout"
+	FailureDNS                FailureCategory = "dns_error"
+	FailureConnectionRefused  FailureCategory = "connection_refused"
+	FailureNetworkUnreachable FailureCategory = "network_unreachable"
+	FailureRateLimited        FailureCategory = "rate_limited"
+	FailureHTTPRejected       FailureCategory = "http_rejected"
+	FailureTLS                FailureCategory = "tls_error"
+	FailureParse              FailureCategory = "parse_error"
+	FailureToolMissing        FailureCategory = "tool_missing"
+	FailurePermissionDenied   FailureCategory = "permission_denied"
+	FailureUnsupported        FailureCategory = "unsupported"
+	FailureCanceled           FailureCategory = "cancelled"
+	FailureUnknown            FailureCategory = "unknown"
+)
+
+// Failure records a failed observation without conflating it with the module
+// status or evidence grade. Count collapses repeated identical sample failures
+// so a DNS or latency module cannot bloat a report with one row per attempt.
+type Failure struct {
+	Category  FailureCategory `json:"category"`
+	Stage     string          `json:"stage,omitempty"`
+	Target    string          `json:"target,omitempty"`
+	Retryable bool            `json:"retryable"`
+	Count     int             `json:"count,omitempty"`
+	Message   string          `json:"message,omitempty"`
+}
+
+// AddFailure appends or coalesces a structured failure. Machine dimensions
+// form the identity; Message remains diagnostic context and is not parsed by
+// downstream consumers.
+func (r *Result) AddFailure(failure Failure) {
+	if failure.Category == "" {
+		failure.Category = FailureUnknown
+	}
+	if failure.Count <= 0 {
+		failure.Count = 1
+	}
+	for index := range r.Failures {
+		current := &r.Failures[index]
+		if current.Category == failure.Category && current.Stage == failure.Stage &&
+			current.Target == failure.Target && current.Retryable == failure.Retryable &&
+			current.Message == failure.Message {
+			current.Count += failure.Count
+			return
+		}
+	}
+	r.Failures = append(r.Failures, failure)
+}
+
+// Evidence records how much of a module's planned observation set produced a
+// usable verdict.  It is deliberately separate from Status: a module may
+// finish with a warning while still returning every planned sample, or may be
+// marked OK with only part of an optional observation set available.
+type Evidence struct {
+	Valid    int           `json:"valid"`
+	Expected int           `json:"expected"`
+	Unit     string        `json:"unit,omitempty"`
+	Grade    EvidenceGrade `json:"grade,omitempty"`
+}
+
+// EvidenceGrade describes whether the planned observation set is sufficient;
+// it says nothing about whether the observed value itself is good or bad.
+type EvidenceGrade string
+
+const (
+	EvidenceComplete     EvidenceGrade = "complete"
+	EvidencePartial      EvidenceGrade = "partial"
+	EvidenceInsufficient EvidenceGrade = "insufficient"
+	EvidenceNotPlanned   EvidenceGrade = "not_planned"
+)
+
+// DerivedGrade computes the canonical grade from normalized counters instead
+// of trusting a stale or manually edited serialized label.
+func (e Evidence) DerivedGrade() EvidenceGrade {
+	switch {
+	case e.Expected <= 0:
+		return EvidenceNotPlanned
+	case e.Valid >= e.Expected:
+		return EvidenceComplete
+	case e.Valid > 0:
+		return EvidencePartial
+	default:
+		return EvidenceInsufficient
+	}
+}
+
+// EffectiveGrade deliberately ignores a stale serialized grade when counters
+// disagree, keeping valid/expected as the single source of truth.
+func (e Evidence) EffectiveGrade() EvidenceGrade { return e.DerivedGrade() }
+
+// Normalize clamps malformed counters and refreshes the derived grade.
+func (e *Evidence) Normalize() {
+	if e == nil {
+		return
+	}
+	if e.Valid < 0 {
+		e.Valid = 0
+	}
+	if e.Expected < 0 {
+		e.Expected = 0
+	}
+	if e.Expected == 0 {
+		e.Valid = 0
+	} else if e.Valid > e.Expected {
+		e.Valid = e.Expected
+	}
+	e.Grade = e.DerivedGrade()
+}
+
+// EvidenceRatio returns a renderer-safe coverage ratio in [0, 1].
+func (e Evidence) EvidenceRatio() float64 {
+	if e.Expected <= 0 || e.Valid <= 0 {
+		return 0
+	}
+	valid := e.Valid
+	if valid > e.Expected {
+		valid = e.Expected
+	}
+	return float64(valid) / float64(e.Expected)
+}
+
+// NewEvidence normalizes counters at the probe boundary so malformed or
+// partially cancelled runs cannot emit negative coverage.
+func NewEvidence(valid, expected int, unit string) *Evidence {
+	evidence := &Evidence{Valid: valid, Expected: expected, Unit: unit}
+	evidence.Normalize()
+	return evidence
 }
 
 type Methodology struct {
@@ -91,6 +259,10 @@ type Methodology struct {
 	Engine          string `json:"engine,omitempty"`
 	Profile         string `json:"profile,omitempty"`
 	ComparisonScope string `json:"comparison_scope,omitempty"`
+	// Parameters is the stable, machine-readable workload scope used by
+	// ecs compare. Human prose in Profile/ComparisonScope is never parsed to
+	// decide whether two numbers are like-for-like.
+	Parameters map[string]string `json:"parameters,omitempty"`
 }
 
 type Field struct {
@@ -204,8 +376,30 @@ func RedactedCopy(in Report, reveal bool) Report {
 	out.Results = make([]Result, len(in.Results))
 	for i, result := range in.Results {
 		out.Results[i] = result
+		out.Results[i].Methodology.Parameters = cloneStringMap(result.Methodology.Parameters)
+		if result.Evidence != nil {
+			evidence := *result.Evidence
+			out.Results[i].Evidence = &evidence
+		}
 		out.Results[i].Fields = append([]Field(nil), result.Fields...)
 		out.Results[i].Measurements = append([]Measurement(nil), result.Measurements...)
+		out.Results[i].Failures = append([]Failure(nil), result.Failures...)
+		if result.Retry != nil {
+			retry := *result.Retry
+			retry.TriggerReasons = append([]string(nil), result.Retry.TriggerReasons...)
+			retry.Attempts = make([]RetryAttempt, len(result.Retry.Attempts))
+			for attemptIndex, attempt := range result.Retry.Attempts {
+				retry.Attempts[attemptIndex] = attempt
+				retry.Attempts[attemptIndex].Measurements = append([]Measurement(nil), attempt.Measurements...)
+				retry.Attempts[attemptIndex].Interference.Reasons = append([]string(nil), attempt.Interference.Reasons...)
+				retry.Attempts[attemptIndex].Interference.Measurements = append([]Measurement(nil), attempt.Interference.Measurements...)
+				if attempt.Evidence != nil {
+					evidence := *attempt.Evidence
+					retry.Attempts[attemptIndex].Evidence = &evidence
+				}
+			}
+			out.Results[i].Retry = &retry
+		}
 		out.Results[i].Notes = append([]string(nil), result.Notes...)
 		out.Results[i].Sources = append([]Source(nil), result.Sources...)
 		out.Results[i].TextBlocks = append([]TextBlock(nil), result.TextBlocks...)
@@ -393,6 +587,9 @@ func redactExactLocalIPs(report *Report, selected map[string]struct{}) {
 	}
 	for resultIndex := range report.Results {
 		result := &report.Results[resultIndex]
+		for key, value := range result.Methodology.Parameters {
+			result.Methodology.Parameters[key] = maskSelectedIPsInText(value, selected)
+		}
 		result.Description = maskSelectedIPsInText(result.Description, selected)
 		result.Summary = maskSelectedIPsInText(result.Summary, selected)
 		result.Error = maskSelectedIPsInText(result.Error, selected)
@@ -417,6 +614,17 @@ func redactExactLocalIPs(report *Report, selected map[string]struct{}) {
 			result.TextBlocks[index].Content = maskSelectedIPsInText(result.TextBlocks[index].Content, selected)
 		}
 	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func FormatBytes(bytes uint64) string {

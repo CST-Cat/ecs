@@ -574,6 +574,8 @@ func (r *textRenderer) result(result model.Result) {
 	if result.Error != "" {
 		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), r.palette.ErrorBold)
 	}
+	r.resultEvidenceCoverage(result.Evidence)
+	r.resultFailures(result.Failures)
 	for _, group := range textGroups(result) {
 		r.renderGroup(group)
 	}
@@ -581,6 +583,70 @@ func (r *textRenderer) result(result model.Result) {
 		r.resultEvidence(result)
 	}
 	r.blank()
+}
+
+func (r *textRenderer) resultFailures(failures []model.Failure) {
+	if len(failures) == 0 {
+		return
+	}
+	r.subsection(i18n.T("report.failures"))
+	rows := make([][]string, 0, len(failures))
+	for _, failure := range failures {
+		rows = append(rows, []string{
+			failureCategoryLabel(failure.Category),
+			fallbackReport(failure.Stage, "—"),
+			fallbackReport(failure.Target, "—"),
+			strconv.Itoa(maxInt(failure.Count, 1)),
+			failureRetryableLabel(failure.Retryable),
+			fallbackReport(failure.Message, "—"),
+		})
+	}
+	r.table([]string{
+		i18n.T("failure.category"), i18n.T("failure.stage"), i18n.T("failure.target"),
+		i18n.T("failure.count"), i18n.T("failure.retryable"), i18n.T("failure.message"),
+	}, rows, map[int]bool{3: true})
+	r.blank()
+}
+
+func (r *textRenderer) resultEvidenceCoverage(evidence *model.Evidence) {
+	if evidence == nil {
+		return
+	}
+	ratio := evidence.EvidenceRatio()
+	label := evidenceText(*evidence)
+	line := fmt.Sprintf("%s%s%s", i18n.T("report.evidence"), i18n.T("punct.colon"), label)
+	style := r.palette.WarningBold
+	if evidence.Expected <= 0 {
+		style = r.palette.Dim
+	} else if evidence.Valid <= 0 {
+		style = r.palette.ErrorBold
+	} else if evidence.Valid >= evidence.Expected && evidence.Expected > 0 {
+		style = r.palette.SuccessBold
+	}
+	// Keep the semantic label and the proportional bar as sibling ANSI spans.
+	// Nesting a colored bar inside another style would reset the outer color on
+	// basic and 256-color terminals after the first filled cell.
+	r.line("  %s  %s", style(line), r.palette.Bar(ratio, 16))
+}
+
+func evidenceText(evidence model.Evidence) string {
+	unit := evidence.Unit
+	unitKey := "evidence.unit." + unit
+	if i18n.Current() == i18n.LangEN && evidence.Expected != 1 {
+		unitKey = "evidence.units." + unit
+	}
+	if unit != "" && i18n.Has(i18n.Current(), unitKey) {
+		unit = i18n.T(unitKey)
+	}
+	count := fmt.Sprintf("%d/%d", evidence.Valid, evidence.Expected)
+	if unit != "" {
+		count += " " + unit
+	}
+	if evidence.Expected <= 0 {
+		return count + " · " + i18n.T("evidence.notPlanned")
+	}
+	state := i18n.T("evidence." + string(evidence.EffectiveGrade()))
+	return fmt.Sprintf("%s · %.0f%% · %s", count, evidence.EvidenceRatio()*100, state)
 }
 
 // resultEvidence is rendered in file txt output but intentionally omitted from
@@ -980,7 +1046,39 @@ func comparisonSemantic(item model.Measurement) string {
 	if semantic := matrixMeasurementSemantic(item.Key); semantic != "" {
 		return semantic
 	}
+	key := strings.ToLower(item.Key)
 	lower := strings.ToLower(item.Key + " " + item.Label)
+	// Percentile and interval qualifiers are separate metrics even when their
+	// units and quality direction match. Keeping them in distinct buckets makes
+	// every bar compare like with like across targets instead of, for example,
+	// scaling a DNS P50 against a DNS P95 or an iperf interval minimum against
+	// the final whole-run throughput.
+	switch {
+	case strings.Contains(key, "iperf3_") && strings.Contains(key, "_interval_min_"):
+		return "iperf-interval-min"
+	case strings.Contains(key, "iperf3_") && strings.Contains(key, "_interval_p50_"):
+		return "iperf-interval-p50"
+	case strings.Contains(key, "iperf3_") && strings.HasSuffix(key, "_mbps"):
+		return "iperf-throughput"
+	case strings.HasPrefix(key, "dns_resolver_") && strings.Contains(key, "_p50_"):
+		return "dns-p50"
+	case key == "best_dns_median_ms":
+		return "dns-p50"
+	case strings.HasPrefix(key, "dns_resolver_") && strings.Contains(key, "_p95_"):
+		return "dns-p95"
+	case strings.HasPrefix(key, "tcp_target_") && strings.Contains(key, "_p50_"):
+		return "tcp-p50"
+	case key == "best_tcp_median_ms":
+		return "tcp-p50"
+	case strings.HasPrefix(key, "tcp_target_") && strings.Contains(key, "_p95_"):
+		return "tcp-p95"
+	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_hop_slots"):
+		return "route-hop-slots"
+	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_visible_hops"):
+		return "route-visible-hops"
+	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_timeout_hops"):
+		return "route-timeout-hops"
+	}
 	switch strings.TrimSpace(item.Unit) {
 	case "%":
 		switch {

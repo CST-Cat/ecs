@@ -135,6 +135,22 @@ func TestLatencyProbeRunWithRealLoopbackTCP(t *testing.T) {
 	if !bestFound {
 		t.Fatalf("missing best_tcp_median_ms measurement: %+v", result.Measurements)
 	}
+	keys := make(map[string]bool, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		keys[measurement.Key] = true
+	}
+	for _, key := range []string{
+		"tcp_target_01_ipv4_success_percent", "tcp_target_01_ipv4_p50_ms",
+		"tcp_target_01_ipv4_p95_ms", "tcp_target_01_ipv4_jitter_ms",
+		"tcp_target_02_ipv4_success_percent",
+	} {
+		if !keys[key] {
+			t.Errorf("latency result missing %q: %+v", key, result.Measurements)
+		}
+	}
+	if result.Evidence == nil || result.Evidence.Valid != attempts || result.Evidence.Expected != attempts*2 {
+		t.Fatalf("latency evidence = %+v, want %d/%d", result.Evidence, attempts, attempts*2)
+	}
 	if !strings.Contains(result.Summary, "loopback-ok") || !strings.Contains(result.Summary, "P50") {
 		t.Fatalf("latency summary = %q", result.Summary)
 	}
@@ -167,6 +183,18 @@ func TestAppendICMPMeasurementsRetainsCompleteStatistics(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing ICMP measurements: %v", want)
+	}
+}
+
+func TestAppendICMPMeasurementsKeepsIPFamiliesDistinct(t *testing.T) {
+	var result model.Result
+	stats := icmpStats{Available: true, LossKnown: true, LossPercent: 0}
+	appendICMPMeasurementsForFamily(&result, "Cloudflare", "4", stats)
+	appendICMPMeasurementsForFamily(&result, "Cloudflare", "6", stats)
+	if len(result.Measurements) != 2 ||
+		result.Measurements[0].Key != "icmp_loss_percent_cloudflare_ipv4" ||
+		result.Measurements[1].Key != "icmp_loss_percent_cloudflare_ipv6" {
+		t.Fatalf("family-specific ICMP measurements = %+v", result.Measurements)
 	}
 }
 

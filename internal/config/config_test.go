@@ -48,23 +48,20 @@ func TestProfilesOnlyChangeModulePreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCounts := map[string]int{
-		ProfileStandard: 16,
-		ProfileFull:     18,
+	wantModules := map[string][]string{
+		ProfileStandard: {
+			"system", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
+			"ports", "nat", "blacklist", "apps", "cnspeed", "media", "route", "backtrace",
+		},
+		ProfileFull: ModuleIDs(),
 	}
 	for _, profile := range []string{ProfileStandard, ProfileFull} {
 		cfg, err := Defaults(profile)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(cfg.Modules) != wantCounts[profile] {
-			t.Fatalf("%s module count = %d, want %d", profile, len(cfg.Modules), wantCounts[profile])
-		}
-		if profile == ProfileStandard && contains(cfg.Modules, "ookla") {
-			t.Fatal("standard profile must omit Ookla by default")
-		}
-		if profile == ProfileFull && !contains(cfg.Modules, "ookla") {
-			t.Fatal("full profile must include Ookla by default")
+		if !reflect.DeepEqual(cfg.Modules, wantModules[profile]) {
+			t.Fatalf("%s modules = %v, want %v", profile, cfg.Modules, wantModules[profile])
 		}
 		if cfg.CPUTime != full.CPUTime || cfg.DiskMiB != full.DiskMiB ||
 			cfg.DNSAttempts != full.DNSAttempts || cfg.LatencyAttempts != full.LatencyAttempts ||
@@ -85,7 +82,7 @@ func TestOnlyCanSelectModulesOutsideProfile(t *testing.T) {
 		only []string
 		want []string
 	}{
-		{name: "cnspeed and disk", only: []string{"cnspeed", "disk"}, want: []string{"disk", "cnspeed"}},
+		{name: "network and disk", only: []string{"network", "disk"}, want: []string{"network", "disk"}},
 		{name: "ookla", only: []string{"ookla"}, want: []string{"ookla"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -102,8 +99,8 @@ func TestOnlyCanSelectModulesOutsideProfile(t *testing.T) {
 		})
 	}
 	// --skip still filters an explicitly selected module after --only.
-	if got := SelectModules(cfg.Modules, []string{"cnspeed", "disk"}, []string{"disk"}); !reflect.DeepEqual(got, []string{"cnspeed"}) {
-		t.Fatalf("SelectModules skip = %v, want [cnspeed]", got)
+	if got := SelectModules(cfg.Modules, []string{"network", "disk"}, []string{"disk"}); !reflect.DeepEqual(got, []string{"network"}) {
+		t.Fatalf("SelectModules skip = %v, want [network]", got)
 	}
 }
 

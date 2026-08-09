@@ -83,6 +83,7 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 				unlocked++
 			case stateUnknown:
 				unknown++
+				addFailureMessage(&result, "platform_check", item.Check.Name, item.Verdict.Evidence)
 			case stateLocked, stateRestricted, stateUnreachable:
 				locked++
 			}
@@ -116,6 +117,7 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(false),
 		},
 	}
+	result.Evidence = model.NewEvidence(total-unknown, total, "target")
 	result.Summary = fmt.Sprintf("%d/%d 可用 · %d 不可用 · %d 未知", unlocked, total, locked, unknown)
 	result.Finish(start)
 	return result

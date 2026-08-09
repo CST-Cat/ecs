@@ -53,16 +53,19 @@ func TestDetectRouteEngineRequiresOfficialTiny(t *testing.T) {
 
 func TestRouteProbeRequiresValidJSONAndResponsiveHop(t *testing.T) {
 	cases := []struct {
-		name       string
-		output     string
-		wantStatus model.Status
-		wantRow    string
-		wantHops   string
+		name         string
+		output       string
+		wantStatus   model.Status
+		wantRow      string
+		wantSlots    string
+		wantVisible  string
+		wantEvidence int
+		wantMetrics  int
 	}{
-		{name: "valid nested address", output: `{"Hops":[[{"Address":{"IP":"127.0.0.1"}}]]}`, wantStatus: model.StatusOK, wantRow: "完成", wantHops: "1"},
-		{name: "malformed", output: `{"Hops":`, wantStatus: model.StatusWarning, wantRow: "NextTrace 解析失败", wantHops: "0"},
-		{name: "empty hops", output: `{"Hops":[]}`, wantStatus: model.StatusWarning, wantRow: "NextTrace 解析失败", wantHops: "0"},
-		{name: "all unresponsive", output: `{"Hops":[[{"Address":null}],[{"Address":""}]]}`, wantStatus: model.StatusWarning, wantRow: "NextTrace 解析失败", wantHops: "0"},
+		{name: "valid nested address", output: `{"Hops":[[{"Address":{"IP":"127.0.0.1"}}]]}`, wantStatus: model.StatusOK, wantRow: "完成", wantSlots: "1", wantVisible: "1", wantEvidence: 1, wantMetrics: 4},
+		{name: "malformed", output: `{"Hops":`, wantStatus: model.StatusWarning, wantRow: "NextTrace 解析失败", wantSlots: "0", wantVisible: "0"},
+		{name: "empty hops", output: `{"Hops":[]}`, wantStatus: model.StatusWarning, wantRow: "NextTrace 解析失败", wantSlots: "0", wantVisible: "0"},
+		{name: "all unresponsive", output: `{"Hops":[[{"Address":null}],[{"Address":""}]]}`, wantStatus: model.StatusWarning, wantRow: "无响应", wantSlots: "2", wantVisible: "0", wantEvidence: 1, wantMetrics: 4},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -81,8 +84,14 @@ func TestRouteProbeRequiresValidJSONAndResponsiveHop(t *testing.T) {
 				t.Fatalf("route tables = %+v", result.Tables)
 			}
 			row := result.Tables[0].Rows[0]
-			if row[2] != testCase.wantRow || row[3] != testCase.wantHops {
-				t.Fatalf("route row = %v, want status=%q hops=%q", row, testCase.wantRow, testCase.wantHops)
+			if row[2] != testCase.wantRow || row[3] != testCase.wantSlots || row[4] != testCase.wantVisible {
+				t.Fatalf("route row = %v, want status=%q slots=%q visible=%q", row, testCase.wantRow, testCase.wantSlots, testCase.wantVisible)
+			}
+			if result.Evidence == nil || result.Evidence.Valid != testCase.wantEvidence || result.Evidence.Expected != 1 {
+				t.Fatalf("route evidence = %+v, want %d/1", result.Evidence, testCase.wantEvidence)
+			}
+			if len(result.Measurements) != testCase.wantMetrics {
+				t.Fatalf("route metrics = %+v, want %d", result.Measurements, testCase.wantMetrics)
 			}
 			if len(result.TextBlocks) != 1 || result.TextBlocks[0].Content != testCase.output {
 				t.Fatalf("raw route output was not retained: %+v", result.TextBlocks)

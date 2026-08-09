@@ -16,7 +16,7 @@ import (
 
 func textSampleReport() model.Report {
 	return model.Report{
-		SchemaVersion: "ecs.report/v1",
+		SchemaVersion: "ecs.report/v2",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run: model.RunInfo{
 			ID: "abc", Profile: "standard", Exposure: "local", Offline: true,
@@ -735,6 +735,39 @@ func TestTextIncludesEveryResultDetail(t *testing.T) {
 	}
 }
 
+func TestEvidenceCoverageUsesPaletteAndFitsEveryTerminalLevel(t *testing.T) {
+	data := textSampleReport()
+	data.Results[0].Evidence = model.NewEvidence(3, 4, "sample")
+	for _, level := range []termcolor.Level{
+		termcolor.LevelNone, termcolor.LevelBasic, termcolor.LevelANSI256, termcolor.LevelTrueColor,
+	} {
+		out := Text(data, TextOptions{Color: level})
+		if !strings.Contains(out, i18n.T("report.evidence")) || !strings.Contains(out, "3/4") || !strings.Contains(out, "75%") {
+			t.Fatalf("level %v lost evidence coverage:\n%s", level, out)
+		}
+		if !strings.Contains(out, "█") && !strings.Contains(out, "▓") && !strings.Contains(out, "▒") {
+			t.Fatalf("level %v lost proportional evidence bar:\n%s", level, out)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if width := textwidth.Width(line); width > textWidth {
+				t.Fatalf("level %v evidence report line is %d columns: %q", level, width, line)
+			}
+		}
+	}
+}
+
+func TestEvidenceCoverageUsesEnglishPluralUnitsAndNoPlanState(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangEN)
+	if got := evidenceText(*model.NewEvidence(3, 4, "query")); got != "3/4 queries · 75% · partial" {
+		t.Fatalf("plural evidence text = %q", got)
+	}
+	if got := evidenceText(*model.NewEvidence(0, 0, "sample")); got != "0/0 samples · no samples planned" {
+		t.Fatalf("unplanned evidence text = %q", got)
+	}
+}
+
 // 同单位同方向的一组指标才画组内相对柱：把 ms 和 MiB/s 放同一刻度没有意义。
 func TestGroupComparableRequiresSameUnitAndDirection(t *testing.T) {
 	items := []model.Measurement{
@@ -755,6 +788,24 @@ func TestGroupComparableRequiresSameUnitAndDirection(t *testing.T) {
 	}
 	if value := comparableValue(items[0], groups["a"]); value <= comparableValue(items[1], groups["b"]) {
 		t.Error("翻转后更小的延迟应得到更大的比较值")
+	}
+}
+
+func TestStructuredPercentilesAndRouteCountsUseSeparateBarScales(t *testing.T) {
+	items := []model.Measurement{
+		{Key: "dns_resolver_01_p50_ms", Value: 10, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "dns_resolver_02_p50_ms", Value: 20, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "dns_resolver_01_p95_ms", Value: 100, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "dns_resolver_02_p95_ms", Value: 200, Unit: "ms", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "route_target_01_hop_slots", Value: 8, Unit: "hops", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "route_target_02_hop_slots", Value: 10, Unit: "hops", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "route_target_01_timeout_hops", Value: 1, Unit: "hops", HigherIsBetter: model.BoolPtr(false)},
+		{Key: "route_target_02_timeout_hops", Value: 2, Unit: "hops", HigherIsBetter: model.BoolPtr(false)},
+	}
+	groups := groupComparable(items)
+	if groups["dns_resolver_01_p50_ms"].min == groups["dns_resolver_01_p95_ms"].min ||
+		groups["route_target_01_hop_slots"].min == groups["route_target_01_timeout_hops"].min {
+		t.Fatalf("unlike structured metrics borrowed one bar scale: %+v", groups)
 	}
 }
 

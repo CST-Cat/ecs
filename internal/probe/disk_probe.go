@@ -30,6 +30,8 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		result.Status = model.StatusWarning
 		result.Summary = "未找到 fio，标准磁盘基准未运行"
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "fio", Count: 1, Message: result.Summary})
+		result.Evidence = model.NewEvidence(0, len(fioJobPlan()), "job")
 		result.Notes = append(result.Notes, "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 fio，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供缓存 I/O 或自研替代分数。")
 	}
 

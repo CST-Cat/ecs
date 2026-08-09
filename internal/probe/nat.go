@@ -93,6 +93,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	servers := env.Config.STUNServers
 	if len(servers) == 0 {
 		result.Skip("未配置 STUN 服务器")
+		result.Evidence = model.NewEvidence(0, 1, "target")
 		result.Finish(start)
 		return result
 	}
@@ -127,8 +128,10 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		switch {
 		case finding.UDPBlocked:
 			status = "UDP 无响应"
+			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: status})
 		case finding.Err != nil:
 			status = "失败：" + compactError(finding.Err)
+			addFailure(&result, "stun_binding", finding.Server.Address, finding.Err)
 		}
 		other := finding.Other.String()
 		if other == "" {
@@ -158,6 +161,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 			"所有 STUN 服务器都没有返回映射地址。常见原因是出站 UDP 被封锁、"+
 				"防火墙只放行 TCP，或本次选用的服务器全部不可用；这本身也说明 UDP 类应用会受影响。",
 		)
+		result.Evidence = model.NewEvidence(0, 1, "target")
 		result.Finish(start)
 		return result
 	}
@@ -183,6 +187,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 			Method: "stun-binding-rfc5389-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
+	result.Evidence = model.NewEvidence(1, 1, "target")
 	result.Sources = []model.Source{
 		{Name: "RFC 5389", URL: "https://www.rfc-editor.org/rfc/rfc5389", Purpose: "STUN Binding 协议"},
 		{Name: "RFC 5780", URL: "https://www.rfc-editor.org/rfc/rfc5780", Purpose: "NAT 映射与过滤行为发现方法"},

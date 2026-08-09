@@ -97,6 +97,7 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	openCount := 0
 	emailOpen := 0
+	validAttempts := 0
 	for _, item := range collected {
 		status := "阻断/不可达"
 		detail := item.Error
@@ -108,6 +109,12 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 				emailOpen++
 			}
 		}
+		if item.Open || item.Error != "" {
+			validAttempts++
+		}
+		if !item.Open && item.Error != "" {
+			addFailureMessage(&result, "connect", item.Target.Address, item.Error)
+		}
 		table.Rows = append(table.Rows, []string{item.Target.Service, item.Target.Address, item.Target.Note, status, detail})
 	}
 	result.Tables = []model.Table{table}
@@ -115,6 +122,7 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "reachable_ports", Label: "可达端口", Value: float64(openCount), Unit: "项", Display: fmt.Sprintf("%d/%d", openCount, len(targets)), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
 		{Key: "reachable_mail_ports", Label: "可达邮件端口", Value: float64(emailOpen), Unit: "项", Display: fmt.Sprintf("%d/4", emailOpen), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
 	}
+	result.Evidence = model.NewEvidence(validAttempts, len(targets), "target")
 	result.Notes = append(result.Notes,
 		"只完成 TCP 握手，不发送邮件、认证信息或应用层命令。",
 		"失败可能来自本机防火墙、上游封锁、DNS、目标服务或地区限制；单一目标失败不能证明端口被运营商封锁。",

@@ -202,6 +202,47 @@ func TestParseIPerfTCPJSONUsesTheRequestedDirection(t *testing.T) {
 	}
 }
 
+func TestParseIPerfTCPJSONRetainsIntervalStability(t *testing.T) {
+	raw := []byte(`{
+		"start":{"test_start":{"protocol":"TCP","reverse":0}},
+		"intervals":[
+			{"sum":{"bits_per_second":100000000}},
+			{"sum":{"bits_per_second":200000000}},
+			{"sum":{"bits_per_second":300000000}}
+		],
+		"end":{"sum_sent":{"bytes":75000000,"bits_per_second":200000000,"retransmits":4,"seconds":3}}
+	}`)
+	got := parseIPerfTCPJSON(raw, 5201, false)
+	if got.Error != "" {
+		t.Fatalf("parse interval JSON: %+v", got)
+	}
+	if !reflect.DeepEqual(got.IntervalMbps, []float64{100, 200, 300}) || got.IntervalMin != 100 || got.IntervalMedian != 200 {
+		t.Fatalf("interval statistics = %+v", got)
+	}
+	if got.IntervalCV < 40.82 || got.IntervalCV > 40.83 {
+		t.Fatalf("interval CV = %f, want about 40.825", got.IntervalCV)
+	}
+}
+
+func TestParseIPerfTCPJSONKeepsExplicitZeroIntervals(t *testing.T) {
+	raw := []byte(`{
+		"start":{"test_start":{"protocol":"TCP","reverse":0}},
+		"intervals":[
+			{"sum":{"bits_per_second":0}},
+			{"sum":{}},
+			{"sum":{"bits_per_second":100000000}}
+		],
+		"end":{"sum_sent":{"bytes":12500000,"bits_per_second":50000000,"retransmits":1,"seconds":2}}
+	}`)
+	got := parseIPerfTCPJSON(raw, 5201, false)
+	if got.Error != "" {
+		t.Fatalf("parse zero interval JSON: %+v", got)
+	}
+	if !reflect.DeepEqual(got.IntervalMbps, []float64{0, 100}) || got.IntervalMin != 0 || got.IntervalMedian != 50 || got.IntervalCV != 100 {
+		t.Fatalf("explicit zero interval was lost: %+v", got)
+	}
+}
+
 func TestParseIPerfTCPJSONRejectsWrongProtocolAndMissingExpectedSummary(t *testing.T) {
 	wrongProtocol := []byte(`{"start":{"test_start":{"protocol":"UDP","reverse":0}},"end":{"sum_sent":{"bytes":100,"bits_per_second":1000000,"seconds":1}}}`)
 	if got := parseIPerfTCPJSON(wrongProtocol, 5200, false); got.Error == "" || got.Mbps != 0 {

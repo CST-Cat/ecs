@@ -111,4 +111,19 @@ func TestNetworkFieldsFallbackToBGPWhenIPAPIUnavailable(t *testing.T) {
 	if fields["ipv4_owner"] != "未查询（ipapi 不可用）" {
 		t.Fatalf("owner semantic fallback = %q", fields["ipv4_owner"])
 	}
+	if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 1 || result.Evidence.Unit != "source" {
+		t.Fatalf("network provider evidence = %+v, want 0/1 source", result.Evidence)
+	}
+}
+
+func TestEnabledIPQualitySourceCountMatchesConfiguredProviders(t *testing.T) {
+	if got := enabledIPQualitySourceCount([]string{"none"}); got != 0 {
+		t.Fatalf("none enables %d sources", got)
+	}
+	if got := enabledIPQualitySourceCount([]string{"ipapi", "dbip"}); got != 2 {
+		t.Fatalf("explicit source count = %d, want 2", got)
+	}
+	if got := enabledIPQualitySourceCount([]string{"all"}); got != len(qualitySourceOrder) {
+		t.Fatalf("all source count = %d, want %d", got, len(qualitySourceOrder))
+	}
 }

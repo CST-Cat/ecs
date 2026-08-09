@@ -80,6 +80,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		address, _ := env.Egress.Lookup(version)
 		egressIP, err := env.Egress.IPFor(version)
 		if err != nil {
+			addFailure(&result, "egress", "IPv"+version, err)
 			result.Fields = append(result.Fields, model.Field{
 				Key:   "ipv" + version + "_error",
 				Label: "IPv" + version + " 失败原因",
@@ -100,6 +101,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 
 		observations, err := routeViewsObservations(ctx, env, address, egressIP)
 		if err != nil {
+			addFailure(&result, "provider", "RouteViews IPv"+version, err)
 			result.Fields = append(result.Fields, model.Field{
 				Key: "ipv" + version + "_routeviews_error", Label: "IPv" + version + " RouteViews 失败原因", Value: compactError(err),
 			})
@@ -137,6 +139,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		Key: "bgp_families_observed", Label: "BGP 可观测协议族", Value: float64(successes), Unit: "项",
 		Display: fmt.Sprintf("%d/%d", successes, len(versions)), Method: "routeviews-current-rib-v1", HigherIsBetter: model.BoolPtr(true),
 	})
+	result.Evidence = model.NewEvidence(successes, len(versions), "target")
 	if successes == 0 {
 		result.Status = model.StatusWarning
 		result.Summary = "没有取得当前公共 BGP 观测"

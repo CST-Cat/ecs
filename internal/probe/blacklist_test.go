@@ -105,3 +105,22 @@ func TestDNSBLRowRankPutsHitsFirst(t *testing.T) {
 		t.Fatal("失败应排在干净之前")
 	}
 }
+
+func TestDNSBLCountMeasurementsKeepAllOutcomesSeparate(t *testing.T) {
+	measurements := dnsblCountMeasurements(2, 11, 3, 1, 17)
+	want := map[string]float64{
+		"dnsbl_listed_count":  2,
+		"dnsbl_clean_count":   11,
+		"dnsbl_refused_count": 3,
+		"dnsbl_failed_count":  1,
+	}
+	if len(measurements) != len(want) {
+		t.Fatalf("DNSBL measurements = %+v", measurements)
+	}
+	for _, measurement := range measurements {
+		value, ok := want[measurement.Key]
+		if !ok || measurement.Value != value || measurement.Display == "" || measurement.Method != "dnsbl-a-lookup-v1" {
+			t.Errorf("DNSBL outcome measurement = %+v", measurement)
+		}
+	}
+}

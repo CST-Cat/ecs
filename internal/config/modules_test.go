@@ -33,14 +33,20 @@ func TestModuleDescriptorsAreCanonical(t *testing.T) {
 	if got := ModulesForProfile(ProfileFull); len(got) != 18 {
 		t.Fatalf("full profile module count = %d, want 18: %v", len(got), got)
 	}
-	if !contains(ModulesForProfile(ProfileFull), "ookla") {
-		t.Fatal("Ookla must be part of the full preset")
+	standard := ModulesForProfile(ProfileStandard)
+	for _, id := range []string{"network", "ookla"} {
+		if !contains(ModulesForProfile(ProfileFull), id) {
+			t.Fatalf("%s must be part of the full preset", id)
+		}
+		if contains(standard, id) {
+			t.Fatalf("%s must not be part of the standard preset", id)
+		}
+		if descriptor, ok := ModuleDescriptorFor(id); !ok || descriptor.ProfileStandard || !descriptor.ProfileFull || descriptor.ProfileExplicitOnly {
+			t.Fatalf("%s profile metadata = %+v, want full-only default module", id, descriptor)
+		}
 	}
-	if contains(ModulesForProfile(ProfileStandard), "ookla") {
-		t.Fatal("Ookla must not be part of the standard preset")
-	}
-	if descriptor, ok := ModuleDescriptorFor("ookla"); !ok || descriptor.ProfileStandard || !descriptor.ProfileFull || descriptor.ProfileExplicitOnly {
-		t.Fatalf("Ookla profile metadata = %+v, want full-only default module", descriptor)
+	if !contains(standard, "cnspeed") {
+		t.Fatal("cnspeed must be part of the standard preset")
 	}
 }
 

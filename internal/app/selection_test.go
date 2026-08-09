@@ -13,7 +13,7 @@ func TestStandardOnlyCanSelectModulesOutsidePreset(t *testing.T) {
 		only string
 		want string
 	}{
-		{name: "cnspeed and disk", only: "cnspeed,disk", want: "disk,cnspeed"},
+		{name: "network and disk", only: "network,disk", want: "network,disk"},
 		{name: "ookla", only: "ookla", want: "ookla"},
 	}
 	for _, testCase := range cases {

@@ -53,6 +53,8 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
 		result.Skip("未发现 NextTrace Tiny")
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "nexttrace", Count: 1, Message: result.Summary})
+		result.Evidence = model.NewEvidence(0, len(env.Config.RouteTargets), "target")
 		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过路由探测。")
 		result.Finish(start)
 		return result
@@ -60,6 +62,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	targets := endpointsForIPVersion(env.Config.RouteTargets, env.Config.IPVersion)
 	if len(targets) == 0 {
 		result.Skip("没有匹配当前协议族的路由目标")
+		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Notes = append(result.Notes, "当前协议族没有可用的字面量路由目标；请用 --route-targets 提供对应协议族的目标地址。")
 		result.Finish(start)
 		return result
@@ -74,29 +77,65 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		Name: "NextTrace Tiny", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "以纯 JSON、无启动横幅模式执行官方 Tiny 路由追踪",
 	})
 	table := model.Table{
-		Title:   "追踪摘要",
-		Columns: []string{"目标", "类型", "状态", "已见跳数", "耗时"},
+		Title:                 "追踪摘要",
+		Columns:               []string{"目标", "类型", "状态", "探测跳位", "可见跳点", "超时跳点", "耗时"},
+		NumericColumns:        []int{3, 4, 5, 6},
+		NumericHigherIsBetter: []bool{false, true, false, false},
 	}
 	successes := 0
-	for _, target := range targets {
+	validTraces := 0
+	for targetIndex, target := range targets {
 		traceCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		traceStart := time.Now()
 		output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, routeSnapshotHops, endpointFamily(target, env.Config.IPVersion))
 		elapsed := time.Since(traceStart)
 		cancel()
 		clean := sanitizeCommandOutput(output)
-		hops := routeHopCount(engine.Name, clean)
+		slots, visible, timeouts, parsed := routeHopSummary(engine.Name, clean)
 		status := "完成"
 		switch {
 		case err != nil:
 			status = "部分/失败"
-		case hops == 0:
+			addFailure(&result, "trace", target.Address, err)
+		case !parsed:
 			status = "NextTrace 解析失败"
+			addFailureMessage(&result, "parse", target.Address, "NextTrace JSON 解析失败或没有有效跳点")
 			result.Notes = append(result.Notes, fmt.Sprintf("%s 追踪失败：NextTrace JSON 解析失败或没有有效跳点", target.Name))
+		case visible == 0:
+			status = "无响应"
+			validTraces++
 		default:
 			successes++
+			validTraces++
 		}
-		table.Rows = append(table.Rows, []string{target.Name, target.Kind, status, fmt.Sprintf("%d", hops), elapsed.Round(time.Millisecond).String()})
+		table.Rows = append(table.Rows, []string{
+			target.Name, target.Kind, status, strconv.Itoa(slots), strconv.Itoa(visible), strconv.Itoa(timeouts), elapsed.Round(time.Millisecond).String(),
+		})
+		if parsed {
+			prefix := fmt.Sprintf("route_target_%02d", targetIndex+1)
+			result.Measurements = append(result.Measurements,
+				model.Measurement{
+					Key: prefix + "_hop_slots", Label: target.Name + " 探测跳位",
+					Value: float64(slots), Unit: "hops", Display: strconv.Itoa(slots),
+					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+				},
+				model.Measurement{
+					Key: prefix + "_visible_hops", Label: target.Name + " 可见跳点",
+					Value: float64(visible), Unit: "hops", Display: strconv.Itoa(visible),
+					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(true),
+				},
+				model.Measurement{
+					Key: prefix + "_timeout_hops", Label: target.Name + " 超时跳点",
+					Value: float64(timeouts), Unit: "hops", Display: strconv.Itoa(timeouts),
+					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+				},
+				model.Measurement{
+					Key: prefix + "_duration_ms", Label: target.Name + " 追踪耗时",
+					Value: float64(elapsed) / float64(time.Millisecond), Unit: "ms", Display: elapsed.Round(time.Millisecond).String(),
+					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+				},
+			)
+		}
 		if clean != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
 				Title:    target.Name + " (" + target.Address + ")",
@@ -106,6 +145,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = []model.Table{table}
+	result.Evidence = model.NewEvidence(validTraces, len(targets), "target")
 	if successes < len(targets) {
 		result.Status = model.StatusWarning
 	}
@@ -190,20 +230,24 @@ func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, f
 }
 
 func routeHopCount(engineName, output string) int {
+	_, visible, _, _ := routeHopSummary(engineName, output)
+	return visible
+}
+
+func routeHopSummary(engineName, output string) (slots, visible, timeouts int, ok bool) {
 	if !isNextTraceEngine(engineName) {
-		return 0
+		return 0, 0, 0, false
 	}
 	details, ok := extractNextTraceDetails(output)
 	if !ok {
-		return 0
+		return 0, 0, 0, false
 	}
-	count := 0
 	for _, hop := range details {
 		if hop.IP != "" && hop.IP != "—" {
-			count++
+			visible++
 		}
 	}
-	return count
+	return len(details), visible, len(details) - visible, true
 }
 
 func isNextTraceEngine(name string) bool {
