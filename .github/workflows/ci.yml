@@ -142,8 +142,8 @@ jobs:
           echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
 
   # amd64/arm64 使用对应的 GitHub 原生硬件，386 使用 x86-64 的原生 32 位兼容执行。
-  # ARMv7 在 ARM64 上用原生交叉编译器构建，仅最终 smoke 使用 qemu-arm；其余架构
-  # 仍在目标 userspace/QEMU 中构建。任何下载、编译、smoke 或 manifest 失败都会失败。
+  # 其余四个架构都由宿主原生运行交叉编译器，仅最终 smoke 显式调用对应 QEMU。
+  # 任何下载、编译、smoke 或 manifest 失败都会失败。
   tools:
     if: >-
       always() &&
@@ -164,58 +164,59 @@ jobs:
             platform: linux/amd64
             image: debian:trixie
             build_mode: native
-            emulated: false
+            target_runner: direct
           - arch: arm64
             runner: ubuntu-24.04-arm
             runner_arch: arm64
             platform: linux/arm64
             image: debian:trixie
             build_mode: native
-            emulated: false
+            target_runner: direct
           - arch: armv7
             runner: ubuntu-24.04-arm
             runner_arch: arm64
             platform: linux/arm64
             image: debian:trixie
-            build_mode: cross-armv7
-            emulated: false
+            build_mode: cross-qemu-smoke
+            debian_arch: armhf
+            cross_triplet: arm-linux-gnueabihf
+            target_runner: qemu-arm-static
           - arch: "386"
             runner: ubuntu-24.04
             runner_arch: x86_64
             platform: linux/386
             image: debian:trixie
             build_mode: native-compat
-            emulated: false
+            target_runner: direct
           - arch: s390x
             runner: ubuntu-24.04
             runner_arch: x86_64
-            platform: linux/s390x
+            platform: linux/amd64
             image: debian:trixie
-            build_mode: target-qemu
-            emulated: true
-            qemu_platform: s390x
+            build_mode: cross-qemu-smoke
+            debian_arch: s390x
+            cross_triplet: s390x-linux-gnu
+            target_runner: qemu-s390x-static
           - arch: riscv64
             runner: ubuntu-24.04
             runner_arch: x86_64
-            platform: linux/riscv64
+            platform: linux/amd64
             image: debian:trixie
-            build_mode: target-qemu
-            emulated: true
-            qemu_platform: riscv64
+            build_mode: cross-qemu-smoke
+            debian_arch: riscv64
+            cross_triplet: riscv64-linux-gnu
+            target_runner: qemu-riscv64-static
           - arch: ppc64le
             runner: ubuntu-24.04
             runner_arch: x86_64
-            platform: linux/ppc64le
+            platform: linux/amd64
             image: debian:sid
-            build_mode: target-qemu
-            emulated: true
-            qemu_platform: ppc64le
+            build_mode: cross-qemu-smoke
+            debian_arch: ppc64el
+            cross_triplet: powerpc64le-linux-gnu
+            target_runner: qemu-ppc64le
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v3
-        if: matrix.emulated == true
-        with:
-          platforms: ${{ matrix.qemu_platform }}
       - name: Verify runner architecture
         env:
           EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
@@ -232,7 +233,7 @@ jobs:
       - name: Prepare stage directories
         run: mkdir -p .ci-tools-stage artifact
       - name: Build and verify real tools in target container
-        if: matrix.build_mode != 'cross-armv7'
+        if: matrix.build_mode != 'cross-qemu-smoke'
         env:
           ARCH: ${{ matrix.arch }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -254,11 +255,14 @@ jobs:
                 zlib1g-dev
               scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
             '
-      - name: Cross-build ARMv7 and smoke with qemu-arm
-        if: matrix.build_mode == 'cross-armv7'
+      - name: Cross-build target and smoke with QEMU
+        if: matrix.build_mode == 'cross-qemu-smoke'
         env:
           ARCH: ${{ matrix.arch }}
+          CROSS_TRIPLET: ${{ matrix.cross_triplet }}
+          DEBIAN_ARCH: ${{ matrix.debian_arch }}
           GITHUB_TOKEN: ${{ github.token }}
+          TARGET_RUNNER: ${{ matrix.target_runner }}
         run: |
           docker run --rm --platform='${{ matrix.platform }}' \
             --security-opt seccomp=unconfined \
@@ -266,25 +270,29 @@ jobs:
             --mount "type=bind,source=${GITHUB_WORKSPACE}/.ci-tools-stage,target=/stage" \
             --workdir /src \
             --env ARCH \
+            --env CROSS_TRIPLET \
+            --env DEBIAN_ARCH \
             --env GITHUB_TOKEN \
+            --env TARGET_RUNNER \
             '${{ matrix.image }}' \
             bash -euo pipefail -c '
               export DEBIAN_FRONTEND=noninteractive
-              dpkg --add-architecture armhf
+              dpkg --add-architecture "$DEBIAN_ARCH"
               apt-get update
               apt-get install -y --no-install-recommends \
                 autoconf automake binutils build-essential ca-certificates curl git jq \
                 libtool libtool-bin meson ninja-build pkg-config qemu-user-static \
-                binutils-arm-linux-gnueabihf gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
-                libaio-dev:armhf libck-dev:armhf libluajit-5.1-dev:armhf zlib1g-dev:armhf
+                "binutils-$CROSS_TRIPLET" "gcc-$CROSS_TRIPLET" "g++-$CROSS_TRIPLET" \
+                "libaio-dev:$DEBIAN_ARCH" "libck-dev:$DEBIAN_ARCH" \
+                "libluajit-5.1-dev:$DEBIAN_ARCH" "zlib1g-dev:$DEBIAN_ARCH"
               export PKG_CONFIG_PATH=
-              export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig
+              export PKG_CONFIG_LIBDIR="/usr/lib/$CROSS_TRIPLET/pkgconfig:/usr/share/pkgconfig"
               export STREAM_NT_THREADS=2
               scripts/build_tools.sh \
                 --arch "$ARCH" \
                 --stage-root /stage \
-                --cross-prefix arm-linux-gnueabihf- \
-                --target-runner qemu-arm-static
+                --cross-prefix "${CROSS_TRIPLET}-" \
+                --target-runner "$TARGET_RUNNER"
             '
       - uses: actions/setup-go@v7
         with:
@@ -303,10 +311,13 @@ jobs:
           go run ./cmd/tools-manifest-check \
             --architecture '${{ matrix.arch }}' \
             ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
-          jq -e --arg arch '${{ matrix.arch }}' '
+          jq -e \
+            --arg arch '${{ matrix.arch }}' \
+            --arg build_mode '${{ matrix.build_mode }}' \
+            --arg target_runner '${{ matrix.target_runner }}' '
             .architecture == $arch and (.tools | length == 6) and
-            (.build.toolchain_mode == (if $arch == "armv7" then "cross" else "native" end)) and
-            (.build.smoke_runner == (if $arch == "armv7" then "qemu-arm-static" else "direct" end)) and
+            (.build.toolchain_mode == (if $build_mode == "cross-qemu-smoke" then "cross" else "native" end)) and
+            (.build.smoke_runner == $target_runner) and
             (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
           ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
       - name: Preserve architecture directory in artifact

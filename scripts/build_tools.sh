@@ -64,7 +64,10 @@ esac
 [[ -n "$stage_root" ]] || { usage; exit 2; }
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
 if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
-  [[ "$arch" == armv7 ]] || die "cross mode is currently supported only for armv7"
+  case "$arch" in
+    armv7|s390x|riscv64|ppc64le) ;;
+    *) die "cross mode is not supported for $arch" ;;
+  esac
   [[ -n "$cross_prefix" && -n "$target_runner" ]] ||
     die "--cross-prefix and --target-runner must be provided together"
 fi
@@ -92,6 +95,36 @@ target_runner_command=()
 
 if [[ -n "$cross_prefix" ]]; then
   build_mode=cross
+  case "$arch" in
+    armv7)
+      expected_target_triplet=arm-linux-gnueabihf
+      fio_target_cpu=arm
+      meson_cpu_family=arm
+      meson_cpu=armv7
+      meson_endian=little
+      ;;
+    s390x)
+      expected_target_triplet=s390x-linux-gnu
+      fio_target_cpu=s390x
+      meson_cpu_family=s390x
+      meson_cpu=s390x
+      meson_endian=big
+      ;;
+    riscv64)
+      expected_target_triplet=riscv64-linux-gnu
+      fio_target_cpu=riscv64
+      meson_cpu_family=riscv64
+      meson_cpu=riscv64
+      meson_endian=little
+      ;;
+    ppc64le)
+      expected_target_triplet=powerpc64le-linux-gnu
+      fio_target_cpu=ppc64
+      meson_cpu_family=ppc64
+      meson_cpu=ppc64le
+      meson_endian=little
+      ;;
+  esac
   cc_command="${cross_prefix}gcc"
   cxx_command="${cross_prefix}g++"
   ar_command="${cross_prefix}ar"
@@ -103,10 +136,10 @@ if [[ -n "$cross_prefix" ]]; then
     command -v "$command_name" >/dev/null 2>&1 || die "required cross command is missing: $command_name"
   done
   target_triplet=$("$cc_command" -dumpmachine)
-  [[ "$target_triplet" == arm-linux-gnueabihf* ]] ||
-    die "armv7 cross compiler reported unexpected target: $target_triplet"
+  [[ "$target_triplet" == "$expected_target_triplet"* ]] ||
+    die "$arch cross compiler reported unexpected target: $target_triplet"
   configure_cross_args=("--build=$build_triplet" "--host=$target_triplet")
-  fio_cross_args=(--cpu=arm "--cc=$cc_command")
+  fio_cross_args=("--cpu=$fio_target_cpu" "--cc=$cc_command")
   target_runner_command=("$target_runner")
   smoke_runner=$target_runner
 fi
@@ -164,9 +197,9 @@ if [[ -n "$cross_prefix" ]]; then
     printf '%s\n' 'needs_exe_wrapper = true'
     printf '%s\n' '[host_machine]'
     printf "%s\n" "system = 'linux'"
-    printf "%s\n" "cpu_family = 'arm'"
-    printf "%s\n" "cpu = 'armv7'"
-    printf "%s\n" "endian = 'little'"
+    printf "%s\n" "cpu_family = '$meson_cpu_family'"
+    printf "%s\n" "cpu = '$meson_cpu'"
+    printf "%s\n" "endian = '$meson_endian'"
   } >"$meson_cross_file"
   meson_cross_args=(--cross-file "$meson_cross_file")
 fi
@@ -548,7 +581,7 @@ trap 'stop_iperf_server; cleanup' EXIT
 iperf_json="$work/iperf3-smoke.json"
 iperf_client_error="$work/iperf3-client.txt"
 iperf_client_status=1
-for attempt in {1..50}; do
+for _ in {1..50}; do
   if run_target "$iperf3_bin" -J -c 127.0.0.1 -p "$iperf_port" -t 1 -P 1 \
     >"$iperf_json" 2>"$iperf_client_error"; then
     iperf_client_status=0
