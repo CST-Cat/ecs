@@ -124,6 +124,9 @@ smoke 做硬校验，运行时若缺少已核对资产则明确标记不可用�
 硬件直接执行 32 位兼容 userspace；这三条路径不注册 QEMU。`armv7` 在 ARM64 runner 上用
 `arm-linux-gnueabihf` 交叉工具链编译，只在最终真实 smoke 时显式调用 `qemu-arm-static`；
 `s390x`、`riscv64`、`ppc64le` 同样由宿主原生运行对应交叉工具链，只让 QEMU 执行最终 smoke。
+工具 CI 只验证构建与功能正确性，不验证性能；即使是原生 runner，smoke 日志里的 benchmark 数值
+也不能作为正式性能结果。Manifest 会明确记录 `validation.scope=functional` 和
+`performance_valid=false`：**CI = correctness，真实用户 VPS = measurement**。
 
 **界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
 `config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按

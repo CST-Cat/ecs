@@ -318,6 +318,10 @@ jobs:
             .architecture == $arch and (.tools | length == 6) and
             (.build.toolchain_mode == (if $build_mode == "cross-qemu-smoke" then "cross" else "native" end)) and
             (.build.smoke_runner == $target_runner) and
+            (.build.build_triplet | type == "string" and length > 0) and
+            (.build.target_triplet | type == "string" and length > 0) and
+            (.build.validation.scope == "functional") and
+            (.build.validation.performance_valid == false) and
             (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
           ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
       - name: Preserve architecture directory in artifact

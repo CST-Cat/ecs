@@ -10,6 +10,16 @@
     "riscv64",
     "ppc64le"
   ],
+  "build": {
+    "toolchain_mode": "native",
+    "build_triplet": "x86_64-linux-gnu",
+    "target_triplet": "x86_64-linux-gnu",
+    "smoke_runner": "direct",
+    "validation": {
+      "scope": "functional",
+      "performance_valid": false
+    }
+  },
   "tools": [
     {
       "name": "sysbench",

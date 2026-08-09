@@ -480,7 +480,30 @@ iperf3_bin="$stage/bin/iperf3"
 nexttrace_bin="$stage/bin/nexttrace-tiny"
 ping_bin="$stage/bin/ping"
 
-echo 'running real binary smoke tests'
+# Check all six resulting binaries before executing any target program. This
+# catches accidental linkage even if a future base image contains excluded
+# libraries. The package carries no runtime library directory, so a missing
+# dependency or a benchmark-specific runtime library is a hard failure. Do not
+# use ldd here: under binfmt/QEMU it executes the target loader and can crash on
+# a valid static binary. ELF program and dynamic headers are architecture-safe.
+for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
+  binary="$stage/bin/$tool"
+  "$readelf_command" -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
+  "$readelf_command" -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
+  cat "$work/${tool}.dynamic" "$work/${tool}.program"
+  if grep -Eq '\(NEEDED\)' "$work/${tool}.dynamic" ||
+    grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' "$work/${tool}.program"; then
+    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
+    die "$tool is not fully static"
+  fi
+  if grep -Eiq 'not found|ceph|rbd|rados|gluster|gfapi|rdma|ibverbs|rdmacm|libaio|liburing|libgomp|libgcc_s' \
+      "$work/${tool}.dynamic" "$work/${tool}.program"; then
+    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
+    die "$tool has an unresolved or forbidden runtime dependency"
+  fi
+done
+
+echo 'running functional binary smoke tests only; benchmark values are not valid performance measurements'
 run_target "$sysbench_bin" --version
 run_target "$sysbench_bin" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
 grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" || {
@@ -623,29 +646,6 @@ grep -Eq '1 packets transmitted|1 packets received|1 received' "$work/ping-smoke
   die 'iputils ping loopback smoke failed'
 }
 
-# Check all six resulting binaries rather than package-manager state. This
-# catches accidental linkage even if a future base image contains excluded
-# libraries. The package carries no runtime library directory, so a missing
-# dependency or a benchmark-specific runtime library is a hard failure. Do not
-# use ldd here: under binfmt/QEMU it executes the target loader and can crash on
-# a valid static binary. ELF program and dynamic headers are architecture-safe.
-for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
-  binary="$stage/bin/$tool"
-  "$readelf_command" -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
-  "$readelf_command" -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
-  cat "$work/${tool}.dynamic" "$work/${tool}.program"
-  if grep -Eq '\(NEEDED\)' "$work/${tool}.dynamic" ||
-    grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' "$work/${tool}.program"; then
-    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
-    die "$tool is not fully static"
-  fi
-  if grep -Eiq 'not found|ceph|rbd|rados|gluster|gfapi|rdma|ibverbs|rdmacm|libaio|liburing|libgomp|libgcc_s' \
-      "$work/${tool}.dynamic" "$work/${tool}.program"; then
-    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
-    die "$tool has an unresolved or forbidden runtime dependency"
-  fi
-done
-
 sysbench_sha=$(sha256sum "$sysbench_bin" | awk '{print $1}')
 stream_binary_sha=$(sha256sum "$stream_bin" | awk '{print $1}')
 fio_sha=$(sha256sum "$fio_bin" | awk '{print $1}')
@@ -726,7 +726,11 @@ jq -n \
         toolchain_mode: $toolchain_mode,
         build_triplet: $build_triplet,
         target_triplet: $target_triplet,
-        smoke_runner: $smoke_runner
+        smoke_runner: $smoke_runner,
+        validation: {
+          scope: "functional",
+          performance_valid: false
+        }
       },
       tools: [
         {
@@ -829,6 +833,8 @@ jq -e --arg architecture "$arch" '
   (.build.build_triplet | type == "string" and length > 0) and
   (.build.target_triplet | type == "string" and length > 0) and
   (.build.smoke_runner | type == "string" and length > 0) and
+  .build.validation.scope == "functional" and
+  .build.validation.performance_valid == false and
   (.tools | length == 6) and
   (all(.tools[]; .architecture == $architecture and .version != "unknown" and .tag_or_commit != "unknown" and .source != "unknown" and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
 ' "$stage/manifest.json" >/dev/null || die "generated manifest failed concrete metadata checks"

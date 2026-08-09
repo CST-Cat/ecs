@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,12 @@ func TestExampleManifestParsesAndValidates(t *testing.T) {
 	}
 	if len(manifest.SupportedArchitectures) != len(Architectures) {
 		t.Fatalf("example supported architecture count = %d, want %d", len(manifest.SupportedArchitectures), len(Architectures))
+	}
+	if manifest.Build.ToolchainMode != "native" || manifest.Build.SmokeRunner != "direct" {
+		t.Fatalf("example build metadata = %#v, want native/direct", manifest.Build)
+	}
+	if manifest.Build.Validation.Scope != "functional" || manifest.Build.Validation.PerformanceValid {
+		t.Fatalf("example validation metadata = %#v, want functional/non-performance", manifest.Build.Validation)
 	}
 }
 
@@ -109,6 +116,158 @@ func TestParseRejectsMissingRequiredField(t *testing.T) {
 	delete(tools[0].(map[string]any), "build_flags")
 	if _, err := Parse(objectBytes(t, object)); err == nil {
 		t.Fatal("manifest with missing build_flags unexpectedly passed")
+	}
+}
+
+func TestParseRequiresCompleteBuildMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		field  string
+		mutate func(map[string]any)
+	}{
+		{
+			name:  "build",
+			field: `"build"`,
+			mutate: func(object map[string]any) {
+				delete(object, "build")
+			},
+		},
+		{
+			name:  "toolchain mode",
+			field: `"toolchain_mode"`,
+			mutate: func(object map[string]any) {
+				delete(object["build"].(map[string]any), "toolchain_mode")
+			},
+		},
+		{
+			name:  "build triplet",
+			field: `"build_triplet"`,
+			mutate: func(object map[string]any) {
+				delete(object["build"].(map[string]any), "build_triplet")
+			},
+		},
+		{
+			name:  "target triplet",
+			field: `"target_triplet"`,
+			mutate: func(object map[string]any) {
+				delete(object["build"].(map[string]any), "target_triplet")
+			},
+		},
+		{
+			name:  "smoke runner",
+			field: `"smoke_runner"`,
+			mutate: func(object map[string]any) {
+				delete(object["build"].(map[string]any), "smoke_runner")
+			},
+		},
+		{
+			name:  "validation",
+			field: `"validation"`,
+			mutate: func(object map[string]any) {
+				delete(object["build"].(map[string]any), "validation")
+			},
+		},
+		{
+			name:  "validation scope",
+			field: `"scope"`,
+			mutate: func(object map[string]any) {
+				build := object["build"].(map[string]any)
+				delete(build["validation"].(map[string]any), "scope")
+			},
+		},
+		{
+			name:  "performance validity",
+			field: `"performance_valid"`,
+			mutate: func(object map[string]any) {
+				build := object["build"].(map[string]any)
+				delete(build["validation"].(map[string]any), "performance_valid")
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			object := exampleObject(t)
+			test.mutate(object)
+			_, err := Parse(objectBytes(t, object))
+			if err == nil {
+				t.Fatalf("manifest missing %s unexpectedly passed", test.field)
+			}
+			if !strings.Contains(err.Error(), test.field) {
+				t.Fatalf("error %q does not identify missing field %s", err, test.field)
+			}
+		})
+	}
+}
+
+func TestParseAcceptsCrossBuildMetadata(t *testing.T) {
+	object := exampleObject(t)
+	build := object["build"].(map[string]any)
+	build["toolchain_mode"] = "cross"
+	build["build_triplet"] = "aarch64-linux-gnu"
+	build["target_triplet"] = "arm-linux-gnueabihf"
+	build["smoke_runner"] = "qemu-arm-static"
+
+	manifest, err := Parse(objectBytes(t, object))
+	if err != nil {
+		t.Fatalf("cross-build manifest rejected: %v", err)
+	}
+	if manifest.Build.ToolchainMode != "cross" || manifest.Build.SmokeRunner != "qemu-arm-static" {
+		t.Fatalf("cross-build metadata = %#v", manifest.Build)
+	}
+}
+
+func TestParseRejectsInvalidBuildMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "invalid toolchain mode",
+			mutate: func(build map[string]any) {
+				build["toolchain_mode"] = "emulated"
+			},
+		},
+		{
+			name: "empty build triplet",
+			mutate: func(build map[string]any) {
+				build["build_triplet"] = ""
+			},
+		},
+		{
+			name: "empty target triplet",
+			mutate: func(build map[string]any) {
+				build["target_triplet"] = ""
+			},
+		},
+		{
+			name: "empty smoke runner",
+			mutate: func(build map[string]any) {
+				build["smoke_runner"] = ""
+			},
+		},
+		{
+			name: "performance scope",
+			mutate: func(build map[string]any) {
+				build["validation"].(map[string]any)["scope"] = "performance"
+			},
+		},
+		{
+			name: "performance claimed valid",
+			mutate: func(build map[string]any) {
+				build["validation"].(map[string]any)["performance_valid"] = true
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			object := exampleObject(t)
+			test.mutate(object["build"].(map[string]any))
+			if _, err := Parse(objectBytes(t, object)); err == nil {
+				t.Fatal("manifest with invalid build metadata unexpectedly passed")
+			}
+		})
 	}
 }
 

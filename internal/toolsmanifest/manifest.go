@@ -36,10 +36,28 @@ var sha256Pattern = regexp.MustCompile(`^[[:xdigit:]]{64}$`)
 
 // Manifest describes one Linux architecture's ecs-tools package.
 type Manifest struct {
-	SchemaVersion          string   `json:"schema_version"`
-	Architecture           string   `json:"architecture"`
-	SupportedArchitectures []string `json:"supported_architectures,omitempty"`
-	Tools                  []Tool   `json:"tools"`
+	SchemaVersion          string        `json:"schema_version"`
+	Architecture           string        `json:"architecture"`
+	SupportedArchitectures []string      `json:"supported_architectures,omitempty"`
+	Build                  BuildMetadata `json:"build"`
+	Tools                  []Tool        `json:"tools"`
+}
+
+// BuildMetadata records how the target binaries were built and how CI
+// validated them. PerformanceValid is deliberately false for every CI build:
+// benchmark values produced during smoke tests are not release measurements.
+type BuildMetadata struct {
+	ToolchainMode string             `json:"toolchain_mode"`
+	BuildTriplet  string             `json:"build_triplet"`
+	TargetTriplet string             `json:"target_triplet"`
+	SmokeRunner   string             `json:"smoke_runner"`
+	Validation    ValidationMetadata `json:"validation"`
+}
+
+// ValidationMetadata defines the scope and interpretation of CI validation.
+type ValidationMetadata struct {
+	Scope            string `json:"scope"`
+	PerformanceValid bool   `json:"performance_valid"`
 }
 
 // Tool describes one executable in a package.  The feature and parameter
@@ -80,9 +98,27 @@ func Parse(data []byte) (Manifest, error) {
 	if raw == nil {
 		return Manifest{}, fmt.Errorf("manifest must be a JSON object")
 	}
-	for _, field := range []string{"schema_version", "architecture", "tools"} {
+	for _, field := range []string{"schema_version", "architecture", "build", "tools"} {
 		if err := requireField(raw, field); err != nil {
 			return Manifest{}, err
+		}
+	}
+	buildRaw, err := rawObject(raw["build"], "build")
+	if err != nil {
+		return Manifest{}, err
+	}
+	for _, field := range []string{"toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"} {
+		if err := requireField(buildRaw, field); err != nil {
+			return Manifest{}, fmt.Errorf("build: %w", err)
+		}
+	}
+	validationRaw, err := rawObject(buildRaw["validation"], "build.validation")
+	if err != nil {
+		return Manifest{}, err
+	}
+	for _, field := range []string{"scope", "performance_valid"} {
+		if err := requireField(validationRaw, field); err != nil {
+			return Manifest{}, fmt.Errorf("build.validation: %w", err)
 		}
 	}
 
@@ -105,6 +141,17 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, err
 	}
 	return manifest, nil
+}
+
+func rawObject(raw json.RawMessage, name string) (map[string]json.RawMessage, error) {
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON object: %w", name, err)
+	}
+	if value == nil {
+		return nil, fmt.Errorf("%s must be a JSON object", name)
+	}
+	return value, nil
 }
 
 func rawTools(raw json.RawMessage) []map[string]json.RawMessage {
@@ -131,6 +178,24 @@ func Validate(manifest Manifest) error {
 	}
 	if !contains(Architectures, manifest.Architecture) {
 		return fmt.Errorf("unsupported architecture %q", manifest.Architecture)
+	}
+	if manifest.Build.ToolchainMode != "native" && manifest.Build.ToolchainMode != "cross" {
+		return fmt.Errorf("build.toolchain_mode must be %q or %q, got %q", "native", "cross", manifest.Build.ToolchainMode)
+	}
+	for field, value := range map[string]string{
+		"build_triplet":  manifest.Build.BuildTriplet,
+		"target_triplet": manifest.Build.TargetTriplet,
+		"smoke_runner":   manifest.Build.SmokeRunner,
+	} {
+		if value == "" {
+			return fmt.Errorf("build.%s must be a non-empty string", field)
+		}
+	}
+	if manifest.Build.Validation.Scope != "functional" {
+		return fmt.Errorf("build.validation.scope must be %q, got %q", "functional", manifest.Build.Validation.Scope)
+	}
+	if manifest.Build.Validation.PerformanceValid {
+		return fmt.Errorf("build.validation.performance_valid must be false for CI smoke validation")
 	}
 	if manifest.SupportedArchitectures != nil {
 		if len(manifest.SupportedArchitectures) != len(Architectures) {
