@@ -51,7 +51,7 @@ esac
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
 
 for command_name in \
-  curl git jq sha256sum gcc make readelf ldd strip meson ninja autoconf automake \
+  curl git jq sha256sum gcc make readelf strip meson ninja autoconf automake \
   libtoolize pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
@@ -493,20 +493,22 @@ grep -Eq '1 packets transmitted|1 packets received|1 received' "$work/ping-smoke
 # Check all six resulting binaries rather than package-manager state. This
 # catches accidental linkage even if a future base image contains excluded
 # libraries. The package carries no runtime library directory, so a missing
-# dependency or a benchmark-specific runtime library is a hard failure.
+# dependency or a benchmark-specific runtime library is a hard failure. Do not
+# use ldd here: under binfmt/QEMU it executes the target loader and can crash on
+# a valid static binary. ELF program and dynamic headers are architecture-safe.
 for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
   binary="$stage/bin/$tool"
-  readelf -d "$binary" >"$work/${tool}.readelf" 2>&1 || die "readelf failed for $tool"
-  ldd "$binary" >"$work/${tool}.ldd" 2>&1 || true
-  cat "$work/${tool}.readelf" "$work/${tool}.ldd"
-  if grep -Eq '\(NEEDED\)' "$work/${tool}.readelf" ||
-    ! grep -Eiq 'not a dynamic executable|statically linked' "$work/${tool}.ldd"; then
-    cat "$work/${tool}.readelf" "$work/${tool}.ldd" >&2
+  readelf -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
+  readelf -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
+  cat "$work/${tool}.dynamic" "$work/${tool}.program"
+  if grep -Eq '\(NEEDED\)' "$work/${tool}.dynamic" ||
+    grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' "$work/${tool}.program"; then
+    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
     die "$tool is not fully static"
   fi
   if grep -Eiq 'not found|ceph|rbd|rados|gluster|gfapi|rdma|ibverbs|rdmacm|libaio|liburing|libgomp|libgcc_s' \
-      "$work/${tool}.readelf" "$work/${tool}.ldd"; then
-    cat "$work/${tool}.readelf" "$work/${tool}.ldd" >&2
+      "$work/${tool}.dynamic" "$work/${tool}.program"; then
+    cat "$work/${tool}.dynamic" "$work/${tool}.program" >&2
     die "$tool has an unresolved or forbidden runtime dependency"
   fi
 done
