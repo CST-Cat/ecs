@@ -141,8 +141,9 @@ jobs:
           echo "rebuild=false" >>"$GITHUB_OUTPUT"
           echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
 
-  # 每个架构都在对应的 Linux userspace 中从官方源码/Release asset 构建真实工具。
-  # 任何下载、配置、编译、smoke、依赖或 manifest 失败都会使 CI 失败。
+  # amd64/arm64 使用对应的 GitHub 原生硬件，386 使用 x86-64 的原生 32 位兼容执行。
+  # ARMv7 在 ARM64 上用原生交叉编译器构建，仅最终 smoke 使用 qemu-arm；其余架构
+  # 仍在目标 userspace/QEMU 中构建。任何下载、编译、smoke 或 manifest 失败都会失败。
   tools:
     if: >-
       always() &&
@@ -150,41 +151,88 @@ jobs:
       ((startsWith(github.ref, 'refs/tags/v') && needs.tools_plan.result == 'success' && needs.tools_plan.outputs.rebuild == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.rebuild_tools))
     needs: [test, race, cross, tools_plan]
-    runs-on: ubuntu-latest
+    name: tools (${{ matrix.arch }}, ${{ matrix.build_mode }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
+            runner: ubuntu-24.04
+            runner_arch: x86_64
             platform: linux/amd64
             image: debian:trixie
+            build_mode: native
+            emulated: false
           - arch: arm64
+            runner: ubuntu-24.04-arm
+            runner_arch: arm64
             platform: linux/arm64
             image: debian:trixie
+            build_mode: native
+            emulated: false
           - arch: armv7
-            platform: linux/arm/v7
+            runner: ubuntu-24.04-arm
+            runner_arch: arm64
+            platform: linux/arm64
             image: debian:trixie
+            build_mode: cross-armv7
+            emulated: false
           - arch: "386"
+            runner: ubuntu-24.04
+            runner_arch: x86_64
             platform: linux/386
             image: debian:trixie
+            build_mode: native-compat
+            emulated: false
           - arch: s390x
+            runner: ubuntu-24.04
+            runner_arch: x86_64
             platform: linux/s390x
             image: debian:trixie
+            build_mode: target-qemu
+            emulated: true
+            qemu_platform: s390x
           - arch: riscv64
+            runner: ubuntu-24.04
+            runner_arch: x86_64
             platform: linux/riscv64
             image: debian:trixie
+            build_mode: target-qemu
+            emulated: true
+            qemu_platform: riscv64
           - arch: ppc64le
+            runner: ubuntu-24.04
+            runner_arch: x86_64
             platform: linux/ppc64le
             image: debian:sid
+            build_mode: target-qemu
+            emulated: true
+            qemu_platform: ppc64le
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
+        if: matrix.emulated == true
         with:
-          platforms: all
+          platforms: ${{ matrix.qemu_platform }}
+      - name: Verify runner architecture
+        env:
+          EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
+        run: |
+          set -euo pipefail
+          actual=$(uname -m)
+          case "$EXPECTED_RUNNER_ARCH:$actual" in
+            x86_64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *)
+              echo "expected $EXPECTED_RUNNER_ARCH runner, got $actual" >&2
+              exit 1
+              ;;
+          esac
       - name: Prepare stage directories
         run: mkdir -p .ci-tools-stage artifact
       - name: Build and verify real tools in target container
+        if: matrix.build_mode != 'cross-armv7'
         env:
           ARCH: ${{ matrix.arch }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -206,6 +254,38 @@ jobs:
                 zlib1g-dev
               scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
             '
+      - name: Cross-build ARMv7 and smoke with qemu-arm
+        if: matrix.build_mode == 'cross-armv7'
+        env:
+          ARCH: ${{ matrix.arch }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --platform='${{ matrix.platform }}' \
+            --security-opt seccomp=unconfined \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/src" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/.ci-tools-stage,target=/stage" \
+            --workdir /src \
+            --env ARCH \
+            --env GITHUB_TOKEN \
+            '${{ matrix.image }}' \
+            bash -euo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
+              dpkg --add-architecture armhf
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                autoconf automake binutils build-essential ca-certificates curl git jq \
+                libtool libtool-bin meson ninja-build pkg-config qemu-user-static \
+                binutils-arm-linux-gnueabihf gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+                libaio-dev:armhf libck-dev:armhf libluajit-5.1-dev:armhf zlib1g-dev:armhf
+              export PKG_CONFIG_PATH=
+              export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig
+              export STREAM_NT_THREADS=2
+              scripts/build_tools.sh \
+                --arch "$ARCH" \
+                --stage-root /stage \
+                --cross-prefix arm-linux-gnueabihf- \
+                --target-runner qemu-arm-static
+            '
       - uses: actions/setup-go@v7
         with:
           go-version: stable
@@ -225,6 +305,8 @@ jobs:
             ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
           jq -e --arg arch '${{ matrix.arch }}' '
             .architecture == $arch and (.tools | length == 6) and
+            (.build.toolchain_mode == (if $arch == "armv7" then "cross" else "native" end)) and
+            (.build.smoke_runner == (if $arch == "armv7" then "qemu-arm-static" else "direct" end)) and
             (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
           ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
       - name: Preserve architecture directory in artifact
@@ -326,7 +408,9 @@ jobs:
   # 实网协议/解析检查：确认第三方数据源与公共服务的当前响应仍能解析。
   # 只在定时任务与手动触发时运行；普通 push 不触发外部网络请求。
   live:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.rebuild_tools != true)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

@@ -120,6 +120,11 @@ smoke 做硬校验，运行时若缺少已核对资产则明确标记不可用�
 按已核对的发布 manifest 选择对应 Linux 资产并校验 SHA-256 后放入本次临时 WORK，退出时清理；
 没有已核对的资产就明确跳过，不虚构版本或摘要。
 
+工具 CI 中，`amd64` 与 `arm64` 使用对应的 GitHub 原生 hosted runner，`386` 由 x86-64
+硬件直接执行 32 位兼容 userspace；这三条路径不注册 QEMU。`armv7` 在 ARM64 runner 上用
+`arm-linux-gnueabihf` 交叉工具链编译，只在最终真实 smoke 时显式调用 `qemu-arm-static`；
+`s390x`、`riscv64`、`ppc64le` 才保留目标 userspace 的 QEMU 构建。
+
 **界面语言**：`--lang zh|en` 对**每个命令**都生效——`run`、`list`、`doctor`、`render`、
 `config`、帮助文本与全部 29 个参数说明，以及 `run.sh` 自身的下载提示。未指定时按
 `ECS_LANG`/`LC_ALL`/`LANG` 推断，都没有则用中文。

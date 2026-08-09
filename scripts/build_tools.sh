@@ -4,10 +4,12 @@ set -Eeuo pipefail
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/build_tools.sh --arch ARCH --stage-root STAGE_ROOT
+                              [--cross-prefix PREFIX --target-runner COMMAND]
 
 Build the six ECS benchmark tools for one Linux architecture. This script is
-intended to run inside the architecture container used by CI; it never uses a
-fixture or a distribution-provided benchmark binary.
+intended to run inside the native or cross-build container used by CI; it never
+uses a fixture or a distribution-provided benchmark binary. Cross mode keeps
+the compiler native and uses TARGET_RUNNER only for final binary smoke tests.
 EOF
 }
 
@@ -18,6 +20,8 @@ die() {
 
 arch=""
 stage_root=""
+cross_prefix=""
+target_runner=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --arch)
@@ -28,6 +32,16 @@ while [[ "$#" -gt 0 ]]; do
     --stage-root)
       [[ "$#" -ge 2 ]] || { usage; exit 2; }
       stage_root=$2
+      shift 2
+      ;;
+    --cross-prefix)
+      [[ "$#" -ge 2 ]] || { usage; exit 2; }
+      cross_prefix=$2
+      shift 2
+      ;;
+    --target-runner)
+      [[ "$#" -ge 2 ]] || { usage; exit 2; }
+      target_runner=$2
       shift 2
       ;;
     -h|--help)
@@ -49,12 +63,72 @@ case " ${architectures[*]} " in
 esac
 [[ -n "$stage_root" ]] || { usage; exit 2; }
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
+if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
+  [[ "$arch" == armv7 ]] || die "cross mode is currently supported only for armv7"
+  [[ -n "$cross_prefix" && -n "$target_runner" ]] ||
+    die "--cross-prefix and --target-runner must be provided together"
+fi
 
 for command_name in \
   curl git jq sha256sum gcc make readelf strip meson ninja autoconf automake \
   libtoolize pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
+
+build_triplet=$(gcc -dumpmachine)
+target_triplet=$build_triplet
+build_mode=native
+smoke_runner=direct
+cc_command=${CC:-gcc}
+cxx_command=${CXX:-g++}
+ar_command=${AR:-ar}
+ranlib_command=${RANLIB:-ranlib}
+readelf_command=${READELF:-readelf}
+strip_command=${STRIP:-strip}
+configure_cross_args=()
+fio_cross_args=()
+meson_cross_args=()
+target_runner_command=()
+
+if [[ -n "$cross_prefix" ]]; then
+  build_mode=cross
+  cc_command="${cross_prefix}gcc"
+  cxx_command="${cross_prefix}g++"
+  ar_command="${cross_prefix}ar"
+  ranlib_command="${cross_prefix}ranlib"
+  readelf_command="${cross_prefix}readelf"
+  strip_command="${cross_prefix}strip"
+  for command_name in "$cc_command" "$cxx_command" "$ar_command" "$ranlib_command" \
+    "$readelf_command" "$strip_command" "$target_runner"; do
+    command -v "$command_name" >/dev/null 2>&1 || die "required cross command is missing: $command_name"
+  done
+  target_triplet=$("$cc_command" -dumpmachine)
+  [[ "$target_triplet" == arm-linux-gnueabihf* ]] ||
+    die "armv7 cross compiler reported unexpected target: $target_triplet"
+  configure_cross_args=("--build=$build_triplet" "--host=$target_triplet")
+  fio_cross_args=(--cpu=arm "--cc=$cc_command")
+  target_runner_command=("$target_runner")
+  smoke_runner=$target_runner
+fi
+
+echo "toolchain mode: $build_mode ($build_triplet -> $target_triplet); smoke runner: $smoke_runner"
+
+export CC="$cc_command"
+export CXX="$cxx_command"
+export AR="$ar_command"
+export RANLIB="$ranlib_command"
+export STRIP="$strip_command"
+if [[ -n "$cross_prefix" ]]; then
+  export CROSS_COMPILE="$cross_prefix"
+fi
+
+run_target() {
+  if [[ "${#target_runner_command[@]}" -gt 0 ]]; then
+    "${target_runner_command[@]}" "$@"
+  else
+    "$@"
+  fi
+}
 
 stage="$stage_root/linux_${arch}"
 work=/tmp/ecs-tools-build
@@ -75,6 +149,27 @@ export LC_ALL=C
 export TZ=UTC
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-946684800}
 [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || die "SOURCE_DATE_EPOCH must be an integer"
+
+if [[ -n "$cross_prefix" ]]; then
+  [[ -n "${PKG_CONFIG_LIBDIR:-}" ]] ||
+    die "cross mode requires PKG_CONFIG_LIBDIR to point at target metadata"
+  meson_cross_file="$work/meson-cross.ini"
+  {
+    printf '%s\n' '[binaries]'
+    printf "c = '%s'\n" "$cc_command"
+    printf "ar = '%s'\n" "$ar_command"
+    printf "strip = '%s'\n" "$strip_command"
+    printf "pkg-config = 'pkg-config'\n"
+    printf '%s\n' '[properties]'
+    printf '%s\n' 'needs_exe_wrapper = true'
+    printf '%s\n' '[host_machine]'
+    printf "%s\n" "system = 'linux'"
+    printf "%s\n" "cpu_family = 'arm'"
+    printf "%s\n" "cpu = 'armv7'"
+    printf "%s\n" "endian = 'little'"
+  } >"$meson_cross_file"
+  meson_cross_args=(--cross-file "$meson_cross_file")
+fi
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
@@ -195,6 +290,7 @@ echo "building sysbench ${sysbench_tag} (${sysbench_commit})"
 # discovered list is written to the manifest, so metadata cannot drift from
 # the command that configured this binary.
 sysbench_configure_args=(
+  "${configure_cross_args[@]}"
   "--prefix=$work/sysbench-prefix"
   '--with-system-luajit'
   '--with-system-ck'
@@ -205,6 +301,7 @@ sysbench_luajit_version=$(pkg-config --modversion luajit) ||
 sysbench_ck_version=$(pkg-config --modversion ck) ||
   die 'target container is missing the Concurrency Kit pkg-config metadata'
 sysbench_manifest_flags=(
+  "${configure_cross_args[@]}"
   '--with-system-luajit'
   '--with-system-ck'
   '--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed'
@@ -236,6 +333,7 @@ echo "building fio ${fio_tag} (${fio_commit})"
 (
   cd "$fio_src"
   ./configure \
+    "${fio_cross_args[@]}" \
     --prefix="$work/fio-prefix" \
     --build-static \
     --disable-numa \
@@ -273,6 +371,7 @@ echo "building iperf3 ${iperf3_tag} (${iperf3_commit})"
 (
   cd "$iperf3_src"
   ./configure \
+    "${configure_cross_args[@]}" \
     --prefix="$work/iperf3-prefix" \
     --enable-static-bin \
     --without-sctp \
@@ -289,7 +388,7 @@ echo "building official STREAM ${stream_revision}"
 stream_array_size=10000000
 stream_ntimes=10
 stream_build_flags=(
-  gcc -O3 -fopenmp -static -static-libgcc
+  "$cc_command" -O3 -fopenmp -static -static-libgcc
   "-DSTREAM_ARRAY_SIZE=$stream_array_size" "-DNTIMES=$stream_ntimes"
 )
 stream_build_flags_json=$(printf '%s\n' "${stream_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -299,6 +398,7 @@ echo "building iputils ping ${iputils_tag} (${iputils_commit})"
 ping_build="$work/iputils-build"
 ping_install="$work/iputils-install"
 LDFLAGS='-static' meson setup "$ping_build" "$iputils_src" \
+  "${meson_cross_args[@]}" \
   --prefix=/usr/local \
   --buildtype=release \
   -DUSE_CAP=false \
@@ -322,7 +422,7 @@ cp "$nexttrace_download" "$stage/bin/nexttrace-tiny"
 # NextTrace asset is kept byte-for-byte so its GitHub release digest remains
 # independently verifiable.
 for tool in sysbench stream fio iperf3 ping; do
-  strip --strip-unneeded "$stage/bin/$tool"
+  "$strip_command" --strip-unneeded "$stage/bin/$tool"
 done
 
 for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
@@ -348,8 +448,8 @@ nexttrace_bin="$stage/bin/nexttrace-tiny"
 ping_bin="$stage/bin/ping"
 
 echo 'running real binary smoke tests'
-"$sysbench_bin" --version
-"$sysbench_bin" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
+run_target "$sysbench_bin" --version
+run_target "$sysbench_bin" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
 grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" || {
   cat "$work/sysbench-smoke.txt" >&2
   die 'sysbench CPU smoke output was not recognized'
@@ -360,7 +460,7 @@ stream_nt_threads=${STREAM_NT_THREADS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null |
 for stream_threads in 1 "$stream_nt_threads"; do
   stream_context=nt
   [[ "$stream_threads" -eq 1 ]] && stream_context=1t
-  OMP_NUM_THREADS="$stream_threads" "$stream_bin" >"$work/stream-${stream_context}.txt"
+  OMP_NUM_THREADS="$stream_threads" run_target "$stream_bin" >"$work/stream-${stream_context}.txt"
 done
 cat "$work/stream-1t.txt" "$work/stream-nt.txt"
 for stream_context in 1t nt; do
@@ -374,7 +474,7 @@ done
 
 dd if=/dev/zero of="$work/fio-smoke.data" bs=4096 count=1 status=none
 fio_json="$work/fio-smoke.json"
-"$fio_bin" \
+run_target "$fio_bin" \
   --name=ecs-smoke \
   --filename="$work/fio-smoke.data" \
   --rw=read \
@@ -393,7 +493,7 @@ jq -e '(.jobs | length == 1) and .jobs[0].jobname == "ecs-smoke"' "$fio_json" >/
 fio_io_uring_json="$work/fio-io-uring-smoke.json"
 fio_io_uring_error="$work/fio-io-uring-smoke.err"
 fio_io_uring_output="$work/fio-io-uring-smoke.out"
-if "$fio_bin" \
+if run_target "$fio_bin" \
   --name=ecs-io-uring-smoke \
   --filename="$work/fio-smoke.data" \
   --rw=read \
@@ -420,8 +520,8 @@ else
     die 'fio io_uring runtime smoke failed for a reason other than kernel support'
   fi
 fi
-"$fio_bin" --version
-"$fio_bin" --enghelp >"$work/fio-engines.txt"
+run_target "$fio_bin" --version
+run_target "$fio_bin" --enghelp >"$work/fio-engines.txt"
 for required_engine in io_uring libaio psync; do
   grep -Eiq "(^|[^[:alnum:]_])${required_engine}([^[:alnum:]_]|$)" "$work/fio-engines.txt" || {
     cat "$work/fio-engines.txt" >&2
@@ -433,9 +533,9 @@ if grep -Eiq '(^|[^[:alnum:]])(rados|rbd|gfapi|gluster|rdma)([^[:alnum:]]|$)' "$
   die 'fio exposed a disabled external engine'
 fi
 
-"$iperf3_bin" --version
+run_target "$iperf3_bin" --version
 iperf_port=$((42000 + (${RANDOM:-1} % 1000)))
-"$iperf3_bin" -s -1 -p "$iperf_port" >"$work/iperf3-server.txt" 2>&1 &
+run_target "$iperf3_bin" -s -1 -p "$iperf_port" >"$work/iperf3-server.txt" 2>&1 &
 iperf_server=$!
 stop_iperf_server() {
   if [[ -n "${iperf_server:-}" ]]; then
@@ -449,7 +549,7 @@ iperf_json="$work/iperf3-smoke.json"
 iperf_client_error="$work/iperf3-client.txt"
 iperf_client_status=1
 for attempt in {1..50}; do
-  if "$iperf3_bin" -J -c 127.0.0.1 -p "$iperf_port" -t 1 -P 1 \
+  if run_target "$iperf3_bin" -J -c 127.0.0.1 -p "$iperf_port" -t 1 -P 1 \
     >"$iperf_json" 2>"$iperf_client_error"; then
     iperf_client_status=0
     break
@@ -474,7 +574,7 @@ jq -e 'type == "object" and (.start | type == "object") and (.end | type == "obj
   die 'iperf3 JSON parser smoke failed'
 }
 
-"$nexttrace_bin" --help >"$work/nexttrace-help.txt" 2>&1 || {
+run_target "$nexttrace_bin" --help >"$work/nexttrace-help.txt" 2>&1 || {
   cat "$work/nexttrace-help.txt" >&2
   die 'NextTrace help failed'
 }
@@ -483,8 +583,8 @@ grep -Eq -- '--(json|raw)' "$work/nexttrace-help.txt" || {
   die 'NextTrace Tiny help omitted the JSON/raw flag'
 }
 
-"$ping_bin" -V
-"$ping_bin" -c 1 -W 1 127.0.0.1 >"$work/ping-smoke.txt"
+run_target "$ping_bin" -V
+run_target "$ping_bin" -c 1 -W 1 127.0.0.1 >"$work/ping-smoke.txt"
 grep -Eq '1 packets transmitted|1 packets received|1 received' "$work/ping-smoke.txt" || {
   cat "$work/ping-smoke.txt" >&2
   die 'iputils ping loopback smoke failed'
@@ -498,8 +598,8 @@ grep -Eq '1 packets transmitted|1 packets received|1 received' "$work/ping-smoke
 # a valid static binary. ELF program and dynamic headers are architecture-safe.
 for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
   binary="$stage/bin/$tool"
-  readelf -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
-  readelf -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
+  "$readelf_command" -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
+  "$readelf_command" -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
   cat "$work/${tool}.dynamic" "$work/${tool}.program"
   if grep -Eq '\(NEEDED\)' "$work/${tool}.dynamic" ||
     grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' "$work/${tool}.program"; then
@@ -537,6 +637,10 @@ iputils_version=$(release_version "$iputils_tag")
 
 jq -n \
   --arg architecture "$arch" \
+  --arg toolchain_mode "$build_mode" \
+  --arg build_triplet "$build_triplet" \
+  --arg target_triplet "$target_triplet" \
+  --arg smoke_runner "$smoke_runner" \
   --arg sysbench_version "$sysbench_version" \
   --arg sysbench_tag "$sysbench_tag" \
   --arg sysbench_source "$sysbench_source" \
@@ -585,6 +689,12 @@ jq -n \
       schema_version: "ecs-tools.manifest/v1",
       architecture: $architecture,
       supported_architectures: ["amd64", "arm64", "armv7", "386", "s390x", "riscv64", "ppc64le"],
+      build: {
+        toolchain_mode: $toolchain_mode,
+        build_triplet: $build_triplet,
+        target_triplet: $target_triplet,
+        smoke_runner: $smoke_runner
+      },
       tools: [
         {
           name: "sysbench",
@@ -682,6 +792,10 @@ done
 jq -e --arg architecture "$arch" '
   .schema_version == "ecs-tools.manifest/v1" and
   .architecture == $architecture and
+  (.build.toolchain_mode == "native" or .build.toolchain_mode == "cross") and
+  (.build.build_triplet | type == "string" and length > 0) and
+  (.build.target_triplet | type == "string" and length > 0) and
+  (.build.smoke_runner | type == "string" and length > 0) and
   (.tools | length == 6) and
   (all(.tools[]; .architecture == $architecture and .version != "unknown" and .tag_or_commit != "unknown" and .source != "unknown" and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
 ' "$stage/manifest.json" >/dev/null || die "generated manifest failed concrete metadata checks"
