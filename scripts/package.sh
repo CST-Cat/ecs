@@ -46,7 +46,12 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 dist_dir="$repo_root/dist"
 go_command="${GO:-go}"
 commit="${COMMIT:-$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-build_date="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}"
+if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be an integer" >&2
+  exit 1
+fi
+build_date="${BUILD_DATE:-$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)}"
 ldflags="-s -w -X ecs/internal/buildinfo.Version=${version} -X ecs/internal/buildinfo.Commit=${commit} -X ecs/internal/buildinfo.BuildDate=${build_date}"
 
 if [[ "$tools_enabled" -eq 1 && "$tools_stage_root" != /* ]]; then
@@ -197,7 +202,9 @@ package_tools() {
 
   archive="$dist_dir/ecs-tools_linux_${arch}.tar.zst"
   echo "packaging ecs-tools_linux_${arch}"
-  tar -C "$package_stage" --zstd -cf "$archive" bin LICENSES LICENSE NOTICE manifest.json
+  tar -C "$package_stage" --sort=name --mtime="@$source_date_epoch" \
+    --owner=0 --group=0 --numeric-owner --zstd -cf "$archive" \
+    bin LICENSES LICENSE NOTICE manifest.json
 }
 
 if [[ "$tools_enabled" -eq 1 ]]; then
@@ -223,7 +230,9 @@ for target in "${targets[@]}"; do
       "$go_command" build -trimpath -ldflags "$ldflags" -o "$binary" ./cmd/ecs
   )
   cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
-  tar -C "$stage" -czf "$dist_dir/ecs_${suffix}.tar.gz" ecs LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
+  tar -C "$stage" --sort=name --mtime="@$source_date_epoch" \
+    --owner=0 --group=0 --numeric-owner -czf "$dist_dir/ecs_${suffix}.tar.gz" \
+    ecs LICENSE NOTICE README.md SECURITY.md THIRD_PARTY.md
   if [[ "$tools_enabled" -eq 1 ]]; then
     package_tools "$arch"
   fi

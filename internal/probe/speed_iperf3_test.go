@@ -16,8 +16,6 @@ func TestIPerfPortCandidatesUsesCompleteConfiguredRange(t *testing.T) {
 		t.Fatalf("iperf port candidates = %v, want %v", got, want)
 	}
 
-	// Config validation normally rejects this, but a directly constructed
-	// endpoint still has one concrete candidate to test.
 	if got := iperfPortCandidates(config.IPerfEndpoint{PortStart: 5300, PortEnd: 5299}); !reflect.DeepEqual(got, []int{5300}) {
 		t.Fatalf("invalid iperf port range candidates = %v, want [5300]", got)
 	}
@@ -163,5 +161,72 @@ func TestRunIPerfDirectionHonorsContextCancellation(t *testing.T) {
 	got = runIPerfDirectionWith(ctx, "unused", target, "IPv4", false, 1, 1, run, nil)
 	if calls != 1 || got.Port != target.PortStart || got.Error != "timeout" {
 		t.Fatalf("mid-run cancellation = calls %d result %+v, want one final failed sample", calls, got)
+	}
+}
+
+func TestParseIPerfTCPJSONUsesTheRequestedDirection(t *testing.T) {
+	raw := []byte(`{
+		"start": {
+			"connected": [{"local_host":"192.0.2.10","remote_host":"198.51.100.10"}],
+			"test_start": {"protocol":"TCP","reverse":1}
+		},
+		"end": {
+			"sum_sent": {"bytes":100,"bits_per_second":1000000000,"retransmits":7,"seconds":1},
+			"sum_received": {"bytes":900,"bits_per_second":9000000000,"seconds":1}
+		}
+	}`)
+
+	forward := parseIPerfTCPJSON(raw, 5202, false)
+	if forward.Mbps != 0 || forward.Error == "" {
+		t.Fatalf("forward accepted a reverse JSON: %+v", forward)
+	}
+
+	reverse := parseIPerfTCPJSON(raw, 5202, true)
+	if reverse.Error != "" || reverse.Mbps != 9000 || reverse.Bytes != 900 || reverse.Retransmits != 7 {
+		t.Fatalf("reverse parsed the wrong TCP summary: %+v", reverse)
+	}
+	if reverse.LocalHost != "192.0.2.10" || reverse.RemoteHost != "198.51.100.10" {
+		t.Fatalf("connection metadata was lost: %+v", reverse)
+	}
+
+	forwardRaw := []byte(`{
+		"start": {"test_start": {"protocol":"TCP","reverse":0}},
+		"end": {
+			"sum_sent": {"bytes":100,"bits_per_second":1000000000,"retransmits":3,"seconds":1},
+			"sum_received": {"bytes":900,"bits_per_second":9000000000,"seconds":1}
+		}
+	}`)
+	forward = parseIPerfTCPJSON(forwardRaw, 5202, false)
+	if forward.Error != "" || forward.Mbps != 1000 || forward.Bytes != 100 || forward.Retransmits != 3 {
+		t.Fatalf("forward parsed the wrong TCP summary: %+v", forward)
+	}
+}
+
+func TestParseIPerfTCPJSONRejectsWrongProtocolAndMissingExpectedSummary(t *testing.T) {
+	wrongProtocol := []byte(`{"start":{"test_start":{"protocol":"UDP","reverse":0}},"end":{"sum_sent":{"bytes":100,"bits_per_second":1000000,"seconds":1}}}`)
+	if got := parseIPerfTCPJSON(wrongProtocol, 5200, false); got.Error == "" || got.Mbps != 0 {
+		t.Fatalf("UDP JSON was accepted as TCP: %+v", got)
+	}
+
+	missingReceived := []byte(`{"start":{"test_start":{"protocol":"TCP","reverse":1}},"end":{"sum_sent":{"bytes":100,"bits_per_second":1000000,"seconds":1}}}`)
+	if got := parseIPerfTCPJSON(missingReceived, 5200, true); got.Error == "" || got.Mbps != 0 {
+		t.Fatalf("reverse JSON without received summary was accepted: %+v", got)
+	}
+}
+
+func TestRunIPerfDirectionWithPreferredPortTriesSuccessfulUploadPortFirst(t *testing.T) {
+	target := config.IPerfEndpoint{Host: "example.test", PortStart: 5200, PortEnd: 5202}
+	var attempts []int
+	run := func(_ context.Context, _ string, _ string, port int, _ string, _ bool, _ int, _ int) iperfDirectionResult {
+		attempts = append(attempts, port)
+		if port == 5202 {
+			return iperfDirectionResult{Port: port, Mbps: 100, Bytes: 100, Seconds: 1}
+		}
+		return iperfDirectionResult{Port: port, Error: "busy"}
+	}
+
+	result := runIPerfDirectionWithPreferred(context.Background(), "iperf3", target, "IPv4", true, 1, 1, 5202, run, nil)
+	if result.Error != "" || result.Port != 5202 || len(attempts) != 1 || attempts[0] != 5202 {
+		t.Fatalf("preferred port was not tried first: result=%+v attempts=%v", result, attempts)
 	}
 }

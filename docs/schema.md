@@ -80,10 +80,10 @@
 `fields` 适合离散信息：
 
 ```json
-{"key":"ipv4","label":"IPv4 出口","value":"203.0.113.x","sensitive":true}
+{"key":"ipv4","label":"IPv4 出口","value":"203.0.x.x","sensitive":true}
 ```
 
-`sensitive` 表示写报告前应进入遮盖流程。默认 JSON 本身已经遮盖，而不是只在 HTML 上隐藏。
+`sensitive` 表示该值是本机 IP，写报告前应进入遮盖流程。默认 JSON 本身已经遮盖，而不是只在 HTML 上隐藏。主机名、远端 IP 和网络前缀不应设置该标记。
 
 ## Measurement
 
@@ -172,10 +172,10 @@ IP 质量指标尤其需要保留 `method`：
 
 ```json
 {
-  "title": "三网回程线路",
-  "columns": ["运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"],
-  "rows": [["电信", "北京电信", "电信 163 骨干（AS4134）", "10", "202.97.55.x", "已识别"]],
-  "sensitive_columns": [4]
+  "title": "STUN 探测明细",
+  "columns": ["协议", "服务器", "映射地址", "状态"],
+  "rows": [["IPv4", "example-stun", "203.0.x.x:54321", "完成"]],
+  "sensitive_columns": [2]
 }
 ```
 
@@ -184,14 +184,13 @@ IP 质量指标尤其需要保留 `method`：
 `text_blocks` 保存路由等需要原文复核的结果。终端 ANSI 和 NUL 会在写入前移除；HTML 使用转义后的 `<pre>` 展示。
 
 ```json
-{"title":"北京电信 (219.141.136.x) 原始路径","language":"text","content":"…","sensitive":true}
+{"title":"本机绑定信息","language":"text","content":"local 203.0.x.x:443","sensitive":true}
 ```
 
-`sensitive` 为真时，正文里的 IP 会在写入前按段遮盖：IPv4 隐藏最后一段、IPv6 只保留 `/48`。
-路由类原文必须置位——路径 IP 会暴露机房位置。遮盖刻意保留前缀，因为 `59.43`、`202.97`
-这类网段正是判定线路类型的依据，整段抹掉会让证据失去复核价值。
+本机 IP 的遮盖规则为：IPv4 隐藏后两段，IPv6 隐藏后四段，`IP:port` 中的端口号保留。
+生产报告还会携带一份不写入 JSON 的本机 IP 列表，在所有正文中只替换与该列表精确匹配的地址。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
 
-遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者。
+遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者中的本机 IP 遮盖。
 
 配置文件中的 `Endpoint` 可选 `family` 字段，值为 `"4"` 或 `"6"`；空值表示自动选择。
 IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。

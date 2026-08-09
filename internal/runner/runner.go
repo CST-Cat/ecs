@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -62,6 +63,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			"ecs 报告只写入本地，不会自动上传；网络探针仍会按模块访问必要的公开目标。",
 			"性能结果只应在相同测试方法、版本和资源参数下比较。",
 		},
+		SensitiveIPs: localInterfaceIPs(),
 	}
 	requested := make(map[string]bool, len(cfg.Modules))
 	for _, id := range cfg.Modules {
@@ -86,6 +88,11 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	// 出口 IP 只发现一次，供 network、blacklist、bgp 共用：这既省掉重复请求，
 	// 也让"连了哪个外部服务"在报告里只出现一处。
 	env.Egress = probe.DiscoverEgress(ctx, env)
+	for _, address := range env.Egress.ByVersion {
+		if net.ParseIP(address.IP) != nil {
+			report.SensitiveIPs = append(report.SensitiveIPs, address.IP)
+		}
+	}
 	if env.Egress.Attempted {
 		report.Notices = append(report.Notices,
 			fmt.Sprintf("出口 IP 由 %s 统一发现一次，供需要它的模块共用。", env.Egress.SourceName))
@@ -150,6 +157,28 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	report.Run.DurationMS = report.Run.CompletedAt.Sub(report.Run.StartedAt).Milliseconds()
 	model.Summarize(&report)
 	return report
+}
+
+func localInterfaceIPs() []string {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(addresses))
+	result := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err != nil || ip == nil || ip.IsUnspecified() || ip.IsMulticast() {
+			continue
+		}
+		value := ip.String()
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 // runOne 执行单个探针，统一处理离线跳过与方法学补全。

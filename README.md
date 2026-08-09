@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 
 1. 运行时、安装器和报告永远不展示广告、返利链接或赞助内容。
 2. 所有报告默认只写本地，没有自动上传代码路径。
-3. 默认遮盖主机名与公网 IP；只有显式传入 `--reveal` 才保留完整值。
+3. 默认只遮盖本机 IP：IPv4 隐藏后两段，IPv6 隐藏后四段；主机名和远端 IP 保持完整。
 4. 每项指标记录方法、参数、耗时、数据源、警告和原始证据。
 5. 管道与 JSON 输出不混入 ANSI、进度条或交互提示。
 
@@ -74,7 +74,7 @@ BSD 的代码路径：多平台分支会迫使测试断言放宽到"哪个平台
 测试网络吞吐？iperf3 会跑满带宽，流量不封顶 [Y/n]
 检测流媒体解锁？会访问 33 个平台的公开页 [Y/n]
 检测路由与三网回程？耗时较长 [Y/n]
-在报告中保留完整 IP 与主机名？ [y/N]
+在报告中保留完整本机 IP？ [y/N]
 
 即将运行
   配置档 standard
@@ -193,7 +193,7 @@ ecs --profile standard --only system,cpu,memory,disk --exposure local
 # 显式写法与默认四格式一致，可用于覆盖输出目录
 ecs --format json,txt,md,html --output ./my-report
 
-# 报告中保留完整主机名与 IP（默认不会）
+# 报告中保留完整本机 IP（默认会按协议族遮盖后半段）
 ecs --reveal
 
 # 默认查询全部 IP 质量源；也可只启用指定来源
@@ -435,7 +435,7 @@ ecs render --input report.json --score-baseline baseline.json --format txt
 
 ### 提交进排行榜
 
-完整报告不适合入库：三千多行、含出口 IP 主机名与逐跳路由，那些对排行榜没用却能定位机器。
+完整报告不适合入库：三千多行，含出口 IP、主机名与逐跳路由，那些对排行榜没用却能定位机器。
 提交走另一种格式 `ecs.submission/v1`，只带机器规格与跑分数值，每份约 3 KB：
 
 ```bash
@@ -495,9 +495,9 @@ CI 用 `--annotate` 把结果转成 GitHub 检查注解，**只标记不阻断**
 
 ## 隐私与网络请求
 
-默认情况下，主机名显示为 `hidden`，IPv4 显示为 `A.B.C.x`，IPv6 只保留 `/48` 前缀。遮盖在写入 JSON 之前完成，因此默认生成的所有选中格式（JSON/txt/md/html）都不保存完整值。
+默认只遮盖本机网卡地址和本次发现的本机出口 IP：IPv4 显示为 `A.B.x.x`，IPv6 展开后保留前四段、后四段显示为 `x:x:x:x`。端口号保留。主机名、BGP 前缀、远端目标和路由跳 IP 不脱敏，便于复核线路。
 
-遮盖同时覆盖表格与原始命令输出：`route` 与 `backtrace` 保存的 NextTrace JSON 原文会逐个 IP 按段遮盖，既不泄露完整地址，又保留 `59.43`、`202.97` 这类前缀供你复核线路判定是否成立。
+遮盖在写入 JSON 之前完成，并按精确 IP 匹配覆盖字段、表格和原始命令输出；即使本机 IP 出现在 NextTrace 原文中也会被遮盖，同一文本里的远端 IP 仍保留完整。`--reveal` 只关闭这项本机 IP 遮盖。默认生成的 JSON/txt/md/html 都使用同一处理结果。
 
 在线配置可能连接以下第三方：
 

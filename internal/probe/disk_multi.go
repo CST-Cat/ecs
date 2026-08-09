@@ -191,8 +191,6 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 	table := model.Table{
 		Title:   "其他挂载盘 I/O",
 		Columns: []string{"挂载点", "设备", "文件系统", "顺序写", "4K 随机读", "状态"},
-		// 设备路径可能透露存储拓扑，按敏感列处理。
-		SensitiveColumns: []int{1},
 	}
 	engine := detectFIOEngine(ctx, fioPath)
 	tested := 0

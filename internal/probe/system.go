@@ -89,7 +89,7 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 			model.FormatBytes(snapshot.MemoryUsed), model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
 	}
 	result.Fields = []model.Field{
-		{Key: "hostname", Label: "主机名", Value: snapshot.Hostname, Sensitive: true},
+		{Key: "hostname", Label: "主机名", Value: snapshot.Hostname},
 		{Key: "os", Label: "系统", Value: snapshot.OS},
 		{Key: "kernel", Label: "内核", Value: snapshot.Kernel},
 		{Key: "arch", Label: "架构", Value: snapshot.Arch},

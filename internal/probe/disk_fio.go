@@ -287,7 +287,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Key: "version", Label: "fio 版本", Value: fallback(output.Version, "unknown")},
 		{Key: "binary_sha256", Label: "fio SHA-256", Value: fallback(binarySHA256(fioPath), "unavailable")},
 		{Key: "disk_device", Label: "测试设备", Value: fallback(disk.DiskDevice, "unavailable")},
-		{Key: "path", Label: "测试目录", Value: diskPath, Sensitive: true},
+		{Key: "path", Label: "测试目录", Value: diskPath},
 		{Key: "mount", Label: "挂载点", Value: fallback(disk.DiskMount, diskPath)},
 		{Key: "disk_total", Label: "磁盘总量", Value: model.FormatBytes(disk.DiskTotal)},
 		{Key: "disk_used", Label: "磁盘已用", Value: model.FormatBytes(disk.DiskUsed)},

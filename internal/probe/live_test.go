@@ -81,7 +81,7 @@ func TestLiveIPQualityProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IPv4 出口发现失败：%v", err)
 	}
-	bundle := collectIPQuality(ctx, env, ipLookup{Version: "4", Data: data, Latency: latency})
+	bundle := collectIPQuality(ctx, env, ipLookup{Version: "4", Data: data, Latency: latency, HasIntel: true, IntelAttempted: true})
 
 	var succeeded, failed, partial []string
 	if bundle.Origin.Enabled {

@@ -4,7 +4,8 @@ package i18n
 
 var probeEnglishExtra = map[string]string{
 	"IPv\x1f 出口查询失败，详见下方失败原因。": "IPv\x1f egress lookup failed; see the failure reason below.",
-	"IPv\x1f 失败原因":                                    "IPv\x1f failure reason",
+	"IPv\x1f 失败原因": "IPv\x1f failure reason",
+	"IPv\x1f 未取得 ipapi 情报；ASN/路由段优先使用公共 BGP 观测，其余字段仅保留已取得的数据。": "IPv\x1f ipapi intelligence was unavailable; ASN/route prefix prefer public BGP observations and other fields retain only acquired data.",
 	"\x1f 天滥用置信度与使用类型":                                "\x1f-day abuse confidence and usage type",
 	"\x1f 跳无已知特征":                                     "no known signature in \x1f hops",
 	"\x1f/\x1f 个目标完成 · NextTrace Tiny":                "\x1f/\x1f targets completed · NextTrace Tiny",
@@ -87,6 +88,10 @@ var probeEnglishExtra = map[string]string{
 	"成都联通 (\x1f) 原始路径": "Chengdu Unicom (\x1f) raw path",
 	"无用户密钥时的 MaxMind、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQS、ipdata 社区中转": "Community relay for MaxMind, ipregistry, IP2Location, AbuseIPDB, Scamalytics, IPQS and ipdata when no user key is present",
 	"未识别到任何已知中国骨干线路":                   "No known Chinese backbone route identified",
+	"未查询（ipapi 不可用）":                   "not queried (ipapi unavailable)",
+	"未查询（未启用 ipapi）":                   "not queried (ipapi not enabled)",
+	"ipapi 情报未查询":                      "ipapi intelligence was not queried",
+	"ipapi 响应缺少所需字段":                   "ipapi response is missing required fields",
 	"网络类型、公司类型与隐私信号":                   "Network type, company type and privacy signals",
 	"网络类型与威胁信号":                        "Network type and threat signals",
 	"部分：仅提供地理与运营商，无风险字段":               "partial: geography and carrier only, no risk fields",

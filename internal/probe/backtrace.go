@@ -181,8 +181,6 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	table := model.Table{
 		Title:   "三网回程线路",
 		Columns: []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"},
-		// 命中 IP 会暴露机房出口位置，默认按段遮盖。
-		SensitiveColumns: []int{4},
 	}
 	identified := 0
 	var summaries []string
@@ -191,10 +189,9 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		// 已知骨干"还是"探测被限速打断"的唯一依据。
 		if row.Raw != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:     fmt.Sprintf("%s (%s) 原始路径", row.Target.Name, row.Target.Address),
-				Language:  "text",
-				Content:   row.Raw,
-				Sensitive: true,
+				Title:    fmt.Sprintf("%s (%s) 原始路径", row.Target.Name, row.Target.Address),
+				Language: "text",
+				Content:  row.Raw,
 			})
 		}
 		if row.Err != nil {
@@ -236,9 +233,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	detailTable := model.Table{
 		Title:   "逐跳明细",
 		Columns: []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"},
-		// IP 会暴露机房出口位置，默认按段遮盖；其余列来自路径工具或
-		// 已知骨干特征，未知值统一使用占位符。
-		SensitiveColumns: []int{4},
+		// 回程跳点是远端路径信息；按要求只脱敏本机出口 IP。
 	}
 	for _, row := range rows {
 		if row.Err != nil || len(row.Details) == 0 {

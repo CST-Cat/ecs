@@ -34,6 +34,17 @@ func TestDiscoverEgressSkippedWhenOffline(t *testing.T) {
 	}
 }
 
+func TestModulesNeedEgressBGPForNetworkFallback(t *testing.T) {
+	for _, modules := range [][]string{{"network"}, {"bgp"}, {"system", "network"}} {
+		if !modulesNeedEgressBGP(modules) {
+			t.Fatalf("modulesNeedEgressBGP(%v) = false", modules)
+		}
+	}
+	if modulesNeedEgressBGP([]string{"system", "route"}) {
+		t.Fatal("unrelated modules unexpectedly require a RouteViews query")
+	}
+}
+
 // 报告里要能区分"查了但没结果"和"这次压根没查"：前者是数据缺失，
 // 后者是用户主动选择的隐私边界。
 func TestIntelForDistinguishesMissingFromNotQueried(t *testing.T) {

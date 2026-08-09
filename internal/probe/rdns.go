@@ -103,8 +103,6 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	table := model.Table{
 		Title:   "反向解析与 FCrDNS",
 		Columns: []string{"项目", "结果", "说明"},
-		// PTR 会直接暴露主机名与机房归属。
-		SensitiveColumns: []int{1},
 	}
 	ptrValue := "无 PTR 记录"
 	if len(check.Names) > 0 {
@@ -134,7 +132,7 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	result.Tables = append(result.Tables, table)
 
 	result.Fields = append(result.Fields,
-		model.Field{Key: "ptr_record", Label: "PTR 记录", Value: ptrValue, Sensitive: true},
+		model.Field{Key: "ptr_record", Label: "PTR 记录", Value: ptrValue},
 		model.Field{Key: "fcrdns", Label: "FCrDNS", Value: fcrdns},
 	)
 	result.Measurements = append(result.Measurements, model.Measurement{

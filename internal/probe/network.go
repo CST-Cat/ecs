@@ -24,7 +24,17 @@ func (networkProbe) Title() string      { return "网络与 IP 质量" }
 func (networkProbe) NeedsNetwork() bool { return true }
 
 type ipAPIResponse struct {
-	IP           string  `json:"ip"`
+	IP string `json:"ip"`
+	// The current ipapi.is response is flat (asn_num/asn_org/company_name/cc),
+	// while older responses used the nested ASN/Company/Location objects below.
+	// Keep both representations in the wire type and normalize them immediately
+	// after decoding so every consumer sees one canonical shape.
+	ASNNum       int     `json:"asn_num"`
+	ASNOrg       string  `json:"asn_org"`
+	CompanyName  string  `json:"company_name"`
+	CountryCode  string  `json:"cc"`
+	Latitude     float64 `json:"lat"`
+	Longitude    float64 `json:"lon"`
 	RIR          string  `json:"rir"`
 	IsBogon      bool    `json:"is_bogon"`
 	IsMobile     bool    `json:"is_mobile"`
@@ -63,12 +73,64 @@ type ipAPIResponse struct {
 		Timezone    string `json:"timezone"`
 		Accuracy    string `json:"accuracy"`
 	} `json:"location"`
+	BooleanPresence ipAPIBooleanPresence `json:"-"`
+}
+
+type ipAPIBooleanPresence struct {
+	IsBogon      bool
+	IsMobile     bool
+	IsSatellite  bool
+	IsCrawler    bool
+	IsDatacenter bool
+	IsTor        bool
+	IsProxy      bool
+	IsVPN        bool
+	IsAbuser     bool
+}
+
+func (data *ipAPIResponse) UnmarshalJSON(input []byte) error {
+	type wireIPAPIResponse ipAPIResponse
+	var decoded wireIPAPIResponse
+	if err := json.Unmarshal(input, &decoded); err != nil {
+		return err
+	}
+	var presence struct {
+		IsBogon      *bool `json:"is_bogon"`
+		IsMobile     *bool `json:"is_mobile"`
+		IsSatellite  *bool `json:"is_satellite"`
+		IsCrawler    *bool `json:"is_crawler"`
+		IsDatacenter *bool `json:"is_datacenter"`
+		IsTor        *bool `json:"is_tor"`
+		IsProxy      *bool `json:"is_proxy"`
+		IsVPN        *bool `json:"is_vpn"`
+		IsAbuser     *bool `json:"is_abuser"`
+	}
+	if err := json.Unmarshal(input, &presence); err != nil {
+		return err
+	}
+	*data = ipAPIResponse(decoded)
+	data.BooleanPresence = ipAPIBooleanPresence{
+		IsBogon:      presence.IsBogon != nil,
+		IsMobile:     presence.IsMobile != nil,
+		IsSatellite:  presence.IsSatellite != nil,
+		IsCrawler:    presence.IsCrawler != nil,
+		IsDatacenter: presence.IsDatacenter != nil,
+		IsTor:        presence.IsTor != nil,
+		IsProxy:      presence.IsProxy != nil,
+		IsVPN:        presence.IsVPN != nil,
+		IsAbuser:     presence.IsAbuser != nil,
+	}
+	return nil
 }
 
 type ipLookup struct {
-	Version string
-	Data    ipAPIResponse
-	Latency time.Duration
+	Version         string
+	Data            ipAPIResponse
+	Latency         time.Duration
+	HasIntel        bool
+	IntelAttempted  bool
+	IntelErr        error
+	BGPObservations []routeViewsPrefix
 }
 
 func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -89,9 +151,18 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	var found []ipLookup
 	for _, version := range versions {
 		address, ok := env.Egress.Lookup(version)
-		intel, hasIntel := env.Egress.IntelFor(version)
-		if ok && address.Err == nil && hasIntel && intel.IP != "" {
-			found = append(found, ipLookup{Version: version, Data: intel, Latency: address.Latency})
+		if ok && address.Err == nil && address.IP != "" {
+			intel, hasIntel := env.Egress.IntelFor(version)
+			intel.IP = firstNonEmpty(intel.IP, address.IP)
+			found = append(found, ipLookup{
+				Version:         version,
+				Data:            intel,
+				Latency:         address.Latency,
+				HasIntel:        hasIntel,
+				IntelAttempted:  address.IntelAttempted,
+				IntelErr:        address.IntelErr,
+				BGPObservations: address.BGPObservations,
+			})
 			continue
 		}
 		reason := "unavailable"
@@ -149,13 +220,33 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		prefix := "ipv" + lookup.Version
 		data := lookup.Data
 		bundle := bundles[lookup.Version]
-		location := strings.Trim(strings.Join([]string{data.Location.Country, data.Location.State, data.Location.City}, " / "), " /")
+		location := strings.Trim(strings.Join([]string{
+			firstNonEmpty(data.Location.Country, data.Location.CountryCode),
+			data.Location.State,
+			data.Location.City,
+		}, " / "), " /")
 		if location == "" {
-			location = "unknown"
+			location = bundleCountry(bundle)
 		}
-		asn := "unknown"
-		if data.ASN.ASN > 0 {
-			asn = fmt.Sprintf("AS%d %s", data.ASN.ASN, data.ASN.Organization)
+		if location == "" {
+			location = unavailableIPField(lookup, "unknown")
+		}
+		originASN, route := egressBGPIdentity(lookup.BGPObservations)
+		asnNumber := data.ASN.ASN
+		if asnNumber <= 0 {
+			asnNumber = originASN
+		}
+		asn := formatASNWithOrganization(asnNumber, data.ASN.Organization)
+		if asn == "unknown" {
+			asn = unavailableIPField(lookup, asn)
+		}
+		route = firstNonEmpty(data.ASN.Route, route)
+		if route == "" {
+			route = unavailableIPField(lookup, "unknown")
+		}
+		owner := firstNonEmpty(data.Company.Name, data.ASN.Organization)
+		if owner == "" {
+			owner = unavailableIPField(lookup, "unknown")
 		}
 		ipType := "未启用"
 		if bundle.Origin.Enabled {
@@ -174,19 +265,19 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Fields = append(result.Fields,
 			model.Field{Key: prefix, Label: "IPv" + lookup.Version + " 出口", Value: data.IP, Sensitive: true},
 			model.Field{Key: prefix + "_asn", Label: "IPv" + lookup.Version + " ASN", Value: asn},
-			model.Field{Key: prefix + "_route", Label: "IPv" + lookup.Version + " 路由段", Value: fallback(data.ASN.Route, "unknown")},
+			model.Field{Key: prefix + "_route", Label: "IPv" + lookup.Version + " 路由段", Value: route},
 			model.Field{Key: prefix + "_location", Label: "IPv" + lookup.Version + " 地理", Value: location},
-			model.Field{Key: prefix + "_owner", Label: "IPv" + lookup.Version + " 所有者", Value: fallback(data.Company.Name, data.ASN.Organization)},
+			model.Field{Key: prefix + "_owner", Label: "IPv" + lookup.Version + " 所有者", Value: owner},
 			model.Field{Key: prefix + "_ip_type", Label: "IPv" + lookup.Version + " IP 类型", Value: ipType},
 		)
 		overview.Rows = append(overview.Rows, []string{
 			"IPv" + lookup.Version,
 			fallback(normalizeNetworkType(firstNonEmpty(data.Company.Type, data.ASN.Type)), fallback(data.Company.Type, data.ASN.Type)),
-			yesNo(data.IsDatacenter),
-			yesNo(data.IsProxy),
-			yesNo(data.IsVPN),
-			yesNo(data.IsTor),
-			yesNo(data.IsAbuser),
+			ipAPIBooleanText(data.IsDatacenter, data.BooleanPresence.IsDatacenter),
+			ipAPIBooleanText(data.IsProxy, data.BooleanPresence.IsProxy),
+			ipAPIBooleanText(data.IsVPN, data.BooleanPresence.IsVPN),
+			ipAPIBooleanText(data.IsTor, data.BooleanPresence.IsTor),
+			ipAPIBooleanText(data.IsAbuser, data.BooleanPresence.IsAbuser),
 			fmt.Sprintf("%.0f ms", float64(lookup.Latency)/float64(time.Millisecond)),
 		})
 		result.Measurements = append(result.Measurements, bundle.measurements()...)
@@ -205,14 +296,18 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		summaries = append(
 			summaries,
 			fmt.Sprintf(
-				"IPv%s %s AS%d · %s · %s",
+				"IPv%s %s %s · %s · %s",
 				lookup.Version,
-				data.Location.CountryCode,
-				data.ASN.ASN,
+				firstNonEmpty(data.Location.CountryCode, data.Location.Country, "unknown"),
+				formatASNWithOrganization(asnNumber, data.ASN.Organization),
 				fallback(bundle.Origin.Label, "类型未判定"),
 				sourceSummary,
 			),
 		)
+		if !lookup.HasIntel {
+			result.Status = model.StatusWarning
+			result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 未取得 ipapi 情报；ASN/路由段优先使用公共 BGP 观测，其余字段仅保留已取得的数据。", lookup.Version))
+		}
 		if failed := bundle.failedSourceNames(); len(failed) > 0 {
 			providerNotes = append(providerNotes, fmt.Sprintf("IPv%s 数据源失败：%s。详见数据源状态表。", lookup.Version, strings.Join(failed, "、")))
 		}
@@ -226,6 +321,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}}, result.Fields...)
 	result.Sources = []model.Source{
 		{Name: "ipapi.is", URL: "https://ipapi.is/", Purpose: "出口 IP、ASN、地理、网络类型与滥用概率"},
+		{Name: "RouteViews", URL: "https://api.routeviews.org/", Purpose: "ipapi 字段缺失时回填出口前缀与起源 ASN"},
 		{Name: "IPQuality", URL: "https://github.com/xykt/IPQuality", Purpose: "多源覆盖、字段映射与社区兼容通道（AGPL-3.0）"},
 		{Name: "check.place", URL: "https://check.place/", Purpose: "无用户密钥时的 MaxMind、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQS、ipdata 社区中转"},
 		{Name: "IPinfo", URL: "https://ipinfo.io/developers", Purpose: "网络类型、公司类型与隐私信号"},
@@ -256,6 +352,61 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Summary = strings.Join(summaries, " · ")
 	result.Finish(start)
 	return result
+}
+
+func egressBGPIdentity(observations []routeViewsPrefix) (asn int, route string) {
+	bestLength := -1
+	for _, observation := range observations {
+		length := prefixLength(observation.Prefix)
+		if length < 0 {
+			continue
+		}
+		if length < bestLength {
+			continue
+		}
+		if length == bestLength && route != "" {
+			continue
+		}
+		bestLength = length
+		route = observation.Prefix
+		asn = observation.OriginASN
+	}
+	return asn, route
+}
+
+func formatASNWithOrganization(asn int, organization string) string {
+	if asn <= 0 {
+		return "unknown"
+	}
+	if organization == "" {
+		return formatASN(asn)
+	}
+	return fmt.Sprintf("%s %s", formatASN(asn), organization)
+}
+
+func bundleCountry(bundle ipQualityBundle) string {
+	if bundle.Origin.Err == nil {
+		if country := firstNonEmpty(bundle.Origin.UsageCountry, bundle.Origin.RegisteredCountry); country != "" {
+			return country
+		}
+	}
+	for _, id := range typeSourceOrder {
+		finding := bundle.Findings[id]
+		if finding.Enabled && finding.Err == nil && finding.Country != "" {
+			return finding.Country
+		}
+	}
+	return ""
+}
+
+func unavailableIPField(lookup ipLookup, normalFallback string) string {
+	if lookup.HasIntel {
+		return normalFallback
+	}
+	if lookup.IntelAttempted {
+		return "未查询（ipapi 不可用）"
+	}
+	return "未查询（未启用 ipapi）"
 }
 
 func lookupIP(ctx context.Context, env Environment, version string) (ipAPIResponse, time.Duration, error) {
@@ -290,6 +441,7 @@ func lookupIP(ctx context.Context, env Environment, version string) (ipAPIRespon
 	if err := json.NewDecoder(reader).Decode(&data); err != nil {
 		return data, latency, err
 	}
+	data = normalizeIPAPIResponse(data)
 	if data.Error != "" {
 		return data, latency, fmt.Errorf("%s", data.Error)
 	}
@@ -299,11 +451,46 @@ func lookupIP(ctx context.Context, env Environment, version string) (ipAPIRespon
 	return data, latency, nil
 }
 
+// normalizeIPAPIResponse converts the current flat ipapi.is schema into the
+// canonical nested fields used by the quality and report code.  The endpoint
+// may return only a subset of the optional fields, so each value is filled
+// independently and missing data remains missing instead of being guessed.
+func normalizeIPAPIResponse(data ipAPIResponse) ipAPIResponse {
+	if data.ASN.ASN <= 0 {
+		data.ASN.ASN = data.ASNNum
+	}
+	if data.ASN.Organization == "" {
+		data.ASN.Organization = data.ASNOrg
+	}
+	if data.Company.Name == "" {
+		data.Company.Name = data.CompanyName
+	}
+	if data.Company.Type == "" && data.BooleanPresence.IsDatacenter && data.IsDatacenter {
+		// The flat response does not expose the old nested type field, but its
+		// datacenter boolean is an explicit infrastructure classification.
+		data.Company.Type = "hosting"
+	}
+	if data.Location.CountryCode == "" {
+		data.Location.CountryCode = data.CountryCode
+	}
+	if data.Location.Country == "" {
+		data.Location.Country = data.CountryCode
+	}
+	return data
+}
+
 func yesNo(value bool) string {
 	if value {
 		return "是"
 	}
 	return "否"
+}
+
+func ipAPIBooleanText(value, known bool) string {
+	if !known {
+		return "未返回"
+	}
+	return yesNo(value)
 }
 
 func proxyEnvironmentEnabled() bool {

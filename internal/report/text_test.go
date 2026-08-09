@@ -413,23 +413,24 @@ func TestTextBacktraceRendersHopDetailsAndMasksIPs(t *testing.T) {
 		ID: "backtrace", Title: "三网回程", Status: model.StatusOK,
 		Summary: "电信 CN2（AS4809）",
 		Tables: []model.Table{
-			{Title: "三网回程线路", Columns: []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"}, Rows: [][]string{{"电信", "北京电信", "电信 CN2（AS4809）", "3", "59.43.130.22", "已识别"}}, SensitiveColumns: []int{4}},
+			{Title: "本机出口", Columns: []string{"项目", "IP"}, Rows: [][]string{{"IPv4", "203.0.113.44"}}, SensitiveColumns: []int{1}},
 			{Title: "逐跳明细", Columns: []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"}, Rows: [][]string{
 				{"北京电信", "电信", "1", "0.512 ms", "10.0.0.1", "—", "—", "—", "已响应"},
 				{"北京电信", "电信", "2", "—", "—", "—", "—", "—", "无响应"},
 				{"北京电信", "电信", "3", "32.118 ms", "59.43.130.22", "AS4809", "China Telecom", "Shanghai", "已响应"},
-			}, SensitiveColumns: []int{4}},
+			},
+			},
 		},
 	}}
 	redacted := model.RedactedCopy(data, false)
 	plain := Text(redacted, TextOptions{Color: termcolor.LevelNone})
-	for _, want := range []string{"三网回程线路", "逐跳明细", "北京电信", "0.512 ms", "32.118 ms", "AS4809", "China Telecom", "无响应", "59.43.130.x"} {
+	for _, want := range []string{"本机出口", "逐跳明细", "北京电信", "0.512 ms", "32.118 ms", "AS4809", "China Telecom", "无响应", "203.0.x.x", "59.43.130.22"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("回程逐跳报告缺少 %q:\n%s", want, plain)
 		}
 	}
-	if strings.Contains(plain, "59.43.130.22") || strings.Contains(plain, "10.0.0.1") {
-		t.Fatalf("脱敏后的终端报告仍暴露完整 IP:\n%s", plain)
+	if strings.Contains(plain, "203.0.113.44") {
+		t.Fatalf("脱敏后的终端报告仍暴露本机完整 IP:\n%s", plain)
 	}
 	for _, level := range []termcolor.Level{termcolor.LevelNone, termcolor.LevelTrueColor} {
 		out := Text(redacted, TextOptions{Color: level})

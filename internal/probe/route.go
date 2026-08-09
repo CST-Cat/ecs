@@ -99,10 +99,9 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		table.Rows = append(table.Rows, []string{target.Name, target.Kind, status, fmt.Sprintf("%d", hops), elapsed.Round(time.Millisecond).String()})
 		if clean != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:     target.Name + " (" + target.Address + ")",
-				Language:  "json",
-				Content:   clean,
-				Sensitive: true,
+				Title:    target.Name + " (" + target.Address + ")",
+				Language: "json",
+				Content:  clean,
 			})
 		}
 	}

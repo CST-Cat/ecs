@@ -36,6 +36,18 @@ type EgressAddress struct {
 	Intel ipAPIResponse
 	// HasIntel 区分"情报字段为空"与"根本没查过情报"。
 	HasIntel bool
+	// IntelAttempted 表示本次是否尝试过 ipapi.is。它和 HasIntel 分开，
+	// 这样报告可以区分"按外联设置没有查询"与"查询失败"。
+	IntelAttempted bool
+	// IntelErr 保留 ipapi.is 的失败原因；只要 STUN 仍然发现了 IP，Err
+	// 不会被设置为发现失败，调用方仍可继续使用地址和 BGP 观测。
+	IntelErr error
+	// BGPQueried 表示出口发现阶段是否已经为该协议族查询过 RouteViews。
+	// BGPObservations/BGPError 让 network 与 bgp 模块共享同一份观测，避免
+	// network 为了字段回填再发第二次请求。
+	BGPQueried      bool
+	BGPObservations []routeViewsPrefix
+	BGPError        error
 	// Latency 是本次发现耗时。
 	Latency time.Duration
 	// Err 是发现失败的原因。
@@ -114,20 +126,50 @@ func DiscoverEgress(ctx context.Context, env Environment) Egress {
 		}(version)
 	}
 	wg.Wait()
+	if modulesNeedEgressBGP(cfg.Modules) {
+		cacheEgressBGP(ctx, env, &result, versions)
+	}
+	if useIntel {
+		for _, address := range result.ByVersion {
+			if address.Source == "stun" {
+				result.SourceName = "ipapi.is + STUN fallback"
+				break
+			}
+		}
+	}
 	return result
 }
 
 func discoverEgressForVersion(ctx context.Context, env Environment, version string, useIntel bool) EgressAddress {
-	address := EgressAddress{Version: version}
+	address := EgressAddress{Version: version, IntelAttempted: useIntel}
 	if useIntel {
 		data, latency, err := lookupIP(ctx, env, version)
 		address.Source = "ipapi.is"
 		address.Latency = latency
-		if err != nil {
-			address.Err = err
+		if data.IP != "" && egressAddressMatchesVersion(data.IP, version) {
+			address.IP, address.Intel = data.IP, data
+			if err == nil {
+				address.HasIntel = true
+				return address
+			}
+			address.IntelErr = err
+			// ipapi returned a usable address but incomplete intelligence. Keep
+			// that address: BGP and the remaining quality sources can still run.
 			return address
 		}
-		address.IP, address.Intel, address.HasIntel = data.IP, data, true
+		address.IntelErr = err
+		// The intelligence endpoint is also the historical IP discovery path.
+		// If it is unavailable, fall back to STUN so a service outage does not
+		// turn a known egress address into a total module failure.
+		start := time.Now()
+		ip, stunErr := egressViaSTUN(ctx, env, version)
+		address.Latency += time.Since(start)
+		if stunErr != nil {
+			address.Err = combineEgressErrors(err, stunErr)
+			return address
+		}
+		address.Source = "stun"
+		address.IP = ip
 		return address
 	}
 
@@ -141,6 +183,49 @@ func discoverEgressForVersion(ctx context.Context, env Environment, version stri
 	}
 	address.IP = ip
 	return address
+}
+
+func cacheEgressBGP(ctx context.Context, env Environment, result *Egress, versions []string) {
+	for _, version := range versions {
+		address, ok := result.ByVersion[version]
+		if !ok {
+			continue
+		}
+		address.BGPQueried = true
+		if address.Err != nil || address.IP == "" {
+			address.BGPError = fmt.Errorf("IPv%s 出口 IP 不可用", version)
+			result.ByVersion[version] = address
+			continue
+		}
+		observations, err := queryRouteViewsPrefix(ctx, env, address.IP)
+		address.BGPObservations = observations
+		address.BGPError = err
+		result.ByVersion[version] = address
+	}
+}
+
+func moduleSelected(modules []string, target string) bool {
+	for _, module := range modules {
+		if module == target {
+			return true
+		}
+	}
+	return false
+}
+
+func modulesNeedEgressBGP(modules []string) bool {
+	return moduleSelected(modules, "bgp") || moduleSelected(modules, "network")
+}
+
+func combineEgressErrors(intelErr, stunErr error) error {
+	switch {
+	case intelErr == nil:
+		return stunErr
+	case stunErr == nil:
+		return intelErr
+	default:
+		return fmt.Errorf("ipapi.is: %v；STUN: %v", intelErr, stunErr)
+	}
 }
 
 // egressViaSTUN 依次尝试配置里的 STUN 服务器，取第一个返回的映射地址。

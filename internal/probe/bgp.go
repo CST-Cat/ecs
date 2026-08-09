@@ -72,14 +72,12 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 	table := model.Table{
 		Title:   "公共 BGP / 互联观测",
 		Columns: []string{"协议族", "匹配前缀", "起源 ASN", "RPKI", "观测 peer/collector", "AS 路径样本"},
-		// The matched prefix identifies the egress network even when the full
-		// address is not shown; keep the same default redaction boundary as IP.
-		SensitiveColumns: []int{1},
 	}
 
 	versions := config.IPVersions(env.Config.IPVersion)
 	successes := 0
 	for _, version := range versions {
+		address, _ := env.Egress.Lookup(version)
 		egressIP, err := env.Egress.IPFor(version)
 		if err != nil {
 			result.Fields = append(result.Fields, model.Field{
@@ -100,23 +98,23 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 			)
 		}
 
-		observations, err := queryRouteViewsPrefix(ctx, env, egressIP)
+		observations, err := routeViewsObservations(ctx, env, address, egressIP)
 		if err != nil {
 			result.Fields = append(result.Fields, model.Field{
 				Key: "ipv" + version + "_routeviews_error", Label: "IPv" + version + " RouteViews 失败原因", Value: compactError(err),
 			})
 			continue
 		}
-		successes++
 		if len(observations) == 0 {
 			table.Rows = append(table.Rows, []string{"IPv" + version, "未找到匹配前缀", "—", "—", "—", "—"})
 			continue
 		}
+		successes++
 		for index, observation := range observations {
 			peerText, pathText, collectors, adjacent := summarizeRouteViews(observation.ReportingPeers)
 			if index == 0 {
 				result.Fields = append(result.Fields,
-					model.Field{Key: "ipv" + version + "_prefix", Label: "IPv" + version + " 匹配前缀", Value: observation.Prefix, Sensitive: true},
+					model.Field{Key: "ipv" + version + "_prefix", Label: "IPv" + version + " 匹配前缀", Value: observation.Prefix},
 					model.Field{Key: "ipv" + version + "_origin_asn", Label: "IPv" + version + " 起源 ASN", Value: formatASN(observation.OriginASN)},
 					model.Field{Key: "ipv" + version + "_rpki", Label: "IPv" + version + " RPKI", Value: fallback(observation.RPKIState, "unknown")},
 					model.Field{Key: "ipv" + version + "_collectors", Label: "IPv" + version + " 观测 collectors", Value: collectors},
@@ -176,7 +174,66 @@ func queryRouteViewsPrefix(ctx context.Context, env Environment, ip string) ([]r
 	if err := json.Unmarshal(body, &observations); err != nil {
 		return nil, fmt.Errorf("解析 RouteViews 响应失败")
 	}
-	return observations, nil
+	return normalizeRouteViewsObservations(parsed, observations), nil
+}
+
+func routeViewsObservations(ctx context.Context, env Environment, address EgressAddress, ip string) ([]routeViewsPrefix, error) {
+	if address.BGPQueried {
+		return address.BGPObservations, address.BGPError
+	}
+	return queryRouteViewsPrefix(ctx, env, ip)
+}
+
+func normalizeRouteViewsObservations(ip net.IP, observations []routeViewsPrefix) []routeViewsPrefix {
+	if ip == nil {
+		return nil
+	}
+	result := make([]routeViewsPrefix, 0, len(observations))
+	for _, observation := range observations {
+		prefixIP, network, err := net.ParseCIDR(strings.TrimSpace(observation.Prefix))
+		if err != nil || prefixIP == nil || network == nil {
+			continue
+		}
+		ones, bits := network.Mask.Size()
+		// Default routes do not identify an egress network and are not useful
+		// for this module's longest-match display.  A prefix also has to match
+		// the queried address and belong to the same address family.
+		if ones <= 0 || (bits != 32 && bits != 128) {
+			continue
+		}
+		if ip.To4() != nil {
+			if bits != 32 || prefixIP.To4() == nil || !network.Contains(ip.To4()) {
+				continue
+			}
+		} else {
+			if bits != 128 || prefixIP.To4() != nil || !network.Contains(ip) {
+				continue
+			}
+		}
+		observation.Prefix = network.String()
+		result = append(result, observation)
+	}
+	// RouteViews currently returns the longest match first, but that ordering is
+	// an API detail rather than part of the data contract.  Keep the report and
+	// the network-module fallback correct if the upstream response is reordered.
+	sort.SliceStable(result, func(i, j int) bool {
+		left := prefixLength(result[i].Prefix)
+		right := prefixLength(result[j].Prefix)
+		if left != right {
+			return left > right
+		}
+		return result[i].Prefix < result[j].Prefix
+	})
+	return result
+}
+
+func prefixLength(prefix string) int {
+	_, network, err := net.ParseCIDR(prefix)
+	if err != nil || network == nil {
+		return -1
+	}
+	ones, _ := network.Mask.Size()
+	return ones
 }
 
 func waitRouteViews(ctx context.Context) error {

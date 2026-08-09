@@ -131,7 +131,21 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 	}
 
 	if qualitySourceEnabled(env.Config.IPQualitySources, "ipapi") {
-		finding := findingFromIPAPI(lookup.Data, lookup.Latency)
+		finding := newFinding("ipapi")
+		if lookup.HasIntel {
+			finding = findingFromIPAPI(lookup.Data, lookup.Latency)
+			if !findingHasEvidence(finding) {
+				finding.Err = errors.New("ipapi 响应缺少所需字段")
+			}
+		} else {
+			finding.Access = "官方免密直连"
+			finding.Latency = lookup.Latency
+			if lookup.IntelErr != nil {
+				finding.Err = lookup.IntelErr
+			} else {
+				finding.Err = errors.New("ipapi 情报未查询")
+			}
+		}
 		finding.Enabled = true
 		bundle.Findings["ipapi"] = finding
 	}
@@ -259,12 +273,12 @@ func findingFromIPAPI(data ipAPIResponse, latency time.Duration) qualityFinding 
 		Company:   normalizeNetworkType(data.Company.Type),
 		ScoreKind: "公司滥用概率",
 		Risk:      translateRiskLabel(scoreLabel(data.Company.AbuserScore)),
-		Proxy:     knownSignal(data.IsProxy),
-		Tor:       knownSignal(data.IsTor),
-		VPN:       knownSignal(data.IsVPN),
-		Server:    knownSignal(data.IsDatacenter),
-		Abuser:    knownSignal(data.IsAbuser),
-		Robot:     knownSignal(data.IsCrawler),
+		Proxy:     knownIPAPISignal(data.IsProxy, data.BooleanPresence.IsProxy),
+		Tor:       knownIPAPISignal(data.IsTor, data.BooleanPresence.IsTor),
+		VPN:       knownIPAPISignal(data.IsVPN, data.BooleanPresence.IsVPN),
+		Server:    knownIPAPISignal(data.IsDatacenter, data.BooleanPresence.IsDatacenter),
+		Abuser:    knownIPAPISignal(data.IsAbuser, data.BooleanPresence.IsAbuser),
+		Robot:     knownIPAPISignal(data.IsCrawler, data.BooleanPresence.IsCrawler),
 		Latency:   latency,
 	}
 	finding.Score = parseProbabilityScore(data.Company.AbuserScore)
@@ -274,6 +288,13 @@ func findingFromIPAPI(data ipAPIResponse, latency time.Duration) qualityFinding 
 		finding.Risk = translateRiskLabel(scoreLabel(data.ASN.AbuserScore))
 	}
 	return finding
+}
+
+func knownIPAPISignal(value, present bool) qualitySignal {
+	if !present {
+		return qualitySignal{}
+	}
+	return knownSignal(value)
 }
 
 func fetchMaxMindOrigin(ctx context.Context, client *http.Client, userAgent, ip string) originAssessment {

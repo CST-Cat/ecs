@@ -51,13 +51,15 @@ esac
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
 
 for command_name in \
-  curl git jq sha256sum gcc make readelf ldd meson ninja autoconf automake \
+  curl git jq sha256sum gcc make readelf ldd strip meson ninja autoconf automake \
   libtoolize pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
 stage="$stage_root/linux_${arch}"
-work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-tools-build.XXXXXX")
+work=/tmp/ecs-tools-build
+[[ ! -e "$work" ]] || die "deterministic build directory already exists: $work"
+mkdir -m 0700 -- "$work"
 cleanup() {
   local status=$?
   trap - EXIT
@@ -65,6 +67,14 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+
+# Stable locale, timestamps, and source paths keep consecutive builds of the
+# same inputs byte-identical. Each architecture runs in its own disposable
+# container, so the fixed path cannot collide with another matrix job.
+export LC_ALL=C
+export TZ=UTC
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-946684800}
+[[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || die "SOURCE_DATE_EPOCH must be an integer"
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
@@ -262,10 +272,9 @@ cp "$fio_src/fio" "$stage/bin/fio"
 echo "building iperf3 ${iperf3_tag} (${iperf3_commit})"
 (
   cd "$iperf3_src"
-  LDFLAGS='-static' ./configure \
+  ./configure \
     --prefix="$work/iperf3-prefix" \
-    --disable-shared \
-    --enable-static \
+    --enable-static-bin \
     --without-sctp \
     --without-openssl \
     --without-ldconfig
@@ -308,6 +317,13 @@ meson install -C "$ping_build" --destdir "$ping_install"
 cp "$ping_install/usr/local/bin/ping" "$stage/bin/ping"
 
 cp "$nexttrace_download" "$stage/bin/nexttrace-tiny"
+
+# Remove compiler/debug sections from binaries built in this job. The official
+# NextTrace asset is kept byte-for-byte so its GitHub release digest remains
+# independently verifiable.
+for tool in sysbench stream fio iperf3 ping; do
+  strip --strip-unneeded "$stage/bin/$tool"
+done
 
 for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
   chmod 0755 "$stage/bin/$tool"
@@ -483,6 +499,11 @@ for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
   readelf -d "$binary" >"$work/${tool}.readelf" 2>&1 || die "readelf failed for $tool"
   ldd "$binary" >"$work/${tool}.ldd" 2>&1 || true
   cat "$work/${tool}.readelf" "$work/${tool}.ldd"
+  if grep -Eq '\(NEEDED\)' "$work/${tool}.readelf" ||
+    ! grep -Eiq 'not a dynamic executable|statically linked' "$work/${tool}.ldd"; then
+    cat "$work/${tool}.readelf" "$work/${tool}.ldd" >&2
+    die "$tool is not fully static"
+  fi
   if grep -Eiq 'not found|ceph|rbd|rados|gluster|gfapi|rdma|ibverbs|rdmacm|libaio|liburing|libgomp|libgcc_s' \
       "$work/${tool}.readelf" "$work/${tool}.ldd"; then
     cat "$work/${tool}.readelf" "$work/${tool}.ldd" >&2
@@ -575,7 +596,7 @@ jq -n \
           architecture: $architecture,
           license: "GPL-2.0-only",
           sha256: $sysbench_sha,
-          parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags, system_luajit_version: $sysbench_luajit_version, system_ck_version: $sysbench_ck_version}
+          parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags, system_luajit_version: $sysbench_luajit_version, system_ck_version: $sysbench_ck_version, fully_static: true, stripped: true}
         },
         {
           name: "stream",
@@ -589,7 +610,7 @@ jq -n \
           architecture: $architecture,
           license: "STREAM-custom",
           sha256: $stream_binary_sha,
-          parameters: {source_sha256: $stream_sha, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], run_rules: "official STREAM 5.10 defaults; each array must exceed cache as required; NT uses runtime CPU allowance"}
+          parameters: {source_sha256: $stream_sha, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], run_rules: "official STREAM 5.10 defaults; each array must exceed cache as required; NT uses runtime CPU allowance", fully_static: true, stripped: true}
         },
         {
           name: "fio",
@@ -603,7 +624,7 @@ jq -n \
           architecture: $architecture,
           license: "GPL-2.0-only",
           sha256: $fio_sha,
-          parameters: {source_commit: $fio_commit, qd: 1}
+          parameters: {source_commit: $fio_commit, qd: 1, fully_static: true, stripped: true}
         },
         {
           name: "iperf3",
@@ -611,13 +632,13 @@ jq -n \
           version: $iperf3_version,
           tag_or_commit: $iperf3_tag,
           source: $iperf3_source,
-          build_flags: ["LDFLAGS=-static", "--disable-shared", "--enable-static", "--without-sctp", "--without-openssl", "--without-ldconfig"],
+          build_flags: ["--enable-static-bin", "--without-sctp", "--without-openssl", "--without-ldconfig", "strip --strip-unneeded"],
           enabled_features: ["tcp", "udp", "ipv4", "ipv6", "parallel", "reverse", "json"],
           disabled_features: ["sctp", "openssl/auth"],
           architecture: $architecture,
           license: "BSD-3-Clause",
           sha256: $iperf3_sha,
-          parameters: {source_commit: $iperf3_commit}
+          parameters: {source_commit: $iperf3_commit, fully_static: true, stripped: true}
         },
         {
           name: "nexttrace-tiny",
@@ -645,7 +666,7 @@ jq -n \
           architecture: $architecture,
           license: "GPL-2.0-or-later",
           sha256: $iputils_sha,
-          parameters: {source_commit: $iputils_commit}
+          parameters: {source_commit: $iputils_commit, fully_static: true, stripped: true}
         }
       ]
     }' | jq . >"$stage/manifest.json"

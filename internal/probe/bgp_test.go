@@ -2,8 +2,10 @@ package probe
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -81,6 +83,34 @@ func TestQueryRouteViewsPrefixAcceptsIPv4LongestMatch(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Prefix != "64.23.192.0/19" {
 		t.Fatalf("longest-match observations = %+v", got)
+	}
+}
+
+func TestNormalizeRouteViewsObservationsDropsDefaultAndInvalidPrefixes(t *testing.T) {
+	got := normalizeRouteViewsObservations(net.ParseIP("64.23.222.10"), []routeViewsPrefix{
+		{Prefix: "0.0.0.1/0", OriginASN: 64500},
+		{Prefix: "not-a-prefix", OriginASN: 64501},
+		{Prefix: "2001:db8::/32", OriginASN: 64502},
+		{Prefix: "192.0.2.0/24", OriginASN: 64503},
+		{Prefix: "64.23.222.10/19", OriginASN: 14061, ReportingPeers: []routeViewsPeer{{PeerASN: 64500}}},
+	})
+	want := []routeViewsPrefix{{
+		Prefix:         "64.23.192.0/19",
+		OriginASN:      14061,
+		ReportingPeers: []routeViewsPeer{{PeerASN: 64500}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized observations = %+v, want %+v", got, want)
+	}
+}
+
+func TestNormalizeRouteViewsObservationsKeepsIPv6Observation(t *testing.T) {
+	got := normalizeRouteViewsObservations(net.ParseIP("2001:db8:1234::1"), []routeViewsPrefix{
+		{Prefix: "::/0", OriginASN: 64500},
+		{Prefix: "2001:db8:1234:abcd::/48", OriginASN: 14061},
+	})
+	if len(got) != 1 || got[0].Prefix != "2001:db8:1234::/48" || got[0].OriginASN != 14061 {
+		t.Fatalf("IPv6 normalized observations = %+v", got)
 	}
 }
 

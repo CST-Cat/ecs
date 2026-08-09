@@ -24,6 +24,10 @@ type iperfJSONOutput struct {
 			LocalHost  string `json:"local_host"`
 			RemoteHost string `json:"remote_host"`
 		} `json:"connected"`
+		TestStart struct {
+			Protocol string `json:"protocol"`
+			Reverse  *int   `json:"reverse"`
+		} `json:"test_start"`
 	} `json:"start"`
 	End struct {
 		SumSent     iperfJSONSum `json:"sum_sent"`
@@ -97,8 +101,12 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 		result.Err = output.Error
 		return result
 	}
-	if err != nil && output.End.SumReceived.Packets == 0 {
+	if err != nil {
 		result.Err = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 200))
+		return result
+	}
+	if !strings.EqualFold(output.Start.TestStart.Protocol, "UDP") {
+		result.Err = "iperf3 返回的不是 UDP 结果"
 		return result
 	}
 	// UDP 模式下服务端回报的接收统计才带 jitter 与丢包。
@@ -234,11 +242,16 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			if ctx.Err() != nil {
 				break
 			}
+			upload := runIPerfDirection(ctx, path, target, family, false, threads, seconds)
 			row := iperfRow{
-				Target:   target,
-				Family:   family,
-				Upload:   runIPerfDirection(ctx, path, target, family, false, threads, seconds),
-				Download: runIPerfDirection(ctx, path, target, family, true, threads, seconds),
+				Target: target,
+				Family: family,
+				Upload: upload,
+				// Public nodes often expose several ports, and a successful upload
+				// identifies the port whose daemon is actually serving this family.
+				// Try that port first for reverse mode, then retain the configured
+				// range as a fallback when the daemon is busy or direction-filtered.
+				Download: runIPerfDirectionPreferred(ctx, path, target, family, true, threads, seconds, upload.Port),
 			}
 			if ctx.Err() == nil && (isPositiveFinite(row.Upload.Mbps) || isPositiveFinite(row.Download.Mbps)) {
 				port := iperfUDPPort(target, row.Upload, row.Download)
@@ -389,6 +402,10 @@ func runIPerfDirection(ctx context.Context, path string, target config.IPerfEndp
 	return runIPerfDirectionWith(ctx, path, target, family, reverse, threads, seconds, executeIPerf, nil)
 }
 
+func runIPerfDirectionPreferred(ctx context.Context, path string, target config.IPerfEndpoint, family string, reverse bool, threads, seconds, preferredPort int) iperfDirectionResult {
+	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, preferredPort, executeIPerf, nil)
+}
+
 // runIPerfDirectionWith is the retry policy behind runIPerfDirection.  Keeping
 // the runner and port checker injectable makes the policy auditable without
 // replacing the real iperf3 process in production: tests can exercise every
@@ -400,6 +417,19 @@ func runIPerfDirectionWith(
 	family string,
 	reverse bool,
 	threads, seconds int,
+	run iperfDirectionRunner,
+	check iperfPortChecker,
+) iperfDirectionResult {
+	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, 0, run, check)
+}
+
+func runIPerfDirectionWithPreferred(
+	ctx context.Context,
+	path string,
+	target config.IPerfEndpoint,
+	family string,
+	reverse bool,
+	threads, seconds, preferredPort int,
 	run iperfDirectionRunner,
 	check iperfPortChecker,
 ) iperfDirectionResult {
@@ -418,7 +448,7 @@ func runIPerfDirectionWith(
 	defer cancel()
 
 	var last iperfDirectionResult
-	for _, port := range ports {
+	for _, port := range orderedIPerfPorts(ports, preferredPort) {
 		if err := runCtx.Err(); err != nil {
 			// Keep the first configured port in the result when cancellation
 			// happens before any attempt, matching executeIPerf's port record.
@@ -457,6 +487,25 @@ func runIPerfDirectionWith(
 		}
 	}
 	return last
+}
+
+func orderedIPerfPorts(ports []int, preferred int) []int {
+	if preferred <= 0 {
+		return ports
+	}
+	ordered := make([]int, 0, len(ports))
+	for _, port := range ports {
+		if port == preferred {
+			ordered = append(ordered, port)
+			break
+		}
+	}
+	for _, port := range ports {
+		if port != preferred {
+			ordered = append(ordered, port)
+		}
+	}
+	return ordered
 }
 
 // iperfPortCandidates returns the configured inclusive range in deterministic
@@ -555,32 +604,54 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 		sample.Error = runCtx.Err().Error()
 		return sample
 	}
-	if stdout.Len() > 4*1024*1024 {
+	if err != nil {
+		sample.Error = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 300))
+		return sample
+	}
+	parsed := parseIPerfTCPJSON(stdout.Bytes(), port, reverse)
+	if parsed.Error != "" && len(stderr.Bytes()) > 0 {
+		parsed.Error += ": " + tailText(sanitizeCommandOutput(stderr.Bytes()), 300)
+	}
+	return parsed
+}
+
+func parseIPerfTCPJSON(raw []byte, port int, reverse bool) iperfDirectionResult {
+	sample := iperfDirectionResult{Port: port}
+	if len(raw) > 4*1024*1024 {
 		sample.Error = "iperf3 JSON 超过 4 MiB 安全上限"
 		return sample
 	}
 	var output iperfJSONOutput
-	if decodeErr := json.Unmarshal(stdout.Bytes(), &output); decodeErr != nil {
-		detail := tailText(sanitizeCommandOutput(stderr.Bytes()), 300)
-		if detail == "" {
-			detail = tailText(sanitizeCommandOutput(stdout.Bytes()), 300)
-		}
-		sample.Error = fmt.Sprintf("解析 JSON: %v: %s", decodeErr, detail)
+	if decodeErr := json.Unmarshal(raw, &output); decodeErr != nil {
+		sample.Error = fmt.Sprintf("解析 JSON: %v", decodeErr)
 		return sample
 	}
 	if output.Error != "" {
 		sample.Error = output.Error
 		return sample
 	}
-	if err != nil {
-		sample.Error = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 300))
+	if !strings.EqualFold(output.Start.TestStart.Protocol, "TCP") {
+		sample.Error = "iperf3 返回的不是 TCP 结果"
 		return sample
 	}
-	sum := output.End.SumReceived
-	if !isPositiveFinite(sum.BitsPerSecond) {
-		sum = output.End.SumSent
+	if output.Start.TestStart.Reverse != nil {
+		want := 0
+		if reverse {
+			want = 1
+		}
+		if *output.Start.TestStart.Reverse != want {
+			sample.Error = "iperf3 返回的 TCP 方向与请求不一致"
+			return sample
+		}
 	}
-	if !isPositiveFinite(sum.BitsPerSecond) || sum.Bytes < 0 || !nonNegativeFinite(sum.Seconds) {
+	// Forward mode measures bytes sent by this client; reverse mode measures
+	// bytes received by this client.  Do not silently fall back to the opposite
+	// summary: a non-empty opposite side can be a partial/error report.
+	sum := output.End.SumSent
+	if reverse {
+		sum = output.End.SumReceived
+	}
+	if !isPositiveFinite(sum.BitsPerSecond) || sum.Bytes <= 0 || sum.Seconds <= 0 || !nonNegativeFinite(sum.Seconds) {
 		sample.Error = "iperf3 未返回有效吞吐统计"
 		return sample
 	}
@@ -591,9 +662,6 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 	if len(output.Start.Connected) > 0 {
 		sample.LocalHost = output.Start.Connected[0].LocalHost
 		sample.RemoteHost = output.Start.Connected[0].RemoteHost
-	}
-	if !isPositiveFinite(sample.Mbps) {
-		sample.Error = "iperf3 未返回有效吞吐"
 	}
 	return sample
 }
