@@ -305,7 +305,75 @@ jobs:
           zstd --version
           chmod +x scripts/package.sh
           scripts/package.sh "${GITHUB_REF_NAME#v}" --tools-stage tools-stage
+      - name: Check release assets before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(
+            ecs_linux_386.tar.gz
+            ecs_linux_amd64.tar.gz
+            ecs_linux_arm64.tar.gz
+            ecs_linux_armv7.tar.gz
+            ecs_linux_ppc64le.tar.gz
+            ecs_linux_riscv64.tar.gz
+            ecs_linux_s390x.tar.gz
+            ecs-tools_linux_386.tar.zst
+            ecs-tools_linux_amd64.tar.zst
+            ecs-tools_linux_arm64.tar.zst
+            ecs-tools_linux_armv7.tar.zst
+            ecs-tools_linux_ppc64le.tar.zst
+            ecs-tools_linux_riscv64.tar.zst
+            ecs-tools_linux_s390x.tar.zst
+          )
+          for asset in "${assets[@]}"; do
+            test -s "dist/$asset"
+          done
+          test -s dist/checksums.txt
+          for asset in "${assets[@]}"; do
+            grep -F "  $asset" dist/checksums.txt >/dev/null
+          done
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/ecs_* dist/checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/ecs_linux_386.tar.gz \
+            dist/ecs_linux_amd64.tar.gz \
+            dist/ecs_linux_arm64.tar.gz \
+            dist/ecs_linux_armv7.tar.gz \
+            dist/ecs_linux_ppc64le.tar.gz \
+            dist/ecs_linux_riscv64.tar.gz \
+            dist/ecs_linux_s390x.tar.gz \
+            dist/ecs-tools_linux_386.tar.zst \
+            dist/ecs-tools_linux_amd64.tar.zst \
+            dist/ecs-tools_linux_arm64.tar.zst \
+            dist/ecs-tools_linux_armv7.tar.zst \
+            dist/ecs-tools_linux_ppc64le.tar.zst \
+            dist/ecs-tools_linux_riscv64.tar.zst \
+            dist/ecs-tools_linux_s390x.tar.zst \
+            dist/checksums.txt
+          expected_assets=(
+            checksums.txt
+            ecs_linux_386.tar.gz
+            ecs_linux_amd64.tar.gz
+            ecs_linux_arm64.tar.gz
+            ecs_linux_armv7.tar.gz
+            ecs_linux_ppc64le.tar.gz
+            ecs_linux_riscv64.tar.gz
+            ecs_linux_s390x.tar.gz
+            ecs-tools_linux_386.tar.zst
+            ecs-tools_linux_amd64.tar.zst
+            ecs-tools_linux_arm64.tar.zst
+            ecs-tools_linux_armv7.tar.zst
+            ecs-tools_linux_ppc64le.tar.zst
+            ecs-tools_linux_riscv64.tar.zst
+            ecs-tools_linux_s390x.tar.zst
+          )
+          remote_assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          for asset in "${expected_assets[@]}"; do
+            grep -F -x "$asset" <<<"$remote_assets" >/dev/null
+          done
