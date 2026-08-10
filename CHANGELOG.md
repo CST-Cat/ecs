@@ -9,7 +9,7 @@
 
 ## Unreleased
 
-- 待定。
+- release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
 ## 版本路线概览
 
