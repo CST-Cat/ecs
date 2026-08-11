@@ -231,7 +231,7 @@ jobs:
             runner: ubuntu-24.04
             runner_arch: x86_64
             platform: linux/amd64
-            image: debian:trixie
+            image: debian:forky
             build_mode: cross-qemu-smoke
             debian_arch: ppc64el
             cross_triplet: powerpc64le-linux-gnu

@@ -660,7 +660,6 @@ openssl_build_flags=(
   'no-engine'
   'no-static-engine'
   'no-legacy'
-  'no-deprecated'
   'no-async'
   'no-atexit'
   'no-autoload-config'

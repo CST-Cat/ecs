@@ -32,7 +32,8 @@
 - 四个交叉架构先由宿主工具链完成编译，再由 QEMU 执行短功能 smoke；NPB 用同工具链的临时 Class S 跑完整 Verification，发行 Class A 只做静态 ELF/摘要/manifest 校验，避免在模拟器中做无意义的重型性能运行。
 - 工具 manifest 与发布资产检查由 6 个二进制更新为 10 个二进制加固定 corpus，同时保留 binary/source SHA-256、编译参数、启用能力和 smoke runner 证据。
 - 固定摘要的 NPB 与 Silesia 下载增加内容校验级重试和实际摘要诊断，仍拒绝任何不匹配数据；GitHub token 仅发送给 GitHub API，不再随外部源码请求传出。
-- 七架构产物统一规范许可证文件读权限；`ppc64le` 与其余交叉目标统一使用 Debian trixie 和对应 static QEMU runner，避免 sid 目标 libc 与交叉 sysroot 版本冲突。
+- 七架构产物统一规范许可证文件读权限；`ppc64le` 使用同时提供目标 LuaJIT、交叉 gfortran 与配套 libc sysroot 的 Debian forky，并显式调用对应 static QEMU runner，避免 sid 的 libc 版本冲突。
+- OpenSSL 继续关闭 TLS、网络、动态组件和无关算法，但保留上游 RISC-V 加速源编译所需的 deprecated SHA context 类型声明；该调整不改变三项固定 EVP benchmark 口径。
 
 ## 版本路线概览
 
