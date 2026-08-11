@@ -31,6 +31,8 @@
 - 七架构工具构建矩阵补齐 `gfortran`、OpenMP、Perl 和 unzip 依赖；zstd 裁掉字典/trace/兼容格式，NPB 只发布 EP/FT，OpenSSL 只构建官方 CLI 必需依赖并关闭 TLS/网络/动态组件与无关算法族。
 - 四个交叉架构先由宿主工具链完成编译，再由 QEMU 执行短功能 smoke；NPB 用同工具链的临时 Class S 跑完整 Verification，发行 Class A 只做静态 ELF/摘要/manifest 校验，避免在模拟器中做无意义的重型性能运行。
 - 工具 manifest 与发布资产检查由 6 个二进制更新为 10 个二进制加固定 corpus，同时保留 binary/source SHA-256、编译参数、启用能力和 smoke runner 证据。
+- 固定摘要的 NPB 与 Silesia 下载增加内容校验级重试和实际摘要诊断，仍拒绝任何不匹配数据；GitHub token 仅发送给 GitHub API，不再随外部源码请求传出。
+- 七架构产物统一规范许可证文件读权限；`ppc64le` 与其余交叉目标统一使用 Debian trixie 和对应 static QEMU runner，避免 sid 目标 libc 与交叉 sysroot 版本冲突。
 
 ## 版本路线概览
 

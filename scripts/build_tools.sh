@@ -220,14 +220,39 @@ fi
 mkdir -p "$stage/bin" "$stage/LICENSES" "$stage/share/ecs/corpus"
 
 curl_options=(-fsSL --retry 4 --retry-delay 2 --connect-timeout 30)
+github_api_curl_options=("${curl_options[@]}")
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  curl_options+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
+  github_api_curl_options+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
 fi
+
+download_sha256() {
+  local url=$1
+  local expected_sha=$2
+  local output=$3
+  local label=$4
+  local attempt actual_sha actual_bytes
+
+  for attempt in 1 2 3; do
+    if curl "${curl_options[@]}" "$url" -o "$output"; then
+      actual_sha=$(sha256sum "$output" | awk '{print $1}')
+      if [[ "$actual_sha" == "$expected_sha" ]]; then
+        return 0
+      fi
+      actual_bytes=$(stat -c %s "$output")
+      echo "build-tools: $label SHA-256 mismatch on attempt $attempt/3: expected $expected_sha, got $actual_sha ($actual_bytes bytes)" >&2
+    else
+      echo "build-tools: $label download failed on attempt $attempt/3" >&2
+    fi
+    rm -f -- "$output"
+  done
+
+  die "$label did not match its pinned SHA-256 after 3 attempts"
+}
 
 github_latest_release() {
   local repository=$1
   local output=$2
-  curl "${curl_options[@]}" \
+  curl "${github_api_curl_options[@]}" \
     -H 'Accept: application/vnd.github+json' \
     "https://api.github.com/repos/${repository}/releases/latest" >"$output"
   jq -e '
@@ -315,9 +340,8 @@ npb_version='3.4.4'
 npb_archive_url='https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz'
 npb_archive_sha='1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549'
 npb_archive="$work/NPB3.4.4.tar.gz"
-curl "${curl_options[@]}" "$npb_archive_url" -o "$npb_archive"
-[[ "$(sha256sum "$npb_archive" | awk '{print $1}')" == "$npb_archive_sha" ]] ||
-  die 'NPB 3.4.4 source archive SHA-256 mismatch'
+download_sha256 "$npb_archive_url" "$npb_archive_sha" "$npb_archive" \
+  'NPB 3.4.4 source archive'
 tar -xzf "$npb_archive" -C "$work"
 npb_release_root="$work/NPB3.4.4"
 npb_src="$npb_release_root/NPB3.4-OMP"
@@ -335,9 +359,8 @@ zstd_corpus_order=(dickens mozilla mr nci ooffice osdb reymont samba sao webster
 zstd_corpus_zip="$work/silesia.zip"
 zstd_corpus_dir="$work/silesia"
 zstd_corpus_path="$stage/share/ecs/corpus/$zstd_corpus_name"
-curl "${curl_options[@]}" "$zstd_corpus_url" -o "$zstd_corpus_zip"
-[[ "$(sha256sum "$zstd_corpus_zip" | awk '{print $1}')" == "$zstd_corpus_source_sha" ]] ||
-  die 'Silesia source ZIP SHA-256 mismatch'
+download_sha256 "$zstd_corpus_url" "$zstd_corpus_source_sha" "$zstd_corpus_zip" \
+  'Silesia source ZIP'
 mkdir -p "$zstd_corpus_dir"
 unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir"
 : >"$zstd_corpus_path"
@@ -720,6 +743,7 @@ cp "$iputils_src/LICENSE" "$stage/LICENSES/IPUTILS-LICENSE"
 cp "$iputils_src/Documentation/LICENSE.GPL2" "$stage/LICENSES/IPUTILS-GPL2"
 cp "$nexttrace_src/LICENSE" "$stage/LICENSES/NEXTTRACE-LICENSE"
 sed -n '1,/^ \*\/$/p' "$stream_src" >"$stage/LICENSES/STREAM-LICENSE.txt"
+chmod 0644 "$stage/LICENSES/"*
 
 sysbench_bin="$stage/bin/sysbench"
 zstd_bin="$stage/bin/zstd"

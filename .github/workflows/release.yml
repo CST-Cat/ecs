@@ -231,11 +231,11 @@ jobs:
             runner: ubuntu-24.04
             runner_arch: x86_64
             platform: linux/amd64
-            image: debian:sid
+            image: debian:trixie
             build_mode: cross-qemu-smoke
             debian_arch: ppc64el
             cross_triplet: powerpc64le-linux-gnu
-            target_runner: qemu-ppc64le
+            target_runner: qemu-ppc64le-static
     steps:
       - uses: actions/checkout@v7
       - name: Verify runner architecture
