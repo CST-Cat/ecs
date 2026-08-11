@@ -358,8 +358,8 @@ jobs:
           test -f "$corpus"
           test "$(stat -c %s "$corpus")" -eq 211938580
           test "$(sha256sum "$corpus" | awk '{print $1}')" = 8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0
-          rm -f -- "$corpus"
-          rmdir ".ci-tools-stage/linux_$ARCH/share/ecs/corpus" ".ci-tools-stage/linux_$ARCH/share/ecs" ".ci-tools-stage/linux_$ARCH/share" 2>/dev/null || true
+          sudo rm -f -- "$corpus"
+          sudo rmdir ".ci-tools-stage/linux_$ARCH/share/ecs/corpus" ".ci-tools-stage/linux_$ARCH/share/ecs" ".ci-tools-stage/linux_$ARCH/share" 2>/dev/null || true
           test ! -e "$corpus"
       - name: Preserve architecture directory without corpus
         run: cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
