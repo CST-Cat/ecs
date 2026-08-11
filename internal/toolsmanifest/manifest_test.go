@@ -96,6 +96,12 @@ func TestExampleRecordsRequiredFeatureFlags(t *testing.T) {
 	if got, ok := byName["zstd"].Parameters["corpus_bytes"].(float64); !ok || got != 211938580 {
 		t.Fatalf("zstd corpus_bytes = %#v, want 211938580", byName["zstd"].Parameters["corpus_bytes"])
 	}
+	if got := byName["zstd"].Parameters["corpus_path"]; got != "runtime/ecs-silesia-v1.corpus" {
+		t.Fatalf("zstd corpus_path = %#v, want runtime/ecs-silesia-v1.corpus", got)
+	}
+	if got := byName["zstd"].Parameters["corpus_source"]; got != "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip" {
+		t.Fatalf("zstd corpus_source = %#v, want fixed Silesia ZIP URL", got)
+	}
 	for _, name := range []string{"npb-ep", "npb-ft"} {
 		assertContains(name, byName[name].EnabledFeatures, "NPB3.4-OMP", "Class A", "OpenMP")
 		if got := byName[name].Parameters["source_sha256"]; got != "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549" {

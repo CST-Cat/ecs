@@ -130,6 +130,7 @@ jobs:
           tool_inputs=(
             .github/workflows/release.yml
             scripts/build_tools.sh
+            scripts/build_corpus.sh
             scripts/package.sh
             cmd/tools-manifest-check
             internal/toolsmanifest
@@ -144,7 +145,7 @@ jobs:
           fi
 
           remote_assets=$(gh release view "$previous_tag" --json assets --jq '.assets[].name')
-          expected_assets=(checksums.txt)
+          expected_assets=(checksums.txt ecs-corpus_silesia-v1.tar.gz)
           for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
             expected_assets+=("ecs-tools_linux_${arch}.tar.gz")
           done
@@ -347,7 +348,20 @@ jobs:
               .parameters.ci_smoke_class == (if $build_mode == "cross-qemu-smoke" then "S" else "A" end))) and
             (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
           ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
-      - name: Preserve architecture directory in artifact
+      - name: Remove corpus from architecture artifact
+        env:
+          ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          corpus=".ci-tools-stage/linux_$ARCH/share/ecs/corpus/ecs-silesia-v1.corpus"
+          test -f "$corpus"
+          test "$(stat -c %s "$corpus")" -eq 211938580
+          test "$(sha256sum "$corpus" | awk '{print $1}')" = 8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0
+          rm -f -- "$corpus"
+          rmdir ".ci-tools-stage/linux_$ARCH/share/ecs/corpus" ".ci-tools-stage/linux_$ARCH/share/ecs" ".ci-tools-stage/linux_$ARCH/share" 2>/dev/null || true
+          test ! -e "$corpus"
+      - name: Preserve architecture directory without corpus
         run: cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
       - uses: actions/upload-artifact@v4
         with:
@@ -419,11 +433,10 @@ jobs:
             test -x "tools-stage/linux_${arch}/bin/iperf3"
             test -x "tools-stage/linux_${arch}/bin/nexttrace-tiny"
             test -x "tools-stage/linux_${arch}/bin/ping"
-            test -f "tools-stage/linux_${arch}/share/ecs/corpus/ecs-silesia-v1.corpus"
-            test "$(sha256sum "tools-stage/linux_${arch}/share/ecs/corpus/ecs-silesia-v1.corpus" | awk '{print $1}')" = \
-              8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0
+            test ! -e "tools-stage/linux_$arch/share/ecs/corpus/ecs-silesia-v1.corpus"
             test -d "tools-stage/linux_${arch}/LICENSES"
           done
+          test ! -e tools-stage/linux_amd64/share/ecs/corpus/ecs-silesia-v1.corpus
       - name: Build release assets
         env:
           REBUILD_TOOLS: ${{ needs.tools_plan.outputs.rebuild }}
@@ -458,6 +471,10 @@ jobs:
           done
           for asset in "${expected_tools[@]}"; do
             test -s "reused-tools/$asset"
+            if tar -tzf "reused-tools/$asset" | grep -E '(^|/)(share|ecs-silesia-v1[.]corpus)(/|$)' >/dev/null; then
+              echo "$asset contains the Silesia corpus or a share directory" >&2
+              exit 1
+            fi
           done
           grep -E '^[0-9A-Fa-f]{64}  ecs-tools_linux_(amd64|arm64|armv7|386|s390x|riscv64|ppc64le)\.tar\.gz$' \
             reused-tools/checksums.txt >reused-tools/tools-checksums.txt
@@ -465,13 +482,20 @@ jobs:
           (cd reused-tools && sha256sum -c tools-checksums.txt)
           cp reused-tools/ecs-tools_linux_*.tar.gz dist/
 
+      - name: Build and verify standalone Silesia corpus asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build_corpus.sh
+          scripts/build_corpus.sh --output dist/ecs-corpus_silesia-v1.tar.gz
+
       - name: Finalize checksums
         shell: bash
         run: |
           set -euo pipefail
           (
             cd dist
-            sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz >checksums.txt
+            sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz ecs-corpus_silesia-v1.tar.gz >checksums.txt
           )
       - name: Check release assets before upload
         shell: bash
@@ -492,11 +516,27 @@ jobs:
             ecs-tools_linux_ppc64le.tar.gz
             ecs-tools_linux_riscv64.tar.gz
             ecs-tools_linux_s390x.tar.gz
+            ecs-corpus_silesia-v1.tar.gz
           )
           for asset in "${assets[@]}"; do
             test -s "dist/$asset"
           done
           test -s dist/checksums.txt
+          for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+            asset="dist/ecs-tools_linux_$arch.tar.gz"
+            if tar -tzf "$asset" | grep -E '(^|/)(share|ecs-silesia-v1[.]corpus)(/|$)' >/dev/null; then
+              echo "$asset contains the Silesia corpus or a share directory" >&2
+              exit 1
+            fi
+          done
+          corpus_verify_dir=$(mktemp -d)
+          trap 'rm -rf -- "$corpus_verify_dir"' EXIT
+          corpus_listing=$(tar -tzf dist/ecs-corpus_silesia-v1.tar.gz)
+          test "$corpus_listing" = ecs-silesia-v1.corpus
+          tar -xzf dist/ecs-corpus_silesia-v1.tar.gz -C "$corpus_verify_dir"
+          corpus_path="$corpus_verify_dir/ecs-silesia-v1.corpus"
+          test "$(stat -c %s "$corpus_path")" -eq 211938580
+          test "$(sha256sum "$corpus_path" | awk '{print $1}')" = 8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0
           test "$(wc -l <dist/checksums.txt)" -eq "${#assets[@]}"
           for asset in "${assets[@]}"; do
             grep -F "  $asset" dist/checksums.txt >/dev/null
@@ -567,6 +607,7 @@ jobs:
             dist/ecs-tools_linux_ppc64le.tar.gz \
             dist/ecs-tools_linux_riscv64.tar.gz \
             dist/ecs-tools_linux_s390x.tar.gz \
+            dist/ecs-corpus_silesia-v1.tar.gz \
             dist/checksums.txt \
             --clobber
           expected_assets=(
@@ -585,6 +626,7 @@ jobs:
             ecs-tools_linux_ppc64le.tar.gz
             ecs-tools_linux_riscv64.tar.gz
             ecs-tools_linux_s390x.tar.gz
+            ecs-corpus_silesia-v1.tar.gz
           )
           remote_assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
           for asset in "${expected_assets[@]}"; do

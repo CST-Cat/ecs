@@ -51,6 +51,9 @@ jobs:
       - run: sh -n run.sh
       - run: bash -n scripts/package.sh
       - run: bash -n scripts/build_tools.sh
+      - run: bash -n scripts/build_corpus.sh
+      - name: Verify tools package layout regression
+        run: bash scripts/package_tools_test.sh
 
   # 跑分提交校验：新增提交必须格式合法、指纹自洽、不与已有记录重复。
   # 指纹由内容派生，因此手改数值而不重算会被当场发现。

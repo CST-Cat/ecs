@@ -1168,7 +1168,7 @@ jq -n \
           architecture: $architecture,
           license: "BSD-3-Clause OR GPL-2.0-only",
           sha256: $zstd_sha,
-          parameters: {source_commit: $zstd_commit, level: 3, evaluation_seconds: 5, thread_modes: ["1T", "NT"], corpus_name: $zstd_corpus_name, corpus_path: ("share/ecs/corpus/" + $zstd_corpus_name), corpus_bytes: $zstd_corpus_bytes, corpus_sha256: $zstd_corpus_sha, corpus_source_url: $zstd_corpus_url, corpus_source_sha256: $zstd_corpus_source_sha, corpus_construction: "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml", fully_static: true, stripped: true}
+          parameters: {source_commit: $zstd_commit, level: 3, evaluation_seconds: 5, thread_modes: ["1T", "NT"], corpus_name: $zstd_corpus_name, corpus_path: ("runtime/" + $zstd_corpus_name), corpus_bytes: $zstd_corpus_bytes, corpus_sha256: $zstd_corpus_sha, corpus_source: $zstd_corpus_url, corpus_source_url: $zstd_corpus_url, corpus_source_sha256: $zstd_corpus_source_sha, corpus_construction: "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml", fully_static: true, stripped: true}
         },
         {
           name: "npb-ep",

@@ -7,7 +7,7 @@
 
 ## 一、当前状态
 
-`main` 当前维护 Linux-only 实现：标准性能链路固定为 sysbench CPU、zstd 1.5.7 + Silesia corpus、NASA NPB-OMP 3.4.4 EP/FT Class A、官方 STREAM、OpenSSL 3.5.7 speed、fio 和 iperf3；路由与回程固定使用官方 NextTrace Tiny；CI 负责七架构的 10 个工具、manifest、摘要、corpus 与真实 smoke test。
+`main` 当前维护 Linux-only 实现：标准性能链路固定为 sysbench CPU、zstd 1.5.7 + Silesia corpus、NASA NPB-OMP 3.4.4 EP/FT Class A、官方 STREAM、OpenSSL 3.5.7 speed、fio 和 iperf3；路由与回程固定使用官方 NextTrace Tiny；CI 负责七架构的 10 个工具、manifest、摘要、独立 corpus 资产与真实 smoke test。
 
 ### 已解决的问题
 
@@ -63,8 +63,9 @@
 性能测试。NPB 发行包仍只含 EP/FT Class A；交叉 job 用同源码/参数的临时 Class S 完成
 Verification，并对发行 Class A ELF 做静态链接、架构、摘要与 manifest 校验。任一能力不满足
 都会诚实失败，不用 fixture 或假 binary 继续打包。release 只消费 tools job 的真实 stage，
-并由 `scripts/package.sh` 产出 7 个 tar.gz 与 `checksums.txt`。工具包使用 gzip，避免最小系统因尚无
-zstd 而无法解出工具包中的固定 zstd；归档摘要、manifest、binary/corpus 摘要校验保持不变。
+并由 `scripts/package.sh` 产出 7 个工具 tar.gz 与独立的 Silesia corpus 归档，最终由 release
+workflow 统一生成 `checksums.txt`。工具包使用 gzip，避免最小系统因尚无 zstd 而无法解出工具包；
+固定 corpus 只在 zstd 选中时从独立 Release 资产下载并校验。
 
 ### 2.3 已重写的测试（`4457bda` 的妥协已撤销）
 
@@ -269,7 +270,8 @@ bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
 apt-get install -y sysbench fio iperf3
-# zstd/corpus、NPB、OpenSSL、STREAM、NextTrace Tiny 和 iputils ping 由 run.sh/ecs-tools 按架构临时提供
+# zstd、NPB、OpenSSL、STREAM、NextTrace Tiny 和 iputils ping 由 ecs-tools 按架构临时提供；
+# zstd 选中时，固定 corpus 由 run.sh 从独立 Release 资产临时提供
 # ./install.sh --with-benchmarks 只持久安装上面的三个系统包
 ```
 

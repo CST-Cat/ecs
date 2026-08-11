@@ -77,8 +77,6 @@ targets=(
 )
 
 tool_names=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
-zstd_corpus_relative='share/ecs/corpus/ecs-silesia-v1.corpus'
-zstd_corpus_sha256='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
 
 temp_stages=()
 new_temp_stage_path=""
@@ -143,8 +141,6 @@ validate_tool_stage() {
   local licenses_dir
   local license_file
   local manifest_file
-  local corpus_file
-  local corpus_digest
 
   stage_dir=$(tool_stage_dir "$arch")
   [[ -d "$stage_dir" ]] || die "missing architecture staging directory: $stage_dir"
@@ -162,13 +158,6 @@ validate_tool_stage() {
   for tool in "${tool_names[@]}"; do
     require_tool_artifact "$bin_dir/$tool" "$arch" "$tool"
   done
-
-  corpus_file="$stage_dir/$zstd_corpus_relative"
-  [[ -f "$corpus_file" && ! -L "$corpus_file" ]] ||
-    die "missing fixed zstd corpus for $arch: $corpus_file"
-  corpus_digest=$(sha256sum "$corpus_file" | awk '{print $1}')
-  [[ "$corpus_digest" == "$zstd_corpus_sha256" ]] ||
-    die "fixed zstd corpus SHA-256 mismatch for $arch"
 
   licenses_dir="$stage_dir/LICENSES"
   [[ -d "$licenses_dir" ]] || die "missing LICENSES directory for $arch: $licenses_dir"
@@ -199,7 +188,7 @@ package_tools() {
   new_temp_stage
   package_stage=$new_temp_stage_path
   assert_temp_stage_path "$package_stage"
-  mkdir -p "$package_stage/bin" "$package_stage/LICENSES" "$package_stage/share/ecs/corpus"
+  mkdir -p "$package_stage/bin" "$package_stage/LICENSES"
 
   cp "$repo_root/LICENSE" "$package_stage/LICENSE"
   cp "$repo_root/NOTICE" "$package_stage/NOTICE"
@@ -210,14 +199,11 @@ package_tools() {
     cp "$source_dir/$tool" "$package_stage/bin/$tool"
     chmod 0755 "$package_stage/bin/$tool"
   done
-  cp "$stage_dir/$zstd_corpus_relative" "$package_stage/$zstd_corpus_relative"
-  chmod 0644 "$package_stage/$zstd_corpus_relative"
-
   archive="$dist_dir/ecs-tools_linux_${arch}.tar.gz"
   echo "packaging ecs-tools_linux_${arch}"
   tar -C "$package_stage" --sort=name --mtime="@$source_date_epoch" \
     --owner=0 --group=0 --numeric-owner -czf "$archive" \
-    bin share LICENSES LICENSE NOTICE manifest.json
+    bin LICENSES LICENSE NOTICE manifest.json
 }
 
 if [[ "$tools_enabled" -eq 1 ]]; then

@@ -10,9 +10,10 @@
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 已有的通用组件优先使用；固定口径基准选中时使用发行工具包内的指定版本与数据。
+#   - 已有的通用组件优先使用；固定口径基准选中时使用发行版提供的指定版本与数据。
 #   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
-#     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin。
+#     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin；
+#     zstd 选中时再从独立 corpus 发行资产准备固定输入。
 #     绝不调用系统包安装器，也不改动系统数据库。
 #   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
 #     Ookla speedtest 不放入工具包；--only ookla 仍可在任意档位显式单独选择，缺失时才走独立的 Ookla
@@ -308,6 +309,14 @@ TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
 TOOLS_BASE=${TOOLS_BASE%/}
 TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
 ZSTD_CORPUS_SHA256='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
+ZSTD_CORPUS_ASSET='ecs-corpus_silesia-v1.tar.gz'
+ZSTD_CORPUS_NAME='ecs-silesia-v1.corpus'
+ZSTD_CORPUS_BYTES=211938580
+ZSTD_CORPUS_BASE="${ECS_CORPUS_BASE_URL:-$BASE}"
+ZSTD_CORPUS_BASE=${ZSTD_CORPUS_BASE%/}
+ZSTD_CORPUS_ARCHIVE="$WORK/$ZSTD_CORPUS_ASSET"
+ZSTD_CORPUS_CHECKSUMS_FILE="$WORK/ecs-corpus-checksums.txt"
+ZSTD_CORPUS_EXTRACT_ROOT="$WORK/zstd-corpus"
 
 # Install the cleanup trap as soon as WORK exists.  This also covers argument
 # validation and manifest failures that happen before the test body starts.
@@ -537,6 +546,8 @@ validate_tools_manifest() {
       ([.tools[].name] | sort) == ["fio", "iperf3", "nexttrace-tiny", "npb-ep", "npb-ft", "openssl", "ping", "stream", "sysbench", "zstd"] and
       ([.tools[] | select(.name == "zstd")][0].parameters.corpus_sha256 == "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0") and
       ([.tools[] | select(.name == "zstd")][0].parameters.corpus_bytes == 211938580) and
+      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_path == "runtime/ecs-silesia-v1.corpus") and
+      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_source == "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip") and
       (all(.tools[]; has("name") and has("architecture") and has("sha256") and
         (.architecture == $arch) and
         ((.sha256 == "unknown") or (.sha256 == "unavailable") or (.sha256 | test("^[A-Fa-f0-9]{64}$")))))
@@ -569,8 +580,52 @@ validate_tools_archive_layout() {
   for tools_entry in sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping; do
     grep -F -x "bin/$tools_entry" "$tools_list_path" >/dev/null || return 1
   done
-  grep -F -x 'share/ecs/corpus/ecs-silesia-v1.corpus' "$tools_list_path" >/dev/null || return 1
+  if grep -E '(^|/)share(/|$)|(^|/)ecs-silesia-v1[.]corpus$' "$tools_list_path" >/dev/null; then
+    return 1
+  fi
   return 0
+}
+
+prepare_zstd_corpus() {
+  if [ "$ZSTD_CORPUS_BASE" = "$BASE" ]; then
+    cp "$WORK/checksums.txt" "$ZSTD_CORPUS_CHECKSUMS_FILE" || return 1
+  else
+    fetch "${ZSTD_CORPUS_BASE}/checksums.txt" "$ZSTD_CORPUS_CHECKSUMS_FILE" || return 1
+  fi
+  fetch "${ZSTD_CORPUS_BASE}/${ZSTD_CORPUS_ASSET}" "$ZSTD_CORPUS_ARCHIVE" || return 1
+
+  zstd_corpus_expected=$(awk -v f="$ZSTD_CORPUS_ASSET" '$2 == f {print $1; exit}' \
+    "$ZSTD_CORPUS_CHECKSUMS_FILE" | tr '[:upper:]' '[:lower:]')
+  case "$zstd_corpus_expected" in
+    ''|*[!A-Fa-f0-9]*) return 1 ;;
+  esac
+  [ "${#zstd_corpus_expected}" -eq 64 ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    zstd_corpus_archive_actual=$(sha256sum "$ZSTD_CORPUS_ARCHIVE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  elif command -v shasum >/dev/null 2>&1; then
+    zstd_corpus_archive_actual=$(shasum -a 256 "$ZSTD_CORPUS_ARCHIVE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  else
+    return 1
+  fi
+  [ "$zstd_corpus_archive_actual" = "$zstd_corpus_expected" ] || return 1
+
+  tar -tzf "$ZSTD_CORPUS_ARCHIVE" >"$WORK/ecs-corpus.list" || return 1
+  [ "$(wc -l <"$WORK/ecs-corpus.list")" -eq 1 ] || return 1
+  grep -F -x "$ZSTD_CORPUS_NAME" "$WORK/ecs-corpus.list" >/dev/null || return 1
+  mkdir -p "$ZSTD_CORPUS_EXTRACT_ROOT" || return 1
+  tar -xzf "$ZSTD_CORPUS_ARCHIVE" -C "$ZSTD_CORPUS_EXTRACT_ROOT" "$ZSTD_CORPUS_NAME" || return 1
+  zstd_corpus_path="$ZSTD_CORPUS_EXTRACT_ROOT/$ZSTD_CORPUS_NAME"
+  [ -f "$zstd_corpus_path" ] && [ ! -L "$zstd_corpus_path" ] || return 1
+  [ "$(stat -c %s "$zstd_corpus_path")" -eq "$ZSTD_CORPUS_BYTES" ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    zstd_corpus_actual=$(sha256sum "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  elif command -v shasum >/dev/null 2>&1; then
+    zstd_corpus_actual=$(shasum -a 256 "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+  else
+    return 1
+  fi
+  [ "$zstd_corpus_actual" = "$ZSTD_CORPUS_SHA256" ] || return 1
+  export ECS_ZSTD_CORPUS="$zstd_corpus_path"
 }
 
 prepare_tools_archive() {
@@ -617,19 +672,7 @@ prepare_tools_archive() {
   done
   case " $TOOLS_REQUESTED " in
     *" zstd "*)
-      tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" \
-        'share/ecs/corpus/ecs-silesia-v1.corpus' || return 1
-      zstd_corpus_path="$TOOLS_EXTRACT_ROOT/share/ecs/corpus/ecs-silesia-v1.corpus"
-      [ -f "$zstd_corpus_path" ] && [ ! -L "$zstd_corpus_path" ] || return 1
-      if command -v sha256sum >/dev/null 2>&1; then
-        zstd_corpus_actual=$(sha256sum "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-      elif command -v shasum >/dev/null 2>&1; then
-        zstd_corpus_actual=$(shasum -a 256 "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-      else
-        return 1
-      fi
-      [ "$zstd_corpus_actual" = "$ZSTD_CORPUS_SHA256" ] || return 1
-      export ECS_ZSTD_CORPUS="$zstd_corpus_path"
+      prepare_zstd_corpus || return 1
       ;;
   esac
   # Do not alter MISSING_TOOLS or PATH until every requested binary has passed

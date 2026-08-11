@@ -38,13 +38,15 @@ supports unknown/unavailable version, license, and SHA-256 fields until CI has
 built and audited a real artifact. This notice does not claim that a release
 asset or tool version exists merely because a manifest example exists.
 
-When run.sh needs sysbench, pinned zstd and its corpus, NPB EP/FT, pinned
-OpenSSL, official STREAM, fio, iperf3, NextTrace Tiny, or ping, it uses the
-architecture-matched ecs-tools tar.gz artifact for fixed-contract components
-and for any missing general tool. The artifact is accepted only after checks
-against checksums.txt, manifest.json, binary digests, and the corpus digest,
-then is unpacked into the temporary run directory and exposed through the
-temporary PATH. APT/Packagecloud is reserved for an explicitly selected Ookla
+When run.sh needs pinned zstd, NPB EP/FT, pinned OpenSSL, official STREAM,
+fio, iperf3, NextTrace Tiny, or ping, it uses the architecture-matched
+ecs-tools tar.gz artifact for fixed-contract components and for any missing
+general tool. The artifact is accepted only after checks against
+checksums.txt, manifest.json, and binary digests, then is unpacked into the
+temporary run directory and exposed through the temporary PATH. When the zstd
+benchmark is selected, run.sh separately downloads the standalone corpus
+Release asset, checks its Release checksum, and verifies its fixed size and
+SHA-256. APT/Packagecloud is reserved for an explicitly selected Ookla
 adapter and is not a source for these general missing tools.
 
 The ecs-tools set intentionally excludes the Ookla speedtest client. Ookla is

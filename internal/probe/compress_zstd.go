@@ -98,7 +98,7 @@ func missingZstdResult(summary, target string) model.Result {
 	})
 	result.Evidence = model.NewEvidence(0, 2, "run")
 	result.Notes = append(result.Notes,
-		"请使用 run.sh；它会从当前架构的已校验 ecs-tools 包同时提供固定 zstd binary 与固定 corpus。ecs 不生成自定义压缩综合分。",
+		"请使用 run.sh；它会从已校验的 ecs-tools 包提供固定 zstd binary，并从独立 Release 资产准备固定 corpus。ecs 不生成自定义压缩综合分。",
 	)
 	result.Finish(start)
 	return result
@@ -115,12 +115,9 @@ func zstdMethodology(contract zstdBenchmarkContract) model.Methodology {
 }
 
 func findZstdCorpus(zstdPath string, contract zstdBenchmarkContract) (string, error) {
-	candidates := make([]string, 0, 5)
+	candidates := make([]string, 0, 4)
 	if configured := strings.TrimSpace(os.Getenv("ECS_ZSTD_CORPUS")); configured != "" {
 		candidates = append(candidates, configured)
-	}
-	if absolute, err := filepath.Abs(zstdPath); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(absolute), "..", "share", "ecs", "corpus", contract.CorpusName))
 	}
 	candidates = append(candidates,
 		filepath.Join("/usr/local/share/ecs/corpus", contract.CorpusName),
@@ -143,7 +140,7 @@ func findZstdCorpus(zstdPath string, contract zstdBenchmarkContract) (string, er
 	if len(diagnostics) > 0 {
 		return "", fmt.Errorf("固定 corpus 校验失败: %s", strings.Join(diagnostics, "; "))
 	}
-	return "", fmt.Errorf("固定 corpus %s 不在 ECS_ZSTD_CORPUS 或 ecs-tools share 目录中", contract.CorpusName)
+	return "", fmt.Errorf("固定 corpus %s 不在 ECS_ZSTD_CORPUS 或系统 corpus 目录中", contract.CorpusName)
 }
 
 func verifyZstdCorpus(path string, contract zstdBenchmarkContract) error {

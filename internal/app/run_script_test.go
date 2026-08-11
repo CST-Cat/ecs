@@ -101,6 +101,31 @@ func TestRunScriptDocumentsProfileMembership(t *testing.T) {
 	}
 }
 
+func TestRunScriptPreparesStandaloneCorpusOnlyForZstd(t *testing.T) {
+	contents, err := os.ReadFile(runScriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, required := range []string{
+		"ZSTD_CORPUS_ASSET='ecs-corpus_silesia-v1.tar.gz'",
+		"ZSTD_CORPUS_BYTES=211938580",
+		"prepare_zstd_corpus()",
+		"tar -tzf \"$ZSTD_CORPUS_ARCHIVE\"",
+		"tar -xzf \"$ZSTD_CORPUS_ARCHIVE\" -C \"$ZSTD_CORPUS_EXTRACT_ROOT\" \"$ZSTD_CORPUS_NAME\"",
+		"[ \"$(stat -c %s \"$zstd_corpus_path\")\" -eq \"$ZSTD_CORPUS_BYTES\" ]",
+		"export ECS_ZSTD_CORPUS=\"$zstd_corpus_path\"",
+		"prepare_zstd_corpus || return 1",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("run.sh missing standalone zstd corpus step %q", required)
+		}
+	}
+	if strings.Contains(text, "share/ecs/corpus/ecs-silesia-v1.corpus") {
+		t.Fatal("run.sh must not assume that the corpus is inside an ecs-tools archive")
+	}
+}
+
 func TestRunScriptKeepsRunOptionsAndFiltersSubmitOptions(t *testing.T) {
 	contents, err := os.ReadFile(runScriptPath(t))
 	if err != nil {

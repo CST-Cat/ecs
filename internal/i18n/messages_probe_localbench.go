@@ -10,7 +10,7 @@ var probeEnglishLocalBench = map[string]string{
 	"相同 zstd 版本、corpus SHA-256、压缩等级、评估时长、线程数与 method version":                          "Same zstd version, corpus SHA-256, compression level, evaluation duration, thread count and method version",
 	"未找到固定版本 zstd，压缩基准未运行":                                                             "The pinned zstd binary was not found; the compression benchmark did not run",
 	"未找到或无法验证固定 Silesia corpus，zstd 基准未运行":                                             "The fixed Silesia corpus was not found or could not be verified; the zstd benchmark did not run",
-	"请使用 run.sh；它会从当前架构的已校验 ecs-tools 包同时提供固定 zstd binary 与固定 corpus。ecs 不生成自定义压缩综合分。": "Use run.sh; it stages both the pinned zstd binary and fixed corpus from the verified architecture-matched ecs-tools package. ecs does not produce a custom compression score.",
+	"请使用 run.sh；它会从已校验的 ecs-tools 包提供固定 zstd binary，并从独立 Release 资产准备固定 corpus。ecs 不生成自定义压缩综合分。": "Use run.sh; it stages the pinned zstd binary from the verified architecture-matched ecs-tools package and prepares the fixed corpus from the standalone Release asset. ecs does not produce a custom compression score.",
 	"zstd 版本不符合固定口径：检测到 \x1f，要求 \x1f":                                                  "The zstd version does not match the fixed contract: detected \x1f, required \x1f",
 	"固定 Silesia corpus 校验失败，zstd 基准未运行":                                                "Fixed Silesia corpus verification failed; the zstd benchmark did not run",
 	"请使用 run.sh 提供版本与哈希均经过 ecs-tools manifest 校验的 zstd binary。":                        "Use run.sh to provide a zstd binary whose version and hash have both been verified by the ecs-tools manifest.",

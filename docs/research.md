@@ -42,7 +42,7 @@
 2. **默认零上传**：所有报告只写本地。当前发行版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、JSON、txt、Markdown 和独立 HTML 都由同一份数据渲染，避免各输出路径互相漂移。
 4. **标准性能工具唯一**：CPU scalar/vCPU scaling、压缩、FP/FFT、内存、密码学、磁盘和网络吞吐原始成绩分别调用 sysbench、zstd、NPB EP+FT、官方 STREAM、OpenSSL speed、fio、iperf3。固定工具或 corpus 缺失时不生成替代成绩；fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的，zstd/NPB/crypto 不并入 CPU 分数。
-5. **外部引擎必须可审计**：外部工具只作为可关闭的本地适配器；调用时记录版本、完整参数、二进制 SHA-256、原始输出、method version 和数据来源。`run.sh` 只从当前架构的已校验 `ecs-tools` 包解包缺失/不合口径的工具到临时 WORK；工具包固定 10 个经过功能裁剪的二进制及 zstd corpus。七架构 CI 先原生/交叉编译，再直接或用 QEMU 做短功能 smoke；交叉 NPB 用不入包的 Class S 验证运行时，发行 Class A 只做目标 ELF 校验，不在模拟器中跑性能负载。Ookla 仅在选中时走独立官方签名源。
+5. **外部引擎必须可审计**：外部工具只作为可关闭的本地适配器；调用时记录版本、完整参数、二进制 SHA-256、原始输出、method version 和数据来源。`run.sh` 只从当前架构的已校验 `ecs-tools` 包解包缺失/不合口径的工具到临时 WORK；工具包固定 10 个经过功能裁剪的二进制，只有选中 zstd 时才从独立 Release 资产准备固定 corpus。七架构 CI 先原生/交叉编译，再直接或用 QEMU 做短功能 smoke；交叉 NPB 用不入包的 Class S 验证运行时，发行 Class A 只做目标 ELF 校验，不在模拟器中跑性能负载。Ookla 仅在选中时走独立官方签名源。
 6. **资源预算可见**：`standard`、`full` 是 19/21 个默认模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
 7. **结果必须可比较**：每个性能结果记录引擎版本、块大小、队列深度、线程数、测试时长、样本数和时间戳。不同方法不混成一个总分。
 8. **双栈是一等公民**：IPv4/IPv6 分开探测、分开记录失败原因，不能用“有地址”代替“可联网”。
@@ -93,7 +93,7 @@ full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` �
 - IPQuality 的多源清单、字段对应关系、类型归类和供应商风险分段构成明确的实现输入；`ecs` 因此整体改用 AGPL-3.0-only，并在 `NOTICE`、报告来源和文档中保留项目、提交与许可证归属；
 - 没有移植 IPQuality 的广告、赞助素材、运行计数、在线报告上传、依赖安装、流媒体或邮件检测代码；
 - 网络实现、并发、密钥路由、结构化模型、终端/JSON/txt/Markdown/HTML 渲染和错误隔离由 `ecs` 重新实现；
-- sysbench、zstd、NPB EP/FT、OpenSSL、STREAM、fio、iperf3、NextTrace Tiny 和 ping 仍作为独立进程调用；`run.sh` 从已校验的七架构 `ecs-tools` 包解包所需的 10 个二进制和固定 zstd corpus 到 WORK，只有 full 默认或显式选中的 Ookla 才走独立官方签名源。
+- sysbench、zstd、NPB EP/FT、OpenSSL、STREAM、fio、iperf3、NextTrace Tiny 和 ping 仍作为独立进程调用；`run.sh` 从已校验的七架构 `ecs-tools` 包解包所需的 10 个二进制，只有选中 zstd 时才从独立 Release 资产校验并解包固定 corpus 到 WORK，只有 full 默认或显式选中的 Ookla 才走独立官方签名源。
 
 ## 首版之后的实测校准
 

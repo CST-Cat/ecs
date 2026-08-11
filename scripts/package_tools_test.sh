@@ -12,31 +12,6 @@ trap 'rm -rf -- "$stage_root"' EXIT
 
 architectures=(amd64 arm64 armv7 386 s390x riscv64 ppc64le)
 tools=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
-corpus_sha256='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
-corpus_source_sha256='0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af'
-corpus_file=${ECS_TEST_ZSTD_CORPUS:-}
-if [[ -z "$corpus_file" ]]; then
-  command -v curl >/dev/null 2>&1
-  command -v unzip >/dev/null 2>&1
-  corpus_zip="$stage_root/silesia.zip"
-  corpus_source="$stage_root/silesia"
-  corpus_file="$stage_root/ecs-silesia-v1.corpus"
-  curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 \
-    https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip -o "$corpus_zip"
-  [[ "$(sha256sum "$corpus_zip" | awk '{print $1}')" == "$corpus_source_sha256" ]]
-  unzip -tq "$corpus_zip" >/dev/null || {
-    echo 'Silesia download is not a valid ZIP archive' >&2
-    exit 1
-  }
-  mkdir -p "$corpus_source"
-  unzip -q "$corpus_zip" -d "$corpus_source"
-  : >"$corpus_file"
-  for member in dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml; do
-    cat "$corpus_source/$member" >>"$corpus_file"
-  done
-fi
-[[ -f "$corpus_file" && ! -L "$corpus_file" ]]
-[[ "$(sha256sum "$corpus_file" | awk '{print $1}')" == "$corpus_sha256" ]]
 
 write_fixture() {
   local path=$1
@@ -53,12 +28,9 @@ write_manifest_fixture() {
 
 for arch in "${architectures[@]}"; do
   stage_dir="$stage_root/linux_${arch}"
-  mkdir -p "$stage_dir/bin" "$stage_dir/LICENSES" "$stage_dir/share/ecs/corpus"
+  mkdir -p "$stage_dir/bin" "$stage_dir/LICENSES"
   cp "$repo_root/LICENSE" "$stage_dir/LICENSES/project-license.txt"
   write_manifest_fixture "$arch" "$stage_dir/manifest.json"
-  if ! ln "$corpus_file" "$stage_dir/share/ecs/corpus/ecs-silesia-v1.corpus" 2>/dev/null; then
-    cp "$corpus_file" "$stage_dir/share/ecs/corpus/ecs-silesia-v1.corpus"
-  fi
   for tool in "${tools[@]}"; do
     write_fixture "$stage_dir/bin/$tool"
   done
@@ -79,6 +51,10 @@ for arch in "${architectures[@]}"; do
     exit 1
   }
   listing=$(tar -tzf "$archive")
+  [[ "$(printf '%s\n' "$listing" | wc -l)" -eq 16 ]] || {
+    echo "archive $archive has an unexpected number of entries" >&2
+    exit 1
+  }
   for entry in \
     bin/ \
     bin/sysbench \
@@ -91,10 +67,6 @@ for arch in "${architectures[@]}"; do
     bin/iperf3 \
     bin/nexttrace-tiny \
     bin/ping \
-    share/ \
-    share/ecs/ \
-    share/ecs/corpus/ \
-    share/ecs/corpus/ecs-silesia-v1.corpus \
     LICENSES/ \
     LICENSES/project-license.txt \
     LICENSE \
@@ -105,6 +77,10 @@ for arch in "${architectures[@]}"; do
       exit 1
     }
   done
+  if printf '%s\n' "$listing" | grep -E '(^|/)share/|ecs-silesia-v1\.corpus$' >/dev/null; then
+    echo "archive $archive contains the Silesia corpus or a share directory" >&2
+    exit 1
+  fi
   if printf '%s\n' "$listing" | grep -E -i '(^|/)(ookla|speedtest)(/|$)' >/dev/null; then
     echo "archive $archive contains an Ookla path" >&2
     exit 1

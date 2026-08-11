@@ -14,7 +14,7 @@ The project follows three rules:
 
 ## Quick start
 
-The one-line runner supports Linux only. It downloads and verifies the latest Release and reuses compatible general-purpose tools already installed on the system. Pinned zstd/corpus, NPB, OpenSSL, and related benchmark components are staged from the verified release tool bundle for the current run. Temporary files are removed afterward, without installing anything into system directories.
+The one-line runner supports Linux only. It downloads and verifies the latest Release and reuses compatible general-purpose tools already installed on the system. Pinned zstd, NPB, OpenSSL, and related benchmark components are staged from the verified release tool bundle for the current run; only a selected zstd benchmark prepares the fixed corpus from its standalone Release asset. Temporary files are removed afterward, without installing anything into system directories.
 
 `ecs` provides 21 test modules in total. Standard runs 19 of them by default, while Full runs all 21.
 
@@ -190,7 +190,7 @@ A numeric comparison is made only when module ID, metric key, `method`, unit, pe
 | `route` | Forward path, probed/visible/timed-out hops, and per-target duration | Official NextTrace Tiny + built-in statistics | Standard / Full |
 | `backtrace` | China return paths and backbone signatures across four cities and three carriers | Official NextTrace Tiny + built-in signature table | Standard / Full |
 
-The one-line runner stages verified, architecture-matched copies of missing `sysbench`, zstd plus its fixed corpus, NPB EP/FT, OpenSSL, STREAM, `fio`, `iperf3`, `ping`, and NextTrace Tiny tools. It verifies the manifest, binary SHA-256 values, and corpus SHA-256. Ookla is never included in that tool bundle. If `ookla` is selected and `speedtest` is missing, the runner downloads and extracts it temporarily from a separate, signed official package source. If no verifiable tool is available, the affected module is explicitly skipped instead of producing a substitute score.
+The one-line runner stages verified, architecture-matched copies of missing `sysbench`, zstd, NPB EP/FT, OpenSSL, STREAM, `fio`, `iperf3`, `ping`, and NextTrace Tiny tools. Only when zstd is selected does it download and verify the fixed corpus from a standalone Release asset; it verifies the manifest, binary SHA-256 values, and corpus SHA-256. Ookla is never included in that tool bundle. If `ookla` is selected and `speedtest` is missing, the runner downloads and extracts it temporarily from a separate, signed official package source. If no verifiable tool is available, the affected module is explicitly skipped instead of producing a substitute score.
 
 Release tools are feature-trimmed before native or cross compilation. Cross targets are handed to QEMU only for short functional smoke tests after compilation is complete. Shipped NPB binaries always remain Class A; cross CI builds unshipped Class S EP/FT binaries from the same source and toolchain to validate the target runtime and OpenMP without running a meaningless heavy Class A workload under emulation.
 

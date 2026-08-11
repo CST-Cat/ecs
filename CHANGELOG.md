@@ -1,7 +1,7 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.6.6` 的主要变化。
+`v0.1.0` 到 `v0.6.7` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -10,6 +10,18 @@
 ## Unreleased
 
 - release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
+
+## 0.6.7 — 2026-08-11
+
+### 变更 — 2026-08-11
+
+- `ecs-tools_linux_<arch>.tar.gz` 继续使用 gzip，但只包含 `bin/`、`LICENSES/`、`LICENSE`、`NOTICE` 和 `manifest.json`；固定 Silesia corpus 从七个架构包中移除。
+- 新增架构无关的 `ecs-corpus_silesia-v1.tar.gz` Release 资产，按固定 ZIP、文件顺序、211938580 bytes 和最终 SHA-256 构建并校验。
+- `run.sh` 只有在选中 zstd 时才从 Release checksums 校验并解压独立 corpus，随后再次校验长度和 SHA-256；其他 benchmark 不下载 corpus。
+
+### CI 与验证 — 2026-08-11
+
+- 七架构 tools smoke 仍验证 10 个工具，构建阶段可使用 corpus，但上传前明确移除；CI 同时拒绝 tools 归档中的 `share/`/corpus，并验证独立 corpus 资产内容。
 
 ## 0.6.6 — 2026-08-11
 
@@ -51,6 +63,7 @@
 | `v0.6.0–v0.6.4` | 六个标准工具、七个 Linux 架构和可验证发布资产 |
 | `v0.6.5` | 结构化失败、资源压力诊断、条件复测和多报告对比 |
 | `v0.6.6` | 七架构发布链路修复和 Silesia 镜像切换 |
+| `v0.6.7` | Silesia corpus 独立发布与架构 tools 体积收敛 |
 
 ## 0.1.0 — 2026-08-01
 

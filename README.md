@@ -14,7 +14,7 @@
 
 ## 快速开始
 
-一键脚本仅支持 Linux。它会下载并校验最新 Release，复用口径兼容的系统通用工具；zstd/corpus、NPB、OpenSSL 等固定版本基准则从已校验的发行工具包临时放入本次运行目录。测试结束后自动清理，不向系统目录安装文件。
+一键脚本仅支持 Linux。它会下载并校验最新 Release，复用口径兼容的系统通用工具；zstd、NPB、OpenSSL 等固定版本工具从已校验的发行工具包临时放入本次运行目录，只有选中 zstd 时才准备独立发布的固定 corpus。测试结束后自动清理，不向系统目录安装文件。
 
 `ecs` 一共提供 21 个测试模块：Standard 默认运行其中 19 个，Full 运行全部 21 个。
 
@@ -190,7 +190,7 @@ ecs compare ./fleet/*.json \
 | `route` | 正向路径、探测/可见/超时跳点与逐目标耗时 | 官方 NextTrace Tiny + 内置统计 | Standard / Full |
 | `backtrace` | 四城三网回程路径与骨干特征 | 官方 NextTrace Tiny + 内置特征表 | Standard / Full |
 
-一键脚本会为缺失的 `sysbench`、zstd 与固定 corpus、NPB EP/FT、OpenSSL、STREAM、`fio`、`iperf3`、`ping` 和 NextTrace Tiny 准备与当前架构匹配的临时工具，并校验 manifest、二进制 SHA-256 与 corpus SHA-256。Ookla 不进入该工具包；仅在选中 `ookla` 且本机缺少 `speedtest` 时，脚本才会从独立的官方签名软件源临时下载并解包。无法取得可核验工具时，对应项目会明确标记为跳过，不生成替代成绩。
+一键脚本会为缺失的 `sysbench`、zstd、NPB EP/FT、OpenSSL、STREAM、`fio`、`iperf3`、`ping` 和 NextTrace Tiny 准备与当前架构匹配的临时工具；选中 zstd 时才从独立 Release 资产下载并校验固定 corpus，并校验 manifest、二进制 SHA-256 与 corpus SHA-256。Ookla 不进入该工具包；仅在选中 `ookla` 且本机缺少 `speedtest` 时，脚本才会从独立的官方签名软件源临时下载并解包。无法取得可核验工具时，对应项目会明确标记为跳过，不生成替代成绩。
 
 发行工具先按实际用途裁剪，再原生或交叉编译；交叉目标只在全部编译结束后交给 QEMU 做短功能 smoke。NPB 发行二进制始终是 Class A，交叉 CI 另用不入包的 Class S 验证目标运行时与 OpenMP，避免在模拟器里执行没有性能意义的 Class A 重负载。
 
