@@ -22,7 +22,7 @@ const (
 	zstdEvaluationSeconds        = 5
 	zstdCorpusName               = "ecs-silesia-v1.corpus"
 	zstdCorpusSHA256             = "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0"
-	zstdCorpusSourceSHA256       = "7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e"
+	zstdCorpusSourceSHA256       = "0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af"
 	zstdCorpusBytes        int64 = 211938580
 	zstdRunTimeout               = 3 * time.Minute
 )

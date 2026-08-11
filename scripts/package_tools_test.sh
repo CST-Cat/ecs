@@ -13,7 +13,7 @@ trap 'rm -rf -- "$stage_root"' EXIT
 architectures=(amd64 arm64 armv7 386 s390x riscv64 ppc64le)
 tools=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
 corpus_sha256='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
-corpus_source_sha256='7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e'
+corpus_source_sha256='0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af'
 corpus_file=${ECS_TEST_ZSTD_CORPUS:-}
 if [[ -z "$corpus_file" ]]; then
   command -v curl >/dev/null 2>&1
@@ -22,8 +22,12 @@ if [[ -z "$corpus_file" ]]; then
   corpus_source="$stage_root/silesia"
   corpus_file="$stage_root/ecs-silesia-v1.corpus"
   curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 \
-    https://mattmahoney.net/dc/silesia.zip -o "$corpus_zip"
+    https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip -o "$corpus_zip"
   [[ "$(sha256sum "$corpus_zip" | awk '{print $1}')" == "$corpus_source_sha256" ]]
+  unzip -tq "$corpus_zip" >/dev/null || {
+    echo 'Silesia download is not a valid ZIP archive' >&2
+    exit 1
+  }
   mkdir -p "$corpus_source"
   unzip -q "$corpus_zip" -d "$corpus_source"
   : >"$corpus_file"

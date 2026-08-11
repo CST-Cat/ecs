@@ -207,7 +207,7 @@ STREAM 不可用时只报告标准内存基准未运行，不使用替代后端�
 
 `zstd`、`npb` 和 `crypto` 与 CPU 评分保持独立，不生成跨工具综合分：
 
-- `zstd` 固定 zstd 1.5.7、level 3、5s、1/全 worker 和 `zstd-silesia-l3-v1`。corpus 是 211,938,580 bytes 的 `ecs-silesia-v1.corpus`，SHA-256 为 `8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0`；其 Silesia ZIP 来源 SHA-256 为 `7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e`。指标为 `zstd_{compress,decompress}_{1t,nt}_mb_s`、`zstd_{compress,decompress}_scaling_ratio` 和 `zstd_{compress,decompress}_per_worker_efficiency_percent`。
+- `zstd` 固定 zstd 1.5.7、level 3、5s、1/全 worker 和 `zstd-silesia-l3-v1`。corpus 是 211,938,580 bytes 的 `ecs-silesia-v1.corpus`，SHA-256 为 `8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0`；其 Silesia ZIP 来源 SHA-256 为 `0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af`。指标为 `zstd_{compress,decompress}_{1t,nt}_mb_s`、`zstd_{compress,decompress}_scaling_ratio` 和 `zstd_{compress,decompress}_per_worker_efficiency_percent`。
 - `npb` 只保留 NASA NPB-OMP 3.4.4 的 EP/FT Class A，固定 `-O3 -fopenmp -static`、`randi8`、OpenMP 环境与 1T/全线程。指标为 `npb_{ep,ft}_{1t,nt}_mops` 和 `npb_{ep,ft}_scaling_ratio`；表格同时保留官方 `Mop/s/thread`、耗时与 Verification。只有尺寸/迭代数、线程数、版本、编译参数和 Verification 全部通过才采纳 Mop/s。
 - `crypto` 固定 OpenSSL 3.5.7、16 KiB、5s、`-elapsed -mr -multi` 与 1/全 worker，分别测 AES-256-GCM、ChaCha20-Poly1305 和 SHA-256。指标为 `openssl_{aes_256_gcm,chacha20_poly1305,sha_256}_{1w,nw}_mb_s` 和对应 `*_scaling_ratio`；表格保留 `+F` 行的原始 bytes/s，MB/s 是除以 1,000,000 的可复算表示。
 

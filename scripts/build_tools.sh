@@ -350,8 +350,8 @@ npb_src="$npb_release_root/NPB3.4-OMP"
 # The corpus is part of the benchmark contract, not an incidental input. The
 # ZIP mirror and the concatenated byte stream are both pinned. Rebuilding the
 # package therefore fails if the mirror changes any byte or file ordering.
-zstd_corpus_url='https://mattmahoney.net/dc/silesia.zip'
-zstd_corpus_source_sha='7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e'
+zstd_corpus_url='https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip'
+zstd_corpus_source_sha='0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af'
 zstd_corpus_sha='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
 zstd_corpus_bytes=211938580
 zstd_corpus_name='ecs-silesia-v1.corpus'
@@ -361,6 +361,8 @@ zstd_corpus_dir="$work/silesia"
 zstd_corpus_path="$stage/share/ecs/corpus/$zstd_corpus_name"
 download_sha256 "$zstd_corpus_url" "$zstd_corpus_source_sha" "$zstd_corpus_zip" \
   'Silesia source ZIP'
+unzip -tq "$zstd_corpus_zip" >/dev/null ||
+  die 'Silesia download is not a valid ZIP archive'
 mkdir -p "$zstd_corpus_dir"
 unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir"
 : >"$zstd_corpus_path"

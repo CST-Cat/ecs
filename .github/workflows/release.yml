@@ -235,7 +235,7 @@ jobs:
             build_mode: cross-qemu-smoke
             debian_arch: ppc64el
             cross_triplet: powerpc64le-linux-gnu
-            target_runner: qemu-ppc64le-static
+            target_runner: qemu-ppc64le
     steps:
       - uses: actions/checkout@v7
       - name: Verify runner architecture

@@ -1,7 +1,7 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.6.5` 的主要变化。
+`v0.1.0` 到 `v0.6.6` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -10,6 +10,8 @@
 ## Unreleased
 
 - release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
+
+## 0.6.6 — 2026-08-11
 
 ### 新增 — 2026-08-11
 
@@ -34,6 +36,8 @@
 - 固定摘要的 NPB 与 Silesia 下载增加内容校验级重试和实际摘要诊断，仍拒绝任何不匹配数据；GitHub token 仅发送给 GitHub API，不再随外部源码请求传出。
 - 七架构产物统一规范许可证文件读权限；`ppc64le` 使用同时提供目标 LuaJIT、交叉 gfortran 与配套 libc sysroot 的 Debian forky，并显式调用对应 static QEMU runner，避免 sid 的 libc 版本冲突。
 - OpenSSL 继续关闭 TLS、网络、动态组件和无关算法，但保留上游 RISC-V 加速源编译所需的 deprecated SHA context 类型声明；该调整不改变三项固定 EVP benchmark 口径。
+- 修复 `ppc64le` 在 Debian forky 中的 QEMU runner 名称，改用实际存在的 `qemu-ppc64le`。
+- 将 Silesia ZIP 下载源切换到可用镜像，保留最终 corpus 的 `211938580` 字节数和 `8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0` SHA-256，并增加 ZIP 完整性检查。
 
 ## 版本路线概览
 
@@ -46,6 +50,7 @@
 | `v0.5.x` | 安全提交链路、临时工具暂存、配置档和可见性边界 |
 | `v0.6.0–v0.6.4` | 六个标准工具、七个 Linux 架构和可验证发布资产 |
 | `v0.6.5` | 结构化失败、资源压力诊断、条件复测和多报告对比 |
+| `v0.6.6` | 七架构发布链路修复和 Silesia 镜像切换 |
 
 ## 0.1.0 — 2026-08-01
 
