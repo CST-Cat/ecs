@@ -239,19 +239,9 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		threads = 1
 	}
 
-	hasIPv6 := hostHasUsableIPv6()
-	if env.Config.IPVersion == config.IPVersion6 && !hasIPv6 {
-		result.Status = model.StatusWarning
-		result.Summary = "本机没有可用的全球 IPv6 路由，IPv6 吞吐基准未运行"
-		result.Notes = append(result.Notes,
-			"显式选择 IPv6 时不会把 ULA、链路本地地址或无默认路由的 IPv6 当成可用网络；请确认 VPS 已配置全球 IPv6 与默认路由。")
-		result.Evidence = model.NewEvidence(0, len(env.Config.IPerfTargets)*3, "operation")
-		result.Finish(start)
-		return result
-	}
 	rows := make([]iperfRow, 0, len(env.Config.IPerfTargets)*2)
 	for _, target := range env.Config.IPerfTargets {
-		for _, family := range endpointFamilies(target.Networks, hasIPv6, env.Config.IPVersion) {
+		for _, family := range endpointFamilies(target.Networks, env.Network.IPv4Usable, env.Network.IPv6Usable, env.Config.IPVersion) {
 			if ctx.Err() != nil {
 				break
 			}
@@ -777,9 +767,11 @@ func parseIPerfTCPJSON(raw []byte, port int, reverse bool) iperfDirectionResult 
 	return sample
 }
 
-func endpointFamilies(networks string, hasIPv6 bool, mode string) []string {
+func endpointFamilies(networks string, hasIPv4, hasIPv6 bool, mode string) []string {
 	allow4 := config.AllowsIPVersion(mode, config.IPVersion4)
 	allow6 := config.AllowsIPVersion(mode, config.IPVersion6)
+	allow4 = allow4 && hasIPv4
+	allow6 = allow6 && hasIPv6
 	switch networks {
 	case "IPv6":
 		if hasIPv6 && allow6 {
@@ -794,57 +786,24 @@ func endpointFamilies(networks string, hasIPv6 bool, mode string) []string {
 		if hasIPv6 && allow6 {
 			families = append(families, "IPv6")
 		}
+		if len(families) == 0 {
+			return nil
+		}
 		return families
-	default:
+	case "IPv4":
 		if allow4 {
 			return []string{"IPv4"}
 		}
 		return nil
-	}
-}
-
-// hasGlobalUnicastIPv6 判断地址列表里是否存在全球可路由的 IPv6 单播地址。
-//
-// 必须排除 ULA（fc00::/7）：Tailscale、Docker 和家用网络都会分配 ULA，
-// 它有地址但到不了公网。注意 net.IP.IsGlobalUnicast() 对 ULA 同样返回 true，
-// 不能用它做这个判断，得靠 IsPrivate()。
-func hasGlobalUnicastIPv6(addresses []net.Addr) bool {
-	for _, address := range addresses {
-		raw := address.String()
-		if slash := strings.IndexByte(raw, '/'); slash >= 0 {
-			raw = raw[:slash]
+	default:
+		if allow4 {
+			return []string{"IPv4"}
 		}
-		ip := net.ParseIP(raw)
-		if ip == nil || ip.To4() != nil {
-			continue
+		if allow6 {
+			return []string{"IPv6"}
 		}
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || !ip.IsGlobalUnicast() {
-			continue
-		}
-		return true
+		return nil
 	}
-	return false
-}
-
-// hostHasUsableIPv6 判断本机是否真的能用 IPv6 出网。
-//
-// 只看网卡上有没有 IPv6 地址是不够的。实测中一台只有 Tailscale ULA、没有 IPv6
-// 默认路由的机器会被判为"支持 IPv6"，于是每个 iperf3 节点都白跑一轮 IPv6 测试
-// 并全部失败，既浪费时间又在报告里留下一堆并非链路问题的"失败"行。
-//
-// 因此在地址检查之外再确认内核确实有到公网 IPv6 的路由：UDP dial 只做路由查找、
-// 不发送任何数据包，没有路由会立即失败。
-func hostHasUsableIPv6() bool {
-	addresses, err := net.InterfaceAddrs()
-	if err != nil || !hasGlobalUnicastIPv6(addresses) {
-		return false
-	}
-	connection, err := net.DialTimeout("udp6", "[2001:4860:4860::8888]:53", 2*time.Second)
-	if err != nil {
-		return false
-	}
-	_ = connection.Close()
-	return true
 }
 
 func formatOptionalMbps(value float64) string {

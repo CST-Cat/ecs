@@ -16,19 +16,25 @@ func TestEndpointFamiliesRespectIPVersion(t *testing.T) {
 	cases := []struct {
 		name     string
 		networks string
+		hasV4    bool
 		hasV6    bool
 		mode     string
 		want     []string
 	}{
-		{"auto dual stack", "IPv4|IPv6", true, config.IPVersionAuto, []string{"IPv4", "IPv6"}},
-		{"auto v4 only", "IPv4|IPv6", false, config.IPVersionAuto, []string{"IPv4"}},
-		{"forced v4", "IPv4|IPv6", true, config.IPVersion4, []string{"IPv4"}},
-		{"forced v6", "IPv4|IPv6", true, config.IPVersion6, []string{"IPv6"}},
-		{"v4 target cannot serve v6", "IPv4", true, config.IPVersion6, nil},
+		{"auto dual stack", "IPv4|IPv6", true, true, config.IPVersionAuto, []string{"IPv4", "IPv6"}},
+		{"auto v4 only", "IPv4|IPv6", true, false, config.IPVersionAuto, []string{"IPv4"}},
+		{"auto v6 only", "IPv4|IPv6", false, true, config.IPVersionAuto, []string{"IPv6"}},
+		{"auto no network", "IPv4|IPv6", false, false, config.IPVersionAuto, nil},
+		{"forced v4", "IPv4|IPv6", false, true, config.IPVersion4, nil},
+		{"forced v4 available", "IPv4|IPv6", true, true, config.IPVersion4, []string{"IPv4"}},
+		{"forced v6", "IPv4|IPv6", true, false, config.IPVersion6, nil},
+		{"forced v6 available", "IPv4|IPv6", true, true, config.IPVersion6, []string{"IPv6"}},
+		{"v4 target cannot serve v6", "IPv4", false, true, config.IPVersion6, nil},
+		{"unspecified target on IPv6-only", "", false, true, config.IPVersionAuto, []string{"IPv6"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := endpointFamilies(testCase.networks, testCase.hasV6, testCase.mode); !reflect.DeepEqual(got, testCase.want) {
+			if got := endpointFamilies(testCase.networks, testCase.hasV4, testCase.hasV6, testCase.mode); !reflect.DeepEqual(got, testCase.want) {
 				t.Fatalf("endpointFamilies = %v, want %v", got, testCase.want)
 			}
 		})
@@ -44,6 +50,33 @@ func TestLatencyFamiliesForLiteralAddresses(t *testing.T) {
 	}
 	if got := latencyFamilies("127.0.0.1:443", config.IPVersion6); len(got) != 0 {
 		t.Fatalf("forced IPv6 must not schedule IPv4 literal: %v", got)
+	}
+}
+
+func TestLatencyFamiliesRespectSharedCapability(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+		hasV4   bool
+		hasV6   bool
+		mode    string
+		want    []string
+	}{
+		{name: "auto IPv4 only hostname", address: "example.test:443", hasV4: true, mode: config.IPVersionAuto, want: []string{config.IPVersion4}},
+		{name: "auto IPv6 only hostname", address: "example.test:443", hasV6: true, mode: config.IPVersionAuto, want: []string{config.IPVersion6}},
+		{name: "auto dual stack hostname", address: "example.test:443", hasV4: true, hasV6: true, mode: config.IPVersionAuto, want: []string{config.IPVersion4, config.IPVersion6}},
+		{name: "explicit IPv4 unavailable", address: "example.test:443", hasV6: true, mode: config.IPVersion4},
+		{name: "explicit IPv6 unavailable", address: "example.test:443", hasV4: true, mode: config.IPVersion6},
+		{name: "IPv4 literal needs IPv4", address: "127.0.0.1:443", hasV6: true, mode: config.IPVersionAuto},
+		{name: "IPv6 literal needs IPv6", address: "[::1]:443", hasV4: true, mode: config.IPVersionAuto},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := latencyFamiliesWithCapability(testCase.address, testCase.mode, testCase.hasV4, testCase.hasV6)
+			if !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("latencyFamiliesWithCapability(%q, %q, %v, %v) = %v, want %v", testCase.address, testCase.mode, testCase.hasV4, testCase.hasV6, got, testCase.want)
+			}
+		})
 	}
 }
 
@@ -78,7 +111,7 @@ func TestEndpointFamilySelectsIPv6Hostname(t *testing.T) {
 			t.Fatalf("%s IPv6 hostname route args = %v", engineName, args)
 		}
 	}
-	if got := latencyFamiliesForEndpoint(target, config.IPVersionAuto, true); !reflect.DeepEqual(got, []string{config.IPVersion6}) {
+	if got := latencyFamiliesForEndpoint(target, config.IPVersionAuto, true, true); !reflect.DeepEqual(got, []string{config.IPVersion6}) {
 		t.Fatalf("IPv6 hostname latency families = %v", got)
 	}
 }

@@ -38,6 +38,16 @@ type Progress struct {
 // groups without coupling rendering to probe execution.
 type ProgressFunc func(Progress)
 
+// detectNetworkCapabilities is a hook rather than a direct call so runner
+// integration tests can exercise all four local capability states without
+// depending on the host's real interfaces. The production value performs no
+// remote operation.
+var detectNetworkCapabilities = probe.DetectNetworkCapabilities
+
+// discoverEgress is injectable so runner tests can verify that the effective
+// family and shared capability snapshot exist before the egress stage starts.
+var discoverEgress = probe.DiscoverEgress
+
 func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.Report {
 	started := time.Now().UTC()
 	selected := selectedProbes(cfg.Modules)
@@ -81,14 +91,27 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 
 	httpClient := probe.NewHTTPClient(cfg.HTTPTimeout)
 	defer httpClient.CloseIdleConnections()
+	effectiveCfg := cfg
+	networkRunnable := true
+	networkModules := !cfg.OfflineOnly() && hasNetworkModules(selected)
+	capabilities := probe.NetworkCapabilities{}
+	if networkModules {
+		capabilities = detectNetworkCapabilities()
+		plan := planNetwork(cfg.IPVersion, capabilities)
+		effectiveCfg.IPVersion = plan.effectiveIPVersion
+		networkRunnable = plan.networkRunnable
+	}
 	env := probe.Environment{
-		Config:     cfg,
+		Config:     effectiveCfg,
 		HTTPClient: httpClient,
 		UserAgent:  fmt.Sprintf("ecs/%s", buildinfo.Version),
+		Network:    capabilities,
 	}
 	// 出口 IP 只发现一次，供 network、blacklist、bgp 共用：这既省掉重复请求，
 	// 也让"连了哪个外部服务"在报告里只出现一处。
-	env.Egress = probe.DiscoverEgress(ctx, env)
+	if networkModules && networkRunnable {
+		env.Egress = discoverEgress(ctx, env)
+	}
 	for _, address := range env.Egress.ByVersion {
 		if net.ParseIP(address.IP) != nil {
 			report.SensitiveIPs = append(report.SensitiveIPs, address.IP)
@@ -128,7 +151,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 				wg.Add(1)
 				go func(index int) {
 					defer wg.Done()
-					results[index] = runOne(ctx, selected[index], cfg, env)
+					results[index] = runOne(ctx, selected[index], effectiveCfg, env, networkRunnable)
 				}(index)
 			}
 			wg.Wait()
@@ -138,7 +161,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			if progress != nil {
 				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
 			}
-			results[index] = runOne(ctx, item, cfg, env)
+			results[index] = runOne(ctx, item, effectiveCfg, env, networkRunnable)
 		}
 		for _, index := range group.Indices {
 			item := selected[index]
@@ -183,7 +206,7 @@ func localInterfaceIPs() []string {
 }
 
 // runOne 执行单个探针，统一处理离线跳过与方法学补全。
-func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment) model.Result {
+func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
 	descriptor, hasDescriptor := config.ModuleDescriptorFor(item.ID())
 	displayTitle := item.Title()
 	needsNetwork := item.NeedsNetwork()
@@ -198,6 +221,11 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
 		result.Skip("离线模式")
+		result.Finish(start)
+	} else if !networkRunnable && needsNetwork {
+		start := time.Now()
+		result = model.NewResult(item.ID(), item.Title())
+		result.Skip("未检测到用户请求的可用 IPv4/IPv6 出站能力")
 		result.Finish(start)
 	} else {
 		result = runWithConditionalRetry(ctx, item, env)
@@ -223,6 +251,21 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 	failure.EnsureResult(&result)
 	result.Title = displayTitle
 	return result
+}
+
+func hasNetworkModules(selected []probe.Probe) bool {
+	for _, item := range selected {
+		if descriptor, ok := config.ModuleDescriptorFor(item.ID()); ok {
+			if descriptor.NeedsNetwork {
+				return true
+			}
+			continue
+		}
+		if item.NeedsNetwork() {
+			return true
+		}
+	}
+	return false
 }
 
 func runWithConditionalRetry(ctx context.Context, item probe.Probe, env probe.Environment) model.Result {

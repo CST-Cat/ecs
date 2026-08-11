@@ -713,7 +713,10 @@ func TestRunIPerfWithRealServer(t *testing.T) {
 		Location: "local", Networks: "IPv4",
 	}}
 
-	result := runIPerfSpeed(context.Background(), Environment{Config: cfg}, iperfPath)
+	result := runIPerfSpeed(context.Background(), Environment{
+		Config:  cfg,
+		Network: NetworkCapabilities{IPv4Usable: true},
+	}, iperfPath)
 	if result.Status != model.StatusOK || result.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("iperf result = %+v", result)
 	}
@@ -858,43 +861,6 @@ func TestRouteEngineTracesLoopback(t *testing.T) {
 		t.Fatalf("跳数统计 = %d：\n%s", count, clean)
 	}
 	t.Logf("真实 %s 解析出 %d 跳", engine.Name, len(hops))
-}
-
-// IPv6 可用性判定必须排除 ULA：有地址不等于能出网。
-//
-// 这个用例来自一次真实误判：机器上只有 Tailscale 的 fd7a::/48 ULA、没有 IPv6
-// 默认路由，却被判为支持 IPv6，于是每个 iperf3 节点都白跑一轮并全部失败。
-func TestHasGlobalUnicastIPv6(t *testing.T) {
-	parse := func(cidr string) net.Addr {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		address, _, _ := net.ParseCIDR(cidr)
-		network.IP = address
-		return network
-	}
-	cases := []struct {
-		name      string
-		addresses []net.Addr
-		want      bool
-	}{
-		{"Tailscale ULA", []net.Addr{parse("fd7a:115c:a1e0::cd37:b07d/128")}, false},
-		{"链路本地", []net.Addr{parse("fe80::e2d4:e8ff:fe4b:579e/64")}, false},
-		{"回环", []net.Addr{parse("::1/128")}, false},
-		{"仅 IPv4", []net.Addr{parse("192.168.31.199/24")}, false},
-		{"公网 IPv6", []net.Addr{parse("2001:db8::1/64")}, true},
-		{"ULA 与公网并存", []net.Addr{
-			parse("fd7a:115c:a1e0::cd37:b07d/128"),
-			parse("2404:6800:4004::200e/64"),
-		}, true},
-		{"空列表", nil, false},
-	}
-	for _, testCase := range cases {
-		if got := hasGlobalUnicastIPv6(testCase.addresses); got != testCase.want {
-			t.Errorf("%s: hasGlobalUnicastIPv6 = %v, want %v", testCase.name, got, testCase.want)
-		}
-	}
 }
 
 // 每个模块都要有方法学标注：漏了报告里就缺"这个数字是怎么来的、能和什么比"，

@@ -82,19 +82,19 @@ func resolveEndpoint(ctx context.Context, address, family string) (string, time.
 	return "", elapsed, fmt.Errorf("解析 %s 没有 IPv%s 地址", host, family)
 }
 
-// latencyFamilies keeps auto mode useful on hosts without IPv6 while still
-// probing both families when the kernel has a real public IPv6 route.
+// latencyFamilies is retained for direct callers that do not have a runner
+// environment. Runner paths use latencyFamiliesForEndpoint with the shared
+// NetworkCapabilities snapshot instead of probing the host again.
 func latencyFamilies(address, mode string) []string {
-	hasIPv6 := false
-	if mode != config.IPVersion4 {
-		hasIPv6 = hostHasUsableIPv6()
-	}
-	return latencyFamiliesWithCapability(address, mode, hasIPv6)
+	return latencyFamiliesWithCapability(address, mode, true, true)
 }
 
-func latencyFamiliesWithCapability(address, mode string, hasIPv6 bool) []string {
+func latencyFamiliesWithCapability(address, mode string, hasIPv4, hasIPv6 bool) []string {
 	var families []string
 	for _, family := range config.IPVersions(mode) {
+		if family == config.IPVersion4 && !hasIPv4 || family == config.IPVersion6 && !hasIPv6 {
+			continue
+		}
 		if ip, _, err := net.SplitHostPort(address); err == nil {
 			if parsed := net.ParseIP(ip); parsed != nil {
 				if family == config.IPVersion4 && parsed.To4() != nil {
@@ -105,9 +105,6 @@ func latencyFamiliesWithCapability(address, mode string, hasIPv6 bool) []string 
 				}
 				continue
 			}
-		}
-		if family == config.IPVersion6 && mode != config.IPVersion6 && !hasIPv6 {
-			continue
 		}
 		families = append(families, family)
 	}
@@ -151,18 +148,14 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	attempts := env.Config.LatencyAttempts
 	icmpEnabled := icmpAvailable()
-	hasIPv6 := false
-	if env.Config.IPVersion != config.IPVersion4 {
-		hasIPv6 = hostHasUsableIPv6()
-	}
 	capacity := 0
 	for _, endpoint := range env.Config.LatencyTargets {
-		capacity += len(latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, hasIPv6))
+		capacity += len(latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, env.Network.IPv4Usable, env.Network.IPv6Usable))
 	}
 	results := make(chan latencyResult, capacity)
 	var wg sync.WaitGroup
 	for _, endpoint := range env.Config.LatencyTargets {
-		for _, family := range latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, hasIPv6) {
+		for _, family := range latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, env.Network.IPv4Usable, env.Network.IPv6Usable) {
 			wg.Add(1)
 			go func(endpoint config.Endpoint, family string) {
 				defer wg.Done()
@@ -412,8 +405,8 @@ func appendICMPMeasurementsForFamily(result *model.Result, targetName, family st
 	}
 }
 
-func latencyFamiliesForEndpoint(endpoint config.Endpoint, mode string, hasIPv6 bool) []string {
-	families := latencyFamiliesWithCapability(endpoint.Address, mode, hasIPv6)
+func latencyFamiliesForEndpoint(endpoint config.Endpoint, mode string, hasIPv4, hasIPv6 bool) []string {
+	families := latencyFamiliesWithCapability(endpoint.Address, mode, hasIPv4, hasIPv6)
 	if endpoint.Family != config.IPVersion4 && endpoint.Family != config.IPVersion6 {
 		return families
 	}

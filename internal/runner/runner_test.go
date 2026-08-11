@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"ecs/internal/config"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestLocalExposureSkipsNetworkProbe(t *testing.T) {
+	setNetworkCapabilityDetector(t, probe.NetworkCapabilities{IPv4Usable: true})
 	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +37,273 @@ func TestLocalExposureSkipsNetworkProbe(t *testing.T) {
 	if report.Run.Exposure != config.ExposureNameLocal || !report.Run.Offline {
 		t.Fatalf("run info = %+v", report.Run)
 	}
+}
+
+func setNetworkCapabilityDetector(t *testing.T, capabilities probe.NetworkCapabilities) {
+	t.Helper()
+	previous := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		return capabilities
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previous
+	})
+}
+
+func setEgressDiscoverer(t *testing.T, discover func(context.Context, probe.Environment) probe.Egress) {
+	t.Helper()
+	previous := discoverEgress
+	discoverEgress = discover
+	t.Cleanup(func() {
+		discoverEgress = previous
+	})
+}
+
+func TestRunDetectsNetworkCapabilitiesOnceAndKeepsLocalModulesRunning(t *testing.T) {
+	calls := 0
+	previous := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		calls++
+		return probe.NetworkCapabilities{}
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previous
+	})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"network", "system"}
+	cfg.Exposure = config.ExposurePublic
+	report := Run(context.Background(), cfg, nil)
+	if calls != 1 {
+		t.Fatalf("network capability detector calls = %d, want one", calls)
+	}
+	if len(report.Results) != 2 {
+		t.Fatalf("results = %d, want network and system", len(report.Results))
+	}
+	var networkSkipped, systemRan bool
+	for _, result := range report.Results {
+		switch result.ID {
+		case "network":
+			networkSkipped = result.Status == model.StatusSkipped && result.Summary == "未检测到用户请求的可用 IPv4/IPv6 出站能力"
+		case "system":
+			systemRan = result.Status != model.StatusSkipped
+		}
+	}
+	if !networkSkipped || !systemRan {
+		t.Fatalf("network/system gating results = %+v", report.Results)
+	}
+}
+
+func TestRunDoesNotDetectCapabilitiesForLocalOnlyRound(t *testing.T) {
+	calls := 0
+	previous := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		calls++
+		return probe.NetworkCapabilities{}
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previous
+	})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"system"}
+	cfg.Exposure = config.ExposureLocal
+	_ = Run(context.Background(), cfg, nil)
+	if calls != 0 {
+		t.Fatalf("local-only detector calls = %d, want zero", calls)
+	}
+}
+
+func TestRunDoesNotInitializeNetworkForPublicLocalOnlyRound(t *testing.T) {
+	detectorCalls := 0
+	previousDetector := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		detectorCalls++
+		return probe.NetworkCapabilities{}
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previousDetector
+	})
+	setEgressDiscoverer(t, func(context.Context, probe.Environment) probe.Egress {
+		t.Fatal("public local-only round entered egress discovery")
+		return probe.Egress{}
+	})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"system"}
+	cfg.Exposure = config.ExposurePublic
+	report := Run(context.Background(), cfg, nil)
+	if detectorCalls != 0 {
+		t.Fatalf("public local-only detector calls = %d, want zero", detectorCalls)
+	}
+	if len(report.Results) != 1 || report.Results[0].ID != "system" {
+		t.Fatalf("public local-only results = %+v", report.Results)
+	}
+}
+
+func TestRunDoesNotDetectCapabilitiesForOfflineNetworkRound(t *testing.T) {
+	calls := 0
+	previous := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		calls++
+		return probe.NetworkCapabilities{IPv4Usable: true, IPv6Usable: true}
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previous
+	})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"network", "system"}
+	cfg.Exposure = config.ExposureLocal
+	report := Run(context.Background(), cfg, nil)
+	if calls != 0 {
+		t.Fatalf("offline detector calls = %d, want zero", calls)
+	}
+	if report.Run.IPVersion != cfg.IPVersion {
+		t.Fatalf("offline raw run IP version = %q, want %q", report.Run.IPVersion, cfg.IPVersion)
+	}
+	for _, result := range report.Results {
+		switch result.ID {
+		case "network":
+			if result.Status != model.StatusSkipped || result.Summary != "离线模式" {
+				t.Fatalf("offline network result = %+v", result)
+			}
+			if got := result.Methodology.Parameters["ip_version"]; got != cfg.IPVersion {
+				t.Fatalf("offline comparison ip version = %q, want %q", got, cfg.IPVersion)
+			}
+		case "system":
+			if result.Status == model.StatusSkipped {
+				t.Fatalf("offline local result unexpectedly skipped: %+v", result)
+			}
+		}
+	}
+}
+
+func TestRunRecordsEffectiveIPVersionButPreservesRawRequest(t *testing.T) {
+	setEgressDiscoverer(t, func(context.Context, probe.Environment) probe.Egress {
+		return probe.Egress{}
+	})
+	for _, testCase := range []struct {
+		name         string
+		capabilities probe.NetworkCapabilities
+		effective    string
+	}{
+		{name: "auto to IPv4", capabilities: probe.NetworkCapabilities{IPv4Usable: true}, effective: config.IPVersion4},
+		{name: "auto to IPv6", capabilities: probe.NetworkCapabilities{IPv6Usable: true}, effective: config.IPVersion6},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			setNetworkCapabilityDetector(t, testCase.capabilities)
+			cfg, err := config.Defaults(config.ProfileStandard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Modules = []string{"network"}
+			cfg.Exposure = config.ExposurePublic
+			cfg.IPVersion = config.IPVersionAuto
+			report := Run(context.Background(), cfg, nil)
+			if report.Run.IPVersion != config.IPVersionAuto {
+				t.Fatalf("raw run IP version = %q, want auto", report.Run.IPVersion)
+			}
+			if got := report.Results[0].Methodology.Parameters["ip_version"]; got != testCase.effective {
+				t.Fatalf("effective comparison ip version = %q, want %q", got, testCase.effective)
+			}
+		})
+	}
+}
+
+func TestRunDetectsBeforeDiscoverEgressWithEffectiveEnvironment(t *testing.T) {
+	events := make([]string, 0, 2)
+	previousDetector := detectNetworkCapabilities
+	detectNetworkCapabilities = func() probe.NetworkCapabilities {
+		events = append(events, "detect")
+		return probe.NetworkCapabilities{IPv4Usable: true}
+	}
+	t.Cleanup(func() {
+		detectNetworkCapabilities = previousDetector
+	})
+	setEgressDiscoverer(t, func(_ context.Context, env probe.Environment) probe.Egress {
+		events = append(events, "egress:"+env.Config.IPVersion)
+		if !env.Network.IPv4Usable || env.Network.IPv6Usable {
+			t.Fatalf("egress saw wrong capability snapshot: %+v", env.Network)
+		}
+		return probe.Egress{}
+	})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"network"}
+	cfg.Exposure = config.ExposurePublic
+	cfg.IPVersion = config.IPVersionAuto
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = Run(ctx, cfg, nil)
+	if got := strings.Join(events, ","); got != "detect,egress:4" {
+		t.Fatalf("runner stage order/effective family = %q, want detect,egress:4", got)
+	}
+}
+
+func TestRunDoesNotFallbackExplicitUnavailableFamily(t *testing.T) {
+	setNetworkCapabilityDetector(t, probe.NetworkCapabilities{IPv4Usable: true})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"network", "system"}
+	cfg.Exposure = config.ExposurePublic
+	cfg.IPVersion = config.IPVersion6
+	report := Run(context.Background(), cfg, nil)
+	if report.Run.IPVersion != config.IPVersion6 {
+		t.Fatalf("raw run IP version = %q, want 6", report.Run.IPVersion)
+	}
+	for _, result := range report.Results {
+		if result.ID == "network" {
+			if result.Status != model.StatusSkipped || result.Summary != "未检测到用户请求的可用 IPv4/IPv6 出站能力" {
+				t.Fatalf("explicit unavailable network result = %+v", result)
+			}
+			if result.Methodology.Parameters["ip_version"] != config.IPVersion6 {
+				t.Fatalf("explicit unavailable comparison ip version = %q", result.Methodology.Parameters["ip_version"])
+			}
+			return
+		}
+	}
+	t.Fatal("network result not found")
+}
+
+func TestRunDoesNotFallbackExplicitUnavailableIPv4(t *testing.T) {
+	setNetworkCapabilityDetector(t, probe.NetworkCapabilities{IPv6Usable: true})
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = []string{"network", "system"}
+	cfg.Exposure = config.ExposurePublic
+	cfg.IPVersion = config.IPVersion4
+	report := Run(context.Background(), cfg, nil)
+	if report.Run.IPVersion != config.IPVersion4 {
+		t.Fatalf("raw run IP version = %q, want 4", report.Run.IPVersion)
+	}
+	for _, result := range report.Results {
+		if result.ID != "network" {
+			continue
+		}
+		if result.Status != model.StatusSkipped || result.Summary != "未检测到用户请求的可用 IPv4/IPv6 出站能力" {
+			t.Fatalf("explicit unavailable IPv4 result = %+v", result)
+		}
+		if result.Methodology.Parameters["ip_version"] != config.IPVersion4 {
+			t.Fatalf("explicit unavailable IPv4 comparison ip version = %q", result.Methodology.Parameters["ip_version"])
+		}
+		return
+	}
+	t.Fatal("network result not found")
 }
 
 func TestComparisonParametersCaptureDynamicWorkloadInputs(t *testing.T) {

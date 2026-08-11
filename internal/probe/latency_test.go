@@ -69,7 +69,10 @@ func TestLatencyProbeRunWithRealLoopbackTCP(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result := (latencyProbe{}).Run(ctx, Environment{Config: config})
+	result := (latencyProbe{}).Run(ctx, Environment{
+		Config:  config,
+		Network: NetworkCapabilities{IPv4Usable: true},
+	})
 
 	for index := 0; index < attempts; index++ {
 		select {

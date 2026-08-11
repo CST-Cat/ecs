@@ -10,6 +10,9 @@
 ## Unreleased
 
 - release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
+- 新增每轮一次的纯本地 `NetworkCapabilities` 快照：识别 IPv4-only、IPv6-only、双栈与无可用出站族，接受 RFC1918 IPv4 NAT 源地址并排除 IPv6 ULA、链路本地和回环地址；网络探针共享该快照，不再重复做 IPv6 系统检测。
+- runner 按原始 IP 族请求形成 effective family；`auto` 只收窄到实际可用族，显式 IPv4/IPv6 不跨族回退，不可用请求统一跳过网络模块而继续运行本地模块；报告保留原始 `run.ip_version`，比较参数记录 effective family；纯本地选择不进入出口发现阶段。
+- 同步中英文网络能力跳过文案；报告 schema 与机器可解析字段保持兼容。
 
 ## 0.6.8 — 2026-08-11
 

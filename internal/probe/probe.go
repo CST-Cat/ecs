@@ -17,6 +17,10 @@ type Environment struct {
 	Config     config.Runtime
 	HTTPClient *http.Client
 	UserAgent  string
+	// Network is the one local capability snapshot for this run. It is filled
+	// by runner before DiscoverEgress and is shared by all network probes.
+	// The zero value remains valid for direct probe/unit-test callers.
+	Network NetworkCapabilities
 	// Egress 是本次运行共享的出口地址快照，由 runner 在探针启动前发现一次。
 	// 见 egress.go：需要出口 IP 的模块读这里，不再各自去查。
 	Egress Egress
