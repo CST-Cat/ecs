@@ -59,11 +59,65 @@ func comparisonParameters(id string, cfg config.Runtime, result model.Result) ma
 		addField("threads", "threads")
 		addField("duration", "duration")
 		addField("prime", "prime")
+	case "zstd":
+		addField("tool_version", "version")
+		addField("tool_sha256", "binary_sha256")
+		addField("method_version", "method_version")
+		addField("compression_level", "compression_level")
+		addField("threads", "threads")
+		addField("duration", "duration")
+		addField("corpus_bytes", "corpus_bytes")
+		addField("corpus_sha256", "corpus_sha256")
+		addField("corpus_source_sha256", "corpus_source_sha256")
+		addZstdArgumentHash := func(parameterKey, fieldKey string) {
+			if value, ok := uniqueFieldValue(result.Fields, fieldKey); ok {
+				// The fifth argument is the verified corpus's per-run temporary
+				// path. Its identity is already fixed by corpus_bytes and
+				// corpus_sha256, so including that path would make two otherwise
+				// identical run.sh invocations incomparable.
+				parts := strings.Fields(value)
+				if len(parts) >= 4 {
+					parts = parts[:4]
+				}
+				add(parameterKey, scopeHash(parts))
+			}
+		}
+		addZstdArgumentHash("arguments_1t_sha256", "arguments_1t")
+		addZstdArgumentHash("arguments_nt_sha256", "arguments_nt")
+	case "npb":
+		addField("tool_version", "version")
+		addField("method_version", "method_version")
+		addField("problem_class", "problem_class")
+		addField("threads", "threads")
+		addField("implementation", "implementation")
+		addField("compiler_flags", "compiler_flags")
+		addField("random_generator", "random_generator")
+		addField("ep_sha256", "binary_ep_sha256")
+		addField("ft_sha256", "binary_ft_sha256")
+		addFieldHash("environment_1t_sha256", "environment_1t")
+		addFieldHash("environment_nt_sha256", "environment_nt")
 	case "memory":
 		addField("tool_version", "version")
 		addField("tool_sha256", "binary_sha256")
 		addField("threads", "threads")
 		addField("kernel_order", "kernel_order")
+	case "crypto":
+		addField("tool_version", "version")
+		addField("tool_sha256", "binary_sha256")
+		addField("method_version", "method_version")
+		addField("algorithms", "algorithms")
+		addField("block_size", "block_size")
+		addField("duration", "duration")
+		addField("workers", "workers")
+		addField("timing", "timing")
+		addField("machine_output", "machine_output")
+		for _, key := range []string{
+			"arguments_aes_256_gcm_1w", "arguments_aes_256_gcm_nw",
+			"arguments_chacha20_poly1305_1w", "arguments_chacha20_poly1305_nw",
+			"arguments_sha_256_1w", "arguments_sha_256_nw",
+		} {
+			addFieldHash(key+"_sha256", key)
+		}
 	case "disk":
 		add("configured_file_mib", strconv.Itoa(cfg.DiskMiB))
 		add("multi_mount", strconv.FormatBool(cfg.DiskMulti))

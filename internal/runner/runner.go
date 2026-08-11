@@ -236,7 +236,7 @@ func runWithConditionalRetryHooks(
 	capture func() probe.EnvironmentSnapshot,
 	assess func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference,
 ) model.Result {
-	if item.ID() != "cpu" && item.ID() != "memory" && item.ID() != "disk" {
+	if item.ID() != "cpu" && item.ID() != "zstd" && item.ID() != "npb" && item.ID() != "memory" && item.ID() != "crypto" && item.ID() != "disk" {
 		return safeRun(ctx, item, env)
 	}
 	firstBefore := capture()

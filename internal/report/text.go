@@ -30,7 +30,7 @@ import (
 	"ecs/internal/textwidth"
 )
 
-// textWidth 是报告的版面宽度。
+// textWidth 是文件型 txt 报告的默认版面宽度。
 //
 // 110 列给三网回程、风险矩阵等宽表格留出可读空间，同时仍适合常见终端与
 // 聊天窗口。所有输出路径都按 textwidth.Width 计算，中文、英文和 ANSI 颜色
@@ -39,6 +39,11 @@ const textWidth = 110
 
 // barWidth 是柱状图的格数。
 const barWidth = 24
+
+const (
+	minimumTextWidth = 20
+	maximumTextWidth = 160
+)
 
 // TextOptions 控制纯文本报告的呈现。
 type TextOptions struct {
@@ -49,6 +54,9 @@ type TextOptions struct {
 	// Compact 只用于交互式终端摘要。文件型 txt 默认保留方法学、原始
 	// TextBlocks、说明和来源，避免四种报告格式之间发生信息丢失。
 	Compact bool
+	// Width 是可见终端列数。0 保留文件报告的 110 列默认值；
+	// 交互式终端应传入实际宽度，让表格、折行和柱图一起自适应。
+	Width int
 }
 
 // Text 渲染纯文本报告。
@@ -62,6 +70,7 @@ func Text(data model.Report, options TextOptions) string {
 		palette: termcolor.Palette{Level: options.Color},
 		score:   options.Score,
 		compact: options.Compact,
+		width:   normalizeTextWidth(options.Width),
 	}
 	return renderer.render(data)
 }
@@ -71,10 +80,42 @@ type textRenderer struct {
 	palette      termcolor.Palette
 	score        *score.Report
 	compact      bool
+	width        int
 	section      int
 	subsectionNo int
 	version      string
 	headline     string
+}
+
+func normalizeTextWidth(width int) int {
+	if width <= 0 {
+		return textWidth
+	}
+	if width < minimumTextWidth {
+		return minimumTextWidth
+	}
+	if width > maximumTextWidth {
+		return maximumTextWidth
+	}
+	return width
+}
+
+// adaptiveBarWidth 保留宽终端的信息密度，并在窄终端为标签、
+// 数值和评级腾出空间。长度变化不改变比例或颜色语义。
+func adaptiveBarWidth(reportWidth, preferred int) int {
+	if preferred <= 0 {
+		return 0
+	}
+	limit := preferred
+	switch {
+	case reportWidth < 48:
+		limit = 4
+	case reportWidth < 72:
+		limit = 8
+	case reportWidth < 96:
+		limit = 14
+	}
+	return minInt(preferred, limit)
 }
 
 func (r *textRenderer) render(data model.Report) string {
@@ -93,11 +134,19 @@ func (r *textRenderer) render(data model.Report) string {
 }
 
 func (r *textRenderer) line(format string, values ...any) {
+	value := format
 	if len(values) == 0 {
-		r.out.WriteString(format)
+		value = format
 	} else {
-		fmt.Fprintf(&r.out, format, values...)
+		value = fmt.Sprintf(format, values...)
 	}
+	// Every specialized layout path budgets against r.width. Keep this final
+	// guard for unusually long localized/status values so a resized terminal
+	// never receives a physical line wider than the requested viewport.
+	if r.width > 0 && textwidth.Width(value) > r.width {
+		value = textwidth.Truncate(value, r.width)
+	}
+	r.out.WriteString(value)
 	r.out.WriteByte('\n')
 }
 
@@ -105,7 +154,7 @@ func (r *textRenderer) blank() { r.out.WriteByte('\n') }
 
 // header 是报告顶部的标题块。
 func (r *textRenderer) header(data model.Report) {
-	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", r.width)))
 	r.centeredStyled(i18n.T("report.title"), r.palette.AccentBold)
 	r.centeredStyled("bash <(curl -sL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh)", r.palette.Info)
 	r.centeredStyled("https://github.com/CST-Cat/ecs", r.palette.Info)
@@ -128,7 +177,7 @@ func (r *textRenderer) header(data model.Report) {
 		second = append(second, i18n.T("report.totalDuration")+" "+formatDurationMS(data.Run.DurationMS))
 	}
 	r.centeredStyled(strings.Join(second, "    "), r.palette.Dim)
-	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", r.width)))
 	r.blank()
 }
 
@@ -145,11 +194,11 @@ func (r *textRenderer) centered(value string) {
 }
 
 func (r *textRenderer) centeredStyled(value string, style func(string) string) {
-	for _, line := range wrapText(value, textWidth-2) {
+	for _, line := range wrapText(value, r.width-2) {
 		if style != nil {
 			line = style(line)
 		}
-		r.line(textwidth.Center(line, textWidth))
+		r.line(textwidth.Center(line, r.width))
 	}
 }
 
@@ -223,9 +272,9 @@ func moduleTitles(ids []string) []string {
 func (r *textRenderer) compactList(label string, values []string) {
 	styledLabel := r.palette.Label(label)
 	prefix := "  " + styledLabel + "  "
-	available := textWidth - textwidth.Width(prefix)
+	available := r.width - textwidth.Width(prefix)
 	if available < 1 {
-		available = textWidth - 2
+		available = r.width - 2
 	}
 	content := strings.Join(values, "    ")
 	lines := wrapText(content, available)
@@ -242,7 +291,7 @@ func (r *textRenderer) compactList(label string, values []string) {
 // prefaceTitle 是不参与章节编号的标题块（目前用于模块状态总览）。
 func (r *textRenderer) prefaceTitle(title string) {
 	r.line(r.palette.AccentBold(title))
-	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("-", r.width)))
 }
 
 func (r *textRenderer) subsection(title string) {
@@ -252,7 +301,7 @@ func (r *textRenderer) subsection(title string) {
 // indented 把模块描述、口径和错误按版面宽度折行，避免长字段把 110 列撑开。
 func (r *textRenderer) indented(value string, emphasize ...bool) {
 	indent := "  "
-	for _, line := range wrapText(value, textWidth-textwidth.Width(indent)) {
+	for _, line := range wrapText(value, r.width-textwidth.Width(indent)) {
 		if len(emphasize) > 0 && emphasize[0] {
 			r.line(r.palette.Bold(indent + line))
 		} else {
@@ -263,7 +312,7 @@ func (r *textRenderer) indented(value string, emphasize ...bool) {
 
 func (r *textRenderer) indentedStyled(value string, style func(string) string) {
 	indent := "  "
-	for _, line := range wrapText(value, textWidth-textwidth.Width(indent)) {
+	for _, line := range wrapText(value, r.width-textwidth.Width(indent)) {
 		styled := indent + line
 		if style != nil {
 			styled = style(styled)
@@ -296,7 +345,7 @@ func (r *textRenderer) scoreSection() {
 			continue
 		}
 		r.line("  %s  %s  %s", label,
-			r.palette.Bar(dimension.Ratio, barWidth),
+			r.palette.Bar(dimension.Ratio, adaptiveBarWidth(r.width, barWidth)),
 			r.palette.WrapRatio(fmt.Sprintf("%7.0f", dimension.Score), dimension.Ratio))
 		r.matrixScoreSummary(dimension)
 		// 分项指标缩进一级，读者能看到维度分是怎么来的。
@@ -572,7 +621,7 @@ func (r *textRenderer) result(result model.Result) {
 		r.indentedStyled(status, r.statusStyle(result.Status))
 	}
 	if result.Error != "" {
-		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, textWidth-10), r.palette.ErrorBold)
+		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, maxInt(1, r.width-10)), r.palette.ErrorBold)
 	}
 	r.resultEvidenceCoverage(result.Evidence)
 	r.resultFailures(result.Failures)
@@ -626,7 +675,16 @@ func (r *textRenderer) resultEvidenceCoverage(evidence *model.Evidence) {
 	// Keep the semantic label and the proportional bar as sibling ANSI spans.
 	// Nesting a colored bar inside another style would reset the outer color on
 	// basic and 256-color terminals after the first filled cell.
-	r.line("  %s  %s", style(line), r.palette.Bar(ratio, 16))
+	prefix := "  " + style(line)
+	barSize := minInt(16, adaptiveBarWidth(r.width, 16))
+	if available := r.width - textwidth.Width(prefix) - 2; available < barSize {
+		barSize = maxInt(0, available)
+	}
+	if barSize >= 4 {
+		r.line("%s  %s", prefix, r.palette.Bar(ratio, barSize))
+	} else {
+		r.indentedStyled(line, style)
+	}
 }
 
 func evidenceText(evidence model.Evidence) string {
@@ -719,7 +777,7 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 }
 
 func (r *textRenderer) moduleBanner(result model.Result) {
-	r.line(r.palette.Dim(strings.Repeat("*", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("*", r.width)))
 	r.centeredStyled(resultTitle(result), r.palette.AccentBold)
 	source := "https://github.com/CST-Cat/ecs"
 	for _, candidate := range result.Sources {
@@ -742,7 +800,7 @@ func (r *textRenderer) moduleBanner(result model.Result) {
 		timestamp := when.Format("2006-01-02 15:04:05 MST")
 		r.centeredStyled(timestamp+" · "+version, r.palette.Dim)
 	}
-	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("-", r.width)))
 }
 
 type textGroup struct {
@@ -759,7 +817,7 @@ func (r *textRenderer) renderGroup(group textGroup) {
 		heading = fmt.Sprintf("%d. %s", r.subsectionNo, group.title)
 	}
 	r.line(r.palette.AccentBold("  " + heading))
-	r.line(r.palette.Dim("  " + strings.Repeat("-", textWidth-2)))
+	r.line(r.palette.Dim("  " + strings.Repeat("-", maxInt(0, r.width-2))))
 	fields := dedupeFields(visibleFields(group.fields))
 	measurements := dedupeMeasurements(fields, group.measurements)
 	if len(fields) > 0 {
@@ -951,7 +1009,9 @@ func tableGroupTitle(id, title, resultTitle string) string {
 
 func defaultResultGroup(id, resultTitle string) string {
 	titles := map[string][2]string{
-		"cpu": {"CPU 测评", "CPU benchmark"}, "memory": {"内存测评", "Memory benchmark"}, "disk": {"磁盘测评", "Disk benchmark"},
+		"cpu": {"CPU 测评", "CPU benchmark"}, "zstd": {"zstd 压缩测评", "zstd benchmark"},
+		"npb": {"NPB EP + FT 测评", "NPB EP + FT benchmark"}, "memory": {"内存测评", "Memory benchmark"},
+		"crypto": {"密码学测评", "Cryptography benchmark"}, "disk": {"磁盘测评", "Disk benchmark"},
 		"dns": {"DNS 结果", "DNS results"}, "latency": {"延迟结果", "Latency results"}, "speed": {"吞吐结果", "Throughput results"},
 		"route": {"路由结果", "Route results"}, "backtrace": {"回程结果", "Return path results"},
 	}
@@ -974,28 +1034,44 @@ func localizedGroup(zh, en string) string {
 // 毫无意义，单独一项也没有"相对"可言。
 func (r *textRenderer) measurements(items []model.Measurement) {
 	groups := groupComparable(items)
+	labelLimit := minInt(30, maxInt(6, r.width*3/10))
+	valueLimit := minInt(26, maxInt(6, r.width/4))
 	labelWidth, valueWidth := 0, 0
 	for _, item := range items {
 		labelWidth = maxInt(labelWidth, textwidth.Width(item.Label))
 		valueWidth = maxInt(valueWidth, textwidth.Width(item.Display))
 	}
-	labelWidth = minInt(labelWidth, 30)
-	valueWidth = minInt(valueWidth, 26)
+	labelWidth = minInt(labelWidth, labelLimit)
+	valueWidth = minInt(valueWidth, valueLimit)
 	for _, item := range items {
-		label := textwidth.Pad(textwidth.Truncate(item.Label, 30), labelWidth) + i18n.T("punct.colon")
+		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), labelWidth) + i18n.T("punct.colon")
 		valueLines := wrapText(item.Display, valueWidth)
 		if len(valueLines) == 0 {
 			valueLines = []string{""}
 		}
-		bar := ""
-		if group, ok := groups[item.Key]; ok {
-			bar = "  " + r.palette.BarRelativeRange(comparableValue(item, group), group.min, group.max, barWidth)
-		}
+		base := "  " + r.palette.Label(label) + "  " + r.semanticValue(textwidth.PadLeft(valueLines[0], valueWidth))
 		rating := ""
 		if item.Rating != "" {
 			rating = "  " + r.semanticValue(textwidth.Truncate(item.Rating, 20))
 		}
-		base := "  " + r.palette.Label(label) + "  " + r.semanticValue(textwidth.PadLeft(valueLines[0], valueWidth)) + bar + rating
+		separateRating := false
+		bar := ""
+		if group, ok := groups[item.Key]; ok {
+			available := r.width - textwidth.Width(base) - 2
+			barSize := minInt(adaptiveBarWidth(r.width, barWidth), maxInt(0, available-textwidth.Width(rating)))
+			if rating != "" && barSize < 4 {
+				separateRating = true
+				rating = ""
+				barSize = minInt(adaptiveBarWidth(r.width, barWidth), maxInt(0, available))
+			}
+			if barSize >= 2 {
+				bar = "  " + r.palette.BarRelativeRange(comparableValue(item, group), group.min, group.max, barSize)
+			}
+		} else if textwidth.Width(base)+textwidth.Width(rating) > r.width {
+			separateRating = rating != ""
+			rating = ""
+		}
+		base += bar + rating
 		for index, valueLine := range valueLines {
 			if index == 0 {
 				r.line(base)
@@ -1003,11 +1079,23 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 				r.line("      %s", r.semanticValue(valueLine))
 			}
 		}
+		if separateRating {
+			r.indentedStyled(item.Rating, r.semanticValue)
+		}
 		// Workload identifiers are part of the evidence contract. The compact
 		// terminal view hides them, while file txt retains every method so it can
 		// be audited against the structured JSON artifact.
 		if !r.compact && item.Method != "" {
-			r.line("      %s%s", r.palette.Dim(i18n.T("report.method")+i18n.T("punct.colon")), r.palette.Dim(item.Method))
+			prefix := "      " + i18n.T("report.method") + i18n.T("punct.colon")
+			available := maxInt(1, r.width-textwidth.Width(prefix))
+			lines := wrapText(item.Method, available)
+			for index, methodLine := range lines {
+				if index == 0 {
+					r.line("%s%s", r.palette.Dim(prefix), r.palette.Dim(methodLine))
+				} else {
+					r.line("%s%s", strings.Repeat(" ", textwidth.Width(prefix)), r.palette.Dim(methodLine))
+				}
+			}
 		}
 	}
 	r.blank()
@@ -1225,18 +1313,19 @@ func boolKey(value bool) string {
 
 // fields 渲染 label: value 列表。
 func (r *textRenderer) fields(items []model.Field) {
+	labelLimit := minInt(28, maxInt(6, r.width/3))
 	width := 0
 	for _, item := range items {
 		width = maxInt(width, textwidth.Width(item.Label))
 	}
-	width = minInt(width, 28)
+	width = minInt(width, labelLimit)
 	for _, item := range items {
 		value := item.Value
-		label := textwidth.Pad(textwidth.Truncate(item.Label, 28), width) + i18n.T("punct.colon")
+		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), width) + i18n.T("punct.colon")
 		prefix := "  " + r.palette.Label(label) + "  "
-		available := textWidth - textwidth.Width(prefix)
+		available := r.width - textwidth.Width(prefix)
 		if available < 1 {
-			available = textWidth - 2
+			available = maxInt(1, r.width-2)
 		}
 		valueLines := wrapText(value, available)
 		if len(valueLines) == 0 {
@@ -1271,7 +1360,13 @@ func (r *textRenderer) resultTable(table model.Table) {
 		}
 		r.indentedStyled(title, r.palette.AccentBold)
 	}
-	r.table(table.Columns, tableRowsWithBars(table, r.palette), nil)
+	cellBarWidth := adaptiveBarWidth(r.width, 8)
+	if tableNeedsStackedLayout(r.width, len(table.Columns)) {
+		// A bar inside every stacked value adds noise and makes ANSI-aware
+		// wrapping harder. Preserve the exact numeric text in this layout.
+		cellBarWidth = 0
+	}
+	r.table(table.Columns, tableRowsWithBars(table, r.palette, cellBarWidth), nil)
 	r.blank()
 }
 
@@ -1416,7 +1511,7 @@ func matrixKindForMeasurement(key string) diskMatrixKind {
 	}
 }
 
-func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string {
+func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBarWidth ...int) [][]string {
 	if len(table.NumericColumns) == 0 || len(table.Rows) == 0 {
 		return table.Rows
 	}
@@ -1484,6 +1579,10 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 		}
 		stats[group] = entry
 	}
+	cellBarWidth := 8
+	if len(requestedBarWidth) > 0 {
+		cellBarWidth = maxInt(0, requestedBarWidth[0])
+	}
 	rows := make([][]string, len(table.Rows))
 	for rowIndex, original := range table.Rows {
 		rows[rowIndex] = append([]string(nil), original...)
@@ -1510,7 +1609,9 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette) [][]string 
 			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
 			// row and the visual column drifts with digit count or unit text.
 			cell := textwidth.Pad(rows[rowIndex][column], valueWidths[column])
-			rows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, 8)
+			if cellBarWidth > 0 {
+				rows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, cellBarWidth)
+			}
 		}
 	}
 	return rows
@@ -1637,6 +1738,10 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 	if len(columns) == 0 {
 		return
 	}
+	if tableNeedsStackedLayout(r.width, len(columns)) {
+		r.stackedTable(columns, rows)
+		return
+	}
 	widths := make([]int, len(columns))
 	for index, column := range columns {
 		widths[index] = textwidth.Width(column)
@@ -1649,7 +1754,7 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 		}
 	}
 	// 总宽超出版面时按比例压缩最宽的列，而不是让表格折行。
-	shrinkColumns(widths, textWidth-2-2*(len(columns)-1))
+	shrinkColumns(widths, r.width-2-2*(len(columns)-1))
 
 	var head strings.Builder
 	head.WriteString("  ")
@@ -1668,7 +1773,7 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 			total += 2
 		}
 	}
-	r.line(r.palette.Dim("  " + strings.Repeat("─", minInt(total-2, textWidth-2))))
+	r.line(r.palette.Dim("  " + strings.Repeat("─", maxInt(0, minInt(total-2, r.width-2)))))
 
 	for _, row := range rows {
 		var line strings.Builder
@@ -1692,10 +1797,45 @@ func (r *textRenderer) table(columns []string, rows [][]string, rightAlign map[i
 	}
 }
 
+func tableNeedsStackedLayout(width, columns int) bool {
+	if columns < 2 {
+		return false
+	}
+	if width <= 0 {
+		width = textWidth
+	}
+	// Two spaces indent, four useful columns per cell, and two spaces between
+	// cells. Below this point a horizontal row would collapse into ellipses.
+	return width < 2+columns*4+(columns-1)*2
+}
+
+func (r *textRenderer) stackedTable(columns []string, rows [][]string) {
+	valueWidth := maxInt(1, r.width-4)
+	for rowIndex, row := range rows {
+		if rowIndex > 0 {
+			r.line(r.palette.Dim("  " + strings.Repeat("·", maxInt(1, minInt(8, r.width-2)))))
+		}
+		for columnIndex, column := range columns {
+			value := ""
+			if columnIndex < len(row) {
+				value = row[columnIndex]
+			}
+			r.indentedStyled(column+i18n.T("punct.colon"), r.palette.LabelBold)
+			for _, line := range wrapText(value, valueWidth) {
+				r.line("    %s", r.semanticValue(line))
+			}
+		}
+	}
+}
+
 // shrinkColumns 在总宽超限时从最宽的列开始收缩。
 func shrinkColumns(widths []int, budget int) {
 	if budget <= 0 {
 		return
+	}
+	minimum := 4
+	if budget < len(widths)*minimum && len(widths) > 0 {
+		minimum = maxInt(1, budget/len(widths))
 	}
 	total := 0
 	for _, width := range widths {
@@ -1708,8 +1848,9 @@ func shrinkColumns(widths []int, budget int) {
 				widest, index = width, position
 			}
 		}
-		// 收不动了就放手：强行压到 8 列以下会让每个单元格都只剩省略号。
-		if index < 0 || widths[index] <= 8 {
+		// 窄终端上允许列收缩到 4 格；极窄视口再均匀收缩，
+		// 以保证整行不溢出。省略号会明确表示被压缩的单元格。
+		if index < 0 || widths[index] <= minimum {
 			return
 		}
 		widths[index]--
@@ -1723,7 +1864,7 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 		r.indented(block.Title, true)
 	}
 	for _, line := range strings.Split(strings.TrimRight(block.Content, "\n"), "\n") {
-		for _, wrapped := range wrapText(line, textWidth-6) {
+		for _, wrapped := range wrapText(line, maxInt(1, r.width-6)) {
 			r.line("    %s", wrapped)
 		}
 	}
@@ -1732,7 +1873,7 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 
 func (r *textRenderer) note(text string) {
 	// 说明文字按版面宽度折行，超长的一行在窄终端里会被硬折得难读。
-	for _, line := range wrapText(text, textWidth-6) {
+	for _, line := range wrapText(text, maxInt(1, r.width-6)) {
 		r.line("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
 	}
 }
@@ -1746,10 +1887,10 @@ func (r *textRenderer) sectionTitle(title, scope string) {
 	if scope != "" {
 		heading += "  [" + scope + "]"
 	}
-	for _, line := range wrapText(heading, textWidth) {
+	for _, line := range wrapText(heading, r.width) {
 		r.line(r.palette.AccentBold(line))
 	}
-	r.line(r.palette.Dim(strings.Repeat("-", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("-", r.width)))
 }
 
 func (r *textRenderer) footer(data model.Report) {
@@ -1760,7 +1901,7 @@ func (r *textRenderer) footer(data model.Report) {
 		}
 		r.blank()
 	}
-	r.line(r.palette.Dim(strings.Repeat("#", textWidth)))
+	r.line(r.palette.Dim(strings.Repeat("#", r.width)))
 	r.indentedStyled(i18n.T("report.generator")+" "+data.Tool.Name+" "+data.Tool.Version, r.palette.Dim)
 }
 

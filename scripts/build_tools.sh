@@ -6,7 +6,7 @@ usage() {
 usage: scripts/build_tools.sh --arch ARCH --stage-root STAGE_ROOT
                               [--cross-prefix PREFIX --target-runner COMMAND]
 
-Build the six ECS benchmark tools for one Linux architecture. This script is
+Build the ECS benchmark tools for one Linux architecture. This script is
 intended to run inside the native or cross-build container used by CI; it never
 uses a fixture or a distribution-provided benchmark binary. Cross mode keeps
 the compiler native and uses TARGET_RUNNER only for final binary smoke tests.
@@ -63,6 +63,15 @@ case " ${architectures[*]} " in
 esac
 [[ -n "$stage_root" ]] || { usage; exit 2; }
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
+case "$arch" in
+  amd64) openssl_target=linux-x86_64 ;;
+  arm64) openssl_target=linux-aarch64 ;;
+  armv7) openssl_target=linux-armv4 ;;
+  386) openssl_target=linux-x86 ;;
+  s390x) openssl_target=linux64-s390x ;;
+  riscv64) openssl_target=linux64-riscv64 ;;
+  ppc64le) openssl_target=linux-ppc64le ;;
+esac
 if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
   case "$arch" in
     armv7|s390x|riscv64|ppc64le) ;;
@@ -73,8 +82,8 @@ if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
 fi
 
 for command_name in \
-  curl git jq sha256sum gcc make readelf strip meson ninja autoconf automake \
-  libtoolize pkg-config; do
+  curl git jq sha256sum gcc make readelf strip tar meson ninja autoconf automake \
+  libtoolize perl pkg-config unzip; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
@@ -84,6 +93,7 @@ build_mode=native
 smoke_runner=direct
 cc_command=${CC:-gcc}
 cxx_command=${CXX:-g++}
+fc_command=${FC:-gfortran}
 ar_command=${AR:-ar}
 ranlib_command=${RANLIB:-ranlib}
 readelf_command=${READELF:-readelf}
@@ -127,11 +137,12 @@ if [[ -n "$cross_prefix" ]]; then
   esac
   cc_command="${cross_prefix}gcc"
   cxx_command="${cross_prefix}g++"
+  fc_command="${cross_prefix}gfortran"
   ar_command="${cross_prefix}ar"
   ranlib_command="${cross_prefix}ranlib"
   readelf_command="${cross_prefix}readelf"
   strip_command="${cross_prefix}strip"
-  for command_name in "$cc_command" "$cxx_command" "$ar_command" "$ranlib_command" \
+  for command_name in "$cc_command" "$cxx_command" "$fc_command" "$ar_command" "$ranlib_command" \
     "$readelf_command" "$strip_command" "$target_runner"; do
     command -v "$command_name" >/dev/null 2>&1 || die "required cross command is missing: $command_name"
   done
@@ -144,6 +155,8 @@ if [[ -n "$cross_prefix" ]]; then
   smoke_runner=$target_runner
 fi
 
+command -v "$fc_command" >/dev/null 2>&1 || die "required Fortran compiler is missing: $fc_command"
+
 echo "toolchain mode: $build_mode ($build_triplet -> $target_triplet); smoke runner: $smoke_runner"
 
 export CC="$cc_command"
@@ -151,9 +164,9 @@ export CXX="$cxx_command"
 export AR="$ar_command"
 export RANLIB="$ranlib_command"
 export STRIP="$strip_command"
-if [[ -n "$cross_prefix" ]]; then
-  export CROSS_COMPILE="$cross_prefix"
-fi
+# These variables already contain fully qualified target tool names in cross
+# mode. Do not also export CROSS_COMPILE: OpenSSL would prepend it a second
+# time and look for e.g. arm-linux-gnueabihf-arm-linux-gnueabihf-gcc.
 
 run_target() {
   if [[ "${#target_runner_command[@]}" -gt 0 ]]; then
@@ -204,7 +217,7 @@ if [[ -n "$cross_prefix" ]]; then
   meson_cross_args=(--cross-file "$meson_cross_file")
 fi
 
-mkdir -p "$stage/bin" "$stage/LICENSES"
+mkdir -p "$stage/bin" "$stage/LICENSES" "$stage/share/ecs/corpus"
 
 curl_options=(-fsSL --retry 4 --retry-delay 2 --connect-timeout 30)
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -262,11 +275,23 @@ iperf3_tag=$(jq -er '.tag_name' "$iperf3_release")
 nexttrace_tag=$(jq -er '.tag_name' "$nexttrace_release")
 
 sysbench_src="$work/sysbench"
+zstd_src="$work/zstd"
+openssl_src="$work/openssl"
 fio_src="$work/fio"
 iperf3_src="$work/iperf3"
 iputils_src="$work/iputils"
 nexttrace_src="$work/nexttrace"
 sysbench_commit=$(clone_release akopytov/sysbench "$sysbench_tag" "$sysbench_src")
+zstd_tag='v1.5.7'
+zstd_expected_commit='f8745da6ff1ad1e7bab384bd1f9d742439278e99'
+zstd_commit=$(clone_release facebook/zstd "$zstd_tag" "$zstd_src")
+[[ "$zstd_commit" == "$zstd_expected_commit" ]] ||
+  die "zstd $zstd_tag resolved to $zstd_commit, expected $zstd_expected_commit"
+openssl_tag='openssl-3.5.7'
+openssl_expected_commit='8cf17aaeb4599f8af87fefd810b5b5fee90fe69e'
+openssl_commit=$(clone_release openssl/openssl "$openssl_tag" "$openssl_src")
+[[ "$openssl_commit" == "$openssl_expected_commit" ]] ||
+  die "OpenSSL $openssl_tag resolved to $openssl_commit, expected $openssl_expected_commit"
 fio_commit=$(clone_release axboe/fio "$fio_tag" "$fio_src")
 iperf3_commit=$(clone_release esnet/iperf "$iperf3_tag" "$iperf3_src")
 
@@ -285,6 +310,46 @@ stream_sha=$(sha256sum "$stream_src" | awk '{print $1}')
 stream_revision=$(sed -n 's@^/\* Revision: \$Id: stream\.c,v \([^ ]*\) \([0-9/]\{10\}\).*\*/$@\1-\2@p' "$stream_src")
 [[ -n "$stream_revision" ]] || die "could not read the official STREAM revision from $stream_url"
 stream_version=${stream_revision%%-*}
+
+npb_version='3.4.4'
+npb_archive_url='https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz'
+npb_archive_sha='1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549'
+npb_archive="$work/NPB3.4.4.tar.gz"
+curl "${curl_options[@]}" "$npb_archive_url" -o "$npb_archive"
+[[ "$(sha256sum "$npb_archive" | awk '{print $1}')" == "$npb_archive_sha" ]] ||
+  die 'NPB 3.4.4 source archive SHA-256 mismatch'
+tar -xzf "$npb_archive" -C "$work"
+npb_release_root="$work/NPB3.4.4"
+npb_src="$npb_release_root/NPB3.4-OMP"
+[[ -d "$npb_src/EP" && -d "$npb_src/FT" ]] || die 'NPB archive omitted NPB3.4-OMP EP or FT'
+
+# The corpus is part of the benchmark contract, not an incidental input. The
+# ZIP mirror and the concatenated byte stream are both pinned. Rebuilding the
+# package therefore fails if the mirror changes any byte or file ordering.
+zstd_corpus_url='https://mattmahoney.net/dc/silesia.zip'
+zstd_corpus_source_sha='7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e'
+zstd_corpus_sha='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
+zstd_corpus_bytes=211938580
+zstd_corpus_name='ecs-silesia-v1.corpus'
+zstd_corpus_order=(dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml)
+zstd_corpus_zip="$work/silesia.zip"
+zstd_corpus_dir="$work/silesia"
+zstd_corpus_path="$stage/share/ecs/corpus/$zstd_corpus_name"
+curl "${curl_options[@]}" "$zstd_corpus_url" -o "$zstd_corpus_zip"
+[[ "$(sha256sum "$zstd_corpus_zip" | awk '{print $1}')" == "$zstd_corpus_source_sha" ]] ||
+  die 'Silesia source ZIP SHA-256 mismatch'
+mkdir -p "$zstd_corpus_dir"
+unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir"
+: >"$zstd_corpus_path"
+for corpus_member in "${zstd_corpus_order[@]}"; do
+  [[ -f "$zstd_corpus_dir/$corpus_member" ]] || die "Silesia ZIP omitted $corpus_member"
+  cat "$zstd_corpus_dir/$corpus_member" >>"$zstd_corpus_path"
+done
+[[ "$(stat -c %s "$zstd_corpus_path")" -eq "$zstd_corpus_bytes" ]] ||
+  die 'fixed Silesia corpus byte length mismatch'
+[[ "$(sha256sum "$zstd_corpus_path" | awk '{print $1}')" == "$zstd_corpus_sha" ]] ||
+  die 'fixed Silesia corpus SHA-256 mismatch'
+chmod 0644 "$zstd_corpus_path"
 
 nexttrace_asset_name="nexttrace-tiny_linux_${arch}"
 nexttrace_asset_url=$(jq -er --arg name "$nexttrace_asset_name" \
@@ -361,6 +426,106 @@ sysbench_disabled_features_json=$(printf '%s\n' "${sysbench_disabled_features[@]
   make -j"$jobs"
 )
 cp "$sysbench_src/src/sysbench" "$stage/bin/sysbench"
+
+echo "building zstd ${zstd_tag} (${zstd_commit})"
+zstd_build_flags=(
+  "$cc_command"
+  '-O3'
+  '-static'
+  '-static-libgcc'
+  '-DZSTD_NODICT'
+  '-DZSTD_NOTRACE'
+  'HAVE_ZLIB=0'
+  'HAVE_LZMA=0'
+  'HAVE_LZ4=0'
+  'ZSTD_LEGACY_SUPPORT=0'
+)
+zstd_build_flags_json=$(printf '%s\n' "${zstd_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+make -C "$zstd_src/programs" -j"$jobs" zstd-release \
+  CC="$cc_command" \
+  MOREFLAGS='-O3 -static -static-libgcc -DZSTD_NODICT -DZSTD_NOTRACE' \
+  HAVE_ZLIB=0 HAVE_LZMA=0 HAVE_LZ4=0 ZSTD_LEGACY_SUPPORT=0
+cp "$zstd_src/programs/zstd" "$stage/bin/zstd"
+
+echo "building NPB ${npb_version} OpenMP EP + FT Class A"
+npb_flags='-O3 -fopenmp -static'
+npb_compile_date=$(date -u -d "@$SOURCE_DATE_EPOCH" '+%d %b %Y')
+npb_build_flags=(
+  "$fc_command"
+  '-O3'
+  '-fopenmp'
+  '-static'
+  'CLASS=A'
+  'RAND=randi8'
+  'OMP'
+)
+npb_build_flags_json=$(printf '%s\n' "${npb_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+npb_gfortran_version=$("$fc_command" --version | sed -n '1p')
+cat >"$npb_src/config/make.def" <<EOF
+FC = $fc_command
+FLINK = $fc_command
+F_LIB =
+F_INC =
+FFLAGS = $npb_flags
+FLINKFLAGS = $npb_flags
+CC = $cc_command
+CLINK = $cc_command
+C_LIB = -lm
+C_INC =
+CFLAGS = $npb_flags
+CLINKFLAGS = $npb_flags
+UCC = gcc
+BINDIR = ../bin
+RAND = randi8
+WTIME = wtime.c
+EOF
+mkdir -p "$npb_src/bin"
+make -C "$npb_src/sys" all
+
+configure_npb_class() {
+  local benchmark=$1
+  local class=$2
+  local benchmark_lower=${benchmark,,}
+  local params="$npb_src/$benchmark/npbparams.h"
+  (
+    cd "$npb_src/$benchmark"
+    ../sys/setparams "$benchmark_lower" "$class"
+  )
+  sed -i "s@parameter (compiletime='[^']*')@parameter (compiletime='$npb_compile_date')@" "$params"
+  grep -F "parameter (compiletime='$npb_compile_date')" "$params" >/dev/null ||
+    die "could not pin NPB compile date in $params"
+}
+
+# The release contains only the requested EP/FT Class A binaries.  Build them
+# completely with the target compiler before any target executable is handed
+# to QEMU.
+configure_npb_class EP A
+configure_npb_class FT A
+make -C "$npb_src" -j"$jobs" ep CLASS=A
+make -C "$npb_src" -j"$jobs" ft CLASS=A
+cp "$npb_src/bin/ep.A.x" "$stage/bin/npb-ep"
+cp "$npb_src/bin/ft.A.x" "$stage/bin/npb-ft"
+
+npb_smoke_class=A
+npb_ep_smoke_bin="$stage/bin/npb-ep"
+npb_ft_smoke_bin="$stage/bin/npb-ft"
+if [[ "$build_mode" == cross ]]; then
+  # Class A is the released benchmark contract, but running that workload
+  # under instruction emulation would turn a functional CI check into a slow,
+  # meaningless performance run.  Build transient Class S binaries from the
+  # same source, flags and target toolchain; QEMU runs those to completion.
+  # The packaged Class A ELFs are still checked separately below.
+  npb_smoke_class=S
+  configure_npb_class EP S
+  make -C "$npb_src" -j"$jobs" ep CLASS=S
+  configure_npb_class FT S
+  make -C "$npb_src" -j"$jobs" ft CLASS=S
+  npb_ep_smoke_bin="$work/npb-ep-class-s-smoke"
+  npb_ft_smoke_bin="$work/npb-ft-class-s-smoke"
+  cp "$npb_src/bin/ep.S.x" "$npb_ep_smoke_bin"
+  cp "$npb_src/bin/ft.S.x" "$npb_ft_smoke_bin"
+  "$strip_command" --strip-unneeded "$npb_ep_smoke_bin" "$npb_ft_smoke_bin"
+fi
 
 echo "building fio ${fio_tag} (${fio_commit})"
 (
@@ -449,16 +614,94 @@ meson compile -C "$ping_build" -j "$jobs"
 meson install -C "$ping_build" --destdir "$ping_install"
 cp "$ping_install/usr/local/bin/ping" "$stage/bin/ping"
 
+echo "building OpenSSL ${openssl_tag} (${openssl_commit})"
+openssl_version='3.5.7'
+openssl_prefix='/opt/ecs-openssl'
+openssl_build_flags=(
+  "$openssl_target"
+  '-O3'
+  'no-shared'
+  'no-module'
+  'no-pinshared'
+  'no-tests'
+  'no-docs'
+  'no-ssl'
+  'no-sock'
+  'no-dgram'
+  'no-http'
+  'no-cmp'
+  'no-cms'
+  'no-ct'
+  'no-ocsp'
+  'no-dso'
+  'no-engine'
+  'no-static-engine'
+  'no-legacy'
+  'no-deprecated'
+  'no-async'
+  'no-atexit'
+  'no-autoload-config'
+  'no-cached-fetch'
+  'no-comp'
+  'no-dh'
+  'no-dsa'
+  'no-ec'
+  'no-aria'
+  'no-bf'
+  'no-blake2'
+  'no-camellia'
+  'no-cast'
+  'no-cmac'
+  'no-des'
+  'no-idea'
+  'no-md4'
+  'no-mdc2'
+  'no-ocb'
+  'no-rc2'
+  'no-rc4'
+  'no-rmd160'
+  'no-scrypt'
+  'no-seed'
+  'no-siphash'
+  'no-siv'
+  'no-sm2'
+  'no-sm3'
+  'no-sm4'
+  'no-whirlpool'
+  'no-ml-dsa'
+  'no-ml-kem'
+  'no-slh-dsa'
+  'no-rfc3779'
+  'no-srp'
+  'no-srtp'
+  'no-ts'
+  '-static'
+  "--prefix=$openssl_prefix"
+  "--openssldir=$openssl_prefix/ssl"
+)
+openssl_build_flags_json=$(printf '%s\n' "${openssl_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+(
+  cd "$openssl_src"
+  perl ./Configure "${openssl_build_flags[@]}"
+  # OpenSSL's individual executable target does not depend on its mandatory
+  # generated headers. Generate only those first, then build the official CLI
+  # target and its exact link dependencies. The Configure exclusions above
+  # leave speed/version plus the EVP families required by ECS.
+  make -j"$jobs" build_generated
+  make -j"$jobs" apps/openssl
+)
+cp "$openssl_src/apps/openssl" "$stage/bin/openssl"
+
 cp "$nexttrace_download" "$stage/bin/nexttrace-tiny"
 
 # Remove compiler/debug sections from binaries built in this job. The official
 # NextTrace asset is kept byte-for-byte so its GitHub release digest remains
 # independently verifiable.
-for tool in sysbench stream fio iperf3 ping; do
+for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl ping; do
   "$strip_command" --strip-unneeded "$stage/bin/$tool"
 done
 
-for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
+for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl nexttrace-tiny ping; do
   chmod 0755 "$stage/bin/$tool"
   [[ -s "$stage/bin/$tool" ]] || die "built $tool is empty"
 done
@@ -466,6 +709,11 @@ done
 # Preserve upstream license texts in every architecture package. STREAM embeds
 # its license in the official source file, so retain the complete header.
 cp "$sysbench_src/COPYING" "$stage/LICENSES/SYSBENCH-COPYING"
+cp "$zstd_src/LICENSE" "$stage/LICENSES/ZSTD-LICENSE"
+cp "$zstd_src/COPYING" "$stage/LICENSES/ZSTD-COPYING"
+sed -n '1,31p' "$npb_src/EP/ep.f90" >"$stage/LICENSES/NPB-LICENSE.txt"
+cp "$npb_release_root/README" "$stage/LICENSES/NPB-README.txt"
+cp "$openssl_src/LICENSE.txt" "$stage/LICENSES/OPENSSL-LICENSE.txt"
 cp "$fio_src/COPYING" "$stage/LICENSES/FIO-COPYING"
 cp "$iperf3_src/LICENSE" "$stage/LICENSES/IPERF3-LICENSE"
 cp "$iputils_src/LICENSE" "$stage/LICENSES/IPUTILS-LICENSE"
@@ -474,19 +722,23 @@ cp "$nexttrace_src/LICENSE" "$stage/LICENSES/NEXTTRACE-LICENSE"
 sed -n '1,/^ \*\/$/p' "$stream_src" >"$stage/LICENSES/STREAM-LICENSE.txt"
 
 sysbench_bin="$stage/bin/sysbench"
+zstd_bin="$stage/bin/zstd"
+npb_ep_bin="$stage/bin/npb-ep"
+npb_ft_bin="$stage/bin/npb-ft"
+openssl_bin="$stage/bin/openssl"
 stream_bin="$stage/bin/stream"
 fio_bin="$stage/bin/fio"
 iperf3_bin="$stage/bin/iperf3"
 nexttrace_bin="$stage/bin/nexttrace-tiny"
 ping_bin="$stage/bin/ping"
 
-# Check all six resulting binaries before executing any target program. This
+# Check all resulting binaries before executing any target program. This
 # catches accidental linkage even if a future base image contains excluded
 # libraries. The package carries no runtime library directory, so a missing
 # dependency or a benchmark-specific runtime library is a hard failure. Do not
 # use ldd here: under binfmt/QEMU it executes the target loader and can crash on
 # a valid static binary. ELF program and dynamic headers are architecture-safe.
-for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
+for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl nexttrace-tiny ping; do
   binary="$stage/bin/$tool"
   "$readelf_command" -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
   "$readelf_command" -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
@@ -503,6 +755,22 @@ for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
   fi
 done
 
+# Transient NPB Class S smoke binaries are never packaged, but cross jobs still
+# require the same static-target guarantee before QEMU executes them.
+if [[ "$build_mode" == cross ]]; then
+  for npb_smoke_binary in "$npb_ep_smoke_bin" "$npb_ft_smoke_bin"; do
+    "$readelf_command" -dW "$npb_smoke_binary" >"$work/npb-smoke.dynamic" 2>&1 ||
+      die "dynamic-header readelf failed for $npb_smoke_binary"
+    "$readelf_command" -lW "$npb_smoke_binary" >"$work/npb-smoke.program" 2>&1 ||
+      die "program-header readelf failed for $npb_smoke_binary"
+    if grep -Eq '\(NEEDED\)' "$work/npb-smoke.dynamic" ||
+      grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' "$work/npb-smoke.program"; then
+      cat "$work/npb-smoke.dynamic" "$work/npb-smoke.program" >&2
+      die "$npb_smoke_binary is not fully static"
+    fi
+  done
+fi
+
 echo 'running functional binary smoke tests only; benchmark values are not valid performance measurements'
 run_target "$sysbench_bin" --version
 run_target "$sysbench_bin" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
@@ -510,6 +778,84 @@ grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" || {
   cat "$work/sysbench-smoke.txt" >&2
   die 'sysbench CPU smoke output was not recognized'
 }
+
+run_target "$zstd_bin" --version >"$work/zstd-version.txt" 2>&1
+grep -Eq 'v1\.5\.7([^0-9]|$)' "$work/zstd-version.txt" || {
+  cat "$work/zstd-version.txt" >&2
+  die 'zstd version smoke did not report v1.5.7'
+}
+head -c 1048576 "$zstd_corpus_path" >"$work/zstd-smoke.corpus"
+run_target "$zstd_bin" -q -b3 -i1 -T1 "$work/zstd-smoke.corpus" >"$work/zstd-smoke.txt" 2>&1
+grep -Eq 'bench 1\.5\.7.*input 1048576 bytes, 1 seconds' "$work/zstd-smoke.txt" || {
+  cat "$work/zstd-smoke.txt" >&2
+  die 'zstd benchmark smoke output was not recognized'
+}
+grep -Eq '^-3[[:space:]].*MB/s[[:space:]].*MB/s' "$work/zstd-smoke.txt" || {
+  cat "$work/zstd-smoke.txt" >&2
+  die 'zstd benchmark smoke omitted compression/decompression throughput'
+}
+
+mkdir -p "$work/npb-smoke-run"
+for npb_benchmark in EP FT; do
+  case "$npb_benchmark" in
+    EP) npb_smoke_bin=$npb_ep_smoke_bin ;;
+    FT) npb_smoke_bin=$npb_ft_smoke_bin ;;
+  esac
+  (
+    cd "$work/npb-smoke-run"
+    OMP_NUM_THREADS=1 \
+      OMP_DYNAMIC=FALSE \
+      OMP_PROC_BIND=close \
+      OMP_PLACES=cores \
+      OMP_SCHEDULE=static \
+      OMP_DISPLAY_ENV=FALSE \
+      NPB_TIMER_FLAG=0 \
+      run_target "$npb_smoke_bin"
+  ) >"$work/npb-${npb_benchmark,,}-smoke.txt" 2>&1
+  npb_smoke_output="$work/npb-${npb_benchmark,,}-smoke.txt"
+  grep -Eq "NAS Parallel Benchmarks \\(NPB3\\.4-OMP\\) - ${npb_benchmark} Benchmark" "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke omitted the official header"
+  grep -Eq "^[[:space:]]*Class[[:space:]]*=[[:space:]]*${npb_smoke_class}[[:space:]]*$" "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke did not run Class ${npb_smoke_class}"
+  grep -Eq '^[[:space:]]*Total threads[[:space:]]*=[[:space:]]*1[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke did not use one OpenMP thread"
+  grep -Eq '^[[:space:]]*Verification[[:space:]]*=[[:space:]]*SUCCESSFUL[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} Class ${npb_smoke_class} verification failed"
+  grep -Eq '^[[:space:]]*Version[[:space:]]*=[[:space:]]*3\.4\.4[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke reported the wrong version"
+  grep -Eq '^[[:space:]]*FC[[:space:]]*=[[:space:]]*.*gfortran[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke reported the wrong target compiler"
+  grep -F 'FFLAGS       = -O3 -fopenmp -static' "$npb_smoke_output" >/dev/null ||
+    die "NPB ${npb_benchmark} smoke reported unexpected compiler flags"
+  grep -Eq '^[[:space:]]*RAND[[:space:]]*=[[:space:]]*randi8[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB ${npb_benchmark} smoke reported the wrong random generator"
+done
+
+run_target "$openssl_bin" version >"$work/openssl-version.txt" 2>&1
+grep -Eq '^OpenSSL 3\.5\.7([[:space:]]|$)' "$work/openssl-version.txt" || {
+  cat "$work/openssl-version.txt" >&2
+  die 'OpenSSL version smoke did not report 3.5.7'
+}
+mkdir -p "$work/openssl-smoke/modules" "$work/openssl-smoke/engines"
+for openssl_algorithm in aes-256-gcm chacha20-poly1305 sha256; do
+  case "$openssl_algorithm" in
+    aes-256-gcm) openssl_output_name='AES-256-GCM'; openssl_aead=(-aead) ;;
+    chacha20-poly1305) openssl_output_name='ChaCha20-Poly1305'; openssl_aead=(-aead) ;;
+    sha256) openssl_output_name='sha256'; openssl_aead=() ;;
+  esac
+  OPENSSL_CONF=/dev/null \
+    OPENSSL_MODULES="$work/openssl-smoke/modules" \
+    OPENSSL_ENGINES="$work/openssl-smoke/engines" \
+    run_target "$openssl_bin" speed \
+      -elapsed -seconds 1 -bytes 16384 -mr -multi 1 \
+      -evp "$openssl_algorithm" "${openssl_aead[@]}" \
+      >"$work/openssl-${openssl_algorithm}-smoke.txt" 2>&1
+  openssl_smoke_output="$work/openssl-${openssl_algorithm}-smoke.txt"
+  grep -F "+DT:${openssl_output_name}:1:16384" "$openssl_smoke_output" >/dev/null ||
+    die "OpenSSL speed ${openssl_algorithm} smoke omitted fixed parameters"
+  grep -Eq "^\\+F:[0-9]+:${openssl_output_name}:[0-9]+(\\.[0-9]+)?[[:space:]]*$" "$openssl_smoke_output" ||
+    die "OpenSSL speed ${openssl_algorithm} smoke omitted aggregate machine-readable throughput"
+done
 
 stream_nt_threads=${STREAM_NT_THREADS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 [[ "$stream_nt_threads" =~ ^[1-9][0-9]*$ ]] || die "invalid STREAM_NT_THREADS=$stream_nt_threads"
@@ -647,23 +993,30 @@ grep -Eq '1 packets transmitted|1 packets received|1 received' "$work/ping-smoke
 }
 
 sysbench_sha=$(sha256sum "$sysbench_bin" | awk '{print $1}')
+zstd_sha=$(sha256sum "$zstd_bin" | awk '{print $1}')
+npb_ep_sha=$(sha256sum "$npb_ep_bin" | awk '{print $1}')
+npb_ft_sha=$(sha256sum "$npb_ft_bin" | awk '{print $1}')
+openssl_sha=$(sha256sum "$openssl_bin" | awk '{print $1}')
 stream_binary_sha=$(sha256sum "$stream_bin" | awk '{print $1}')
 fio_sha=$(sha256sum "$fio_bin" | awk '{print $1}')
 iperf3_sha=$(sha256sum "$iperf3_bin" | awk '{print $1}')
 nexttrace_binary_sha=$(sha256sum "$nexttrace_bin" | awk '{print $1}')
 ping_sha=$(sha256sum "$ping_bin" | awk '{print $1}')
 
-for digest in "$sysbench_sha" "$stream_binary_sha" "$fio_sha" "$iperf3_sha" \
+for digest in "$sysbench_sha" "$zstd_sha" "$npb_ep_sha" "$npb_ft_sha" "$openssl_sha" "$stream_binary_sha" "$fio_sha" "$iperf3_sha" \
   "$nexttrace_binary_sha" "$ping_sha"; do
   [[ "$digest" =~ ^[[:xdigit:]]{64}$ ]] || die "invalid binary SHA-256: $digest"
 done
 
 sysbench_source=$(git_source akopytov/sysbench "$sysbench_commit")
+zstd_source=$(git_source facebook/zstd "$zstd_commit")
+openssl_source=$(git_source openssl/openssl "$openssl_commit")
 fio_source=$(git_source axboe/fio "$fio_commit")
 iperf3_source=$(git_source esnet/iperf "$iperf3_commit")
 iputils_source=$(git_source iputils/iputils "$iputils_commit")
 nexttrace_version=$(release_version "$nexttrace_tag")
 sysbench_version=$(release_version "$sysbench_tag")
+zstd_version=$(release_version "$zstd_tag")
 fio_version=$(release_version "$fio_tag")
 iperf3_version=$(release_version "$iperf3_tag")
 iputils_version=$(release_version "$iputils_tag")
@@ -683,6 +1036,34 @@ jq -n \
   --arg sysbench_ck_version "$sysbench_ck_version" \
   --argjson sysbench_build_flags "$sysbench_build_flags_json" \
   --argjson sysbench_disabled_features "$sysbench_disabled_features_json" \
+  --arg zstd_version "$zstd_version" \
+  --arg zstd_tag "$zstd_tag" \
+  --arg zstd_source "$zstd_source" \
+  --arg zstd_sha "$zstd_sha" \
+  --arg zstd_commit "$zstd_commit" \
+  --argjson zstd_build_flags "$zstd_build_flags_json" \
+  --arg zstd_corpus_url "$zstd_corpus_url" \
+  --arg zstd_corpus_source_sha "$zstd_corpus_source_sha" \
+  --arg zstd_corpus_sha "$zstd_corpus_sha" \
+  --argjson zstd_corpus_bytes "$zstd_corpus_bytes" \
+  --arg zstd_corpus_name "$zstd_corpus_name" \
+  --arg npb_version "$npb_version" \
+  --arg npb_archive_url "$npb_archive_url" \
+  --arg npb_archive_sha "$npb_archive_sha" \
+  --arg npb_ep_sha "$npb_ep_sha" \
+  --arg npb_ft_sha "$npb_ft_sha" \
+  --arg npb_gfortran_version "$npb_gfortran_version" \
+  --arg npb_compile_date "$npb_compile_date" \
+  --arg npb_flags "$npb_flags" \
+  --arg npb_smoke_class "$npb_smoke_class" \
+  --argjson npb_build_flags "$npb_build_flags_json" \
+  --arg openssl_version "$openssl_version" \
+  --arg openssl_tag "$openssl_tag" \
+  --arg openssl_source "$openssl_source" \
+  --arg openssl_sha "$openssl_sha" \
+  --arg openssl_commit "$openssl_commit" \
+  --arg openssl_target "$openssl_target" \
+  --argjson openssl_build_flags "$openssl_build_flags_json" \
   --arg fio_version "$fio_version" \
   --arg fio_tag "$fio_tag" \
   --arg fio_source "$fio_source" \
@@ -703,6 +1084,9 @@ jq -n \
   --argjson stream_ntimes "$stream_ntimes" \
   --arg iperf3_upstream 'https://github.com/esnet/iperf' \
   --arg sysbench_upstream 'https://github.com/akopytov/sysbench' \
+  --arg zstd_upstream 'https://github.com/facebook/zstd' \
+  --arg npb_upstream 'https://www.nas.nasa.gov/software/npb.html' \
+  --arg openssl_upstream 'https://github.com/openssl/openssl' \
   --arg fio_upstream 'https://github.com/axboe/fio' \
   --arg stream_upstream 'https://www.cs.virginia.edu/stream/' \
   --arg nexttrace_asset_source "$nexttrace_asset_url" \
@@ -746,6 +1130,62 @@ jq -n \
           license: "GPL-2.0-only",
           sha256: $sysbench_sha,
           parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags, system_luajit_version: $sysbench_luajit_version, system_ck_version: $sysbench_ck_version, fully_static: true, stripped: true}
+        },
+        {
+          name: "zstd",
+          upstream: $zstd_upstream,
+          version: $zstd_version,
+          tag_or_commit: $zstd_tag,
+          source: $zstd_source,
+          build_flags: $zstd_build_flags,
+          enabled_features: ["benchmark", "multithread", "compression", "decompression"],
+          disabled_features: ["zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace"],
+          architecture: $architecture,
+          license: "BSD-3-Clause OR GPL-2.0-only",
+          sha256: $zstd_sha,
+          parameters: {source_commit: $zstd_commit, level: 3, evaluation_seconds: 5, thread_modes: ["1T", "NT"], corpus_name: $zstd_corpus_name, corpus_path: ("share/ecs/corpus/" + $zstd_corpus_name), corpus_bytes: $zstd_corpus_bytes, corpus_sha256: $zstd_corpus_sha, corpus_source_url: $zstd_corpus_url, corpus_source_sha256: $zstd_corpus_source_sha, corpus_construction: "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml", fully_static: true, stripped: true}
+        },
+        {
+          name: "npb-ep",
+          upstream: $npb_upstream,
+          version: $npb_version,
+          tag_or_commit: "NPB3.4.4",
+          source: $npb_archive_url,
+          build_flags: $npb_build_flags,
+          enabled_features: ["NPB3.4-OMP", "EP", "Class A", "OpenMP"],
+          disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
+          architecture: $architecture,
+          license: "NASA-NPB-permissive",
+          sha256: $npb_ep_sha,
+          parameters: {source_sha256: $npb_archive_sha, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler: $npb_gfortran_version, compiler_flags: $npb_flags, linker_flags: $npb_flags, random_generator: "randi8", compile_date: $npb_compile_date, thread_modes: ["1T", "NT"], ci_smoke_class: $npb_smoke_class, ci_smoke_scope: (if $npb_smoke_class == "A" then "release Class A binary" else "transient Class S binary from identical source and target toolchain; release Class A ELF statically validated" end), fully_static: true, stripped: true}
+        },
+        {
+          name: "npb-ft",
+          upstream: $npb_upstream,
+          version: $npb_version,
+          tag_or_commit: "NPB3.4.4",
+          source: $npb_archive_url,
+          build_flags: $npb_build_flags,
+          enabled_features: ["NPB3.4-OMP", "FT", "Class A", "OpenMP", "3D FFT"],
+          disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
+          architecture: $architecture,
+          license: "NASA-NPB-permissive",
+          sha256: $npb_ft_sha,
+          parameters: {source_sha256: $npb_archive_sha, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler: $npb_gfortran_version, compiler_flags: $npb_flags, linker_flags: $npb_flags, random_generator: "randi8", compile_date: $npb_compile_date, thread_modes: ["1T", "NT"], ci_smoke_class: $npb_smoke_class, ci_smoke_scope: (if $npb_smoke_class == "A" then "release Class A binary" else "transient Class S binary from identical source and target toolchain; release Class A ELF statically validated" end), fully_static: true, stripped: true}
+        },
+        {
+          name: "openssl",
+          upstream: $openssl_upstream,
+          version: $openssl_version,
+          tag_or_commit: $openssl_tag,
+          source: $openssl_source,
+          build_flags: $openssl_build_flags,
+          enabled_features: ["speed", "EVP", "AES-256-GCM", "ChaCha20-Poly1305", "SHA-256", "multi-process", "architecture assembly"],
+          disabled_features: ["TLS/DTLS/QUIC", "network/HTTP", "shared libraries/modules/engines", "EC/DH/DSA/PQ families", "unrequested cipher/digest families", "tests/documentation"],
+          architecture: $architecture,
+          license: "Apache-2.0",
+          sha256: $openssl_sha,
+          parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], block_bytes: 16384, duration_seconds: 5, worker_modes: [1, "detected_cpu_allowance"], elapsed_wall_clock: true, machine_readable: true, capability_detection: "automatic with override environment removed", fully_static: true, stripped: true}
         },
         {
           name: "stream",
@@ -820,7 +1260,7 @@ jq -n \
       ]
     }' | jq . >"$stage/manifest.json"
 
-for tool in sysbench stream fio iperf3 nexttrace-tiny ping; do
+for tool in sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping; do
   actual=$(sha256sum "$stage/bin/$tool" | awk '{print $1}')
   recorded=$(jq -er --arg name "$tool" '.tools[] | select(.name == $name) | .sha256' "$stage/manifest.json")
   [[ "$actual" == "$recorded" ]] || die "manifest hash mismatch for $tool"
@@ -835,7 +1275,7 @@ jq -e --arg architecture "$arch" '
   (.build.smoke_runner | type == "string" and length > 0) and
   .build.validation.scope == "functional" and
   .build.validation.performance_valid == false and
-  (.tools | length == 6) and
+  (.tools | length == 10) and
   (all(.tools[]; .architecture == $architecture and .version != "unknown" and .tag_or_commit != "unknown" and .source != "unknown" and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
 ' "$stage/manifest.json" >/dev/null || die "generated manifest failed concrete metadata checks"
 

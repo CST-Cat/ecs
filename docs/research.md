@@ -5,7 +5,7 @@
 >
 > 当前实现和依赖策略已收敛为 NextTrace Tiny，路由模块只安装或调用这一套官方资产。
 >
-> 当前实现口径：内存使用官方 STREAM 5.10 的
+> 当前本地性能口径：CPU scalar/vCPU scaling 使用 sysbench，压缩使用固定 zstd 1.5.7 + Silesia corpus，FP/FFT 使用 NPB-OMP 3.4.4 EP + FT Class A，密码学使用固定 OpenSSL 3.5.7 speed。内存使用官方 STREAM 5.10 的
 > 10,000,000 elements/10 iterations，分别真实运行 1T/NT 的 Copy、Scale、Add、Triad；
 > STREAM 不可用时明确报告内存基准未运行。磁盘使用 fio Direct I/O，包含 fio JSON 的
 > QD1 延迟；mbw/ioping 不属于当前实现、RequiredTools 或 `ecs-tools`。综合评分只在显式提供当前参考或发行包内嵌新参考时出现；
@@ -41,9 +41,9 @@
 1. **运行时零广告**：二进制、终端、JSON、txt、Markdown、HTML 和安装脚本均不展示赞助商、返利链接、二维码或推广语。
 2. **默认零上传**：所有报告只写本地。当前发行版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、JSON、txt、Markdown 和独立 HTML 都由同一份数据渲染，避免各输出路径互相漂移。
-4. **标准性能工具唯一**：CPU、内存、磁盘和网络吞吐原始成绩分别调用 sysbench CPU、官方 STREAM、fio、iperf3；STREAM 缺失时不生成替代内存成绩，fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的，只有存在同一口径的当前参考时才生成。
-5. **外部引擎必须可审计**：sysbench、fio、iperf3、NextTrace 等只作为可关闭的本地适配器；调用时记录可安全读取的版本、命令参数、程序摘要和数据来源。`run.sh` 优先使用系统程序，缺失的六项标准工具只从当前架构的已校验 `ecs-tools` 包解包到临时 WORK；Ookla 仅在选中时走独立官方签名源，不调用通用系统安装器；需要持久安装基准工具时才显式使用 `install.sh --with-benchmarks`。
-6. **资源预算可见**：`standard`、`full` 是 16/18 个默认模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
+4. **标准性能工具唯一**：CPU scalar/vCPU scaling、压缩、FP/FFT、内存、密码学、磁盘和网络吞吐原始成绩分别调用 sysbench、zstd、NPB EP+FT、官方 STREAM、OpenSSL speed、fio、iperf3。固定工具或 corpus 缺失时不生成替代成绩；fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的，zstd/NPB/crypto 不并入 CPU 分数。
+5. **外部引擎必须可审计**：外部工具只作为可关闭的本地适配器；调用时记录版本、完整参数、二进制 SHA-256、原始输出、method version 和数据来源。`run.sh` 只从当前架构的已校验 `ecs-tools` 包解包缺失/不合口径的工具到临时 WORK；工具包固定 10 个经过功能裁剪的二进制及 zstd corpus。七架构 CI 先原生/交叉编译，再直接或用 QEMU 做短功能 smoke；交叉 NPB 用不入包的 Class S 验证运行时，发行 Class A 只做目标 ELF 校验，不在模拟器中跑性能负载。Ookla 仅在选中时走独立官方签名源。
+6. **资源预算可见**：`standard`、`full` 是 19/21 个默认模块的配置预设；运行前按实际选中的模块给出预计耗时、临时磁盘占用和网络流量，所有选中模块沿用统一深度口径；任何网络压力测试都可单独关闭。
 7. **结果必须可比较**：每个性能结果记录引擎版本、块大小、队列深度、线程数、测试时长、样本数和时间戳。不同方法不混成一个总分。
 8. **双栈是一等公民**：IPv4/IPv6 分开探测、分开记录失败原因，不能用“有地址”代替“可联网”。
 9. **IP 质量不迷信单一分数**：保存每个数据源的原始判定、查询时间和错误；聚合结论必须显示置信度与冲突项。
@@ -62,7 +62,10 @@
 | 系统、虚拟化、资源与内核网络栈 | ✓ | `/proc`/`sys` 只读采集 | ✓ | ✓ |
 | IPv4/IPv6、ASN、原生/广播、五库类型、六库评分、九库因子 | ✓ | 官方 API 密钥直连；IPQuality 社区通道；离线 GeoIP（规划） | — | ✓ |
 | CPU 单线程/多线程固定工作负载（cgroup 配额感知） | — | sysbench CPU（唯一） | 15s | 15s |
+| 真实压缩/整数路径 | — | zstd 1.5.7、Silesia corpus SHA-256、level 3、5s、1/全 worker | ✓ | ✓ |
+| 浮点/多核与 3D FFT/cache-memory access | — | NASA NPB-OMP 3.4.4 EP + FT Class A，1T/全线程 | ✓ | ✓ |
 | 内存带宽与资源证据 | — | 官方 STREAM 10M/10，1T/NT 四 kernel；缺失时明确报告未运行；Balloon/KSM 只读 sysfs/proc 证据 | 15s | 15s |
+| 服务器密码学加速 | — | OpenSSL 3.5.7 speed；AES-256-GCM/ChaCha20-Poly1305/SHA-256，16 KiB、5s、1/全 worker | ✓ | ✓ |
 | 磁盘基础项、Crystal、ATTO、50/50 混合矩阵与 QD1 延迟 | — | fio JSON，Direct I/O；fio 引擎探测回退只在可验证时使用 | 53 作业 | 53 作业 |
 | DNS 延迟、失败率与抖动 | ✓ | — | ✓ | ✓ |
 | TCP 延迟与可达率 | ✓ | 系统 ping 的 ICMP 往返 | ✓ | ✓ |
@@ -79,7 +82,7 @@
 | Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（standard 默认不运行；full 默认运行；`--only ookla` 可从任意档位显式选择；run.sh 缺失时从官方签名源下载并临时解包） | — | ✓ |
 | JSON、txt、Markdown、独立 HTML | ✓ | — | ✓ | ✓ |
 
-两档配置只改变默认模块集合（standard 16、full 18）：standard 包含 cnspeed，
+两档配置只改变默认模块集合（standard 19、full 21）：standard 包含 cnspeed，
 full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` 显式选择，
 并始终采用同一 full 深度参数。
 
@@ -90,7 +93,7 @@ full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` �
 - IPQuality 的多源清单、字段对应关系、类型归类和供应商风险分段构成明确的实现输入；`ecs` 因此整体改用 AGPL-3.0-only，并在 `NOTICE`、报告来源和文档中保留项目、提交与许可证归属；
 - 没有移植 IPQuality 的广告、赞助素材、运行计数、在线报告上传、依赖安装、流媒体或邮件检测代码；
 - 网络实现、并发、密钥路由、结构化模型、终端/JSON/txt/Markdown/HTML 渲染和错误隔离由 `ecs` 重新实现；
-- sysbench、STREAM、fio、iperf3、NextTrace Tiny 和 ping 仍作为独立进程调用；缺失的六项标准工具由 `run.sh` 从已校验的架构 `ecs-tools` 包解包到 WORK，只有 full 默认或显式选中的 Ookla 才走独立官方签名源，持久安装基准工具才使用 `install.sh`。
+- sysbench、zstd、NPB EP/FT、OpenSSL、STREAM、fio、iperf3、NextTrace Tiny 和 ping 仍作为独立进程调用；`run.sh` 从已校验的七架构 `ecs-tools` 包解包所需的 10 个二进制和固定 zstd corpus 到 WORK，只有 full 默认或显式选中的 Ookla 才走独立官方签名源。
 
 ## 首版之后的实测校准
 
@@ -306,13 +309,13 @@ full 深度参数，保证直接运行与 `--only` 运行的结果可以比较�
 
 | | standard | full |
 | --- | ---: | ---: |
-| 默认模块数 | 16 | 18 |
-| CPU/内存每轮 | 15 s | 15 s |
+| 默认模块数 | 19 | 21 |
+| sysbench/STREAM 每轮 | 15 s | 15 s |
 | fio 临时文件与作业 | 2048 MiB，上限安全检查；53 项完整基础/混合/Crystal/ATTO | 同左 |
 | iperf3（选中 `speed` 时） | 7 节点 × 双方向 × 15 s，附 UDP 50 Mbps/5 s | 同左 |
 | `cnspeed` | 8 s/100 MiB 每运营商（standard/full 默认包含） | 同左 |
 
-`standard`、`full` 仅分别预选 16、18 个模块。standard 默认包含 `cnspeed`，
+`standard`、`full` 仅分别预选 19、21 个模块。standard 默认包含 `cnspeed`，
 不包含 `network` 与 `ookla`；full 额外加入后两项。`SelectModules` 先处理
 `--only` 再处理 `--skip`，因此 standard 也可以直接运行 `--only network,ookla`，而
 `--skip` 仍可从任何预设中移除模块；显式选择的模块继续受各自 exposure 约束。

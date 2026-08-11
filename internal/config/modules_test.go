@@ -27,11 +27,11 @@ func TestModuleDescriptorsAreCanonical(t *testing.T) {
 	if err := ValidateModuleDescriptors(); err != nil {
 		t.Fatal(err)
 	}
-	if got := ModulesForProfile(ProfileStandard); len(got) != 16 {
-		t.Fatalf("standard profile module count = %d, want 16: %v", len(got), got)
+	if got := ModulesForProfile(ProfileStandard); len(got) != 19 {
+		t.Fatalf("standard profile module count = %d, want 19: %v", len(got), got)
 	}
-	if got := ModulesForProfile(ProfileFull); len(got) != 18 {
-		t.Fatalf("full profile module count = %d, want 18: %v", len(got), got)
+	if got := ModulesForProfile(ProfileFull); len(got) != 21 {
+		t.Fatalf("full profile module count = %d, want 21: %v", len(got), got)
 	}
 	standard := ModulesForProfile(ProfileStandard)
 	for _, id := range []string{"network", "ookla"} {
@@ -52,6 +52,9 @@ func TestModuleDescriptorsAreCanonical(t *testing.T) {
 
 func TestBenchmarkRequiredToolsMatchRuntimeFallbacks(t *testing.T) {
 	cases := map[string][]string{
+		"zstd":   {"zstd"},
+		"npb":    {"npb-ep", "npb-ft"},
+		"crypto": {"openssl"},
 		"memory": {"stream"},
 		"disk":   {"fio"},
 	}
@@ -106,7 +109,10 @@ func TestModuleDescriptorEstimateModes(t *testing.T) {
 		"network":   EstimateModeFixed,
 		"bgp":       EstimateModeFixed,
 		"cpu":       EstimateModeCPU,
+		"zstd":      EstimateModeFixed,
+		"npb":       EstimateModeFixed,
 		"memory":    EstimateModeMemory,
+		"crypto":    EstimateModeFixed,
 		"disk":      EstimateModeDisk,
 		"dns":       EstimateModeDNS,
 		"latency":   EstimateModeLatency,

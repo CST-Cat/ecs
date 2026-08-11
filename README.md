@@ -4,7 +4,7 @@
 
 无广告、默认不上传报告、结果可审计的 Linux VPS 综合测试工具。
 
-`ecs` 将系统信息、CPU、内存、磁盘、网络、IP 质量、流媒体、路由与三网回程等测试统一为结构化结果，再从同一份数据生成 JSON、纯文本、Markdown 和 HTML 报告。每项结果都会保留测试方法、参数、工具、耗时、警告、有效样本/计划样本和原始证据，方便复核，也方便后续重新渲染。
+`ecs` 将系统信息、CPU 标量/多核、压缩、浮点/FFT、内存、密码学、磁盘、网络、IP 质量、流媒体、路由与三网回程等测试统一为结构化结果，再从同一份数据生成 JSON、纯文本、Markdown 和 HTML 报告。每项结果都会保留测试方法、完整参数、工具版本/二进制 SHA-256、耗时、警告、有效样本/计划样本和原始证据，方便复核，也方便后续重新渲染。
 
 项目坚持三个原则：
 
@@ -14,9 +14,9 @@
 
 ## 快速开始
 
-一键脚本仅支持 Linux。它会下载并校验最新 Release，优先复用系统中已有的工具，并把缺失组件临时放入本次运行目录；测试结束后自动清理，不向系统目录安装文件。
+一键脚本仅支持 Linux。它会下载并校验最新 Release，复用口径兼容的系统通用工具；zstd/corpus、NPB、OpenSSL 等固定版本基准则从已校验的发行工具包临时放入本次运行目录。测试结束后自动清理，不向系统目录安装文件。
 
-`ecs` 一共提供 18 个测试模块：Standard 默认运行其中 16 个，Full 运行全部 18 个。
+`ecs` 一共提供 21 个测试模块：Standard 默认运行其中 19 个，Full 运行全部 21 个。
 
 ### Standard：日常综合测试
 
@@ -25,9 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
   sh -s -- --profile standard --yes --output ./reports
 ```
 
-测试项目：系统与硬件、BGP、CPU、内存、磁盘、DNS、网络延迟、iperf3 吞吐、端口、NAT、黑名单、常用服务、中国三网 HTTP 测速、流媒体、路由和三网回程。
+测试项目：系统与硬件、BGP、CPU、zstd 压缩、NPB EP/FT、STREAM 内存、OpenSSL 密码学、磁盘、DNS、网络延迟、iperf3 吞吐、端口、NAT、黑名单、常用服务、中国三网 HTTP 测速、流媒体、路由和三网回程。
 
-对应模块：`system`、`bgp`、`cpu`、`memory`、`disk`、`dns`、`latency`、`speed`、`ports`、`nat`、`blacklist`、`apps`、`cnspeed`、`media`、`route`、`backtrace`。
+对应模块：`system`、`bgp`、`cpu`、`zstd`、`npb`、`memory`、`crypto`、`disk`、`dns`、`latency`、`speed`、`ports`、`nat`、`blacklist`、`apps`、`cnspeed`、`media`、`route`、`backtrace`。
 
 ### Full：完整测试
 
@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
   sh -s -- --profile full --yes --output ./reports
 ```
 
-在 Standard 的 16 个项目上增加多源 IP 质量（`network`）和官方 Ookla Speedtest（`ookla`），合计运行全部 18 个模块。这两项依赖外部商业服务；免费或公开通道可能受额度、缓存和数据库更新影响，仅作为扩展参考。Ookla 还会产生较大流量，并按其自身条款处理测速所需的数据；它不属于 `ecs` 的本地零上传保证。
+在 Standard 的 19 个项目上增加多源 IP 质量（`network`）和官方 Ookla Speedtest（`ookla`），合计运行全部 21 个模块。这两项依赖外部商业服务；免费或公开通道可能受额度、缓存和数据库更新影响，仅作为扩展参考。Ookla 还会产生较大流量，并按其自身条款处理测速所需的数据；它不属于 `ecs` 的本地零上传保证。
 
 > `speed`、`cnspeed` 和 `ookla` 都可能跑满带宽。流量按测试时长产生，不设固定上限。
 
@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
-  sh -s -- --only system,cpu,memory,disk \
+  sh -s -- --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local --yes --format json,txt --output ./reports
 ```
 
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
 | 目标 | `--only` 的值 | 测试项目 |
 | --- | --- | --- |
 | 系统概览 | `system` | 操作系统、虚拟化与硬件信息 |
-| 本地性能 | `system,cpu,memory,disk` | 系统信息、CPU、内存和磁盘，不产生网络请求 |
+| 本地性能 | `system,cpu,zstd,npb,memory,crypto,disk` | 系统、标量/多核 CPU、压缩、FP/FFT、内存、密码学和磁盘，不产生网络请求 |
 | BGP 与信誉 | `bgp,blacklist` | 公共 BGP 观测与 DNS 黑名单 |
 | 多源 IP 质量 | `network` | 商业与第三方 IP 情报；Full 默认项目 |
 | 网络质量 | `dns,latency,speed,ports,nat` | DNS、延迟、iperf3、端口与 NAT |
@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
 | 中国三网测速 | `cnspeed` | 社区 HTTP 节点；Standard 默认项目 |
 | Ookla 测速 | `ookla` | 官方专有客户端；Full 默认项目 |
 
-18 个模块都可以任意组合，完整 ID、测试内容和对应工具见下方的[测试项目与工具](#测试项目与工具)表。
+21 个模块都可以任意组合，完整 ID、测试内容和对应工具见下方的[测试项目与工具](#测试项目与工具)表。
 
 不带测试参数运行一键脚本时，如果当前有终端，脚本会进入交互向导；带 `--profile`、`--only` 等测试参数或处于 cron、CI 环境时会直接运行。
 
@@ -97,7 +97,9 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
 
 证据同时带有稳定等级：`complete`（完整）、`partial`（部分）、`insufficient`（证据不足）和 `not_planned`（本轮无计划样本）。超时、DNS 错误、连接被拒、限流、HTTP 拒绝、解析失败、工具缺失等不会只埋在说明文字里，而会写入 `failures[]` 的稳定机器字段，并在 txt、Markdown 和 HTML 中显示。
 
-`system` 会报告真实 cgroup CPU/内存限额、cpuset、CPU throttle、PSI CPU/内存/I/O 压力和 OOM 事件。CPU、STREAM 与 fio 测试只在检测到测试前高负载、steal、PSI、cgroup throttle 或 OOM 干扰时自动复测一次；干净环境不会无条件延长测试。选择结果时先排除无有效证据的轮次，再采用干扰较低的一轮，同分保留首次结果，绝不按跑分高低挑成绩。两轮指标、证据和干扰原因都会保留在 JSON 中。
+`system` 会报告真实 cgroup CPU/内存限额、cpuset、CPU throttle、PSI CPU/内存/I/O 压力和 OOM 事件。CPU、zstd、NPB、STREAM、OpenSSL speed 与 fio 测试只在检测到测试前高负载、steal、PSI、cgroup throttle 或 OOM 干扰时自动复测一次；干净环境不会无条件延长测试。选择结果时先排除无有效证据的轮次，再采用干扰较低的一轮，同分保留首次结果，绝不按跑分高低挑成绩。两轮指标、证据和干扰原因都会保留在 JSON 中。
+
+交互式 txt 报告会读取当前终端列数；标签、表格列和数据柱会同比缩放。无色、8/16 色、256 色和真彩色终端使用同一套语义层次；无色时仍靠柱子长度和密度字符表达差异。写入文件的 txt 保持 110 列默认版面。
 
 `--output` 指向目录，目录不存在时会自动创建。使用 `--name` 可以固定文件名前缀：
 
@@ -170,7 +172,10 @@ ecs compare ./fleet/*.json \
 | `network` | 出口 IP、ASN、地理位置与多源 IP 质量 | 内置 HTTP 客户端 + 多家 IP 情报数据源 | Full |
 | `bgp` | 出口前缀、起源 ASN、RPKI 与 AS 路径样本 | RouteViews 公共 RIB API | Standard / Full |
 | `cpu` | 单/多线程事件率与 P95、扩展倍率、每线程效率、压力诊断及条件复测 | `sysbench` + 内置统计 | Standard / Full |
+| `zstd` | 固定 Silesia corpus 的压缩/解压 MB/s、1T/全 worker 扩展倍率和每 worker 效率 | 固定 zstd 1.5.7 + corpus SHA-256 | Standard / Full |
+| `npb` | NPB-OMP EP + FT Class A 的 1T/全线程 Mop/s、Mop/s/thread 与扩展倍率 | NASA NPB 3.4.4、GNU Fortran/OpenMP | Standard / Full |
 | `memory` | Copy、Scale、Add、Triad 带宽、扩展倍率、稳定性、压力诊断及条件复测 | 官方 STREAM + 内置统计 | Standard / Full |
+| `crypto` | AES-256-GCM、ChaCha20-Poly1305、SHA-256 的 1/全 worker 原始吞吐与扩展倍率 | 固定 OpenSSL 3.5.7 `speed` | Standard / Full |
 | `disk` | Direct I/O、混合读写、Crystal/ATTO 矩阵、延迟、压力诊断及条件复测 | `fio` + 内置统计 | Standard / Full |
 | `dns` | 各公共解析器的 P50、P95、抖动与成功率 | 内置 DNS/UDP 客户端 | Standard / Full |
 | `latency` | 各目标 TCP P50/P95/抖动/成功率与 ICMP 往返 | 内置 TCP 客户端 + `ping` | Standard / Full |
@@ -185,7 +190,21 @@ ecs compare ./fleet/*.json \
 | `route` | 正向路径、探测/可见/超时跳点与逐目标耗时 | 官方 NextTrace Tiny + 内置统计 | Standard / Full |
 | `backtrace` | 四城三网回程路径与骨干特征 | 官方 NextTrace Tiny + 内置特征表 | Standard / Full |
 
-一键脚本会为缺失的 `sysbench`、STREAM、`fio`、`iperf3`、`ping` 和 NextTrace Tiny 准备与当前架构匹配的临时工具，并校验清单与摘要。Ookla 不进入该工具包；仅在选中 `ookla` 且本机缺少 `speedtest` 时，脚本才会从独立的官方签名软件源临时下载并解包。无法取得可核验工具时，对应项目会明确标记为跳过，不生成替代成绩。
+一键脚本会为缺失的 `sysbench`、zstd 与固定 corpus、NPB EP/FT、OpenSSL、STREAM、`fio`、`iperf3`、`ping` 和 NextTrace Tiny 准备与当前架构匹配的临时工具，并校验 manifest、二进制 SHA-256 与 corpus SHA-256。Ookla 不进入该工具包；仅在选中 `ookla` 且本机缺少 `speedtest` 时，脚本才会从独立的官方签名软件源临时下载并解包。无法取得可核验工具时，对应项目会明确标记为跳过，不生成替代成绩。
+
+发行工具先按实际用途裁剪，再原生或交叉编译；交叉目标只在全部编译结束后交给 QEMU 做短功能 smoke。NPB 发行二进制始终是 Class A，交叉 CI 另用不入包的 Class S 验证目标运行时与 OpenMP，避免在模拟器里执行没有性能意义的 Class A 重负载。
+
+本地性能骨架按标准工具分工，新模块不会被并入 CPU 自定义综合分：
+
+| 负载 | 工具/模块 |
+| --- | --- |
+| CPU scalar / vCPU scaling | sysbench (`cpu`) |
+| Real-world integer/compress | zstd (`zstd`) |
+| FP / FFT compute | NPB EP + FT (`npb`) |
+| Memory bandwidth | STREAM (`memory`) |
+| Crypto acceleration | OpenSSL speed (`crypto`) |
+| Storage | fio (`disk`) |
+| Network | iperf3 (`speed`) |
 
 ## 选择测试项目
 
@@ -193,7 +212,7 @@ ecs compare ./fleet/*.json \
 
 ```bash
 # 只运行本地资源与性能测试
-ecs --only system,cpu,memory,disk \
+ecs --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local \
   --format json,txt \
   --output ./reports
@@ -246,7 +265,7 @@ ecs --only ookla \
 
 ```bash
 # 全套本地性能测试，不产生网络请求
-ecs --only system,cpu,memory,disk \
+ecs --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local \
   --format json,txt \
   --output ./reports

@@ -78,7 +78,7 @@
 
 `methodology.kind` 明确结果证据等级：
 
-- `standard-benchmark`：由 sysbench、官方 STREAM、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
+- `standard-benchmark`：由 sysbench、zstd、NASA NPB-OMP、官方 STREAM、OpenSSL speed、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
 - `protocol-measurement`：DNS、TCP、NextTrace 等协议级现场测量，不是基准分；
 - `provider-assessment`：IP 情报供应商各自的评分或分类；
 - `heuristic`：公开页面和规则得出的启发式判断；
@@ -134,7 +134,7 @@ JSON 保留枚举原值；txt、Markdown 与 HTML 使用当前语言显示类别
 
 `system` 的字段和 measurements 显式记录容器的真实 CPU quota、有效 cpuset、内存上限/当前使用、swap 上限、CPU throttle 累计值、PSI CPU/内存/I/O 的 `some` / `full` 值，以及 cgroup OOM/OOM-kill 计数。来源路径同时写入“cgroup 与 PSI 压力诊断”表；接口不存在时显示 unavailable，不按宿主机物理规格猜测。
 
-CPU、STREAM（`memory`）和 fio（`disk`）会在测试窗口前后采样：
+CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`disk`）会在测试窗口前后采样：
 
 - 测试前 load、PSI `avg10` 用于识别已经存在的争抢；
 - 窗口内 `/proc/stat` steal、cgroup throttle 和 OOM 增量用于识别实际干扰；
@@ -204,6 +204,14 @@ CPU、STREAM（`memory`）和 fio（`disk`）会在测试窗口前后采样：
 STREAM 不可用时只报告标准内存基准未运行，不使用替代后端。评分若使用内存维度，会对
 每个 STREAM kernel 的 1T/NT 取中位数，
 四个 kernel 子组等权；缺少匹配 STREAM 基线或指标时透明列为缺失，不补替代分。
+
+`zstd`、`npb` 和 `crypto` 与 CPU 评分保持独立，不生成跨工具综合分：
+
+- `zstd` 固定 zstd 1.5.7、level 3、5s、1/全 worker 和 `zstd-silesia-l3-v1`。corpus 是 211,938,580 bytes 的 `ecs-silesia-v1.corpus`，SHA-256 为 `8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0`；其 Silesia ZIP 来源 SHA-256 为 `7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e`。指标为 `zstd_{compress,decompress}_{1t,nt}_mb_s`、`zstd_{compress,decompress}_scaling_ratio` 和 `zstd_{compress,decompress}_per_worker_efficiency_percent`。
+- `npb` 只保留 NASA NPB-OMP 3.4.4 的 EP/FT Class A，固定 `-O3 -fopenmp -static`、`randi8`、OpenMP 环境与 1T/全线程。指标为 `npb_{ep,ft}_{1t,nt}_mops` 和 `npb_{ep,ft}_scaling_ratio`；表格同时保留官方 `Mop/s/thread`、耗时与 Verification。只有尺寸/迭代数、线程数、版本、编译参数和 Verification 全部通过才采纳 Mop/s。
+- `crypto` 固定 OpenSSL 3.5.7、16 KiB、5s、`-elapsed -mr -multi` 与 1/全 worker，分别测 AES-256-GCM、ChaCha20-Poly1305 和 SHA-256。指标为 `openssl_{aes_256_gcm,chacha20_poly1305,sha_256}_{1w,nw}_mb_s` 和对应 `*_scaling_ratio`；表格保留 `+F` 行的原始 bytes/s，MB/s 是除以 1,000,000 的可复算表示。
+
+三个模块的 `methodology.parameters` 都包含 method version、实际线程/worker、固定时长和工具二进制 SHA-256。zstd 另包含 corpus 长度/两级 SHA-256 与完整参数指纹；NPB 包含 EP/FT 各自 SHA-256、problem class、编译参数和环境指纹；crypto 包含算法、block、计时/输出模式和六组完整参数指纹。任一口径不同时 `compare` 将其分组，不强行排名。
 
 磁盘 `disk` 结果使用 fio/YABS 当前指标；只要选中 `disk`（无论配置档预设还是
 `--only`），就增加下面三组完整表。两档配置只预选模块集合，不改变这些表的深度：
@@ -313,7 +321,7 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
   "summary": {
     "comparability": "partially_comparable",
     "reports": 3,
-    "modules": 18,
+    "modules": 21,
     "comparable_metrics": 120,
     "improved": 20,
     "regressed": 12,

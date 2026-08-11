@@ -176,6 +176,32 @@ func TestStructuredDiagnosticLabelsTranslate(t *testing.T) {
 	}
 }
 
+func TestLocalBenchmarkReportCopyTranslates(t *testing.T) {
+	original := Current()
+	defer Set(original)
+	Set(LangEN)
+	cases := map[string]string{
+		"zstd 8 worker 压缩吞吐":                                 "zstd 8-worker compression throughput",
+		"zstd 全 worker（8）原始输出":                               "zstd all-workers (8) raw output",
+		"zstd 压缩 1T 100.00 MB/s · 8T 700.00 MB/s · 扩展 7.00×": "zstd compression 1T 100.00 MB/s · 8T 700.00 MB/s · 7.00x scaling",
+		"NPB EP 浮点计算吞吐 8T":                                   "NPB EP floating-point throughput 8T",
+		"NPB FT Class A 全线程（8T）原始输出":                         "NPB FT Class A all threads (8T) raw output",
+		"未找到固定 NPB EP Class A binary，EP 未运行":                 "The pinned NPB EP Class A binary was not found; EP did not run",
+		"AES-256-GCM 8 worker 吞吐":                            "AES-256-GCM 8-worker throughput",
+		"完整参数（ChaCha20-Poly1305 全 worker（8））":                "Full arguments (ChaCha20-Poly1305, all 8 workers)",
+		"OpenSSL speed SHA-256 全 worker（8）原始输出":              "OpenSSL speed SHA-256 all-workers (8) raw output",
+	}
+	for source, want := range cases {
+		if !HasProbeText(source) {
+			t.Errorf("missing local benchmark translation: %q", source)
+			continue
+		}
+		if got := Text(source); got != want {
+			t.Errorf("Text(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
 // 校验错误表与其余译文表同样必须一一对应。
 func TestErrorTablesAreInSync(t *testing.T) {
 	for key, value := range errorChinese {

@@ -438,7 +438,10 @@ func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
 // 方法学长说明，避免把实现细节混入模板正文。
 func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
 	terminal.line("")
-	text := reporter.Text(data, reporter.TextOptions{Color: color, Score: scored, Compact: true})
+	text := reporter.Text(data, reporter.TextOptions{
+		Color: color, Score: scored, Compact: true,
+		Width: terminal.progressColumns(),
+	})
 	_, _ = io.WriteString(terminal.out, text)
 	if text != "" && !strings.HasSuffix(text, "\n") {
 		terminal.line("")
@@ -464,13 +467,28 @@ func (terminal *Terminal) printFiles(files map[string]string) {
 	}
 	sort.Strings(formats)
 	for _, format := range formats {
-		terminal.line(fmt.Sprintf("  %-5s %s", strings.ToUpper(format), files[format]))
+		prefix := fmt.Sprintf("  %-5s ", strings.ToUpper(format))
+		columns := terminal.progressColumns()
+		available := columns - textwidth.Width(prefix)
+		if columns <= 0 || available <= 0 {
+			terminal.line(prefix + files[format])
+			continue
+		}
+		for index, line := range wrapTerminalText(files[format], available) {
+			if index == 0 {
+				terminal.line(prefix + line)
+			} else {
+				terminal.line(strings.Repeat(" ", textwidth.Width(prefix)) + line)
+			}
+		}
 	}
 }
 
 func (terminal *Terminal) printNoUpload() {
 	terminal.line("")
-	terminal.line(terminal.style("2", i18n.T("term.noUpload")))
+	for _, line := range wrapTerminalText(i18n.T("term.noUpload"), terminal.progressColumns()) {
+		terminal.line(terminal.style("2", line))
+	}
 }
 
 func (terminal *Terminal) printTable(table model.Table) {
@@ -530,6 +548,36 @@ func displayWidth(value string) int {
 		}
 	}
 	return width
+}
+
+// wrapTerminalText wraps unstyled terminal UI text by visible columns. The
+// caller applies ANSI styling to each physical line afterwards, so every line
+// closes its own escape sequence and remains safe on basic/256-color terminals.
+func wrapTerminalText(value string, width int) []string {
+	if width <= 0 || textwidth.Width(value) <= width {
+		return []string{value}
+	}
+	lines := make([]string, 0, 2)
+	var current strings.Builder
+	used := 0
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		lines = append(lines, current.String())
+		current.Reset()
+		used = 0
+	}
+	for _, character := range value {
+		characterWidth := textwidth.RuneWidth(character)
+		if used+characterWidth > width {
+			flush()
+		}
+		current.WriteRune(character)
+		used += characterWidth
+	}
+	flush()
+	return lines
 }
 
 func (terminal *Terminal) Error(format string, values ...any) {

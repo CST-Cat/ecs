@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -560,7 +561,13 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 			version = version[:newline]
 		}
 		if runErr != nil || version == "" {
-			version = i18n.T("doctor.unknownVersion")
+			label := i18n.T("doctor.optional")
+			if tool.required {
+				label = i18n.T("doctor.missing")
+				missingRequired = true
+			}
+			fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, padDisplay(label, 8), tool.purpose, i18n.T("doctor.unknownVersion"))
+			continue
 		}
 		fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, padDisplay(i18n.T("doctor.ready"), 8), tool.purpose, version)
 	}
@@ -612,6 +619,10 @@ func doctorTools() []doctorTool {
 	}
 	catalog := []toolMeta{
 		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
+		{name: "zstd", required: true, purpose: "doctor.purpose.zstd", check: identifyPinnedZstd},
+		{name: "npb-ep", required: true, purpose: "doctor.purpose.npbEP", check: identifyNPBBinary("EP")},
+		{name: "npb-ft", required: true, purpose: "doctor.purpose.npbFT", check: identifyNPBBinary("FT")},
+		{name: "openssl", required: true, purpose: "doctor.purpose.openssl", check: identifyPinnedOpenSSL},
 		{name: "fio", required: true, purpose: "doctor.purpose.fio", args: []string{"--version"}},
 		{name: "iperf3", required: true, purpose: "doctor.purpose.iperf3", args: []string{"--version"}},
 		{name: "stream", required: true, purpose: "doctor.purpose.stream", check: identifyOfficialStream},
@@ -690,6 +701,57 @@ func identifyOfficialStream(_ context.Context, path string) (string, error) {
 		}
 	}
 	return "official STREAM", nil
+}
+
+var pinnedZstdVersionPattern = regexp.MustCompile(`(?i)(^|[^0-9])v1\.5\.7([^0-9]|$)`)
+
+func identifyPinnedZstd(ctx context.Context, path string) (string, error) {
+	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	version := strings.TrimSpace(string(output))
+	if err != nil {
+		return "", err
+	}
+	if !pinnedZstdVersionPattern.MatchString(version) {
+		return "", fmt.Errorf("zstd 1.5.7 required")
+	}
+	return "zstd 1.5.7", nil
+}
+
+var pinnedOpenSSLVersionPattern = regexp.MustCompile(`(?m)^OpenSSL\s+3\.5\.7(?:\s|$)`)
+
+func identifyPinnedOpenSSL(ctx context.Context, path string) (string, error) {
+	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
+	version := strings.TrimSpace(string(output))
+	if err != nil {
+		return "", err
+	}
+	if !pinnedOpenSSLVersionPattern.MatchString(version) {
+		return "", fmt.Errorf("OpenSSL 3.5.7 required")
+	}
+	return "OpenSSL 3.5.7", nil
+}
+
+func identifyNPBBinary(benchmark string) func(context.Context, string) (string, error) {
+	return func(_ context.Context, path string) (string, error) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		text := string(data)
+		for _, marker := range []string{
+			"NAS Parallel Benchmarks (NPB3.4-OMP)",
+			" - " + benchmark + " Benchmark",
+			"Benchmark Completed.",
+			"Mop/s total",
+			"Verification",
+			"3.4.4",
+		} {
+			if !strings.Contains(text, marker) {
+				return "", fmt.Errorf("NPB %s marker %q not found", benchmark, marker)
+			}
+		}
+		return "NPB 3.4.4 " + benchmark + " (Class A verified at run)", nil
+	}
 }
 
 // resolveLanguage 在解析命令前先把 --lang 取出来。

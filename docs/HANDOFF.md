@@ -1,14 +1,13 @@
 # 工作交接与后续计划
 
-> 更新于 2026-08-08。仓库 <https://github.com/CST-Cat/ecs>，默认分支 `main`，当前发布目标为 `v0.6.0`。
+> 更新于 2026-08-10。仓库 <https://github.com/CST-Cat/ecs>，默认分支 `main`，当前工作位于 `v0.6.5` 之后的 Unreleased。
 > 后续一律直接在 `main` 上开发，不再新建分支。
 >
-> 当前路由实现为 NextTrace Tiny，性能链路为官方 STREAM 1T/NT 四 kernel、fio JSON
-> QD1 latency 和 sysbench CPU；报告默认四格式 JSON/txt/md/html。
+> 当前路由实现为 NextTrace Tiny；本地性能链路为 sysbench、zstd、NPB EP+FT、STREAM、OpenSSL speed、fio，网络吞吐为 iperf3。报告默认四格式 JSON/txt/md/html。
 
 ## 一、当前状态
 
-`main` 当前维护 Linux-only 的 v0.6.0 重构：标准性能链路固定为 sysbench CPU、官方 STREAM、fio、iperf3；路由与回程固定使用官方 NextTrace Tiny；CI 负责七架构工具构建、manifest、摘要和真实 smoke test。
+`main` 当前维护 Linux-only 实现：标准性能链路固定为 sysbench CPU、zstd 1.5.7 + Silesia corpus、NASA NPB-OMP 3.4.4 EP/FT Class A、官方 STREAM、OpenSSL 3.5.7 speed、fio 和 iperf3；路由与回程固定使用官方 NextTrace Tiny；CI 负责七架构的 10 个工具、manifest、摘要、corpus 与真实 smoke test。
 
 ### 已解决的问题
 
@@ -59,9 +58,13 @@
   以及 `pkg`（FreeBSD）与 `brew`（macOS）包管理器分支。
 - `.github/workflows/ci.yml`：`cross` job 调用 `make cross`，随 Makefile 自动收敛，未改动。
 
-当前 CI 通过七架构 matrix 逐架构真实构建和 smoke；任一上游工具/架构不满足配置能力会
-诚实失败，不用 fixture 或假 binary 继续打包。release 只消费 tools job 传递的真实 stage，
-并由 `scripts/package.sh` 产出 7 个 tar.zst 与 `checksums.txt`。
+当前 CI 通过七架构 matrix 逐架构真实构建和 smoke；新增上游先按实际用途裁剪，四个交叉
+目标由宿主交叉编译器完成全部构建后才交给 QEMU 做短功能验证，绝不在 QEMU 中编译或跑
+性能测试。NPB 发行包仍只含 EP/FT Class A；交叉 job 用同源码/参数的临时 Class S 完成
+Verification，并对发行 Class A ELF 做静态链接、架构、摘要与 manifest 校验。任一能力不满足
+都会诚实失败，不用 fixture 或假 binary 继续打包。release 只消费 tools job 的真实 stage，
+并由 `scripts/package.sh` 产出 7 个 tar.gz 与 `checksums.txt`。工具包使用 gzip，避免最小系统因尚无
+zstd 而无法解出工具包中的固定 zstd；归档摘要、manifest、binary/corpus 摘要校验保持不变。
 
 ### 2.3 已重写的测试（`4457bda` 的妥协已撤销）
 
@@ -96,13 +99,16 @@ P0 初版仍用 `#!/bin/sh` 假脚本冒充 fio / sysbench / iperf3，随后已�
 | --- | --- |
 | fio | 真实 `fio` 在临时目录跑完整 53 作业矩阵和固定 QD1 latency（配置档只决定模块预设）；断言探测到的引擎与队列深度标注自洽 |
 | STREAM/sysbench | 真实官方 STREAM 跑 1T/NT 的 Copy/Scale/Add/Triad；STREAM 缺失时明确报告内存基准未运行；CPU 仍跑 sysbench |
+| zstd | 固定 v1.5.7/level 3/5s/1T+NT；只保留 benchmark/压缩/解压/多线程能力，运行前校验 Silesia ZIP 与拼接 corpus SHA-256，smoke 真实压缩/解压 |
+| NPB | 发布包只编译 gfortran/OpenMP EP/FT Class A；原生 smoke 跑 A，交叉 QEMU smoke 跑同工具链临时 Class S，均检查官方 header、线程、参数与 Verification |
+| OpenSSL | 裁掉 TLS/网络/动态组件和无关算法族，只生成上游 mandatory files 并构建官方 `apps/openssl` 依赖；真实运行 `speed -mr -multi 1` 的三种固定算法 |
 | iperf3 | 在回环起真实 `iperf3 -s`，跑 TCP 双向与 UDP |
 | ping | 真实 `ping 127.0.0.1` |
 | NextTrace | 真实官方 Tiny 的 JSON 路径探测（缺失时由 `run.sh` 临时准备） |
 
 全部不依赖公网。`requireTool` 在 CI（`CI` 环境变量）下缺工具直接 `Fatal`，
 本地缺工具才 `Skip`，避免测试静默跳过后仍然显示为绿；`ci.yml` 的 `test` 与 `race`
-tools job 在架构容器中安装并真实验证 sysbench、STREAM、fio、iperf3、ping 和 NextTrace Tiny；
+tools job 在架构容器中安装并真实验证 sysbench、zstd、NPB EP/FT、OpenSSL、STREAM、fio、iperf3、ping 和 NextTrace Tiny；
 宿主机只运行 parser/renderer/config 等确定性 Go tests，真实外部工具 live tests 在容器 smoke 中完成。
 
 第三方 HTTP 数据源（IP 质量、流媒体）的解析器仍用固定样本，但**不再以此为终点**：
@@ -263,7 +269,7 @@ bash -n scripts/package.sh
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
 apt-get install -y sysbench fio iperf3
-# STREAM、NextTrace Tiny 和 iputils ping 由 run.sh/ecs-tools 按架构临时提供
+# zstd/corpus、NPB、OpenSSL、STREAM、NextTrace Tiny 和 iputils ping 由 run.sh/ecs-tools 按架构临时提供
 # ./install.sh --with-benchmarks 只持久安装上面的三个系统包
 ```
 
@@ -271,7 +277,7 @@ apt-get install -y sysbench fio iperf3
 
 ## 六、开发约束（摘自 CONTRIBUTING.md，以该文件为准）
 
-1. 性能成绩只能来自 sysbench / 官方 STREAM / fio / iperf3，**不得引入自研工作负载或替代分数**；
+1. 性能成绩只能来自 sysbench / zstd / NASA NPB EP+FT / 官方 STREAM / OpenSSL speed / fio / iperf3，**不得引入自研工作负载或替代分数**；
 2. 不做跨供应商平均、跨节点均值、综合跑分；
 3. 反爬、超时、限流一律返回"未知"，不得判成"不解锁"；
 4. 外部程序只作可关闭的适配器，记录版本与 SHA-256，参数以数组传入不经过 shell；

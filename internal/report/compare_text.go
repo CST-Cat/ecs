@@ -19,7 +19,7 @@ const comparisonBarWidth = 12
 // vertical blocks when column count would stop being readable.
 func ComparisonText(data comparison.Report, color termcolor.Level) string {
 	r := &comparisonTextRenderer{
-		textRenderer: textRenderer{palette: termcolor.Palette{Level: color}},
+		textRenderer: textRenderer{palette: termcolor.Palette{Level: color}, width: textWidth},
 		data:         data,
 		layout:       comparisonLayoutFor(len(data.Inputs)),
 	}

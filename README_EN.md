@@ -4,7 +4,7 @@
 
 An ad-free, locally written, and auditable all-in-one benchmark for Linux VPS instances.
 
-`ecs` combines system inventory, CPU, memory, disk, network, IP quality, streaming-service checks, route diagnostics, and China return-path analysis into one structured result. The same data can be rendered as JSON, plain text, Markdown, or a standalone HTML report. Every result retains its method, parameters, tool, duration, warnings, valid/planned sample coverage, and raw evidence so it can be reviewed or rendered again later.
+`ecs` combines system inventory, scalar/multicore CPU, compression, floating-point/FFT, memory, cryptography, disk, network, IP quality, streaming-service checks, route diagnostics, and China return-path analysis into one structured result. The same data can be rendered as JSON, plain text, Markdown, or a standalone HTML report. Every result retains its method, full arguments, tool version/binary SHA-256, duration, warnings, valid/planned sample coverage, and raw evidence so it can be reviewed or rendered again later.
 
 The project follows three rules:
 
@@ -14,9 +14,9 @@ The project follows three rules:
 
 ## Quick start
 
-The one-line runner supports Linux only. It downloads and verifies the latest Release, reuses tools already installed on the system, and stages missing components inside a temporary directory for the current run. The temporary files are removed afterward, without installing anything into system directories.
+The one-line runner supports Linux only. It downloads and verifies the latest Release and reuses compatible general-purpose tools already installed on the system. Pinned zstd/corpus, NPB, OpenSSL, and related benchmark components are staged from the verified release tool bundle for the current run. Temporary files are removed afterward, without installing anything into system directories.
 
-`ecs` provides 18 test modules in total. Standard runs 16 of them by default, while Full runs all 18.
+`ecs` provides 21 test modules in total. Standard runs 19 of them by default, while Full runs all 21.
 
 ### Standard: everyday benchmark
 
@@ -25,9 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
   sh -s -- --profile standard --yes --output ./reports
 ```
 
-Tests: system and hardware inventory, BGP, CPU, memory, disk, DNS, network latency, iperf3 throughput, ports, NAT, blocklists, common services, China Telecom/Unicom/Mobile HTTP speed, streaming services, route diagnostics, and China return paths.
+Tests: system and hardware inventory, BGP, CPU, zstd compression, NPB EP/FT, STREAM memory, OpenSSL cryptography, disk, DNS, network latency, iperf3 throughput, ports, NAT, blocklists, common services, China Telecom/Unicom/Mobile HTTP speed, streaming services, route diagnostics, and China return paths.
 
-Module IDs: `system`, `bgp`, `cpu`, `memory`, `disk`, `dns`, `latency`, `speed`, `ports`, `nat`, `blacklist`, `apps`, `cnspeed`, `media`, `route`, and `backtrace`.
+Module IDs: `system`, `bgp`, `cpu`, `zstd`, `npb`, `memory`, `crypto`, `disk`, `dns`, `latency`, `speed`, `ports`, `nat`, `blacklist`, `apps`, `cnspeed`, `media`, `route`, and `backtrace`.
 
 ### Full: all tests
 
@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
   sh -s -- --profile full --yes --output ./reports
 ```
 
-Full adds multi-source IP quality (`network`) and the official Ookla Speedtest (`ookla`) to Standard's 16 modules, for all 18 modules in total. Both depend on external commercial services; free or public access paths may be affected by quotas, caches, and database update delays, so their results are supplemental. Ookla can also consume substantial traffic and processes measurement data under its own terms; it is outside `ecs`'s local-report guarantee.
+Full adds multi-source IP quality (`network`) and the official Ookla Speedtest (`ookla`) to Standard's 19 modules, for all 21 modules in total. Both depend on external commercial services; free or public access paths may be affected by quotas, caches, and database update delays, so their results are supplemental. Ookla can also consume substantial traffic and processes measurement data under its own terms; it is outside `ecs`'s local-report guarantee.
 
 > `speed`, `cnspeed`, and `ookla` may saturate the connection. Traffic is duration-based and has no fixed byte limit.
 
@@ -46,7 +46,7 @@ Full adds multi-source IP quality (`network`) and the official Ookla Speedtest (
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
-  sh -s -- --only system,cpu,memory,disk \
+  sh -s -- --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local --yes --format json,txt --output ./reports
 ```
 
@@ -55,7 +55,7 @@ Common selections:
 | Goal | `--only` value | Tests |
 | --- | --- | --- |
 | System overview | `system` | Operating system, virtualization, and hardware inventory |
-| Local performance | `system,cpu,memory,disk` | System, CPU, memory, and disk with no network requests |
+| Local performance | `system,cpu,zstd,npb,memory,crypto,disk` | System, scalar/multicore CPU, compression, FP/FFT, memory, cryptography, and disk with no network requests |
 | BGP and reputation | `bgp,blacklist` | Public BGP observations and DNS blocklists |
 | Multi-source IP quality | `network` | Commercial and third-party IP intelligence; included by Full |
 | Network quality | `dns,latency,speed,ports,nat` | DNS, latency, iperf3, ports, and NAT |
@@ -64,7 +64,7 @@ Common selections:
 | China bandwidth | `cnspeed` | Community HTTP nodes; included by Standard |
 | Ookla speed test | `ookla` | Official proprietary client; included by Full |
 
-All 18 module IDs can be combined freely. See the [test modules and tools](#test-modules-and-tools) table below for every ID, test, and implementation.
+All 21 module IDs can be combined freely. See the [test modules and tools](#test-modules-and-tools) table below for every ID, test, and implementation.
 
 Running the one-line script without test options opens the interactive wizard when a terminal is available. Supplying `--profile`, `--only`, or other test options runs directly; cron and CI environments are always non-interactive.
 
@@ -97,7 +97,9 @@ All four formats show valid/planned observations and a proportional bar for ever
 
 Evidence also carries a stable grade: `complete`, `partial`, `insufficient`, or `not_planned`. Timeouts, DNS errors, refused connections, rate limits, HTTP rejections, parse errors, missing tools, and related failures are stored as stable machine fields in `failures[]` instead of being buried only in prose; txt, Markdown, and HTML render them as well.
 
-`system` reports effective cgroup CPU/memory limits, cpusets, CPU throttling, PSI CPU/memory/I/O pressure, and OOM events. CPU, STREAM, and fio are retried once only when pre-test load, steal, PSI, cgroup throttling, or OOM interference is detected; clean runs are never extended unconditionally. Selection first discards attempts without valid evidence, then uses the less-interfered attempt, keeping the first on a tie—never whichever benchmark number is higher. JSON retains both attempts, their evidence, metrics, and interference reasons.
+`system` reports effective cgroup CPU/memory limits, cpusets, CPU throttling, PSI CPU/memory/I/O pressure, and OOM events. CPU, zstd, NPB, STREAM, OpenSSL speed, and fio are retried once only when pre-test load, steal, PSI, cgroup throttling, or OOM interference is detected; clean runs are never extended unconditionally. Selection first discards attempts without valid evidence, then uses the less-interfered attempt, keeping the first on a tie—never whichever benchmark number is higher. JSON retains both attempts, their evidence, metrics, and interference reasons.
+
+Interactive txt reports use the detected terminal width; labels, table columns, and data bars contract together. Colorless, 8/16-color, 256-color, and truecolor terminals share the same semantic hierarchy, while colorless output preserves differences through bar length and density characters. File-based txt reports retain the default 110-column layout.
 
 `--output` names a directory, which is created if necessary. Use `--name` to set a stable filename prefix:
 
@@ -170,7 +172,10 @@ A numeric comparison is made only when module ID, metric key, `method`, unit, pe
 | `network` | Egress IP, ASN, geolocation, and multi-source IP quality | Built-in HTTP client + multiple IP intelligence providers | Full |
 | `bgp` | Egress prefix, origin ASN, RPKI, and AS path samples | RouteViews public RIB API | Standard / Full |
 | `cpu` | Single/multi-thread rate and P95, scaling, per-thread efficiency, pressure diagnostics, and conditional retry | `sysbench` + built-in statistics | Standard / Full |
+| `zstd` | Compression/decompression MB/s on a fixed Silesia corpus, 1/all-worker scaling, and per-worker efficiency | Pinned zstd 1.5.7 + corpus SHA-256 | Standard / Full |
+| `npb` | NPB-OMP EP + FT Class A 1/all-thread Mop/s, Mop/s/thread, and scaling | NASA NPB 3.4.4 with GNU Fortran/OpenMP | Standard / Full |
 | `memory` | Copy, Scale, Add, and Triad bandwidth, scaling, stability, pressure diagnostics, and conditional retry | Official STREAM + built-in statistics | Standard / Full |
+| `crypto` | 1/all-worker raw throughput and scaling for AES-256-GCM, ChaCha20-Poly1305, and SHA-256 | Pinned OpenSSL 3.5.7 `speed` | Standard / Full |
 | `disk` | Direct I/O, mixed workloads, Crystal/ATTO matrices, latency, pressure diagnostics, and conditional retry | `fio` + built-in statistics | Standard / Full |
 | `dns` | Per-resolver P50, P95, jitter, and success rate | Built-in DNS/UDP client | Standard / Full |
 | `latency` | Per-target TCP P50/P95/jitter/success and ICMP round trip | Built-in TCP client + `ping` | Standard / Full |
@@ -185,7 +190,21 @@ A numeric comparison is made only when module ID, metric key, `method`, unit, pe
 | `route` | Forward path, probed/visible/timed-out hops, and per-target duration | Official NextTrace Tiny + built-in statistics | Standard / Full |
 | `backtrace` | China return paths and backbone signatures across four cities and three carriers | Official NextTrace Tiny + built-in signature table | Standard / Full |
 
-The one-line runner stages verified, architecture-matched copies of missing `sysbench`, STREAM, `fio`, `iperf3`, `ping`, and NextTrace Tiny tools. Ookla is never included in that tool bundle. If `ookla` is selected and `speedtest` is missing, the runner downloads and extracts it temporarily from a separate, signed official package source. If no verifiable tool is available, the affected module is explicitly skipped instead of producing a substitute score.
+The one-line runner stages verified, architecture-matched copies of missing `sysbench`, zstd plus its fixed corpus, NPB EP/FT, OpenSSL, STREAM, `fio`, `iperf3`, `ping`, and NextTrace Tiny tools. It verifies the manifest, binary SHA-256 values, and corpus SHA-256. Ookla is never included in that tool bundle. If `ookla` is selected and `speedtest` is missing, the runner downloads and extracts it temporarily from a separate, signed official package source. If no verifiable tool is available, the affected module is explicitly skipped instead of producing a substitute score.
+
+Release tools are feature-trimmed before native or cross compilation. Cross targets are handed to QEMU only for short functional smoke tests after compilation is complete. Shipped NPB binaries always remain Class A; cross CI builds unshipped Class S EP/FT binaries from the same source and toolchain to validate the target runtime and OpenMP without running a meaningless heavy Class A workload under emulation.
+
+The local performance skeleton assigns one standard tool to each workload. The new modules remain separate from the CPU composite and do not create a custom aggregate score:
+
+| Workload | Tool/module |
+| --- | --- |
+| CPU scalar / vCPU scaling | sysbench (`cpu`) |
+| Real-world integer/compress | zstd (`zstd`) |
+| FP / FFT compute | NPB EP + FT (`npb`) |
+| Memory bandwidth | STREAM (`memory`) |
+| Crypto acceleration | OpenSSL speed (`crypto`) |
+| Storage | fio (`disk`) |
+| Network | iperf3 (`speed`) |
 
 ## Selecting tests
 
@@ -193,7 +212,7 @@ Profiles select the default module set only. Standard and Full use the same test
 
 ```bash
 # Local inventory and performance only
-ecs --only system,cpu,memory,disk \
+ecs --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local \
   --format json,txt \
   --output ./reports
@@ -246,7 +265,7 @@ Profiles control what is tested. `--exposure` independently controls which desti
 
 ```bash
 # Complete local performance set with no network requests
-ecs --only system,cpu,memory,disk \
+ecs --only system,cpu,zstd,npb,memory,crypto,disk \
   --exposure local \
   --format json,txt \
   --output ./reports

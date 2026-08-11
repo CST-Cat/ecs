@@ -28,15 +28,18 @@ var chinese = map[string]string{
 	"cli.error":          "错误",
 
 	// ── 配置档 ──────────────────────────────────────────────
-	"profile.standard": "标准配置：16 个本地与公共模块（含 cnspeed；推荐）",
-	"profile.full":     "完整配置：全部 18 个模块（额外包含多源 IP 质量与 Ookla）",
+	"profile.standard": "标准配置：19 个本地与公共模块（含 cnspeed；推荐）",
+	"profile.full":     "完整配置：全部 21 个模块（额外包含多源 IP 质量与 Ookla）",
 
 	// ── 模块名称 ────────────────────────────────────────────
 	"module.system.title":    "系统与资源",
 	"module.network.title":   "网络与 IP 质量",
 	"module.bgp.title":       "BGP 与互联观测",
 	"module.cpu.title":       "CPU 性能",
+	"module.zstd.title":      "zstd 压缩性能",
+	"module.npb.title":       "NPB EP + FT 计算性能",
 	"module.memory.title":    "内存性能",
+	"module.crypto.title":    "服务器密码学性能",
 	"module.disk.title":      "磁盘性能",
 	"module.dns.title":       "DNS 质量",
 	"module.latency.title":   "网络延迟",
@@ -291,15 +294,18 @@ var english = map[string]string{
 	"cli.error":          "error",
 
 	// ── Profiles ────────────────────────────────────────────
-	"profile.standard": "Standard profile: 16 local and public modules (including cnspeed; recommended)",
-	"profile.full":     "Full profile: all 18 modules (adds multi-source IP quality and Ookla)",
+	"profile.standard": "Standard profile: 19 local and public modules (including cnspeed; recommended)",
+	"profile.full":     "Full profile: all 21 modules (adds multi-source IP quality and Ookla)",
 
 	// ── Module titles ───────────────────────────────────────
 	"module.system.title":    "System & Resources",
 	"module.network.title":   "Network & IP Quality",
 	"module.bgp.title":       "BGP & Peering Observation",
 	"module.cpu.title":       "CPU Performance",
+	"module.zstd.title":      "zstd Compression",
+	"module.npb.title":       "NPB EP + FT Compute",
 	"module.memory.title":    "Memory Performance",
+	"module.crypto.title":    "Server Cryptography Performance",
 	"module.disk.title":      "Disk Performance",
 	"module.dns.title":       "DNS Quality",
 	"module.latency.title":   "Network Latency",

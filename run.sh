@@ -10,8 +10,8 @@
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 已有的 sysbench/stream/fio/iperf3/ping/nexttrace-tiny 等组件优先使用，不改动系统。
-#   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.zst 获取，
+#   - 已有的通用组件优先使用；固定口径基准选中时使用发行工具包内的指定版本与数据。
+#   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
 #     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin。
 #     绝不调用系统包安装器，也不改动系统数据库。
 #   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
@@ -295,7 +295,7 @@ OOKLA_RPM_OS=""
 OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
-TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.zst"
+TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.gz"
 TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
 TOOLS_MANIFEST_FILE="$WORK/ecs-tools.manifest.json"
 TOOLS_LIST_FILE="$WORK/ecs-tools.list"
@@ -307,6 +307,7 @@ TOOLS_ARCHIVE_DIGESTS="$WORK/ecs-tools.sha256"
 TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
 TOOLS_BASE=${TOOLS_BASE%/}
 TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
+ZSTD_CORPUS_SHA256='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
 
 # Install the cleanup trap as soon as WORK exists.  This also covers argument
 # validation and manifest failures that happen before the test body starts.
@@ -399,7 +400,7 @@ tool_available() {
 
 archive_tool_for() {
   case "$1" in
-    sysbench|stream|fio|iperf3|nexttrace-tiny|ping) printf '%s\n' "$1" ;;
+    sysbench|zstd|npb-ep|npb-ft|openssl|stream|fio|iperf3|nexttrace-tiny|ping) printf '%s\n' "$1" ;;
     *) return 1 ;;
   esac
 }
@@ -499,15 +500,15 @@ validate_tools_manifest() {
   tools_manifest_field_values architecture "$tools_manifest_path" >"$WORK/tools-manifest.arch"
   tools_manifest_arch_count=$(tools_value_count "$WORK/tools-manifest.arch")
   # One top-level architecture plus one for every declared tool.
-  [ "$tools_manifest_arch_count" -eq 7 ] || return 1
+  [ "$tools_manifest_arch_count" -eq 11 ] || return 1
   while IFS= read -r tools_manifest_arch; do
     [ "$tools_manifest_arch" = "$ARCH" ] || return 1
   done <"$WORK/tools-manifest.arch"
 
   tools_manifest_field_values name "$tools_manifest_path" >"$WORK/tools-manifest.names"
-  [ "$(tools_value_count "$WORK/tools-manifest.names")" -eq 6 ] || return 1
+  [ "$(tools_value_count "$WORK/tools-manifest.names")" -eq 10 ] || return 1
   sort -u "$WORK/tools-manifest.names" >"$WORK/tools-manifest.names.unique"
-  printf '%s\n' fio iperf3 nexttrace-tiny ping stream sysbench >"$WORK/tools-manifest.names.expected"
+  printf '%s\n' fio iperf3 nexttrace-tiny npb-ep npb-ft openssl ping stream sysbench zstd >"$WORK/tools-manifest.names.expected"
   cmp -s "$WORK/tools-manifest.names.unique" "$WORK/tools-manifest.names.expected" || return 1
 
   # Every tool record must expose a usable or explicitly unavailable digest.
@@ -515,7 +516,7 @@ validate_tools_manifest() {
   # is present; unknown/unavailable is allowed for source-built packages whose
   # release manifest has no reproducible source digest.
   tools_manifest_field_values sha256 "$tools_manifest_path" >"$WORK/tools-manifest.sha256"
-  [ "$(tools_value_count "$WORK/tools-manifest.sha256")" -eq 6 ] || return 1
+  [ "$(tools_value_count "$WORK/tools-manifest.sha256")" -eq 10 ] || return 1
   while IFS= read -r tools_manifest_sha; do
     case "$tools_manifest_sha" in
       unknown|unavailable) ;;
@@ -524,12 +525,18 @@ validate_tools_manifest() {
     esac
   done <"$WORK/tools-manifest.sha256"
 
+  tools_manifest_field_values corpus_sha256 "$tools_manifest_path" >"$WORK/tools-manifest.corpus-sha256"
+  [ "$(tools_value_count "$WORK/tools-manifest.corpus-sha256")" -eq 1 ] || return 1
+  grep -F -x "$ZSTD_CORPUS_SHA256" "$WORK/tools-manifest.corpus-sha256" >/dev/null || return 1
+
   if command -v jq >/dev/null 2>&1; then
     jq -e --arg arch "$ARCH" '
       .schema_version == "ecs-tools.manifest/v1" and
       .architecture == $arch and
-      (.tools | type == "array" and length == 6) and
-      ([.tools[].name] | sort) == ["fio", "iperf3", "nexttrace-tiny", "ping", "stream", "sysbench"] and
+      (.tools | type == "array" and length == 10) and
+      ([.tools[].name] | sort) == ["fio", "iperf3", "nexttrace-tiny", "npb-ep", "npb-ft", "openssl", "ping", "stream", "sysbench", "zstd"] and
+      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_sha256 == "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0") and
+      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_bytes == 211938580) and
       (all(.tools[]; has("name") and has("architecture") and has("sha256") and
         (.architecture == $arch) and
         ((.sha256 == "unknown") or (.sha256 == "unavailable") or (.sha256 | test("^[A-Fa-f0-9]{64}$")))))
@@ -540,22 +547,14 @@ validate_tools_manifest() {
 
 tools_tar_list() {
   tools_archive_path=$1
-  if tar --zstd -tf "$tools_archive_path" 2>/dev/null; then
-    return 0
-  fi
-  command -v zstd >/dev/null 2>&1 || return 1
-  zstd -q -dc "$tools_archive_path" | tar -tf -
+  tar -tzf "$tools_archive_path"
 }
 
 tools_tar_extract_member() {
   tools_archive_path=$1
   tools_extract_path=$2
   tools_member=$3
-  if tar --zstd -xf "$tools_archive_path" -C "$tools_extract_path" "$tools_member" >/dev/null 2>&1; then
-    return 0
-  fi
-  command -v zstd >/dev/null 2>&1 || return 1
-  zstd -q -dc "$tools_archive_path" | tar -xf - -C "$tools_extract_path" "$tools_member"
+  tar -xzf "$tools_archive_path" -C "$tools_extract_path" "$tools_member"
 }
 
 validate_tools_archive_layout() {
@@ -567,9 +566,10 @@ validate_tools_archive_layout() {
   done <"$tools_list_path"
   grep -F -x 'bin/' "$tools_list_path" >/dev/null || return 1
   grep -F -x 'manifest.json' "$tools_list_path" >/dev/null || return 1
-  for tools_entry in sysbench stream fio iperf3 nexttrace-tiny ping; do
+  for tools_entry in sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping; do
     grep -F -x "bin/$tools_entry" "$tools_list_path" >/dev/null || return 1
   done
+  grep -F -x 'share/ecs/corpus/ecs-silesia-v1.corpus' "$tools_list_path" >/dev/null || return 1
   return 0
 }
 
@@ -615,6 +615,23 @@ prepare_tools_archive() {
     cp "$tools_source" "$TOOLS_STAGING_BIN/$tools_requested" || return 1
     chmod 0755 "$TOOLS_STAGING_BIN/$tools_requested" || return 1
   done
+  case " $TOOLS_REQUESTED " in
+    *" zstd "*)
+      tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" \
+        'share/ecs/corpus/ecs-silesia-v1.corpus' || return 1
+      zstd_corpus_path="$TOOLS_EXTRACT_ROOT/share/ecs/corpus/ecs-silesia-v1.corpus"
+      [ -f "$zstd_corpus_path" ] && [ ! -L "$zstd_corpus_path" ] || return 1
+      if command -v sha256sum >/dev/null 2>&1; then
+        zstd_corpus_actual=$(sha256sum "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+      elif command -v shasum >/dev/null 2>&1; then
+        zstd_corpus_actual=$(shasum -a 256 "$zstd_corpus_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+      else
+        return 1
+      fi
+      [ "$zstd_corpus_actual" = "$ZSTD_CORPUS_SHA256" ] || return 1
+      export ECS_ZSTD_CORPUS="$zstd_corpus_path"
+      ;;
+  esac
   # Do not alter MISSING_TOOLS or PATH until every requested binary has passed
   # its own digest check.  A later mismatch therefore keeps the whole request
   # unresolved instead of exposing a partially verified tool set.
@@ -1287,6 +1304,24 @@ collect_missing_tools() {
     tool_words=$(printf '%s' "$tools" | tr ',' ' ')
     for tool in $tool_words; do
       case "$tool" in
+        zstd)
+          # The benchmark contract pins both executable and corpus. An
+          # arbitrary system command named zstd is not interchangeable.
+          add_missing_tool zstd
+          add_tools_request zstd
+          ;;
+        npb-ep|npb-ft)
+          # Class, OpenMP implementation and compiler flags are embedded in
+          # the release binaries and verified from every benchmark output.
+          add_missing_tool "$tool"
+          add_tools_request "$tool"
+          ;;
+        openssl)
+          # Crypto results use the pinned LTS build rather than the host TLS
+          # utility, whose version and Configure options are distribution-specific.
+          add_missing_tool openssl
+          add_tools_request openssl
+          ;;
         nexttrace-tiny)
           NEXTTRACE_REQUESTED=1
           if ! nexttrace_tool_exists; then

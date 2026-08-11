@@ -478,3 +478,27 @@ func TestFullReportPrintsCompleteTextAndPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestFullReportUsesDetectedTerminalWidth(t *testing.T) {
+	var output bytes.Buffer
+	terminal := NewWithColor(&output, termcolor.LevelANSI256)
+	terminal.progressWidth = 48
+	terminal.FullReport(model.Report{
+		SchemaVersion: "ecs.report/v2",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
+		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusOK, Headline: "completed"},
+		Results: []model.Result{{
+			ID: "crypto", Title: "Cryptography benchmark", Status: model.StatusOK,
+			Measurements: []model.Measurement{
+				{Key: "one", Label: "AES-256-GCM 1 worker", Value: 100, Unit: "MB/s", Display: "100 MB/s", HigherIsBetter: model.BoolPtr(true)},
+				{Key: "all", Label: "AES-256-GCM all workers", Value: 700, Unit: "MB/s", Display: "700 MB/s", HigherIsBetter: model.BoolPtr(true)},
+			},
+		}},
+	}, nil, nil, termcolor.LevelANSI256)
+	for lineNumber, line := range strings.Split(output.String(), "\n") {
+		if width := textwidth.Width(line); width > terminal.progressWidth {
+			t.Fatalf("terminal line %d exceeds detected width %d: got %d: %q", lineNumber+1, terminal.progressWidth, width, line)
+		}
+	}
+}

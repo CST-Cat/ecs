@@ -220,6 +220,66 @@ func TestTextNavigationAndWidthBudget(t *testing.T) {
 	}
 }
 
+func TestTextAdaptsBarsAndLayoutAcrossTerminalWidthsAndColorLevels(t *testing.T) {
+	data := textSampleReport()
+	data.Results[0].Evidence = model.NewEvidence(3, 4, "sample")
+	data.Results[0].Tables = []model.Table{{
+		Title:          "多列性能表",
+		Columns:        []string{"workload", "1 worker", "all workers", "scaling", "efficiency", "status"},
+		Rows:           [][]string{{"compress", "100 MB/s", "740 MB/s", "7.40x", "92.5%", "completed"}},
+		NumericColumns: []int{1, 2, 3, 4}, NumericHigherIsBetter: []bool{true, true, true, true},
+	}}
+
+	levels := []termcolor.Level{
+		termcolor.LevelNone, termcolor.LevelBasic, termcolor.LevelANSI256, termcolor.LevelTrueColor,
+	}
+	for _, width := range []int{40, 64, 96, 140} {
+		for _, level := range levels {
+			out := Text(data, TextOptions{Color: level, Width: width, Compact: true})
+			for lineNumber, line := range strings.Split(out, "\n") {
+				if got := textwidth.Width(line); got > width {
+					t.Fatalf("width=%d level=%v line %d uses %d columns: %q", width, level, lineNumber+1, got, line)
+				}
+			}
+			if !strings.Contains(out, "多列性能表") || !strings.Contains(out, "wor") {
+				t.Fatalf("width=%d level=%v lost table structure:\n%s", width, level, out)
+			}
+			if level == termcolor.LevelNone && strings.Contains(out, "\x1b") {
+				t.Fatalf("width=%d plain output contains ANSI", width)
+			}
+			if level != termcolor.LevelNone && !strings.Contains(out, "\x1b[") {
+				t.Fatalf("width=%d level=%v lost ANSI hierarchy", width, level)
+			}
+		}
+	}
+
+	measurementBarWidth := func(out string) int {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, "单线程") {
+				return barDensityCountForTest(line)
+			}
+		}
+		return 0
+	}
+	narrow := measurementBarWidth(Text(data, TextOptions{Color: termcolor.LevelNone, Width: 40, Compact: true}))
+	wide := measurementBarWidth(Text(data, TextOptions{Color: termcolor.LevelNone, Width: 140, Compact: true}))
+	if narrow == 0 || wide <= narrow {
+		t.Fatalf("measurement bar did not adapt to viewport: narrow=%d wide=%d", narrow, wide)
+	}
+
+	stacked := Text(data, TextOptions{Color: termcolor.LevelNone, Width: 24, Compact: true})
+	for _, required := range []string{"workload", "efficiency", "status", "completed"} {
+		if !strings.Contains(stacked, required) {
+			t.Fatalf("stacked narrow table lost %q:\n%s", required, stacked)
+		}
+	}
+	for lineNumber, line := range strings.Split(stacked, "\n") {
+		if got := textwidth.Width(line); got > 24 {
+			t.Fatalf("stacked line %d uses %d columns: %q", lineNumber+1, got, line)
+		}
+	}
+}
+
 func TestTextUsesTemplateBannersAndNestedGroups(t *testing.T) {
 	data := textSampleReport()
 	data.Results = append(data.Results, model.Result{

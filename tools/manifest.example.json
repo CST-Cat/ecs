@@ -58,6 +58,267 @@
       }
     },
     {
+      "name": "zstd",
+      "upstream": "https://github.com/facebook/zstd",
+      "version": "1.5.7",
+      "tag_or_commit": "v1.5.7",
+      "source": "git+https://github.com/facebook/zstd.git@f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+      "build_flags": [
+        "gcc",
+        "-O3",
+        "-static",
+        "-static-libgcc",
+        "-DZSTD_NODICT",
+        "-DZSTD_NOTRACE",
+        "HAVE_ZLIB=0",
+        "HAVE_LZMA=0",
+        "HAVE_LZ4=0",
+        "ZSTD_LEGACY_SUPPORT=0"
+      ],
+      "enabled_features": [
+        "benchmark",
+        "multithread",
+        "compression",
+        "decompression"
+      ],
+      "disabled_features": [
+        "zlib",
+        "lzma",
+        "lz4",
+        "legacy-formats",
+        "dictionary-builder",
+        "trace"
+      ],
+      "architecture": "amd64",
+      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+        "level": 3,
+        "evaluation_seconds": 5,
+        "thread_modes": [
+          "1T",
+          "NT"
+        ],
+        "corpus_name": "ecs-silesia-v1.corpus",
+        "corpus_path": "share/ecs/corpus/ecs-silesia-v1.corpus",
+        "corpus_bytes": 211938580,
+        "corpus_sha256": "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0",
+        "corpus_source_url": "https://mattmahoney.net/dc/silesia.zip",
+        "corpus_source_sha256": "7d1dd71bfecda66a0ca30d863ed031809f67ecf12717a60fe72c1cc39e28434e",
+        "corpus_construction": "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml"
+      }
+    },
+    {
+      "name": "npb-ep",
+      "upstream": "https://www.nas.nasa.gov/software/npb.html",
+      "version": "3.4.4",
+      "tag_or_commit": "NPB3.4.4",
+      "source": "https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz",
+      "build_flags": [
+        "gfortran",
+        "-O3",
+        "-fopenmp",
+        "-static",
+        "CLASS=A",
+        "RAND=randi8",
+        "OMP"
+      ],
+      "enabled_features": [
+        "NPB3.4-OMP",
+        "EP",
+        "Class A",
+        "OpenMP"
+      ],
+      "disabled_features": [
+        "MPI",
+        "other NPB kernels",
+        "other problem classes"
+      ],
+      "architecture": "amd64",
+      "license": "NASA-NPB-permissive",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549",
+        "implementation": "NPB3.4-OMP",
+        "benchmark": "EP",
+        "problem_class": "A",
+        "problem_size": "2^29 random numbers reported",
+        "compiler": "GNU Fortran (recorded by real build)",
+        "compiler_flags": "-O3 -fopenmp -static",
+        "linker_flags": "-O3 -fopenmp -static",
+        "random_generator": "randi8",
+        "ci_smoke_class": "A",
+        "ci_smoke_scope": "release Class A binary",
+        "thread_modes": [
+          "1T",
+          "NT"
+        ]
+      }
+    },
+    {
+      "name": "npb-ft",
+      "upstream": "https://www.nas.nasa.gov/software/npb.html",
+      "version": "3.4.4",
+      "tag_or_commit": "NPB3.4.4",
+      "source": "https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz",
+      "build_flags": [
+        "gfortran",
+        "-O3",
+        "-fopenmp",
+        "-static",
+        "CLASS=A",
+        "RAND=randi8",
+        "OMP"
+      ],
+      "enabled_features": [
+        "NPB3.4-OMP",
+        "FT",
+        "Class A",
+        "OpenMP",
+        "3D FFT"
+      ],
+      "disabled_features": [
+        "MPI",
+        "other NPB kernels",
+        "other problem classes"
+      ],
+      "architecture": "amd64",
+      "license": "NASA-NPB-permissive",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549",
+        "implementation": "NPB3.4-OMP",
+        "benchmark": "FT",
+        "problem_class": "A",
+        "dimensions": "256x256x128",
+        "iterations": 6,
+        "compiler": "GNU Fortran (recorded by real build)",
+        "compiler_flags": "-O3 -fopenmp -static",
+        "linker_flags": "-O3 -fopenmp -static",
+        "random_generator": "randi8",
+        "ci_smoke_class": "A",
+        "ci_smoke_scope": "release Class A binary",
+        "thread_modes": [
+          "1T",
+          "NT"
+        ]
+      }
+    },
+    {
+      "name": "openssl",
+      "upstream": "https://github.com/openssl/openssl",
+      "version": "3.5.7",
+      "tag_or_commit": "openssl-3.5.7",
+      "source": "git+https://github.com/openssl/openssl.git@8cf17aaeb4599f8af87fefd810b5b5fee90fe69e",
+      "build_flags": [
+        "linux-x86_64",
+        "-O3",
+        "no-shared",
+        "no-module",
+        "no-pinshared",
+        "no-tests",
+        "no-docs",
+        "no-ssl",
+        "no-sock",
+        "no-dgram",
+        "no-http",
+        "no-cmp",
+        "no-cms",
+        "no-ct",
+        "no-ocsp",
+        "no-dso",
+        "no-engine",
+        "no-static-engine",
+        "no-legacy",
+        "no-deprecated",
+        "no-async",
+        "no-atexit",
+        "no-autoload-config",
+        "no-cached-fetch",
+        "no-comp",
+        "no-dh",
+        "no-dsa",
+        "no-ec",
+        "no-aria",
+        "no-bf",
+        "no-blake2",
+        "no-camellia",
+        "no-cast",
+        "no-cmac",
+        "no-des",
+        "no-idea",
+        "no-md4",
+        "no-mdc2",
+        "no-ocb",
+        "no-rc2",
+        "no-rc4",
+        "no-rmd160",
+        "no-scrypt",
+        "no-seed",
+        "no-siphash",
+        "no-siv",
+        "no-sm2",
+        "no-sm3",
+        "no-sm4",
+        "no-whirlpool",
+        "no-ml-dsa",
+        "no-ml-kem",
+        "no-slh-dsa",
+        "no-rfc3779",
+        "no-srp",
+        "no-srtp",
+        "no-ts",
+        "-static",
+        "--prefix=/opt/ecs-openssl",
+        "--openssldir=/opt/ecs-openssl/ssl"
+      ],
+      "enabled_features": [
+        "speed",
+        "EVP",
+        "AES-256-GCM",
+        "ChaCha20-Poly1305",
+        "SHA-256",
+        "multi-process",
+        "architecture assembly"
+      ],
+      "disabled_features": [
+        "TLS/DTLS/QUIC",
+        "network/HTTP",
+        "shared libraries/modules/engines",
+        "EC/DH/DSA/PQ families",
+        "unrequested cipher/digest families",
+        "tests/documentation"
+      ],
+      "architecture": "amd64",
+      "license": "Apache-2.0",
+      "sha256": "unknown",
+      "parameters": {
+        "illustrative": true,
+        "source_commit": "8cf17aaeb4599f8af87fefd810b5b5fee90fe69e",
+        "configure_target": "linux-x86_64",
+        "generated_target": "build_generated",
+        "build_target": "apps/openssl",
+        "algorithms": [
+          "aes-256-gcm",
+          "chacha20-poly1305",
+          "sha256"
+        ],
+        "block_bytes": 16384,
+        "duration_seconds": 5,
+        "worker_modes": [
+          1,
+          "detected_cpu_allowance"
+        ],
+        "elapsed_wall_clock": true,
+        "machine_readable": true,
+        "capability_detection": "automatic with override environment removed"
+      }
+    },
+    {
       "name": "stream",
       "upstream": "https://www.cs.virginia.edu/stream/",
       "version": "unknown",

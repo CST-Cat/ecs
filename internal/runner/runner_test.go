@@ -67,6 +67,41 @@ func TestComparisonParametersCaptureDynamicWorkloadInputs(t *testing.T) {
 	}
 }
 
+func TestZstdComparisonParametersIgnoreVerifiedCorpusTemporaryPath(t *testing.T) {
+	fields := func(path string) []model.Field {
+		return []model.Field{
+			{Key: "version", Value: "*** Zstandard CLI v1.5.7 ***"},
+			{Key: "binary_sha256", Value: "binary-sha"},
+			{Key: "method_version", Value: "zstd-silesia-l3-v1"},
+			{Key: "compression_level", Value: "3"},
+			{Key: "threads", Value: "1 / 8"},
+			{Key: "duration", Value: "5s"},
+			{Key: "corpus_bytes", Value: "211938580 bytes"},
+			{Key: "corpus_sha256", Value: "corpus-sha"},
+			{Key: "corpus_source_sha256", Value: "source-sha"},
+			{Key: "arguments_1t", Value: "-q -b3 -i5 -T1 " + path},
+			{Key: "arguments_nt", Value: "-q -b3 -i5 -T8 " + path},
+		}
+	}
+	first := comparisonParameters("zstd", config.Runtime{}, model.Result{Fields: fields("/tmp/ecs-run.one/corpus")})
+	second := comparisonParameters("zstd", config.Runtime{}, model.Result{Fields: fields("/tmp/ecs-run.two/corpus")})
+	for _, key := range []string{"arguments_1t_sha256", "arguments_nt_sha256"} {
+		if first[key] == "" || first[key] != second[key] {
+			t.Fatalf("zstd comparison parameter %s changed with only the temporary corpus path: %q != %q", key, first[key], second[key])
+		}
+	}
+	changed := fields("/tmp/ecs-run.two/corpus")
+	for index := range changed {
+		if changed[index].Key == "arguments_nt" {
+			changed[index].Value = "-q -b3 -i5 -T7 /tmp/ecs-run.two/corpus"
+		}
+	}
+	third := comparisonParameters("zstd", config.Runtime{}, model.Result{Fields: changed})
+	if first["arguments_nt_sha256"] == third["arguments_nt_sha256"] {
+		t.Fatal("zstd comparison scope ignored a changed worker argument")
+	}
+}
+
 type conditionalRetryProbe struct {
 	id     string
 	runs   int

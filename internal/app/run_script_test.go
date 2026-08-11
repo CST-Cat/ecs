@@ -283,10 +283,12 @@ func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
 	for _, required := range []string{
 		"ECS_TOOLS_BASE_URL",
 		"TOOLS_BASE",
-		"TOOLS_ASSET=\"ecs-tools_linux_${ARCH}.tar.zst\"",
+		"TOOLS_ASSET=\"ecs-tools_linux_${ARCH}.tar.gz\"",
 		"validate_tools_manifest",
 		"validate_tools_archive_layout",
 		"tools_tar_extract_member",
+		`tar -tzf "$tools_archive_path"`,
+		`tar -xzf "$tools_archive_path"`,
 		"tools_manifest_digest_for",
 		"verify_tools_binary_digest",
 		"TOOLS_STAGING_BIN",
@@ -306,6 +308,8 @@ func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
 		"NEXTTRACE_API_URL",
 		"nexttrace_linux_${ARCH}",
 		"nexttrace_cleanup_partial",
+		"tar --zstd",
+		"zstd -q -dc",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("run.sh must not retain an unsupported alternate NextTrace download path %q", forbidden)

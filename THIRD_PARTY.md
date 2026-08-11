@@ -8,15 +8,16 @@ CI 产出的工具版本、发布资产或许可证正文。
 
 ## 可选本地程序
 
-这些程序优先使用系统中已有的实现，也可以由受校验的临时依赖路径提供。缺少 `sysbench`、官方
-`stream`、`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，`run.sh` 从当前 Linux 架构匹配的
-`ecs-tools` `tar.zst` 包临时提供；`ecs` 仅以独立进程调用。
+这些程序可由系统或受校验的临时依赖路径提供。zstd、NPB 与 OpenSSL 只接受下表的固定版本/参数；任意系统版本不会生成可比较成绩。缺少 `sysbench`、`zstd`、`npb-ep`、`npb-ft`、`openssl`、官方 `stream`、`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，`run.sh` 从当前 Linux 架构匹配的 `ecs-tools` `tar.gz` 包临时提供；`ecs` 仅以独立进程调用。
 `ecs-tools` 的工具包边界由每个架构的 `manifest.json` 和 `LICENSES/` 决定，不把下表之外
 的版本或资产默认为已发布：
 
 | 程序 | 用途 | 可核对来源/许可证 | ecs 行为 |
 | --- | --- | --- | --- |
 | `sysbench` | CPU 标准基准 | [上游仓库](https://github.com/akopytov/sysbench) · [LICENSE](https://github.com/akopytov/sysbench/blob/master/LICENSE) · GPL-2.0-only | 只运行 CPU 单线程/多线程工作负载；记录版本和 SHA-256 |
+| `zstd` | 固定 Silesia corpus 的 level 3 压缩/解压吞吐；5s，1/全 worker | [Zstandard v1.5.7](https://github.com/facebook/zstd/tree/v1.5.7) · [LICENSE](https://github.com/facebook/zstd/blob/v1.5.7/LICENSE) · BSD-3-Clause/GPL-2.0-only 双许可 | 只构建含 benchmark/压缩/解压/多线程的 CLI，裁掉字典训练、trace、legacy 与 zlib/lzma/lz4 格式；校验 binary 与两级 corpus SHA-256；保留原始输出 |
+| `npb-ep` / `npb-ft` | NPB-OMP EP + FT Class A，1T/全线程 Mop/s | [NASA NPB 3.4.4](https://www.nas.nasa.gov/software/npb.html) · 上游源文件的 NASA NPB permissive notice | 发布包只编译 EP/FT Class A，裁掉其余 kernel/class/MPI；固定 `-O3 -fopenmp -static`、`randi8` 和 OpenMP 环境；Verification 失败不采纳 Mop/s |
+| `openssl` | AES-256-GCM、ChaCha20-Poly1305、SHA-256；16 KiB、5s、1/全 worker | [OpenSSL 3.5.7](https://github.com/openssl/openssl/tree/openssl-3.5.7) · [LICENSE](https://github.com/openssl/openssl/blob/openssl-3.5.7/LICENSE.txt) · Apache-2.0 | 只构建官方 `apps/openssl` 及依赖，关闭 TLS/网络、动态组件和无关算法族；记录 binary SHA-256、完整 `speed` 参数、`-mr` 原始输出和扩展倍率 |
 | `stream` | 官方 STREAM 内存带宽：10,000,000 elements、10 iterations；`1T`/`NT` × `Copy`/`Scale`/`Add`/`Triad` | [官方来源与 Run Rules](https://www.cs.virginia.edu/stream/ref.html) · 具体许可证文本/版本待 CI 产物填充 | 只调用官方二进制并保留四 kernel、线程和原始单位；缺失时内存基准明确未运行 |
 | `fio` | Direct I/O 磁盘基础项、混合/Crystal/ATTO 矩阵和 4KiB QD1 latency | [上游仓库](https://github.com/axboe/fio) · [COPYING](https://github.com/axboe/fio/blob/master/COPYING) · GPL-2.0-only | 磁盘结果统一来自 fio JSON；记录版本和 SHA-256；QD1 延迟也由 fio 产生 |
 | `iperf3` | TCP 多流双方向与 UDP 丢包/抖动 | [上游仓库](https://github.com/esnet/iperf) · [LICENSE](https://github.com/esnet/iperf/blob/master/LICENSE) · BSD-3-Clause | 网络吞吐唯一标准工具；逐节点、逐方向保留 JSON 原值，不跨节点求平均 |
@@ -33,18 +34,23 @@ Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政�
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
-`run.sh` 优先使用系统中已有的程序；缺失上述六项时选择当前 Linux 架构匹配的 `ecs-tools`
-`tar.zst`，并核对 `checksums.txt`、`manifest.json` 及必要的二进制 digest 后，才解包到本次
+`run.sh` 优先使用符合口径的系统程序；需要临时工具时选择当前 Linux 架构匹配的 `ecs-tools`
+`tar.gz`，并核对 `checksums.txt`、`manifest.json`、10 个二进制 digest 和固定 corpus digest 后，才解包到本次
 运行的 `$WORK`，通过临时 `PATH`/库路径使用，退出时一并删除。APT/Packagecloud 不用于这些
 通用缺失工具。Ookla 缺失且模块被 profile 选中或被 `--only` 显式选中时，才走独立的官方 Packagecloud 源、固定指纹的 GPG
 公钥、索引和缓存路径；由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 安装脚本。
 `full` 缺失 `speedtest` 时走该独立官方签名源，`standard` 只有显式 `--only ookla` 时走该路径；Ookla 永不进入
 `ecs-tools`。`ECS_AUTO_DEPS=0` 会跳过临时依赖准备，让报告如实标记缺失模块。
 `install.sh --with-benchmarks` 当前只安装 `sysbench`、`fio`、`iperf3`，也不安装
-`mbw`/`ioping` 或官方 STREAM。STREAM 由 `ecs-tools`/`run.sh`
-临时提供或由用户自行提供。两条路径都不替用户接受
+`mbw`/`ioping`、zstd corpus、NPB、固定 OpenSSL 或官方 STREAM。这些固定产物由 `ecs-tools`/`run.sh`
+临时提供。两条路径都不替用户接受
 闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为依赖；Ookla 只提供可审计的
 本机客户端适配器。
+
+七架构工具链先在宿主架构上完成原生或交叉编译，之后才直接运行或交给 QEMU 做短功能
+smoke，绝不在 QEMU 内编译。交叉架构的 NPB 用同一源码、编译器和参数额外生成不入包的
+Class S EP/FT 并在 QEMU 中跑到 Verification；发布的 Class A ELF 仍逐个做静态链接、架构、
+摘要和 manifest 校验。这样验证目标运行时/OpenMP，又不把模拟器中的 Class A 重负载误当性能测试。
 
 ## 在线服务
 

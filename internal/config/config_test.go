@@ -50,7 +50,7 @@ func TestProfilesOnlyChangeModulePreset(t *testing.T) {
 	}
 	wantModules := map[string][]string{
 		ProfileStandard: {
-			"system", "bgp", "cpu", "memory", "disk", "dns", "latency", "speed",
+			"system", "bgp", "cpu", "zstd", "npb", "memory", "crypto", "disk", "dns", "latency", "speed",
 			"ports", "nat", "blacklist", "apps", "cnspeed", "media", "route", "backtrace",
 		},
 		ProfileFull: ModuleIDs(),

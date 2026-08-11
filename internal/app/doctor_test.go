@@ -24,6 +24,12 @@ func TestDoctorToolsUseCurrentDependencies(t *testing.T) {
 	if len(stream.args) != 0 || stream.check == nil {
 		t.Fatalf("stream doctor entry = %+v; it must use a non-executing check", stream)
 	}
+	for _, name := range []string{"zstd", "npb-ep", "npb-ft", "openssl"} {
+		tool, ok := seen[name]
+		if !ok || !tool.required || tool.check == nil || len(tool.args) != 0 {
+			t.Fatalf("doctor fixed benchmark entry %q = %+v", name, tool)
+		}
+	}
 	speedtest, ok := seen["speedtest"]
 	if !ok || speedtest.required {
 		t.Fatalf("speedtest doctor entry = %+v; it should remain optional", speedtest)

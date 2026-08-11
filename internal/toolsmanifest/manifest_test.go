@@ -88,6 +88,40 @@ func TestExampleRecordsRequiredFeatureFlags(t *testing.T) {
 			t.Fatalf("sysbench build_flags missing %q: %v", flag, byName["sysbench"].BuildFlags)
 		}
 	}
+	assertContains("zstd", byName["zstd"].EnabledFeatures, "benchmark", "multithread", "compression", "decompression")
+	assertContains("zstd", byName["zstd"].DisabledFeatures, "zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace")
+	if got := byName["zstd"].Parameters["corpus_sha256"]; got != "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0" {
+		t.Fatalf("zstd corpus_sha256 = %#v", got)
+	}
+	if got, ok := byName["zstd"].Parameters["corpus_bytes"].(float64); !ok || got != 211938580 {
+		t.Fatalf("zstd corpus_bytes = %#v, want 211938580", byName["zstd"].Parameters["corpus_bytes"])
+	}
+	for _, name := range []string{"npb-ep", "npb-ft"} {
+		assertContains(name, byName[name].EnabledFeatures, "NPB3.4-OMP", "Class A", "OpenMP")
+		if got := byName[name].Parameters["source_sha256"]; got != "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549" {
+			t.Fatalf("%s source_sha256 = %#v", name, got)
+		}
+		if got := byName[name].Parameters["compiler_flags"]; got != "-O3 -fopenmp -static" {
+			t.Fatalf("%s compiler_flags = %#v", name, got)
+		}
+		if got := byName[name].Parameters["ci_smoke_class"]; got != "A" {
+			t.Fatalf("%s ci_smoke_class = %#v", name, got)
+		}
+	}
+	assertContains("openssl", byName["openssl"].EnabledFeatures, "speed", "EVP", "AES-256-GCM", "ChaCha20-Poly1305", "SHA-256", "multi-process")
+	assertContains("openssl", byName["openssl"].BuildFlags, "no-ssl", "no-sock", "no-dso", "no-engine", "no-ec", "no-dh", "no-dsa", "no-legacy", "no-tests", "no-docs")
+	if got := byName["openssl"].Parameters["source_commit"]; got != "8cf17aaeb4599f8af87fefd810b5b5fee90fe69e" {
+		t.Fatalf("OpenSSL source_commit = %#v", got)
+	}
+	if got, ok := byName["openssl"].Parameters["block_bytes"].(float64); !ok || got != 16384 {
+		t.Fatalf("OpenSSL block_bytes = %#v", byName["openssl"].Parameters["block_bytes"])
+	}
+	if got := byName["openssl"].Parameters["build_target"]; got != "apps/openssl" {
+		t.Fatalf("OpenSSL build_target = %#v", got)
+	}
+	if got := byName["openssl"].Parameters["generated_target"]; got != "build_generated" {
+		t.Fatalf("OpenSSL generated_target = %#v", got)
+	}
 	assertContains("fio", byName["fio"].EnabledFeatures, "io_uring", "libaio", "psync")
 	assertContains("fio", byName["fio"].DisabledFeatures, "ceph", "rbd", "rados", "gluster", "rdma")
 	assertContains("iperf3", byName["iperf3"].DisabledFeatures, "sctp")

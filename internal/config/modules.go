@@ -62,8 +62,8 @@ type ModuleDescriptor struct {
 	ProbeFactory ModuleFactory
 
 	// Profile membership is explicit instead of inferred from an exclusion
-	// list. ProfileFull is true for every default module (18 today), while
-	// ProfileStandard marks the default 16-module shortcut. Explicit-only
+	// list. ProfileFull is true for every default module (21 today), while
+	// ProfileStandard marks the default 19-module shortcut. Explicit-only
 	// modules, if introduced, remain reachable through --only without entering
 	// either preset.
 	ProfileStandard     bool
@@ -127,9 +127,18 @@ var moduleDescriptors = []ModuleDescriptor{
 	moduleDescriptorWithEstimateMode("cpu", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "cpu prime=20000"},
 		true, "cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU),
+	moduleDescriptor("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "zstd", Profile: "Silesia v1 · level=3 · 1T/NT"},
+		false, "", []string{"zstd"}, 25*time.Second),
+	moduleDescriptor("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "NASA NPB-OMP", Profile: "NPB 3.4.4 · EP + FT · Class A · 1T/NT"},
+		false, "", []string{"npb-ep", "npb-ft"}, 60*time.Second),
 	moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "STREAM", Profile: "Copy/Scale/Add/Triad × 1T/NT"},
 		true, "memory", []string{"stream"}, 5*time.Second, EstimateModeMemory),
+	moduleDescriptor("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "OpenSSL speed", Profile: "OpenSSL 3.5.7 · AES-256-GCM/ChaCha20-Poly1305/SHA-256 · 16 KiB · 1W/NW"},
+		false, "", []string{"openssl"}, 45*time.Second),
 	moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio", Profile: "Direct I/O"},
 		true, "disk", []string{"fio"}, 8*time.Second, EstimateModeDisk),

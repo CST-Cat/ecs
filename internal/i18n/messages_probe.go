@@ -10,6 +10,7 @@ var probeEnglish = func() map[string]string {
 	for _, table := range []map[string]string{
 		probeEnglishSystem,
 		probeEnglishBench,
+		probeEnglishLocalBench,
 		probeEnglishNet,
 		probeEnglishRep,
 		probeEnglishQuality,

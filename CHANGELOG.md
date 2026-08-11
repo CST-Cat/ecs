@@ -11,6 +11,27 @@
 
 - release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
+### 新增 — 2026-08-11
+
+- 增加固定 `zstd 1.5.7` 的真实压缩基准：使用 SHA-256 固定的 Silesia corpus、等级 3、5 秒评估窗口，分别运行 1 线程和可用全线程，输出压缩/解压吞吐、扩展倍率与每线程效率。
+- 增加 NASA NPB 3.4.4 OpenMP Class A 的 EP 和 FT；固定 `gfortran` 编译参数与随机数实现，分别记录 1 线程/全线程原始 `Mop/s` 和扩展倍率，不引入自定义综合分。
+- 增加独立的 OpenSSL 3.5.7 密码学模块；固定 16 KiB block、5 秒时长，测量 AES-256-GCM、ChaCha20-Poly1305 和 SHA-256 的 1 worker/全 worker 吞吐与扩展倍率，不并入 CPU 综合结果。
+- 三类新基准均记录 method version、完整参数、工具 binary SHA-256 和原始输出；zstd 额外记录 corpus SHA-256、来源归档 SHA-256、字节数和拼接顺序。
+
+### 变更 — 2026-08-11
+
+- 本地性能骨架扩展为 sysbench、zstd、NPB EP/FT、STREAM、OpenSSL speed、fio 和 iperf3；模块总数由 18 增至 21，标准工具由 6 增至 10。
+- 发行工具包加入固定版本的 zstd、NPB EP/FT、OpenSSL 及固定 corpus；`run.sh` 仅在相关模块启用时，将校验过的二进制和 corpus 暂存到本次运行目录，不改动宿主机系统包。
+- `ecs-tools` 发行归档改用项目已有的 `tar.gz` 格式，消除最小系统“需要先安装 zstd 才能解出固定 zstd”的启动闭环；归档、manifest、binary 与 corpus SHA-256 校验保持不变。
+- 资源干扰复测覆盖 CPU、zstd、NPB、STREAM、crypto 和 fio；报告 schema 以新增字段方式保持兼容，并补充三类基准的参数签名，避免不同口径结果被直接比较。
+- 终端与 TXT 报告按实际列宽在 20–160 列间自适应表格、柱状图和长行；无色、基础色、256 色与 truecolor 终端保持一致的语义层次，中英文文案同步更新。
+
+### CI 与验证 — 2026-08-11
+
+- 七架构工具构建矩阵补齐 `gfortran`、OpenMP、Perl 和 unzip 依赖；zstd 裁掉字典/trace/兼容格式，NPB 只发布 EP/FT，OpenSSL 只构建官方 CLI 必需依赖并关闭 TLS/网络/动态组件与无关算法族。
+- 四个交叉架构先由宿主工具链完成编译，再由 QEMU 执行短功能 smoke；NPB 用同工具链的临时 Class S 跑完整 Verification，发行 Class A 只做静态 ELF/摘要/manifest 校验，避免在模拟器中做无意义的重型性能运行。
+- 工具 manifest 与发布资产检查由 6 个二进制更新为 10 个二进制加固定 corpus，同时保留 binary/source SHA-256、编译参数、启用能力和 smoke runner 证据。
+
 ## 版本路线概览
 
 | 版本线 | 主要主题 |

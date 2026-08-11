@@ -146,7 +146,7 @@ jobs:
           remote_assets=$(gh release view "$previous_tag" --json assets --jq '.assets[].name')
           expected_assets=(checksums.txt)
           for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
-            expected_assets+=("ecs-tools_linux_${arch}.tar.zst")
+            expected_assets+=("ecs-tools_linux_${arch}.tar.gz")
           done
           for asset in "${expected_assets[@]}"; do
             if ! grep -F -x "$asset" <<<"$remote_assets" >/dev/null; then
@@ -162,8 +162,9 @@ jobs:
           echo "source_tag=$previous_tag" >>"$GITHUB_OUTPUT"
 
   # amd64/arm64 使用对应的 GitHub 原生硬件，386 使用 x86-64 的原生 32 位兼容执行。
-  # 其余四个架构都由宿主原生运行交叉编译器，仅最终 smoke 显式调用对应 QEMU。
-  # 任何下载、编译、smoke 或 manifest 失败都会失败。
+  # 其余四个架构都由宿主原生运行交叉编译器，全部编译完成后仅让短 smoke 显式调用 QEMU。
+  # NPB 发行物保持 Class A；交叉 smoke 用同工具链的临时 Class S 完成 Verification，
+  # 避免在模拟器里跑性能负载。任何下载、编译、smoke 或 manifest 失败都会失败。
   tools:
     if: >-
       always() &&
@@ -271,8 +272,8 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends \
                 autoconf automake binutils build-essential ca-certificates curl \
-                git jq libaio-dev libck-dev libluajit-5.1-dev libtool libtool-bin meson ninja-build pkg-config \
-                zlib1g-dev
+                gfortran git jq libaio-dev libck-dev libluajit-5.1-dev libtool libtool-bin meson ninja-build perl pkg-config \
+                unzip zlib1g-dev
               scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
             '
       - name: Cross-build target and smoke with QEMU
@@ -301,10 +302,10 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends \
                 autoconf automake binutils build-essential ca-certificates curl git jq \
-                libtool libtool-bin meson ninja-build pkg-config qemu-user-static \
-                "binutils-$CROSS_TRIPLET" "gcc-$CROSS_TRIPLET" "g++-$CROSS_TRIPLET" \
+                libtool libtool-bin meson ninja-build perl pkg-config qemu-user-static \
+                "binutils-$CROSS_TRIPLET" "gcc-$CROSS_TRIPLET" "g++-$CROSS_TRIPLET" "gfortran-$CROSS_TRIPLET" \
                 "libaio-dev:$DEBIAN_ARCH" "libck-dev:$DEBIAN_ARCH" \
-                "libluajit-5.1-dev:$DEBIAN_ARCH" "zlib1g-dev:$DEBIAN_ARCH"
+                "libluajit-5.1-dev:$DEBIAN_ARCH" unzip "zlib1g-dev:$DEBIAN_ARCH"
               export PKG_CONFIG_PATH=
               export PKG_CONFIG_LIBDIR="/usr/lib/$CROSS_TRIPLET/pkgconfig:/usr/share/pkgconfig"
               export STREAM_NT_THREADS=2
@@ -319,7 +320,7 @@ jobs:
           go-version: stable
           cache: false
       - name: Validate generated manifest with ECS parsers
-        # The real six-tool smoke tests already ran inside the architecture
+        # The real tool smoke tests already ran inside the architecture
         # Docker container. Its binaries are not installed on this host
         # runner, so skip only tests that require host-installed tools while
         # running all manifest, parser, and renderer tests here.
@@ -335,13 +336,15 @@ jobs:
             --arg arch '${{ matrix.arch }}' \
             --arg build_mode '${{ matrix.build_mode }}' \
             --arg target_runner '${{ matrix.target_runner }}' '
-            .architecture == $arch and (.tools | length == 6) and
+            .architecture == $arch and (.tools | length == 10) and
             (.build.toolchain_mode == (if $build_mode == "cross-qemu-smoke" then "cross" else "native" end)) and
             (.build.smoke_runner == $target_runner) and
             (.build.build_triplet | type == "string" and length > 0) and
             (.build.target_triplet | type == "string" and length > 0) and
             (.build.validation.scope == "functional") and
             (.build.validation.performance_valid == false) and
+            (all(.tools[] | select(.name == "npb-ep" or .name == "npb-ft");
+              .parameters.ci_smoke_class == (if $build_mode == "cross-qemu-smoke" then "S" else "A" end))) and
             (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
           ' ".ci-tools-stage/linux_${{ matrix.arch }}/manifest.json"
       - name: Preserve architecture directory in artifact
@@ -407,11 +410,18 @@ jobs:
           for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
             test -s "tools-stage/linux_${arch}/manifest.json"
             test -x "tools-stage/linux_${arch}/bin/sysbench"
+            test -x "tools-stage/linux_${arch}/bin/zstd"
+            test -x "tools-stage/linux_${arch}/bin/npb-ep"
+            test -x "tools-stage/linux_${arch}/bin/npb-ft"
+            test -x "tools-stage/linux_${arch}/bin/openssl"
             test -x "tools-stage/linux_${arch}/bin/stream"
             test -x "tools-stage/linux_${arch}/bin/fio"
             test -x "tools-stage/linux_${arch}/bin/iperf3"
             test -x "tools-stage/linux_${arch}/bin/nexttrace-tiny"
             test -x "tools-stage/linux_${arch}/bin/ping"
+            test -f "tools-stage/linux_${arch}/share/ecs/corpus/ecs-silesia-v1.corpus"
+            test "$(sha256sum "tools-stage/linux_${arch}/share/ecs/corpus/ecs-silesia-v1.corpus" | awk '{print $1}')" = \
+              8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0
             test -d "tools-stage/linux_${arch}/LICENSES"
           done
       - name: Build release assets
@@ -420,8 +430,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v zstd >/dev/null 2>&1
-          zstd --version
           chmod +x scripts/package.sh
           export SOURCE_DATE_EPOCH
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
@@ -441,21 +449,21 @@ jobs:
           test -n "$SOURCE_TAG"
           mkdir reused-tools
           gh release download "$SOURCE_TAG" --dir reused-tools \
-            --pattern 'ecs-tools_linux_*.tar.zst' \
+            --pattern 'ecs-tools_linux_*.tar.gz' \
             --pattern checksums.txt
 
           expected_tools=()
           for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
-            expected_tools+=("ecs-tools_linux_${arch}.tar.zst")
+            expected_tools+=("ecs-tools_linux_${arch}.tar.gz")
           done
           for asset in "${expected_tools[@]}"; do
             test -s "reused-tools/$asset"
           done
-          grep -E '^[0-9A-Fa-f]{64}  ecs-tools_linux_(amd64|arm64|armv7|386|s390x|riscv64|ppc64le)\.tar\.zst$' \
+          grep -E '^[0-9A-Fa-f]{64}  ecs-tools_linux_(amd64|arm64|armv7|386|s390x|riscv64|ppc64le)\.tar\.gz$' \
             reused-tools/checksums.txt >reused-tools/tools-checksums.txt
           test "$(wc -l <reused-tools/tools-checksums.txt)" -eq 7
           (cd reused-tools && sha256sum -c tools-checksums.txt)
-          cp reused-tools/ecs-tools_linux_*.tar.zst dist/
+          cp reused-tools/ecs-tools_linux_*.tar.gz dist/
 
       - name: Finalize checksums
         shell: bash
@@ -463,7 +471,7 @@ jobs:
           set -euo pipefail
           (
             cd dist
-            sha256sum ecs_*.tar.gz ecs-tools_*.tar.zst >checksums.txt
+            sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz >checksums.txt
           )
       - name: Check release assets before upload
         shell: bash
@@ -477,13 +485,13 @@ jobs:
             ecs_linux_ppc64le.tar.gz
             ecs_linux_riscv64.tar.gz
             ecs_linux_s390x.tar.gz
-            ecs-tools_linux_386.tar.zst
-            ecs-tools_linux_amd64.tar.zst
-            ecs-tools_linux_arm64.tar.zst
-            ecs-tools_linux_armv7.tar.zst
-            ecs-tools_linux_ppc64le.tar.zst
-            ecs-tools_linux_riscv64.tar.zst
-            ecs-tools_linux_s390x.tar.zst
+            ecs-tools_linux_386.tar.gz
+            ecs-tools_linux_amd64.tar.gz
+            ecs-tools_linux_arm64.tar.gz
+            ecs-tools_linux_armv7.tar.gz
+            ecs-tools_linux_ppc64le.tar.gz
+            ecs-tools_linux_riscv64.tar.gz
+            ecs-tools_linux_s390x.tar.gz
           )
           for asset in "${assets[@]}"; do
             test -s "dist/$asset"
@@ -552,13 +560,13 @@ jobs:
             dist/ecs_linux_ppc64le.tar.gz \
             dist/ecs_linux_riscv64.tar.gz \
             dist/ecs_linux_s390x.tar.gz \
-            dist/ecs-tools_linux_386.tar.zst \
-            dist/ecs-tools_linux_amd64.tar.zst \
-            dist/ecs-tools_linux_arm64.tar.zst \
-            dist/ecs-tools_linux_armv7.tar.zst \
-            dist/ecs-tools_linux_ppc64le.tar.zst \
-            dist/ecs-tools_linux_riscv64.tar.zst \
-            dist/ecs-tools_linux_s390x.tar.zst \
+            dist/ecs-tools_linux_386.tar.gz \
+            dist/ecs-tools_linux_amd64.tar.gz \
+            dist/ecs-tools_linux_arm64.tar.gz \
+            dist/ecs-tools_linux_armv7.tar.gz \
+            dist/ecs-tools_linux_ppc64le.tar.gz \
+            dist/ecs-tools_linux_riscv64.tar.gz \
+            dist/ecs-tools_linux_s390x.tar.gz \
             dist/checksums.txt \
             --clobber
           expected_assets=(
@@ -570,13 +578,13 @@ jobs:
             ecs_linux_ppc64le.tar.gz
             ecs_linux_riscv64.tar.gz
             ecs_linux_s390x.tar.gz
-            ecs-tools_linux_386.tar.zst
-            ecs-tools_linux_amd64.tar.zst
-            ecs-tools_linux_arm64.tar.zst
-            ecs-tools_linux_armv7.tar.zst
-            ecs-tools_linux_ppc64le.tar.zst
-            ecs-tools_linux_riscv64.tar.zst
-            ecs-tools_linux_s390x.tar.zst
+            ecs-tools_linux_386.tar.gz
+            ecs-tools_linux_amd64.tar.gz
+            ecs-tools_linux_arm64.tar.gz
+            ecs-tools_linux_armv7.tar.gz
+            ecs-tools_linux_ppc64le.tar.gz
+            ecs-tools_linux_riscv64.tar.gz
+            ecs-tools_linux_s390x.tar.gz
           )
           remote_assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
           for asset in "${expected_assets[@]}"; do

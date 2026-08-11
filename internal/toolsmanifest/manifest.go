@@ -25,6 +25,10 @@ var Architectures = []string{
 
 var ToolNames = []string{
 	"sysbench",
+	"zstd",
+	"npb-ep",
+	"npb-ft",
+	"openssl",
 	"stream",
 	"fio",
 	"iperf3",
