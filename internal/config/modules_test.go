@@ -137,13 +137,16 @@ func TestModuleDescriptorEstimateModes(t *testing.T) {
 		RouteTargets:    []Endpoint{{Name: "test", Address: "127.0.0.1"}},
 	}
 	wantDurations := map[EstimateMode]time.Duration{
-		EstimateModeCPU:     3 * time.Second,
-		EstimateModeMemory:  5 * time.Second,
-		EstimateModeDisk:    8 * time.Second,
+		EstimateModeCPU:    3 * time.Second,
+		EstimateModeMemory: 5 * time.Second,
+		// 本包的测试不 import probe，磁盘估算因此没有注册，走保守回落值。
+		// 真实值来自 probe 注册的 FIOPlanDuration，见 disk_probe.go 的 init。
+		EstimateModeDisk:    4 * time.Minute,
 		EstimateModeDNS:     2 * time.Second,
 		EstimateModeLatency: 3 * time.Second,
-		EstimateModeSpeed:   2 * time.Second,
-		EstimateModeRoute:   12 * time.Second,
+		// 1 个节点 × 2 个协议族 ×（上传 1s + 下载 1s + UDP 5s）。
+		EstimateModeSpeed: 14 * time.Second,
+		EstimateModeRoute: 12 * time.Second,
 	}
 	seenModes := make(map[EstimateMode]bool)
 	for _, descriptor := range ModuleDescriptors() {

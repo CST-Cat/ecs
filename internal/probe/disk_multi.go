@@ -268,11 +268,13 @@ func runMultiDiskFIO(ctx context.Context, fioPath, mountPath string, engine fioE
 	defer func() { _ = os.Remove(tempName) }()
 
 	const sizeBytes = int64(128 * 1024 * 1024)
+	// 多盘用简化作业集与更短的窗口：目的是看出介质差异与限速，
+	// 不与主盘的完整矩阵混比。
 	plan := []fioJobSpec{
-		{Name: "seqwrite", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, EndFsync: true},
-		{Name: "randread", RW: "randread", BlockSize: "4k", IODepth: 32, NumJobs: 1},
+		{Name: "seqwrite", RW: "write", BlockSize: "1m", IODepth: 1, NumJobs: 1, EndFsync: true, Runtime: 3 * time.Second},
+		{Name: "randread", RW: "randread", BlockSize: "4k", IODepth: 32, NumJobs: 1, Runtime: 3 * time.Second},
 	}
-	args := fioArguments(tempName, sizeBytes, 3*time.Second, engine, plan)
+	args := fioArguments(tempName, sizeBytes, engine, plan)
 	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	command := exec.CommandContext(runCtx, fioPath, args...)

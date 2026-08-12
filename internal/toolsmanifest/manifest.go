@@ -4,7 +4,6 @@ package toolsmanifest
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -234,11 +233,8 @@ func Validate(manifest Manifest) error {
 			return fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
 	}
-	for _, name := range ToolNames {
-		if !seenTools[name] {
-			return fmt.Errorf("tools is missing %q", name)
-		}
-	}
+	// 不再逐个检查缺失：上面已经确认数量与 ToolNames 相等、每个 name 都在
+	// 白名单内、且互不重复，三者合起来在数学上就蕴含了全覆盖。
 	return nil
 }
 
@@ -288,11 +284,8 @@ func isSHA256(value string) bool {
 	if value == "unknown" || value == "unavailable" {
 		return true
 	}
-	if !sha256Pattern.MatchString(value) {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
+	// 正则已经保证是 64 个十六进制字符，再解码一遍不会发现任何新问题。
+	return sha256Pattern.MatchString(value)
 }
 
 func contains(values []string, wanted string) bool {

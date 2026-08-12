@@ -471,17 +471,22 @@ func Mask(value string) string {
 	return "hidden"
 }
 
+// maskIP 遮盖一个地址。
+//
+// IPv4 保留前两段（/16）：足以看出运营商与大致归属，又不能定位到具体主机。
+//
+// IPv6 只保留前两组（/32）。这里刻意比 IPv4 更激进：VPS 提供商普遍按 /64
+// 给每台机器分配一整个子网，保留前四组等于把实例本身指认出来，遮盖形同虚设。
+// /32 通常对应分配给运营商的大块，与 IPv4 的 /16 是同一量级的信息。
 func maskIP(ip net.IP) string {
 	if v4 := ip.To4(); v4 != nil {
 		return fmt.Sprintf("%d.%d.x.x", v4[0], v4[1])
 	}
 	if v6 := ip.To16(); v6 != nil {
 		return fmt.Sprintf(
-			"%x:%x:%x:%x:x:x:x:x",
+			"%x:%x:x:x:x:x:x:x",
 			binary.BigEndian.Uint16(v6[0:2]),
 			binary.BigEndian.Uint16(v6[2:4]),
-			binary.BigEndian.Uint16(v6[4:6]),
-			binary.BigEndian.Uint16(v6[6:8]),
 		)
 	}
 	return "hidden"

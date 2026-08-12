@@ -5,8 +5,18 @@ import (
 	"os/exec"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
+
+func init() {
+	// 磁盘时长由实际作业计划决定，config 不能 import probe，因此在这里注册。
+	// 留在两边各抄一份的做法曾让估算比实测低 10 倍。
+	_ = config.RegisterModuleEstimate("disk", func(runtime config.Runtime) time.Duration {
+		// 加 10 秒覆盖 fio 启动与 --enghelp 引擎探测。
+		return FIOPlanDuration() + 10*time.Second
+	})
+}
 
 type diskProbe struct{}
 

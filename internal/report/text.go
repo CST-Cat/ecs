@@ -59,13 +59,16 @@ type TextOptions struct {
 	Width int
 }
 
-// Text 渲染纯文本报告。
+// Text 渲染纯文本报告，会先做一次本地化。
+//
+// 终端外观（ui.Terminal）与独立调用方可能直接传入探针产出的原始语言报告，
+// 因此这里保留 Localize；它返回副本，不会改动仍用于机器可读产物的那一份。
 func Text(data model.Report, options TextOptions) string {
-	// Keep direct renderer calls consistent with WriteFiles: callers such as the
-	// terminal facade may pass the probe's source-language report directly.
-	// Localize returns a copy, so rendering never mutates the report that is
-	// still used for the machine-readable artifact.
-	data = Localize(data)
+	return textLocalized(Localize(data), options)
+}
+
+// textLocalized 渲染一份**已经本地化过**的报告，见 htmlLocalized 的说明。
+func textLocalized(data model.Report, options TextOptions) string {
 	renderer := &textRenderer{
 		palette: termcolor.Palette{Level: options.Color},
 		score:   options.Score,
@@ -188,11 +191,6 @@ func metaLabel(zh, value, en, englishValue string) string {
 	return zh + "：" + value
 }
 
-// centered 按版面宽度折行后居中，避免长的外联级别或自定义版本把标题块撑宽。
-func (r *textRenderer) centered(value string) {
-	r.centeredStyled(value, nil)
-}
-
 func (r *textRenderer) centeredStyled(value string, style func(string) string) {
 	for _, line := range wrapText(value, r.width-2) {
 		if style != nil {
@@ -200,33 +198,6 @@ func (r *textRenderer) centeredStyled(value string, style func(string) string) {
 		}
 		r.line(textwidth.Center(line, r.width))
 	}
-}
-
-// overview 是模块状态总览。
-func (r *textRenderer) overview(data model.Report) {
-	// 概览是报告的前言，不占用正文的章节编号。正文的编号只表示
-	// 实际输出的结果与评分，用户选了几个模块就从一数到几。
-	r.prefaceTitle(i18n.T("report.glance"))
-	r.moduleNavigation(data)
-	if data.Summary.Headline != "" {
-		r.indented(statusIcon(data.Summary.Status)+" "+data.Summary.Headline, true)
-		r.blank()
-	}
-	rows := make([][]string, 0, len(data.Results))
-	for _, result := range data.Results {
-		rows = append(rows, []string{
-			resultTitle(result),
-			localizedMethodology(result.Methodology),
-			statusIcon(result.Status) + " " + statusLabel(result.Status),
-			result.Summary,
-			formatDurationMS(result.DurationMS),
-		})
-	}
-	r.table([]string{
-		i18n.T("report.module"), i18n.T("report.scope"),
-		i18n.T("report.status"), i18n.T("report.summary"), i18n.T("report.duration"),
-	}, rows, map[int]bool{4: true})
-	r.blank()
 }
 
 // moduleNavigation 显示完整模块目录以及本次报告实际选择的模块。Run.Requested

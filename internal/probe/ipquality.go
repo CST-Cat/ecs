@@ -786,7 +786,8 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 	totalLatency += latency
 	if err == nil {
 		finding := parseIPQSPublicPage(body, ip)
-		finding.Access = "官方公开查询页"
+		// 通道披露到底：这一级用浏览器 UA 读官方公开页，而不是 ecs 自己的 UA。
+		finding.Access = "官方公开查询页（浏览器 UA）"
 		finding.Latency = totalLatency
 		if finding.Err == nil {
 			finding.Partial = appendPartial(finding.Partial, "公开页只提供部分 API 字段")
@@ -962,7 +963,8 @@ func fetchDBIP(ctx context.Context, env Environment, _ *http.Client, ip string) 
 	totalLatency += latency
 	if err == nil {
 		finding := parseDBIPPublicPage(body)
-		finding.Access = "官方公开查询页"
+		// 同上：公开页只接受浏览器 UA，报告如实标出这一点。
+		finding.Access = "官方公开查询页（浏览器 UA）"
 		finding.Latency = totalLatency
 		if finding.Err == nil {
 			if keyedAttemptFailed {

@@ -367,10 +367,6 @@ func ooklaPacketLossDisplay(parsed ooklaResult) string {
 	return fmt.Sprintf("%.2f %%", loss)
 }
 
-func appendOoklaMeasurements(result *model.Result, parsed ooklaResult) {
-	appendOoklaMeasurementsFor(result, parsed, "", "Ookla")
-}
-
 func appendOoklaMeasurementsFor(result *model.Result, parsed ooklaResult, prefix, labelPrefix string) {
 	if labelPrefix == "" {
 		labelPrefix = "Ookla"
@@ -416,8 +412,4 @@ func ooklaBandwidthMbps(bytesPerSecond float64) float64 {
 		return 0
 	}
 	return value
-}
-
-func ooklaSummary(parsed ooklaResult) string {
-	return fmt.Sprintf("下载 %s · 上传 %s · 延迟 %s", ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth), ooklaLatencyDisplay(parsed.Ping.Latency))
 }

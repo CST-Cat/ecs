@@ -8,3 +8,5 @@
 /AGENTS.md
 ecs-report-*
 .DS_Store
+# 本地 Agent 权限配置属于开发者环境，不入库
+.claude/

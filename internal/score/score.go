@@ -546,8 +546,10 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 	if metric.Prefix == "" && metric.Suffix == "" {
 		return 0, "", "", false
 	}
-	var matched []float64
-	var unit, label string
+	// 按 key 排序后再取展示信息：map 的遍历顺序是随机的，直接取"最后一个
+	// 匹配项"会让同一份报告每次渲染得到不同的 label/unit。数值本身不受影响
+	// （聚合与顺序无关），但 JSON 里出现不稳定字段会破坏可复现性。
+	var matchedKeys []string
 	for key, item := range values {
 		if metric.Prefix != "" && !strings.HasPrefix(key, metric.Prefix) {
 			continue
@@ -558,13 +560,18 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 		if item.value <= 0 {
 			continue
 		}
-		matched = append(matched, item.value)
-		unit, label = item.unit, item.label
+		matchedKeys = append(matchedKeys, key)
 	}
-	if len(matched) == 0 {
+	if len(matchedKeys) == 0 {
 		return 0, "", "", false
 	}
-	return aggregate(matched, metric.Aggregate), unit, label, true
+	sort.Strings(matchedKeys)
+	matched := make([]float64, 0, len(matchedKeys))
+	for _, key := range matchedKeys {
+		matched = append(matched, values[key].value)
+	}
+	first := values[matchedKeys[0]]
+	return aggregate(matched, metric.Aggregate), first.unit, first.label, true
 }
 
 func aggregate(values []float64, mode Aggregation) float64 {

@@ -37,7 +37,7 @@ func TestDNSProbeEmitsPerResolverStatisticsAndEvidence(t *testing.T) {
 	}()
 
 	cfg := config.Runtime{
-		IPVersion:  config.IPVersion4,
+		IPVersion:   config.IPVersion4,
 		DNSAttempts: attempts,
 		DNSResolvers: []config.Endpoint{{
 			Name: "fixture", Address: server.LocalAddr().String(),

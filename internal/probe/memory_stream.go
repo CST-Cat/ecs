@@ -59,24 +59,34 @@ type streamMemoryRun struct {
 	Err     error
 }
 
-// isOfficialStreamBinary identifies the upstream STREAM executable without
+// streamOfficialMarkers 是官方 STREAM 可执行文件里稳定出现的只读数据串。
+// run.sh 用 strings(1) 检查同一组标记；两边改动必须同步。
+var streamOfficialMarkers = []string{
+	"STREAM version",
+	"Number of Threads requested",
+	"Best Rate",
+	"Function",
+}
+
+// maxStreamBinaryBytes 限制读入内存的候选文件大小。官方 STREAM 只有几十 KB；
+// PATH 上恰好同名的巨大文件不应该把整个进程读爆。
+const maxStreamBinaryBytes = 64 << 20
+
+// IsOfficialStreamBinary identifies the upstream STREAM executable without
 // invoking it.  ImageMagick also installs a command named "stream"; running
 // that command as a benchmark can block or produce an unrelated transcript.
-// These markers are emitted by the official STREAM source and are also used by
-// the wrapper/doctor checks, so the probe must apply the same guard when it is
-// called directly.
-func isOfficialStreamBinary(path string) bool {
+// doctor 与 memory 探针共用这一份判断，避免两处各写一份标记表。
+func IsOfficialStreamBinary(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxStreamBinaryBytes {
+		return false
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 	text := string(data)
-	for _, marker := range []string{
-		"STREAM version",
-		"Number of Threads requested",
-		"Best Rate",
-		"Function",
-	} {
+	for _, marker := range streamOfficialMarkers {
 		if !strings.Contains(text, marker) {
 			return false
 		}

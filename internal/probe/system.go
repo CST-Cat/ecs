@@ -364,8 +364,12 @@ func collectLinuxSystem(s *systemSnapshot) {
 	s.KSM = detectKSM("/sys")
 
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
-		if seconds, err := strconv.ParseFloat(strings.Fields(string(data))[0], 64); err == nil {
-			s.Uptime = formatDuration(time.Duration(seconds) * time.Second)
+		// 容器与沙箱里 /proc/uptime 可能存在但为空；直接取 Fields()[0]
+		// 会越界 panic，让整个 system 模块变成"探针发生 panic"。
+		if fields := strings.Fields(string(data)); len(fields) > 0 {
+			if seconds, err := strconv.ParseFloat(fields[0], 64); err == nil {
+				s.Uptime = formatDuration(time.Duration(seconds) * time.Second)
+			}
 		}
 	}
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {

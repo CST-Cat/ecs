@@ -11,13 +11,16 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"ecs/internal/model"
 )
+
+// stealInterferenceThreshold 是触发自动复测的 CPU steal 门槛（百分比）。
+// 与 system 模块的累计 steal 告警同阈值，见 AssessBenchmarkInterference 的说明。
+const stealInterferenceThreshold = 5.0
 
 type psiValues struct {
 	Avg10, Avg60, Avg300 float64
@@ -346,7 +349,13 @@ func AssessBenchmarkInterference(module string, before, after EnvironmentSnapsho
 	if before.CPUTracked && after.CPUTracked {
 		if steal, ok := stealPercent(before.CPUTimes, after.CPUTimes); ok {
 			add("cpu_steal_percent_window", "测试窗口 CPU steal", steal, "%", fmt.Sprintf("%.2f %%", steal), "proc-stat-steal-window-v1")
-			if steal >= 1 {
+			// 阈值与 system 模块的累计 steal 告警保持一致。
+			//
+			// 取 5% 而不是 1%：同一台机器连续三轮的实测波动就有 ±5–8%
+			// （randread 29.12 / 26.90 / 27.01 MiB/s），1% steal 造成的影响
+			// 小于测量本身的噪声。而超卖 VPS 上 1% steal 是常态，按它复测
+			// 等于把每个重型基准都跑两遍，收益却被噪声淹没。
+			if steal >= stealInterferenceThreshold {
 				reason(3, fmt.Sprintf("测试窗口 CPU steal %.2f%%", steal))
 			}
 		}
@@ -601,12 +610,4 @@ func retrySelectionText(selected bool) string {
 		return "采用"
 	}
 	return "保留供复核"
-}
-
-// SortedInterferenceReasons supports deterministic tests and callers that
-// need a stable presentation independent of sampling order.
-func SortedInterferenceReasons(interference model.Interference) []string {
-	reasons := append([]string(nil), interference.Reasons...)
-	sort.Strings(reasons)
-	return reasons
 }

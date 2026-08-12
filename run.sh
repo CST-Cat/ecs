@@ -290,10 +290,6 @@ OOKLA_KEYRING=""
 OOKLA_GNUPGHOME=""
 OOKLA_APT_SOURCES=""
 OOKLA_APT_LISTS=""
-OOKLA_RPM_REPO=""
-OOKLA_RPM_ARCH=""
-OOKLA_RPM_OS=""
-OOKLA_RPM_VERSION=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
 TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.gz"
@@ -1094,53 +1090,13 @@ prepare_ookla_apt() {
   OOKLA_REPO_READY=1
 }
 
-select_ookla_rpm_distribution() {
-  OOKLA_RPM_OS=""
-  OOKLA_RPM_VERSION=""
-  [ -r /etc/os-release ] || return 1
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID:-}" in
-    fedora) OOKLA_RPM_OS=fedora ;;
-    amzn|centos|rhel|rocky|almalinux|ol) OOKLA_RPM_OS=el ;;
-    *) return 1 ;;
-  esac
-  OOKLA_RPM_VERSION="${VERSION_ID%%.*}"
-  [ -n "$OOKLA_RPM_VERSION" ] || return 1
-  # The upstream repository currently has EL 6–9 and Fedora 32–36.  Keep
-  # newer compatible systems on the newest signed suite rather than guessing
-  # a third-party package name.
-  if [ "$OOKLA_RPM_OS" = el ] && [ "$OOKLA_RPM_VERSION" -gt 9 ] 2>/dev/null; then
-    OOKLA_RPM_VERSION=9
-  elif [ "$OOKLA_RPM_OS" = fedora ] && [ "$OOKLA_RPM_VERSION" -gt 36 ] 2>/dev/null; then
-    OOKLA_RPM_VERSION=36
-  fi
-  case "$(uname -m)" in
-    x86_64|amd64) OOKLA_RPM_ARCH=x86_64 ;;
-    aarch64|arm64) OOKLA_RPM_ARCH=aarch64 ;;
-    armv7l|armv7) OOKLA_RPM_ARCH=armhfp ;;
-    i386|i686|x86) OOKLA_RPM_ARCH=i386 ;;
-    *) return 1 ;;
-  esac
-}
-
 prepare_ookla_rpm() {
-  select_ookla_rpm_distribution || return 1
-  prepare_ookla_key || return 1
-  OOKLA_RPM_REPO="$WORK/ookla-packagecloud.repo"
-  printf '%s\n' \
-    '[ookla-speedtest-cli]' \
-    'name=Ookla Speedtest CLI (official)' \
-    "baseurl=https://packagecloud.io/ookla/speedtest-cli/$OOKLA_RPM_OS/$OOKLA_RPM_VERSION/\$basearch" \
-    'enabled=1' \
-    'repo_gpgcheck=1' \
-    'gpgcheck=1' \
-    "gpgkey=file://$OOKLA_KEY_ASC" \
-    'sslverify=1' \
-    'metadata_expire=300' >"$OOKLA_RPM_REPO"
   # RPM metadata can be verified without installation, but extracting an RPM
   # safely requires rpm2cpio/cpio (and dnf's download plugin).  Do not guess or
   # install those helpers globally: report a controlled degradation instead.
+  #
+  # 这里刻意不再生成 .repo 文件与导入 GPG key：既然本路径必然以跳过收尾，
+  # 提前建立仓库配置只是在 WORK 里留下用不到的产物。
   say "当前 RPM 路径没有安全的临时解包器，speedtest 将跳过；请预先放入 PATH" \
     "the RPM path lacks a safe temporary extractor; speedtest will be skipped (preinstall it on PATH if needed)"
   return 1

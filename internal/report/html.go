@@ -24,10 +24,17 @@ type htmlTableCell struct {
 	Class string
 }
 
+// HTML 渲染独立调用方传入的报告，会先做一次本地化。
 func HTML(data model.Report, scored *score.Report) ([]byte, error) {
-	// Keep the standalone HTML renderer language-aware.  WriteFiles already
-	// supplies a localized copy; Localize is deliberately idempotent here.
-	data = Localize(data)
+	return htmlLocalized(Localize(data), scored)
+}
+
+// htmlLocalized 渲染一份**已经本地化过**的报告。
+//
+// WriteFiles 已经在写文件前统一本地化过一次；英文模式下 Localize 要遍历整棵
+// 报告树、对每个字符串做多级正则模板匹配，重复三遍（html/markdown/text 各一次）
+// 是纯粹的浪费。
+func htmlLocalized(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"t":           i18n.T,
 		"htmlLang":    reportHTMLLanguage,
@@ -414,25 +421,38 @@ func evidenceHTMLLabelColor(evidence *model.Evidence) template.CSS {
 	}
 }
 
+// reportValueClass 给表格单元格挑一个语义色。
+//
+// 值在渲染前已经过本地化，因此中英两种写法都要认：只列中文会让英文报告的
+// 整张表退化成无色。前缀判断放在精确匹配之后，覆盖"失败：<原因>"这类带
+// 后缀的取值。
 func reportValueClass(value string) string {
-	switch strings.TrimSpace(value) {
-	case "极低", "低", "否", "成功", "原生 IP", "available", "true":
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "极低", "低", "否", "成功", "原生 IP",
+		"very low", "low", "no", "success", "native ip", "available", "true", "unlocked", "passed":
 		return "cell-good"
-	case "中等", "需留意", "可疑", "商业", "其他":
+	case "中等", "需留意", "可疑", "商业", "其他",
+		"elevated", "medium", "attention", "suspicious", "business", "other", "partial":
 		return "cell-warn"
-	case "高", "极高", "是", "机房", "失败":
+	case "高", "极高", "是", "机房", "失败",
+		"high", "very high", "yes", "hosting", "datacenter", "failed", "failure":
 		return "cell-bad"
-	case "—", "未启用", "未返回", "unavailable", "false":
+	case "—", "未启用", "未返回",
+		"not enabled", "no response", "unavailable", "false", "unknown", "n/a":
 		return "cell-muted"
-	default:
-		if strings.HasPrefix(value, "失败：") {
+	}
+	for _, prefix := range []string{"失败：", "failed:", "failure:"} {
+		if strings.HasPrefix(strings.ToLower(trimmed), prefix) || strings.HasPrefix(trimmed, prefix) {
 			return "cell-bad"
 		}
-		if strings.HasPrefix(value, "部分：") {
+	}
+	for _, prefix := range []string{"部分：", "partial:"} {
+		if strings.HasPrefix(strings.ToLower(trimmed), prefix) || strings.HasPrefix(trimmed, prefix) {
 			return "cell-warn"
 		}
-		return ""
 	}
+	return ""
 }
 
 func htmlTableRows(table model.Table) [][]htmlTableCell {

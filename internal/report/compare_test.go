@@ -140,3 +140,67 @@ func TestWriteComparisonFilesWritesAllRequestedFormats(t *testing.T) {
 		}
 	}
 }
+
+// TestComparisonHTMLEscapesUntrustedFields 守住 compare_html.go 的手工转义。
+//
+// 该渲染器用 strings.Builder + html.EscapeString 拼 HTML，而不是 html/template
+// 的自动转义：一次遗漏就是注入面。报告标签直接来自命令行给出的文件名，
+// Linux 下文件名几乎可以是任意字节。
+func TestComparisonHTMLEscapesUntrustedFields(t *testing.T) {
+	payload := `<script>alert(1)</script>`
+	data := comparison.Report{
+		SchemaVersion: comparison.SchemaVersion,
+		Tool:          model.ToolInfo{Name: payload, Version: payload},
+		Reference:     0,
+		Inputs: []comparison.Input{
+			{Index: 0, Label: payload, ReportID: payload, Profile: payload, ToolVersion: payload},
+			{Index: 1, Label: "b", ReportID: "b"},
+		},
+		Summary: comparison.Summary{Reports: 2, Comparability: comparison.PartiallyComparable},
+		Modules: []comparison.Module{{
+			ID:            payload,
+			Title:         payload,
+			Comparability: comparison.PartiallyComparable,
+			Statuses: []comparison.StatusValue{
+				{Report: 0, Available: true, Status: model.StatusOK},
+				{Report: 1, Available: true, Status: model.StatusOK},
+			},
+			Evidence: []comparison.EvidenceValue{{Report: 0}, {Report: 1}},
+			Metrics: []comparison.Metric{{
+				Key: payload, Label: payload, Unit: payload, Method: payload,
+				ParameterScope: payload, HigherIsBetter: true,
+				Values: []comparison.MetricValue{
+					{Report: 0, Available: true, Value: 1, Display: payload},
+					{Report: 1, Available: true, Value: 2, Display: payload},
+				},
+			}},
+			Changes: []comparison.Observation{{
+				Key: payload, Label: payload, Source: payload,
+				Values: []comparison.ObservationValue{
+					{Report: 0, Available: true, Value: payload},
+					{Report: 1, Available: true, Value: payload},
+				},
+			}},
+			MetricIssues: []comparison.MetricIssue{{
+				Key: payload, Label: payload, Reason: payload, Reports: []int{0},
+			}},
+		}},
+		Notices: []string{payload},
+	}
+
+	rendered, err := ComparisonHTML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(rendered)
+	if strings.Contains(text, "<script>alert(1)</script>") {
+		t.Fatal("比较报告 HTML 输出了未转义的脚本标签")
+	}
+	if !strings.Contains(text, "&lt;script&gt;") {
+		t.Fatal("比较报告 HTML 没有把不可信文本转义成实体")
+	}
+	// CSP 是第二道防线，缺了它一次转义遗漏就能直接执行脚本。
+	if !strings.Contains(text, "default-src 'none'") {
+		t.Fatal("比较报告 HTML 缺少 default-src 'none' 的 CSP")
+	}
+}

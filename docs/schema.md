@@ -299,7 +299,7 @@ IP 质量指标尤其需要保留 `method`：
 {"title":"本机绑定信息","language":"text","content":"local 203.0.x.x:443","sensitive":true}
 ```
 
-本机 IP 的遮盖规则为：IPv4 隐藏后两段，IPv6 隐藏后四段，`IP:port` 中的端口号保留。
+本机 IP 的遮盖规则为：IPv4 隐藏后两段（保留 /16），IPv6 隐藏后六组（保留 /32），`IP:port` 中的端口号保留。
 生产报告还会携带一份不写入 JSON 的本机 IP 列表，在所有正文中只替换与该列表精确匹配的地址。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
 
 遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者中的本机 IP 遮盖。

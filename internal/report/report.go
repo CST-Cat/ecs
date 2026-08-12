@@ -54,11 +54,11 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 		case "json":
 			content, err = JSON(localized)
 		case "md":
-			content = []byte(Markdown(localized, options.Score))
+			content = []byte(markdownLocalized(localized, options.Score))
 		case "html":
-			content, err = HTML(localized, options.Score)
+			content, err = htmlLocalized(localized, options.Score)
 		case "txt":
-			content = []byte(Text(localized, TextOptions{Color: options.TextColor, Score: options.Score}))
+			content = []byte(textLocalized(localized, TextOptions{Color: options.TextColor, Score: options.Score}))
 		default:
 			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}

@@ -8,7 +8,7 @@
 
 磁盘模块只在用户指定目录创建名称随机的 `.ecs-fio-*` 临时文件，并在完成、错误或取消时清理。它会把文件限制在测试前可用空间的 20% 以内。
 
-路由模块只调用官方 NextTrace Tiny，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 Tiny 仅从官方 GitHub Release 选取对应 Linux Tiny asset，先校验 GitHub API 提供的 SHA-256 digest，再放入本次 `$WORK/bin`；脚本退出时随工作目录清理。`ECS_AUTO_DEPS=0` 或下载/校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace Tiny 只使用无启动横幅的 JSON 输出模式。
+路由模块只调用官方 NextTrace Tiny，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 Tiny 从当前架构的 `ecs-tools` 发行包取得：该包整体校验 `checksums.txt`，包内 `manifest.json` 再逐个校验每个 binary 的 SHA-256，通过后才放入本次 `$WORK/bin`；脚本退出时随工作目录清理。发行包本身在构建期从官方 NextTrace Release 取得对应 Linux Tiny asset，并强制比对 GitHub API 提供的 SHA-256 digest——digest 缺失即构建失败，不会以"无 digest"为由跳过校验。`ECS_AUTO_DEPS=0` 或任一环节校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace Tiny 只使用无启动横幅的 JSON 输出模式。
 
 磁盘模块只会调用 `PATH` 中现有的 `fio`，解析其本地 JSON 输出并记录参数、版本与程序 SHA-256。运行 `ecs` 本身不会调用包管理器；只有用户显式执行 `install.sh --with-benchmarks` 才会安装依赖。fio 临时文件仍受 20% 可用空间上限约束。
 
@@ -44,7 +44,7 @@ Ookla 可能接收测量所需的出口 IP、客户端和服务器元数据，ec
 
 ## 报告隐私
 
-默认在写 JSON 之前只遮盖本机 IP：IPv4 隐藏后两段，IPv6 隐藏后四段，端口号保留。主机名、远端目标、BGP 前缀与路由跳 IP 保持完整。ecs 会在字段、表格和原始输出中精确查找已知本机 IP，不会因为同一段文本含有远端 IP 就一并遮盖。`--reveal` 会把完整本机 IP 写入所有选中的报告格式，请只在可信目录中使用。报告文件权限默认为 `0600`，输出目录由 ecs 创建时权限为 `0700`。
+默认在写 JSON 之前只遮盖本机 IP：IPv4 隐藏后两段（保留 /16），IPv6 隐藏后六组（保留 /32），端口号保留。IPv6 刻意比 IPv4 遮得更多：VPS 提供商普遍按 /64 给每台机器分配一整个子网，只隐藏后四组等于把实例本身指认出来。主机名、远端目标、BGP 前缀与路由跳 IP 保持完整。ecs 会在字段、表格和原始输出中精确查找已知本机 IP，不会因为同一段文本含有远端 IP 就一并遮盖。`--reveal` 会把完整本机 IP 写入所有选中的报告格式，请只在可信目录中使用。报告文件权限默认为 `0600`，输出目录由 ecs 创建时权限为 `0700`。
 
 在线模块仍会让目标服务看到发起请求的出口 IP；完整列表见 README 的“隐私与网络请求”章节。使用 `--exposure local` 可禁止这些模块运行，`--exposure public` 保留联网但不接触第三方情报服务。
 

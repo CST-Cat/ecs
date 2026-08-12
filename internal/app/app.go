@@ -15,16 +15,17 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/runner"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
+	"ecs/internal/textwidth"
 	"ecs/internal/ui"
 )
 
@@ -120,6 +121,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, i18n.T("flag.diskMiB"))
 	diskPathFlag := flags.String("disk-path", cfg.DiskPath, i18n.T("flag.diskPath"))
 	diskMultiFlag := flags.Bool("disk-multi", cfg.DiskMulti, i18n.T("flag.diskMulti"))
+	diskMatrixModeFlag := flags.String("disk-matrix-mode", cfg.DiskMatrixMode, i18n.T("flag.diskMatrixMode"))
 	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, i18n.T("flag.iperfDuration"))
 	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, i18n.T("flag.speedThreads"))
 	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, i18n.T("flag.timeout"))
@@ -181,6 +183,12 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	cfg.DiskMiB = *diskFlag
 	cfg.DiskPath = *diskPathFlag
 	cfg.DiskMulti = *diskMultiFlag
+	diskMatrixMode, err := config.ParseDiskMatrixMode(*diskMatrixModeFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: --disk-matrix-mode: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
+	cfg.DiskMatrixMode = diskMatrixMode
 	cfg.IPerfDuration = *iperfDurationFlag
 	cfg.SpeedThreads = *threadsFlag
 	cfg.HTTPTimeout = *timeoutFlag
@@ -540,7 +548,7 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 				label = i18n.T("doctor.missing")
 				missingRequired = true
 			}
-			fmt.Fprintf(stdout, "  %-11s %s %s\n", tool.name, padDisplay(label, 8), tool.purpose)
+			fmt.Fprintf(stdout, "  %-11s %s %s\n", tool.name, textwidth.Pad(label, 8), tool.purpose)
 			continue
 		}
 		versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -566,10 +574,10 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 				label = i18n.T("doctor.missing")
 				missingRequired = true
 			}
-			fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, padDisplay(label, 8), tool.purpose, i18n.T("doctor.unknownVersion"))
+			fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, textwidth.Pad(label, 8), tool.purpose, i18n.T("doctor.unknownVersion"))
 			continue
 		}
-		fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, padDisplay(i18n.T("doctor.ready"), 8), tool.purpose, version)
+		fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, textwidth.Pad(i18n.T("doctor.ready"), 8), tool.purpose, version)
 	}
 	if missingRequired {
 		fmt.Fprintln(stdout, "\n"+i18n.T("doctor.installHint"))
@@ -687,18 +695,11 @@ func doctorTools() []doctorTool {
 
 // identifyOfficialStream performs a read-only marker check. The official
 // STREAM program is a benchmark executable, not a conventional CLI: invoking
-// it with --version or --help starts a full memory run. A build from the
-// official source carries these table/header markers in its read-only data.
+// it with --version or --help starts a full memory run.  探针与 doctor 共用
+// probe 里的同一份标记判断，避免两处各写一份标记表。
 func identifyOfficialStream(_ context.Context, path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	text := string(data)
-	for _, marker := range []string{"STREAM version", "Number of Threads requested", "Best Rate", "Function"} {
-		if !strings.Contains(text, marker) {
-			return "", fmt.Errorf("official STREAM marker %q not found", marker)
-		}
+	if !probe.IsOfficialStreamBinary(path) {
+		return "", fmt.Errorf("official STREAM markers not found in %s", path)
 	}
 	return "official STREAM", nil
 }
@@ -777,26 +778,6 @@ func resolveLanguage(args []string) i18n.Lang {
 		}
 	}
 	return i18n.DetectFromEnv()
-}
-
-// padDisplay 按显示宽度右填充。
-//
-// %-Ns 按字节计数，中日韩字符一个占三字节却只显示两列，直接用会让中英文两种
-// 语言下的列宽都对不齐。
-func padDisplay(value string, width int) string {
-	display := 0
-	for _, character := range value {
-		if unicode.Is(unicode.Han, character) || unicode.Is(unicode.Hiragana, character) ||
-			unicode.Is(unicode.Katakana, character) || unicode.Is(unicode.Hangul, character) {
-			display += 2
-			continue
-		}
-		display++
-	}
-	if display >= width {
-		return value
-	}
-	return value + strings.Repeat(" ", width-display)
 }
 
 func preparse(args []string) (configPath, profile string) {

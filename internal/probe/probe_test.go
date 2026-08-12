@@ -158,7 +158,7 @@ func TestFIOJSONHelpers(t *testing.T) {
 	}
 	asyncEngine := fioEngine{Name: "libaio", AsyncQueue: true, Detected: true}
 	plan := fioJobPlan()
-	args := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, asyncEngine, plan), " ")
+	args := strings.Join(fioArguments("<tempfile>", 64*1024*1024, asyncEngine, plan), " ")
 	for _, expected := range []string{
 		"--output-format=json", "--direct=1", "--name=seqwrite", "--name=randwrite",
 		"--iodepth=32", "--name=mix4k", "--name=mix512k", "--rwmixread=50", "--iodepth=64", "--numjobs=2",
@@ -173,7 +173,7 @@ func TestFIOJSONHelpers(t *testing.T) {
 	if got := syncEngine.EffectiveDepth(64); got != 1 {
 		t.Fatalf("psync effective depth = %d, want 1", got)
 	}
-	syncArgs := strings.Join(fioArguments("<tempfile>", 64*1024*1024, 2*time.Second, syncEngine, plan), " ")
+	syncArgs := strings.Join(fioArguments("<tempfile>", 64*1024*1024, syncEngine, plan), " ")
 	if strings.Contains(syncArgs, "--iodepth=64") || strings.Contains(syncArgs, "--iodepth=32") {
 		t.Fatalf("psync args must not request an async queue depth: %s", syncArgs)
 	}
@@ -266,7 +266,7 @@ func TestRunFIOD1LatencyWithRealFIO(t *testing.T) {
 	}
 	engine := detectFIOEngine(context.Background(), fioPath)
 	plan := []fioJobSpec{{Name: fioQD1LatencyJobName, RW: "randread", BlockSize: "4k", IODepth: 1, NumJobs: 1}}
-	args := fioArguments(filename, 16*1024*1024, time.Second, engine, plan)
+	args := fioArguments(filename, 16*1024*1024, engine, plan)
 	command := exec.Command(fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	output, err := command.Output()
@@ -325,7 +325,7 @@ func TestRunRepresentativeFIOJobsWithRealFIO(t *testing.T) {
 	}
 
 	engine := detectFIOEngine(context.Background(), fioPath)
-	args := fioArguments(filename, 128*1024*1024, time.Second, engine, plan)
+	args := fioArguments(filename, 128*1024*1024, engine, plan)
 	command := exec.Command(fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	output, err := command.Output()

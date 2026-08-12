@@ -432,12 +432,13 @@ func TestNetworkSummaryPrintsDetailedTables(t *testing.T) {
 	}
 }
 
+// 终端表格改用 textwidth 统一计算显示宽度，不再自带第二份 CJK 宽度表。
 func TestDisplayWidthCountsCJKAsTwoColumns(t *testing.T) {
-	if got := displayWidth("IP 风险"); got != 7 {
-		t.Fatalf("displayWidth = %d, want 7", got)
+	if got := textwidth.Width("IP 风险"); got != 7 {
+		t.Fatalf("width = %d, want 7", got)
 	}
-	if got := displayWidth("IPQS"); got != 4 {
-		t.Fatalf("ASCII displayWidth = %d, want 4", got)
+	if got := textwidth.Width("IPQS"); got != 4 {
+		t.Fatalf("ASCII width = %d, want 4", got)
 	}
 }
 

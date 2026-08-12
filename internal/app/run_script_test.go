@@ -170,8 +170,10 @@ func TestRunScriptOoklaPreparationUsesTemporarySource(t *testing.T) {
 		"install_ookla",
 		"TEMP_TOOL_CACHE",
 		"dpkg-deb --extract",
-		"gpgcheck=1",
+		// RPM 路径没有安全的临时解包器，必然以跳过收尾，因此不再生成
+		// .repo 文件；apt 路径的签名保证由 signed-by= 表达。
 		"signed-by=",
+		"OOKLA_KEY_FINGERPRINT",
 		"ECS_AUTO_DEPS=0",
 	} {
 		if !strings.Contains(text, required) {
@@ -217,7 +219,6 @@ func TestRunScriptOoklaDependencyPolicy(t *testing.T) {
 		`OOKLA_KEY_ASC="$WORK/ookla-packagecloud-key.asc"`,
 		`OOKLA_KEYRING="$WORK/ookla-packagecloud-keyring.gpg"`,
 		`OOKLA_APT_SOURCES="$WORK/ookla-packagecloud.list"`,
-		`OOKLA_RPM_REPO="$WORK/ookla-packagecloud.repo"`,
 		`apt_ookla_command download speedtest`,
 		`stage_temp_tool speedtest`,
 	} {

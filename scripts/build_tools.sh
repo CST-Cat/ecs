@@ -249,16 +249,16 @@ download_sha256() {
   die "$label did not match its pinned SHA-256 after 3 attempts"
 }
 
-github_latest_release() {
+github_release_by_tag() {
   local repository=$1
-  local output=$2
+  local tag=$2
+  local output=$3
   curl "${github_api_curl_options[@]}" \
     -H 'Accept: application/vnd.github+json' \
-    "https://api.github.com/repos/${repository}/releases/latest" >"$output"
-  jq -e '
-    (.draft == false) and (.prerelease == false) and
-    (.tag_name | type == "string" and length > 0)
-  ' "$output" >/dev/null || die "${repository} latest release is not a stable tagged release"
+    "https://api.github.com/repos/${repository}/releases/tags/${tag}" >"$output"
+  jq -e --arg tag "$tag" '
+    (.draft == false) and (.prerelease == false) and (.tag_name == $tag)
+  ' "$output" >/dev/null || die "${repository} ${tag} is not a stable tagged release"
 }
 
 clone_release() {
@@ -285,19 +285,23 @@ git_source() {
   printf 'git+https://github.com/%s.git@%s\n' "$repository" "$commit"
 }
 
-sysbench_release="$work/sysbench-release.json"
-fio_release="$work/fio-release.json"
-iperf3_release="$work/iperf3-release.json"
-nexttrace_release="$work/nexttrace-release.json"
-github_latest_release akopytov/sysbench "$sysbench_release"
-github_latest_release axboe/fio "$fio_release"
-github_latest_release esnet/iperf "$iperf3_release"
-github_latest_release nxtrace/NTrace-core "$nexttrace_release"
+# Every upstream is pinned to an exact tag AND the commit that tag resolved to
+# when the pin was recorded.  A moved or re-cut tag therefore fails the build
+# instead of silently changing what ends up in a release.  Bumping a tool is an
+# explicit two-line edit here, exactly like zstd and OpenSSL below.
+sysbench_tag='1.0.20'
+sysbench_expected_commit='ebf1c90da05dea94648165e4f149abc20c979557'
+fio_tag='fio-3.42'
+fio_expected_commit='ab77643023f5d7e3c1b71a7576a564f368bf577a'
+iperf3_tag='3.21'
+iperf3_expected_commit='d39cf41526626b4e5a130f115d931cd6cbdffc19'
+iputils_tag='20250605'
+iputils_expected_commit='6e1cb146547eb6fbb127ffc8397a9241be0d33c2'
+nexttrace_tag='v1.7.1'
+nexttrace_expected_commit='c9919828fcd8c3103827d08bb26d69e9bf538299'
 
-sysbench_tag=$(jq -er '.tag_name' "$sysbench_release")
-fio_tag=$(jq -er '.tag_name' "$fio_release")
-iperf3_tag=$(jq -er '.tag_name' "$iperf3_release")
-nexttrace_tag=$(jq -er '.tag_name' "$nexttrace_release")
+nexttrace_release="$work/nexttrace-release.json"
+github_release_by_tag nxtrace/NTrace-core "$nexttrace_tag" "$nexttrace_release"
 
 sysbench_src="$work/sysbench"
 zstd_src="$work/zstd"
@@ -307,6 +311,8 @@ iperf3_src="$work/iperf3"
 iputils_src="$work/iputils"
 nexttrace_src="$work/nexttrace"
 sysbench_commit=$(clone_release akopytov/sysbench "$sysbench_tag" "$sysbench_src")
+[[ "$sysbench_commit" == "$sysbench_expected_commit" ]] ||
+  die "sysbench $sysbench_tag resolved to $sysbench_commit, expected $sysbench_expected_commit"
 zstd_tag='v1.5.7'
 zstd_expected_commit='f8745da6ff1ad1e7bab384bd1f9d742439278e99'
 zstd_commit=$(clone_release facebook/zstd "$zstd_tag" "$zstd_src")
@@ -318,20 +324,29 @@ openssl_commit=$(clone_release openssl/openssl "$openssl_tag" "$openssl_src")
 [[ "$openssl_commit" == "$openssl_expected_commit" ]] ||
   die "OpenSSL $openssl_tag resolved to $openssl_commit, expected $openssl_expected_commit"
 fio_commit=$(clone_release axboe/fio "$fio_tag" "$fio_src")
+[[ "$fio_commit" == "$fio_expected_commit" ]] ||
+  die "fio $fio_tag resolved to $fio_commit, expected $fio_expected_commit"
 iperf3_commit=$(clone_release esnet/iperf "$iperf3_tag" "$iperf3_src")
+[[ "$iperf3_commit" == "$iperf3_expected_commit" ]] ||
+  die "iperf3 $iperf3_tag resolved to $iperf3_commit, expected $iperf3_expected_commit"
 
 # iputils is deliberately built from its official release source rather than
 # copied from a distribution package: ECS needs the upstream ping output.
-iputils_release="$work/iputils-release.json"
-github_latest_release iputils/iputils "$iputils_release"
-iputils_tag=$(jq -er '.tag_name' "$iputils_release")
 iputils_commit=$(clone_release iputils/iputils "$iputils_tag" "$iputils_src")
+[[ "$iputils_commit" == "$iputils_expected_commit" ]] ||
+  die "iputils $iputils_tag resolved to $iputils_commit, expected $iputils_expected_commit"
 nexttrace_commit=$(clone_release nxtrace/NTrace-core "$nexttrace_tag" "$nexttrace_src")
+[[ "$nexttrace_commit" == "$nexttrace_expected_commit" ]] ||
+  die "NextTrace $nexttrace_tag resolved to $nexttrace_commit, expected $nexttrace_expected_commit"
 
+# The official STREAM source is a single file served over HTTPS with no release
+# feed and no upstream checksum.  Pin its SHA-256 here: the RCS revision comment
+# alone is not evidence, since a tampered file can keep that line unchanged.
 stream_url='https://www.cs.virginia.edu/stream/FTP/Code/stream.c'
+stream_expected_sha='a52bae5e175bea3f7832112af9c085adab47117f7d2ce219165379849231692b'
 stream_src="$work/stream.c"
-curl "${curl_options[@]}" "$stream_url" -o "$stream_src"
-stream_sha=$(sha256sum "$stream_src" | awk '{print $1}')
+download_sha256 "$stream_url" "$stream_expected_sha" "$stream_src" 'official STREAM source'
+stream_sha=$stream_expected_sha
 stream_revision=$(sed -n 's@^/\* Revision: \$Id: stream\.c,v \([^ ]*\) \([0-9/]\{10\}\).*\*/$@\1-\2@p' "$stream_src")
 [[ -n "$stream_revision" ]] || die "could not read the official STREAM revision from $stream_url"
 stream_version=${stream_revision%%-*}
@@ -386,10 +401,13 @@ nexttrace_download="$work/nexttrace-tiny"
 curl "${curl_options[@]}" "$nexttrace_asset_url" -o "$nexttrace_download"
 chmod 0755 "$nexttrace_download"
 nexttrace_sha=$(sha256sum "$nexttrace_download" | awk '{print $1}')
-if [[ -n "$nexttrace_asset_digest" ]]; then
-  [[ "$nexttrace_asset_digest" == "sha256:${nexttrace_sha}" ]] ||
-    die "NextTrace asset digest disagrees with GitHub: expected $nexttrace_asset_digest, got sha256:$nexttrace_sha"
-fi
+# A missing digest is a verification failure, not a reason to skip verification.
+# NextTrace Tiny is the one prebuilt binary in the package; shipping it without
+# a checksum would leave the whole route/backtrace path unverified.
+[[ -n "$nexttrace_asset_digest" ]] ||
+  die "NextTrace release does not publish a digest for $nexttrace_asset_name"
+[[ "$nexttrace_asset_digest" == "sha256:${nexttrace_sha}" ]] ||
+  die "NextTrace asset digest disagrees with GitHub: expected $nexttrace_asset_digest, got sha256:$nexttrace_sha"
 
 jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=2

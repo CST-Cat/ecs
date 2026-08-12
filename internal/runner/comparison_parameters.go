@@ -9,6 +9,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/probe"
 )
 
 // comparisonParameterRevision changes only when the rules used to build a
@@ -133,7 +134,7 @@ func comparisonParameters(id string, cfg config.Runtime, result model.Result) ma
 		addField("job_duration", "job_duration")
 	case "dns":
 		addIPVersion()
-		add("query_name", "www.cloudflare.com")
+		add("query_name", probe.DNSQueryName)
 		add("attempts", strconv.Itoa(cfg.DNSAttempts))
 		add("resolvers_sha256", scopeHash(cfg.DNSResolvers))
 	case "latency":
@@ -179,14 +180,14 @@ func comparisonParameters(id string, cfg config.Runtime, result model.Result) ma
 	case "route":
 		addIPVersion()
 		add("targets_sha256", scopeHash(cfg.RouteTargets))
-		add("max_hops", "12")
+		add("max_hops", strconv.Itoa(probe.RouteSnapshotHops))
 		addField("tool_version", "version")
 		addField("tool_sha256", "binary_sha256")
 		addFieldHash("arguments_sha256", "arguments")
 	case "backtrace":
 		addIPVersion()
 		add("targets_sha256", scopeHash(cfg.BacktraceTargets))
-		add("max_hops", "20")
+		add("max_hops", strconv.Itoa(probe.BacktraceMaxHops))
 		add("signature_set", "china-backbone-v2")
 		addField("tool_version", "nexttrace_version")
 		addField("tool_sha256", "nexttrace_binary_sha256")

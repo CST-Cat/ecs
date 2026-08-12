@@ -187,24 +187,3 @@ func Has(lang Lang, key string) bool {
 	value, ok := chinese[key]
 	return ok && value != ""
 }
-
-// Keys 返回全部已登记的 key，供测试遍历。
-func Keys() []string {
-	keys := make([]string, 0, len(chinese)+len(errorChinese))
-	for key := range chinese {
-		keys = append(keys, key)
-	}
-	for key := range errorChinese {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-// ErrorKeys 返回全部校验错误 key，供测试核对中英覆盖与格式符一致。
-func ErrorKeys() []string {
-	keys := make([]string, 0, len(errorChinese))
-	for key := range errorChinese {
-		keys = append(keys, key)
-	}
-	return keys
-}

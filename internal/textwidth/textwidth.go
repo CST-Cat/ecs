@@ -16,8 +16,26 @@ import (
 )
 
 // Width 返回字符串在等宽终端里占用的列数。
+//
+// ANSI 转义序列不占列：着色后的字符串仍要参与对齐计算。
 func Width(value string) int {
-	return VisibleWidth(value)
+	width := 0
+	inEscape := false
+	for _, character := range value {
+		if inEscape {
+			// CSI 序列以字母结尾。
+			if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if character == '\x1b' {
+			inEscape = true
+			continue
+		}
+		width += RuneWidth(character)
+	}
+	return width
 }
 
 // RuneWidth 返回单个字符占用的列数。
@@ -141,36 +159,4 @@ func ansiSequenceEnd(value string, start int) int {
 		}
 	}
 	return len(value)
-}
-
-// VisibleWidth 返回忽略 ANSI 转义序列后的显示宽度。
-//
-// 着色后的字符串仍然要参与对齐计算，而转义序列本身不占列。
-func VisibleWidth(value string) int {
-	width := 0
-	inEscape := false
-	for _, character := range value {
-		if inEscape {
-			// CSI 序列以字母结尾。
-			if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
-				inEscape = false
-			}
-			continue
-		}
-		if character == '\x1b' {
-			inEscape = true
-			continue
-		}
-		width += RuneWidth(character)
-	}
-	return width
-}
-
-// PadVisible 按忽略转义序列后的宽度右补空格。
-func PadVisible(value string, width int) string {
-	gap := width - VisibleWidth(value)
-	if gap <= 0 {
-		return value
-	}
-	return value + strings.Repeat(" ", gap)
 }

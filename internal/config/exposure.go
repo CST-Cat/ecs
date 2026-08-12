@@ -114,11 +114,6 @@ func (e Exposure) String() string {
 	}
 }
 
-// ModuleExposureName 返回模块自身级别的名称，用于 list 命令与报告。
-func ModuleExposureName(id string) string {
-	return ExposureFor(id).Level.String()
-}
-
 // AllowsModule 判断模块是否在给定上限内。
 func AllowsModule(limit Exposure, id string) bool {
 	info := ExposureFor(id)

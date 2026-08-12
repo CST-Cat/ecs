@@ -125,16 +125,6 @@ func comparisonOutcomeLabel(outcome comparison.Outcome) string {
 	return translated
 }
 
-func comparisonValueDisplay(value comparison.MetricValue) string {
-	if !value.Available {
-		return "—"
-	}
-	if value.Display != "" {
-		return value.Display
-	}
-	return formatComparisonNumber(value.Value)
-}
-
 func comparisonMetricDisplay(metric comparison.Metric, value comparison.MetricValue) string {
 	if !value.Available {
 		return "—"

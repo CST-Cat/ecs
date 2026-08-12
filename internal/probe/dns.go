@@ -23,6 +23,9 @@ func (dnsProbe) NeedsNetwork() bool { return true }
 // dnsQueryName 是固定的探测域名，各解析器都能递归到且 TTL 稳定。
 const dnsQueryName = "www.cloudflare.com"
 
+// DNSQueryName 是 dns 模块实际查询的域名，供比较签名引用。
+const DNSQueryName = dnsQueryName
+
 type dnsResult struct {
 	Endpoint config.Endpoint
 	Values   []time.Duration
@@ -183,10 +186,6 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Notes = append(result.Notes, "查询域名固定为 "+dnsQueryName+"；每个解析器先发一次不计入统计的预热查询，随后的样本反映缓存命中后的稳态 UDP/53 往返，不等同于系统解析器体验。")
 	result.Finish(start)
 	return result
-}
-
-func dnsQuery(ctx context.Context, address, name string, timeout time.Duration) (time.Duration, error) {
-	return dnsQueryNetwork(ctx, address, name, timeout, "udp")
 }
 
 func dnsQueryForMode(ctx context.Context, address, name string, timeout time.Duration, mode string) (time.Duration, error) {

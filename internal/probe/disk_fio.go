@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -22,10 +23,14 @@ type fioOutput struct {
 }
 
 type fioJob struct {
-	Name  string       `json:"jobname"`
-	Error int          `json:"error"`
-	Read  fioDirection `json:"read"`
-	Write fioDirection `json:"write"`
+	Name string `json:"jobname"`
+	// JobStart 是 fio 记录的作业起始时间（毫秒 epoch）。53 个作业 stonewall
+	// 串行，靠后的档位可能已经耗尽云盘突发额度；保留相对偏移让读者能判断
+	// 某个拐点是介质特性还是额度耗尽的伪影。
+	JobStart int64        `json:"job_start"`
+	Error    int          `json:"error"`
+	Read     fioDirection `json:"read"`
+	Write    fioDirection `json:"write"`
 }
 
 type fioDirection struct {
@@ -51,6 +56,32 @@ const (
 	fioQD1LatencyP95Key  = "fio_random_read_4k_qd1_latency_p95_ms"
 	fioQD1LatencyP99Key  = "fio_random_read_4k_qd1_latency_p99_ms"
 	fioQD1LatencyMaxKey  = "fio_random_read_4k_qd1_latency_max_ms"
+)
+
+// 作业计时窗口。
+//
+// 53 个作业全部 stonewall 串行，因此总时长是各窗口之和。给每一档统一 10 秒
+// 会让磁盘模块跑满 9 分钟，而逐秒采样显示矩阵各档在 2–3 秒内就进入吞吐平台：
+// 多出来的时间只是在重复采样同一个稳定值，却持续消耗云盘的突发额度，让靠后
+// 的档位测到的是额度耗尽后的性能——矩阵内部因此前后不可比。
+//
+// 所以窗口按组划分：基础与混合保持 10 秒（它们是磁盘评分的口径），矩阵按各自
+// 的收敛速度取更短的窗口。
+const (
+	// fioBaseRuntime 是基础与混合作业的计时窗口，也是磁盘评分的口径。
+	fioBaseRuntime = 10 * time.Second
+
+	// fioCrystalRuntime：RND4K/Q32 读约 3 秒进入平台，SEQ1M 各项约 2 秒。
+	// 5 秒覆盖稳定段并留出余量；Crystal 四档共用同一窗口以保持组内可比。
+	fioCrystalRuntime = 5 * time.Second
+
+	// fioATTORuntime：512B–16M 各档 2–3 秒进入平台，3 秒足以还原曲线形状。
+	fioATTORuntime = 3 * time.Second
+
+	// fioATTOLargeRuntime 用于 3 秒窗口下样本不足或恰好卡在转折点的块大小：
+	// 32M/64M 单次 I/O 时间长，实测出现 32768/65601 KiB/s 的交替跳变；
+	// 64K 的吞吐平台恰好在第 3 秒才出现，3 秒窗口会把突发段计入结果。
+	fioATTOLargeRuntime = 5 * time.Second
 )
 
 // fioLatencyStats 是同一个 fio clat 单位下的延迟统计，统一换算为毫秒。
@@ -160,10 +191,13 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		}
 	}()
 
-	duration := fioJobDuration()
 	engine := detectFIOEngine(ctx, fioPath)
 	plan := fioJobPlan()
-	args := fioArguments(tempName, actualBytes, duration, engine, plan)
+	matrixMode := env.Config.DiskMatrixMode
+	if matrixMode == "" {
+		matrixMode = config.DiskMatrixTime
+	}
+	args := fioArgumentsForMode(tempName, actualBytes, engine, plan, matrixMode)
 	command := exec.CommandContext(ctx, fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	var stdout, stderr bytes.Buffer
@@ -208,6 +242,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			result.Notes = append(result.Notes, fmt.Sprintf("fio 作业 %s 返回错误码 %d", job.Name, job.Error))
 		}
 	}
+	offsets := fioModuleOffsets(jobs)
 	validJobs := 0
 	for _, spec := range plan {
 		if job, ok := jobs[spec.Name]; ok && fioJobHasEvidence(spec, job) {
@@ -267,10 +302,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 
 	mixDepth := engine.EffectiveDepth(64)
 	appendFIOMixedResults(&result, plan, jobs, mixDepth)
-	if matrixJobsEnabled() {
-		appendCrystalMatrix(&result, jobs, engine)
-		appendATTOMatrix(&result, jobs, engine)
-	}
+	appendCrystalMatrix(&result, jobs, engine, offsets)
+	appendATTOMatrix(&result, jobs, engine, offsets)
 
 	if !isPositiveFinite(seqWrite) || !isPositiveFinite(seqRead) || !isPositiveFinite(randomRead) || !isPositiveFinite(randomWrite) {
 		result.Status = model.StatusWarning
@@ -285,7 +318,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			model.FormatBytes(uint64(actualBytes)),
 		))
 	}
-	if matrixJobsEnabled() && actualBytes > requestedBytes {
+	if actualBytes > requestedBytes {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 %s 对齐/扩展为 %s（至少两个 64 MiB 窗口）。",
 			model.FormatBytes(uint64(requestedBytes)), model.FormatBytes(uint64(actualBytes)),
@@ -307,7 +340,11 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Key: "direct_io", Label: "Direct I/O", Value: "1"},
 		{Key: "ioengine", Label: "ioengine", Value: describeFIOEngine(engine)},
 		{Key: "jobs", Label: "作业数", Value: strconv.Itoa(len(plan))},
-		{Key: "job_duration", Label: "每项计时", Value: duration.String()},
+		{Key: "job_duration_base", Label: "基础/混合计时", Value: fioBaseRuntime.String()},
+		{Key: "job_duration_crystal", Label: "Crystal 计时", Value: fioCrystalRuntime.String()},
+		{Key: "job_duration_atto", Label: "ATTO 计时", Value: fmt.Sprintf("%s（64K/32M/64M 为 %s）", fioATTORuntime, fioATTOLargeRuntime)},
+		{Key: "plan_duration", Label: "作业计划总时长", Value: fioPlanDuration(plan).String()},
+		{Key: "matrix_mode", Label: "矩阵测量方式", Value: matrixMode},
 	}
 	result.Sources = []model.Source{
 		{Name: "fio", URL: "https://github.com/axboe/fio", Purpose: "Direct I/O 磁盘工作负载与 JSON 统计"},
@@ -318,11 +355,20 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
 		"固定低延迟作业使用 4 KiB randread、Direct I/O、iodepth=1、numjobs=1；avg/P95/P99/max 均来自同一 fio JSON 的 clat 统计。",
 		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
+		"基线、混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：四组各占四分之一；缺失单元不补零。",
+		"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
+		fmt.Sprintf("计时窗口按组划分：基础与混合 %s，Crystal %s，ATTO %s（64K/32M/64M 为 %s）。"+
+			"矩阵各档在 2–3 秒内进入吞吐平台，更长的窗口只是重复采样，却会持续消耗云盘突发额度，"+
+			"让靠后的档位测到额度耗尽后的性能。不同窗口的数值不能互相混比。",
+			fioBaseRuntime, fioCrystalRuntime, fioATTORuntime, fioATTOLargeRuntime),
+		"每个矩阵单元记录它在本模块内的起始偏移；若曲线在某个偏移之后整体下移，"+
+			"通常是突发额度耗尽而非介质特性。",
 	)
-	if matrixJobsEnabled() {
+	if matrixMode == config.DiskMatrixFixed {
 		result.Notes = append(result.Notes,
-			"基线、混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：四组各占四分之一；缺失单元不补零。",
-			"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
+			"ATTO 处于复核模式：每档传输固定 "+fioFixedIOSize+" 而不是按时长收尾。"+
+				"该口径与默认的按时长测量不是同一件事，数值不可与默认报告混比；"+
+				"小块档位耗时极长，整轮可超过 20 分钟。",
 		)
 	}
 	if !engine.AsyncQueue {
@@ -448,11 +494,17 @@ type matrixCell struct {
 	WriteMethod         string
 }
 
-func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine) {
+func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine, offsets map[string]float64) {
 	specs := crystalJobSpecs()
 	cells := make(map[string]matrixCell, 4)
+	// 每个工作负载记录读方向的起始偏移：同一负载的读写相邻执行，
+	// 用读的偏移标注该行足以定位它在模块内的位置。
+	rowOffsets := make(map[string]string, 4)
 	missing := 0
 	for _, spec := range specs {
+		if spec.Direction == "read" {
+			rowOffsets[spec.Workload] = formatModuleOffset(offsets, spec.Name)
+		}
 		sample, ok := jobs[spec.Name]
 		if !ok {
 			missing++
@@ -485,7 +537,7 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 
 	table := model.Table{
 		Title:                 "Crystal",
-		Columns:               []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+		Columns:               []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "起始偏移", "状态"},
 		NumericColumns:        []int{1, 2, 3, 4},
 		NumericHigherIsBetter: []bool{true, true, true, true},
 	}
@@ -498,7 +550,8 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 		table.Rows = append(table.Rows, []string{
 			workload,
 			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
-			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"), status,
+			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"),
+			fallback(rowOffsets[workload], "—"), status,
 		})
 	}
 	result.Tables = append(result.Tables, table)
@@ -508,7 +561,7 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 	}
 }
 
-func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine) {
+func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEngine, offsets map[string]float64) {
 	cells := make(map[string]matrixCell, len(attoBlockSizes))
 	missing := 0
 	for _, block := range attoBlockSizes {
@@ -545,7 +598,7 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 
 	table := model.Table{
 		Title:                 "ATTO",
-		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "状态"},
+		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "计时", "起始偏移", "状态"},
 		NumericColumns:        []int{1, 2, 3, 4},
 		NumericHigherIsBetter: []bool{true, true, true, true},
 	}
@@ -558,7 +611,10 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 		table.Rows = append(table.Rows, []string{
 			block.Label,
 			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
-			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"), status,
+			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"),
+			block.Runtime.String(),
+			formatModuleOffset(offsets, "atto_read_"+block.FIO),
+			status,
 		})
 	}
 	result.Tables = append(result.Tables, table)
@@ -671,14 +727,18 @@ func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, sy
 		return "", 0, disk, fmt.Errorf("测试路径不可用: %s", diskPath)
 	}
 	collectDisk(ctx, diskPath, &disk)
-	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree, matrixJobsEnabled())
+	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree)
 	if err != nil {
 		return "", 0, disk, err
 	}
 	return diskPath, actualBytes, disk, nil
 }
 
-func fioDiskSize(requestedBytes, freeBytes uint64, matrix bool) (int64, error) {
+// fioDiskSize 给出测试文件的实际大小。
+//
+// 作业计划恒定包含 Crystal 与 ATTO 矩阵，因此文件必须能容纳最大的 ATTO 块：
+// 按 64 MiB 对齐并保留至少两个窗口，避免边界截断与单窗口缓存效应。
+func fioDiskSize(requestedBytes, freeBytes uint64) (int64, error) {
 	actualBytes := int64(requestedBytes)
 	if freeBytes > 0 {
 		safeLimit := int64(freeBytes / 5)
@@ -686,23 +746,19 @@ func fioDiskSize(requestedBytes, freeBytes uint64, matrix bool) (int64, error) {
 			actualBytes = safeLimit
 		}
 	}
-	alignment := int64(4 * 1024 * 1024)
-	minimum := int64(16 * 1024 * 1024)
-	if matrix {
-		// The largest ATTO job is 64 MiB.  Keep two aligned 64 MiB windows so
-		// fio can place a full block without edge truncation or an accidental
-		// single-window cache effect on small VPS disks.
-		alignment = 64 * 1024 * 1024
-		minimum = 128 * 1024 * 1024
-		// A caller may configure a smaller baseline file size.  Expand it to the
-		// matrix minimum when the 20% free-space safety limit permits; otherwise
-		// refusing the run is safer than silently dropping ATTO cells.
-		if actualBytes < minimum {
-			if freeBytes > 0 && int64(freeBytes/5) < minimum {
-				return 0, fmt.Errorf("测试盘安全余量不足 %s（ATTO 最大块为 64 MiB）", model.FormatBytes(uint64(minimum)))
-			}
-			actualBytes = minimum
+	// The largest ATTO job is 64 MiB.  Keep two aligned 64 MiB windows so fio
+	// can place a full block without edge truncation or an accidental
+	// single-window cache effect on small VPS disks.
+	const alignment = int64(64 * 1024 * 1024)
+	const minimum = int64(128 * 1024 * 1024)
+	// A caller may configure a smaller baseline file size.  Expand it to the
+	// matrix minimum when the 20% free-space safety limit permits; otherwise
+	// refusing the run is safer than silently dropping ATTO cells.
+	if actualBytes < minimum {
+		if freeBytes > 0 && int64(freeBytes/5) < minimum {
+			return 0, fmt.Errorf("测试盘安全余量不足 %s（ATTO 最大块为 64 MiB）", model.FormatBytes(uint64(minimum)))
 		}
+		actualBytes = minimum
 	}
 	actualBytes = actualBytes / alignment * alignment
 	if actualBytes < minimum {
@@ -719,9 +775,10 @@ func describeFIOEngine(engine fioEngine) string {
 	return engine.Name + "（同步，队列深度恒为 1）"
 }
 
-func fioJobDuration() time.Duration {
-	// 配置档只选择模块预设；每个选中的 disk 模块都使用完整 10 秒工作负载，保证结果可比。
-	return 10 * time.Second
+// FIOPlanDuration 是磁盘模块一次完整作业计划的串行执行下限。
+// config 通过模块估算注册表读取它，避免把作业时长在两处各写一份。
+func FIOPlanDuration() time.Duration {
+	return fioPlanDuration(fioJobPlan())
 }
 
 // fioJobSpec 描述一个 fio 作业。
@@ -737,6 +794,17 @@ type fioJobSpec struct {
 	// MixRead 只对 randrw 有效，表示读操作占比。
 	MixRead  int
 	EndFsync bool
+	// Runtime 是这个作业自己的计时窗口；0 表示使用 fioBaseRuntime。
+	// 见上方常量注释：矩阵作业用更短的窗口，避免 53 个作业串行成 9 分钟。
+	Runtime time.Duration
+}
+
+// EffectiveRuntime 给出该作业实际使用的计时窗口。
+func (s fioJobSpec) EffectiveRuntime() time.Duration {
+	if s.Runtime > 0 {
+		return s.Runtime
+	}
+	return fioBaseRuntime
 }
 
 // Mixed 表示这是一个 50/50 混合随机读写作业。
@@ -769,20 +837,58 @@ func fioJobPlan() []fioJobSpec {
 			MixRead:   50,
 		})
 	}
-	if matrixJobsEnabled() {
-		plan = append(plan, crystalJobSpecs()...)
-		plan = append(plan, attoJobSpecs()...)
-	}
+	plan = append(plan, crystalJobSpecs()...)
+	plan = append(plan, attoJobSpecs()...)
 	return plan
 }
 
-func matrixJobsEnabled() bool {
-	// 每个被选中的 disk 模块都留下完整 Crystal/ATTO 证据。
-	return true
+// fioPlanDuration 是一份作业计划的串行执行下限，用于运行时长估算。
+// 所有作业都带 stonewall，因此总时长就是各计时窗口之和。
+func fioPlanDuration(plan []fioJobSpec) time.Duration {
+	var total time.Duration
+	for _, job := range plan {
+		total += job.EffectiveRuntime()
+	}
+	return total
+}
+
+// fioModuleOffsets 给出每个作业相对本模块第一个作业的起始偏移（秒）。
+//
+// fio 的 job_start 是毫秒 epoch；取最小值作为模块零点即可，不需要额外计时。
+// JSON 缺少该字段时返回 nil，表格按“—”呈现而不是编一个偏移。
+func fioModuleOffsets(jobs map[string]fioJob) map[string]float64 {
+	var base int64
+	for _, job := range jobs {
+		if job.JobStart > 0 && (base == 0 || job.JobStart < base) {
+			base = job.JobStart
+		}
+	}
+	if base == 0 {
+		return nil
+	}
+	offsets := make(map[string]float64, len(jobs))
+	for name, job := range jobs {
+		if job.JobStart > 0 {
+			offsets[name] = float64(job.JobStart-base) / 1000
+		}
+	}
+	return offsets
+}
+
+// formatModuleOffset 呈现一个作业的起始偏移。
+func formatModuleOffset(offsets map[string]float64, name string) string {
+	if offsets == nil {
+		return "—"
+	}
+	value, ok := offsets[name]
+	if !ok {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f s", value)
 }
 
 func crystalJobSpecs() []fioJobSpec {
-	return []fioJobSpec{
+	specs := []fioJobSpec{
 		{Name: "crystal_read_rnd4k_q1", RW: "randread", BlockSize: "4k", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q1", Direction: "read"},
 		{Name: "crystal_write_rnd4k_q1", RW: "randwrite", BlockSize: "4k", IODepth: 1, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q1", Direction: "write", EndFsync: true},
 		{Name: "crystal_read_rnd4k_q32", RW: "randread", BlockSize: "4k", IODepth: 32, NumJobs: 1, Matrix: "crystal", Workload: "RND4K/Q32", Direction: "read"},
@@ -792,30 +898,59 @@ func crystalJobSpecs() []fioJobSpec {
 		{Name: "crystal_read_seq1m_q8", RW: "read", BlockSize: "1m", IODepth: 8, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q8", Direction: "read"},
 		{Name: "crystal_write_seq1m_q8", RW: "write", BlockSize: "1m", IODepth: 8, NumJobs: 1, Matrix: "crystal", Workload: "SEQ1M/Q8", Direction: "write", EndFsync: true},
 	}
+	// 八个单元共用同一窗口：Crystal 的四种工作负载要互相可比，给其中某一档
+	// 单独放宽会在组内引入口径差。
+	for index := range specs {
+		specs[index].Runtime = fioCrystalRuntime
+	}
+	return specs
 }
 
+// attoBlockSizes 是 ATTO 的完整块大小谱系与各档的计时窗口。
+//
+// 大多数块在 2–3 秒内进入吞吐平台（逐秒采样：128K–16M 首秒 55–63 MB/s，
+// 第二秒起稳定在 49–50 MB/s）。三个例外用更长的窗口，理由各不相同：
+// 64K 的平台恰好在第 3 秒才出现，3 秒会把突发段计入结果；32M 与 64M 单次
+// I/O 时间长，3 秒内样本过少（实测 32M 出现 32768/65601 KiB/s 交替）。
 var attoBlockSizes = []struct {
-	FIO   string
-	Label string
+	FIO     string
+	Label   string
+	Runtime time.Duration
 }{
-	{"512b", "512B"}, {"1k", "1K"}, {"2k", "2K"}, {"4k", "4K"}, {"8k", "8K"},
-	{"16k", "16K"}, {"32k", "32K"}, {"64k", "64K"}, {"128k", "128K"}, {"256k", "256K"},
-	{"512k", "512K"}, {"1m", "1M"}, {"2m", "2M"}, {"4m", "4M"}, {"8m", "8M"},
-	{"16m", "16M"}, {"32m", "32M"}, {"64m", "64M"},
+	{"512b", "512B", fioATTORuntime}, {"1k", "1K", fioATTORuntime},
+	{"2k", "2K", fioATTORuntime}, {"4k", "4K", fioATTORuntime},
+	{"8k", "8K", fioATTORuntime}, {"16k", "16K", fioATTORuntime},
+	{"32k", "32K", fioATTORuntime}, {"64k", "64K", fioATTOLargeRuntime},
+	{"128k", "128K", fioATTORuntime}, {"256k", "256K", fioATTORuntime},
+	{"512k", "512K", fioATTORuntime}, {"1m", "1M", fioATTORuntime},
+	{"2m", "2M", fioATTORuntime}, {"4m", "4M", fioATTORuntime},
+	{"8m", "8M", fioATTORuntime}, {"16m", "16M", fioATTORuntime},
+	{"32m", "32M", fioATTOLargeRuntime}, {"64m", "64M", fioATTOLargeRuntime},
 }
 
 func attoJobSpecs() []fioJobSpec {
 	jobs := make([]fioJobSpec, 0, len(attoBlockSizes)*2)
 	for _, block := range attoBlockSizes {
 		jobs = append(jobs,
-			fioJobSpec{Name: "atto_read_" + block.FIO, RW: "read", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "read"},
-			fioJobSpec{Name: "atto_write_" + block.FIO, RW: "write", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "write", EndFsync: true},
+			fioJobSpec{Name: "atto_read_" + block.FIO, RW: "read", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "read", Runtime: block.Runtime},
+			fioJobSpec{Name: "atto_write_" + block.FIO, RW: "write", BlockSize: block.FIO, IODepth: 1, NumJobs: 1, Matrix: "atto", Workload: block.Label, Direction: "write", EndFsync: true, Runtime: block.Runtime},
 		)
 	}
 	return jobs
 }
 
-func fioArguments(filename string, size int64, duration time.Duration, engine fioEngine, plan []fioJobSpec) []string {
+// fioFixedIOSize 是复核模式下每个 ATTO 单元的固定传输量。
+//
+// 固定传输量与按时长是两种测量口径，数值不可混比：小块档位需要海量 I/O 操作
+// 才能凑够同样的字节数（实测 512B 读 237 秒、写 348 秒），整轮超过 20 分钟。
+// 它的价值在于每档数据量相同，便于观察吞吐随传输量、突发额度与缓存的变化。
+const fioFixedIOSize = "256m"
+
+func fioArguments(filename string, size int64, engine fioEngine, plan []fioJobSpec) []string {
+	return fioArgumentsForMode(filename, size, engine, plan, config.DiskMatrixTime)
+}
+
+func fioArgumentsForMode(filename string, size int64, engine fioEngine, plan []fioJobSpec, matrixMode string) []string {
 	args := []string{"--output-format=json", "--eta=never", "--clat_percentiles=1"}
 	for index, job := range plan {
 		args = append(args, "--name="+job.Name)
@@ -830,8 +965,19 @@ func fioArguments(filename string, size int64, duration time.Duration, engine fi
 			"--direct=1",
 			"--ioengine="+engine.Name,
 			"--thread=1",
-			"--runtime="+strconv.Itoa(int(duration/time.Second)),
-			"--time_based=1",
+		)
+		// 复核模式只改 ATTO：Crystal 与基础作业保持按时长，否则整轮无法收敛。
+		if matrixMode == config.DiskMatrixFixed && job.Matrix == "atto" {
+			args = append(args, "--io_size="+fioFixedIOSize)
+		} else {
+			args = append(args,
+				// 计时窗口按作业取：矩阵各档的收敛速度不同，统一 10 秒只是在
+				// 重复采样同一个平台值，却让整个模块串行成 9 分钟。
+				"--runtime="+strconv.Itoa(int(job.EffectiveRuntime()/time.Second)),
+				"--time_based=1",
+			)
+		}
+		args = append(args,
 			"--randrepeat=1",
 			"--invalidate=1",
 			"--group_reporting=1",

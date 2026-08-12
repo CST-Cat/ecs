@@ -19,6 +19,13 @@ var (
 	sysbenchP95Pattern        = regexp.MustCompile(`(?m)^\s*95th percentile:\s*([0-9]+(?:\.[0-9]+)?)\s*$`)
 )
 
+// stealNoticeThreshold 是在报告里标注 steal 的门槛（百分比）。
+//
+// 它刻意比 stealInterferenceThreshold 低：标注只是多一行说明，代价为零，
+// 因此值得对轻微争抢也如实提示；而自动复测要把整个基准重跑一遍，代价远高，
+// 需要 steal 大到确实超过测量噪声才划算。两者不是同一个判断。
+const stealNoticeThreshold = 1.0
+
 type sysbenchCPUResult struct {
 	Rate   float64
 	Events uint64
@@ -167,7 +174,7 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 	if multi.Rate <= 0 {
 		validity = "部分有效"
 	}
-	if (stealOK && steal >= 1) || (loadKnown && load1 > float64(workers)*1.5) {
+	if (stealOK && steal >= stealNoticeThreshold) || (loadKnown && load1 > float64(workers)*1.5) {
 		validity = "受干扰，建议复测"
 	}
 	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "成绩有效性", Value: validity})
@@ -195,7 +202,7 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 			allowance.Quota, allowance.Source, allowance.Visible, allowance.Threads,
 		))
 	}
-	if stealOK && steal >= 1 {
+	if stealOK && steal >= stealNoticeThreshold {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"测试期间 CPU steal 约 %.2f%%，宿主机存在争抢；本轮成绩会被压低，建议错峰复测。", steal,
@@ -291,12 +298,6 @@ func commandVersion(ctx context.Context, path string) string {
 		}
 	}
 	return "unknown"
-}
-
-func appendToolVersion(ctx context.Context, result *model.Result, key, label, path string) {
-	result.Fields = append(result.Fields, model.Field{
-		Key: key, Label: label, Value: commandVersion(ctx, path),
-	})
 }
 
 func parseFirstFloat(pattern *regexp.Regexp, text string) (float64, bool) {

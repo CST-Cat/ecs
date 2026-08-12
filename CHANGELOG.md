@@ -11,6 +11,60 @@
 
 - release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
+## 0.6.14 — 2026-08-12
+
+本版是一次审计驱动的整改：修补供应链校验缺口，把磁盘矩阵的固定 10 秒窗口
+改为按组分级，并清理长期无人调用的代码。beta 阶段不保留向后兼容，磁盘矩阵
+与 IPv6 遮盖的口径都直接改到位。
+
+### 安全 — 2026-08-12
+
+- **`stream.c` 现在按固定 SHA-256 校验**。此前只把下载结果的哈希写进 manifest 而从不比对，唯一的检查是正则匹配 RCS `$Id:` 注释行——攻击者保留那一行即可绕过。官方 STREAM 是单文件、无 release feed、无上游校验和的分发方式，因此必须在本仓库钉住哈希。
+- sysbench、fio、iperf3、iputils、NextTrace 全部从"取上游 latest release"改为**固定 tag + 固定 commit 校验**，与既有的 zstd、OpenSSL 一致。tag 被移动或重新打都会让构建失败，而不是静默换掉发行内容。升级工具版本现在是一次显式的两行编辑。
+- NextTrace 预编译资产的 digest 校验由"有则校验"改为**必须存在**。它是工具包里唯一的预编译二进制，缺 digest 时跳过校验等于让整条路由链路失去校验。
+- IPv6 遮盖从保留前四组（/64）收紧到**保留前两组（/32）**。VPS 提供商普遍按 /64 给单台机器分配整个子网，遮到 /64 仍能唯一定位实例，与 IPv4 的 /16 保护强度不对等。
+- Markdown 报告转义补上 `[`、`]`、`(`、`)`：第三方 IP 情报返回的公司名、ISP 名可以构造出可点击链接。
+- CI 的 `submissions` job 降为只读；重建排行榜参考的写权限拆到独立 job，并在 job 级限制为 main 分支的 push。此前所有分支的 push 与同仓 PR 都以 `contents: write` 运行 `go test` 与 `go run`。
+
+### 磁盘矩阵计时 — 2026-08-12
+
+- 53 个 fio 作业不再统一使用 10 秒窗口。逐秒采样显示矩阵各档在 2–3 秒内进入吞吐平台，更长的窗口只是重复采样同一个稳定值，却持续消耗云盘突发额度——靠后的档位因此测到的是额度耗尽后的性能，矩阵内部前后不可比。
+- 新的分档：基础与混合保持 **10 秒**（磁盘评分口径不变），Crystal **5 秒**，ATTO **3 秒**，其中 64K、32M、64M 为 **5 秒**。64K 的吞吐平台恰好在第 3 秒出现；32M/64M 单次 I/O 时间长，3 秒内样本过少（实测出现 32768/65601 KiB/s 交替）。
+- 磁盘模块串行执行下限从 **8 分 50 秒降到 4 分 10 秒**，53 个作业与完整块大小谱系一个不少。
+- 每个矩阵单元记录它在模块内的**起始偏移**（来自 fio 的 `job_start`）。曲线在某个偏移之后整体下移通常是突发额度耗尽而非介质特性，保留偏移让读者能自行判断。
+- 报告的 `job_duration` 单值字段拆为 `job_duration_base` / `job_duration_crystal` / `job_duration_atto`，另加 `plan_duration` 与 `matrix_mode`；比较签名同步区分三档时长。
+- 新增 `--disk-matrix-mode fixed` 复核模式：ATTO 每档传输固定 256 MiB 而不按时长收尾。它与默认口径不是同一件事，数值不可混比，且小块档位耗时极长（实测 512B 读 237 秒、写 348 秒，整轮超过 20 分钟），只用于突发额度与长尾复核。
+- 删除恒为真的 `matrixJobsEnabled()`：矩阵降到 2 分钟后不需要开关，留一个永真分支只会让人以为它可配置。
+
+### 运行时长估算 — 2026-08-12
+
+- 磁盘估算改为**按实际作业计划求和**。旧公式 `5s + 2×random + DiskMiB/50` 是矩阵引入之前的口径，从未跟着 53 个作业更新，在默认配置下报 51 秒而实测 551 秒（低估 10.4 倍）。config 无法 import probe，因此新增 `RegisterModuleEstimate` late-binding 注册表，由拥有工作负载的包提供估算。
+- speed 估算计入**协议族与 UDP**。旧公式按 `节点数 × 2 × 时长` 算，漏掉了每节点对每个可用协议族都跑上传、下载与一轮 UDP，双栈机器实测低估一倍以上。
+- standard 档展示的预估从"约 7–23 分钟"修正为"约 12–39 分钟"，与实际耗时同量级。
+
+### 基准干扰复测 — 2026-08-12
+
+- 自动复测的 CPU steal 阈值从 **1% 提高到 5%**，与 system 模块的累计 steal 告警一致。同一台机器连续三轮的实测波动就有 ±5–8%（randread 29.12 / 26.90 / 27.01 MiB/s），1% steal 的影响小于测量噪声；而超卖 VPS 上 1% steal 是常态，按它复测等于把六个重型基准都跑两遍，收益却被噪声淹没。
+- 报告里标注 steal 的阈值保持 1%，并单独命名为 `stealNoticeThreshold`：标注只多一行说明、代价为零，值得对轻微争抢也如实提示；复测要重跑整个基准，需要更高门槛。两者不是同一个判断。
+
+### 修复 — 2026-08-12
+
+- `/proc/uptime` 存在但为空时不再 panic。容器与沙箱里会出现这种情况，此前 `strings.Fields(...)[0]` 越界会让整个 system 模块变成"探针发生 panic"。
+- 评分指标解析不再依赖 map 遍历顺序取展示信息。前缀匹配的指标此前取"最后一个匹配项"的 label/unit，导致同一份报告每次渲染得到不同字段。
+- `ecs compare` 的比较签名改为引用 `probe` 的跳数与查询域名常量，不再各写一份 `"12"`、`"20"` 与 `"www.cloudflare.com"`。
+- HTML 报告的表格语义着色补齐英文取值，此前只匹配中文，英文报告的整张表退化成无色。
+- IPQS 与 DB-IP 的公开页通道在报告中标注为"官方公开查询页（浏览器 UA）"，把 UA 这一环也纳入既有的通道披露。
+
+### 清理 — 2026-08-12
+
+- 删除 15 个生产代码中零调用的函数（`overview`、`centered`、`comparisonValueDisplay`、`dnsQuery`、`outboundLocalIP`、`ooklaSummary`、`appendOoklaMeasurements`、`extractNextTraceHops`、`appendToolVersion`、`SortedInterferenceReasons`、`KnownModules`、`ModuleExposureName`、`Keys`、`ErrorKeys`、`ProbeTextKeys`）。
+- 合并三处独立的 CJK 显示宽度实现：`ui.displayWidth` 与 `app.padDisplay` 删除，统一使用 `textwidth`。同时删除 `textwidth.VisibleWidth` 与 `PadVisible`——它们与 `Width`、`Pad` 逐字相同。
+- 合并两处 STREAM 二进制识别，导出 `probe.IsOfficialStreamBinary` 供 doctor 与 memory 探针共用，并加上 64 MiB 大小上限防止读入超大同名文件。
+- 报告渲染不再重复本地化。`WriteFiles` 已统一本地化一次，html/markdown/text 三个渲染器此前各自又调用一次 `Localize`；英文模式下每个字符串要走多级正则模板匹配，三遍是纯浪费。
+- `run.sh` 删除 `prepare_ookla_rpm` 中生成 `.repo` 文件后直接返回失败的 20 行无用功，以及随之失去调用方的 `select_ookla_rpm_distribution` 与四个 RPM 变量。
+- `toolsmanifest` 删除两处冗余校验：正则确认过的 SHA-256 不再二次 `hex.DecodeString`，`Validate` 末尾的缺失检查已被前面的数量、白名单与去重三项蕴含。
+- CI 增加 `gofmt` 门禁，并顺手修正两个既有的格式不合规文件。
+
 ## 0.6.9 — 2026-08-11
 
 ### CI 与验证 — 2026-08-11

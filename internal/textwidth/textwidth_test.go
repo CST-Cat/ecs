@@ -74,19 +74,19 @@ func TestTruncateNeverExceedsWidth(t *testing.T) {
 // 着色后的字符串仍要参与对齐，转义序列本身不占列。
 func TestVisibleWidthIgnoresEscapes(t *testing.T) {
 	colored := "\x1b[38;2;255;0;0m中文\x1b[0m"
-	if got := VisibleWidth(colored); got != 4 {
+	if got := Width(colored); got != 4 {
 		t.Errorf("VisibleWidth = %d，期望 4", got)
 	}
-	if got := PadVisible(colored, 10); VisibleWidth(got) != 10 {
-		t.Errorf("PadVisible 后可见宽度 = %d，期望 10", VisibleWidth(got))
+	if got := Pad(colored, 10); Width(got) != 10 {
+		t.Errorf("Pad 后可见宽度 = %d，期望 10", Width(got))
 	}
 }
 
 func TestTruncatePreservesANSISequences(t *testing.T) {
 	colored := "\x1b[38;2;255;0;0m123456789\x1b[0m"
 	got := Truncate(colored, 5)
-	if VisibleWidth(got) > 5 || !contains(got, "…") {
-		t.Fatalf("ANSI truncate width/content = %d/%q", VisibleWidth(got), got)
+	if Width(got) > 5 || !contains(got, "…") {
+		t.Fatalf("ANSI truncate width/content = %d/%q", Width(got), got)
 	}
 	if !strings.HasSuffix(got, "\x1b[0m…") {
 		t.Fatalf("truncation must close an active style before ellipsis: %q", got)

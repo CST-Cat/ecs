@@ -258,7 +258,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			}
 			if ctx.Err() == nil && (isPositiveFinite(row.Upload.Mbps) || isPositiveFinite(row.Download.Mbps)) {
 				port := iperfUDPPort(target, row.Upload, row.Download)
-				row.UDP = runIPerfUDP(ctx, path, target.Host, port, family, "50M", 5)
+				row.UDP = runIPerfUDP(ctx, path, target.Host, port, family, "50M", int(config.IPerfUDPDuration/time.Second))
 			}
 			rows = append(rows, row)
 		}

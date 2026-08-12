@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +19,17 @@ const (
 	ProfileStandard = "standard"
 	ProfileFull     = "full"
 
+	// DiskMatrixTime 让 Crystal/ATTO 按各自的计时窗口运行。这是默认口径。
+	DiskMatrixTime = "time"
+	// IPerfUDPDuration 是 speed 模块每行固定的 UDP 采样时长。
+	// probe 与估算共用它，避免两边各写一个 5 秒。
+	IPerfUDPDuration = 5 * time.Second
+
+	// DiskMatrixFixed 让 ATTO 每档传输固定字节数而不是按时长收尾。
+	// 它专用于复核突发额度耗尽与长尾：小块档位耗时极长（实测 512B 读 237 秒、
+	// 写 348 秒，整轮超过 20 分钟），且与按时长的结果不是同一测量口径。
+	DiskMatrixFixed = "fixed"
+
 	// IPVersionAuto lets each probe choose the usable protocol family it
 	// supports, while dual-stack probes keep results
 	// separate instead of collapsing them into one score.
@@ -27,6 +37,18 @@ const (
 	IPVersion4    = "4"
 	IPVersion6    = "6"
 )
+
+// ParseDiskMatrixMode 解析 --disk-matrix-mode 的取值。
+func ParseDiskMatrixMode(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", DiskMatrixTime:
+		return DiskMatrixTime, nil
+	case DiskMatrixFixed:
+		return DiskMatrixFixed, nil
+	default:
+		return "", i18n.Errorf("err.unknownDiskMatrixMode", raw)
+	}
+}
 
 // stunServerPool 是 NAT 行为发现使用的公共 STUN 服务器。
 //
@@ -135,6 +157,10 @@ type Runtime struct {
 	DiskMiB          int
 	DiskPath         string
 	DiskMulti        bool
+	// DiskMatrixMode 选择 Crystal/ATTO 的测量方式。
+	// DiskMatrixTime 是默认的按时长计时；DiskMatrixFixed 改为每档传输固定字节，
+	// 只用于突发额度与长尾复核——两者不是同一口径，数值不可混比。
+	DiskMatrixMode   string
 	IPerfDuration    time.Duration
 	IPerfTargets     []IPerfEndpoint
 	HTTPTimeout      time.Duration
@@ -172,6 +198,7 @@ type File struct {
 	DiskMiB          *int            `json:"disk_mib,omitempty"`
 	DiskPath         string          `json:"disk_path,omitempty"`
 	DiskMulti        *bool           `json:"disk_multi,omitempty"`
+	DiskMatrixMode   string          `json:"disk_matrix_mode,omitempty"`
 	IPerfDuration    string          `json:"iperf_duration,omitempty"`
 	IPerfTargets     []IPerfEndpoint `json:"iperf_targets,omitempty"`
 	HTTPTimeout      string          `json:"http_timeout,omitempty"`
@@ -295,6 +322,7 @@ func Defaults(profile string) (Runtime, error) {
 		IPQualitySources: []string{"all"},
 		Formats:          []string{"json", "txt", "md", "html"},
 		DiskPath:         ".",
+		DiskMatrixMode:   DiskMatrixTime,
 		HTTPTimeout:      10 * time.Second,
 		// Profiles are module-count shortcuts. Keep the full-depth benchmark
 		// budget and selected iperf nodes identical so a module has one
@@ -407,6 +435,13 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	if file.DiskMulti != nil {
 		runtime.DiskMulti = *file.DiskMulti
+	}
+	if file.DiskMatrixMode != "" {
+		mode, err := ParseDiskMatrixMode(file.DiskMatrixMode)
+		if err != nil {
+			return err
+		}
+		runtime.DiskMatrixMode = mode
 	}
 	if file.IPerfDuration != "" {
 		value, err := time.ParseDuration(file.IPerfDuration)
@@ -674,6 +709,9 @@ func Validate(runtime Runtime) error {
 	if runtime.DiskPath == "" {
 		return i18n.Errorf("err.diskPathEmpty")
 	}
+	if _, err := ParseDiskMatrixMode(runtime.DiskMatrixMode); err != nil {
+		return err
+	}
 	if runtime.IPerfDuration < time.Second || runtime.IPerfDuration > 30*time.Second {
 		return i18n.Errorf("err.iperfDuration")
 	}
@@ -762,6 +800,11 @@ func estimateTypicalDuration(runtime Runtime) time.Duration {
 }
 
 func estimateModuleDuration(runtime Runtime, descriptor ModuleDescriptor) time.Duration {
+	// 拥有工作负载的包可以注册精确估算：它知道实际的作业计划，而在这里重抄
+	// 一份必然会随作业变更而失真（磁盘矩阵就曾因此把 8 分钟报成 51 秒）。
+	if estimate := moduleEstimateFor(descriptor.ID); estimate != nil {
+		return estimate(runtime)
+	}
 	switch descriptor.EstimateMode {
 	case EstimateModeCPU:
 		// sysbench CPU 跑单线程与多线程两轮。
@@ -771,21 +814,23 @@ func estimateModuleDuration(runtime Runtime, descriptor ModuleDescriptor) time.D
 		// to official STREAM must not change the user-visible resource estimate.
 		return 4*runtime.CPUTime + time.Second
 	case EstimateModeDisk:
-		randomDuration := runtime.CPUTime
-		if randomDuration > 3*time.Second {
-			randomDuration = 3 * time.Second
-		}
-		if randomDuration < 500*time.Millisecond {
-			randomDuration = 500 * time.Millisecond
-		}
-		return 5*time.Second + 2*randomDuration + time.Duration(runtime.DiskMiB/50)*time.Second
+		// 没有注册精确估算时的保守回落：矩阵与基础作业的量级差异很大，
+		// 这里只能给一个下限，真实值由 probe 注册的估算给出。
+		return 4 * time.Minute
 	case EstimateModeDNS:
 		return time.Duration(runtime.DNSAttempts) * time.Second
 	case EstimateModeLatency:
 		return time.Duration(runtime.LatencyAttempts) * 1500 * time.Millisecond
 	case EstimateModeSpeed:
-		// Typical estimate assumes IPv4 only and no busy-server retry.
-		return time.Duration(len(runtime.IPerfTargets)*2) * runtime.IPerfDuration
+		// 每个节点对每个可用协议族都跑上传、下载与一轮 UDP；auto 模式下
+		// 双栈机器的行数会翻倍。只按节点数乘时长会漏掉协议族与 UDP，
+		// 实测因此低估一倍以上。
+		families := 1
+		if runtime.IPVersion == "" || runtime.IPVersion == IPVersionAuto {
+			families = 2
+		}
+		perRow := 2*runtime.IPerfDuration + IPerfUDPDuration
+		return time.Duration(len(runtime.IPerfTargets)*families) * perRow
 	case EstimateModeRoute:
 		return time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
 	case EstimateModeFixed:
@@ -859,12 +904,6 @@ func AllowsIPVersion(mode, version string) bool {
 		}
 	}
 	return false
-}
-
-func KnownModules() []string {
-	out := append([]string(nil), ModuleOrder...)
-	sort.Strings(out)
-	return out
 }
 
 func contains(items []string, target string) bool {

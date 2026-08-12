@@ -10,10 +10,29 @@ import (
 )
 
 func TestFIOJobPlanIncludesCompleteCrystalAndATTO(t *testing.T) {
-	if got := fioJobDuration(); got != 10*time.Second {
-		t.Fatalf("fio duration = %s, want 10s", got)
-	}
 	plan := fioJobPlan()
+	// 计时窗口按组划分：基础与混合是评分口径，保持 10 秒；矩阵按各自的
+	// 收敛速度取更短的窗口，否则 53 个 stonewall 作业会串行成 9 分钟。
+	for _, job := range plan {
+		want := fioBaseRuntime
+		switch job.Matrix {
+		case "crystal":
+			want = fioCrystalRuntime
+		case "atto":
+			want = fioATTORuntime
+			switch job.BlockSize {
+			case "64k", "32m", "64m":
+				want = fioATTOLargeRuntime
+			}
+		}
+		if got := job.EffectiveRuntime(); got != want {
+			t.Fatalf("job %s runtime = %s, want %s", job.Name, got, want)
+		}
+	}
+	// 5 基础 + 4 混合 = 9 × 10s，Crystal 8 × 5s，ATTO 30 × 3s + 6 × 5s。
+	if got, want := fioPlanDuration(plan), 250*time.Second; got != want {
+		t.Fatalf("plan duration = %s, want %s", got, want)
+	}
 	mixed := 0
 	crystal, atto := 0, 0
 	for _, job := range plan {
@@ -82,30 +101,30 @@ func TestFIOArgumentsSafelySupportLargestATTOJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("fixed QD1 latency job missing from plan: %v", plan)
 	}
-	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, plan), " ")
+	args := strings.Join(fioArguments("<tempfile>", 128*1024*1024, engine, plan), " ")
 	for _, want := range []string{"--name=atto_read_64m", "--name=atto_write_64m", "--name=" + fioQD1LatencyJobName, "--bs=64m", "--size=134217728", "--direct=1", "--iodepth=1", "--output-format=json", "--clat_percentiles=1"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("fio args missing %q", want)
 		}
 	}
-	latencyArgs := strings.Join(fioArguments("<tempfile>", 128*1024*1024, 10_000_000_000, engine, []fioJobSpec{latencyJob}), " ")
+	latencyArgs := strings.Join(fioArguments("<tempfile>", 128*1024*1024, engine, []fioJobSpec{latencyJob}), " ")
 	for _, want := range []string{"--output-format=json", "--direct=1", "--rw=randread", "--bs=4k", "--iodepth=1", "--numjobs=1", "--clat_percentiles=1"} {
 		if !strings.Contains(latencyArgs, want) {
 			t.Fatalf("fixed QD1 fio args missing %q: %s", want, latencyArgs)
 		}
 	}
 
-	actual, err := fioDiskSize(256*1024*1024, 2*1024*1024*1024, true)
+	actual, err := fioDiskSize(256*1024*1024, 2*1024*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if actual < 128*1024*1024 || actual%(64*1024*1024) != 0 {
 		t.Fatalf("matrix disk size = %d, must be aligned and support two 64MiB windows", actual)
 	}
-	if _, err := fioDiskSize(256*1024*1024, 512*1024*1024, true); err == nil {
+	if _, err := fioDiskSize(256*1024*1024, 512*1024*1024); err == nil {
 		t.Fatal("a disk with less than the matrix safety reserve must be refused")
 	}
-	expanded, err := fioDiskSize(64*1024*1024, 2*1024*1024*1024, true)
+	expanded, err := fioDiskSize(64*1024*1024, 2*1024*1024*1024)
 	if err != nil || expanded != 128*1024*1024 {
 		t.Fatalf("small configured matrix file should expand to the safe minimum: %d/%v", expanded, err)
 	}
@@ -126,8 +145,8 @@ func TestFIOCrystalAndATTOMetricKeysAndTables(t *testing.T) {
 	}
 	result := model.Result{ID: "disk", Status: model.StatusOK}
 	engine := fioEngine{Name: "io_uring", AsyncQueue: true, Detected: true}
-	appendCrystalMatrix(&result, jobs, engine)
-	appendATTOMatrix(&result, jobs, engine)
+	appendCrystalMatrix(&result, jobs, engine, nil)
+	appendATTOMatrix(&result, jobs, engine, nil)
 
 	if len(result.Measurements) != 16+72 {
 		t.Fatalf("matrix measurements = %d, want 88", len(result.Measurements))
@@ -178,8 +197,8 @@ func TestFIOCrystalAndATTOMetricKeysAndTables(t *testing.T) {
 func TestFIOMatrixMissingCellsRemainExplicit(t *testing.T) {
 	result := model.Result{ID: "disk", Status: model.StatusOK}
 	engine := fioEngine{Name: "psync", Detected: true}
-	appendCrystalMatrix(&result, nil, engine)
-	appendATTOMatrix(&result, nil, engine)
+	appendCrystalMatrix(&result, nil, engine, nil)
+	appendATTOMatrix(&result, nil, engine, nil)
 	if result.Status != model.StatusWarning || len(result.Measurements) != 0 {
 		t.Fatalf("missing matrix result = %+v", result)
 	}
@@ -207,7 +226,7 @@ func TestFIOMatrixPartialCellsRemainExplicit(t *testing.T) {
 			Write: fioDirection{BWBytes: 4 * 1024 * 1024, IOPS: 50},
 		},
 	}
-	appendCrystalMatrix(&result, jobs, fioEngine{Name: "psync", Detected: true})
+	appendCrystalMatrix(&result, jobs, fioEngine{Name: "psync", Detected: true}, nil)
 
 	if result.Status != model.StatusWarning {
 		t.Fatalf("partial matrix status = %s, want warning", result.Status)
@@ -216,7 +235,8 @@ func TestFIOMatrixPartialCellsRemainExplicit(t *testing.T) {
 		t.Fatalf("partial matrix rows = %+v, want four retained rows", result.Tables)
 	}
 	row := result.Tables[0].Rows[0]
-	if row[1] == "—" || row[2] != "—" || row[3] == "—" || row[4] == "—" || row[5] != "未返回" {
+	// 列序：工作负载 / 读吞吐 / 读 IOPS / 写吞吐 / 写 IOPS / 起始偏移 / 状态
+	if row[1] == "—" || row[2] != "—" || row[3] == "—" || row[4] == "—" || row[6] != "未返回" {
 		t.Fatalf("partial matrix cell was not shown explicitly: %v", row)
 	}
 	if containsNote(result.Notes, "缺失项") == false && !containsNote(result.Notes, "未返回") {

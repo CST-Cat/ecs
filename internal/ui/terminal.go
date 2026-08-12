@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
@@ -501,12 +500,12 @@ func (terminal *Terminal) printTable(table model.Table) {
 	}
 	widths := make([]int, len(table.Columns))
 	for index, value := range table.Columns {
-		widths[index] = displayWidth(value)
+		widths[index] = textwidth.Width(value)
 	}
 	for _, row := range table.Rows {
 		for index := range table.Columns {
-			if index < len(row) && displayWidth(row[index]) > widths[index] {
-				widths[index] = displayWidth(row[index])
+			if index < len(row) && textwidth.Width(row[index]) > widths[index] {
+				widths[index] = textwidth.Width(row[index])
 			}
 		}
 	}
@@ -527,27 +526,10 @@ func formatTableRow(values []string, widths []int) string {
 		}
 		output.WriteString(value)
 		if index < len(values)-1 {
-			output.WriteString(strings.Repeat(" ", max(0, widths[index]-displayWidth(value))))
+			output.WriteString(strings.Repeat(" ", max(0, widths[index]-textwidth.Width(value))))
 		}
 	}
 	return output.String()
-}
-
-func displayWidth(value string) int {
-	width := 0
-	for _, character := range value {
-		if unicode.Is(unicode.Han, character) ||
-			unicode.Is(unicode.Hiragana, character) ||
-			unicode.Is(unicode.Katakana, character) ||
-			unicode.Is(unicode.Hangul, character) ||
-			(character >= 0xFF01 && character <= 0xFF60) ||
-			(character >= 0xFFE0 && character <= 0xFFE6) {
-			width += 2
-		} else {
-			width++
-		}
-	}
-	return width
 }
 
 // wrapTerminalText wraps unstyled terminal UI text by visible columns. The

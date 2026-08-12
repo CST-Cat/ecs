@@ -170,14 +170,14 @@ func TestOfficialStreamBinaryMarkerCheckRejectsImageMagick(t *testing.T) {
 	if err := os.WriteFile(imageMagick, []byte("ImageMagick stream utility\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if isOfficialStreamBinary(imageMagick) {
+	if IsOfficialStreamBinary(imageMagick) {
 		t.Fatal("ImageMagick stream utility was accepted as official STREAM")
 	}
 	official := filepath.Join(directory, "official-stream")
 	if err := os.WriteFile(official, []byte("STREAM version Number of Threads requested Function Best Rate"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if !isOfficialStreamBinary(official) {
+	if !IsOfficialStreamBinary(official) {
 		t.Fatal("official STREAM markers were rejected")
 	}
 }

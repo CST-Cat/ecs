@@ -46,6 +46,14 @@ jobs:
           go test ./internal/report/ -run '^TestLocalizeCoversRealReports$' -v
           go test ./internal/i18n/ -v
       - run: go vet ./...
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt：" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
       - run: go build ./cmd/ecs
       - run: sh -n install.sh
       - run: sh -n run.sh
@@ -57,11 +65,13 @@ jobs:
 
   # 跑分提交校验：新增提交必须格式合法、指纹自洽、不与已有记录重复。
   # 指纹由内容派生，因此手改数值而不重算会被当场发现。
+  # 这个 job 只读：写权限留给下面单独的 leaderboard job，避免任何分支的
+  # push/PR 都以 contents: write 运行 go test 与 go run。
   submissions:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -86,10 +96,22 @@ jobs:
             echo "当前没有排行榜提交，跳过离群检测"
           fi
 
-      # 排行榜参考重建只在主分支 push 做：检查阶段不改工作区，避免把生成文件
-      # 混进正在审核的代码变更。
+  # 排行榜参考重建只在主分支 push 做，并且是唯一带写权限的 job：检查阶段不改
+  # 工作区，避免把生成文件混进正在审核的代码变更，也避免写权限出现在 PR 上。
+  leaderboard:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: submissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
       - name: Rebuild leaderboard reference
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
             go run ./cmd/ecs baseline \
@@ -104,7 +126,6 @@ jobs:
           fi
 
       - name: Commit rebuilt leaderboard reference
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           if git diff --quiet -- submissions/baseline.json internal/score/embedded/baseline.json; then
             echo "排行榜参考无变化，跳过提交"

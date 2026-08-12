@@ -141,12 +141,3 @@ func HasProbeText(text string) bool {
 	}
 	return false
 }
-
-// ProbeTextKeys 返回全部已登记的探针文案，供测试统计。
-func ProbeTextKeys() []string {
-	keys := make([]string, 0, len(probeEnglish))
-	for key := range probeEnglish {
-		keys = append(keys, key)
-	}
-	return keys
-}

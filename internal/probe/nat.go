@@ -379,14 +379,6 @@ func natCategory(finding natFinding, behind bool) (string, string) {
 	}
 }
 
-// outboundLocalIP 给出前往 target 时内核选择的源地址。
-//
-// ListenUDP 绑定 0.0.0.0 时 LocalAddr 的 IP 是全零，拿它和映射地址比较永远
-// 会得出"存在 NAT"。这里用一次不发包的 UDP dial 让内核做路由决策。
-func outboundLocalIP(target *net.UDPAddr) net.IP {
-	return outboundLocalIPForNetwork(target, "udp4")
-}
-
 func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {
 	connection, err := net.DialUDP(network, nil, target)
 	if err != nil {

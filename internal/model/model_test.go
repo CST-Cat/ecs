@@ -8,12 +8,12 @@ import (
 func TestMask(t *testing.T) {
 	tests := map[string]string{
 		"203.0.113.42":                  "203.0.x.x",
-		"2001:db8:1234:5678::1":         "2001:db8:1234:5678:x:x:x:x",
-		"2001:db8::1":                   "2001:db8:0:0:x:x:x:x",
+		"2001:db8:1234:5678::1":         "2001:db8:x:x:x:x:x:x",
+		"2001:db8::1":                   "2001:db8:x:x:x:x:x:x",
 		"64.23.192.0/19":                "64.23.x.x/19",
-		"2001:db8:1234:5678::/64":       "2001:db8:1234:5678:x:x:x:x/64",
+		"2001:db8:1234:5678::/64":       "2001:db8:x:x:x:x:x:x/64",
 		"203.0.113.42:54321":            "203.0.x.x:54321",
-		"[2001:db8:1234:5678::1]:54321": "[2001:db8:1234:5678:x:x:x:x]:54321",
+		"[2001:db8:1234:5678::1]:54321": "[2001:db8:x:x:x:x:x:x]:54321",
 		"server-01":                     "hidden",
 		"":                              "",
 	}
@@ -145,7 +145,7 @@ func TestMaskIPsInTextMasksAllAddressForms(t *testing.T) {
 	trace := " 3  202.97.94.1  32.118 ms\n 4  59.43.130.22  35.900 ms\n 5  2001:db8:1234:5678:abcd:ef01:2345:6789  40.000 ms"
 	masked := MaskIPsInText(trace)
 	if !strings.Contains(masked, "202.97.x.x") || !strings.Contains(masked, "59.43.x.x") ||
-		!strings.Contains(masked, "2001:db8:1234:5678:x:x:x:x") {
+		!strings.Contains(masked, "2001:db8:x:x:x:x:x:x") {
 		t.Fatalf("masked trace = %q", masked)
 	}
 	if strings.Contains(masked, "94.1") || strings.Contains(masked, "130.22") {
@@ -156,7 +156,7 @@ func TestMaskIPsInTextMasksAllAddressForms(t *testing.T) {
 		t.Fatalf("masked trace corrupted timings: %q", masked)
 	}
 	cidr := MaskIPsInText("prefix 64.23.192.0/19 and 2001:db8:1234:5678::/64")
-	if !strings.Contains(cidr, "64.23.x.x/19") || !strings.Contains(cidr, "2001:db8:1234:5678:x:x:x:x/64") {
+	if !strings.Contains(cidr, "64.23.x.x/19") || !strings.Contains(cidr, "2001:db8:x:x:x:x:x:x/64") {
 		t.Fatalf("masked CIDR = %q", cidr)
 	}
 	if got := MaskIPsInText(""); got != "" {
@@ -217,7 +217,7 @@ func TestRedactedCopyMasksOnlyExactLocalIPsEverywhere(t *testing.T) {
 	if got := redacted.Results[0].Summary; got != "local 203.0.x.x, remote 203.0.113.11" {
 		t.Fatalf("summary = %q", got)
 	}
-	want := "src 203.0.x.x:443 via 59.43.130.22 to [2001:db8:1234:5678:x:x:x:x]:8443 and 2001:db8:1234:5678::2"
+	want := "src 203.0.x.x:443 via 59.43.130.22 to [2001:db8:x:x:x:x:x:x]:8443 and 2001:db8:1234:5678::2"
 	if got := redacted.Results[0].TextBlocks[0].Content; got != want {
 		t.Fatalf("text block = %q, want %q", got, want)
 	}

@@ -25,15 +25,16 @@ var errorChinese = map[string]string{
 	"err.moduleAboveLimitFix": "模块 %q 的外联级别 %s 超过 --exposure %s",
 
 	// ── 资源参数 ────────────────────────────────────────────
-	"err.cpuTimeRange":     "CPU 测试时长必须在 100ms 到 30s 之间",
-	"err.diskSizeRange":    "磁盘测试大小必须在 16 到 16384 MiB 之间",
-	"err.httpTimeoutRange": "HTTP 超时必须在 1s 到 1m 之间",
-	"err.attemptsRange":    "DNS/延迟采样次数必须在 1 到 20 之间",
-	"err.threadsRange":     "测速并发必须在 1 到 32 之间",
-	"err.iperfDuration":    "iperf3 单方向时长必须在 1s 到 30s 之间",
-	"err.diskPathEmpty":    "磁盘测试路径不能为空",
-	"err.diskPathInvalid":  "磁盘测试路径无效",
-	"err.diskPathWrap":     "磁盘测试路径: %w",
+	"err.cpuTimeRange":          "CPU 测试时长必须在 100ms 到 30s 之间",
+	"err.diskSizeRange":         "磁盘测试大小必须在 16 到 16384 MiB 之间",
+	"err.httpTimeoutRange":      "HTTP 超时必须在 1s 到 1m 之间",
+	"err.attemptsRange":         "DNS/延迟采样次数必须在 1 到 20 之间",
+	"err.threadsRange":          "测速并发必须在 1 到 32 之间",
+	"err.iperfDuration":         "iperf3 单方向时长必须在 1s 到 30s 之间",
+	"err.diskPathEmpty":         "磁盘测试路径不能为空",
+	"err.unknownDiskMatrixMode": "未知磁盘矩阵模式 %q，可选 time、fixed",
+	"err.diskPathInvalid":       "磁盘测试路径无效",
+	"err.diskPathWrap":          "磁盘测试路径: %w",
 
 	// ── IP 质量数据源 ───────────────────────────────────────
 	"err.ipSourceUnknown": "未知 IP 质量数据源 %q",
@@ -119,15 +120,16 @@ var errorEnglish = map[string]string{
 	"err.moduleAboveLimitFix": "module %q has exposure level %s, above --exposure %s",
 
 	// ── Resource limits ─────────────────────────────────────
-	"err.cpuTimeRange":     "CPU test duration must be between 100ms and 30s",
-	"err.diskSizeRange":    "disk test size must be between 16 and 16384 MiB",
-	"err.httpTimeoutRange": "HTTP timeout must be between 1s and 1m",
-	"err.attemptsRange":    "DNS/latency sample counts must be between 1 and 20",
-	"err.threadsRange":     "speed test concurrency must be between 1 and 32",
-	"err.iperfDuration":    "iperf3 per-direction duration must be between 1s and 30s",
-	"err.diskPathEmpty":    "disk test path must not be empty",
-	"err.diskPathInvalid":  "disk test path is invalid",
-	"err.diskPathWrap":     "disk test path: %w",
+	"err.cpuTimeRange":          "CPU test duration must be between 100ms and 30s",
+	"err.diskSizeRange":         "disk test size must be between 16 and 16384 MiB",
+	"err.httpTimeoutRange":      "HTTP timeout must be between 1s and 1m",
+	"err.attemptsRange":         "DNS/latency sample counts must be between 1 and 20",
+	"err.threadsRange":          "speed test concurrency must be between 1 and 32",
+	"err.iperfDuration":         "iperf3 per-direction duration must be between 1s and 30s",
+	"err.diskPathEmpty":         "disk test path must not be empty",
+	"err.unknownDiskMatrixMode": "unknown disk matrix mode %q; choose time or fixed",
+	"err.diskPathInvalid":       "disk test path is invalid",
+	"err.diskPathWrap":          "disk test path: %w",
 
 	// ── IP quality sources ──────────────────────────────────
 	"err.ipSourceUnknown": "unknown IP quality source %q",

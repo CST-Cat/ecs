@@ -20,6 +20,13 @@ type ModuleConcurrency string
 // result implements its Probe interface.
 type ModuleFactory func() any
 
+// ModuleEstimate is a late-bound runtime estimate supplied by the package that
+// owns the workload.  It exists for the same reason as ModuleFactory: probe
+// imports config, so config cannot ask probe how long a job plan takes.  Without
+// it the duration would have to be duplicated here and would silently drift
+// from the plan that actually runs.
+type ModuleEstimate func(Runtime) time.Duration
+
 const (
 	ModuleConcurrencyExclusive ModuleConcurrency = "exclusive"
 	ModuleConcurrencyProbe     ModuleConcurrency = "probe"
@@ -184,7 +191,31 @@ var moduleDescriptors = []ModuleDescriptor{
 var (
 	moduleFactoriesMu sync.RWMutex
 	moduleFactories   = map[string]ModuleFactory{}
+	moduleEstimatesMu sync.RWMutex
+	moduleEstimates   = map[string]ModuleEstimate{}
 )
+
+// RegisterModuleEstimate attaches a runtime estimate to a module.  Registration
+// is idempotent and safe to call from a package init.
+func RegisterModuleEstimate(id string, estimate ModuleEstimate) error {
+	if estimate == nil {
+		return fmt.Errorf("module %q has a nil estimate", id)
+	}
+	if _, ok := ModuleDescriptorFor(id); !ok {
+		return fmt.Errorf("module estimate %q is not present in the descriptor registry", id)
+	}
+	moduleEstimatesMu.Lock()
+	moduleEstimates[id] = estimate
+	moduleEstimatesMu.Unlock()
+	return nil
+}
+
+func moduleEstimateFor(id string) ModuleEstimate {
+	moduleEstimatesMu.RLock()
+	estimate := moduleEstimates[id]
+	moduleEstimatesMu.RUnlock()
+	return estimate
+}
 
 func moduleDescriptor(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreEnabled bool, scoreKey string, tools []string, estimate time.Duration, wizard ...string) ModuleDescriptor {
 	return moduleDescriptorWithEstimateMode(id, standard, exposure, needsEgress, concurrency, methodology, scoreEnabled, scoreKey, tools, estimate, EstimateModeFixed, wizard...)

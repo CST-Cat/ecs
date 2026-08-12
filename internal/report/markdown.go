@@ -14,11 +14,13 @@ import (
 	"ecs/internal/termcolor"
 )
 
+// Markdown 渲染独立调用方传入的报告，会先做一次本地化。
 func Markdown(data model.Report, scored *score.Report) string {
-	// Markdown is also used as a standalone renderer in tests and by callers
-	// that already loaded a report.  Apply the same language boundary as the
-	// file writer instead of requiring every caller to remember Localize.
-	data = Localize(data)
+	return markdownLocalized(Localize(data), scored)
+}
+
+// markdownLocalized 渲染一份**已经本地化过**的报告，见 htmlLocalized 的说明。
+func markdownLocalized(data model.Report, scored *score.Report) string {
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")
@@ -270,6 +272,10 @@ func writeMarkdownTable(out *strings.Builder, table model.Table) {
 	}
 }
 
+// markdownEscape 转义单元格与正文里的不可信文本。
+//
+// 除了 HTML 实体与表格分隔符，还要转义链接语法：报告里的公司名、ISP 名与
+// 错误信息来自第三方 API，未转义的 `[文本](URL)` 会在渲染后变成可点击链接。
 func markdownEscape(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.ReplaceAll(value, "&", "&amp;")
@@ -277,6 +283,9 @@ func markdownEscape(value string) string {
 	value = strings.ReplaceAll(value, ">", "&gt;")
 	value = strings.ReplaceAll(value, "\n", "<br>")
 	value = strings.ReplaceAll(value, "|", "\\|")
+	for _, character := range []string{"[", "]", "(", ")"} {
+		value = strings.ReplaceAll(value, character, "\\"+character)
+	}
 	return value
 }
 
