@@ -182,7 +182,8 @@ EOF
 		}
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+originalPath)
-	result := runNPBBenchmarks(context.Background(), Environment{}, npbBenchmarkSpecs)
+	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs,
+		cpuAllowance{Visible: 4, Threads: 4, Source: "fixture"})
 	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 4 || result.Evidence.Expected != 4 {
 		t.Fatalf("NPB status/evidence = %s %+v; failures=%+v notes=%v", result.Status, result.Evidence, result.Failures, result.Notes)
 	}
@@ -244,11 +245,85 @@ EOF
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+originalPath)
-	result := runNPBBenchmarks(context.Background(), Environment{}, npbBenchmarkSpecs)
+	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs,
+		cpuAllowance{Visible: 4, Threads: 4, Source: "fixture"})
 	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 4 {
 		t.Fatalf("partial NPB result = %s %+v failures=%+v", result.Status, result.Evidence, result.Failures)
 	}
 	if !hasMeasurement(result, "npb_ep_1t_mops") || hasMeasurement(result, "npb_ft_1t_mops") {
 		t.Fatalf("partial NPB measurements = %+v", result.Measurements)
+	}
+}
+
+func TestNPBSingleCoreKeepsLogicalMetricsWithoutScaling(t *testing.T) {
+	spec := npbBenchmarkSpecs[0]
+	sample := npbBenchmarkSample{Benchmark: spec.Name, Threads: 1, MOPS: 100, MOPSPerThread: 100, Seconds: 1}
+	runs := map[string][]npbBenchmarkSample{spec.Name: {sample, sample}}
+	result := model.NewResult("npb", "npb")
+	appendNPBMeasurements(&result, []npbBenchmarkSpec{spec}, runs, 1)
+	for _, key := range []string{"npb_ep_1t_mops", "npb_ep_nt_mops"} {
+		if !hasMeasurement(result, key) {
+			t.Errorf("single-core logical metric missing %q", key)
+		}
+	}
+	if hasMeasurement(result, "npb_ep_scaling_ratio") {
+		t.Fatal("single-core NPB result invented a scaling ratio")
+	}
+	table := npbResultsTable([]npbBenchmarkSpec{spec}, runs, 1)
+	for _, row := range table.Rows {
+		if row[6] != "不适用" {
+			t.Fatalf("single-core NPB scaling cell = %q, want 不适用: %v", row[6], row)
+		}
+	}
+}
+
+func TestRunNPBSingleCoreExecutesOnePhysicalWorkloadPerBenchmark(t *testing.T) {
+	directory := t.TempDir()
+	originalPath := os.Getenv("PATH")
+	spec := npbBenchmarkSpecs[0]
+	tool := filepath.Join(directory, spec.Binary)
+	logPath := filepath.Join(directory, "runs.log")
+	script := `#!/bin/sh
+printf '%s\n' run >> "$ECS_RUN_LOG"
+cat <<EOF
+ NAS Parallel Benchmarks (NPB3.4-OMP) - EP Benchmark
+ EP Benchmark Completed.
+ Class = A
+ Size = 536870912
+ Iterations = 0
+ Time in seconds = 1.00
+ Total threads = 1
+ Avail threads = 1
+ Mop/s total = 100.00
+ Mop/s/thread = 100.00
+ Operation type = Random numbers generated
+ Verification = SUCCESSFUL
+ Version = 3.4.4
+ FC = gfortran
+ FLINK = gfortran
+ FFLAGS = -O3 -fopenmp -static
+ FLINKFLAGS = -O3 -fopenmp -static
+ RAND = randi8
+EOF
+`
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+originalPath)
+	t.Setenv("ECS_RUN_LOG", logPath)
+	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, []npbBenchmarkSpec{spec},
+		cpuAllowance{Visible: 1, Threads: 1, Source: "fixture"})
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(log), "run\n") != 1 {
+		t.Fatalf("single-core NPB physical executions = %q, want one for one benchmark", log)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.TextBlocks) != 1 {
+		t.Fatalf("single-core NPB evidence/raw output is not physical: evidence=%+v blocks=%d", result.Evidence, len(result.TextBlocks))
+	}
+	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 2 {
+		t.Fatalf("single-core NPB lost logical table contexts: %+v", result.Tables)
 	}
 }

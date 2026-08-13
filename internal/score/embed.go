@@ -10,7 +10,6 @@ package score
 import (
 	_ "embed"
 	"encoding/json"
-	"math"
 )
 
 //go:embed embedded/baseline.json
@@ -25,16 +24,11 @@ func EmbeddedBaseline() Baseline {
 	if err := json.Unmarshal(embeddedBaselineJSON, &baseline); err != nil {
 		return emptyBaseline()
 	}
-	if baseline.Schema != BaselineSchema || baseline.Source == "" || baseline.SampleCount < 0 || baseline.RankMinSamples < 0 {
+	if err := validateBaseline(baseline, true); err != nil {
 		return emptyBaseline()
 	}
 	if baseline.Metrics == nil {
 		baseline.Metrics = map[string]float64{}
-	}
-	for _, value := range baseline.Metrics {
-		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-			return emptyBaseline()
-		}
 	}
 	return baseline
 }

@@ -22,11 +22,15 @@
 
 本地检查：
 
+`go.mod` 的 `go 1.22` 只是语言兼容下限。开发和从源码分发二进制时，请使用 Go 上游当前支持的最新补丁版；CI 另保留 1.22 的编译兼容检查，不把它当作安全支持声明。
+
 ```bash
-gofmt -w cmd internal
+gofmt -w $(git ls-files '*.go')
 go test ./...        # 需要 fio / sysbench / iperf3
 go vet ./...
 go test -race ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 ```
 
 实网测试（会把本机出口 IP 发给表内数据源，按需运行）：

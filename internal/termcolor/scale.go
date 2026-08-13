@@ -27,7 +27,7 @@ func RelativeRatio(value, groupMin, groupMax float64) float64 {
 	}
 	if groupMin > 0 && groupMax > groupMin {
 		span := math.Log(groupMax) - math.Log(groupMin)
-		if span > 0 && math.IsInf(span, 0) == false && groupMax/groupMin >= relativeLogThreshold {
+		if span > 0 && !math.IsInf(span, 0) && groupMax/groupMin >= relativeLogThreshold {
 			ratio := (math.Log(value) - math.Log(groupMin)) / span
 			if ratio > 0 {
 				return ratio

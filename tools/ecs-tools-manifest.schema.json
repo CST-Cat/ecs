@@ -7,6 +7,7 @@
   "required": [
     "schema_version",
     "architecture",
+    "build",
     "tools"
   ],
   "properties": {
@@ -25,13 +26,28 @@
         "$ref": "#/$defs/architecture"
       }
     },
+    "build": {
+      "$ref": "#/$defs/build"
+    },
     "tools": {
       "type": "array",
-      "minItems": 6,
-      "maxItems": 6,
+      "minItems": 10,
+      "maxItems": 10,
       "items": {
         "$ref": "#/$defs/tool"
-      }
+      },
+      "allOf": [
+        {"contains": {"properties": {"name": {"const": "sysbench"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "zstd"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "npb-ep"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "npb-ft"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "openssl"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "stream"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "fio"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "iperf3"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "nexttrace-tiny"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "ping"}}, "required": ["name"]}, "minContains": 1, "maxContains": 1}
+      ]
     }
   },
   "$defs": {
@@ -68,9 +84,56 @@
         "minLength": 1
       }
     },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "performance_valid"
+      ],
+      "properties": {
+        "scope": {
+          "const": "functional"
+        },
+        "performance_valid": {
+          "const": false
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toolchain_mode",
+        "build_triplet",
+        "target_triplet",
+        "smoke_runner",
+        "validation"
+      ],
+      "properties": {
+        "toolchain_mode": {
+          "enum": ["native", "cross"]
+        },
+        "build_triplet": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_triplet": {
+          "type": "string",
+          "minLength": 1
+        },
+        "smoke_runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validation": {
+          "$ref": "#/$defs/validation"
+        }
+      }
+    },
     "tool": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "name",
         "upstream",
@@ -89,6 +152,10 @@
         "name": {
           "enum": [
             "sysbench",
+            "zstd",
+            "npb-ep",
+            "npb-ft",
+            "openssl",
             "stream",
             "fio",
             "iperf3",

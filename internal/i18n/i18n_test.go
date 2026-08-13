@@ -202,6 +202,33 @@ func TestLocalBenchmarkReportCopyTranslates(t *testing.T) {
 	}
 }
 
+func TestAuditFixProbeCopyTranslates(t *testing.T) {
+	original := Current()
+	defer Set(original)
+	Set(LangEN)
+	cases := map[string]string{
+		"CPU allowance 为 1 核：单线程与多线程逻辑指标复用同一次 1T 实测；未执行第二次相同命令，扩展倍率与每线程效率不适用。": "With a 1-core CPU allowance, the single- and multi-thread logical metrics reuse the same 1T measurement; no duplicate command is run, and scaling and per-thread efficiency do not apply.",
+		"1 / 1（单核，同一次实测）": "1 / 1 (single core, same measurement)",
+		"zstd 固定为 v1.5.7、level 3、每阶段至少 5 秒；单核 allowance 下 1 worker 与全 worker 逻辑指标复用同一次实测，未执行第二次相同命令，扩展倍率与每 worker 效率不适用。":                           "zstd is fixed at v1.5.7, level 3 and at least 5 seconds per stage; with a single-core allowance, the 1-worker and all-worker logical metrics reuse the same measurement, no duplicate command is run, and scaling and per-worker efficiency do not apply.",
+		"EP 1T/NT（同一次实测）100.00 Mop/s · 扩展不适用 · FT 1T/NT（同一次实测）200.00 Mop/s · 扩展不适用":                                                                 "EP 1T/NT (same measurement) 100.00 Mop/s · scaling not applicable · FT 1T/NT (same measurement) 200.00 Mop/s · scaling not applicable",
+		"AES-256-GCM 1W/NW（同一次实测）100.00 MB/s · 扩展不适用 · ChaCha20-Poly1305 1W/NW（同一次实测）200.00 MB/s · 扩展不适用 · SHA-256 1W/NW（同一次实测）300.00 MB/s · 扩展不适用": "AES-256-GCM 1W/NW (same measurement) 100.00 MB/s · scaling not applicable · ChaCha20-Poly1305 1W/NW (same measurement) 200.00 MB/s · scaling not applicable · SHA-256 1W/NW (same measurement) 300.00 MB/s · scaling not applicable",
+		"STREAM Copy 1T/NT（同一次实测）100.00 MiB/s · Triad 1T/NT（同一次实测）200.00 MiB/s":                                                                     "STREAM Copy 1T/NT (same measurement) 100.00 MiB/s · Triad 1T/NT (same measurement) 200.00 MiB/s",
+		"复用同一次实测": "Reused the same measurement",
+		"抓取固定提交 fbc05248d2e106f7ef14f3ce7e037bc9976b58bb 的节点清单失败（timeout）；不会改用未经本版本审计的清单。": "Failed to fetch the node list at pinned commit fbc05248d2e106f7ef14f3ce7e037bc9976b58bb (timeout); no list unaudited for this release will be substituted.",
+		"节点 URL 仅允许 HTTP(S)，解析与每次拨号都会拒绝本机、内网、链路本地、文档、基准及保留地址；重定向执行相同检查。":                   "Node URLs are limited to HTTP(S); resolution and every dial reject loopback, private, link-local, documentation, benchmark and reserved addresses, and redirects undergo the same checks.",
+		"仅命中异网骨干（联通/移动），不作为电信结论":                                                           "Only foreign-carrier backbones (Unicom/Mobile) matched; they are not used as the Telecom verdict",
+	}
+	for source, want := range cases {
+		if !HasProbeText(source) {
+			t.Errorf("missing audit-fix translation: %q", source)
+			continue
+		}
+		if got := Text(source); got != want {
+			t.Errorf("Text(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
 // 校验错误表与其余译文表同样必须一一对应。
 func TestErrorTablesAreInSync(t *testing.T) {
 	for key, value := range errorChinese {

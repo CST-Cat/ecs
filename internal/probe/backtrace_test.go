@@ -3,6 +3,8 @@ package probe
 import (
 	"strings"
 	"testing"
+
+	"ecs/internal/config"
 )
 
 func TestExtractTraceHopsFromNextTraceJSON(t *testing.T) {
@@ -120,34 +122,55 @@ func TestMatchRouteSignaturesIdentifiesIPv6CarrierBackbones(t *testing.T) {
 func TestBestBacktraceHitPrefersHigherQualityLine(t *testing.T) {
 	// 同一条路径同时经过 163 与 CN2 时，结论应当取更优质的 CN2。
 	hits := matchRouteSignatures([]string{"202.97.94.1", "59.43.130.22"})
-	best, ok := bestBacktraceHit(hits)
+	best, ok := bestBacktraceHit(hits, "电信")
 	if !ok || best.Signature.Code != "CN2" {
 		t.Fatalf("best = %+v, ok = %v", best, ok)
 	}
 
-	if _, ok := bestBacktraceHit(nil); ok {
+	if _, ok := bestBacktraceHit(nil, "电信"); ok {
 		t.Fatal("empty hit list must not produce a verdict")
+	}
+}
+
+func TestBestBacktraceHitNeverUsesAnotherCarrierForTargetVerdict(t *testing.T) {
+	// A higher-quality foreign-carrier hit must not displace the target
+	// carrier's lower-quality but relevant evidence.
+	hits := matchRouteSignatures([]string{"223.120.1.1", "202.97.94.1"})
+	best, ok := bestBacktraceHit(hits, "电信")
+	if !ok || best.Signature.Code != "163" || best.Signature.Carrier != "电信" {
+		t.Fatalf("target-carrier verdict used foreign evidence: best=%+v ok=%v", best, ok)
+	}
+
+	foreignOnly := matchRouteSignatures([]string{"223.120.1.1", "219.158.16.1"})
+	if best, ok := bestBacktraceHit(foreignOnly, "电信"); ok {
+		t.Fatalf("foreign-only path produced a telecom verdict: %+v", best)
+	}
+	status := unidentifiedBacktraceStatus(backtraceRow{
+		Target: config.Endpoint{Kind: "电信"}, Hits: foreignOnly, Hops: []string{"223.120.1.1", "219.158.16.1"},
+	})
+	if status != "仅命中异网骨干（联通/移动），不作为电信结论" {
+		t.Fatalf("foreign-only status is not explicit: %q", status)
 	}
 }
 
 func TestDescribeBacktraceLineMarksCN2Inference(t *testing.T) {
 	// 直接进 CN2 推测为 GIA。
 	direct := matchRouteSignatures([]string{"59.43.130.22", "59.43.80.1"})
-	best, _ := bestBacktraceHit(direct)
+	best, _ := bestBacktraceHit(direct, "电信")
 	if got := describeBacktraceLine(best, direct); !strings.Contains(got, "GIA") || !strings.Contains(got, "推测") {
 		t.Fatalf("direct CN2 line = %q", got)
 	}
 
 	// 先经 163 再进 CN2 推测为 GT。
 	viaBackbone := matchRouteSignatures([]string{"202.97.94.1", "59.43.130.22"})
-	best, _ = bestBacktraceHit(viaBackbone)
+	best, _ = bestBacktraceHit(viaBackbone, "电信")
 	if got := describeBacktraceLine(best, viaBackbone); !strings.Contains(got, "GT") || !strings.Contains(got, "推测") {
 		t.Fatalf("via-163 CN2 line = %q", got)
 	}
 
 	// 非 CN2 线路不应带推测后缀。
 	unicom := matchRouteSignatures([]string{"219.158.16.1"})
-	best, _ = bestBacktraceHit(unicom)
+	best, _ = bestBacktraceHit(unicom, "联通")
 	if got := describeBacktraceLine(best, unicom); strings.Contains(got, "推测") {
 		t.Fatalf("non-CN2 line must not be labelled as inferred: %q", got)
 	}

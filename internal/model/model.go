@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -373,6 +374,8 @@ func RedactedCopy(in Report, reveal bool) Report {
 	out := in
 	out.Notices = append([]string(nil), in.Notices...)
 	out.SensitiveIPs = append([]string(nil), in.SensitiveIPs...)
+	out.Run.Requested = append([]string(nil), in.Run.Requested...)
+	out.Run.OutputFormats = append([]string(nil), in.Run.OutputFormats...)
 	out.Results = make([]Result, len(in.Results))
 	for i, result := range in.Results {
 		out.Results[i] = result
@@ -586,38 +589,50 @@ func maskSelectedIPsInText(value string, selected map[string]struct{}) string {
 }
 
 func redactExactLocalIPs(report *Report, selected map[string]struct{}) {
-	report.Summary.Headline = maskSelectedIPsInText(report.Summary.Headline, selected)
-	for index := range report.Notices {
-		report.Notices[index] = maskSelectedIPsInText(report.Notices[index], selected)
+	if report == nil || len(selected) == 0 {
+		return
 	}
-	for resultIndex := range report.Results {
-		result := &report.Results[resultIndex]
-		for key, value := range result.Methodology.Parameters {
-			result.Methodology.Parameters[key] = maskSelectedIPsInText(value, selected)
+	redactStringValues(reflect.ValueOf(report).Elem(), selected)
+}
+
+// redactStringValues walks every exported string value in the report schema.
+// Keeping redaction at the schema boundary prevents a newly added diagnostic
+// field from silently bypassing the local-IP promise. Map keys are stable
+// machine identifiers and are deliberately preserved; map string values are
+// redacted like ordinary fields.
+func redactStringValues(value reflect.Value, selected map[string]struct{}) {
+	if !value.IsValid() {
+		return
+	}
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if !value.IsNil() {
+			redactStringValues(value.Elem(), selected)
 		}
-		result.Description = maskSelectedIPsInText(result.Description, selected)
-		result.Summary = maskSelectedIPsInText(result.Summary, selected)
-		result.Error = maskSelectedIPsInText(result.Error, selected)
-		for index := range result.Notes {
-			result.Notes[index] = maskSelectedIPsInText(result.Notes[index], selected)
-		}
-		for index := range result.Fields {
-			result.Fields[index].Value = maskSelectedIPsInText(result.Fields[index].Value, selected)
-		}
-		for index := range result.Measurements {
-			result.Measurements[index].Display = maskSelectedIPsInText(result.Measurements[index].Display, selected)
-		}
-		for tableIndex := range result.Tables {
-			for rowIndex := range result.Tables[tableIndex].Rows {
-				for columnIndex := range result.Tables[tableIndex].Rows[rowIndex] {
-					cell := &result.Tables[tableIndex].Rows[rowIndex][columnIndex]
-					*cell = maskSelectedIPsInText(*cell, selected)
-				}
+	case reflect.Struct:
+		for index := 0; index < value.NumField(); index++ {
+			field := value.Field(index)
+			if field.CanSet() {
+				redactStringValues(field, selected)
 			}
 		}
-		for index := range result.TextBlocks {
-			result.TextBlocks[index].Content = maskSelectedIPsInText(result.TextBlocks[index].Content, selected)
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			redactStringValues(value.Index(index), selected)
 		}
+	case reflect.Map:
+		iterator := value.MapRange()
+		for iterator.Next() {
+			key := iterator.Key()
+			item := iterator.Value()
+			if item.Kind() == reflect.String {
+				masked := reflect.New(item.Type()).Elem()
+				masked.SetString(maskSelectedIPsInText(item.String(), selected))
+				value.SetMapIndex(key, masked)
+			}
+		}
+	case reflect.String:
+		value.SetString(maskSelectedIPsInText(value.String(), selected))
 	}
 }
 

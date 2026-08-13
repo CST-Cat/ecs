@@ -6,6 +6,8 @@
 和 `LICENSES/` 为准。源码中的示例 manifest 允许 `unknown`/`unavailable`，这里不填写尚未由
 CI 产出的工具版本、发布资产或许可证正文。
 
+`tools/ecs-tools-manifest.schema.json` 与 Go 解析器使用同一严格合同：顶层必须包含 `build`，`build.validation` 必须明确为功能校验且不具备性能有效性，`tools` 必须恰好各含一个下文十个工具，未知字段会同时被 schema 和解析器拒绝。CI 会先检查 Draft 2020-12 schema 本身，再校验示例与实际生成的 manifest。
+
 ## 可选本地程序
 
 这些程序可由系统或受校验的临时依赖路径提供。zstd、NPB 与 OpenSSL 只接受下表的固定版本/参数；任意系统版本不会生成可比较成绩。缺少 `sysbench`、`zstd`、`npb-ep`、`npb-ft`、`openssl`、官方 `stream`、`fio`、`iperf3`、`nexttrace-tiny` 或 `ping` 时，`run.sh` 从当前 Linux 架构匹配的 `ecs-tools` `tar.gz` 包临时提供二进制；选中 zstd 时，固定 corpus 由独立 Release 资产临时提供。`ecs` 仅以独立进程调用。
@@ -23,6 +25,8 @@ CI 产出的工具版本、发布资产或许可证正文。
 | `iperf3` | TCP 多流双方向与 UDP 丢包/抖动 | [上游仓库](https://github.com/esnet/iperf) · [LICENSE](https://github.com/esnet/iperf/blob/master/LICENSE) · BSD-3-Clause | 网络吞吐唯一标准工具；逐节点、逐方向保留 JSON 原值，不跨节点求平均 |
 | `nexttrace-tiny` | 路由和回程追踪 | [上游仓库](https://github.com/nxtrace/NTrace-core) · [LICENSE](https://github.com/nxtrace/NTrace-core/blob/main/LICENSE) · GPL-3.0-only | 只使用官方 Tiny 资产；实际版本和 SHA-256 由 manifest/报告记录 |
 | `ping` | 系统 ICMP 往返与丢包 | [iputils](https://github.com/iputils/iputils) 或发行版提供；许可证随实际发行版包 | 系统 ping 优先；兼容 busybox 等精简 ping 的三段统计行；完全不可用时只保留 TCP 并明确说明 |
+
+上表中带 1T/NT 或 1/全 worker 口径的五个本地基准（sysbench、zstd、NPB、STREAM、OpenSSL）在有效 CPU allowance 为 1 时只执行一次参数相同的官方工具命令。报告保留 1T/NT 逻辑原始指标以兼容现有 schema，但不伪造第二个独立样本，也不生成扩展倍率。
 
 Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政策的外部适配器。`full` 默认
 运行它，`standard` 默认不运行；`--only ookla` 仍可从任意配置档显式单独选择。它不进入 `ecs-tools`；`ecs` 不在本文
@@ -75,7 +79,7 @@ Class S EP/FT 并在 QEMU 中跑到 Verification；发布的 Class A ELF 仍逐�
 - 四城三网 IPv4/IPv6 回程目标：IPv4 使用公开参考地址，IPv6 使用地区节点域名并强制 `family: "6"`；目标服务会看到路由探测的源地址；
 - [Ookla Speedtest](https://www.speedtest.net/about/privacy)：full 默认或用户用 `--only ookla` 显式选择后由本机官方客户端连接；Ookla 的数据处理不属于 ecs 本地报告保证范围；
 - DNS 黑名单服务（Spamhaus、SpamCop、Barracuda、CBL、PSBL、blocklist.de、UCEPROTECT、DroneBL、s5h、SpamRats、GBUdb、Mailspike、Backscatterer）：`blacklist` 模块把出口 IP 反转后作为域名查 A 记录，不发送其他信息。各名单有各自的收录标准、解除流程与查询配额；部分名单（如 Spamhaus）拒绝来自公共解析器的查询并返回 127.255.255.x，ecs 将其判为“查询被拒”而非命中；
-- [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT，每日更新）：`cnspeed` 模块的中国测速节点清单，含运营商标注。清单实时抓取而不内置快照——节点会下线，用过期清单去测已消失的节点比不测更糟。ecs 只读取清单，不复制其内容入库；测速本身直接连清单里的节点，不经过第三方；
+- [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID/tree/fbc05248d2e106f7ef14f3ce7e037bc9976b58bb)（MIT）：`cnspeed` 模块的中国测速节点清单，含运营商标注。当前固定提交为 `fbc05248d2e106f7ef14f3ce7e037bc9976b58bb`；上游 `main` 虽每日更新，ecs 发行版不会在未经代码评审时自动更换访问目标。ecs 只读取该 commit 的清单，不复制内容入库；专用客户端只连接通过 scheme、DNS、拨号与重定向公网地址校验的 HTTP(S) 节点，不使用环境代理。部分节点仅有 HTTP，中间网络可观察或篡改测速流量；
 - 公共 STUN 服务器（`stun.miwifi.com`、`stun.1und1.de`、`stun.hoiio.com`、`stun.l.google.com`、`stun.cloudflare.com`）：`nat` 模块的 UDP Binding 请求。STUN 请求本身不携带任何本机信息——服务器看到的只是 UDP 包的源地址，也就是本机公网出口；返回的映射地址是判定 NAT 类型的依据；
 - README 中列出的公共 DNS、延迟、端口以及服务自身公开网页。
 

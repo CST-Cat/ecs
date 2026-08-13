@@ -148,7 +148,8 @@ printf '+F:25:%s:%d.00\n' "$output_name" "$((base*workers))"
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+originalPath)
-	result := runOpenSSLSpeed(context.Background(), Environment{}, tool, openSSLAlgorithmSpecs)
+	result := runOpenSSLSpeedWithAllowance(context.Background(), Environment{}, tool, openSSLAlgorithmSpecs,
+		cpuAllowance{Visible: 4, Threads: 4, Source: "fixture"})
 	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 6 || result.Evidence.Expected != 6 {
 		t.Fatalf("crypto status/evidence = %s %+v failures=%+v notes=%v", result.Status, result.Evidence, result.Failures, result.Notes)
 	}
@@ -196,5 +197,63 @@ exit 99
 	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 ||
 		!strings.Contains(result.Summary, "3.5.6") || len(result.TextBlocks) != 0 {
 		t.Fatalf("OpenSSL version mismatch result = %+v", result)
+	}
+}
+
+func TestOpenSSLSingleCoreKeepsLogicalMetricsWithoutScaling(t *testing.T) {
+	spec := openSSLAlgorithmSpecs[0]
+	sample := openSSLSpeedSample{Algorithm: spec.Key, Workers: 1, ThroughputBPS: 1_000_000_000, ThroughputMBPS: 1000}
+	runs := map[string][]openSSLSpeedSample{spec.Key: {sample, sample}}
+	result := model.NewResult("crypto", "crypto")
+	appendOpenSSLMeasurements(&result, []openSSLAlgorithmSpec{spec}, runs, 1)
+	for _, key := range []string{"openssl_aes_256_gcm_1w_mb_s", "openssl_aes_256_gcm_nw_mb_s"} {
+		if !hasMeasurement(result, key) {
+			t.Errorf("single-core logical metric missing %q", key)
+		}
+	}
+	if hasMeasurement(result, "openssl_aes_256_gcm_scaling_ratio") {
+		t.Fatal("single-core OpenSSL result invented a scaling ratio")
+	}
+	table := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, runs, 1)
+	for _, row := range table.Rows {
+		if row[5] != "不适用" {
+			t.Fatalf("single-core OpenSSL scaling cell = %q, want 不适用: %v", row[5], row)
+		}
+	}
+}
+
+func TestRunOpenSSLSingleCoreExecutesOnePhysicalWorkloadPerAlgorithm(t *testing.T) {
+	directory := t.TempDir()
+	tool := filepath.Join(directory, "openssl")
+	logPath := filepath.Join(directory, "runs.log")
+	script := `#!/bin/sh
+if [ "$1" = version ]; then
+  echo 'OpenSSL 3.5.7 9 Jun 2026'
+  exit 0
+fi
+printf '%s\n' run >> "$ECS_RUN_LOG"
+printf '%s\n' \
+  '+DT:AES-256-GCM:5:16384' \
+  '+R:1000:AES-256-GCM:5.000000' \
+  '+F:25:AES-256-GCM:1000000000.00'
+`
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECS_RUN_LOG", logPath)
+	result := runOpenSSLSpeedWithAllowance(context.Background(), Environment{}, tool,
+		[]openSSLAlgorithmSpec{openSSLAlgorithmSpecs[0]}, cpuAllowance{Visible: 1, Threads: 1, Source: "fixture"})
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(log), "run\n") != 1 {
+		t.Fatalf("single-core OpenSSL physical executions = %q, want one for one algorithm", log)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.TextBlocks) != 1 {
+		t.Fatalf("single-core OpenSSL evidence/raw output is not physical: evidence=%+v blocks=%d", result.Evidence, len(result.TextBlocks))
+	}
+	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 2 {
+		t.Fatalf("single-core OpenSSL lost logical table contexts: %+v", result.Tables)
 	}
 }

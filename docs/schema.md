@@ -19,6 +19,7 @@
 - `run`：报告 ID、配置档、时间、外联级别、离线/遮盖/中断状态、IP 协议族、请求模块和输出格式。
   - `exposure`：本次运行允许的最高外联级别，取值 `local`、`public`、`thirdparty`、`any`；
   - `offline`：`exposure == "local"` 的派生布尔值，保留给既有的报告消费方。
+  - `redacted`：只有在写文件前已完成全 schema 本机 IP 遮盖的副本才为 `true`；Runner 内部的原始对象为 `false`。
 - `results`：按实际执行顺序排列的探针结果。
 - `summary`：`ok`、`warning`、`skipped`、`error` 数量与人类可读摘要。
 - `notices`：适用于整份报告的方法或隐私说明。
@@ -214,6 +215,8 @@ manifest 的 `corpus_path` 表示运行时路径；选中 zstd 时，`run.sh` �
 
 三个模块的 `methodology.parameters` 都包含 method version、实际线程/worker、固定时长和工具二进制 SHA-256。zstd 另包含 corpus 长度/两级 SHA-256 与完整参数指纹；NPB 包含 EP/FT 各自 SHA-256、problem class、编译参数和环境指纹；crypto 包含算法、block、计时/输出模式和六组完整参数指纹。任一口径不同时 `compare` 将其分组，不强行排名。
 
+当 CPU allowance 只有 1 核时，sysbench、zstd、NPB、STREAM 与 OpenSSL 的“单线程”和“全线程”命令参数完全相同。这种情况只物理运行一次，然后将同一原始样本写入既有 1T/NT（或 1W/NW）指标键，以保持机器字段兼容。扩展倍率和每 worker/线程效率不生成；表格显示“不适用”，`evidence.expected` 计物理执行数而不是逻辑字段数，原始输出也只保留一份。
+
 磁盘 `disk` 结果使用 fio/YABS 当前指标；只要选中 `disk`（无论配置档预设还是
 `--only`），就增加下面三组完整表。两档配置只预选模块集合，不改变这些表的深度：
 
@@ -293,20 +296,28 @@ IP 质量指标尤其需要保留 `method`：
 
 `network` 结果固定保留 IP 类型属性、风险评分、风险因子和数据源状态表。即使供应商未配置、被限流或解析失败，对应行也不能静默删除；使用 `未启用`、`失败`、`未返回` 或 `—` 区分状态。这样 Markdown/HTML 和下游程序能看到证据缺口，而不是把缺失误判成低风险。
 
-`text_blocks` 保存路由等需要原文复核的结果。终端 ANSI 和 NUL 会在写入前移除；HTML 使用转义后的 `<pre>` 展示。
+`text_blocks` 保存路由等需要原文复核的结果。JSON 按 JSON 规则编码控制字符，HTML 使用转义后的 `<pre>` 展示；txt/终端渲染在排版前对整份报告的字符串值做副本净化，将 C0、DEL、C1（包括 OSC/CSI）替换为普通空格并合并连续控制符。净化之后只允许渲染器自己生成 SGR 颜色序列，输入 JSON 不会被改写。
 
 ```json
 {"title":"本机绑定信息","language":"text","content":"local 203.0.x.x:443","sensitive":true}
 ```
 
 本机 IP 的遮盖规则为：IPv4 隐藏后两段（保留 /16），IPv6 隐藏后六组（保留 /32），`IP:port` 中的端口号保留。
-生产报告还会携带一份不写入 JSON 的本机 IP 列表，在所有正文中只替换与该列表精确匹配的地址。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
+生产报告还会携带一份不写入 JSON 的本机 IP 列表，在报告 schema 的所有导出字符串值中只替换与该列表精确匹配的地址，包括失败消息、复测尝试、方法参数、表格、说明和原始输出。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
 
-遮盖对 `fields`、`tables` 和 `text_blocks` 一致生效，`--reveal` 同时关闭这三者中的本机 IP 遮盖。
+遮盖不维护人工字段白名单；新增的导出字符串字段会自动进入同一 visitor。映射的稳定机器 key 保持不变，字符串 value 会遮盖。`--reveal` 关闭这次本机 IP 遮盖，且 `run.redacted` 保持 `false`。
 
 配置文件中的 `Endpoint` 可选 `family` 字段，值为 `"4"` 或 `"6"`；空值表示自动选择。
 IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。
 `ookla_servers` 只控制外部 Ookla 适配器的服务器选择，不代表 Ookla 客户端本身不发送测量数据。
+
+`backtrace` 只会从与当前参考目标同运营商的骨干特征中选择结论；异网骨干命中仍保留在路径证据中，但表格结论为“未识别”，不用其代替目标运营商的线路类型。
+
+## 排行榜提交与基线 schema
+
+`ecs.submission/v1` 的新提交增加 `fingerprint_version: "v2"`。v2 ID 是除 `id` 和 `ran_at` 以外所有允许公开字段的规范 JSON SHA-256 前 12 位：同一内容在不同导出时间得到同一 ID，而主机规格、工具、profile、note 或任何精确浮点值的改动都会改变 ID。未携带 `fingerprint_version` 的历史文件仍按冻结的旧算法校验，不重写旧 ID；其它版本值直接拒绝。
+
+`ecs.baseline/v1` 的每个 `tiers[]` 保留总机器数 `sample_count`，并增加 `metric_sample_counts`记录每个平均值的独立样本数。某个分档指标只在自身样本数至少为 5 时覆盖全局值；“该档有 5 台机器”不再让只有 1 个磁盘样本的指标冒充可用分档。为保守兼容，缺少 `metric_sample_counts` 的旧分档不被信任，评分时回落全局指标。加载器会拒绝重复/非法档位、非正有限指标、样本数越界和指标/计数 key 不一致。
 
 ## 多报告比较 schema
 

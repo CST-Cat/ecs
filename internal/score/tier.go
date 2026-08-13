@@ -9,9 +9,9 @@ package score
 // 分档的边界不是我划的，是云厂商的实际规格分布：1、2、4、8、16、32、64+
 // 这几档覆盖了绝大多数售卖规格，落在中间的（如 6 核）归入下界所在的档。
 //
-// 关键约束是**样本不足时自动退化**：某档不够 minTierSamples 台机器就回落到
-// 全局排行榜参考均值并在报告里说明。一个由三台机器算出来的档位平均值没有代表性，
-// 用它去评判别人还不如老实说"这档样本不够"。
+// 关键约束是**按指标自动退化**：同一档的 CPU 可能有足够样本，磁盘却只有一份；
+// 每个指标必须各自达到 minTierSamples 才覆盖全局均值。一个由三台机器算出来的
+// 指标平均值没有代表性，用它去评判别人还不如老实回落到全局参考。
 
 import (
 	"fmt"
@@ -33,6 +33,9 @@ type Tier struct {
 	VCPUMin     int                `json:"vcpu_min"`
 	SampleCount int                `json:"sample_count"`
 	Metrics     map[string]float64 `json:"metrics"`
+	// MetricSampleCounts records the independent evidence behind each mean.
+	// Older baselines omit it and conservatively fall back to global metrics.
+	MetricSampleCounts map[string]int `json:"metric_sample_counts,omitempty"`
 }
 
 // MinTierSamples 返回档位可用所需的最少样本数，供命令行说明用。
@@ -78,7 +81,7 @@ func TierLabel(vcpuMin int) string {
 func (b Baseline) MetricsForHost(vcpu int) (map[string]float64, int, int) {
 	key := TierKeyFor(vcpu)
 	for _, tier := range b.Tiers {
-		if tier.VCPUMin != key || tier.SampleCount < minTierSamples {
+		if tier.VCPUMin != key {
 			continue
 		}
 		// 档位里缺的指标用全局值兜底：某档可能没人跑过带宽，
@@ -87,8 +90,16 @@ func (b Baseline) MetricsForHost(vcpu int) (map[string]float64, int, int) {
 		for metricKey, value := range b.Metrics {
 			merged[metricKey] = value
 		}
+		usedTierMetric := false
 		for metricKey, value := range tier.Metrics {
+			if tier.MetricSampleCounts[metricKey] < minTierSamples {
+				continue
+			}
 			merged[metricKey] = value
+			usedTierMetric = true
+		}
+		if !usedTierMetric {
+			return b.Metrics, 0, b.SampleCount
 		}
 		return merged, tier.VCPUMin, tier.SampleCount
 	}
@@ -96,7 +107,7 @@ func (b Baseline) MetricsForHost(vcpu int) (map[string]float64, int, int) {
 }
 
 // buildTiers 从按档位分好的样本里生成分档排行榜参考。
-func buildTiers(samplesByTier map[int]map[string][]float64) []Tier {
+func buildTiers(samplesByTier map[int]map[string][]float64, reportCounts map[int]int) []Tier {
 	keys := make([]int, 0, len(samplesByTier))
 	for key := range samplesByTier {
 		keys = append(keys, key)
@@ -106,22 +117,20 @@ func buildTiers(samplesByTier map[int]map[string][]float64) []Tier {
 	var tiers []Tier
 	for _, key := range keys {
 		metrics := make(map[string]float64)
-		// 档位样本数取各指标里最多的那个：不同机器跑的模块可能不同，
-		// 用最大值代表"这一档有多少台机器提供了数据"。
-		count := 0
+		metricCounts := make(map[string]int)
 		for metricKey, values := range samplesByTier[key] {
 			if len(values) == 0 {
 				continue
 			}
 			metrics[metricKey] = arithmeticMean(values)
-			if len(values) > count {
-				count = len(values)
-			}
+			metricCounts[metricKey] = len(values)
 		}
 		if len(metrics) == 0 {
 			continue
 		}
-		tiers = append(tiers, Tier{VCPUMin: key, SampleCount: count, Metrics: metrics})
+		tiers = append(tiers, Tier{
+			VCPUMin: key, SampleCount: reportCounts[key], Metrics: metrics, MetricSampleCounts: metricCounts,
+		})
 	}
 	return tiers
 }

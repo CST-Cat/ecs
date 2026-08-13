@@ -92,17 +92,22 @@ func npbMethodology() model.Methodology {
 }
 
 func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmarkSpec) model.Result {
+	return runNPBBenchmarksWithAllowance(ctx, env, specs, detectCPUAllowance())
+}
+
+func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs []npbBenchmarkSpec, allowance cpuAllowance) model.Result {
 	start := time.Now()
 	result := model.NewResult("npb", "NPB EP + FT 计算性能")
 	result.Description = "NASA NPB-OMP Class A：EP 覆盖浮点与多核吞吐，FT 覆盖 3D FFT、浮点和 cache/memory access"
 	result.Methodology = npbMethodology()
 
-	allowance := detectCPUAllowance()
 	workers := allowance.Threads
+	threadCounts := distinctBenchmarkThreadCounts(workers)
+	singleCore := len(threadCounts) == 1
 	runs := make(map[string][]npbBenchmarkSample, len(specs))
 	paths := make(map[string]string, len(specs))
 	validRuns := 0
-	expectedRuns := len(specs) * 2
+	expectedRuns := len(specs) * len(threadCounts)
 	for _, spec := range specs {
 		path, err := exec.LookPath(spec.Binary)
 		if err != nil {
@@ -111,12 +116,12 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 			result.Notes = append(result.Notes, message)
 			result.AddFailure(model.Failure{
 				Category: model.FailureToolMissing, Stage: "tool_lookup", Target: spec.Binary,
-				Count: 2, Message: message,
+				Count: len(threadCounts), Message: message,
 			})
 			continue
 		}
 		paths[spec.Name] = path
-		for _, threads := range []int{1, workers} {
+		for _, threads := range threadCounts {
 			sample, runErr := executeNPBBenchmark(ctx, path, spec, threads)
 			runs[spec.Name] = append(runs[spec.Name], sample)
 			if runErr == nil {
@@ -131,6 +136,10 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 				Count: 1, Message: runErr.Error(),
 			})
 		}
+		if singleCore && len(runs[spec.Name]) == 1 {
+			clone := runs[spec.Name][0]
+			runs[spec.Name] = append(runs[spec.Name], clone)
+		}
 	}
 
 	appendNPBMeasurements(&result, specs, runs, workers)
@@ -140,7 +149,7 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 		{Key: "method_version", Label: "method version", Value: npbMethodVersion},
 		{Key: "benchmarks", Label: "固定 benchmark", Value: "EP / FT"},
 		{Key: "problem_class", Label: "problem class", Value: npbExpectedClass},
-		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
+		{Key: "threads", Label: "测试线程", Value: benchmarkThreadField(workers)},
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "implementation", Label: "实现", Value: "NPB3.4-OMP"},
 		{Key: "compiler_flags", Label: "固定编译参数", Value: npbCompileFlags},
@@ -158,6 +167,9 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 	}
 	for _, spec := range specs {
 		for index, sample := range runs[spec.Name] {
+			if singleCore && index > 0 {
+				continue
+			}
 			if sample.Output == "" {
 				continue
 			}
@@ -175,13 +187,17 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 	result.Sources = []model.Source{
 		{Name: "NASA NAS Parallel Benchmarks", URL: "https://www.nas.nasa.gov/software/npb.html", Purpose: "NPB 3.4.4 官方源码与 benchmark 定义"},
 	}
+	if singleCore {
+		result.Notes = append(result.Notes, "仅运行 NPB-OMP 的 EP 与 FT；单核 allowance 下 1T 与 NT 逻辑指标复用各 benchmark 的同一次 1T 实测，未执行第二次相同命令，扩展倍率不适用。")
+	} else {
+		result.Notes = append(result.Notes, "仅运行 NPB-OMP 的 EP 与 FT；固定 NPB 3.4.4、Class A、1T/当前 CPU allowance 全线程与相同 OpenMP 环境。")
+	}
 	result.Notes = append(result.Notes,
-		"仅运行 NPB-OMP 的 EP 与 FT；固定 NPB 3.4.4、Class A、1T/当前 CPU allowance 全线程与相同 OpenMP 环境。",
 		"EP 输出随机数/高斯对浮点计算 Mop/s；FT 输出 3D FFT、浮点与 cache/memory access 综合 Mop/s。两者 workload 不同，不互相混算。",
 		"每轮必须报告 Class A、正确 size/iteration、实际线程数、NPB 3.4.4、固定编译参数并通过 Verification；否则不采纳 Mop/s。",
 		"本模块只保留各 benchmark 原始 Mop/s、Mop/s/thread 和多线程扩展倍率，不进入 CPU 综合分，也不生成自定义综合分。",
 	)
-	if allowance.Limited() {
+	if allowance.Limited() && !singleCore {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"检测到 CPU 配额 %.2f 核（%s），全线程轮按 allowance 使用 %d 线程。",
 			allowance.Quota, allowance.Source, workers,
@@ -406,7 +422,7 @@ func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs 
 				HigherIsBetter: model.BoolPtr(true),
 			})
 		}
-		if len(samples) >= 2 && samples[0].MOPS > 0 && samples[1].MOPS > 0 {
+		if workers > 1 && len(samples) >= 2 && samples[0].MOPS > 0 && samples[1].MOPS > 0 {
 			scaling := samples[1].MOPS / samples[0].MOPS
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:   "npb_" + strings.ToLower(spec.Name) + "_scaling_ratio",
@@ -438,7 +454,9 @@ func npbResultsTable(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSam
 				perThread = model.FormatRate(sample.MOPSPerThread, "Mop/s")
 				seconds = fmt.Sprintf("%.2f s", sample.Seconds)
 				verification = "SUCCESSFUL"
-				if index == 0 {
+				if workers <= 1 {
+					scaling = "不适用"
+				} else if index == 0 {
 					scaling = "1.00 x"
 				} else if len(samples) >= 2 && samples[0].MOPS > 0 {
 					scaling = fmt.Sprintf("%.2f x", sample.MOPS/samples[0].MOPS)
@@ -454,7 +472,10 @@ func npbSummary(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSample, 
 	parts := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		samples := runs[spec.Name]
-		if len(samples) >= 2 && samples[0].MOPS > 0 && samples[1].MOPS > 0 {
+		if workers <= 1 && len(samples) >= 1 && samples[0].MOPS > 0 {
+			parts = append(parts, fmt.Sprintf("%s 1T/NT（同一次实测）%s · 扩展不适用",
+				spec.Name, model.FormatRate(samples[0].MOPS, "Mop/s")))
+		} else if len(samples) >= 2 && samples[0].MOPS > 0 && samples[1].MOPS > 0 {
 			parts = append(parts, fmt.Sprintf("%s 1T %s · %dT %s · %.2f×",
 				spec.Name, model.FormatRate(samples[0].MOPS, "Mop/s"), workers,
 				model.FormatRate(samples[1].MOPS, "Mop/s"), samples[1].MOPS/samples[0].MOPS))

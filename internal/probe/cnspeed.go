@@ -26,8 +26,8 @@ import (
 //     返回基于出口 IP 的就近 10 个节点——海外机器拿到的全是当地节点。开源的
 //     sivel/speedtest-cli 也因此只能列出就近节点（这大概也是它 2024 年后停更的原因）。
 //     因此中国节点只能依赖社区维护的清单。
-//  2. **清单必然会过期**，所以实时抓取而不内置快照；抓不到就跳过本模块，
-//     绝不用一份陈旧的内置清单去测已经下线的节点。
+//  2. **清单必然会过期**，所以每个 ecs 版本固定一个经过审计的上游提交；升级
+//     提交要随代码评审，抓不到就跳过本模块，不静默回退到另一份清单。
 
 type cnSpeedProbe struct{}
 
@@ -37,9 +37,10 @@ func (cnSpeedProbe) NeedsNetwork() bool { return true }
 
 // cnNodeListURL 是社区维护的中国测速节点清单。
 //
-// 来源 spiritLHLS/speedtest.cn-CN-ID（MIT），每日自动更新，带运营商标注。
-// ecs 只读取清单，不复制其内容入库——内置快照会过期，而过期清单比没有更糟。
-const cnNodeListURL = "https://raw.githubusercontent.com/spiritLHLS/speedtest.cn-CN-ID/main/CN.csv"
+// 来源 spiritLHLS/speedtest.cn-CN-ID（MIT），固定到经审计的上游提交。上游
+// main 每日变化，不能在未经过版本评审时直接改变 ecs 的网络访问目标。
+const cnNodeListCommit = "fbc05248d2e106f7ef14f3ce7e037bc9976b58bb"
+const cnNodeListURL = "https://raw.githubusercontent.com/spiritLHLS/speedtest.cn-CN-ID/" + cnNodeListCommit + "/CN.csv"
 
 const (
 	cnSpeedDuration       = 8 * time.Second
@@ -129,6 +130,12 @@ func fetchCNNodes(ctx context.Context, client *http.Client, userAgent string) ([
 		if node.PingURL == "" || node.DownloadURL == "" || node.Operator == "" {
 			continue
 		}
+		if _, err := validateCNNodeURL(node.PingURL); err != nil {
+			continue
+		}
+		if _, err := validateCNNodeURL(node.DownloadURL); err != nil {
+			continue
+		}
 		nodes = append(nodes, node)
 	}
 	if len(nodes) == 0 {
@@ -141,7 +148,11 @@ func fetchCNNodes(ctx context.Context, client *http.Client, userAgent string) ([
 func cnPingNode(ctx context.Context, client *http.Client, userAgent string, node cnNode) (float64, error) {
 	pingCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(pingCtx, http.MethodGet, node.PingURL, nil)
+	target, err := validateCNNodeURL(node.PingURL)
+	if err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequestWithContext(pingCtx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return 0, err
 	}
@@ -167,11 +178,16 @@ func cnDownload(ctx context.Context, client *http.Client, userAgent string, node
 	duration time.Duration, maxBytes int64) (float64, int64, error) {
 	downloadCtx, cancel := context.WithTimeout(ctx, duration+5*time.Second)
 	defer cancel()
-	url := node.DownloadURL
-	if !strings.Contains(url, "?") {
-		url += "?size=200000000"
+	target, err := validateCNNodeURL(node.DownloadURL)
+	if err != nil {
+		return 0, 0, err
 	}
-	request, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, url, nil)
+	if target.RawQuery == "" {
+		query := target.Query()
+		query.Set("size", "200000000")
+		target.RawQuery = query.Encode()
+	}
+	request, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -217,8 +233,8 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "per-carrier nearest node by HTTP latency",
 		ComparisonScope: "当次到该节点的 HTTP 下载带宽；节点、时段与运营商策略都会影响结果",
 	}
-	client, closeClient := httpClientForMode(env)
-	defer closeClient()
+	client := newCNSpeedHTTPClient(env.Config.HTTPTimeout, env.Config.IPVersion, nil, nil)
+	defer client.CloseIdleConnections()
 	env.HTTPClient = client
 
 	nodes, err := fetchCNNodes(ctx, env.HTTPClient, env.UserAgent)
@@ -227,8 +243,8 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		addFailure(&result, "node_list", "speedtest.cn-CN-ID", err)
 		result.Evidence = model.NewEvidence(0, len(cnCarriers), "target")
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"抓取节点清单失败（%s）。清单实时获取而不内置快照：节点会下线，"+
-				"用过期清单去测已经消失的节点比不测更糟。", compactError(err)))
+			"抓取固定提交 %s 的节点清单失败（%s）；不会改用未经本版本审计的清单。",
+			cnNodeListCommit, compactError(err)))
 		result.Finish(start)
 		return result
 	}
@@ -306,16 +322,17 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Tables = []model.Table{table}
 	result.Evidence = model.NewEvidence(succeeded, len(cnCarriers), "target")
 	result.Fields = []model.Field{
-		{Key: "node_list", Label: "节点清单来源", Value: "spiritLHLS/speedtest.cn-CN-ID（MIT，每日更新）"},
+		{Key: "node_list", Label: "节点清单来源", Value: "spiritLHLS/speedtest.cn-CN-ID（MIT，固定提交 " + cnNodeListCommit + "）"},
 		{Key: "nodes_available", Label: "清单可用节点", Value: fmt.Sprintf("%d", len(nodes))},
 		{Key: "download_budget", Label: "单运营商上限", Value: fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024)},
 	}
 	result.Sources = []model.Source{
 		{Name: "speedtest.cn-CN-ID", URL: "https://github.com/spiritLHLS/speedtest.cn-CN-ID",
-			Purpose: "中国测速节点清单与运营商标注（MIT，每日更新）"},
+			Purpose: "中国测速节点清单与运营商标注（MIT，固定审计提交）"},
 	}
 	result.Notes = append(result.Notes,
-		"节点清单实时抓取而不内置快照：节点会下线，用过期清单去测已经消失的节点比不测更糟。",
+		"节点清单固定到本版本审计过的上游提交；升级提交需要经过代码评审，避免上游 main 未经审查地改变访问目标。",
+		"节点 URL 仅允许 HTTP(S)，解析与每次拨号都会拒绝本机、内网、链路本地、文档、基准及保留地址；重定向执行相同检查。",
 		"每个运营商先按 HTTP 延迟从候选节点里选最快的一个，再对它做限时下载；"+
 			"三个运营商的下载串行执行，同时拉流会互相抢带宽，测出来是瓜分后的结果。",
 		"这是到某个具体测速节点的 HTTP 带宽，不是“到该运营商全网”的带宽；"+

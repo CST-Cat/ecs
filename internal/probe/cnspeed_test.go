@@ -2,8 +2,11 @@ package probe
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -16,12 +19,107 @@ const realCNNodeCSV = `id,active,https,cros,preferred,host,country_code,province
 429248,1,0,1,0,speedtest.139play.com:8080,CN,江苏,南京,5,移动,118.7,32.0,0,0,江苏移动,,,,http://speedtest.139play.com:8080/hello,http://speedtest.139play.com:8080/download,http://speedtest.139play.com:8080/upload,
 999999,0,0,1,0,dead.example.com:8080,CN,广东,深圳,5,电信,113.0,22.5,0,0,已下线,,,,http://dead.example.com:8080/hello,http://dead.example.com:8080/download,http://dead.example.com:8080/upload,
 888888,1,0,1,0,nourl.example.com:8080,CN,北京,北京,5,联通,116.4,39.9,0,0,缺字段,,,,,,,
+777777,1,0,1,0,local.example:8080,CN,北京,北京,5,联通,116.4,39.9,0,0,内网目标,,,,http://127.0.0.1/hello,http://127.0.0.1/download,,
+666666,1,0,1,0,file.example:8080,CN,北京,北京,5,联通,116.4,39.9,0,0,非 HTTP,,,,file:///etc/passwd,gopher://example.com/download,,
 `
+
+type cnFakeResolver struct {
+	addresses []netip.Addr
+	err       error
+	calls     int
+}
+
+func (resolver *cnFakeResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	resolver.calls++
+	return append([]netip.Addr(nil), resolver.addresses...), resolver.err
+}
 
 func TestCNSpeedUsesFullDepthBudget(t *testing.T) {
 	duration, maxBytes := cnSpeedBudget()
 	if duration != 8*time.Second || maxBytes != 100*1024*1024 {
 		t.Fatalf("cnspeed budget = %s/%d, want 8s/100MiB", duration, maxBytes)
+	}
+}
+
+func TestCNNodeListIsPinnedToReviewedCommit(t *testing.T) {
+	if len(cnNodeListCommit) != 40 || strings.Contains(cnNodeListURL, "/main/") ||
+		!strings.Contains(cnNodeListURL, "/"+cnNodeListCommit+"/CN.csv") {
+		t.Fatalf("node list URL is not commit-pinned: %q", cnNodeListURL)
+	}
+}
+
+func TestValidateCNNodeURLRejectsNonHTTPAndSpecialUseTargets(t *testing.T) {
+	allowed := []string{
+		"http://speed.example.com:8080/download",
+		"https://1.1.1.1/download",
+		"https://[2606:4700:4700::1111]/download",
+	}
+	for _, target := range allowed {
+		if _, err := validateCNNodeURL(target); err != nil {
+			t.Errorf("validateCNNodeURL(%q) rejected safe shape: %v", target, err)
+		}
+	}
+	blocked := []string{
+		"", " file:///etc/passwd", "file:///etc/passwd", "gopher://example.com/x",
+		"https://user:secret@example.com/x", "https://example.com/x#fragment",
+		"https://127.0.0.1/x", "http://169.254.169.254/latest/meta-data",
+		"http://10.0.0.1/x", "http://100.64.0.1/x", "http://192.0.2.1/x",
+		"http://198.18.0.1/x", "http://[::1]/x", "http://[fc00::1]/x",
+		"http://example.com:99999/x",
+	}
+	for _, target := range blocked {
+		if _, err := validateCNNodeURL(target); err == nil {
+			t.Errorf("validateCNNodeURL(%q) accepted an unsafe target", target)
+		}
+	}
+}
+
+func TestCNSafeDialRejectsDNSPrivateAndDialsOnlyResolvedPublicLiteral(t *testing.T) {
+	privateResolver := &cnFakeResolver{addresses: []netip.Addr{
+		netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("169.254.169.254"),
+		netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("fc00::1"),
+	}}
+	dialCalls := 0
+	client := newCNSpeedHTTPClient(time.Second, "auto", privateResolver, func(context.Context, string, string) (net.Conn, error) {
+		dialCalls++
+		return nil, errors.New("unexpected dial")
+	})
+	transport := client.Transport.(*http.Transport)
+	if _, err := transport.DialContext(context.Background(), "tcp", "malicious.example:80"); err == nil {
+		t.Fatal("DNS answers containing only non-public addresses must be rejected")
+	}
+	if dialCalls != 0 || privateResolver.calls != 1 {
+		t.Fatalf("unsafe DNS result reached dialer: resolver=%d dial=%d", privateResolver.calls, dialCalls)
+	}
+
+	publicResolver := &cnFakeResolver{addresses: []netip.Addr{
+		netip.MustParseAddr("10.0.0.8"), netip.MustParseAddr("1.1.1.1"),
+	}}
+	wantErr := errors.New("fixture dial stop")
+	var dialedNetwork, dialedAddress string
+	client = newCNSpeedHTTPClient(time.Second, "auto", publicResolver, func(_ context.Context, network, address string) (net.Conn, error) {
+		dialCalls++
+		dialedNetwork, dialedAddress = network, address
+		return nil, wantErr
+	})
+	transport = client.Transport.(*http.Transport)
+	if _, err := transport.DialContext(context.Background(), "tcp", "mixed.example:443"); !errors.Is(err, wantErr) {
+		t.Fatalf("safe dial error = %v, want wrapped fixture error", err)
+	}
+	if publicResolver.calls != 1 || dialedNetwork != "tcp4" || dialedAddress != "1.1.1.1:443" {
+		t.Fatalf("dial must use the already-validated public literal once: resolver=%d network=%q address=%q",
+			publicResolver.calls, dialedNetwork, dialedAddress)
+	}
+}
+
+func TestCNSpeedRedirectPolicyRejectsPrivateTarget(t *testing.T) {
+	client := newCNSpeedHTTPClient(time.Second, "auto", &cnFakeResolver{}, nil)
+	request, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CheckRedirect(request, nil); err == nil {
+		t.Fatal("redirect to a loopback literal must be rejected before dialing")
 	}
 }
 

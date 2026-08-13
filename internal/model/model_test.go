@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -223,5 +224,85 @@ func TestRedactedCopyMasksOnlyExactLocalIPsEverywhere(t *testing.T) {
 	}
 	if redacted.SensitiveIPs != nil {
 		t.Fatal("internal sensitive IP allow-list must not survive redaction")
+	}
+}
+
+func TestRedactedCopyMasksExactLocalIPAcrossEntireReportSchema(t *testing.T) {
+	const localIP = "203.0.113.77"
+	const remoteIP = "203.0.113.78"
+	withIPs := func(label string) string { return label + " local=" + localIP + " remote=" + remoteIP }
+	report := Report{
+		SchemaVersion: withIPs("schema"),
+		Tool: ToolInfo{
+			Name: withIPs("tool-name"), Version: withIPs("tool-version"),
+			Commit: withIPs("commit"), BuildDate: withIPs("build-date"),
+		},
+		Run: RunInfo{
+			ID: withIPs("run-id"), Profile: withIPs("profile"), Exposure: withIPs("exposure"),
+			IPVersion: withIPs("family"), Requested: []string{withIPs("requested")},
+			OutputFormats: []string{withIPs("format")},
+		},
+		Summary:      Summary{Headline: withIPs("headline")},
+		Notices:      []string{withIPs("notice")},
+		SensitiveIPs: []string{localIP},
+		Results: []Result{{
+			ID: withIPs("result-id"), Title: withIPs("title"), Description: withIPs("description"),
+			Summary: withIPs("summary"), Error: withIPs("error"),
+			Methodology: Methodology{
+				Kind: withIPs("kind"), Label: withIPs("label"), Engine: withIPs("engine"),
+				Profile: withIPs("method-profile"), ComparisonScope: withIPs("scope"),
+				Parameters: map[string]string{"target": withIPs("parameter")},
+			},
+			Fields: []Field{{Key: withIPs("field-key"), Label: withIPs("field-label"), Value: withIPs("field-value")}},
+			Measurements: []Measurement{{
+				Key: withIPs("metric-key"), Label: withIPs("metric-label"), Unit: withIPs("unit"),
+				Display: withIPs("display"), Rating: withIPs("rating"), Method: withIPs("method"),
+			}},
+			Tables: []Table{{
+				Title: withIPs("table-title"), Columns: []string{withIPs("column")},
+				Rows: [][]string{{withIPs("cell")}},
+			}},
+			TextBlocks: []TextBlock{{Title: withIPs("block-title"), Language: withIPs("language"), Content: withIPs("content")}},
+			Notes:      []string{withIPs("note")},
+			Sources:    []Source{{Name: withIPs("source-name"), URL: withIPs("source-url"), Purpose: withIPs("source-purpose")}},
+			Failures:   []Failure{{Stage: withIPs("failure-stage"), Target: withIPs("failure-target"), Message: withIPs("failure-message")}},
+			Retry: &RetryInfo{
+				SelectionRule: withIPs("selection-rule"), TriggerReasons: []string{withIPs("trigger")},
+				Attempts: []RetryAttempt{{
+					Measurements: []Measurement{{Display: withIPs("retry-measurement")}},
+					Interference: Interference{
+						Reasons:      []string{withIPs("interference-reason")},
+						Measurements: []Measurement{{Display: withIPs("interference-measurement")}},
+					},
+				}},
+			},
+		}},
+	}
+
+	redacted := RedactedCopy(report, false)
+	encoded, err := json.Marshal(redacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), localIP) {
+		t.Fatalf("redacted report still contains exact local IP: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "203.0.x.x") || !strings.Contains(string(encoded), remoteIP) {
+		t.Fatalf("redaction lost the masked local or untouched remote address: %s", encoded)
+	}
+	if !redacted.Run.Redacted {
+		t.Fatal("the completed redacted copy must declare run.redacted=true")
+	}
+	if report.Results[0].Failures[0].Message != withIPs("failure-message") || report.Run.Requested[0] != withIPs("requested") {
+		t.Fatal("full-schema redaction mutated the source report")
+	}
+
+	revealed := RedactedCopy(report, true)
+	revealedJSON, err := json.Marshal(revealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(revealedJSON), localIP) || revealed.Run.Redacted {
+		t.Fatalf("--reveal did not retain the exact address and truthful state: %s", revealedJSON)
 	}
 }

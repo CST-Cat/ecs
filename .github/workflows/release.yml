@@ -387,7 +387,9 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
-          go-version: stable
+          # Release binaries use an exact, currently supported patch toolchain.
+          # The go directive in go.mod remains the language compatibility floor.
+          go-version: 1.26.5
           cache: false
       - name: Verify release tag is exactly remote main
         shell: bash
@@ -437,6 +439,16 @@ jobs:
             test -d "tools-stage/linux_${arch}/LICENSES"
           done
           test ! -e tools-stage/linux_amd64/share/ecs/corpus/ecs-silesia-v1.corpus
+      - name: Verify clean release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(git status --porcelain=v1 --untracked-files=all)
+          if [[ -n "$status" ]]; then
+            echo "release source is not clean:" >&2
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
       - name: Build release assets
         env:
           REBUILD_TOOLS: ${{ needs.tools_plan.outputs.rebuild }}
@@ -451,6 +463,35 @@ jobs:
           else
             scripts/package.sh "${GITHUB_REF_NAME#v}"
           fi
+      - name: Verify release VCS metadata and known vulnerabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_revision=$(git rev-parse HEAD)
+          expected_go=go1.26.5
+          verify_root=$(mktemp -d)
+          trap 'rm -rf -- "$verify_root"' EXIT
+          mapfile -t archives < <(find dist -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print | sort)
+          test "${#archives[@]}" -eq 7
+
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck_bin="$(go env GOPATH)/bin/govulncheck"
+          test -x "$govulncheck_bin"
+
+          for archive in "${archives[@]}"; do
+            archive_name=$(basename "$archive" .tar.gz)
+            binary_dir="$verify_root/$archive_name"
+            mkdir -p "$binary_dir"
+            tar -xzf "$archive" -C "$binary_dir" ecs
+            binary="$binary_dir/ecs"
+            metadata=$(go version -m "$binary")
+            printf '%s\n' "$metadata"
+            grep -F -x "$binary: $expected_go" <<<"$metadata" >/dev/null
+            grep -F $'\tbuild\tvcs=git' <<<"$metadata" >/dev/null
+            grep -F $'\tbuild\tvcs.revision='"$expected_revision" <<<"$metadata" >/dev/null
+            grep -F $'\tbuild\tvcs.modified=false' <<<"$metadata" >/dev/null
+            "$govulncheck_bin" -mode binary "$binary"
+          done
       - name: Reuse and verify unchanged tools archives
         if: needs.tools_plan.outputs.rebuild != 'true'
         env:

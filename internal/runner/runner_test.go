@@ -118,6 +118,25 @@ func TestRunDoesNotDetectCapabilitiesForLocalOnlyRound(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotClaimRedactionBeforeSchemaRedaction(t *testing.T) {
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Modules = nil
+	cfg.Exposure = config.ExposureLocal
+	cfg.Reveal = false
+
+	raw := Run(context.Background(), cfg, nil)
+	if raw.Run.Redacted {
+		t.Fatal("runner returned raw diagnostics while claiming run.redacted=true")
+	}
+	redacted := model.RedactedCopy(raw, false)
+	if !redacted.Run.Redacted {
+		t.Fatal("RedactedCopy must be the boundary that sets run.redacted=true")
+	}
+}
+
 func TestRunDoesNotInitializeNetworkForPublicLocalOnlyRound(t *testing.T) {
 	detectorCalls := 0
 	previousDetector := detectNetworkCapabilities

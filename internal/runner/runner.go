@@ -60,13 +60,15 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			BuildDate: buildinfo.BuildDate,
 		},
 		Run: model.RunInfo{
-			ID:            newRunID(),
-			Profile:       cfg.Profile,
-			StartedAt:     started,
-			Exposure:      cfg.Exposure.String(),
-			Offline:       cfg.OfflineOnly(),
-			IPVersion:     cfg.IPVersion,
-			Redacted:      !cfg.Reveal,
+			ID:        newRunID(),
+			Profile:   cfg.Profile,
+			StartedAt: started,
+			Exposure:  cfg.Exposure.String(),
+			Offline:   cfg.OfflineOnly(),
+			IPVersion: cfg.IPVersion,
+			// The runner still contains raw probe diagnostics. RedactedCopy is the
+			// only boundary allowed to claim that every report string was scrubbed.
+			Redacted:      false,
 			Requested:     append([]string(nil), cfg.Modules...),
 			OutputFormats: append([]string(nil), cfg.Formats...),
 		},

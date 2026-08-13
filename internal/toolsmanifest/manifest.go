@@ -101,6 +101,9 @@ func Parse(data []byte) (Manifest, error) {
 	if raw == nil {
 		return Manifest{}, fmt.Errorf("manifest must be a JSON object")
 	}
+	if err := rejectUnknownFields(raw, "schema_version", "architecture", "supported_architectures", "build", "tools"); err != nil {
+		return Manifest{}, err
+	}
 	for _, field := range []string{"schema_version", "architecture", "build", "tools"} {
 		if err := requireField(raw, field); err != nil {
 			return Manifest{}, err
@@ -110,6 +113,9 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	if err := rejectUnknownFields(buildRaw, "toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"); err != nil {
+		return Manifest{}, fmt.Errorf("build: %w", err)
+	}
 	for _, field := range []string{"toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"} {
 		if err := requireField(buildRaw, field); err != nil {
 			return Manifest{}, fmt.Errorf("build: %w", err)
@@ -118,6 +124,9 @@ func Parse(data []byte) (Manifest, error) {
 	validationRaw, err := rawObject(buildRaw["validation"], "build.validation")
 	if err != nil {
 		return Manifest{}, err
+	}
+	if err := rejectUnknownFields(validationRaw, "scope", "performance_valid"); err != nil {
+		return Manifest{}, fmt.Errorf("build.validation: %w", err)
 	}
 	for _, field := range []string{"scope", "performance_valid"} {
 		if err := requireField(validationRaw, field); err != nil {
@@ -130,6 +139,13 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("decode manifest: %w", err)
 	}
 	for index, toolRaw := range rawTools(raw["tools"]) {
+		if err := rejectUnknownFields(toolRaw,
+			"name", "upstream", "version", "tag_or_commit", "source",
+			"build_flags", "enabled_features", "disabled_features",
+			"architecture", "license", "sha256", "parameters", "fallback",
+		); err != nil {
+			return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
+		}
 		for _, field := range []string{
 			"name", "upstream", "version", "tag_or_commit", "source",
 			"build_flags", "enabled_features", "disabled_features",
@@ -169,6 +185,15 @@ func requireField(fields map[string]json.RawMessage, field string) error {
 	value, ok := fields[field]
 	if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 		return fmt.Errorf("missing required field %q", field)
+	}
+	return nil
+}
+
+func rejectUnknownFields(fields map[string]json.RawMessage, allowed ...string) error {
+	for field := range fields {
+		if !contains(allowed, field) {
+			return fmt.Errorf("unknown field %q", field)
+		}
 	}
 	return nil
 }

@@ -542,7 +542,8 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	}
 	cfg.CPUTime = time.Second
 
-	cpu := runSysbenchCPU(context.Background(), Environment{Config: cfg}, sysbenchPath)
+	allowance := detectCPUAllowance()
+	cpu := runSysbenchCPUWithAllowance(context.Background(), Environment{Config: cfg}, sysbenchPath, allowance)
 	// 宿主机 steal 高时降级为 warning 是正确行为，只有 error 才算失败。
 	if cpu.Status == model.StatusError || cpu.Methodology.Kind != "standard-benchmark" {
 		t.Fatalf("sysbench CPU result = %+v", cpu)
@@ -554,15 +555,18 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 		cpuMeasurements[measurement.Key] = measurement
 	}
 	// steal 缺失在 Linux 上就是 bug：/proc/stat 必然可读，读不到说明采样逻辑坏了。
-	for _, required := range []string{
+	requiredMeasurements := []string{
 		"sysbench_cpu_single_events_s",
 		"sysbench_cpu_multi_events_s",
 		"sysbench_cpu_single_p95_ms",
 		"sysbench_cpu_multi_p95_ms",
-		"sysbench_cpu_scaling_ratio",
-		"sysbench_cpu_per_thread_efficiency_percent",
 		"cpu_steal_percent_during_test",
-	} {
+	}
+	if allowance.Threads > 1 {
+		requiredMeasurements = append(requiredMeasurements,
+			"sysbench_cpu_scaling_ratio", "sysbench_cpu_per_thread_efficiency_percent")
+	}
+	for _, required := range requiredMeasurements {
 		if _, ok := cpuValues[required]; !ok {
 			t.Fatalf("sysbench CPU missing %q: %+v", required, cpu.Measurements)
 		}
@@ -570,8 +574,11 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 	if cpuValues["sysbench_cpu_single_events_s"] <= 0 {
 		t.Fatalf("real sysbench returned a non-positive event rate: %+v", cpu.Measurements)
 	}
-	if cpuValues["sysbench_cpu_scaling_ratio"] <= 0 || cpuValues["sysbench_cpu_per_thread_efficiency_percent"] <= 0 {
+	if allowance.Threads > 1 && (cpuValues["sysbench_cpu_scaling_ratio"] <= 0 || cpuValues["sysbench_cpu_per_thread_efficiency_percent"] <= 0) {
 		t.Fatalf("CPU scaling diagnostics must be positive: %+v", cpu.Measurements)
+	}
+	if allowance.Threads <= 1 && (hasMeasurement(cpu, "sysbench_cpu_scaling_ratio") || hasMeasurement(cpu, "sysbench_cpu_per_thread_efficiency_percent")) {
+		t.Fatalf("single-core CPU invented scaling diagnostics: %+v", cpu.Measurements)
 	}
 	for _, key := range []string{"sysbench_cpu_single_events_s", "sysbench_cpu_multi_events_s"} {
 		measurement := cpuMeasurements[key]
@@ -597,13 +604,14 @@ func TestRunSysbenchWithRealBinary(t *testing.T) {
 			t.Fatalf("sysbench CPU missing field %q: %+v", key, cpu.Fields)
 		}
 	}
-	if cpu.Evidence == nil || cpu.Evidence.Valid != 2 || cpu.Evidence.Expected != 2 || cpu.Evidence.Unit != "run" {
-		t.Fatalf("sysbench CPU evidence = %+v, want 2/2 runs", cpu.Evidence)
+	wantRuns := len(distinctBenchmarkThreadCounts(allowance.Threads))
+	if cpu.Evidence == nil || cpu.Evidence.Valid != wantRuns || cpu.Evidence.Expected != wantRuns || cpu.Evidence.Unit != "run" {
+		t.Fatalf("sysbench CPU evidence = %+v, want %d/%d runs", cpu.Evidence, wantRuns, wantRuns)
 	}
 	if got, want := fieldValues["engine"], "sysbench"; got != want {
 		t.Fatalf("sysbench engine field = %q, want %q", got, want)
 	}
-	if got, want := fieldValues["threads"], "1 / "+strconv.Itoa(detectCPUAllowance().Threads); got != want {
+	if got, want := fieldValues["threads"], benchmarkThreadField(allowance.Threads); got != want {
 		t.Fatalf("sysbench threads field = %q, want %q", got, want)
 	}
 	if got, want := fieldValues["duration"], "1s"; got != want {

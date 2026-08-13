@@ -81,26 +81,101 @@ func LoadBaseline(path string) (Baseline, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return baseline, fmt.Errorf("baseline file must contain exactly one JSON object")
 	}
-	if baseline.Schema != BaselineSchema {
-		return baseline, fmt.Errorf("unsupported baseline schema %q, expected %q", baseline.Schema, BaselineSchema)
+	if err := validateBaseline(baseline, false); err != nil {
+		return baseline, err
 	}
-	if len(baseline.Metrics) == 0 {
-		return baseline, fmt.Errorf("baseline file contains no metrics")
+	return baseline, nil
+}
+
+// validateBaseline checks both global and tier evidence. allowEmptyMetrics is
+// reserved for the intentionally empty embedded reference; user-provided
+// baseline files must always contain at least one usable metric.
+func validateBaseline(baseline Baseline, allowEmptyMetrics bool) error {
+	if baseline.Schema != BaselineSchema {
+		return fmt.Errorf("unsupported baseline schema %q, expected %q", baseline.Schema, BaselineSchema)
+	}
+	if baseline.Source == "" {
+		return fmt.Errorf("baseline source must be non-empty")
+	}
+	if baseline.SampleCount < 0 {
+		return fmt.Errorf("baseline sample_count must not be negative")
+	}
+	if !allowEmptyMetrics && len(baseline.Metrics) == 0 {
+		return fmt.Errorf("baseline file contains no metrics")
+	}
+	if len(baseline.Metrics) > 0 && baseline.SampleCount == 0 {
+		return fmt.Errorf("baseline with metrics must have a positive sample_count")
+	}
+	if len(baseline.Metrics) == 0 && (len(baseline.Tiers) > 0 || len(baseline.ScoreSamples) > 0) {
+		return fmt.Errorf("empty baseline must not contain tiers or score samples")
 	}
 	if baseline.RankMinSamples < 0 {
-		return baseline, fmt.Errorf("baseline rank_min_samples must not be negative")
+		return fmt.Errorf("baseline rank_min_samples must not be negative")
 	}
-	for key, value := range baseline.Metrics {
-		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-			return baseline, fmt.Errorf("baseline metric %q must be positive", key)
-		}
+	if err := validatePositiveMetrics("baseline", baseline.Metrics); err != nil {
+		return err
 	}
 	for _, value := range baseline.ScoreSamples {
 		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-			return baseline, fmt.Errorf("baseline score_samples must contain finite non-negative values")
+			return fmt.Errorf("baseline score_samples must contain finite non-negative values")
 		}
 	}
-	return baseline, nil
+	if len(baseline.ScoreSamples) > baseline.SampleCount {
+		return fmt.Errorf("baseline score_samples cannot exceed sample_count")
+	}
+	seenTiers := make(map[int]bool, len(baseline.Tiers))
+	tierSampleTotal := 0
+	for index, tier := range baseline.Tiers {
+		if TierKeyFor(tier.VCPUMin) != tier.VCPUMin || tier.VCPUMin <= 0 {
+			return fmt.Errorf("baseline tier %d has invalid vcpu_min %d", index, tier.VCPUMin)
+		}
+		if seenTiers[tier.VCPUMin] {
+			return fmt.Errorf("baseline contains duplicate tier vcpu_min %d", tier.VCPUMin)
+		}
+		seenTiers[tier.VCPUMin] = true
+		tierSampleTotal += tier.SampleCount
+		if tier.SampleCount <= 0 || tier.SampleCount > baseline.SampleCount {
+			return fmt.Errorf("baseline tier %d sample_count must be positive and no greater than the global count", tier.VCPUMin)
+		}
+		if len(tier.Metrics) == 0 {
+			return fmt.Errorf("baseline tier %d contains no metrics", tier.VCPUMin)
+		}
+		if err := validatePositiveMetrics(fmt.Sprintf("baseline tier %d", tier.VCPUMin), tier.Metrics); err != nil {
+			return err
+		}
+		// Omission denotes the legacy format and is accepted for compatibility;
+		// MetricsForHost will conservatively refuse to use those tier values.
+		if tier.MetricSampleCounts == nil {
+			continue
+		}
+		if len(tier.MetricSampleCounts) != len(tier.Metrics) {
+			return fmt.Errorf("baseline tier %d metric_sample_counts must cover exactly its metrics", tier.VCPUMin)
+		}
+		for key := range tier.Metrics {
+			count, ok := tier.MetricSampleCounts[key]
+			if !ok || count <= 0 || count > tier.SampleCount {
+				return fmt.Errorf("baseline tier %d metric %q has invalid sample count %d", tier.VCPUMin, key, count)
+			}
+		}
+		for key := range tier.MetricSampleCounts {
+			if _, ok := tier.Metrics[key]; !ok {
+				return fmt.Errorf("baseline tier %d has sample count for unknown metric %q", tier.VCPUMin, key)
+			}
+		}
+	}
+	if tierSampleTotal > baseline.SampleCount {
+		return fmt.Errorf("baseline tier sample counts cannot exceed the global sample_count")
+	}
+	return nil
+}
+
+func validatePositiveMetrics(scope string, metrics map[string]float64) error {
+	for key, value := range metrics {
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("%s metric %q must be positive and finite", scope, key)
+		}
+	}
+	return nil
 }
 
 // BuildBaseline 从多份报告聚合出一份排行榜参考。
@@ -115,6 +190,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	samples := make(map[string][]float64)
 	// 同一批样本同时按档位归类，分档基线与全局基线一次算完。
 	byTier := make(map[int]map[string][]float64)
+	tierReportCounts := make(map[int]int)
 	for _, report := range reports {
 		values := collectMeasurements(report)
 		ran := make(map[string]bool, len(report.Results))
@@ -124,6 +200,9 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 			}
 		}
 		tierKey := TierKeyFor(hostVCPU(values))
+		if tierKey > 0 {
+			tierReportCounts[tierKey]++
+		}
 		for _, dimension := range Dimensions() {
 			if !ran[dimension.ModuleID] {
 				continue
@@ -159,7 +238,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 		SampleCount:    len(reports),
 		GeneratedAt:    time.Now().UTC(),
 		Metrics:        metrics,
-		Tiers:          buildTiers(byTier),
+		Tiers:          buildTiers(byTier, tierReportCounts),
 		RankMinSamples: DefaultRankMinSamples,
 	}
 	// Compute each input against the freshly built reference to retain a small,

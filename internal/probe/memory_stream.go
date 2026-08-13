@@ -53,6 +53,7 @@ type streamParsedOutput struct {
 type streamMemoryRun struct {
 	Context string
 	Threads int
+	Reused  bool
 	Sample  streamParsedOutput
 	Output  string
 	Args    []string
@@ -261,10 +262,15 @@ func streamEnvironment(threads int) []string {
 	return env
 }
 
-// runStreamMemory runs the two thread contexts independently, then appends
-// the eight kernel measurements in the report order: Copy/Triad first for the
-// headline, followed by the complete Scale/Add data.
+// runStreamMemory executes each distinct physical thread context, then appends
+// the eight logical kernel measurements in report order: Copy/Triad first for
+// the headline, followed by complete Scale/Add data. On a one-core allowance,
+// the NT logical context explicitly reuses the single physical 1T run.
 func runStreamMemory(ctx context.Context, env Environment, path string) model.Result {
+	return runStreamMemoryWithAllowance(ctx, env, path, detectCPUAllowance())
+}
+
+func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path string, allowance cpuAllowance) model.Result {
 	start := time.Now()
 	result := model.NewResult("memory", "内存性能")
 	result.Description = "官方 STREAM 内存带宽的 Copy、Scale、Add、Triad kernel，分别运行 1T 与当前 CPU allowance 的 NT"
@@ -276,28 +282,42 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 		ComparisonScope: "相同 STREAM 实现、数组规模、编译选项、线程上下文与运行环境",
 	}
 
-	allowance := detectCPUAllowance()
 	workers := allowance.Threads
-	runs := []streamMemoryRun{
-		{Context: "1t", Threads: 1},
-		{Context: "nt", Threads: workers},
-	}
-	for index := range runs {
-		run, err := executeStreamMemory(ctx, path, runs[index].Threads)
-		run.Context = runs[index].Context
-		run.Threads = runs[index].Threads
+	threadCounts := distinctBenchmarkThreadCounts(workers)
+	singleCore := len(threadCounts) == 1
+	runs := make([]streamMemoryRun, 0, 2)
+	validRuns := 0
+	for index, threads := range threadCounts {
+		contextName := "1t"
+		if index == 1 {
+			contextName = "nt"
+		}
+		run, err := executeStreamMemory(ctx, path, threads)
+		run.Context = contextName
+		run.Threads = threads
 		run.Err = err
-		runs[index] = run
+		runs = append(runs, run)
 		if err != nil {
 			result.Status = model.StatusWarning
-			contextName := "1T"
-			if runs[index].Context == "nt" {
-				contextName = "NT"
+			logicalName := "1T"
+			if contextName == "nt" {
+				logicalName = "NT"
 			}
 			// Keep the note localizable; the exact command/parser diagnostic and
 			// raw output remain in the run result for machine/debug inspection.
-			result.Notes = append(result.Notes, fmt.Sprintf("STREAM %s 运行失败；请查看原始输出。", contextName))
+			result.Notes = append(result.Notes, fmt.Sprintf("STREAM %s 运行失败；请查看原始输出。", logicalName))
+		} else {
+			validRuns++
 		}
+	}
+	if singleCore {
+		clone := runs[0]
+		clone.Context = "nt"
+		clone.Threads = 1
+		clone.Reused = true
+		runs = append(runs, clone)
+		result.Description = "官方 STREAM Copy、Scale、Add、Triad kernel；单核 allowance 下 1T/NT 逻辑指标复用一次实测"
+		result.Methodology.Profile = "Copy/Scale/Add/Triad × 1T/NT logical · one physical 1T run"
 	}
 
 	measurementOrder := []struct {
@@ -330,7 +350,7 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 			HigherIsBetter: model.BoolPtr(true),
 		})
 	}
-	if len(runs) == 2 {
+	if workers > 1 && len(runs) == 2 {
 		for _, kernel := range streamKernels {
 			single, singleOK := runs[0].Sample.Samples[kernel]
 			multi, multiOK := runs[1].Sample.Samples[kernel]
@@ -362,17 +382,17 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 		{Key: "engine", Label: "标准工具", Value: "STREAM"},
 		{Key: "version", Label: "STREAM 版本", Value: version},
 		{Key: "binary_sha256", Label: "STREAM SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
-		{Key: "threads", Label: "测试线程", Value: fmt.Sprintf("1 / %d", workers)},
+		{Key: "threads", Label: "测试线程", Value: benchmarkThreadField(workers)},
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "kernel_order", Label: "STREAM kernel", Value: "Copy / Scale / Add / Triad"},
-		{Key: "thread_control", Label: "线程控制", Value: fmt.Sprintf("OMP_NUM_THREADS=1；OMP_NUM_THREADS=%d（独立运行）", workers)},
+		{Key: "thread_control", Label: "线程控制", Value: streamThreadControlField(workers)},
 		{Key: "rate_unit", Label: "速率单位", Value: "MiB/s（结构化值）"},
 	}
 	if len(units) > 0 {
 		result.Fields = append(result.Fields, model.Field{Key: "source_rate_units", Label: "原始速率单位", Value: strings.Join(units, " / ")})
 	}
 	for _, run := range runs {
-		if run.Output == "" {
+		if run.Output == "" || run.Reused {
 			continue
 		}
 		result.TextBlocks = append(result.TextBlocks, model.TextBlock{
@@ -382,14 +402,18 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 	result.Sources = []model.Source{
 		{Name: "STREAM", URL: "https://www.cs.virginia.edu/stream/", Purpose: "官方 STREAM 内存带宽标准基准"},
 	}
+	if singleCore {
+		result.Notes = append(result.Notes, "STREAM 使用官方 Copy、Scale、Add、Triad kernel；单核 allowance 下 1T 与 NT 逻辑指标复用同一次 OMP_NUM_THREADS=1 实测，未执行第二次相同命令，多线程扩展倍率不适用。")
+	} else {
+		result.Notes = append(result.Notes, fmt.Sprintf("STREAM 使用官方 Copy、Scale、Add、Triad kernel；1T 与 NT 是两次独立运行，分别通过 OMP_NUM_THREADS=1 与 OMP_NUM_THREADS=%d 控制。", workers))
+	}
 	result.Notes = append(result.Notes,
-		fmt.Sprintf("STREAM 使用官方 Copy、Scale、Add、Triad kernel；1T 与 NT 是两次独立运行，分别通过 OMP_NUM_THREADS=1 与 OMP_NUM_THREADS=%d 控制。", workers),
 		"STREAM 输出的 Best Rate 原始单位保留在字段中；结构化指标统一换算为 MiB/s。",
 	)
 	if len(units) > 1 {
 		result.Notes = append(result.Notes, "两次 STREAM 输出的原始速率单位不同；报告仍将结构化数值统一为 MiB/s。")
 	}
-	if allowance.Limited() {
+	if allowance.Limited() && !singleCore {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"STREAM NT 使用 %d 个线程；检测到的 CPU allowance 为 %.2f 个核（%s）；1T 与 NT 仍是独立运行。",
 			workers, allowance.Quota, allowance.Source,
@@ -397,24 +421,24 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 	}
 
 	result.Tables = append(result.Tables, streamMemoryTable(runs), streamStabilityTable(runs))
-	validRuns := 0
-	for _, run := range runs {
-		if run.Err == nil && len(run.Sample.Samples) == len(streamKernels) {
-			validRuns++
-		}
-	}
-	result.Evidence = model.NewEvidence(validRuns, len(runs), "run")
+	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
 	summary := make([]string, 0, 4)
-	for _, item := range measurementOrder[:4] {
-		run := runs[item.run]
-		if sample, ok := run.Sample.Samples[item.kernel]; ok && sample.RateMiBS > 0 {
-			threadLabel := run.Context
-			if run.Context == "nt" {
-				threadLabel = fmt.Sprintf("NT(%dT)", run.Threads)
-			} else {
-				threadLabel = "1T"
+	if singleCore {
+		for _, kernel := range []string{"Copy", "Triad"} {
+			if sample, ok := runs[0].Sample.Samples[kernel]; ok && sample.RateMiBS > 0 {
+				summary = append(summary, fmt.Sprintf("%s 1T/NT（同一次实测）%s", kernel, model.FormatRate(sample.RateMiBS, "MiB/s")))
 			}
-			summary = append(summary, fmt.Sprintf("%s %s %s", item.kernel, threadLabel, model.FormatRate(sample.RateMiBS, "MiB/s")))
+		}
+	} else {
+		for _, item := range measurementOrder[:4] {
+			run := runs[item.run]
+			if sample, ok := run.Sample.Samples[item.kernel]; ok && sample.RateMiBS > 0 {
+				threadLabel := "1T"
+				if run.Context == "nt" {
+					threadLabel = fmt.Sprintf("NT(%dT)", run.Threads)
+				}
+				summary = append(summary, fmt.Sprintf("%s %s %s", item.kernel, threadLabel, model.FormatRate(sample.RateMiBS, "MiB/s")))
+			}
 		}
 	}
 	if len(summary) == 0 {
@@ -424,6 +448,13 @@ func runStreamMemory(ctx context.Context, env Environment, path string) model.Re
 	}
 	result.Finish(start)
 	return result
+}
+
+func streamThreadControlField(workers int) string {
+	if workers <= 1 {
+		return "OMP_NUM_THREADS=1（1T/NT 同一次实测）"
+	}
+	return fmt.Sprintf("OMP_NUM_THREADS=1；OMP_NUM_THREADS=%d（独立运行）", workers)
 }
 
 func streamStabilityTable(runs []streamMemoryRun) model.Table {
@@ -471,6 +502,9 @@ func streamMemoryTable(runs []streamMemoryRun) model.Table {
 			}
 			if run.Err != nil && evidence == "未返回" {
 				evidence = "失败"
+			}
+			if run.Reused && evidence == "STREAM 最佳速率" {
+				evidence = "复用同一次实测"
 			}
 			table.Rows = append(table.Rows, []string{
 				kernel + " / " + streamContextLabel(run), value, unit,

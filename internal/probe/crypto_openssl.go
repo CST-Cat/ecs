@@ -91,7 +91,7 @@ func missingOpenSSLResult(summary string) model.Result {
 		Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl",
 		Count: 1, Message: summary,
 	})
-	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*2, "run")
+	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
 		"请使用 run.sh；它会提供版本与哈希经过 ecs-tools manifest 校验的固定 OpenSSL binary。crypto 不并入 CPU 综合结果。",
 	)
@@ -100,10 +100,15 @@ func missingOpenSSLResult(summary string) model.Result {
 }
 
 func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []openSSLAlgorithmSpec) model.Result {
+	return runOpenSSLSpeedWithAllowance(ctx, env, path, specs, detectCPUAllowance())
+}
+
+func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path string, specs []openSSLAlgorithmSpec, allowance cpuAllowance) model.Result {
 	start := time.Now()
 	result := model.NewResult("crypto", "服务器密码学性能")
 	result.Description = "独立的服务器密码学吞吐：AES-256-GCM、ChaCha20-Poly1305 与 SHA-256"
 	result.Methodology = cryptoMethodology()
+	threadCounts := distinctBenchmarkThreadCounts(allowance.Threads)
 
 	versionOutput, version, versionErr := queryOpenSSLVersion(ctx, path)
 	if versionErr != nil || version != openSSLExpectedVersion {
@@ -119,18 +124,18 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 			{Key: "required_version", Label: "固定版本", Value: openSSLExpectedVersion},
 			{Key: "binary_sha256", Label: "OpenSSL SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		}
-		result.Evidence = model.NewEvidence(0, len(specs)*2, "run")
+		result.Evidence = model.NewEvidence(0, len(specs)*len(threadCounts), "run")
 		result.Notes = append(result.Notes, "请使用 run.sh 提供固定 OpenSSL 3.5.7 static binary；不接受系统中其他版本生成可比较成绩。")
 		result.Finish(start)
 		return result
 	}
 
-	allowance := detectCPUAllowance()
 	workers := allowance.Threads
+	singleCore := len(threadCounts) == 1
 	runs := make(map[string][]openSSLSpeedSample, len(specs))
 	validRuns := 0
 	for _, spec := range specs {
-		for _, workerCount := range []int{1, workers} {
+		for _, workerCount := range threadCounts {
 			sample, runErr := executeOpenSSLSpeed(ctx, path, spec, workerCount, openSSLDurationSeconds, openSSLBlockBytes)
 			runs[spec.Key] = append(runs[spec.Key], sample)
 			if runErr == nil {
@@ -145,6 +150,10 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 				Count: 1, Message: runErr.Error(),
 			})
 		}
+		if singleCore && len(runs[spec.Key]) == 1 {
+			clone := runs[spec.Key][0]
+			runs[spec.Key] = append(runs[spec.Key], clone)
+		}
 	}
 
 	appendOpenSSLMeasurements(&result, specs, runs, workers)
@@ -156,7 +165,7 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 		{Key: "algorithms", Label: "固定算法", Value: "AES-256-GCM / ChaCha20-Poly1305 / SHA-256"},
 		{Key: "block_size", Label: "固定 block size", Value: strconv.Itoa(openSSLBlockBytes) + " bytes"},
 		{Key: "duration", Label: "每算法每轮时长", Value: strconv.Itoa(openSSLDurationSeconds) + "s"},
-		{Key: "workers", Label: "测试 worker", Value: fmt.Sprintf("1 / %d", workers)},
+		{Key: "workers", Label: "测试 worker", Value: benchmarkThreadField(workers)},
 		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
 		{Key: "timing", Label: "计时方式", Value: "-elapsed (wall clock)"},
 		{Key: "machine_output", Label: "输出模式", Value: "-mr"},
@@ -175,7 +184,7 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 				Label: "完整参数（" + spec.Label + " " + contextLabel + "）",
 				Value: strings.Join(sample.Args, " "),
 			})
-			if sample.Output != "" {
+			if sample.Output != "" && !(singleCore && index > 0) {
 				result.TextBlocks = append(result.TextBlocks, model.TextBlock{
 					Title:    "OpenSSL speed " + spec.Label + " " + contextLabel + " 原始输出",
 					Language: "text", Content: sample.Output,
@@ -188,20 +197,24 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 		{Name: "OpenSSL speed", URL: "https://docs.openssl.org/3.5/man1/openssl-speed/", Purpose: "官方 speed 参数与 machine-readable 输出"},
 		{Name: "OpenSSL 3.5.7", URL: "https://github.com/openssl/openssl/tree/openssl-3.5.7", Purpose: "固定源码版本"},
 	}
+	if singleCore {
+		result.Notes = append(result.Notes, "固定 OpenSSL 3.5.7、16 KiB block、每算法每轮 5 秒；单核 allowance 下 1W/NW 逻辑指标复用每个算法的同一次 -multi 1 实测，未执行第二次相同命令，扩展倍率不适用。")
+	} else {
+		result.Notes = append(result.Notes, "固定 OpenSSL 3.5.7、16 KiB block、每算法每轮 5 秒，并用 -multi 显式运行 1 worker 与当前 CPU allowance 的全 worker。")
+	}
 	result.Notes = append(result.Notes,
-		"固定 OpenSSL 3.5.7、16 KiB block、每算法每轮 5 秒，并用 -multi 显式运行 1 worker 与当前 CPU allowance 的全 worker。",
 		"AES-256-GCM 与 ChaCha20-Poly1305 使用 EVP AEAD 路径；SHA-256 使用 EVP digest 路径；-elapsed 使用 wall-clock 计时。",
 		"结构化吞吐由 OpenSSL -mr 最终 +F 行的 bytes/s 除以 1,000,000 得到十进制 MB/s；原始 bytes/s 与完整输出同时保留。",
 		"CPU capability 覆盖变量被清除，让固定 binary 自动探测服务器可用的硬件加速；因此结果体现实际密码学加速能力。",
 		"crypto 是独立服务器密码学模块，不并入 CPU 综合结果，也不生成自定义综合分。",
 	)
-	if allowance.Limited() {
+	if allowance.Limited() && !singleCore {
 		result.Notes = append(result.Notes, fmt.Sprintf(
 			"检测到 CPU 配额 %.2f 核（%s），全 worker 轮按 allowance 使用 %d worker。",
 			allowance.Quota, allowance.Source, workers,
 		))
 	}
-	expectedRuns := len(specs) * 2
+	expectedRuns := len(specs) * len(threadCounts)
 	result.Evidence = model.NewEvidence(validRuns, expectedRuns, "run")
 	if validRuns < expectedRuns {
 		result.Status = model.StatusWarning
@@ -350,7 +363,7 @@ func appendOpenSSLMeasurements(result *model.Result, specs []openSSLAlgorithmSpe
 				HigherIsBetter: model.BoolPtr(true),
 			})
 		}
-		if len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
+		if workers > 1 && len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
 			scaling := samples[1].ThroughputBPS / samples[0].ThroughputBPS
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:   "openssl_" + spec.Key + "_scaling_ratio",
@@ -380,7 +393,9 @@ func openSSLResultsTable(specs []openSSLAlgorithmSpec, runs map[string][]openSSL
 			if sample.ThroughputBPS > 0 {
 				raw = strconv.FormatFloat(sample.ThroughputBPS, 'f', 2, 64)
 				throughput = model.FormatRate(sample.ThroughputMBPS, "MB/s")
-				if index == 0 {
+				if workers <= 1 {
+					scaling = "不适用"
+				} else if index == 0 {
 					scaling = "1.00 x"
 				} else if len(samples) >= 2 && samples[0].ThroughputBPS > 0 {
 					scaling = fmt.Sprintf("%.2f x", sample.ThroughputBPS/samples[0].ThroughputBPS)
@@ -396,7 +411,10 @@ func openSSLSummary(specs []openSSLAlgorithmSpec, runs map[string][]openSSLSpeed
 	parts := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		samples := runs[spec.Key]
-		if len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
+		if workers <= 1 && len(samples) >= 1 && samples[0].ThroughputBPS > 0 {
+			parts = append(parts, fmt.Sprintf("%s 1W/NW（同一次实测）%s · 扩展不适用",
+				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s")))
+		} else if len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
 			parts = append(parts, fmt.Sprintf("%s 1W %s · %dW %s · %.2f×",
 				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s"), workers,
 				model.FormatRate(samples[1].ThroughputMBPS, "MB/s"), samples[1].ThroughputBPS/samples[0].ThroughputBPS))

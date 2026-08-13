@@ -45,6 +45,20 @@ jobs:
         run: |
           go test ./internal/report/ -run '^TestLocalizeCoversRealReports$' -v
           go test ./internal/i18n/ -v
+      - name: Validate ecs-tools JSON Schema and example
+        if: matrix.go == 'stable'
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-cache-dir jsonschema==4.25.1
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+
+          schema = json.loads(Path("tools/ecs-tools-manifest.schema.json").read_text())
+          example = json.loads(Path("tools/manifest.example.json").read_text())
+          Draft202012Validator.check_schema(schema)
+          Draft202012Validator(schema).validate(example)
+          PY
       - run: go vet ./...
       - name: gofmt
         run: |
@@ -54,6 +68,12 @@ jobs:
             echo "$unformatted" >&2
             exit 1
           fi
+      - name: Staticcheck
+        if: matrix.go == 'stable'
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+      - name: Go vulnerability scan
+        if: matrix.go == 'stable'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - run: go build ./cmd/ecs
       - run: sh -n install.sh
       - run: sh -n run.sh

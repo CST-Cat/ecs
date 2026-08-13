@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -627,22 +626,6 @@ func iperfDirectionBudget(seconds, portCount int) time.Duration {
 		scanWindow = time.Duration(portCount) * iperfPortProbeTimeout
 	}
 	return iperfDirectionBudgetWindows*commandWindow + scanWindow + 2*iperfPortProbeTimeout
-}
-
-func checkIPerfPort(ctx context.Context, host string, port int, family string) error {
-	network := "tcp"
-	switch family {
-	case "IPv4":
-		network = "tcp4"
-	case "IPv6":
-		network = "tcp6"
-	}
-	dialer := net.Dialer{Timeout: iperfPortProbeTimeout}
-	connection, err := dialer.DialContext(ctx, network, net.JoinHostPort(host, strconv.Itoa(port)))
-	if err != nil {
-		return err
-	}
-	return connection.Close()
 }
 
 // iperfUDPPort chooses a port that actually produced TCP throughput.  Failed

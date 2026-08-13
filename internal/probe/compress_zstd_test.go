@@ -146,7 +146,8 @@ printf '%s\n' "-3 6 (2.000) $compress MB/s $decompress MB/s tiny.corpus"
 	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	result := runZstdBenchmark(context.Background(), Environment{}, tool, corpusPath, contract)
+	result := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, tool, corpusPath, contract,
+		cpuAllowance{Visible: 4, Threads: 4, Source: "fixture"})
 	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 {
 		t.Fatalf("zstd result status/evidence = %s %+v", result.Status, result.Evidence)
 	}
@@ -195,6 +196,71 @@ exit 99
 	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 ||
 		!strings.Contains(result.Summary, "1.5.6") || len(result.TextBlocks) != 0 {
 		t.Fatalf("version mismatch result = %+v", result)
+	}
+}
+
+func TestZstdSingleCoreKeepsLogicalMetricsWithoutScaling(t *testing.T) {
+	sample := zstdBenchmarkSample{Threads: 1, CompressMBPS: 10, DecompressMBPS: 20}
+	runs := []zstdBenchmarkSample{sample, sample}
+	result := model.NewResult("zstd", "zstd")
+	appendZstdMeasurements(&result, runs, 1)
+	for _, key := range []string{"zstd_compress_1t_mb_s", "zstd_compress_nt_mb_s", "zstd_decompress_1t_mb_s", "zstd_decompress_nt_mb_s"} {
+		if !hasMeasurement(result, key) {
+			t.Errorf("single-core logical metric missing %q", key)
+		}
+	}
+	for _, measurement := range result.Measurements {
+		if strings.Contains(measurement.Key, "scaling") || strings.Contains(measurement.Key, "efficiency") {
+			t.Fatalf("single-core result invented scaling evidence: %+v", measurement)
+		}
+	}
+	table := zstdThroughputTable(runs, 1)
+	for _, row := range table.Rows {
+		for column := 3; column < len(row); column++ {
+			if row[column] != "不适用" {
+				t.Fatalf("single-core scaling cell = %q, want 不适用: %v", row[column], row)
+			}
+		}
+	}
+}
+
+func TestRunZstdSingleCoreExecutesOnePhysicalWorkload(t *testing.T) {
+	corpus := []byte("fixed-corpus")
+	contract := testZstdContract(corpus)
+	directory := t.TempDir()
+	corpusPath := filepath.Join(directory, contract.CorpusName)
+	if err := os.WriteFile(corpusPath, corpus, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := filepath.Join(directory, "zstd")
+	logPath := filepath.Join(directory, "runs.log")
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo '*** Zstandard CLI v1.5.7 ***'
+  exit 0
+fi
+printf '%s\n' run >> "$ECS_RUN_LOG"
+printf '%s\n' 'bench 1.5.7 : input 12 bytes, 1 seconds, 0 KB blocks'
+printf '%s\n' '-3 6 (2.000) 10.0 MB/s 20.0 MB/s tiny.corpus'
+`
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECS_RUN_LOG", logPath)
+	result := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, tool, corpusPath, contract,
+		cpuAllowance{Visible: 1, Threads: 1, Source: "fixture"})
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(log), "run\n") != 1 {
+		t.Fatalf("single-core zstd physical executions = %q, want exactly one", log)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.TextBlocks) != 1 {
+		t.Fatalf("single-core zstd evidence/raw output is not physical: evidence=%+v blocks=%d", result.Evidence, len(result.TextBlocks))
+	}
+	if len(result.Tables) != 1 || len(result.Tables[0].Rows) != 2 {
+		t.Fatalf("single-core zstd lost logical table contexts: %+v", result.Tables)
 	}
 }
 

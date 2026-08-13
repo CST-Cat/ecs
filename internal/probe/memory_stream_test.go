@@ -287,6 +287,84 @@ func TestStreamStabilityTableUsesOfficialTimings(t *testing.T) {
 	}
 }
 
+func TestStreamSingleCoreLogicalContextsReuseOneRunWithoutScaling(t *testing.T) {
+	parsed, err := parseStreamOutput(strings.Replace(streamFixture("MiB/s"), "requested = 4", "requested = 1", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := []streamMemoryRun{
+		{Context: "1t", Threads: 1, Sample: parsed, Output: "one physical transcript"},
+		{Context: "nt", Threads: 1, Sample: parsed, Output: "one physical transcript", Reused: true},
+	}
+	result := model.NewResult("memory", "memory")
+	for _, kernel := range streamKernels {
+		for _, run := range runs {
+			sample := run.Sample.Samples[kernel]
+			result.Measurements = append(result.Measurements, model.Measurement{
+				Key: "stream_" + strings.ToLower(kernel) + "_" + run.Context + "_mib_s", Value: sample.RateMiBS,
+			})
+		}
+	}
+	for _, kernel := range []string{"copy", "scale", "add", "triad"} {
+		if !hasMeasurement(result, "stream_"+kernel+"_1t_mib_s") || !hasMeasurement(result, "stream_"+kernel+"_nt_mib_s") {
+			t.Errorf("single-core STREAM lost logical %s metrics", kernel)
+		}
+		if hasMeasurement(result, "stream_"+kernel+"_scaling_ratio") {
+			t.Errorf("single-core STREAM invented %s scaling", kernel)
+		}
+	}
+	table := streamMemoryTable(runs)
+	if got := table.Rows[1][4]; got != "复用同一次实测" {
+		t.Fatalf("reused NT evidence = %q, want explicit reuse", got)
+	}
+	if got := streamThreadControlField(1); !strings.Contains(got, "同一次实测") {
+		t.Fatalf("single-core thread control is ambiguous: %q", got)
+	}
+}
+
+func TestRunStreamSingleCoreExecutesOnePhysicalWorkload(t *testing.T) {
+	directory := t.TempDir()
+	tool := filepath.Join(directory, "stream")
+	logPath := filepath.Join(directory, "runs.log")
+	script := `#!/bin/sh
+printf '%s\n' run >> "$ECS_RUN_LOG"
+cat <<EOF
+STREAM version 5.10
+Number of Threads requested = $OMP_NUM_THREADS
+Function      Best Rate MiB/s     Avg time     Min time     Max time
+Copy:           1000.0         0.0100       0.0090       0.0110
+Scale:          2000.0         0.0200       0.0190       0.0210
+Add:            3000.0         0.0300       0.0290       0.0310
+Triad:          4000.0         0.0400       0.0390       0.0410
+Solution Validates
+EOF
+`
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECS_RUN_LOG", logPath)
+	result := runStreamMemoryWithAllowance(context.Background(), Environment{}, tool,
+		cpuAllowance{Visible: 1, Threads: 1, Source: "fixture"})
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(log), "run\n") != 1 {
+		t.Fatalf("single-core STREAM physical executions = %q, want exactly one", log)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.TextBlocks) != 1 {
+		t.Fatalf("single-core STREAM evidence/raw output is not physical: evidence=%+v blocks=%d", result.Evidence, len(result.TextBlocks))
+	}
+	if len(result.Measurements) != 8 {
+		t.Fatalf("single-core STREAM logical measurement count = %d, want 8: %+v", len(result.Measurements), result.Measurements)
+	}
+	for _, measurement := range result.Measurements {
+		if strings.Contains(measurement.Key, "scaling") {
+			t.Fatalf("single-core STREAM emitted scaling evidence: %+v", measurement)
+		}
+	}
+}
+
 // TestRunStreamWithRealBinary intentionally executes only a real executable
 // discovered on PATH.  It never creates a command substitute: a missing or
 // non-STREAM `stream` command is a skip outside CI and a failure in CI.
@@ -303,7 +381,8 @@ func TestRunStreamWithRealBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.CPUTime = time.Second
-	result := runStreamMemory(context.Background(), Environment{Config: cfg}, path)
+	allowance := detectCPUAllowance()
+	result := runStreamMemoryWithAllowance(context.Background(), Environment{Config: cfg}, path, allowance)
 	if len(result.Measurements) == 0 {
 		if os.Getenv("CI") != "" {
 			t.Fatalf("stream command did not produce official STREAM output: %+v", result)
@@ -313,8 +392,12 @@ func TestRunStreamWithRealBinary(t *testing.T) {
 	if result.Status != model.StatusOK {
 		t.Fatalf("real STREAM result = %+v", result)
 	}
-	if len(result.Measurements) != 12 {
-		t.Fatalf("STREAM measurements = %d, want 12: %+v", len(result.Measurements), result.Measurements)
+	wantMeasurements := 8
+	if allowance.Threads > 1 {
+		wantMeasurements = 12
+	}
+	if len(result.Measurements) != wantMeasurements {
+		t.Fatalf("STREAM measurements = %d, want %d: %+v", len(result.Measurements), wantMeasurements, result.Measurements)
 	}
 	for _, contextName := range []string{"1t", "nt"} {
 		for _, kernel := range []string{"copy", "scale", "add", "triad"} {
@@ -342,17 +425,21 @@ func TestRunStreamWithRealBinary(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
+		if allowance.Threads > 1 && !found {
 			t.Fatalf("STREAM missing scaling measurement %q", key)
+		}
+		if allowance.Threads <= 1 && found {
+			t.Fatalf("single-core STREAM invented scaling measurement %q", key)
 		}
 	}
 	if len(result.Tables) != 2 || len(result.Tables[0].Rows) != 8 || len(result.Tables[1].Rows) != 8 {
 		t.Fatalf("STREAM table rows = %+v", result.Tables)
 	}
-	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "run" {
-		t.Fatalf("STREAM evidence = %+v, want 2/2 runs", result.Evidence)
+	wantRuns := len(distinctBenchmarkThreadCounts(allowance.Threads))
+	if result.Evidence == nil || result.Evidence.Valid != wantRuns || result.Evidence.Expected != wantRuns || result.Evidence.Unit != "run" {
+		t.Fatalf("STREAM evidence = %+v, want %d/%d runs", result.Evidence, wantRuns, wantRuns)
 	}
-	if len(result.TextBlocks) != 2 {
-		t.Fatalf("STREAM raw output blocks = %d, want 2", len(result.TextBlocks))
+	if len(result.TextBlocks) != wantRuns {
+		t.Fatalf("STREAM raw output blocks = %d, want %d", len(result.TextBlocks), wantRuns)
 	}
 }

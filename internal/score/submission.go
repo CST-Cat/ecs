@@ -31,6 +31,11 @@ import (
 // SubmissionSchema 是提交文件的格式标识。
 const SubmissionSchema = "ecs.submission/v1"
 
+// SubmissionFingerprintV2 identifies the canonical, timestamp-independent
+// fingerprint introduced without changing the additive submission schema.
+// An omitted version remains the legacy v1 algorithm for existing files.
+const SubmissionFingerprintV2 = "v2"
+
 const (
 	memoryBackendStream = "stream"
 )
@@ -39,10 +44,11 @@ const (
 type Submission struct {
 	Schema string `json:"schema"`
 	// ID 由机器规格与测量值派生，用于查重；不含任何可定位信息。
-	ID    string    `json:"id"`
-	Host  HostSpec  `json:"host"`
-	Tool  ToolSpec  `json:"tool"`
-	RanAt time.Time `json:"ran_at"`
+	ID                 string    `json:"id"`
+	FingerprintVersion string    `json:"fingerprint_version,omitempty"`
+	Host               HostSpec  `json:"host"`
+	Tool               ToolSpec  `json:"tool"`
+	RanAt              time.Time `json:"ran_at"`
 	// Metrics 是评分用的原始实测值，键与 Dimensions() 的 Metric.Key 对应。
 	Metrics map[string]float64 `json:"metrics"`
 	// Profile 记录用户选中的模块预设；各档位使用相同的 full-depth 基准口径，
@@ -123,13 +129,14 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	}
 
 	submission := Submission{
-		Schema:        SubmissionSchema,
-		Host:          extractHostSpec(data, values),
-		Tool:          extractToolSpec(data),
-		RanAt:         data.Run.StartedAt,
-		Metrics:       metrics,
-		Profile:       data.Run.Profile,
-		MemoryBackend: memoryBackend,
+		Schema:             SubmissionSchema,
+		FingerprintVersion: SubmissionFingerprintV2,
+		Host:               extractHostSpec(data, values),
+		Tool:               extractToolSpec(data),
+		RanAt:              data.Run.StartedAt,
+		Metrics:            metrics,
+		Profile:            data.Run.Profile,
+		MemoryBackend:      memoryBackend,
 	}
 	// System metadata is a narrow, non-sensitive whitelist.  Explicit CLI
 	// values remain authoritative, while empty values safely leave the
@@ -253,11 +260,23 @@ func extractToolSpec(data model.Report) ToolSpec {
 	return spec
 }
 
-// fingerprint 由规格与测量值派生一个稳定 ID，用于查重。
-//
-// 不用随机数也不用时间戳：同一台机器重复提交同一份结果应当得到同一个 ID，
-// CI 才查得出重复。反过来，这个 ID 也无法反推出机器身份。
+// fingerprint dispatches to the algorithm declared by the record. Existing
+// files omit fingerprint_version and therefore retain their original IDs.
 func (s Submission) fingerprint() string {
+	switch s.FingerprintVersion {
+	case "":
+		return s.legacyFingerprint()
+	case SubmissionFingerprintV2:
+		return s.fingerprintV2()
+	default:
+		return ""
+	}
+}
+
+// legacyFingerprint is frozen for backward compatibility with existing
+// ecs.submission/v1 files. It includes RanAt and rounds metrics to 3 decimals;
+// new records must use fingerprintV2 instead.
+func (s Submission) legacyFingerprint() string {
 	var builder strings.Builder
 	builder.WriteString(s.Host.CPUModel)
 	builder.WriteString("|")
@@ -279,6 +298,39 @@ func (s Submission) fingerprint() string {
 		builder.WriteString(strconv.FormatFloat(s.Metrics[key], 'f', 3, 64))
 	}
 	sum := sha256.Sum256([]byte(builder.String()))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// fingerprintV2 hashes a canonical JSON projection of every accepted public
+// field except ID and RanAt. Consequently the same result has one identity
+// across export times, while metadata/tool/profile/note edits and exact float
+// changes are still detected. JSON struct framing also removes the delimiter
+// ambiguities of the legacy concatenation format.
+func (s Submission) fingerprintV2() string {
+	canonical := struct {
+		Schema             string             `json:"schema"`
+		FingerprintVersion string             `json:"fingerprint_version"`
+		Host               HostSpec           `json:"host"`
+		Tool               ToolSpec           `json:"tool"`
+		Metrics            map[string]float64 `json:"metrics"`
+		Profile            string             `json:"profile"`
+		MemoryBackend      string             `json:"memory_backend,omitempty"`
+		Note               string             `json:"note,omitempty"`
+	}{
+		Schema:             s.Schema,
+		FingerprintVersion: SubmissionFingerprintV2,
+		Host:               s.Host,
+		Tool:               s.Tool,
+		Metrics:            s.Metrics,
+		Profile:            s.Profile,
+		MemoryBackend:      s.MemoryBackend,
+		Note:               s.Note,
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])[:12]
 }
 
@@ -333,6 +385,9 @@ func LoadSubmission(path string) (Submission, error) {
 func (s Submission) Validate() error {
 	if s.Schema != SubmissionSchema {
 		return fmt.Errorf("unsupported submission schema %q, expected %q", s.Schema, SubmissionSchema)
+	}
+	if s.FingerprintVersion != "" && s.FingerprintVersion != SubmissionFingerprintV2 {
+		return fmt.Errorf("unsupported fingerprint_version %q", s.FingerprintVersion)
 	}
 	if len(s.Metrics) == 0 {
 		return fmt.Errorf("submission contains no metrics")

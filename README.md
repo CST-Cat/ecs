@@ -99,7 +99,7 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | \
 
 `system` 会报告真实 cgroup CPU/内存限额、cpuset、CPU throttle、PSI CPU/内存/I/O 压力和 OOM 事件。CPU、zstd、NPB、STREAM、OpenSSL speed 与 fio 测试只在检测到测试前高负载、steal、PSI、cgroup throttle 或 OOM 干扰时自动复测一次；干净环境不会无条件延长测试。选择结果时先排除无有效证据的轮次，再采用干扰较低的一轮，同分保留首次结果，绝不按跑分高低挑成绩。两轮指标、证据和干扰原因都会保留在 JSON 中。
 
-交互式 txt 报告会读取当前终端列数；标签、表格列和数据柱会同比缩放。无色、8/16 色、256 色和真彩色终端使用同一套语义层次；无色时仍靠柱子长度和密度字符表达差异。写入文件的 txt 保持 110 列默认版面。
+交互式 txt 报告会读取当前终端列数；标签、表格列和数据柱会同比缩放。无色、8/16 色、256 色和真彩色终端使用同一套语义层次；无色时仍靠柱子长度和密度字符表达差异。写入文件的 txt 保持 110 列默认版面。终端输出会把报告数据中的 C0/C1 控制字符（包括 OSC/CSI）替换为普通空格，并合并连续控制符；只有渲染器自己生成的 SGR 颜色序列会进入终端。
 
 `--output` 指向目录，目录不存在时会自动创建。使用 `--name` 可以固定文件名前缀：
 
@@ -184,13 +184,15 @@ ecs compare ./fleet/*.json \
 | `nat` | UDP 映射与过滤行为 | 内置 STUN 客户端 | Standard / Full |
 | `blacklist` | DNSBL 收录/干净/拒绝/失败计数与反向解析一致性 | 内置 DNS 客户端 + 公共 DNSBL | Standard / Full |
 | `apps` | Telegram、代码托管、镜像站与软件源可达性 | 内置 TCP 客户端 | Standard / Full |
-| `cnspeed` | 电信、联通、移动节点 HTTP 下载速度 | 内置 HTTP 客户端 + 社区节点清单 | Standard / Full |
+| `cnspeed` | 电信、联通、移动节点 HTTP 下载速度 | 内置 HTTP 客户端 + 固定提交的社区节点清单 | Standard / Full |
 | `ookla` | 官方测速服务的延迟与吞吐 | 官方 Ookla Speedtest CLI（`speedtest`） | Full |
 | `media` | 多个平台的地区与可用性线索 | 内置 HTTP 客户端 + 分平台规则 | Standard / Full |
 | `route` | 正向路径、探测/可见/超时跳点与逐目标耗时 | 官方 NextTrace Tiny + 内置统计 | Standard / Full |
 | `backtrace` | 四城三网回程路径与骨干特征 | 官方 NextTrace Tiny + 内置特征表 | Standard / Full |
 
 一键脚本会为缺失的 `sysbench`、zstd、NPB EP/FT、OpenSSL、STREAM、`fio`、`iperf3`、`ping` 和 NextTrace Tiny 准备与当前架构匹配的临时工具；选中 zstd 时才从独立 Release 资产下载并校验固定 corpus，并校验 manifest、二进制 SHA-256 与 corpus SHA-256。Ookla 不进入该工具包；仅在选中 `ookla` 且本机缺少 `speedtest` 时，脚本才会从独立的官方签名软件源临时下载并解包。无法取得可核验工具时，对应项目会明确标记为跳过，不生成替代成绩。
+
+`cnspeed` 的清单固定到本版本审计过的上游 commit。清单中的节点只能是 HTTP(S) 公网目标；客户端不使用系统代理，并在 DNS 解析、实际拨号和每次重定向时拒绝本机、内网及其他特殊用途地址。
 
 发行工具先按实际用途裁剪，再原生或交叉编译；交叉目标只在全部编译结束后交给 QEMU 做短功能 smoke。NPB 发行二进制始终是 Class A，交叉 CI 另用不入包的 Class S 验证目标运行时与 OpenMP，避免在模拟器里执行没有性能意义的 Class A 重负载。
 
@@ -205,6 +207,8 @@ ecs compare ./fleet/*.json \
 | Crypto acceleration | OpenSSL speed (`crypto`) |
 | Storage | fio (`disk`) |
 | Network | iperf3 (`speed`) |
+
+当有效 CPU allowance 只有 1 核时，`cpu`、`zstd`、`npb`、`memory` 和 `crypto` 不再把参数相同的 1T/NT（或 1W/NW）命令跑两遍。它们只物理执行一次，保留两个兼容的逻辑原始指标，将扩展倍率标为不适用，并在字段、表格、证据分母和说明中披露复用。
 
 ## 选择测试项目
 
@@ -277,13 +281,15 @@ ecs --profile full \
   --output ./reports
 ```
 
-默认情况下，本机 IPv4 会遮盖后两段，IPv6 会遮盖后四段；遮盖在写入 JSON 之前完成，因此四种格式保持一致。`--reveal` 只关闭本机 IP 遮盖，远端目标、BGP 前缀和路由跳地址仍会保留，便于复核线路。
+默认情况下，本机 IPv4 会遮盖后两段（保留 /16），IPv6 会遮盖后六组（保留 /32）；遮盖在写入 JSON 之前完成，因此四种格式保持一致。`--reveal` 只关闭本机 IP 遮盖，远端目标、BGP 前缀和路由跳地址仍会保留，便于复核线路。遮盖会遍历报告 schema 的所有导出字符串值，包括失败消息、复测诊断和原始输出；`run.redacted` 只在这一步完成后才置为 `true`。
 
 `ecs` 本身不包含遥测、运行次数统计、Pastebin、在线报告站或隐藏上传逻辑。联网模块仍会让目标服务看到出口 IP；`network` 会把待查询 IP 发送给所选情报源，Ookla 则适用自己的条款与数据处理规则。详细清单见 [第三方组件与在线服务](THIRD_PARTY.md)。
 
 ## 安装与构建
 
 一键脚本适合临时测试。如果需要长期使用，可以从源码构建并安装本地二进制：
+
+`go.mod` 中的 `go 1.22` 是语言兼容下限，不是安全支持承诺。从源码构建请使用 [Go 上游当前仍支持](https://go.dev/doc/devel/release#policy)的最新补丁版；官方发行流程固定一个受支持的补丁工具链，并对源码与实际发行二进制运行 `govulncheck`。
 
 ```bash
 go build -trimpath -o ecs ./cmd/ecs
@@ -338,6 +344,8 @@ ecs --score-baseline baseline.json \
 go test ./...
 go vet ./...
 go test -race ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 make build
 ```
 

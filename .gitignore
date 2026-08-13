@@ -1,6 +1,10 @@
 /bin/
 /dist/
 /reports/
+/.ci-tools-stage/
+/artifact/
+/tools-artifacts/
+/tools-stage/
 /ecs
 /ecs.exe
 *.test

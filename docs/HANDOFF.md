@@ -19,7 +19,7 @@
 - **延迟混入 DNS**：改为先解析一次再固定对 IP 拨号，解析耗时单列；DNS 增加不计入统计的预热查询。
 - **无三网回程**：新增 `backtrace` 模块，识别 CN2/163/CUII/169/CMI/CMNET。
 - **流媒体误报**：重写为规则引擎（33 平台），Netflix 用双非自制剧区分"仅自制剧"，403/404 一律不判"不解锁"。
-- **脱敏有漏洞**：`RedactedCopy` 此前只处理 `Fields`，现覆盖 `TextBlocks` 与 `Tables`（按段遮盖，保留 `59.43` 这类前缀供复核）。
+- **脱敏有漏洞**：`RedactedCopy` 曾只处理部分字段；现由 schema visitor 覆盖所有导出字符串值，包括 `Failures`、复测诊断、`TextBlocks`、`Tables` 和原始输出（精确遮盖已知本机 IP，保留 `59.43` 这类远端前缀供复核）。
 
 ---
 
@@ -257,14 +257,16 @@ DNS 轮询会落到备用地址等于自身的那台，已剔除。
 ```bash
 git clone https://github.com/CST-Cat/ecs.git && cd ecs
 
-# 仅支持 Linux。Go 1.22+（CI 同时验 1.22 与 stable）
+# 仅支持 Linux。go 1.22 是语言兼容下限；开发与发行使用 Go 上游仍支持的最新补丁版
 go build ./cmd/ecs
 
 # 本地检查（提交前必跑，与 CI 一致）
-gofmt -l cmd internal     # 必须无输出
+gofmt -l $(git ls-files '*.go')     # 必须无输出
 go test ./...
 go vet ./...
 go test -race ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 sh -n install.sh
 bash -n scripts/package.sh
 

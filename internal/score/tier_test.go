@@ -1,6 +1,7 @@
 package score
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -142,6 +143,116 @@ func TestTierInheritsMissingMetricsFromGlobal(t *testing.T) {
 	}
 	if _, ok := metrics["bandwidth_download"]; !ok {
 		t.Error("档位缺失的指标应从全局基线兜底")
+	}
+}
+
+func TestTierRequiresEnoughSamplesForEachMetric(t *testing.T) {
+	baseline := Baseline{
+		Metrics:     map[string]float64{"cpu_multi": 100, "disk_seq_read": 1000},
+		SampleCount: 12,
+		Tiers: []Tier{{
+			VCPUMin: 4, SampleCount: 5,
+			Metrics:            map[string]float64{"cpu_multi": 200, "disk_seq_read": 9000},
+			MetricSampleCounts: map[string]int{"cpu_multi": 5, "disk_seq_read": 1},
+		}},
+	}
+	metrics, tierMin, samples := baseline.MetricsForHost(4)
+	if tierMin != 4 || samples != 5 {
+		t.Fatalf("eligible CPU tier was not selected: tier=%d samples=%d", tierMin, samples)
+	}
+	if metrics["cpu_multi"] != 200 {
+		t.Fatalf("five-sample tier CPU metric = %v, want 200", metrics["cpu_multi"])
+	}
+	if metrics["disk_seq_read"] != 1000 {
+		t.Fatalf("one-sample tier disk metric must fall back to global, got %v", metrics["disk_seq_read"])
+	}
+}
+
+func TestLegacyTierWithoutPerMetricCountsFallsBackToGlobal(t *testing.T) {
+	baseline := Baseline{
+		Metrics: map[string]float64{"cpu_multi": 100}, SampleCount: 20,
+		Tiers: []Tier{{VCPUMin: 4, SampleCount: 10, Metrics: map[string]float64{"cpu_multi": 999}}},
+	}
+	metrics, tierMin, samples := baseline.MetricsForHost(4)
+	if tierMin != 0 || samples != 20 || metrics["cpu_multi"] != 100 {
+		t.Fatalf("legacy tier must degrade safely to global: metric=%v tier=%d samples=%d", metrics["cpu_multi"], tierMin, samples)
+	}
+}
+
+func TestBuildTierRecordsHostAndPerMetricSampleCounts(t *testing.T) {
+	var submissions []Submission
+	for index := 0; index < 5; index++ {
+		metrics := map[string]float64{"cpu_multi": 200 + float64(index)}
+		if index == 0 {
+			metrics["disk_seq_read"] = 9000
+		}
+		submissions = append(submissions, tierSubmission(string(rune('a'+index)), 4, metrics))
+	}
+	baseline, err := BuildBaseline(submissionsToReports(submissions), "counts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baseline.Tiers) != 1 {
+		t.Fatalf("tier count = %d, want 1", len(baseline.Tiers))
+	}
+	tier := baseline.Tiers[0]
+	if tier.SampleCount != 5 || tier.MetricSampleCounts["cpu_multi"] != 5 || tier.MetricSampleCounts["disk_seq_read"] != 1 {
+		t.Fatalf("tier evidence counts are not truthful: %+v", tier)
+	}
+	encoded, err := baseline.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Baseline
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Tiers[0].MetricSampleCounts["disk_seq_read"] != 1 {
+		t.Fatalf("per-metric tier evidence was lost in JSON: %s", encoded)
+	}
+}
+
+func TestBaselineValidationRejectsMalformedTierEvidence(t *testing.T) {
+	valid := Baseline{
+		Schema: BaselineSchema, Source: "test", SampleCount: 5,
+		Metrics: map[string]float64{"cpu_multi": 100},
+		Tiers: []Tier{{
+			VCPUMin: 4, SampleCount: 5, Metrics: map[string]float64{"cpu_multi": 100},
+			MetricSampleCounts: map[string]int{"cpu_multi": 5},
+		}},
+	}
+	if err := validateBaseline(valid, false); err != nil {
+		t.Fatalf("valid tier baseline rejected: %v", err)
+	}
+	tests := map[string]func(*Baseline){
+		"invalid bound":           func(b *Baseline) { b.Tiers[0].VCPUMin = 3 },
+		"too many hosts":          func(b *Baseline) { b.Tiers[0].SampleCount = 6 },
+		"missing count":           func(b *Baseline) { b.Tiers[0].MetricSampleCounts = map[string]int{} },
+		"too many metric samples": func(b *Baseline) { b.Tiers[0].MetricSampleCounts["cpu_multi"] = 6 },
+		"invalid metric":          func(b *Baseline) { b.Tiers[0].Metrics["cpu_multi"] = math.Inf(1) },
+		"zero global count":       func(b *Baseline) { b.SampleCount = 0 },
+		"too many score samples":  func(b *Baseline) { b.ScoreSamples = make([]float64, 6) },
+		"tier totals exceed global": func(b *Baseline) {
+			b.SampleCount = 9
+			b.Tiers = append(b.Tiers, Tier{
+				VCPUMin: 8, SampleCount: 5, Metrics: map[string]float64{"cpu_multi": 200},
+				MetricSampleCounts: map[string]int{"cpu_multi": 5},
+			})
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			changed := valid
+			changed.Metrics = map[string]float64{"cpu_multi": 100}
+			changed.Tiers = []Tier{{
+				VCPUMin: 4, SampleCount: 5,
+				Metrics: map[string]float64{"cpu_multi": 100}, MetricSampleCounts: map[string]int{"cpu_multi": 5},
+			}}
+			mutate(&changed)
+			if err := validateBaseline(changed, false); err == nil {
+				t.Fatal("malformed tier evidence was accepted")
+			}
+		})
 	}
 }
 

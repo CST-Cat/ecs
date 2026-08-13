@@ -211,21 +211,10 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			continue
 		}
 		validTraces++
-		best, ok := bestBacktraceHit(row.Hits)
+		best, ok := bestBacktraceHit(row.Hits, row.Target.Kind)
 		if !ok {
-			responded := 0
-			for _, hop := range row.Hops {
-				if hop != "" {
-					responded++
-				}
-			}
-			status := fmt.Sprintf("%d 跳无已知特征", len(row.Hops))
-			// 绝大多数跳都没响应时，更可能是探测被限速或过滤，而不是线路真的陌生。
-			if len(row.Hops) > 0 && responded*2 < len(row.Hops) {
-				status = fmt.Sprintf("%d/%d 跳无响应，可能被限速", len(row.Hops)-responded, len(row.Hops))
-			}
 			table.Rows = append(table.Rows, []string{
-				row.Target.Kind, row.Target.Name, "未识别", "—", "—", status,
+				row.Target.Kind, row.Target.Name, "未识别", "—", "—", unidentifiedBacktraceStatus(row),
 			})
 			continue
 		}
@@ -292,6 +281,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		"CN2 的 GIA 与 GT 依据 59.43 段出现位置推断，带“推测”标注；精确区分需要更细的入口段表。",
 		"IPv6 目标采用各省三网 TCP-Ping 节点域名，地址可能随 CDN 调度变化；报告保留目标名与结构化路径信息，完整原始路径同时保留在原始证据块中，默认展示按敏感列脱敏。",
 		"未命中任何已知特征时返回“未识别”，不会猜测线路类型。",
+		"只命中其他运营商骨干时仍返回“未识别”；异网命中仅作为路径证据，不会替目标运营商下结论。",
 	)
 	result.Finish(start)
 	return result
@@ -642,15 +632,22 @@ func matchRouteSignatures(hops []string) []backtraceHit {
 	return hits
 }
 
-// bestBacktraceHit 在多个命中里挑出代表本次线路的那一条。
+// bestBacktraceHit 在目标运营商自己的命中里挑出代表本次线路的那一条。
 //
 // 同一路径上同时出现 163 与 CN2 是常见情况（先经骨干再进 CN2），此时应以更优质
-// 的线路作为结论，质量相同则取更靠前的跳。
-func bestBacktraceHit(hits []backtraceHit) (backtraceHit, bool) {
-	if len(hits) == 0 {
+// 的线路作为结论，质量相同则取更靠前的跳。异网骨干可以保留为证据，但不能
+// 被当作这个参考目标的运营商结论。
+func bestBacktraceHit(hits []backtraceHit, targetCarrier string) (backtraceHit, bool) {
+	matching := make([]backtraceHit, 0, len(hits))
+	for _, hit := range hits {
+		if hit.Signature.Carrier == targetCarrier {
+			matching = append(matching, hit)
+		}
+	}
+	if len(matching) == 0 {
 		return backtraceHit{}, false
 	}
-	sorted := append([]backtraceHit(nil), hits...)
+	sorted := append([]backtraceHit(nil), matching...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Signature.Quality != sorted[j].Signature.Quality {
 			return sorted[i].Signature.Quality > sorted[j].Signature.Quality
@@ -658,6 +655,51 @@ func bestBacktraceHit(hits []backtraceHit) (backtraceHit, bool) {
 		return sorted[i].Hop < sorted[j].Hop
 	})
 	return sorted[0], true
+}
+
+func unidentifiedBacktraceStatus(row backtraceRow) string {
+	foreign := make(map[string]bool)
+	for _, hit := range row.Hits {
+		if hit.Signature.Carrier != "" && hit.Signature.Carrier != row.Target.Kind {
+			foreign[hit.Signature.Carrier] = true
+		}
+	}
+	if len(foreign) > 0 {
+		carriers := make([]string, 0, len(foreign))
+		for carrier := range foreign {
+			carriers = append(carriers, carrier)
+		}
+		sort.Slice(carriers, func(left, right int) bool {
+			return backtraceCarrierOrder(carriers[left]) < backtraceCarrierOrder(carriers[right])
+		})
+		return fmt.Sprintf("仅命中异网骨干（%s），不作为%s结论", strings.Join(carriers, "/"), row.Target.Kind)
+	}
+
+	responded := 0
+	for _, hop := range row.Hops {
+		if hop != "" {
+			responded++
+		}
+	}
+	status := fmt.Sprintf("%d 跳无已知特征", len(row.Hops))
+	// 绝大多数跳都没响应时，更可能是探测被限速或过滤，而不是线路真的陌生。
+	if len(row.Hops) > 0 && responded*2 < len(row.Hops) {
+		status = fmt.Sprintf("%d/%d 跳无响应，可能被限速", len(row.Hops)-responded, len(row.Hops))
+	}
+	return status
+}
+
+func backtraceCarrierOrder(carrier string) int {
+	switch carrier {
+	case "电信":
+		return 0
+	case "联通":
+		return 1
+	case "移动":
+		return 2
+	default:
+		return 3
+	}
 }
 
 // describeBacktraceLine 给出线路名称，并在可判断时补充 CN2 的 GIA/GT 推测。
@@ -671,6 +713,9 @@ func describeBacktraceLine(best backtraceHit, hits []backtraceHit) string {
 	}
 	firstCN2, first163 := -1, -1
 	for _, hit := range hits {
+		if hit.Signature.Carrier != best.Signature.Carrier {
+			continue
+		}
 		if hit.Signature.Code == "CN2" && (firstCN2 < 0 || hit.Hop < firstCN2) {
 			firstCN2 = hit.Hop
 		}

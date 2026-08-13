@@ -84,6 +84,18 @@ func detectCPUAllowance() cpuAllowance {
 	return allowance
 }
 
+// distinctBenchmarkThreadCounts is the physical execution plan shared by
+// local 1T/NT benchmarks. A one-core allowance has only one distinct context;
+// running the same 1-thread command twice adds cost and noise but no scaling
+// evidence. Renderers may still expose both logical metric keys for schema and
+// scoring compatibility.
+func distinctBenchmarkThreadCounts(workers int) []int {
+	if workers <= 1 {
+		return []int{1}
+	}
+	return []int{1, workers}
+}
+
 // cgroupCPUQuota 返回 cgroup 配额折算的核数。
 func cgroupCPUQuota() (float64, string, bool) {
 	if quota, ok := cgroupV2CPUQuota(); ok {

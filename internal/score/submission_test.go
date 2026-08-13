@@ -1,6 +1,7 @@
 package score
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -113,6 +114,84 @@ func TestSubmissionFingerprintIsStable(t *testing.T) {
 	second, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{Region: "jp"})
 	if first.ID != second.ID {
 		t.Fatalf("同一份内容应得到同一 ID：%q vs %q", first.ID, second.ID)
+	}
+}
+
+func TestSubmissionFingerprintV2IsIndependentOfRunTime(t *testing.T) {
+	firstReport := sampleSubmissionReport()
+	secondReport := sampleSubmissionReport()
+	secondReport.Run.StartedAt = firstReport.Run.StartedAt.Add(72 * time.Hour)
+	first, err := BuildSubmission(firstReport, SubmissionOptions{Region: "jp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := BuildSubmission(secondReport, SubmissionOptions{Region: "jp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.FingerprintVersion != SubmissionFingerprintV2 || second.FingerprintVersion != SubmissionFingerprintV2 {
+		t.Fatalf("new submissions must declare fingerprint %q: %#v / %#v", SubmissionFingerprintV2, first, second)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("the same result exported at different times must deduplicate: %q vs %q", first.ID, second.ID)
+	}
+}
+
+func TestSubmissionFingerprintV2CoversPublicFieldsAndExactFloats(t *testing.T) {
+	base, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{Region: "jp", Provider: "provider", Note: "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]func(*Submission){
+		"host arch":     func(s *Submission) { s.Host.Arch = "arm64" },
+		"provider":      func(s *Submission) { s.Host.Provider = "other" },
+		"tool":          func(s *Submission) { s.Tool.ECS = "v9" },
+		"profile":       func(s *Submission) { s.Profile = "standard" },
+		"note":          func(s *Submission) { s.Note = "other" },
+		"precise float": func(s *Submission) { s.Metrics["cpu_single"] += 0.0001 },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			changed.Metrics = make(map[string]float64, len(base.Metrics))
+			for key, value := range base.Metrics {
+				changed.Metrics[key] = value
+			}
+			mutate(&changed)
+			if changed.fingerprintV2() == base.ID {
+				t.Fatal("field change did not affect the v2 fingerprint")
+			}
+			if err := changed.Validate(); err == nil {
+				t.Fatal("field change without a new ID was not detected")
+			}
+		})
+	}
+}
+
+func TestSubmissionLegacyFingerprintRemainsValid(t *testing.T) {
+	legacy, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.FingerprintVersion = ""
+	legacy.ID = legacy.legacyFingerprint()
+	encoded, err := legacy.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Submission
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.FingerprintVersion != "" {
+		t.Fatalf("legacy omission did not round-trip: %#v", decoded)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("legacy record without fingerprint_version must remain readable: %v", err)
+	}
+	legacy.FingerprintVersion = "future"
+	if err := legacy.Validate(); err == nil || !strings.Contains(err.Error(), "fingerprint_version") {
+		t.Fatalf("unknown fingerprint version was not rejected clearly: %v", err)
 	}
 }
 
@@ -387,11 +466,12 @@ func TestSubmissionCorpus(t *testing.T) {
 			t.Errorf("%s: %v", path, err)
 			continue
 		}
-		if previous, duplicated := seen[submission.ID]; duplicated {
-			t.Errorf("%s 与 %s 重复（ID %s）", path, previous, submission.ID)
+		canonicalID := submission.fingerprintV2()
+		if previous, duplicated := seen[canonicalID]; duplicated {
+			t.Errorf("%s 与 %s 内容重复（规范指纹 %s）", path, previous, canonicalID)
 			continue
 		}
-		seen[submission.ID] = path
+		seen[canonicalID] = path
 		// 文件名应当与内容自洽，否则目录列表会误导人。
 		if want := submission.FileName(); filepath.Base(path) != want {
 			t.Errorf("%s 的文件名应为 %s", path, want)
