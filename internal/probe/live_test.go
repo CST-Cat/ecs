@@ -23,6 +23,8 @@ package probe
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +45,25 @@ func liveEnvironment(t *testing.T) Environment {
 		HTTPClient: NewHTTPClient(cfg.HTTPTimeout),
 		UserAgent:  "ecs/live-test",
 	}
+}
+
+// liveIPerfPortCheck 保留实网可达性检查的轻量语义：只建立并关闭 TCP
+// 连接，不启动 iperf3，也不向公共服务端发送测试数据。生产吞吐路径已经
+// 改用 iperf3 自带的 --connect-timeout，不能把这个预检重新接回生产路径。
+func liveIPerfPortCheck(ctx context.Context, host string, port int, family string) error {
+	network := "tcp"
+	switch family {
+	case "IPv4":
+		network = "tcp4"
+	case "IPv6":
+		network = "tcp6"
+	}
+	dialer := net.Dialer{Timeout: iperfPortProbeTimeout}
+	connection, err := dialer.DialContext(ctx, network, net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	return connection.Close()
 }
 
 // 出口发现是所有网络模块的前提，它挂了后面全都没有意义。
@@ -220,7 +241,7 @@ func TestLiveIPerfNodeReachability(t *testing.T) {
 				break
 			}
 			start := time.Now()
-			err := checkIPerfPort(targetCtx, target.Host, port, "IPv4")
+			err := liveIPerfPortCheck(targetCtx, target.Host, port, "IPv4")
 			elapsed := time.Since(start)
 			if err != nil {
 				lastErr = err

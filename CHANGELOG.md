@@ -9,6 +9,7 @@
 
 ## Unreleased
 
+- 修复定时与手动 `live` CI：将 iperf3 节点可达性检查适配到新的生产吞吐接口，保留按端口范围执行有界 TCP 预检的实网功能，同时不把额外连接重新接回生产吞吐路径；普通 stable CI 增加不发网络请求的 live 标签编译门禁。
 - 后续版本的变更记录写在这里；release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
 ## 0.6.15 — 2026-08-13

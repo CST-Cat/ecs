@@ -36,6 +36,11 @@ jobs:
           go test
           -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunRepresentativeFIOJobsWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
           ./...
+      # 实网测试不在普通 push/PR 中执行，但必须在这里编译 live 标签，避免
+      # build-tag 专用代码的接口变动只能等到定时任务才暴露。
+      - name: Compile live-tag tests
+        if: matrix.go == 'stable'
+        run: go test -tags=live ./internal/probe/ -run '^$' -count=1
       # 翻译覆盖率使用当前报告样本；样本缺失时测试使用当前 renderer contract，
       # 不把已删除样本重新作为测试目标。
       - name: i18n coverage
