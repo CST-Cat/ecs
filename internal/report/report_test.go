@@ -15,7 +15,7 @@ import (
 func sampleReport() model.Report {
 	start := time.Date(2026, 7, 31, 1, 2, 3, 0, time.UTC)
 	return model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
 		Run: model.RunInfo{
 			ID:          "run-1",
@@ -237,7 +237,7 @@ func TestWriteAndLoadJSON(t *testing.T) {
 func TestLoadJSONIgnoresUnknownOptionalFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.json")
 	content := []byte(`{
-	  "schema_version": "ecs.report/v2",
+	  "schema_version": "ecs.report/v1",
 	  "tool": {"name": "ecs", "future_tool_field": true},
 	  "run": {"id": "future-run"},
 	  "results": [],
@@ -260,14 +260,16 @@ func TestLoadJSONIgnoresUnknownOptionalFields(t *testing.T) {
 func TestLoadJSONRejectsTrailingDataAndUnknownSchema(t *testing.T) {
 	directory := t.TempDir()
 	trailing := filepath.Join(directory, "trailing.json")
-	if err := os.WriteFile(trailing, []byte(`{"schema_version":"ecs.report/v2"} {}`), 0o600); err != nil {
+	if err := os.WriteFile(trailing, []byte(`{"schema_version":"ecs.report/v1"} {}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadJSON(trailing); err == nil {
 		t.Fatal("expected trailing JSON error")
 	}
 	unknown := filepath.Join(directory, "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"schema_version":"ecs.report/v1"}`), 0o600); err != nil {
+	// v0 是永远不会被使用的哨兵版本：拒绝用例不能拿一个可能升上来的版本号做
+	// 反例，否则下次升级 schema 时这条断言会静默失效。
+	if err := os.WriteFile(unknown, []byte(`{"schema_version":"ecs.report/v0"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadJSON(unknown); err == nil {

@@ -1,12 +1,12 @@
 # ecs 报告 schema
 
-当前 schema 标识为 `ecs.report/v2`。JSON 是 txt、Markdown 与 HTML 的唯一事实来源（JSON 自身也可直接发布）；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
+当前 schema 标识为 `ecs.report/v1`。JSON 是 txt、Markdown 与 HTML 的唯一事实来源（JSON 自身也可直接发布）；渲染器不得重新执行探针或推导与 JSON 不一致的结果。
 
 ## 顶层
 
 ```json
 {
-  "schema_version": "ecs.report/v2",
+  "schema_version": "ecs.report/v1",
   "tool": {},
   "run": {},
   "results": [],
@@ -321,7 +321,7 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
 
 ## 多报告比较 schema
 
-`ecs compare` 接受 2 份到任意多份 `ecs.report/v2` JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。
+`ecs compare` 接受 2 份到任意多份 `ecs.report/v1` JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。
 
 ```json
 {
@@ -381,9 +381,9 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 
 ## 当前 schema 规则
 
-- `ecs.report/v2` 只接收当前字段与当前单位；旧版报告不参与新参数口径比较；
+- `ecs.report/v1` 只接收当前字段与当前单位；旧版报告不参与新参数口径比较；
 - 删除、重命名、改变单位或状态语义时升级 schema 版本；
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v1` 只消费经过 `ecs.report/v2` 校验的输入；比较 schema 的字段语义发生不兼容变化时独立升级版本。
+- `ecs.compare/v1` 只消费经过 `ecs.report/v1` 校验的输入；比较 schema 的字段语义发生不兼容变化时独立升级版本。

@@ -16,7 +16,7 @@ import (
 
 func textSampleReport() model.Report {
 	return model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run: model.RunInfo{
 			ID: "abc", Profile: "standard", Exposure: "local", Offline: true,

@@ -39,7 +39,7 @@ func TestProgressViewNonTTYIsConciseAndDeduplicatesConcurrentEvents(t *testing.T
 	progress.Stop()
 	progressText := output.String()
 	terminal.FullReport(model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
 		Summary:       model.Summary{Status: model.StatusOK, Headline: "最终报告"},
 		Results: []model.Result{{
@@ -446,7 +446,7 @@ func TestFullReportPrintsCompleteTextAndPaths(t *testing.T) {
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
 	terminal.FullReport(model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
 		Summary:       model.Summary{Status: model.StatusOK, Headline: "完成"},
@@ -485,7 +485,7 @@ func TestFullReportUsesDetectedTerminalWidth(t *testing.T) {
 	terminal := NewWithColor(&output, termcolor.LevelANSI256)
 	terminal.progressWidth = 48
 	terminal.FullReport(model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
 		Summary:       model.Summary{Status: model.StatusOK, Headline: "completed"},

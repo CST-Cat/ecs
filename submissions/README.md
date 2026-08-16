@@ -1,104 +1,158 @@
-# 跑分提交库
+# 排行榜提交库
 
-这里存放经过脱敏的社区跑分记录。CI 会在有真实提交时聚合出评分参考，随下一次
-发行包编译进去；没有当前样本时，ecs 不显示综合评分，也不会使用旧数据。
+这个目录存放社区跑分提交。CI 从这些文件聚合出排行榜参考（`baseline.json`），评分用的"参考均值"就来自它。
 
-> 目录名刻意不叫 `reports/`：那是 ecs 默认的报告输出目录（已在 `.gitignore` 里），
-> 两者同名会让人把含出口 IP 的完整报告误提交进来。
+目录当前为空——还没有收录任何提交，所以发行二进制内嵌的参考也是空的（`sample_count: 0`）。在样本积累起来之前，综合评分需要用 `--score-baseline` 自备参考文件才有意义。
 
-## 里面存的是什么
+## 提交里有什么，没有什么
 
-**不是完整报告。** 完整报告有三千多行，含出口 IP、主机名、反向解析与逐跳路由——
-那些字段对排行榜毫无用处，却足以定位一台具体机器。
+提交**不是报告的压缩版，而是另一种东西**。一份 `full` 报告有三千多行、上百 KB，里面还有出口 IP、主机名、反向解析、逐跳路由——那些字段对排行榜毫无用处，却足以定位一台具体机器。
 
-提交格式 `ecs.submission/v1` 只带两类信息：
+所以提交的字段是**白名单**而不是黑名单：加字段必须显式改代码，不会因为报告新增了什么就悄悄多带出去。
 
-- **机器规格**：vCPU 数、内存、虚拟化类型、CPU 型号、架构，以及从安全白名单元数据自动识别的云厂商与地区（缺失时留空，可用 `--provider`/`--region` 覆盖）；
-- **跑分数值**：CPU、内存、磁盘、带宽四个维度的原始实测值，加上产出它们的工具版本。
-
-字段是白名单：加字段要显式改 `internal/score/submission.go`，不会因为报告新增了
-什么就悄悄多带出去。每份约 3 KB，一千份也就三兆。
-
-白名单中的磁盘扩展键包括 `fio_mixed_*`（4K/64K/512K/1M 混合读写吞吐）、
-`crystal_*`（4 个 Crystal 工作负载 × 读写 × 吞吐/IOPS）和 `atto_*`（18 个 ATTO
-块大小 × 读写 × 吞吐/IOPS）；ATTO 清单到 `64m`，不含 5M。
-包含 STREAM 内存分数的提交必须写 `memory_backend: "stream"`，并使用
-`memory_copy`、`memory_scale`、`memory_add`、`memory_triad` 四个当前聚合键。
-提交只允许当前 schema 定义的指标；缺少 STREAM 键的提交只会在其它维度有效，不会伪装成内存基线。评分会把缺失项明确列出，
-绝不把缺失当成零或宣称完整覆盖。
-
-## 怎么提交
-
-```bash
-# 1. 正常跑一次测试
-ecs --profile full
-
-# 2. 从报告导出提交文件（自动识别云厂商与地区；缺失时留空）
-ecs submit --input ./reports/ecs-report-*.json \
-  --output ./submissions/2026-08/
-
-# 3. 把生成的文件放进 submissions/YYYY-MM/，交给项目的正常评审流程
+```json
+{
+  "schema": "ecs.submission/v1",
+  "id": "ddecbbc0421f",
+  "fingerprint_version": "v2",
+  "host": {
+    "vcpu": 16,
+    "memory_gib": 30.69,
+    "virtualization": "kvm",
+    "cpu_model": "AMD Ryzen 7 PRO 4750U with Radeon Graphics",
+    "arch": "amd64",
+    "region": "jp-tokyo",
+    "provider": "vultr"
+  },
+  "tool": {
+    "ecs": "v0.6.15",
+    "sysbench": "sysbench 1.0.20",
+    "fio": "fio-3.39",
+    "iperf3": "iperf 3.16"
+  },
+  "ran_at": "2026-08-13T07:54:51Z",
+  "profile": "standard",
+  "memory_backend": "stream",
+  "metrics": {
+    "cpu_single": 1234.56,
+    "cpu_multi": 9876.54,
+    "memory_triad": 12345.67,
+    "disk_seq_read": 890.12,
+    "bandwidth_download": 945.6
+  },
+  "note": "常规月度跑分"
+}
 ```
 
-导出时会优先读取报告中的 cloud-init/DMI 明确信号；不会使用公网 IP、ASN、地理定位、
-主机名或原始云元数据。无法识别时对应字段留空；需要手动分组时，可用
-`--provider`/`--region` 显式覆盖。导出时会打印这份提交都带了什么，请自己过目一遍再提交。
+| 收录 | 理由 |
+| --- | --- |
+| `host.vcpu` / `memory_gib` | 决定机器落在哪个档位 |
+| `host.cpu_model` / `arch` / `virtualization` | 让同型号之间可比 |
+| `host.provider` / `region` | 分组用，**由提交者自报**——从 IP 推断需要引入 IP 情报数据，而那正是这个格式要避开的东西 |
+| `tool.*` | 换了 ecs 或基准工具版本口径可能变；不记版本的跑分库过几个月就是一堆无法解释的数字 |
+| `metrics` | 评分需要的原始实测值，键与评分维度一一对应 |
 
-## 目录约定
+| 不收录 | 理由 |
+| --- | --- |
+| 出口 IP、主机名、反向解析 | 能把机器指认出来，且对分组毫无帮助 |
+| ASN、精确地理位置 | 同上 |
+| 逐跳路由路径、磁盘序列号 | 同上 |
+| 除四个评分维度以外的任何探针结论 | 排行榜用不到 |
+
+`ecs submit` 完成后会把这条边界打印出来：**提交只含机器规格与跑分数值；出口 IP、主机名、路由路径与 ASN 均不写入。**
+
+## 生成一份提交
+
+先跑测试拿到 JSON 报告，再导出提交：
+
+```sh
+ecs --profile full --output ./reports
+ecs submit --input ./reports/ecs-report-20260813-075451.json \
+  --provider vultr --region jp-tokyo --note "常规月度跑分"
+```
+
+或者一步完成：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
+  --submit --profile full --yes --provider vultr --region jp-tokyo
+```
+
+`--output` 不给时写到 `${TMPDIR:-/tmp}` 并自动命名；给一个已存在的目录则在目录内自动命名；给一个尚不存在的路径则按该路径写文件。**已存在的文件永远不会被覆盖**，符号链接一律拒绝。
+
+三个自报字段都是可选的：`--provider`（最长 48 字符）、`--region`（最长 32 字符）、`--note`（最长 200 字符）。`system` 模块若识别到了云厂商或区域会自动填入，命令行的显式取值优先。
+
+## 放进哪里
 
 ```
 submissions/
-  2026-08/
-  baseline.json        ← 有样本时由 CI 重建，不要手改；无样本时不生成
+├── 2026-08/
+│   ├── ddecbbc0421f-vultr-jp-tokyo.json
+│   └── 3f9a12c4e5b7-hetzner-de-fsn.json
+├── 2026-09/
+│   └── ...
+└── baseline.json        ← CI 生成，不要手工编辑
 ```
 
-文件名前 12 位是内容指纹。新文件写入 `fingerprint_version: "v2"`，用除 `id` 和
-`ran_at` 以外的全部公开白名单字段生成规范 JSON SHA-256 指纹。因此同一内容在不同
-时间重新导出仍得到同一 ID，而机器规格、工具版本、profile、note 或任何精确测量值
-发生变化都会改变 ID。CI 会拦下内容重复，也会拒绝未知指纹版本。不带
-`fingerprint_version` 的历史提交继续按旧算法校验，不会在读取时被改写。
+两条硬性要求：
 
-## CI 会检查什么
+1. **恰好一层子目录。** CI 只收集 `submissions/*/*.json`，放在本目录根下或更深层的文件都不会被看到。按月份分目录是当前约定。
+2. **文件名必须与内容自洽**，即 `ecs submit` 生成的那个名字：`<id>[-<provider>][-<region>].json`。`id` 由内容派生，`provider`/`region` 取自报字段并转成小写连字符形式。名字对不上目录列表就会误导人，CI 会直接报错。
 
-- schema 与字段合法性、指纹与内容是否一致（手改数值而没重算指纹会被发现）；
-- 与已有提交是否重复；
-- 数值是否离群到不合常理（同档内 MAD 判定，样本不足时明确不判）。
+`baseline.json` 是 CI 的产物，不是输入——聚合时会自动跳过它。
 
-离群不等于造假——可能是新硬件或特殊配置。CI 只标记，由维护者判断。
+## 校验规则
 
-## 当前库存
+CI 用 `go test ./internal/score/ -run TestSubmissionCorpus`（`ECS_SUBMISSION_DIR=submissions`）逐份检查。本地提交前可以先自己跑一遍：
 
-v0.6.0 已删除旧工具口径对应的提交和基线，当前目录没有可用于评分的样本。
-因此本版本默认报告不会给出综合分；重新收集真实 STREAM、fio、sysbench 和 iperf3
-结果后，CI 才会生成新的排行榜参考。每档至少 5 台才会启用分档，每档至少 8 台才能
-做离群判定。
-
-## 分档
-
-基线按 vCPU 分档（1/2/4/8/16/32/64+），评分时自动选对应档位：多线程分数几乎
-正比于核数，用全体平均值当基线会让小机器永远不及格、大机器永远满分。
-
-分档是**按指标**启用的：每个指标至少要有 5 台机器的独立样本，否则该指标单独回落到全局基线。
-`baseline.json` 在 `tiers[].sample_count` 中保留该档的机器数，在
-`tiers[].metric_sample_counts` 中保留每个平均值的实际样本数。这避免“CPU 有 5 份、磁盘只有
-1 份”时把那一份磁盘成绩冒充成可代表的分档基线。所以**各模块的提交越完整，分档
-参考越可靠**；同一机型的样本尤其有用。缺少 `metric_sample_counts` 的历史基线会保守回落到全局值。
-
-## 基线怎么重建
-
-新提交进入主分支后 CI 自动跑：
-
-```bash
-ecs baseline --source "社区提交聚合" --output submissions/baseline.json submissions/
+```sh
+go test ./internal/score/ -run TestSubmissionCorpus -v
+ecs leaderboard --strict --output /tmp/check.json submissions
 ```
 
-每个指标取**算术平均**；离群值由独立的 MAD 检查标记，不把离群检测的规则
-偷偷混入基线定义。
-只有至少一台机器测到的指标才会进入基线，凭空补齐会让缺失伪装成数据。
-评分时磁盘的 baseline、混合、Crystal、ATTO 是四个等权子组；每个子组先平均内部单元，
-所以混合矩阵的 8 个单元和 ATTO 的 72 个读写表格单元不会按数量放大。内存按
-STREAM 的 Copy、Scale、Add、Triad 四个等权子组处理，每个 kernel 的 1T/NT
-先取中位数，缺失子组不补零。
+一份提交必须满足：
 
-重建后的 `baseline.json` 会同步到 `internal/score/embedded/baseline.json`，随二进制
-编译进去。样本为空时两个文件都不生成/保持空参考；ecs 不联网获取排行榜数据。
+- `schema` 恰为 `ecs.submission/v1`；`fingerprint_version` 省略（旧算法）或为 `v2`；
+- 文件是**单个 JSON 对象**，无未知字段、无尾随内容，不超过 256 KiB；
+- `metrics` 非空，每个键都是已登记的评分指标，值为正的有限数；
+- `host.vcpu` 与 `host.memory_gib` 为正数；`tool.ecs` 非空；`note` 不超过 200 字；
+- 存在 STREAM 内存指标时 `memory_backend` 必须是 `stream`，没有时不得出现这个标记；
+- **`id` 必须与内容重新计算的指纹一致**；
+- 与库中已有提交不重复（按规范指纹判定）。
+
+最后两条是关键：指纹由内容派生，**手改数值而不重算会被当场发现**。同理，改动 `provider`、`region`、`note` 或工具版本也会改变 `id`，此时文件名必须一起改——正确做法是重新跑一次 `ecs submit`，而不是编辑既有文件。
+
+## 离群检测
+
+聚合时会做离群标记，结果以 GitHub Actions 注解形式显示在检查页面上：
+
+```sh
+ecs leaderboard --annotate --verbose --output /tmp/baseline.json submissions
+```
+
+**离群只提示、不阻断合并。** 一台机器跑出远超同档的成绩，可能是新硬件、特殊配置，也可能是数据有问题——这需要人来判断，不该由阈值自动否决。`--verbose` 会额外列出样本太少、无法判定的组合。
+
+## 排行榜参考如何重建
+
+`main` 分支收到 push 后，CI 会：
+
+1. 用 `ecs baseline --source "社区提交聚合" --output submissions/baseline.json submissions` 重新聚合；
+2. 把结果同步到 `internal/score/embedded/baseline.json`，让发行二进制内嵌最新参考；
+3. 构建并跑一遍评分测试；
+4. 有变化才提交，无变化跳过。
+
+校验 job 是只读的，写权限只给这一个 job，且只在主分支 push 时运行——检查阶段不会改工作区，PR 上也不会出现写权限。
+
+## 参考值怎么用
+
+- 参考值按 **vCPU 分档**：多线程分数几乎正比于核数，拿全体均值会让小机器永远不及格、大机器永远满分。档位样本不足时自动回落全局均值，报告写明用的是哪一档。
+- **排名**只在参考文件真的保存了分数分布、且样本数达到阈值（当前 5）时才显示，绝不从主机数目倒推百分位。
+- 每个指标的样本数会在聚合输出里逐项列出。只有一两台机器测到的指标，代表性远低于其他项，使用者应当看得到这件事。
+
+## 刻意不做的事
+
+不上传、不下载、不合并远端基线。样本从哪来、代表什么，由使用者自己掌握——这是分数能被解释的前提。
+
+---
+
+English: [README_EN.md](README_EN.md) · 返回：[项目说明](../README.md)

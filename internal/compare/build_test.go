@@ -13,7 +13,7 @@ import (
 func comparisonTestReport(id string, value float64, method, profile, label string, higher bool) model.Report {
 	started := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	return model.Report{
-		SchemaVersion: "ecs.report/v2",
+		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{ID: id, Profile: "standard", StartedAt: started},
 		Results: []model.Result{{

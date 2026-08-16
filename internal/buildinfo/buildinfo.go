@@ -8,5 +8,5 @@ var (
 
 const (
 	Name          = "ecs"
-	SchemaVersion = "ecs.report/v2"
+	SchemaVersion = "ecs.report/v1"
 )
