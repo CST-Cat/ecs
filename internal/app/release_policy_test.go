@@ -44,12 +44,12 @@ func TestReleaseWorkflowRejectsDirtyOrMismatchedGoBinaries(t *testing.T) {
 	releaseJob := workflow[releaseJobAt:]
 
 	for _, required := range []string{
-		"go-version: 1.26.5",
+		"go-version: 1.26.6",
 		"Verify clean release source",
 		"git status --porcelain=v1 --untracked-files=all",
 		"Verify release VCS metadata and known vulnerabilities",
 		"expected_revision=$(git rev-parse HEAD)",
-		"expected_go=go1.26.5",
+		"expected_go=go1.26.6",
 		"metadata=$(go version -m \"$binary\")",
 		"vcs.revision='\"$expected_revision\"",
 		"vcs.modified=false",

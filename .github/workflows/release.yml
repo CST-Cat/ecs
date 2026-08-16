@@ -389,7 +389,7 @@ jobs:
         with:
           # Release binaries use an exact, currently supported patch toolchain.
           # The go directive in go.mod remains the language compatibility floor.
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: false
       - name: Verify release tag is exactly remote main
         shell: bash
@@ -468,7 +468,7 @@ jobs:
         run: |
           set -euo pipefail
           expected_revision=$(git rev-parse HEAD)
-          expected_go=go1.26.5
+          expected_go=go1.26.6
           verify_root=$(mktemp -d)
           trap 'rm -rf -- "$verify_root"' EXIT
           mapfile -t archives < <(find dist -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print | sort)
