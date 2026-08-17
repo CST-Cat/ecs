@@ -71,11 +71,6 @@ func pingArgumentsForFamily(host string, count int, timeout time.Duration, famil
 	return append(args, host)
 }
 
-// runICMPPing 对目标执行一次 ICMP 探测。
-func runICMPPing(ctx context.Context, host string, count int, timeout time.Duration) icmpStats {
-	return runICMPPingFamily(ctx, host, count, timeout, "")
-}
-
 func runICMPPingFamily(ctx context.Context, host string, count int, timeout time.Duration, family string) icmpStats {
 	stats := icmpStats{}
 	path, err := exec.LookPath(pingCommand)

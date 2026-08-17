@@ -138,13 +138,9 @@ func (r *textRenderer) render(data model.Report) string {
 	return r.out.String()
 }
 
-func (r *textRenderer) line(format string, values ...any) {
-	value := format
-	if len(values) == 0 {
-		value = format
-	} else {
-		value = fmt.Sprintf(format, values...)
-	}
+// line 输出一行已经渲染好的文本。签名刻意不带变参：译文和工具输出里的 '%'
+// 因此不可能被当成格式动词。需要格式化的调用点用 linef。
+func (r *textRenderer) line(value string) {
 	// Every specialized layout path budgets against r.width. Keep this final
 	// guard for unusually long localized/status values so a resized terminal
 	// never receives a physical line wider than the requested viewport.
@@ -153,6 +149,10 @@ func (r *textRenderer) line(format string, values ...any) {
 	}
 	r.out.WriteString(value)
 	r.out.WriteByte('\n')
+}
+
+func (r *textRenderer) linef(format string, values ...any) {
+	r.line(fmt.Sprintf(format, values...))
 }
 
 func (r *textRenderer) blank() { r.out.WriteByte('\n') }
@@ -268,7 +268,7 @@ func (r *textRenderer) prefaceTitle(title string) {
 }
 
 func (r *textRenderer) subsection(title string) {
-	r.line("  %s", r.palette.AccentBold(title))
+	r.linef("  %s", r.palette.AccentBold(title))
 }
 
 // indented 把模块描述、口径和错误按版面宽度折行，避免长字段把 110 列撑开。
@@ -304,7 +304,7 @@ func (r *textRenderer) scoreSection() {
 	ratio := total / score.FullScale
 	coverage := fmt.Sprintf(i18n.T("score.coverage"), r.score.Covered, r.score.Possible)
 
-	r.line("  %s  %s   %s",
+	r.linef("  %s  %s   %s",
 		textwidth.Pad(i18n.T("score.total"), 12),
 		r.palette.WrapRatio(fmt.Sprintf("%7.0f", total), ratio),
 		r.palette.Dim(coverage))
@@ -314,10 +314,10 @@ func (r *textRenderer) scoreSection() {
 		label := textwidth.Pad(i18n.T("score.dimension."+dimension.Key), 12)
 		if dimension.Missing {
 			reason := i18n.T("score.missing." + dimension.MissingReason)
-			r.line("  %s  %s", label, r.palette.Dim(reason))
+			r.linef("  %s  %s", label, r.palette.Dim(reason))
 			continue
 		}
-		r.line("  %s  %s  %s", label,
+		r.linef("  %s  %s  %s", label,
 			r.palette.Bar(dimension.Ratio, adaptiveBarWidth(r.width, barWidth)),
 			r.palette.WrapRatio(fmt.Sprintf("%7.0f", dimension.Score), dimension.Ratio))
 		r.matrixScoreSummary(dimension)
@@ -326,7 +326,7 @@ func (r *textRenderer) scoreSection() {
 			if matrixKindForMeasurement(metric.Key) != "" {
 				continue
 			}
-			r.line("      %s  %s  %s",
+			r.linef("      %s  %s  %s",
 				textwidth.Pad(textwidth.Truncate(metricLabel(metric), 22), 22),
 				r.palette.Dim(textwidth.PadLeft(formatFloat(metric.Value)+" "+metric.Unit, 20)),
 				r.palette.Dim(fmt.Sprintf(i18n.T("score.ofBaseline"), metric.Ratio*100)))
@@ -378,7 +378,7 @@ func (r *textRenderer) matrixScoreSummary(dimension score.DimensionScore) {
 	}
 	if len(parts) > 0 {
 		separator := " · "
-		r.line("      %s", r.palette.Dim(strings.Join(parts, separator)))
+		r.linef("      %s", r.palette.Dim(strings.Join(parts, separator)))
 	}
 }
 
@@ -657,7 +657,7 @@ func (r *textRenderer) resultEvidenceCoverage(evidence *model.Evidence) {
 		barSize = maxInt(0, available)
 	}
 	if barSize >= 4 {
-		r.line("%s  %s", prefix, r.palette.Bar(ratio, barSize))
+		r.linef("%s  %s", prefix, r.palette.Bar(ratio, barSize))
 	} else {
 		r.indentedStyled(line, style)
 	}
@@ -1052,7 +1052,7 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 			if index == 0 {
 				r.line(base)
 			} else {
-				r.line("      %s", r.semanticValue(valueLine))
+				r.linef("      %s", r.semanticValue(valueLine))
 			}
 		}
 		if separateRating {
@@ -1067,9 +1067,9 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 			lines := wrapText(item.Method, available)
 			for index, methodLine := range lines {
 				if index == 0 {
-					r.line("%s%s", r.palette.Dim(prefix), r.palette.Dim(methodLine))
+					r.linef("%s%s", r.palette.Dim(prefix), r.palette.Dim(methodLine))
 				} else {
-					r.line("%s%s", strings.Repeat(" ", textwidth.Width(prefix)), r.palette.Dim(methodLine))
+					r.linef("%s%s", strings.Repeat(" ", textwidth.Width(prefix)), r.palette.Dim(methodLine))
 				}
 			}
 		}
@@ -1798,7 +1798,7 @@ func (r *textRenderer) stackedTable(columns []string, rows [][]string) {
 			}
 			r.indentedStyled(column+i18n.T("punct.colon"), r.palette.LabelBold)
 			for _, line := range wrapText(value, valueWidth) {
-				r.line("    %s", r.semanticValue(line))
+				r.linef("    %s", r.semanticValue(line))
 			}
 		}
 	}
@@ -1841,7 +1841,7 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 	}
 	for _, line := range strings.Split(strings.TrimRight(block.Content, "\n"), "\n") {
 		for _, wrapped := range wrapText(line, maxInt(1, r.width-6)) {
-			r.line("    %s", wrapped)
+			r.linef("    %s", wrapped)
 		}
 	}
 	r.blank()
@@ -1850,7 +1850,7 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 func (r *textRenderer) note(text string) {
 	// 说明文字按版面宽度折行，超长的一行在窄终端里会被硬折得难读。
 	for _, line := range wrapText(text, maxInt(1, r.width-6)) {
-		r.line("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
+		r.linef("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
 	}
 }
 

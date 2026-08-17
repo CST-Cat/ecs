@@ -1,14 +1,18 @@
 name: ci
 
+# 这个 commit 能不能进 main？
+#
+# 只回答这一个问题。定时外网监控在 live.yml，排行榜写回在 leaderboard.yml，
+# 发布后安全复审在 security.yml，发布在 release.yml。把它们混在一起的后果是
+# 第三方接口限流会让普通代码检查变红，而红灯一旦常态化就没人再看。
+#
+# Go 工具链版本只来自 go.mod。这里不写任何版本号，升级 Go 只需改 go.mod 一行。
+# 注意不要设置 GOTOOLCHAIN=local：setup-go 靠读 go.mod 决定装哪个补丁版。
+
 on:
   push:
     branches: ["**"]
   pull_request:
-  # 实网测试按天跑，不挂在普通主分支检查上：第三方限流或改版会让每次代码检查变红，
-  # 那只会训练所有人忽略红灯。
-  schedule:
-    - cron: "37 5 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,95 +22,85 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # 行为：程序做的事对不对。
+  unit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ["1.22.x", "stable"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
           cache: false
+      # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
       - name: Unit and parser tests
-        run: >-
-          go test
-          -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunRepresentativeFIOJobsWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
-          ./...
-      # 实网测试不在普通 push/PR 中执行，但必须在这里编译 live 标签，避免
-      # build-tag 专用代码的接口变动只能等到定时任务才暴露。
-      - name: Compile live-tag tests
-        if: matrix.go == 'stable'
-        run: go test -tags=live ./internal/probe/ -run '^$' -count=1
-      # 翻译覆盖率使用当前报告样本；样本缺失时测试使用当前 renderer contract，
-      # 不把已删除样本重新作为测试目标。
-      - name: i18n coverage
-        if: matrix.go == 'stable'
         env:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
-        run: |
-          go test ./internal/report/ -run '^TestLocalizeCoversRealReports$' -v
-          go test ./internal/i18n/ -v
-      - name: Validate ecs-tools JSON Schema and example
-        if: matrix.go == 'stable'
-        run: |
-          python3 -m pip install --disable-pip-version-check --no-cache-dir jsonschema==4.25.1
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          from jsonschema import Draft202012Validator
+        run: go test ./...
 
-          schema = json.loads(Path("tools/ecs-tools-manifest.schema.json").read_text())
-          example = json.loads(Path("tools/manifest.example.json").read_text())
-          Draft202012Validator.check_schema(schema)
-          Draft202012Validator(schema).validate(example)
-          PY
-      - run: go vet ./...
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l ./cmd ./internal)
-          if [ -n "$unformatted" ]; then
-            echo "以下文件未通过 gofmt：" >&2
-            echo "$unformatted" >&2
-            exit 1
-          fi
-      - name: Staticcheck
-        if: matrix.go == 'stable'
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
-      - name: Go vulnerability scan
-        if: matrix.go == 'stable'
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-      - run: go build ./cmd/ecs
-      - run: sh -n install.sh
-      - run: sh -n run.sh
-      - run: bash -n scripts/package.sh
-      - run: bash -n scripts/build_tools.sh
-      - run: bash -n scripts/build_corpus.sh
-      - name: Verify tools package layout regression
-        run: bash scripts/package_tools_test.sh
+  # 静态规则、源码安全、格式、数据契约。与 release preflight 是同一个脚本。
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: ./scripts/ci/check.sh
 
-  # 跑分提交校验：新增提交必须格式合法、指纹自洽、不与已有记录重复。
-  # 指纹由内容派生，因此手改数值而不重算会被当场发现。
-  # 这个 job 只读：写权限留给下面单独的 leaderboard job，避免任何分支的
-  # push/PR 都以 contents: write 运行 go test 与 go run。
+  # 与真实基准工具的集成。工具由脚本自己装齐，装什么不写在 YAML 里。
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: ./scripts/ci/integration.sh
+
+  # 并发问题。
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -race ./...
+
+  # 七个发布架构现在都编得过吗。
+  cross:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: ./scripts/cross.sh
+
+  # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，
+  # 手改数值而不重算会被当场发现。只读：写权限属于 leaderboard.yml。
   submissions:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: false
       - name: Validate submissions
-        run: go test ./internal/score/ -run TestSubmissionCorpus -v
         env:
           ECS_SUBMISSION_DIR: submissions
+        run: go test ./internal/score/ -run TestSubmissionCorpus -v
 
       # 离群检测只标记不阻断：可能是新硬件或特殊配置，由维护者判断。
       # --annotate 把结果转成 GitHub 检查注解，直接显示在检查页面上。
@@ -121,89 +115,24 @@ jobs:
             echo "当前没有排行榜提交，跳过离群检测"
           fi
 
-  # 排行榜参考重建只在主分支 push 做，并且是唯一带写权限的 job：检查阶段不改
-  # 工作区，避免把生成文件混进正在审核的代码变更，也避免写权限出现在 PR 上。
-  leaderboard:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: submissions
+  # branch protection 的单点引用：加新 job 时只改这里的 needs，
+  # 不必去仓库设置里逐个勾选。
+  required:
+    if: always()
+    needs: [unit, quality, integration, race, cross, submissions]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          cache: false
-      - name: Rebuild leaderboard reference
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
-            go run ./cmd/ecs baseline \
-              --source "社区提交聚合" \
-              --output submissions/baseline.json \
-              submissions
-            # 排行榜参考随二进制发布，因此同步写进内嵌副本。
-            cp submissions/baseline.json internal/score/embedded/baseline.json
-            go build ./... && go test ./internal/score/
-          else
-            echo "当前没有排行榜提交，保持无基线状态"
-          fi
-
-      - name: Commit rebuilt leaderboard reference
-        run: |
-          if git diff --quiet -- submissions/baseline.json internal/score/embedded/baseline.json; then
-            echo "排行榜参考无变化，跳过提交"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add submissions/baseline.json internal/score/embedded/baseline.json
-          git commit -m "CI：按最新提交重建排行榜参考"
-          git push
-
-  race:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          cache: false
-      - name: Race tests
-        run: >-
-          go test -race
-          -skip 'TestRunFIOD1LatencyWithRealFIO|TestDetectFIOEngineAgreesWithEnghelp|TestRunRepresentativeFIOJobsWithRealFIO|TestExecuteSysbenchCPUUsesStableOfficialWorkload|TestRunSysbenchWithRealBinary|TestRunStreamWithRealBinary|TestRunIPerfWithRealServer|TestRunIPerfUDPWithRealServer|TestRunICMPPingAgainstLoopback|TestRouteEngineTracesLoopback'
-          ./...
-
-  cross:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          cache: false
-      - run: make cross
-
-  # 实网协议/解析检查：确认第三方数据源与公共服务的当前响应仍能解析。
-  # 只在定时任务与手动触发时运行；普通 push 不触发外部网络请求。
-  live:
-    if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-          cache: false
-      - name: Live upstream protocol checks
-        run: >-
-          go test -tags=live ./internal/probe/
-          -run '^TestLive(IPLookup|IPQualityProviders|CommunityGateway|MediaStrongRules|IPerfNodeReachability|STUNServers)$'
-          -v -timeout 20m
+          set -euo pipefail
+          echo "上游 job 结果：$RESULTS"
+          for result in $RESULTS; do
+            if [[ "$result" != "success" ]]; then
+              echo "有 job 未通过：$RESULTS" >&2
+              exit 1
+            fi
+          done
+          echo "全部通过"

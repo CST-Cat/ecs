@@ -257,18 +257,17 @@ DNS 轮询会落到备用地址等于自身的那台，已剔除。
 ```bash
 git clone https://github.com/CST-Cat/ecs.git && cd ecs
 
-# 仅支持 Linux。go 1.22 是语言兼容下限；开发与发行使用 Go 上游仍支持的最新补丁版
+# 仅支持 Linux。构建工具链版本由 go.mod 单点定义（当前 go 1.26.6），
+# GOTOOLCHAIN=auto 会自动获取。运行 Release 二进制不需要 Go。
 go build ./cmd/ecs
 
-# 本地检查（提交前必跑，与 CI 一致）
-gofmt -l $(git ls-files '*.go')     # 必须无输出
-go test ./...
-go vet ./...
+# 本地检查（提交前必跑，与 CI 是同一个脚本）
+make check                          # 格式、vet、staticcheck、源码漏洞、schema、脚本与 workflow 语法
+make test                           # go test ./...，不需要外部工具
+make integration                    # 需要真实 fio / sysbench / iperf3
 go test -race ./...
-go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
-go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-sh -n install.sh
-bash -n scripts/package.sh
+
+# 分析工具版本锁在 devtools/go.mod，check.sh 自己构建，无需手工安装
 
 # 标准基准工具（缺失时对应模块只告警，不会生成替代分数）
 apt-get install -y sysbench fio iperf3

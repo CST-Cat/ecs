@@ -46,7 +46,7 @@ make check          # go vet + go test -race
 make cross          # 七个 Linux 架构交叉编译到 dist/
 ```
 
-需要 Go 1.22 或更高版本。
+从源码构建 ecs 需要 Go 1.26.6（版本由 `go.mod` 单点定义，工具链会自动获取）。运行 Release 二进制不需要 Go：它们是静态链接的，下载解压即可执行。
 
 ## 命令
 

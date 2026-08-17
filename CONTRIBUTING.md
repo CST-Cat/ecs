@@ -22,21 +22,30 @@
 
 本地检查：
 
-`go.mod` 的 `go 1.22` 只是语言兼容下限。开发和从源码分发二进制时，请使用 Go 上游当前支持的最新补丁版；CI 另保留 1.22 的编译兼容检查，不把它当作安全支持声明。
+Go 工具链版本由 `go.mod` 单点定义（当前 `go 1.26.6`），CI、发布和安全复审都读它，任何地方都不再重复写版本号。升级 Go 只改那一行。本机装的是更低的补丁版时，`GOTOOLCHAIN=auto`（默认）会自动获取所需版本。运行 Release 二进制不需要 Go。
+
+`staticcheck` 与 `govulncheck` 的版本锁在 `devtools/go.mod`（含 `go.sum` 哈希）。主模块 `go.mod` 保持零依赖：从源码构建 ecs 不下载任何模块，这是发布物的一项属性，不为了跑分析工具而放弃。
 
 ```bash
 gofmt -w $(git ls-files '*.go')
-go test ./...        # 需要 fio / sysbench / iperf3
-go vet ./...
+make test            # go test ./...，不需要任何外部工具
+make check           # 格式、vet、staticcheck、源码漏洞、schema、脚本与 workflow 语法
+make integration     # 需要真实 fio / sysbench / iperf3
 go test -race ./...
-go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
-go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 ```
 
-实网测试（会把本机出口 IP 发给表内数据源，按需运行）：
+测试按"需要什么"分三类，分类写在源码的 build tag 里，不写在 CI 配置里：
+
+| 类别 | 命令 | 需要 |
+|---|---|---|
+| 单元与解析 | `go test ./...` | 无 |
+| 集成 | `go test -tags=integration ./...` | 宿主装有真实基准工具 |
+| 实网 | `go test -tags=live ./...` | 公网，会把出口 IP 发给表内数据源 |
+
+实网测试（按需运行）：
 
 ```bash
-go test -tags=live ./internal/probe/ -run TestLive -v
+make live
 ```
 
 性能工作负载一旦进入稳定版本，不应原地改变语义。需要调整块大小、并发、算法或计时方式时，请升级 `measurement.method`。

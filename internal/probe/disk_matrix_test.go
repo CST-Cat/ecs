@@ -280,15 +280,6 @@ func findFIOJobSpec(plan []fioJobSpec, name string) (fioJobSpec, bool) {
 	return fioJobSpec{}, false
 }
 
-func findMeasurement(measurements []model.Measurement, key string) (model.Measurement, bool) {
-	for _, measurement := range measurements {
-		if measurement.Key == key {
-			return measurement, true
-		}
-	}
-	return model.Measurement{}, false
-}
-
 func TestFIOLatencyStatsConvertAllClatUnits(t *testing.T) {
 	cases := []struct {
 		name   string

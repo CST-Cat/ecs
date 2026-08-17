@@ -1,0 +1,40 @@
+name: live
+
+# 第三方服务现在还正常吗？
+#
+# 这些测试真的向公网数据源发请求，因此不能挂在普通 commit 检查上：
+#
+#   - 第三方限流、改版、下线都会让它们变红，但代码没有任何问题。让它们阻塞
+#     每一次主分支检查会训练所有人忽略红灯，那比没有测试更糟；
+#   - 它们会把运行机器的出口 IP 发给表内每一家数据源，不该在别人 clone 下来
+#     跑 go test 时悄悄发生。
+#
+# 因此这个 workflow **不进 branch protection**。它红了说明外界变了，
+# 处理方式是去看解析器还认不认得上游的新响应，不是拦住别人合并代码。
+#
+# 跑哪些测试由 //go:build live 在源码里回答，这里不枚举任何测试函数名。
+
+on:
+  schedule:
+    - cron: "37 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Live upstream protocol checks
+        run: go test -tags=live ./... -v -timeout 20m

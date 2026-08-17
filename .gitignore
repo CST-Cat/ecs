@@ -5,6 +5,8 @@
 /artifact/
 /tools-artifacts/
 /tools-stage/
+# devtools 模块编译出的分析工具二进制，版本由 devtools/go.mod 锁定
+/.devtools-bin/
 /ecs
 /ecs.exe
 *.test

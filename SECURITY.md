@@ -42,9 +42,40 @@ Ookla 可能接收测量所需的出口 IP、客户端和服务器元数据，ec
 - 不修改包管理器；
 - 不执行下载到的其他脚本。
 
-官方 Release 的构建 job 在打包前要求 Git 工作区洁净，CI 下载和中间目录全部显式忽略。每个主程序归档解包后都会用 `go version -m` 校验完整 `vcs.revision`、固定的 Go 补丁版与 `vcs.modified=false`，再对实际二进制运行固定版本的 `govulncheck`。普通 CI 另对源码运行 `staticcheck` 和 `govulncheck`。`go.mod` 的 `go 1.22` 只表示语言兼容下限；自行编译应使用 Go 上游当前支持的最新补丁版。
-
 在最终 GitHub 仓库确定前，远程安装必须显式设置 `ECS_REPOSITORY=owner/ecs`，避免脚本指向虚假的默认仓库。
+
+## 发布前门禁
+
+Release 从一个**冻结的提交 SHA** 开始：入口处确认候选提交等于当时的远端 `main`，此后所有阶段只认这个 SHA，不再与移动中的 `main` 比较。
+
+流水线按权限和制品交接分阶段，只有最后一步持有仓库写权限：
+
+```
+preflight → tools × 7 → assemble → verify / security → attest → publish
+  read        read        read         read              OIDC     write
+```
+
+编译器、Docker、tar、`govulncheck`、构建脚本和全部第三方工具都运行在没有仓库写权限的阶段中。
+
+- 打包前要求 Git 工作区洁净，CI 下载和中间目录全部显式忽略；
+- 每个主程序归档**解包后**用 `go version -m` 校验 `vcs.revision` 等于冻结 SHA、`vcs.modified=false`，以及 Go 工具链等于本次构建的**实测**版本（取自 `go env GOVERSION`，不是写死在配置里的期望值）；
+- 对解包出来的实际二进制运行 `govulncheck -mode binary`，这是发布前安全门禁；
+- 为全部发布资产生成 GitHub artifact attestation，可用 `gh attestation verify` 核对来源仓库、workflow 与提交。
+
+Go 工具链版本由 `go.mod` 单点定义，CI、发布和安全复审都读它。`staticcheck` 与 `govulncheck` 的版本锁在 `devtools/go.mod`（含 `go.sum` 哈希）。所有 GitHub Action 引用固定到 40 位 commit SHA，升级由 Dependabot 以可审阅的 PR 提出。
+
+## 发布后持续监控
+
+发布完成不代表安全生命周期结束：漏洞库每天都在更新，昨天干净的二进制今天可能已经不干净了。用户手上跑的是 Release 上的那些文件，因此每日复审的对象就是它们。
+
+`security.yml` 每天做两件事：对当前 `main` 的源码跑 `govulncheck`，以及下载最新正式 Release 的七个主程序归档、校验摘要后逐个跑 `govulncheck -mode binary`。发现问题时分两类处理：
+
+- **Go stdlib/runtime 漏洞，且官方已在同一小版本系列内给出修复版**（例如 1.26.6 → 1.26.7）：自动开一个只改 `go.mod` 一行的 PR。这类修复是可以机械确认的等式——同一份 ecs 源码 + 官方修好的工具链，程序自身不需要任何改动。
+- **其余全部情况**：ecs 自身源码或第三方依赖的漏洞、只有跨小版本才有修复、漏洞库尚未给出修复版——只让 workflow 失败，交给人判断。
+
+自动开出的 PR **不会自动合并**。合并与打 tag 由人决定，随后走与常规发布完全相同的那一条流水线，制品验证标准不因为是安全重建而降低。判定逻辑在 `scripts/security/triage.py`，其判定表由 `scripts/security/triage_test.sh` 覆盖。
+
+注意：由 `GITHUB_TOKEN` 创建的 PR，其 CI 会停在 approval-required 状态，需要有写权限的人在 PR 页面点一次 **Approve workflows to run**。这是 GitHub 防止递归触发的既定行为。
 
 ## 报告隐私
 

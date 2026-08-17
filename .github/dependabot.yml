@@ -1,0 +1,31 @@
+version: 2
+
+# 所有 uses: 都固定到 40 位 commit SHA，因此升级必须走 PR——这正是想要的：
+# 供应链变更是可审阅的事件，而不是一个悄悄跟着 tag 漂移的引用。
+#
+# gomod 只管 devtools/。主模块 go.mod 是零依赖的（从源码构建 ecs 不下载任何
+# 模块），那里没有东西需要 Dependabot 管；Go 工具链版本由 security.yml 的
+# 漏洞复审驱动升级，不该由 Dependabot 按发布节奏推。
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "CI"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: "/devtools"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "devtools"
+    groups:
+      analysis-tools:
+        patterns: ["*"]

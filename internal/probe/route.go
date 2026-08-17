@@ -182,10 +182,6 @@ const routeSnapshotHops = 12
 // RouteSnapshotHops 是 route 模块实际使用的跳数上限。
 const RouteSnapshotHops = routeSnapshotHops
 
-func runRouteCommand(ctx context.Context, engine routeEngine, target string, maxHops int) ([]byte, error) {
-	return runRouteCommandForFamily(ctx, engine, target, maxHops, config.IPVersionAuto)
-}
-
 func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
 	if !isNextTraceEngine(engine.Name) || engine.Path == "" {
 		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)

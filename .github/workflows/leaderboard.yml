@@ -1,0 +1,45 @@
+name: leaderboard
+
+# 排行榜数据需要重建并写回吗？
+#
+# 这是 CI 侧唯一带 contents: write 的 workflow，因此它只做一件事：按 main 上
+# 当前的提交重算基线并写回。代码检查不在这里跑——检查阶段不改工作区，避免把
+# 生成文件混进正在审核的代码变更，也避免写权限出现在任意分支的 push 上。
+#
+# paths 限定真正影响排行榜的输入。无关改动不该触发一次写回。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "submissions/**"
+      - "internal/score/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leaderboard
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Validate submissions before rebuilding
+        env:
+          ECS_SUBMISSION_DIR: submissions
+        run: go test ./internal/score/ -run TestSubmissionCorpus
+
+      - name: Rebuild and commit the leaderboard reference
+        run: ./scripts/leaderboard.sh

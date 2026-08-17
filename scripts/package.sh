@@ -42,7 +42,8 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+repo_root=$ECS_REPO_ROOT
 dist_dir="$repo_root/dist"
 go_command="${GO:-go}"
 commit="${COMMIT:-$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
@@ -63,20 +64,10 @@ die() {
   exit 1
 }
 
-# ecs 只面向 Linux VPS，发布目标随之收敛到 Linux 架构。  The final
-# field is the stable package architecture name; in particular, GOARM=7 is
-# represented as armv7 rather than as a second v7 suffix.
-targets=(
-  "linux amd64 amd64"
-  "linux arm64 arm64"
-  "linux arm armv7"
-  "linux 386 386"
-  "linux s390x s390x"
-  "linux riscv64 riscv64"
-  "linux ppc64le ppc64le"
-)
+# 发布目标与工具清单来自 scripts/lib/common.sh，与交叉构建、发布校验共用同一张表。
+targets=("${ECS_TARGETS[@]}")
 
-tool_names=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
+tool_names=("${ECS_TOOL_NAMES[@]}")
 
 temp_stages=()
 new_temp_stage_path=""
