@@ -2,6 +2,7 @@ package compare
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -286,4 +287,290 @@ func hasIssue(issues []MetricIssue, reason string) bool {
 		}
 	}
 	return false
+}
+
+// ---- 不可比原因的差异归因 ----
+//
+// "method 或参数口径不一致"这个结论本身不可行动。本项目约定工作负载语义变了
+// 就升 measurement.method，跨版本报告因此经常撞上它，用户需要知道的是究竟哪
+// 一项变了。下面的用例把这份明细钉住。
+
+// differenceFor 返回某个具名分量的差异，找不到时返回 nil。
+func differenceFor(issue MetricIssue, field string) *Difference {
+	for index := range issue.Differences {
+		if issue.Differences[index].Field == field {
+			return &issue.Differences[index]
+		}
+	}
+	return nil
+}
+
+func issueFor(issues []MetricIssue, reason string) (MetricIssue, bool) {
+	for _, issue := range issues {
+		if issue.Reason == reason {
+			return issue, true
+		}
+	}
+	return MetricIssue{}, false
+}
+
+func TestBuildExplainsMethodRevisionAsTheOnlyDifference(t *testing.T) {
+	first := comparisonTestReport("first", 100, "sysbench-cpu-prime20000-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "sysbench-cpu-prime20000-v2", "same", "rate", true)
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := issueFor(data.Modules[0].MetricIssues, "method_or_parameters_mismatch")
+	if !ok {
+		t.Fatalf("expected a mismatch issue: %+v", data.Modules[0].MetricIssues)
+	}
+	// 只有 method 变了，明细里就不该出现别的分量——否则真正变了的那一项会被淹掉。
+	if len(issue.Differences) != 1 {
+		t.Fatalf("differences = %+v, want only the method", issue.Differences)
+	}
+	method := differenceFor(issue, "method")
+	if method == nil {
+		t.Fatalf("method difference missing: %+v", issue.Differences)
+	}
+	want := []DifferenceValue{
+		{Report: 0, Value: "sysbench-cpu-prime20000-v1"},
+		{Report: 1, Value: "sysbench-cpu-prime20000-v2"},
+	}
+	if !reflect.DeepEqual(method.Values, want) {
+		t.Fatalf("method values = %+v, want %+v", method.Values, want)
+	}
+}
+
+func TestBuildNamesTheParameterThatChangedInsteadOfTheWholeScope(t *testing.T) {
+	first := comparisonTestReport("first", 100, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "m-v1", "same", "rate", true)
+	first.Results[0].Methodology.Parameters = map[string]string{"scope_revision": "1", "threads": "4", "duration": "15s"}
+	second.Results[0].Methodology.Parameters = map[string]string{"scope_revision": "1", "threads": "8", "duration": "15s"}
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := issueFor(data.Modules[0].MetricIssues, "method_or_parameters_mismatch")
+	if !ok {
+		t.Fatalf("expected a mismatch issue: %+v", data.Modules[0].MetricIssues)
+	}
+	// 相同的 duration 与 scope_revision 不该出现。
+	if len(issue.Differences) != 1 {
+		t.Fatalf("differences = %+v, want only threads", issue.Differences)
+	}
+	threads := differenceFor(issue, "parameter:threads")
+	if threads == nil {
+		t.Fatalf("threads difference missing: %+v", issue.Differences)
+	}
+	if threads.Values[0].Value != "4" || threads.Values[1].Value != "8" {
+		t.Fatalf("threads values = %+v", threads.Values)
+	}
+}
+
+func TestBuildReportsEveryChangedComponentTogether(t *testing.T) {
+	first := comparisonTestReport("first", 100, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "m-v2", "same", "rate", true)
+	second.Results[0].Measurements[0].Unit = "ops/s"
+	second.Results[0].Methodology.Kind = "observation"
+	second.Results[0].Methodology.Parameters = map[string]string{"scope_revision": "2", "workload": "same"}
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := issueFor(data.Modules[0].MetricIssues, "method_or_parameters_mismatch")
+	if !ok {
+		t.Fatalf("expected a mismatch issue: %+v", data.Modules[0].MetricIssues)
+	}
+	for _, field := range []string{"unit", "method", "kind", "parameter:scope_revision"} {
+		if differenceFor(issue, field) == nil {
+			t.Errorf("difference for %q is missing: %+v", field, issue.Differences)
+		}
+	}
+	// workload 两边相同，不该被列进去。
+	if differenceFor(issue, "parameter:workload") != nil {
+		t.Errorf("identical parameter was reported as a difference: %+v", issue.Differences)
+	}
+}
+
+func TestBuildTreatsAMissingParameterKeyAsADifference(t *testing.T) {
+	first := comparisonTestReport("first", 100, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "m-v1", "same", "rate", true)
+	first.Results[0].Methodology.Parameters = map[string]string{"scope_revision": "1", "threads": "4"}
+	second.Results[0].Methodology.Parameters = map[string]string{"scope_revision": "1"}
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := issueFor(data.Modules[0].MetricIssues, "method_or_parameters_mismatch")
+	if !ok {
+		t.Fatalf("expected a mismatch issue: %+v", data.Modules[0].MetricIssues)
+	}
+	threads := differenceFor(issue, "parameter:threads")
+	if threads == nil {
+		t.Fatalf("a key present in only one report must be reported: %+v", issue.Differences)
+	}
+	// 缺这个键要能表达出来，而不是被当成两边都没有。
+	if threads.Values[0].Value != "4" || threads.Values[1].Value != "" {
+		t.Fatalf("missing key values = %+v", threads.Values)
+	}
+}
+
+// 判定与明细必须出自同一组分量：可比的指标不该带出任何差异，
+// 否则就会出现"明细说有差异、判定却说可比"的自相矛盾输出。
+func TestBuildProducesNoDifferencesWhenSignaturesAgree(t *testing.T) {
+	first := comparisonTestReport("first", 100, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "m-v1", "same", "rate", true)
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := data.Modules[0]
+	if len(module.Metrics) != 1 {
+		t.Fatalf("identical signatures must stay comparable: %+v", module)
+	}
+	for _, issue := range module.MetricIssues {
+		if len(issue.Differences) > 0 {
+			t.Fatalf("comparable metric reported differences: %+v", issue)
+		}
+	}
+}
+
+// 取不到签名的报告（数值非有限、缺 method、参数口径损坏）由各自的 issue 说明，
+// 混进差异归因只会把用户引向错误的结论。
+func TestBuildKeepsUnsignedReportsOutOfDifferences(t *testing.T) {
+	first := comparisonTestReport("first", 100, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 120, "m-v2", "same", "rate", true)
+	third := comparisonTestReport("third", math.NaN(), "m-v3", "same", "rate", true)
+	data, err := Build([]model.Report{first, second, third}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := issueFor(data.Modules[0].MetricIssues, "method_or_parameters_mismatch")
+	if !ok {
+		t.Fatalf("expected a mismatch issue: %+v", data.Modules[0].MetricIssues)
+	}
+	method := differenceFor(issue, "method")
+	if method == nil {
+		t.Fatalf("method difference missing: %+v", issue.Differences)
+	}
+	for _, value := range method.Values {
+		if value.Report == 2 {
+			t.Fatalf("a report without a signature leaked into the differences: %+v", method.Values)
+		}
+	}
+}
+
+// ---- 跨版本比较 ----
+//
+// 硬拒绝跨 schema 版本的代价是：schema 一升版，用户手里所有旧报告立刻永久
+// 不可比，而"比较不同时期的报告"正是 compare 存在的理由。放宽之后必须钉住
+// 两件事：结论仍然出得来，且可比性被如实降级。
+
+func TestBuildComparesAcrossSchemaVersionsAndDowngradesComparability(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+
+	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
+	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
+	second.SchemaVersion = "ecs.report/v2"
+
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatalf("跨 schema 版本必须仍能比较：%v", err)
+	}
+	if data.Summary.Comparability != PartiallyComparable {
+		t.Fatalf("跨 schema 版本的可比性 = %q，want %q", data.Summary.Comparability, PartiallyComparable)
+	}
+	// 签名一致的指标照常出结论——降级针对的是签名覆盖不到的部分。
+	if data.Summary.ComparableMetrics != 1 || data.Summary.Improved != 1 {
+		t.Fatalf("签名一致的指标应照常比较：metrics=%d improved=%d",
+			data.Summary.ComparableMetrics, data.Summary.Improved)
+	}
+	if len(data.Notices) == 0 || !strings.Contains(data.Notices[0], "schema") {
+		t.Fatalf("跨版本提示必须排在最前：%v", data.Notices)
+	}
+	for _, version := range []string{"ecs.report/v1", "ecs.report/v2"} {
+		if !strings.Contains(data.Notices[0], version) {
+			t.Fatalf("提示里缺少版本 %q：%q", version, data.Notices[0])
+		}
+	}
+	if got := data.SchemaVersions(); !reflect.DeepEqual(got, []string{"ecs.report/v1", "ecs.report/v2"}) {
+		t.Fatalf("SchemaVersions() = %v", got)
+	}
+	if data.Inputs[1].SchemaVersion != "ecs.report/v2" {
+		t.Fatalf("每份输入都要记录自己的 schema：%+v", data.Inputs[1])
+	}
+}
+
+func TestBuildExplainsDifferentToolVersionsWithoutDowngrading(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+
+	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
+	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
+	second.Tool.Version = "0.7.0"
+
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ecs 版本不同不影响结论可信度，只是需要给下方的差异一个解释。
+	if data.Summary.Comparability != Comparable {
+		t.Fatalf("同 schema 不同 ecs 版本不应降级：%q", data.Summary.Comparability)
+	}
+	if len(data.Notices) == 0 || !strings.Contains(data.Notices[0], "ecs") ||
+		!strings.Contains(data.Notices[0], "0.7.0") {
+		t.Fatalf("缺少 ecs 版本差异提示：%v", data.Notices)
+	}
+}
+
+func TestBuildKeepsNoticesUnchangedWhenVersionsAgree(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+
+	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
+	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
+
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Summary.Comparability != Comparable {
+		t.Fatalf("全部一致时可比性 = %q", data.Summary.Comparability)
+	}
+	// 版本一致是常态，不该为常态多出任何提示行。
+	if len(data.Notices) != 3 {
+		t.Fatalf("版本一致时提示数 = %d，want 3：%v", len(data.Notices), data.Notices)
+	}
+	if len(data.SchemaVersions()) != 1 {
+		t.Fatalf("SchemaVersions() = %v", data.SchemaVersions())
+	}
+}
+
+func TestBuildStillFlagsMethodChangesAcrossSchemaVersions(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+
+	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
+	second := comparisonTestReport("b", 120, "m2", "p", "速率", true)
+	second.SchemaVersion = "ecs.report/v2"
+
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 保护比较安全的始终是签名而不是版本号：method 变了照样拦下并归因。
+	if data.Summary.ComparableMetrics != 0 || data.Summary.MetricIssues != 1 {
+		t.Fatalf("method 不同必须落进 issue：metrics=%d issues=%d",
+			data.Summary.ComparableMetrics, data.Summary.MetricIssues)
+	}
+	issue := data.Modules[0].MetricIssues[0]
+	if len(issue.Differences) != 1 || issue.Differences[0].Field != "method" {
+		t.Fatalf("差异必须归因到 method：%+v", issue.Differences)
+	}
 }

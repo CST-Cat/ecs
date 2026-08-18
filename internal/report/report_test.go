@@ -276,3 +276,44 @@ func TestLoadJSONRejectsTrailingDataAndUnknownSchema(t *testing.T) {
 		t.Fatal("expected unsupported schema error")
 	}
 }
+
+// LoadJSONForComparison 放宽的是版本，不是格式。
+//
+// 硬拒绝跨 schema 版本会让 schema 每升一次版，用户手里所有旧报告立刻永久
+// 不可比；而"比较不同时期的报告"正是 compare 存在的理由。真正保证比较安全
+// 的是指标签名，不是版本号（见 compare.Build）。
+func TestLoadJSONForComparisonAcceptsOtherSchemaVersions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "future.json")
+	payload := `{"schema_version":"ecs.report/v2","tool":{"name":"ecs"},"run":{"id":"r1"}}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadJSON(path); err == nil {
+		t.Fatal("严格加载必须继续拒绝其它 schema 版本")
+	}
+	loaded, err := LoadJSONForComparison(path)
+	if err != nil {
+		t.Fatalf("比较路径应接受其它 schema 版本：%v", err)
+	}
+	if loaded.SchemaVersion != "ecs.report/v2" {
+		t.Fatalf("schema 版本必须原样保留：%q", loaded.SchemaVersion)
+	}
+}
+
+func TestLoadJSONForComparisonRejectsForeignAndMissingSchemas(t *testing.T) {
+	directory := t.TempDir()
+	for name, payload := range map[string]string{
+		"foreign.json": `{"schema_version":"something.else/v1","run":{"id":"r1"}}`,
+		"missing.json": `{"run":{"id":"r1"}}`,
+		"empty.json":   `{"schema_version":"","run":{"id":"r1"}}`,
+	} {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadJSONForComparison(path); err == nil {
+			t.Fatalf("%s 必须被拒绝：放宽的是版本，不是格式", name)
+		}
+	}
+}

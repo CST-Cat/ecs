@@ -38,11 +38,13 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	labels := uniqueLabels(options.Labels, len(reports))
 	for index, report := range reports {
 		out.Inputs = append(out.Inputs, Input{
-			Index: index, Label: labels[index], ReportID: report.Run.ID, ToolVersion: report.Tool.Version,
+			Index: index, Label: labels[index], SchemaVersion: report.SchemaVersion,
+			ReportID: report.Run.ID, ToolVersion: report.Tool.Version,
 			Profile: report.Run.Profile, StartedAt: report.Run.StartedAt, IPVersion: report.Run.IPVersion,
 			Redacted: report.Run.Redacted,
 		})
 	}
+	schemaMixed := prependVersionNotices(&out)
 
 	moduleOrder := unionModuleOrder(reports)
 	for _, moduleID := range moduleOrder {
@@ -89,7 +91,62 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	out.Summary.Reports = len(reports)
 	out.Summary.Modules = len(out.Modules)
 	out.Summary.Comparability = overallComparability(out)
+	if schemaMixed && out.Summary.Comparability == Comparable {
+		// 跨 schema 版本时不给"完全可比"。指标本身由签名保护，但 status 枚举
+		// 与 evidence 口径不在签名里，它们的语义理论上可以在升版时改变而没有
+		// 任何信号。降一级是对这段未覆盖面的如实表达。
+		out.Summary.Comparability = PartiallyComparable
+	}
 	return out, nil
+}
+
+// prependVersionNotices 把版本差异说明放到 Notices 最前面，并回答"schema 版本
+// 是否不一致"。
+//
+// 两种差异的性质不同，因此提示也不同：
+//
+//	schema 版本不同   下方结论的可信范围缩小了，必须降级并说清楚。
+//	ecs 版本不同      结论照常可信，但"某模块缺失""method 不一致"多半是版本
+//	                  差异的正常结果而不是故障。缺了这句话，用户会把它当 bug。
+func prependVersionNotices(out *Report) bool {
+	schemas := distinctInputValues(out.Inputs, func(input Input) string { return input.SchemaVersion })
+	tools := distinctInputValues(out.Inputs, func(input Input) string { return input.ToolVersion })
+
+	var leading []string
+	if len(schemas) > 1 {
+		leading = append(leading,
+			i18n.Errorf("compare.notice.schemaMixed", strings.Join(schemas, ", ")).Error())
+	}
+	if len(tools) > 1 {
+		leading = append(leading,
+			i18n.Errorf("compare.notice.toolMixed", strings.Join(tools, ", ")).Error())
+	}
+	out.Notices = append(leading, out.Notices...)
+	return len(schemas) > 1
+}
+
+// distinctInputValues 按首次出现顺序收集互不相同的非空取值。
+func distinctInputValues(inputs []Input, pick func(Input) string) []string {
+	seen := make(map[string]bool, len(inputs))
+	var values []string
+	for _, input := range inputs {
+		value := strings.TrimSpace(pick(input))
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+// SchemaVersions 返回各输入声明的互不相同的 schema 版本，按首次出现顺序。
+// 长度大于 1 表示这是一次跨版本比较。
+//
+// 渲染器共用这一个判定，而不是各自比对 Inputs——三份各写一遍迟早会出现
+// "文本报告说跨版本、HTML 说不跨"这种自相矛盾的输出。
+func (r Report) SchemaVersions() []string {
+	return distinctInputValues(r.Inputs, func(input Input) string { return input.SchemaVersion })
 }
 
 func uniqueLabels(labels []string, count int) []string {
@@ -230,6 +287,9 @@ func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIss
 		}
 		groups := make(map[string][]metricRef)
 		groupOrder := make([]string, 0)
+		// signed 只收录真正算出了签名的报告。取不到签名的（数值非有限、缺 method、
+		// 参数口径损坏）由各自的 issue 负责说明，混进差异归因只会误导。
+		signed := make([]metricRef, 0, len(refs))
 		invalid := make(map[int]bool)
 		invalidValues := make(map[int]bool)
 		invalidParameters := make(map[int]bool)
@@ -256,6 +316,7 @@ func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIss
 				groupOrder = append(groupOrder, signature)
 			}
 			groups[signature] = append(groups[signature], ref)
+			signed = append(signed, ref)
 		}
 		comparableGroups := 0
 		for _, signature := range groupOrder {
@@ -281,23 +342,108 @@ func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIss
 			if comparableGroups > 0 {
 				reason = "some_reports_use_different_method_or_parameters"
 			}
-			issues = append(issues, MetricIssue{Key: key, Label: refs[0].measurement.Label, Reason: reason, Reports: inputsForRefs(refs)})
+			issues = append(issues, MetricIssue{
+				Key: key, Label: refs[0].measurement.Label, Reason: reason,
+				Reports: inputsForRefs(refs), Differences: signatureDifferences(signed),
+			})
 		}
 	}
 	return metrics, issues
 }
 
 func metricSignature(ref metricRef) string {
+	components := signatureComponents(ref)
+	parts := make([]string, 0, len(components))
+	for _, component := range components {
+		parts = append(parts, component.field+"\x1e"+component.value)
+	}
+	return strings.Join(parts, "\x1f")
+}
+
+// signatureComponent 是签名的一个具名分量。
+type signatureComponent struct {
+	field string
+	value string
+}
+
+// signatureComponents 是签名的唯一来源：metricSignature 由它拼成，��异归因也读它。
+//
+// 两者共用同一组分量是刻意的。如果各写一份，迟早会出现"明细说没有差异、判定却
+// 说不可比"这种自相矛盾的输出——那比现在只给一个原因码更糟。
+//
+// 参数逐键展开而不是并成一串：并成一串只能告诉用户"参数不一样"，逐键才能指出
+// 是 threads 变了还是 scope_revision 变了。
+func signatureComponents(ref metricRef) []signatureComponent {
 	direction := "lower"
 	if ref.measurement.HigherIsBetter != nil && *ref.measurement.HigherIsBetter {
 		direction = "higher"
 	}
-	parts := []string{
-		ref.measurement.Unit, ref.measurement.Method, direction,
-		ref.result.Methodology.Kind,
-		canonicalParameters(ref.result.Methodology.Parameters),
+	parameters := ref.result.Methodology.Parameters
+	keys := make([]string, 0, len(parameters))
+	for key := range parameters {
+		keys = append(keys, key)
 	}
-	return strings.Join(parts, "\x1f")
+	sort.Strings(keys)
+
+	components := make([]signatureComponent, 0, 4+len(keys))
+	components = append(components,
+		signatureComponent{field: "unit", value: ref.measurement.Unit},
+		signatureComponent{field: "method", value: ref.measurement.Method},
+		signatureComponent{field: "direction", value: direction},
+		signatureComponent{field: "kind", value: ref.result.Methodology.Kind},
+	)
+	for _, key := range keys {
+		components = append(components, signatureComponent{field: "parameter:" + key, value: parameters[key]})
+	}
+	return components
+}
+
+// signatureDifferences 找出这批报告在签名分量上真正不一致的项。
+//
+// 只收录确实不同的分量。相同的分量不是用户在找的东西，列出来只会把真正变了的
+// 那一项淹掉。某报告缺某个参数键时取值留空——"缺这个键"本身就是一种差异。
+func signatureDifferences(refs []metricRef) []Difference {
+	if len(refs) < 2 {
+		return nil
+	}
+	reports := make([]int, 0, len(refs))
+	byField := make(map[string]map[int]string)
+	fieldOrder := make([]string, 0)
+	for _, ref := range refs {
+		reports = append(reports, ref.input)
+		for _, component := range signatureComponents(ref) {
+			if byField[component.field] == nil {
+				byField[component.field] = make(map[int]string)
+				fieldOrder = append(fieldOrder, component.field)
+			}
+			byField[component.field][ref.input] = component.value
+		}
+	}
+	sort.Ints(reports)
+
+	differences := make([]Difference, 0)
+	for _, field := range fieldOrder {
+		values := byField[field]
+		differs := false
+		for index := 1; index < len(reports); index++ {
+			if values[reports[index]] != values[reports[0]] {
+				differs = true
+				break
+			}
+		}
+		if !differs {
+			continue
+		}
+		difference := Difference{Field: field, Values: make([]DifferenceValue, 0, len(reports))}
+		for _, report := range reports {
+			difference.Values = append(difference.Values, DifferenceValue{Report: report, Value: values[report]})
+		}
+		differences = append(differences, difference)
+	}
+	if len(differences) == 0 {
+		return nil
+	}
+	return differences
 }
 
 func buildMetric(refs []metricRef, reportCount, reference int) Metric {
@@ -336,19 +482,6 @@ func validParameters(parameters map[string]string) bool {
 		}
 	}
 	return true
-}
-
-func canonicalParameters(parameters map[string]string) string {
-	keys := make([]string, 0, len(parameters))
-	for key := range parameters {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, key+"="+parameters[key])
-	}
-	return strings.Join(parts, "\x1e")
 }
 
 func cloneParameters(parameters map[string]string) map[string]string {

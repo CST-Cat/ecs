@@ -31,6 +31,10 @@ func ComparisonHTML(data comparison.Report) ([]byte, error) {
 	out.WriteString("<p>" + html.EscapeString(i18n.T("compare.subtitle")) + "</p><div class=\"hero-meta\">")
 	writeComparisonHTMLPill(&out, i18n.T("compare.reports"), fmt.Sprintf("%d", data.Summary.Reports))
 	writeComparisonHTMLPill(&out, i18n.T("compare.comparability"), comparisonLabel(string(data.Summary.Comparability)))
+	// 跨版本时才多一个 pill。同版本是常态，不为常态占位。
+	if schemas := data.SchemaVersions(); len(schemas) > 1 {
+		writeComparisonHTMLPill(&out, i18n.T("compare.schemaVersions"), strings.Join(schemas, " · "))
+	}
 	if data.Reference >= 0 && data.Reference < len(data.Inputs) {
 		writeComparisonHTMLPill(&out, i18n.T("compare.reference"), data.Inputs[data.Reference].Label)
 	}
@@ -106,6 +110,24 @@ func ComparisonHTML(data comparison.Report) ([]byte, error) {
 					html.EscapeString(fallbackReport(issue.Label, issue.Key)), html.EscapeString(comparisonIssueLabel(issue.Reason)), html.EscapeString(strings.Join(labels, ", ")))
 			}
 			out.WriteString("</tbody></table></div>")
+			// 原因码只说"口径不一致"。这一段说清楚不一致在哪，报告标签后带上
+			// 产出它的 ecs 版本。差异相同的指标合并成一组。
+			if groups := comparisonDifferenceGroups(module.MetricIssues); len(groups) > 0 {
+				fmt.Fprintf(&out, `<p class="muted"><strong>%s</strong></p><ul>`,
+					html.EscapeString(i18n.T("compare.differences")))
+				for _, group := range groups {
+					fmt.Fprintf(&out, `<li>%s<ul>`,
+						html.EscapeString(strings.Join(group.Metrics, i18n.T("punct.listSep"))))
+					for _, difference := range group.Differences {
+						fmt.Fprintf(&out, `<li>%s%s<code>%s</code></li>`,
+							html.EscapeString(comparisonDifferenceLabel(difference.Field)),
+							html.EscapeString(i18n.T("punct.colon")),
+							html.EscapeString(comparisonDifferenceLine(data, difference)))
+					}
+					out.WriteString("</ul></li>")
+				}
+				out.WriteString("</ul>")
+			}
 		}
 		if len(module.Metrics) == 0 && len(module.Changes) == 0 && len(module.MetricIssues) == 0 {
 			out.WriteString(`<p class="muted">` + html.EscapeString(i18n.T("compare.noChanges")) + `</p>`)

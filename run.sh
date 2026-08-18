@@ -8,6 +8,9 @@
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后删除本次临时前缀
 #   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
+#   curl -fsSL .../run.sh | sh -s -- --compare 昨天.json 今天.json
+#       └ 转交给 compare.sh 对比已有报告；对比不需要任何基准工具，因此跳过全部依赖准备
+#         compare.sh 也可以单独 curl 使用，两个入口等价
 #
 # 依赖策略：
 #   - 已有的通用组件优先使用；固定口径基准选中时使用发行版提供的指定版本与数据。
@@ -58,6 +61,18 @@ die() {
   exit 1
 }
 
+# fetch 定义在这里而不是靠近首次下载的地方：sh 的函数定义按顺序生效，而
+# --compare 的转发必须发生在全部工具准备之前，那时还远没走到下载 Release 那一段。
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+  else
+    die "需要 curl 或 wget" "curl or wget is required"
+  fi
+}
+
 # Help must be local and side-effect free.  In particular, asking the wrapper
 # for help must not download a release or prepare system packages first.
 case "${1:-}" in
@@ -66,11 +81,13 @@ case "${1:-}" in
       printf '%s\n' \
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
         '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
+        '       run.sh --compare REPORT.json REPORT.json [more reports] [compare options]' \
         '' \
         'Downloads a checksummed ecs release, then stages missing architecture-matched tools under a temporary PATH (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
         'When route/backtrace needs NextTrace Tiny, run.sh stages the official nexttrace-tiny asset; ECS_AUTO_DEPS=0 skips tool preparation.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
         'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
+        'With --compare, hands over to compare.sh, which needs no benchmark tools at all; compare.sh is equally reachable on its own.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
         'The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules. Explicit --only may select any module. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
@@ -78,11 +95,13 @@ case "${1:-}" in
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
         '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
+        '      run.sh --compare 报告.json 报告.json [更多报告] [对比选项]' \
         '' \
         '下载并校验 ecs Release，再按架构下载并校验缺失工具包，把需要的 binary 放入临时 PATH（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
         '选中 route/backtrace 时使用官方 nexttrace-tiny，缺失时跳过路由探测；ECS_AUTO_DEPS=0 会跳过依赖准备。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
         '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
+        '使用 --compare 会转交给 compare.sh，它完全不需要基准工具；compare.sh 也可以单独使用。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
         'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
@@ -96,6 +115,7 @@ esac
 # avoids eval/string-splitting and therefore preserves spaces and shell
 # metacharacters in ordinary user arguments.
 SUBMIT_MODE=0
+COMPARE_MODE=0
 SUBMIT_PROVIDER=""
 SUBMIT_REGION=""
 SUBMIT_OUTPUT=""
@@ -120,8 +140,14 @@ for arg in "$@"; do
   case "$arg" in
     --submit) SUBMIT_MODE=1 ;;
     --submit=*) die "--submit 不接受参数" "--submit does not take a value" ;;
+    --compare) COMPARE_MODE=1 ;;
+    --compare=*) die "--compare 不接受参数" "--compare does not take a value" ;;
   esac
 done
+# 提交的是一次测试的结果，对比产出的不是测试结果，两者不能叠加。
+if [ "$SUBMIT_MODE" -eq 1 ] && [ "$COMPARE_MODE" -eq 1 ]; then
+  die "--compare 不能与 --submit 同用" "--compare cannot be combined with --submit"
+fi
 if [ "$SUBMIT_MODE" -eq 1 ]; then
   for arg in "$@"; do
     case "$arg" in
@@ -333,6 +359,43 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
+
+# --compare 在这里就转走：对比是纯本地计算，不需要基准工具、语料、apt，也不需要
+# 临时 PATH——下面那一千多行准备逻辑对它一样都用不上。
+#
+# 转发而不是在这里重写一遍：缓存、--install、输出目录语义、参数透传都已经在
+# compare.sh 里实现并测试过，写第二份只会制造一处迟早分叉的实现。
+#
+# 关于这个未校验的下载：run.sh 下载的其它东西都对得上摘要（Release 资产对
+# checksums.txt，工具包再对 manifest.json），而 compare.sh 不是 Release 资产，
+# 没有摘要可对。它从 run.sh 自身被取回的同一个 origin 与同一个 ref 拉取，能篡改
+# 它的人同样能篡改 run.sh，因此对 curl|sh 的用户边际风险为零。Release 资产的逐个
+# 校验不受影响。
+#
+# 不用 exec：exec 会替换掉当前 shell，EXIT trap 不再触发，WORK 会永远留在 /tmp。
+if [ "$COMPARE_MODE" -eq 1 ]; then
+  # 先把 --compare 这个 token 滤掉，其余原样转发。用哨兵旋转而不是字符串拼接：
+  # 报告路径里的空格和 shell 元字符必须原样保留，与 --submit 的处理同一套路。
+  COMPARE_SENTINEL="__ecs_run_compare_filter_$$__"
+  set -- "$@" "$COMPARE_SENTINEL"
+  while [ "$#" -gt 0 ] && [ "$1" != "$COMPARE_SENTINEL" ]; do
+    arg=$1
+    shift
+    case "$arg" in
+      --compare) continue ;;
+    esac
+    set -- "$@" "$arg"
+  done
+  shift
+
+  COMPARE_SCRIPT_URL="${ECS_COMPARE_SCRIPT_URL:-https://raw.githubusercontent.com/${REPO}/main/compare.sh}"
+  say "转交给 compare.sh" "handing over to compare.sh"
+  fetch "$COMPARE_SCRIPT_URL" "$WORK/compare.sh" ||
+    die "下载 compare.sh 失败" "failed to download compare.sh"
+  COMPARE_STATUS=0
+  sh "$WORK/compare.sh" "$@" || COMPARE_STATUS=$?
+  exit "$COMPARE_STATUS"
+fi
 
 select_package_manager() {
   if command -v apt-get >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then
@@ -1520,16 +1583,6 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
       die "提交输出文件已存在：$SUBMIT_OUTPUT" "submit output file already exists: $SUBMIT_OUTPUT"
   fi
 fi
-
-fetch() {
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
-  else
-    die "需要 curl 或 wget" "curl or wget is required"
-  fi
-}
 
 say "下载 $ASSET" "downloading $ASSET"
 fetch "${BASE}/${ASSET}" "${WORK}/${ASSET}" || die "下载失败；仓库是否已发布 Release？" "download failed; has the repository published a Release?"

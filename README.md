@@ -27,6 +27,26 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 
 报告默认写在 `${TMPDIR:-/tmp}`，不会创建新目录；要指定位置用 `--output PATH`。
 
+### 一键对比（不安装任何东西）
+
+已有两份及以上 JSON 报告时，不必先装 ecs：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- 昨天.json 今天.json
+```
+
+脚本只下载主程序（对比是纯本地计算，不需要基准工具和语料），校验 SHA-256 后执行，**退出时删掉二进制、留下对比结果**。结果写在 `/tmp` 下的独立目录里并打印路径，当前目录不会新增任何东西。
+
+校验过的二进制缓存在 `${XDG_CACHE_HOME:-~/.cache}/ecs/<版本>` 下，下次对比直接复用、不再联网；每次使用前都会重新核对摘要，因此缓存被改动过也不会被执行。`--no-cache` 关闭缓存，`--install` 把这份二进制交给 `install.sh` 装进 PATH。其余参数原样透传给 `ecs compare`，`--format txt` 和 `--format=txt` 两种写法都可以。
+
+各输入报告的 schema 版本可以不同：跨版本时只比较双方都存在且签名一致的指标，可比性降为“部分可比”并在概览与说明处标注。
+
+已经在用 `run.sh` 的话，加一个 `--compare` 也能进到同一条路——它转交给 `compare.sh` 执行，两个入口完全等价：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --compare 昨天.json 今天.json
+```
+
 ### 安装二进制
 
 ```sh

@@ -87,6 +87,7 @@ PY
 ecs_step "shell 语法"
 sh -n install.sh
 sh -n run.sh
+sh -n compare.sh
 for script in scripts/*.sh scripts/*/*.sh; do
   [[ -e "$script" ]] || continue
   bash -n "$script"

@@ -1849,8 +1849,15 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 
 func (r *textRenderer) note(text string) {
 	// 说明文字按版面宽度折行，超长的一行在窄终端里会被硬折得难读。
-	for _, line := range wrapText(text, maxInt(1, r.width-6)) {
-		r.linef("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
+	//
+	// 只有第一行带项目符号，续行对齐缩进：每行都带 "·" 会让一条折了行的说明
+	// 看起来像三条独立说明，而说明里本来就常含逗号和顿号，读者无从分辨。
+	for index, line := range wrapText(text, maxInt(1, r.width-6)) {
+		if index == 0 {
+			r.linef("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
+			continue
+		}
+		r.linef("    %s", r.palette.Dim(line))
 	}
 }
 

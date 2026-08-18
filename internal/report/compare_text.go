@@ -77,6 +77,13 @@ func (r *comparisonTextRenderer) summaryBlock() {
 		{i18n.T("compare.statusChanges"), fmt.Sprintf("%d", r.data.Summary.StatusChanges)},
 		{i18n.T("compare.evidenceChanges"), fmt.Sprintf("%d", r.data.Summary.EvidenceChanges)},
 	}
+	// 跨版本时才占一行。同版本是常态，为常态加一行只会稀释真正的信息。
+	if schemas := r.data.SchemaVersions(); len(schemas) > 1 {
+		rows = append(rows, []string{
+			i18n.T("compare.schemaVersions"),
+			r.palette.Warning(strings.Join(schemas, " · ")),
+		})
+	}
 	r.table([]string{i18n.T("report.item"), i18n.T("report.content")}, rows, map[int]bool{1: true})
 	r.indentedStyled(i18n.T("compare.legend"), r.palette.Dim)
 	r.blank()
@@ -304,6 +311,23 @@ func (r *comparisonTextRenderer) issues(issues []comparison.MetricIssue) {
 		})
 	}
 	r.table([]string{i18n.T("report.metric"), i18n.T("compare.methodIssues"), i18n.T("compare.reports")}, rows, nil)
+	r.blank()
+
+	// 原因码只说"口径不一致"，不说不一致在哪。这一段把差异逐项列出来，报告标签
+	// 后带上产出它的 ecs 版本——"哪个版本用的哪个 method"是用户撞上这条时真正
+	// 要问的问题。差异相同的指标合并成一组，避免模块级参数被逐指标刷屏。
+	groups := comparisonDifferenceGroups(issues)
+	if len(groups) == 0 {
+		return
+	}
+	r.indented(i18n.T("compare.differences"), true)
+	for _, group := range groups {
+		r.indentedStyled("  "+strings.Join(group.Metrics, i18n.T("punct.listSep")), r.palette.LabelBold)
+		for _, difference := range group.Differences {
+			r.indentedStyled("    "+comparisonDifferenceLabel(difference.Field)+
+				i18n.T("punct.colon")+comparisonDifferenceLine(r.data, difference), r.palette.Dim)
+		}
+	}
 	r.blank()
 }
 

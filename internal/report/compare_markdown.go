@@ -31,6 +31,9 @@ func ComparisonMarkdown(data comparison.Report) string {
 	comparisonMarkdownRow(&out, i18n.T("compare.metricIssues"), fmt.Sprintf("%d", data.Summary.MetricIssues))
 	comparisonMarkdownRow(&out, i18n.T("compare.statusChanges"), fmt.Sprintf("%d", data.Summary.StatusChanges))
 	comparisonMarkdownRow(&out, i18n.T("compare.evidenceChanges"), fmt.Sprintf("%d", data.Summary.EvidenceChanges))
+	if schemas := data.SchemaVersions(); len(schemas) > 1 {
+		comparisonMarkdownRow(&out, i18n.T("compare.schemaVersions"), markdownEscape(strings.Join(schemas, " · ")))
+	}
 	out.WriteString("\n> " + markdownEscape(i18n.T("compare.legend")) + "\n\n")
 
 	out.WriteString("## " + i18n.T("compare.inputReports") + "\n\n")
@@ -78,6 +81,21 @@ func ComparisonMarkdown(data comparison.Report) string {
 					markdownEscape(strings.Join(labels, ", ")))
 			}
 			out.WriteString("\n")
+			// 原因码只说"口径不一致"。这一段说清楚不一致在哪，报告标签后带上
+			// 产出它的 ecs 版本。差异相同的指标合并成一组。
+			if groups := comparisonDifferenceGroups(module.MetricIssues); len(groups) > 0 {
+				out.WriteString("**" + markdownEscape(i18n.T("compare.differences")) + "**\n\n")
+				for _, group := range groups {
+					fmt.Fprintf(&out, "- %s\n", markdownEscape(strings.Join(group.Metrics, i18n.T("punct.listSep"))))
+					for _, difference := range group.Differences {
+						fmt.Fprintf(&out, "  - %s%s%s\n",
+							markdownEscape(comparisonDifferenceLabel(difference.Field)),
+							markdownEscape(i18n.T("punct.colon")),
+							markdownEscape(comparisonDifferenceLine(data, difference)))
+					}
+				}
+				out.WriteString("\n")
+			}
 		}
 		if len(module.Metrics) == 0 && len(module.Changes) == 0 && len(module.MetricIssues) == 0 {
 			out.WriteString("_" + markdownEscape(i18n.T("compare.noChanges")) + "_\n\n")

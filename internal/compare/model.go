@@ -42,14 +42,17 @@ type Report struct {
 }
 
 type Input struct {
-	Index       int       `json:"index"`
-	Label       string    `json:"label"`
-	ReportID    string    `json:"report_id"`
-	ToolVersion string    `json:"tool_version"`
-	Profile     string    `json:"profile"`
-	StartedAt   time.Time `json:"started_at"`
-	IPVersion   string    `json:"ip_version,omitempty"`
-	Redacted    bool      `json:"redacted"`
+	Index int    `json:"index"`
+	Label string `json:"label"`
+	// SchemaVersion 是这份输入报告自身声明的 schema。各输入允许不同——
+	// compare 跨版本时按尽力比较处理，因此消费方需要知道每一份的出处。
+	SchemaVersion string    `json:"schema_version"`
+	ReportID      string    `json:"report_id"`
+	ToolVersion   string    `json:"tool_version"`
+	Profile       string    `json:"profile"`
+	StartedAt     time.Time `json:"started_at"`
+	IPVersion     string    `json:"ip_version,omitempty"`
+	Redacted      bool      `json:"redacted"`
 }
 
 type Summary struct {
@@ -137,6 +140,27 @@ type MetricIssue struct {
 	Label   string `json:"label,omitempty"`
 	Reason  string `json:"reason"`
 	Reports []int  `json:"reports,omitempty"`
+	// Differences 说明签名里究竟哪一项不一致。只在因签名分歧而拒绝比较时填充，
+	// 且只列出确实不同的分量——相同的分量不是用户在找的东西。
+	//
+	// 没有它的时候，"method 或参数口径不一致"这个结论是不可行动的：本项目约定
+	// 工作负载语义变了就升 measurement.method，因此跨版本报告经常撞上这一条，
+	// 而用户看不出到底是 method 变了、某个参数变了，还是单位换了。
+	Differences []Difference `json:"differences,omitempty"`
+}
+
+// Difference 是一个具名的签名分量，以及各报告在这一项上的取值。
+type Difference struct {
+	// Field 取 unit / method / direction / kind / parameter:<名字>。
+	Field  string            `json:"field"`
+	Values []DifferenceValue `json:"values"`
+}
+
+type DifferenceValue struct {
+	Report int `json:"report"`
+	// Value 为空表示这份报告没有这一项——参数键在各报告间可增可减，
+	// "缺这个键"本身就是一种差异，必须能表达。
+	Value string `json:"value,omitempty"`
 }
 
 type Options struct {

@@ -386,4 +386,22 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v1` 只消费经过 `ecs.report/v1` 校验的输入；比较 schema 的字段语义发生不兼容变化时独立升级版本。
+- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时独立升级版本。
+
+### 为什么只有 `compare` 放宽 schema 版本
+
+`run`、`submit`、`render` 都要求输入的 `schema_version` 与本二进制完全一致：它们把报告当作当前 schema 的实例去解释，版本不符意味着字段语义可能已经变了，继续下去只会得到看似合理的错误结论。
+
+`compare` 不同。真正防止「拿不可比的数字作比较」的是**指标签名**——`key` + `method` + `unit` + 优劣方向 + 逐个 `methodology.parameters`——而不是顶层版本号。由于本项目约定工作负载语义变了就升 `measurement.method`（见上一条），跨版本的语义变化**必然**表现为签名不一致，会落进 `metric_issues` 并由 `differences` 逐分量指出是 method 变了、某个参数变了还是单位换了。这比拒绝加载信息量严格更大。
+
+硬拒绝的代价则是实打实的：schema 每升一次版，用户手里所有旧报告立刻永久不可比，而「比较不同时期的报告」正是 `compare` 存在的理由。
+
+放宽的是版本，不是格式：`schema_version` 为空或不属于 `ecs.report/` 家族仍然直接拒绝。
+
+**残留风险**：签名覆盖不到的字段——`status` 枚举语义、`evidence` 的 `grade` 与比例口径——理论上可以在升版时改变含义而没有任何信号。因此各输入 schema 版本不一致时：
+
+- `summary.comparability` 封顶为 `partially_comparable`，不会给出 `comparable`；
+- `notices` 首条列出涉及的全部 schema 版本；
+- 每份输入的 `inputs[].schema_version` 如实记录，四种输出格式都在概览处显示版本集合。
+
+输入报告来自不同 ecs 版本（但 schema 相同）时不降级，只在 `notices` 首条给出说明：下方的模块缺失与 method 不一致多为版本差异的正常结果，而不是故障。

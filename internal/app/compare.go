@@ -61,7 +61,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 	reports := make([]model.Report, 0, len(paths))
 	labels := make([]string, 0, len(paths))
 	for _, path := range paths {
-		data, loadErr := reporter.LoadJSON(path)
+		data, loadErr := reporter.LoadJSONForComparison(path)
 		if loadErr != nil {
 			fmt.Fprintf(stderr, "%s: %s: %v\n", i18n.T("cli.error"), path, loadErr)
 			return 1

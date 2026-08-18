@@ -27,6 +27,26 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 
 Reports go to `${TMPDIR:-/tmp}` by default and no new directory is created; pass `--output PATH` to choose a destination.
 
+### Compare once, install nothing
+
+When you already have two or more JSON reports, you do not need to install ecs first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
+```
+
+The script downloads only the main binary — comparison is pure local computation, so no benchmark tools or corpus are involved — verifies its SHA-256 before running it, and **removes the binary on exit while keeping the comparison**. Results are written to a private directory under `/tmp` whose path is printed; nothing is created in your current directory.
+
+The verified binary is cached under `${XDG_CACHE_HOME:-~/.cache}/ecs/<tag>` and reused on later runs without network access; its digest is re-checked every time, so a tampered cache is never executed. `--no-cache` disables it and `--install` hands the binary to `install.sh` to put it on PATH. Every other option is passed straight to `ecs compare`, in either `--format txt` or `--format=txt` form.
+
+Input reports may declare different schema versions: across versions only metrics present in all inputs with identical signatures are compared, comparability drops to partial, and the overview and notices say so.
+
+If you already use `run.sh`, `--compare` reaches the same path — it hands over to `compare.sh`, so the two entry points are equivalent:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --compare yesterday.json today.json
+```
+
 ### Install the binary
 
 ```sh
