@@ -103,10 +103,10 @@ Before starting, the terminal prints the estimated duration and disk footprint f
 ```sh
 ecs -4                       # IPv4 only
 ecs -6                       # IPv6 only
-ecs --ip-version auto        # default: dual-stack recorded separately, never merged
+ecs --ip-version auto        # default: select by host and module protocol capabilities
 ```
 
-Under `auto`, network modules on a dual-stack host produce one result per family instead of collapsing both into a single row. IPv6 stress probes are skipped when there is no real global IPv6 route.
+Under `auto`, ecs selects available protocol families based on host capabilities and each module's own protocol capabilities; modules that support independent dual-stack measurements record IPv4/IPv6 separately. IPv6 stress probes are skipped when there is no real global IPv6 route.
 
 ## Custom targets
 
@@ -144,7 +144,7 @@ ecs render --input reports/ecs-report-20260813-075451.json --format html,md
 ecs render --input report.json --output /tmp/out --name renamed
 ```
 
-`render` and `compare` accept only reports whose `schema_version` is exactly `ecs.report/v1`; any other value is rejected outright rather than rendered into results that might be silently misaligned. The report structure evolves additively (new fields are always optional), so optional fields the current implementation does not recognise are ignored without affecting the known ones.
+`render` loads reports according to the report schemas supported by the current binary; `compare` can compare reports in the `ecs.report/*` family. Across schemas, it compares only metrics present in both reports with identical signatures and marks the result as partially comparable. The report structure evolves additively (new fields are always optional), so optional fields the current implementation does not recognise are ignored without affecting the known ones.
 
 ## Compare runs
 

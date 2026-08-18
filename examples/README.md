@@ -103,10 +103,10 @@ ecs --only disk --disk-matrix-mode fixed
 ```sh
 ecs -4                       # 仅 IPv4
 ecs -6                       # 仅 IPv6
-ecs --ip-version auto        # 默认：双栈分别记录，不合并成一个数
+ecs --ip-version auto        # 默认：按主机和模块协议能力选择
 ```
 
-`auto` 下双栈机器的网络模块会各出一份结果，而不是把两者混成一行。没有真实全球 IPv6 路由时会跳过 IPv6 压力探测。
+`auto` 会根据主机能力和模块自身的协议能力选择可用协议族；支持独立双栈测量的模块会分别记录 IPv4/IPv6。没有真实全球 IPv6 路由时会跳过 IPv6 压力探测。
 
 ## 自定义测试目标
 
@@ -144,7 +144,7 @@ ecs render --input reports/ecs-report-20260813-075451.json --format html,md
 ecs render --input 报告.json --output /tmp/out --name 改个名
 ```
 
-`render` 与 `compare` 只接受 `schema_version` 恰为 `ecs.report/v1` 的报告，其他取值一律明确拒绝，而不是勉强渲染出可能错位的结果。报告结构只做新增式演进（新字段一律可选），因此当前实现不认识的可选字段会被忽略，已知字段不受影响。
+`render` 按当前二进制支持的报告 schema 加载；`compare` 可比较 `ecs.report/*` 家族的报告。跨 schema 时，仅比较双方都存在且签名一致的指标，并标记为部分可比。报告结构只做新增式演进（新字段一律可选），因此当前实现不认识的可选字段会被忽略，已知字段不受影响。
 
 ## 对比多次运行
 

@@ -19,7 +19,7 @@
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
 ```
 
-脚本会下载并校验 SHA-256，把缺失的基准工具按当前架构放进临时 PATH（**不写系统目录、不调用包管理器**），跑完即清理。直接管道运行会进入交互向导；带参数则跳过向导直接开跑：
+脚本会下载并校验 SHA-256，把缺失的固定版本基准工具按当前架构放进本次运行的临时 PATH（**不写系统目录、不通过系统包管理器安装**），跑完即清理。显式选择 `ookla` 且本机缺少 `speedtest` 时，`run.sh` 另走已校验的官方包源临时解包路径，也只写入本次 `$WORK`，不会安装到系统。直接管道运行会进入交互向导；带参数则跳过向导直接开跑：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
@@ -55,16 +55,18 @@ ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks   # 顺带用系统包
 ./install.sh --from ./bin/ecs                               # 安装本地已构建的二进制
 ```
 
-安装器只下载一个发行资产并强制校验 `checksums.txt` 中的 SHA-256，不匹配即退出。默认装到 `/usr/local/bin`（不可写时回落 `~/.local/bin`），**从不调用 sudo 提权安装二进制**。
+安装器只下载一个发行资产并强制校验 `checksums.txt` 中的 SHA-256，不匹配即退出。默认装到 `/usr/local/bin`（不可写时回落 `~/.local/bin`）；默认二进制安装不调用 `sudo` 或系统包管理器，只有显式 `--with-benchmarks` 时才会通过检测到的系统包管理器安装 `sysbench`、`fio`、`iperf3`，并可能需要 `sudo`。
 
 ### 从源码构建
 
 ```sh
 make build          # → bin/ecs
-make test           # go test ./...
-make check          # go vet + go test -race
+make test           # 默认 Go 测试：go test ./...
+make check          # ./scripts/ci/check.sh：静态/安全/schema/工作流 YAML/脚本语法等质量门禁
 make cross          # 七个 Linux 架构交叉编译到 dist/
 ```
+
+`make test` 只运行默认 Go 测试（`go test ./...`）；`make check` 调用 `./scripts/ci/check.sh`，运行静态、源码安全、schema、工作流 YAML、shell 语法及其他质量门禁。CI 在 `.github/workflows/ci.yml` 中将 `unit`、`quality`、`race`、`integration`、`cross` 与提交校验分成独立 job：`race` 执行 `go test -race ./...`，`integration` 使用真实基准工具，`cross` 构建七个 Linux 架构。
 
 从源码构建 ecs 需要 Go 1.26.5（版本由 `go.mod` 单点定义，工具链会自动获取）。运行 Release 二进制不需要 Go：它们是静态链接的，下载解压即可执行。
 
@@ -143,7 +145,7 @@ ecs --exposure public    # 联网但不把出口 IP 交给商业情报 API
 
 档位带进来的越限模块会被静默过滤，但 `--only` 亲手点名的模块越限会**直接报错**——用户写下的东西不该被悄悄丢掉。
 
-**报告脱敏默认开启**：本机 IP、主机名等敏感字段在写入任何格式前就被掩码，包括 JSON。`--reveal` 才保留完整值，此时向导会明确警告。详见 [SECURITY.md](SECURITY.md) 与 [THIRD_PARTY.md](THIRD_PARTY.md)。
+**报告脱敏默认开启**：默认只遮盖本机 IP（包括 JSON 和其他输出）；主机名不会遮盖。远端 IP、路由逐跳（route hop）和 BGP 前缀不会自动遮盖。`--reveal` 保留完整本机 IP，启用时向导会明确警告。详见 [SECURITY.md](SECURITY.md) 与 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 综合评分
 
@@ -200,7 +202,7 @@ ecs render --input 报告.json --format html    # 从 JSON 重新导出
 --only / --skip 模块,模块      显式增减模块
 --exposure local|public|thirdparty|any   外联上限
 --lang zh|en                   界面语言
--4 / -6 / --ip-version auto|4|6   协议族（双栈默认分开记录）
+-4 / -6 / --ip-version auto|4|6   协议族
 --format json,txt,md,html      输出格式
 --output DIR / --name 前缀      报告位置与命名
 --reveal                       保留完整本机 IP
@@ -215,6 +217,8 @@ ecs render --input 报告.json --format html    # 从 JSON 重新导出
 --ip-quality-sources all|none|名称,...            IP 质量数据源
 --score-baseline FILE          评分参考文件
 ```
+
+`auto` 会根据主机能力和模块自身的协议能力选择可用协议族；支持独立双栈测量的模块会分别记录 IPv4/IPv6。
 
 完整列表：`ecs run --help`。更多可复制的场景组合见 [examples/README.md](examples/README.md)。
 

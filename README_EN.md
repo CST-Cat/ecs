@@ -19,7 +19,7 @@ The one exception is the `ookla` module: it invokes the official speedtest clien
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
 ```
 
-The script downloads a checksummed release, stages any missing benchmark tools for your architecture under a temporary PATH (**never writing to system directories, never invoking a package manager**), and cleans up when it exits. A bare pipe enters the interactive wizard; passing arguments skips it and starts immediately:
+The script downloads a checksummed release, stages any missing fixed-release benchmark tools for your architecture under a temporary PATH (**never writing to system directories or installing through the system package manager**), and cleans up when it exits. If `ookla` is explicitly selected while `speedtest` is missing, `run.sh` separately uses a verified official package-source extraction path scoped to this run's `$WORK`; it still does not install anything on the system. A bare pipe enters the interactive wizard; passing arguments skips it and starts immediately:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
@@ -55,16 +55,18 @@ ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks   # also install sysbe
 ./install.sh --from ./bin/ecs                               # install a locally built binary
 ```
 
-The installer downloads exactly one release asset and verifies its SHA-256 against `checksums.txt`, exiting on any mismatch. It targets `/usr/local/bin` (falling back to `~/.local/bin` when that is not writable) and **never escalates with sudo to install the binary**.
+The installer downloads exactly one release asset and verifies its SHA-256 against `checksums.txt`, exiting on any mismatch. It targets `/usr/local/bin` (falling back to `~/.local/bin` when that is not writable). A default binary installation uses neither `sudo` nor the system package manager; only explicit `--with-benchmarks` installs `sysbench`, `fio` and `iperf3` through the detected system package manager, which may require `sudo`.
 
 ### Build from source
 
 ```sh
 make build          # → bin/ecs
-make test           # go test ./...
-make check          # go vet + go test -race
+make test           # default Go tests: go test ./...
+make check          # ./scripts/ci/check.sh: static/security/schema/workflow YAML/shell syntax and other quality gates
 make cross          # cross-compile all seven Linux architectures into dist/
 ```
+
+`make test` runs only the default Go tests (`go test ./...`); `make check` invokes `./scripts/ci/check.sh` for static, source-security, schema, workflow YAML, shell-syntax and other quality gates. CI splits `unit`, `quality`, `race`, `integration`, `cross` and submission validation into separate jobs in `.github/workflows/ci.yml`: `race` runs `go test -race ./...`, `integration` uses real benchmark tools, and `cross` builds all seven Linux architectures.
 
 Building ecs from source requires Go 1.26.5 (defined once in `go.mod`; the toolchain is fetched automatically). Running a release binary requires no Go toolchain at all — they are statically linked, so downloading and extracting is enough.
 
@@ -143,7 +145,7 @@ ecs --exposure public    # networked, but no egress IP handed to commercial inte
 
 Modules pulled in by a profile are filtered out silently when they exceed the ceiling, but a module you named yourself with `--only` raises an **error** instead — what the user wrote down should never be dropped quietly.
 
-**Redaction is on by default**: this machine's IP addresses, hostname and other sensitive fields are masked before anything is written, JSON included. `--reveal` keeps the full values, and the wizard warns explicitly when it is enabled. See [SECURITY.md](SECURITY.md) and [THIRD_PARTY.md](THIRD_PARTY.md).
+**Redaction is on by default**: only this machine's IP addresses are redacted (including JSON and other output); hostnames are not redacted. Remote IPs, route hops and BGP prefixes are not redacted automatically. `--reveal` keeps this machine's full IP addresses, and the wizard warns explicitly when it is enabled. See [SECURITY.md](SECURITY.md) and [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Composite score
 
@@ -200,7 +202,7 @@ ecs render --input report.json --format html     # re-export from JSON
 --only / --skip MODULE,...     add or remove modules explicitly
 --exposure local|public|thirdparty|any   outbound exposure ceiling
 --lang zh|en                   interface language
--4 / -6 / --ip-version auto|4|6   protocol family (dual-stack is recorded separately)
+-4 / -6 / --ip-version auto|4|6   protocol family
 --format json,txt,md,html      output formats
 --output DIR / --name PREFIX   report location and naming
 --reveal                       keep full local IP addresses
@@ -215,6 +217,8 @@ ecs render --input report.json --format html     # re-export from JSON
 --ip-quality-sources all|none|NAME,...            IP quality sources
 --score-baseline FILE          scoring reference file
 ```
+
+`auto` selects available protocol families based on the host's capabilities and each module's own protocol capabilities; modules that support independent dual-stack measurements record IPv4 and IPv6 separately.
 
 Full list: `ecs run --help`. Copy-pasteable scenarios: [examples/README_EN.md](examples/README_EN.md).
 
