@@ -79,7 +79,7 @@ install_binary() {
     exit 1
   fi
   destination="${install_dir}/${program}"
-  temp_destination="${install_dir}/.${program}.install.$$"
+  temp_destination=$(mktemp "${install_dir}/.${program}.install.XXXXXX")
   cp "$source_file" "$temp_destination"
   chmod 0755 "$temp_destination"
   mv "$temp_destination" "$destination"
@@ -115,7 +115,7 @@ install_benchmark_tools() {
   elif command -v apk >/dev/null 2>&1; then
     as_root apk add sysbench fio iperf3
   elif command -v pacman >/dev/null 2>&1; then
-    as_root pacman -Sy --noconfirm sysbench fio iperf3
+    as_root pacman -S --needed --noconfirm sysbench fio iperf3
   else
     printf '%s\n' "no supported package manager found; install sysbench fio iperf3 manually; fixed-release tools are provided temporarily by run.sh/ecs-tools" >&2
     exit 1
