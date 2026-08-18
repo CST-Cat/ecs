@@ -11,6 +11,35 @@
 
 - 后续版本的变更记录写在这里；release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
+## 0.7.0 — 2026-08-18
+
+本版重构 CI/CD 并完善报告对比。对普通用户可见的变化有两项：多了一条一行命令的报告对比入口，以及跨版本的旧报告重新变得可比。发布物的构建与校验方式全面收紧，但测量行为一字未改——本版与 0.6.16 的同口径成绩仍可直接比较。
+
+### 报告对比 — 2026-08-18
+
+- 新增 `compare.sh`：`curl … | sh -s -- 昨天.json 今天.json` 即可对比本地报告，不必先安装 ecs。对比是纯本地计算，因此不下载任何基准工具与语料；退出时删掉二进制，**保留**对比结果并打印路径，当前目录不新增任何东西。
+- 校验过的二进制缓存在 `${XDG_CACHE_HOME:-~/.cache}/ecs/<tag>` 下供反复对比复用，按具体 Release tag 分目录，每次使用前重新核对摘要；`--no-cache` 关闭，`--install` 委托 `install.sh` 装进 PATH。
+- `run.sh --compare` 转发给 `compare.sh`，两个入口等价而实现只有一份。
+- 跨 schema 版本的报告重新可比：`run`、`submit`、`render` 仍要求 schema 完全一致，只有 `compare` 放宽为尽力比较。保证比较安全的一直是指标签名（`key` + `method` + 单位 + 优劣方向 + 逐个参数）而非顶层版本号，因此跨版本的语义变化必然落进 `metric_issues` 而不会被误比。跨版本时可比性封顶为 `partially_comparable` 并显式提示；空版本与非 `ecs.report` 家族仍然拒绝。
+- 判定“口径不一致”时不再只给一个原因码，而是逐分量列出究竟什么变了（method 从哪一版到哪一版、哪个参数从多少变成多少、单位是否换了），并标注各值出自哪个 ecs 版本。差异相同的指标合并成组，避免模块级参数把真正只影响单个指标的那一项淹掉。
+
+### CI/CD — 2026-08-18
+
+- 两个职责混杂的 workflow 拆成五个，每个只回答一个问题：`ci.yml` 能否合入、`security.yml` 是否仍安全、`live.yml` 外部服务是否正常、`leaderboard.yml` 数据是否需要重建、`release.yml` 能否发布。第三方接口限流不再让普通代码检查变红，写权限也不再出现在任意分支的 push 上。
+- 发布流水线按权限与制品交接拆成 `preflight → tools×7 → assemble → verify/security → attest → publish`，**只有 `publish` 持有 `contents: write`**；编译器、Docker、`govulncheck` 与全部构建脚本都运行在无写权限的 job 中。发布入口冻结候选 SHA，后续阶段不再与移动中的 `main` 比较。
+- 新增 artifact attestation：全部发布资产可用 `gh attestation verify` 核对来源仓库、workflow 与提交。
+- 每次发布完整构建七架构工具包，删除按路径差异推断、复用上一个 Release 工具包的机制——那种推断错一次就是发出一个没人验证过的二进制。
+- 构建实现从 YAML 下沉到仓库脚本：Docker 镜像、apt 包、交叉三元组、QEMU 运行器全部由 `scripts/build_tools_container.sh` 的架构表决定，`--print-params` 可秒级比对构建定义。只要有一台带 Docker 的 Linux 主机，就能按与 CI 完全相同的定义构建。
+- 新增发布后安全监控：每日复审已发布的七架构二进制。命中全部来自 Go stdlib/toolchain 且官方已有同系列修复版时，自动开一个只改 `go.mod` 的 PR；其余情况交给人判断。
+- 全部 GitHub Action 固定到 40 位 commit SHA，并交由 Dependabot 管理升级。
+
+### 构建工具链 — 2026-08-18
+
+- Go 工具链版本收敛为 `go.mod` 单点定义（`go 1.26.6`），删除 1.22/stable 兼容矩阵与各处硬编码；发布校验改用本次构建实测的版本比对二进制元数据，升级 Go 只需改一行。
+- 从源码构建 ecs 需要 Go 1.26.6；**运行 Release 二进制不需要任何 Go 环境**，文档相应改写。
+- 测试按“需要什么”分类写进源码 build tag：单元测试无外部依赖，`integration` 需要真实基准工具，`live` 需要公网。删除 CI 配置里逐个列举测试函数名的巨型 `-skip` 正则。
+- `staticcheck` 与 `govulncheck` 的版本锁进独立的 `devtools/go.mod`（含 `go.sum` 哈希），主模块 `go.mod` 保持零依赖——从源码构建 ecs 仍然不下载任何模块。
+
 ## 0.6.16 — 2026-08-17
 
 本版只动文档与报告标识，不改任何测量行为：schema 标识定为 `ecs.report/v1`，基准工具版本全部冻结并公开对照表，六份 README 按当前源码重写。beta 阶段不保证跨版本报告兼容，请以当前版本重新生成报告。
