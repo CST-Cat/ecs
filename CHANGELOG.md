@@ -28,6 +28,7 @@
 - 两个职责混杂的 workflow 拆成五个，每个只回答一个问题：`ci.yml` 能否合入、`security.yml` 是否仍安全、`live.yml` 外部服务是否正常、`leaderboard.yml` 数据是否需要重建、`release.yml` 能否发布。第三方接口限流不再让普通代码检查变红，写权限也不再出现在任意分支的 push 上。
 - 发布 preflight 现在在七架构工具构建前校验对应版本的 CHANGELOG 章节且要求有正文；`ci/required` 直接打印 `unit=success` 等带 job 名的结果，失败时可立即定位具体红灯。
 - 明确 CI、live、security、release 红灯的处理边界；quality 检查改为表述为“版本固定、无 live 外部服务依赖”，承认分析工具首次构建与 Python venv/pip 可能联网；分析工具子模块同步使用 Go 1.26.6，避免用旧工具链扫描当前源码。
+- integration 现在只下载并编译 19.5 KiB 的官方 STREAM 源文件，复用 Release 的固定 SHA 与编译参数，不再因 STREAM 缺失而让真实集成门禁在 runner 上失败，也不触发完整十工具构建。
 - 发布流水线按权限与制品交接拆成 `preflight → tools×7 → assemble → verify/security → attest → publish`，**只有 `publish` 持有 `contents: write`**；编译器、Docker、`govulncheck` 与全部构建脚本都运行在无写权限的 job 中。发布入口冻结候选 SHA，后续阶段不再与移动中的 `main` 比较。
 - 新增 artifact attestation：全部发布资产可用 `gh attestation verify` 核对来源仓库、workflow 与提交。
 - 每次发布完整构建七架构工具包，删除按路径差异推断、复用上一个 Release 工具包的机制——那种推断错一次就是发出一个没人验证过的二进制。

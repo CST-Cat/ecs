@@ -13,6 +13,8 @@ the compiler native and uses TARGET_RUNNER only for final binary smoke tests.
 EOF
 }
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/stream.sh"
+
 die() {
   echo "build-tools: $*" >&2
   exit 1
@@ -342,10 +344,10 @@ nexttrace_commit=$(clone_release nxtrace/NTrace-core "$nexttrace_tag" "$nexttrac
 # The official STREAM source is a single file served over HTTPS with no release
 # feed and no upstream checksum.  Pin its SHA-256 here: the RCS revision comment
 # alone is not evidence, since a tampered file can keep that line unchanged.
-stream_url='https://www.cs.virginia.edu/stream/FTP/Code/stream.c'
-stream_expected_sha='a52bae5e175bea3f7832112af9c085adab47117f7d2ce219165379849231692b'
+stream_url=$ECS_STREAM_URL
+stream_expected_sha=$ECS_STREAM_SOURCE_SHA256
 stream_src="$work/stream.c"
-download_sha256 "$stream_url" "$stream_expected_sha" "$stream_src" 'official STREAM source'
+ecs_stream_download "$stream_src" || die 'official STREAM source did not match its pinned SHA-256'
 stream_sha=$stream_expected_sha
 stream_revision=$(sed -n 's@^/\* Revision: \$Id: stream\.c,v \([^ ]*\) \([0-9/]\{10\}\).*\*/$@\1-\2@p' "$stream_src")
 [[ -n "$stream_revision" ]] || die "could not read the official STREAM revision from $stream_url"
@@ -626,14 +628,11 @@ echo "building official STREAM ${stream_revision}"
 # STREAM 5.10's official source defaults are 10,000,000 elements and 10
 # iterations.  Keep those defaults explicit in the command and manifest so a
 # cache-sized/short-run build cannot silently change the benchmark semantics.
-stream_array_size=10000000
-stream_ntimes=10
-stream_build_flags=(
-  "$cc_command" -O3 -fopenmp -static -static-libgcc
-  "-DSTREAM_ARRAY_SIZE=$stream_array_size" "-DNTIMES=$stream_ntimes"
-)
+stream_array_size=$ECS_STREAM_ARRAY_SIZE
+stream_ntimes=$ECS_STREAM_NTIMES
+stream_build_flags=("$cc_command" "${ECS_STREAM_COMPILE_FLAGS[@]}")
 stream_build_flags_json=$(printf '%s\n' "${stream_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
-"${stream_build_flags[@]}" "$stream_src" -o "$stage/bin/stream"
+ecs_stream_compile "$stream_src" "$stage/bin/stream" "$cc_command"
 
 echo "building iputils ping ${iputils_tag} (${iputils_commit})"
 ping_build="$work/iputils-build"
