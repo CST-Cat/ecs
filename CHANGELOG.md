@@ -9,6 +9,10 @@
 
 ## Unreleased
 
+## 0.7.3 — 2026-08-18
+
+- 修复 integration CI 的 apt 安装可靠性：`apt-get update/install` 均设置有限 HTTP/HTTPS 超时、重试次数和单操作硬超时；首次 `update` 失败只在检测到 `azure.archive.ubuntu.com` 时通过临时源文件将该 Ubuntu 源替换为 `archive.ubuntu.com` 再试，第三方源不变；普通 `install`、备用 `update` 或备用 `install` 失败均保留诊断并 hard fail，不静默跳过；新增确定性回归测试。
+
 ## 0.7.2 — 2026-08-18
 
 - 将主模块的最低源码兼容版本改为 Go 1.22；`devtools` 工具链独立管理，不再与根 `go.mod` 绑定。正式 Release 使用 workflow 独立的 `ECS_RELEASE_GO`（当前为 1.26.5）固定编译器，并以构建实测版本校验发布二进制。
