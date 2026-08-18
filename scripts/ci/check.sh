@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 静态质量门禁：格式、静态规则、源码漏洞、数据契约、脚本语法。
+# 静态质量门禁：格式、静态规则、数据契约、脚本语法、工具清单/构建定义、triage。
 #
 # CI 的 quality job 与 release 的 preflight 调用的是同一个文件。发布前检查
 # 与合并前检查一旦是两份实现，就一定会在某次改动后悄悄分叉，而分叉的那一侧
 # 通常是发布路径——因为它跑得少。
 #
 # 这里的检查版本固定、且无 live 外部服务依赖，但不是“完全不联网”：首次构建
-# staticcheck/govulncheck、govulncheck 获取漏洞数据库，以及首次建立 Python venv
-# 时的 pip 都可能联网。需要真实工具的归 integration，需要第三方服务的归 live。
+# staticcheck，以及首次建立 Python venv 时的 pip 都可能联网。源码漏洞扫描不在
+# 这里执行，由 security workflow/release security 负责。需要真实工具的归 integration，
+# 需要第三方服务的归 live。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -49,9 +50,8 @@ for_each_build_tag "go vet" go vet
 staticcheck=$(ecs_devtool staticcheck)
 for_each_build_tag staticcheck "$staticcheck"
 
-ecs_step "govulncheck（源码）"
-govulncheck=$(ecs_devtool govulncheck)
-"$govulncheck" ./...
+# 源码漏洞扫描不属于普通 quality hard gate，不在这里调用 govulncheck；security
+# workflow 负责持续扫描，release security 负责发布前安全门禁。其他检查仍然失败即阻断。
 
 python=$(ecs_python)
 
@@ -117,4 +117,4 @@ for arch in "${ECS_ARCHES[@]}"; do
 done
 
 echo
-echo "check: 全部静态检查通过"
+echo "check: 全部确定性检查通过（漏洞扫描由 security workflow/release security 负责）"

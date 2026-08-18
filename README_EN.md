@@ -62,13 +62,15 @@ The installer downloads exactly one release asset and verifies its SHA-256 again
 ```sh
 make build          # → bin/ecs
 make test           # default Go tests: go test ./...
-make check          # ./scripts/ci/check.sh: static/security/schema/workflow YAML/shell syntax and other quality gates
+make check          # ./scripts/ci/check.sh: static/source-rule/schema/workflow YAML/shell syntax and other quality gates
 make cross          # cross-compile all seven Linux architectures into dist/
 ```
 
-`make test` runs only the default Go tests (`go test ./...`); `make check` invokes `./scripts/ci/check.sh` for static, source-security, schema, workflow YAML, shell-syntax and other quality gates. CI splits `unit`, `quality`, `race`, `integration`, `cross` and submission validation into separate jobs in `.github/workflows/ci.yml`: `race` runs `go test -race ./...`, `integration` uses real benchmark tools, and `cross` builds all seven Linux architectures.
+`make test` runs only the default Go tests (`go test ./...`); `make check` invokes `./scripts/ci/check.sh` for static, source-rule, schema, workflow YAML, shell-syntax and other quality gates. CI splits `unit`, `compat`, `quality`, `race`, `integration`, `cross` and submission validation into separate jobs in `.github/workflows/ci.yml`: `compat` runs source and parser tests on `1.22.x` and `stable`, while every other CI job uses `stable`; `race` runs `go test -race ./...`, `integration` uses real benchmark tools, and `cross` builds all seven Linux architectures.
 
-Building ecs from source requires Go 1.26.5 (defined once in `go.mod`; the toolchain is fetched automatically). Running a release binary requires no Go toolchain at all — they are statically linked, so downloading and extracting is enough.
+`go.mod`'s `go 1.22` only declares the minimum source-compatibility version; it does not select the CI or Release compiler. The Release workflow pins its compiler independently with `ECS_RELEASE_GO` (currently `1.26.5`) instead of deriving it from `go.mod`. Analysis tools, including `govulncheck`, are managed independently by `devtools/go.mod`. A `govulncheck` finding is a scan warning by default; ordinary, unknown-severity or unreachable findings in post-release review only warn and preserve JSON/triage, while scanner, network, input, command, JSON or output errors hard-fail. Only a finding that the Release workflow's `security` job confirms is explicitly severe (HIGH/CRITICAL) and reachable in the actual ECS binary blocks the release. An automatic Go upgrade proposal also requires an exact match in Go's official stable Release list.
+
+Building ecs from source requires Go 1.22 or newer (the toolchain is fetched automatically). Running a release binary requires no Go toolchain at all — they are statically linked, so downloading and extracting is enough.
 
 ## Commands
 

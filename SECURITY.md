@@ -61,25 +61,25 @@ preflight → tools × 7 → assemble → verify / security → attest → publi
 
 编译器、Docker、tar、`govulncheck`、构建脚本和全部第三方工具都运行在没有仓库写权限的阶段中。
 
+- 根 `go.mod` 中的 `go 1.22` 只表示源码最低兼容版本，不是 Release 编译器版本。正式 Release 使用 workflow 独立设置的 `ECS_RELEASE_GO`；构建、验证和 Release security 使用同一条配置，并以二进制中由 `go env GOVERSION` 记录的实测版本复核，而不从 `go.mod` 自动漂移；
 - 打包前要求 Git 工作区洁净，CI 下载和中间目录全部显式忽略；
 - 每个主程序归档**解包后**用 `go version -m` 校验 `vcs.revision` 等于冻结 SHA、`vcs.modified=false`，以及 Go 工具链等于本次构建的**实测**版本（取自 `go env GOVERSION`，不是写死在配置里的期望值）；
-- 对解包出来的实际二进制运行 `govulncheck -mode binary`，这是发布前安全门禁；
+- 对解包出来的实际 ECS 二进制运行 `govulncheck -mode binary`。finding 本身不等于自动禁止发布：只有 Release security 确认 finding 有明确的严重性（HIGH/CRITICAL 或等价的明确高危分数），且由 trace 证明对该实际二进制可达时，才阻断 Release；普通、严重性不明或对实际二进制不可达的 finding 只记录告警。工具、输入、扫描命令或 JSON 解析失败仍然 hard fail；
 - 为全部发布资产生成 GitHub artifact attestation，可用 `gh attestation verify` 核对来源仓库、workflow 与提交。
 
-Go 工具链版本由 `go.mod` 单点定义，CI、发布和安全复审都读它。`staticcheck` 与 `govulncheck` 的版本锁在 `devtools/go.mod`（含 `go.sum` 哈希）。所有 GitHub Action 引用固定到 40 位 commit SHA，升级由 Dependabot 以可审阅的 PR 提出。
+`staticcheck` 与 `govulncheck` 的版本由 `devtools/go.mod` 独立管理（含 `go.sum` 哈希），不从根 `go.mod` 推导。所有 GitHub Action 引用固定到 40 位 commit SHA，升级由 Dependabot 以可审阅的 PR 提出。
 
 ## 发布后持续监控
 
 发布完成不代表安全生命周期结束：漏洞库每天都在更新，昨天干净的二进制今天可能已经不干净了。用户手上跑的是 Release 上的那些文件，因此每日复审的对象就是它们。
 
-`security.yml` 每天做两件事：对当前 `main` 的源码跑 `govulncheck`，以及下载最新正式 Release 的七个主程序归档、校验摘要后逐个跑 `govulncheck -mode binary`。发现问题时分两类处理：
+`security.yml` 每天做两件事：对当前 `main` 的源码跑 `govulncheck`，以及下载最新正式 Release 的七个主程序归档、校验摘要后逐个跑 `govulncheck -mode binary`。源码 finding 只产生告警；正式 Release 的 finding 原样保存为 JSON artifact、运行 triage 并产生告警。finding 不用 `exit 1` 把普通开发或 Release 冻结；扫描工具、扫描输入、扫描命令或扫描 JSON 处理失败仍然 hard fail，不能用“普通 finding 只告警”掩盖执行错误。用于确认官方 Go Release 的查询或解析失败则按保守策略保持 `released=false`，不提出 PR。
 
-OSV 记录中的 `fixed` 版本只作为候选版本，不能单独触发自动升级。`security.yml` 的 release gate 只有在 Go 官方稳定 Release 列表中找到完全匹配且 `stable=true` 的正式版本（例如 `go1.26.7`）时才会置 `released=true`；未发布、查询失败或解析失败时仅输出告警、保持 `released=false`，因此不自动开升级 PR。
+发布后二进制扫描通过机器可解析的 `release_security_result=clean|blocked|fatal` 标记结果：`clean` 表示无须阻断的 finding（包括普通、严重性不明或不可达 finding），`blocked` 表示明确高危且可达但仅在发布后监控中告警，`fatal` 表示扫描工具、输入、JSON 或输出错误并使 job hard fail。
 
-- **Go stdlib/runtime 漏洞，且官方已在同一小版本系列内给出修复版，并通过上述正式版本校验**（例如 1.26.6 → 1.26.7）：自动开一个只改 `go.mod` 一行的 PR。这类修复是可以机械确认的等式——同一份 ecs 源码 + 官方修好的工具链，程序自身不需要任何改动。
-- **其余全部情况**：ecs 自身源码或第三方依赖的漏洞、只有跨小版本才有修复、漏洞库尚未给出修复版——只让 workflow 失败，交给人判断。
+OSV 记录中的 `fixed` 版本只作为候选版本，不能单独触发自动升级。只有在 triage 原有的机械条件成立（全部命中属于 Go stdlib/toolchain，且同一小版本系列存在可用修复候选），并且 `security.yml` 在 Go 官方稳定 Release 列表中找到完全匹配且 `stable=true` 的正式版本（例如 `go1.26.7`）时，才允许提出 Go Release 工具链升级 PR；未正式发布、查询失败或解析失败时仅保留告警、JSON 和 triage 结果，不提出 PR。
 
-自动开出的 PR **不会自动合并**。合并与打 tag 由人决定，随后走与常规发布完全相同的那一条流水线，制品验证标准不因为是安全重建而降低。判定逻辑在 `scripts/security/triage.py`，其判定表由 `scripts/security/triage_test.sh` 覆盖。
+自动提出的 PR **不会自动合并**。合并与打 tag 由人决定，随后走与常规发布完全相同的那一条流水线，制品验证标准不因为是安全重建而降低。`scripts/security/triage.py` 只读取扫描 JSON 并输出判定，不修改源码、配置、制品或工作树；其判定表由 `scripts/security/triage_test.sh` 覆盖。
 
 注意：由 `GITHUB_TOKEN` 创建的 PR，其 CI 会停在 approval-required 状态，需要有写权限的人在 PR 页面点一次 **Approve workflows to run**。这是 GitHub 防止递归触发的既定行为。
 

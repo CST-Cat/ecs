@@ -31,6 +31,10 @@ on:
 permissions:
   contents: read
 
+# 正式发布统一使用这条明确的 Go 工具链，不从主模块 go.mod 自动漂移。
+env:
+  ECS_RELEASE_GO: "1.26.5"
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -56,7 +60,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.ECS_RELEASE_GO }}
           cache: false
 
       - name: Freeze the release candidate
@@ -116,7 +120,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.ECS_RELEASE_GO }}
           cache: false
 
       # 交叉构建把宿主当成构建机，跑错架构的宿主会得到错误的产物。
@@ -160,9 +164,10 @@ jobs:
 
   # 组装全部发布物，并记录**实测**的工具链版本。
   #
-  # 不写 expected_go=... 这种期望值：期望值会和 go.mod 分叉，而分叉的那
-  # 一侧通常没人注意。这里记录的是本次构建真实使用的版本，verify 拿它去对二
-  # 进制里的元数据。升级 Go 只需要改 go.mod。
+  # 编译器版本由 workflow 级 ECS_RELEASE_GO 固定，不另写
+  # expected_go=... 这种可能分叉的期望值。这里记录的是 setup-go 后本次构建
+  # 实际使用的 go env GOVERSION，verify 原样传入 --build-go-version，去对二进制
+  # 里的元数据。升级正式 Go 版本时只需更新本 workflow 的 ECS_RELEASE_GO。
   assemble:
     needs: [preflight, tools]
     runs-on: ubuntu-latest
@@ -176,7 +181,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.ECS_RELEASE_GO }}
           cache: false
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -224,7 +229,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.ECS_RELEASE_GO }}
           cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -252,7 +257,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.ECS_RELEASE_GO }}
           cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

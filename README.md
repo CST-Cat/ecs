@@ -62,13 +62,15 @@ ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks   # 顺带用系统包
 ```sh
 make build          # → bin/ecs
 make test           # 默认 Go 测试：go test ./...
-make check          # ./scripts/ci/check.sh：静态/安全/schema/工作流 YAML/脚本语法等质量门禁
+make check          # ./scripts/ci/check.sh：静态/源码规则/schema/工作流 YAML/脚本语法等质量门禁
 make cross          # 七个 Linux 架构交叉编译到 dist/
 ```
 
-`make test` 只运行默认 Go 测试（`go test ./...`）；`make check` 调用 `./scripts/ci/check.sh`，运行静态、源码安全、schema、工作流 YAML、shell 语法及其他质量门禁。CI 在 `.github/workflows/ci.yml` 中将 `unit`、`quality`、`race`、`integration`、`cross` 与提交校验分成独立 job：`race` 执行 `go test -race ./...`，`integration` 使用真实基准工具，`cross` 构建七个 Linux 架构。
+`make test` 只运行默认 Go 测试（`go test ./...`）；`make check` 调用 `./scripts/ci/check.sh`，运行静态、源码规则、schema、工作流 YAML、shell 语法及其他质量门禁。CI 在 `.github/workflows/ci.yml` 中将 `unit`、`compat`、`quality`、`race`、`integration`、`cross` 与提交校验分成独立 job：`compat` 在 `1.22.x` 与 `stable` 上执行源码与解析器测试，其他 CI job 使用 `stable`；`race` 执行 `go test -race ./...`，`integration` 使用真实基准工具，`cross` 构建七个 Linux 架构。
 
-从源码构建 ecs 需要 Go 1.26.5（版本由 `go.mod` 单点定义，工具链会自动获取）。运行 Release 二进制不需要 Go：它们是静态链接的，下载解压即可执行。
+`go.mod` 中的 `go 1.22` 只表示源码最低兼容版本，不代表 CI 或 Release 编译器。Release workflow 使用独立的 `ECS_RELEASE_GO`（当前为 `1.26.5`）固定编译器，不从 `go.mod` 决定；分析工具（包括 `govulncheck`）由 `devtools/go.mod` 独立管理。`govulncheck` 的 finding 默认是扫描告警；发布后复审中的普通、严重性不明或不可达 finding 只告警并保留 JSON/triage，扫描器、网络、输入、命令、JSON 或输出错误仍然 hard fail；只有 Release workflow 的 `security` job 确认实际 ECS 二进制存在明确严重（HIGH/CRITICAL）且可达的 finding 时才阻断发布。自动提出 Go 升级 PR 还必须通过 Go 官方稳定 Release 列表的精确版本门禁。
+
+从源码构建 ecs 至少需要 Go 1.22（工具链会自动获取）。运行 Release 二进制不需要 Go：它们是静态链接的，下载解压即可执行。
 
 ## 命令
 

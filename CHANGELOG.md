@@ -9,11 +9,19 @@
 
 ## Unreleased
 
-- 将主模块与 `devtools` 模块的 Go 工具链统一固定为 1.26.5，并同步中英文构建文档。
+## 0.7.2 — 2026-08-18
+
+- 将主模块的最低源码兼容版本改为 Go 1.22；`devtools` 工具链独立管理，不再与根 `go.mod` 绑定。正式 Release 使用 workflow 独立的 `ECS_RELEASE_GO`（当前为 1.26.5）固定编译器，并以构建实测版本校验发布二进制。
 - 安全升级候选现在必须先通过 Go 官方稳定 Release 列表的精确版本门禁；未确认正式发布时不自动提出升级 PR。
 - 修复实际测量与网络语义：自定义 iperf3 节点仅对 IPv4/IPv6 字面量固定对应协议族；主机名不固定协议族，协议族留空并交由模块选择；cnspeed 仅在 EOF、达到时限或达到字节上限时成功，非 EOF 读取错误不生成吞吐；回程静态线路签名不伪造 ASN，BGP 改为报告 AS_PATH 中观测到的 ASN 并保留旧机器键；DNS `best_dns_median_ms` 使用 `udp-a-query-warm-v1` method。
 - 修复安装器：Arch Linux 的 benchmark 依赖安装使用 `pacman -S --needed --noconfirm`，不刷新 package DB；二进制替换改为在目标目录内用 `mktemp` 创建临时文件，再通过 `cp`、`chmod`、`mv` 完成。
 - Commit 4 文档收口：中英文说明统一报告隐私（只遮本机 IP，主机名、远端 IP、路由逐跳和 BGP 前缀不自动遮盖）、按主机与模块协议能力选择协议族、`make test`/`make check` 与 CI 的 race/integration/cross 分工、默认 installer 与 `--with-benchmarks` 的系统包安装边界、`run.sh` 临时 staging，以及 `render` 当前支持 schema 与 `compare` 的 `ecs.report/*` 跨 schema 部分可比规则。
+
+- CI 新增 `compat` 矩阵，在 `1.22.x` 与 `stable` 上执行源码和解析器测试；其余 CI job 统一使用 `stable`。最低源码兼容版本、日常构建工具链和正式 Release 编译器因此各自有清晰边界。
+- 普通 `govulncheck` finding 不再让普通质量检查或 security 日常监控 hard fail；扫描器、网络、输入、命令和 JSON 处理错误仍然阻断。Release 安全门禁只在实际 ECS 二进制中的 finding 被明确标为 `HIGH`/`CRITICAL`（或等价的明确高危分数）且 trace 证明可达时阻断发布，普通、严重性不明或不可达的 finding 只告警。
+- 发布后扫描以机器可解析的 `release_security_result=clean|blocked|fatal` 标记结果：工具、输入、JSON 与输出错误为 `fatal` 并 hard fail；明确高危且可达的 finding 为 `blocked`，仅告警并继续 triage；普通或严重性不明的 finding 为 `clean` 并保留告警记录。
+- `security` workflow 继续扫描当前源码和已发布二进制，保存 JSON、运行 triage，并仅在 Go stdlib/toolchain 漏洞具备官方稳定 Release 的正式修复版时提出升级 PR；PR 仍由人工合并和发布，不自动合并。
+- 中英文 README、安全说明与项目协作规则同步更新，明确 Go 最低源码兼容、CI/Release 工具链分工、漏洞 finding 的告警与阻断边界，以及安全扫描、triage 和正式修复版升级流程。
 
 - 后续版本的变更记录写在这里；release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 

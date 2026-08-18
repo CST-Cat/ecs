@@ -9,8 +9,8 @@ name: ci
 # 变化，不阻断合并；security 红表示已发布二进制发现漏洞，应该保持红；release
 # 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
-# Go 工具链版本只来自 go.mod。这里不写任何版本号，升级 Go 只需改 go.mod 一行。
-# 注意不要设置 GOTOOLCHAIN=local：setup-go 靠读 go.mod 决定装哪个补丁版。
+# compat 矩阵验证最低支持版本；其余 CI job 显式使用 stable。
+# 不要设置 GOTOOLCHAIN=local：compat 负责验证最低版本，其他 CI 使用当前稳定版。
 
 on:
   push:
@@ -33,9 +33,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
+      - name: Unit and parser tests
+        env:
+          ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
+        run: go test ./...
+
+  # 最低支持版本与当前稳定版本的源码、解析器测试。
+  compat:
+    name: compat (${{ matrix.go-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.22.x", "stable"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: false
       - name: Unit and parser tests
         env:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
@@ -49,7 +69,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       - run: ./scripts/ci/check.sh
 
@@ -61,7 +81,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       - run: ./scripts/ci/integration.sh
 
@@ -73,7 +93,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       - run: go test -race ./...
 
@@ -85,7 +105,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       - run: ./scripts/cross.sh
 
@@ -98,7 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: false
       - name: Validate submissions
         env:
@@ -122,13 +142,14 @@ jobs:
   # 不必去仓库设置里逐个勾选。
   required:
     if: always()
-    needs: [unit, quality, integration, race, cross, submissions]
+    needs: [unit, compat, quality, integration, race, cross, submissions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every check to pass
         env:
           UNIT_RESULT: ${{ needs.unit.result }}
+          COMPAT_RESULT: ${{ needs.compat.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           RACE_RESULT: ${{ needs.race.result }}
@@ -138,6 +159,7 @@ jobs:
           set -euo pipefail
           summary=(
             "unit=$UNIT_RESULT"
+            "compat=$COMPAT_RESULT"
             "quality=$QUALITY_RESULT"
             "integration=$INTEGRATION_RESULT"
             "race=$RACE_RESULT"
