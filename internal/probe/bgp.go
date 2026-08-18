@@ -113,14 +113,15 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		successes++
 		for index, observation := range observations {
-			peerText, pathText, collectors, adjacent := summarizeRouteViews(observation.ReportingPeers)
+			peerText, pathText, collectors, observed := summarizeRouteViews(observation.ReportingPeers)
 			if index == 0 {
 				result.Fields = append(result.Fields,
 					model.Field{Key: "ipv" + version + "_prefix", Label: "IPv" + version + " 匹配前缀", Value: observation.Prefix},
 					model.Field{Key: "ipv" + version + "_origin_asn", Label: "IPv" + version + " 起源 ASN", Value: formatASN(observation.OriginASN)},
 					model.Field{Key: "ipv" + version + "_rpki", Label: "IPv" + version + " RPKI", Value: fallback(observation.RPKIState, "unknown")},
 					model.Field{Key: "ipv" + version + "_collectors", Label: "IPv" + version + " 观测 collectors", Value: collectors},
-					model.Field{Key: "ipv" + version + "_adjacent_asns", Label: "IPv" + version + " 推断相邻 ASN", Value: adjacent},
+					// Legacy machine field name; keep it for schema compatibility.
+					model.Field{Key: "ipv" + version + "_adjacent_asns", Label: "IPv" + version + " AS_PATH 中观测到的 ASN", Value: observed},
 				)
 			}
 			table.Rows = append(table.Rows, []string{
@@ -149,7 +150,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Notes = append(result.Notes,
 		"该模块最多每个启用协议族查询一次 RouteViews 当前 RIB，不下载历史 MRT，不向 ecs 服务器上传报告。",
 		"查询按出口 IP 的最长匹配前缀返回；精确 /32 或 /128 没有单独观测时，RouteViews 可能返回其已发布的父前缀。",
-		"AS 路径中的相邻 ASN 是基于公开路径样本的推断；RouteViews reporting peer 是观测点的 peer，不等于你的 VPS 提供商直接互联。",
+		"AS_PATH 中观测到的 ASN 来自公开 AS_PATH 样本，不代表 VPS 与这些 ASN 直接互联；RouteViews reporting peer 是观测点的 peer，也不等于你的 VPS 提供商直接互联。",
 		"没有公共观测不等于前缀没有发布：可能是出口 IP 查询、RIB 收敛、过滤或 RouteViews 当前覆盖范围造成的。",
 	)
 	result.Finish(start)
@@ -258,11 +259,11 @@ func waitRouteViews(ctx context.Context) error {
 	return nil
 }
 
-func summarizeRouteViews(peers []routeViewsPeer) (peerText, pathText, collectors, adjacent string) {
+func summarizeRouteViews(peers []routeViewsPeer) (peerText, pathText, collectors, observed string) {
 	peerSet := make(map[string]bool)
 	collectorSet := make(map[string]bool)
 	pathSet := make(map[string]bool)
-	adjacentSet := make(map[string]bool)
+	observedSet := make(map[string]bool)
 	for _, peer := range peers {
 		if peer.PeerASN > 0 {
 			peerSet["AS"+strconv.Itoa(peer.PeerASN)] = true
@@ -273,21 +274,34 @@ func summarizeRouteViews(peers []routeViewsPeer) (peerText, pathText, collectors
 		if path := strings.TrimSpace(peer.ASPath); path != "" && len(pathSet) < 4 {
 			pathSet[path] = true
 		}
-		for _, asn := range adjacentASNs(peer.ASPath) {
-			adjacentSet["AS"+strconv.Itoa(asn)] = true
+		for _, asn := range observedASPathASNs(peer.ASPath) {
+			observedSet["AS"+strconv.Itoa(asn)] = true
 		}
 	}
 	peerValues := sortedKeys(peerSet)
 	collectorValues := sortedKeys(collectorSet)
 	pathValues := sortedKeys(pathSet)
-	adjacentValues := sortedKeys(adjacentSet)
-	return joinOrDash(peerValues), joinOrDash(pathValues), joinOrDash(collectorValues), joinOrDash(adjacentValues)
+	observedValues := sortedKeys(observedSet)
+	return joinOrDash(peerValues), joinOrDash(pathValues), joinOrDash(collectorValues), joinOrDash(observedValues)
 }
 
-func adjacentASNs(path string) []int {
+func observedASPathASNs(path string) []int {
 	var result []int
 	previous := 0
+	inASSet := false
 	for _, raw := range strings.Fields(path) {
+		if inASSet {
+			if strings.ContainsRune(raw, '}') {
+				inASSet = false
+			}
+			continue
+		}
+		if strings.ContainsRune(raw, '{') {
+			if !strings.ContainsRune(raw, '}') {
+				inASSet = true
+			}
+			continue
+		}
 		raw = strings.Trim(raw, "{}(),")
 		if strings.HasPrefix(strings.ToUpper(raw), "AS") {
 			raw = raw[2:]

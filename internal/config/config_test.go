@@ -245,6 +245,22 @@ func TestParseEndpointListInfersFamily(t *testing.T) {
 	}
 }
 
+func TestParseIPerfTargetListInfersNetworksOnlyForLiterals(t *testing.T) {
+	targets, err := ParseIPerfTargetList("v4=192.0.2.1:5201,v6=[2001:db8::1]:5202-5203,host=iperf-v6.example:5204")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 3 {
+		t.Fatalf("parsed iperf targets = %d, want 3", len(targets))
+	}
+	wantNetworks := []string{"IPv4", "IPv6", ""}
+	for i, want := range wantNetworks {
+		if targets[i].Networks != want {
+			t.Errorf("target %d networks = %q, want %q", i, targets[i].Networks, want)
+		}
+	}
+}
+
 func TestValidateRejectsUnknownEndpointFamily(t *testing.T) {
 	cfg, err := Defaults(ProfileStandard)
 	if err != nil {

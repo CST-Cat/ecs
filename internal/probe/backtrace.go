@@ -34,10 +34,8 @@ func (backtraceProbe) NeedsNetwork() bool { return true }
 
 // routeSignature 是一条中国骨干网线路的识别特征。
 type routeSignature struct {
-	// Prefix 是该线路骨干网段的地址前缀。
+	// Prefix 是该线路骨干网段的粗粒度地址前缀，只用于线路分类线索。
 	Prefix string
-	// ASN 是承载该线路的自治域号。
-	ASN int
 	// Code 是线路简称，用于表格。
 	Code string
 	// Label 是完整线路名。
@@ -50,29 +48,29 @@ type routeSignature struct {
 
 // chinaRouteSignatures 覆盖三大运营商的主要骨干线路。
 //
-// 网段与 AS 对应关系来自各运营商公开的骨干网编号，属于长期稳定的公开事实；
-// 但运营商会调整网段用途，因此这里只做前缀匹配并保留证据，供人工复核。
+// 这里只做粗粒度前缀匹配，用于识别运营商与线路分类；逐跳 ASN 必须来自
+// NextTrace 返回的 hop 元数据，不能由静态前缀签名推断。
 var chinaRouteSignatures = []routeSignature{
 	// 中国电信：CN2 优于 163。
-	{Prefix: "59.43.", ASN: 4809, Code: "CN2", Label: "电信 CN2（AS4809）", Carrier: "电信", Quality: 30},
-	{Prefix: "202.97.", ASN: 4134, Code: "163", Label: "电信 163 骨干（AS4134）", Carrier: "电信", Quality: 10},
+	{Prefix: "59.43.", Code: "CN2", Label: "电信 CN2", Carrier: "电信", Quality: 30},
+	{Prefix: "202.97.", Code: "163", Label: "电信 163 骨干", Carrier: "电信", Quality: 10},
 
 	// 中国联通：CUII/A 网优于 169。
-	{Prefix: "218.105.", ASN: 9929, Code: "CUII", Label: "联通 CUII / A 网（AS9929）", Carrier: "联通", Quality: 30},
-	{Prefix: "210.51.", ASN: 9929, Code: "CUII", Label: "联通 CUII / A 网（AS9929）", Carrier: "联通", Quality: 30},
-	{Prefix: "219.158.", ASN: 4837, Code: "169", Label: "联通 169 骨干（AS4837）", Carrier: "联通", Quality: 10},
+	{Prefix: "218.105.", Code: "CUII", Label: "联通 CUII / A 网", Carrier: "联通", Quality: 30},
+	{Prefix: "210.51.", Code: "CUII", Label: "联通 CUII / A 网", Carrier: "联通", Quality: 30},
+	{Prefix: "219.158.", Code: "169", Label: "联通 169 骨干", Carrier: "联通", Quality: 10},
 
 	// 中国移动：CMI 国际优于普通 CMNET。
-	{Prefix: "223.120.", ASN: 58807, Code: "CMI", Label: "移动 CMI 国际（AS58807）", Carrier: "移动", Quality: 30},
-	{Prefix: "221.183.", ASN: 9808, Code: "CMNET", Label: "移动 CMNET 骨干（AS9808）", Carrier: "移动", Quality: 10},
+	{Prefix: "223.120.", Code: "CMI", Label: "移动 CMI 国际", Carrier: "移动", Quality: 30},
+	{Prefix: "221.183.", Code: "CMNET", Label: "移动 CMNET 骨干", Carrier: "移动", Quality: 10},
 
 	// IPv6 目标的地址来自运营商前缀；IPv6 的末端目标由地区节点域名
 	// 提供，实际命中的骨干仍以路径中的跳为证据。前缀规则故意保持粗粒度，
-	// 只做“看到了哪家骨干”的线索，不把它伪装成精确 ASN 归属证明。
-	{Prefix: "240e:", ASN: 4134, Code: "CT-v6", Label: "电信 IPv6 骨干（240e）", Carrier: "电信", Quality: 10},
-	{Prefix: "2408:8120:", ASN: 9929, Code: "CUII-v6", Label: "联通 CUII IPv6（2408:8120）", Carrier: "联通", Quality: 30},
-	{Prefix: "2408:8000:", ASN: 4837, Code: "169-v6", Label: "联通 169 IPv6（2408:8000）", Carrier: "联通", Quality: 10},
-	{Prefix: "2409:", ASN: 9808, Code: "CMNET-v6", Label: "移动 CMNET IPv6（2409）", Carrier: "移动", Quality: 10},
+	// 只做“看到了哪家骨干/线路分类”的线索，不推断逐跳 ASN。
+	{Prefix: "240e:", Code: "CT-v6", Label: "电信 IPv6 骨干（240e）", Carrier: "电信", Quality: 10},
+	{Prefix: "2408:8120:", Code: "CUII-v6", Label: "联通 CUII IPv6（2408:8120）", Carrier: "联通", Quality: 30},
+	{Prefix: "2408:8000:", Code: "169-v6", Label: "联通 169 IPv6（2408:8000）", Carrier: "联通", Quality: 10},
+	{Prefix: "2409:", Code: "CMNET-v6", Label: "移动 CMNET IPv6（2409）", Carrier: "移动", Quality: 10},
 }
 
 // backtraceMaxHops 是回程识别的跳数上限。

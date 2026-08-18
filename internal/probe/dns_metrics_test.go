@@ -55,15 +55,22 @@ func TestDNSProbeEmitsPerResolverStatisticsAndEvidence(t *testing.T) {
 		"dns_resolver_01_jitter_ms":       false,
 		"best_dns_median_ms":              false,
 	}
+	var bestDNSMethod string
 	for _, measurement := range result.Measurements {
 		if _, ok := wantKeys[measurement.Key]; ok {
 			wantKeys[measurement.Key] = true
+		}
+		if measurement.Key == "best_dns_median_ms" {
+			bestDNSMethod = measurement.Method
 		}
 	}
 	for key, found := range wantKeys {
 		if !found {
 			t.Errorf("DNS result missing %q: %+v", key, result.Measurements)
 		}
+	}
+	if bestDNSMethod != "udp-a-query-warm-v1" {
+		t.Errorf("best_dns_median_ms.Method = %q, want %q", bestDNSMethod, "udp-a-query-warm-v1")
 	}
 	if result.Evidence == nil || result.Evidence.Valid != attempts || result.Evidence.Expected != attempts || result.Evidence.Unit != "query" {
 		t.Fatalf("DNS evidence = %+v", result.Evidence)

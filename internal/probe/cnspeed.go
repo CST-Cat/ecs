@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,13 +207,21 @@ func cnDownload(ctx context.Context, client *http.Client, userAgent string, node
 	var total int64
 	deadline := start.Add(duration)
 	for {
-		if time.Now().After(deadline) || total >= maxBytes {
+		if !time.Now().Before(deadline) || total >= maxBytes {
 			break
 		}
-		count, readErr := response.Body.Read(buffer)
+		readBuffer := buffer
+		remaining := maxBytes - total
+		if remaining < int64(len(readBuffer)) {
+			readBuffer = readBuffer[:int(remaining)]
+		}
+		count, readErr := response.Body.Read(readBuffer)
 		total += int64(count)
 		if readErr != nil {
-			break
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return 0, total, readErr
 		}
 	}
 	elapsed := time.Since(start).Seconds()

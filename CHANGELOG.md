@@ -11,6 +11,7 @@
 
 - 将主模块与 `devtools` 模块的 Go 工具链统一固定为 1.26.5，并同步中英文构建文档。
 - 安全升级候选现在必须先通过 Go 官方稳定 Release 列表的精确版本门禁；未确认正式发布时不自动提出升级 PR。
+- 修复实际测量与网络语义：自定义 iperf3 节点仅对 IPv4/IPv6 字面量固定协议族、主机名保持双栈；cnspeed 仅在 EOF、达到时限或达到字节上限时成功，非 EOF 读取错误不生成吞吐；回程静态线路签名不伪造 ASN，BGP 改为报告 AS_PATH 中观测到的 ASN 并保留旧机器键；DNS `best_dns_median_ms` 使用 `udp-a-query-warm-v1` method。
 
 - 后续版本的变更记录写在这里；release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 

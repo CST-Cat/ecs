@@ -12,15 +12,20 @@ import (
 	"ecs/internal/config"
 )
 
-func TestAdjacentASNsDeduplicatesASPath(t *testing.T) {
-	got := adjacentASNs("64500 64500 {64501,64502} 64503")
-	want := []int{64500, 64503}
-	if len(got) != len(want) {
-		t.Fatalf("adjacentASNs = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("adjacentASNs[%d] = %d, want %d", i, got[i], want[i])
+func TestObservedASPathASNsDeduplicatesPrependsWithoutConcatenatingASSet(t *testing.T) {
+	for _, path := range []string{
+		"64500 64500 {64501,64502} 64503",
+		"64500 64500 {64501, 64502} 64503",
+	} {
+		got := observedASPathASNs(path)
+		want := []int{64500, 64503}
+		if len(got) != len(want) {
+			t.Fatalf("observedASPathASNs(%q) = %v, want %v", path, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("observedASPathASNs(%q)[%d] = %d, want %d", path, i, got[i], want[i])
+			}
 		}
 	}
 }

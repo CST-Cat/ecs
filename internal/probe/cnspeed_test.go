@@ -3,11 +3,14 @@ package probe
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -29,6 +32,62 @@ type cnFakeResolver struct {
 	calls     int
 }
 
+type cnDownloadTestBody struct {
+	data    []byte
+	readErr error
+	read    bool
+}
+
+func (body *cnDownloadTestBody) Read(buffer []byte) (int, error) {
+	if body.read {
+		return 0, io.EOF
+	}
+	body.read = true
+	return copy(buffer, body.data), body.readErr
+}
+
+func (body *cnDownloadTestBody) Close() error { return nil }
+
+type cnDownloadTestRoundTripper struct {
+	target *url.URL
+	next   http.RoundTripper
+	body   io.ReadCloser
+}
+
+func (transport cnDownloadTestRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	routed := request.Clone(request.Context())
+	routed.URL.Scheme = transport.target.Scheme
+	routed.URL.Host = transport.target.Host
+	routed.Host = transport.target.Host
+	response, err := transport.next.RoundTrip(routed)
+	if err != nil {
+		return nil, err
+	}
+	if transport.body != nil {
+		_ = response.Body.Close()
+		response.Body = transport.body
+	}
+	return response, nil
+}
+
+func newCNDownloadTestClient(t *testing.T, body io.ReadCloser) *http.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("fixture"))
+	}))
+	t.Cleanup(server.Close)
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	return &http.Client{Transport: cnDownloadTestRoundTripper{
+		target: target,
+		next:   server.Client().Transport,
+		body:   body,
+	}}
+}
+
 func (resolver *cnFakeResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	resolver.calls++
 	return append([]netip.Addr(nil), resolver.addresses...), resolver.err
@@ -38,6 +97,68 @@ func TestCNSpeedUsesFullDepthBudget(t *testing.T) {
 	duration, maxBytes := cnSpeedBudget()
 	if duration != 8*time.Second || maxBytes != 100*1024*1024 {
 		t.Fatalf("cnspeed budget = %s/%d, want 8s/100MiB", duration, maxBytes)
+	}
+}
+
+func TestCNDownloadReadTermination(t *testing.T) {
+	node := cnNode{DownloadURL: "http://speed.example.com/download"}
+	tests := []struct {
+		name      string
+		data      string
+		readErr   error
+		maxBytes  int64
+		wantBytes int64
+		wantError bool
+	}{
+		{
+			name:      "EOF after data succeeds",
+			data:      "downloaded before EOF",
+			readErr:   io.EOF,
+			maxBytes:  1024,
+			wantBytes: int64(len("downloaded before EOF")),
+		},
+		{
+			name:      "connection reset after partial data fails",
+			data:      "partial data",
+			readErr:   syscall.ECONNRESET,
+			maxBytes:  1024,
+			wantBytes: int64(len("partial data")),
+			wantError: true,
+		},
+		{
+			name:      "max bytes succeeds",
+			data:      "more data than allowed",
+			maxBytes:  4,
+			wantBytes: 4,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := &cnDownloadTestBody{data: []byte(test.data), readErr: test.readErr}
+			client := newCNDownloadTestClient(t, body)
+			mbps, bytes, err := cnDownload(context.Background(), client, "ecs/test", node, time.Second, test.maxBytes)
+			if bytes != test.wantBytes {
+				t.Fatalf("bytes = %d, want %d", bytes, test.wantBytes)
+			}
+			if test.wantError {
+				if err == nil {
+					t.Fatal("partial read error must fail")
+				}
+				if !errors.Is(err, syscall.ECONNRESET) {
+					t.Fatalf("read error = %v, want connection reset", err)
+				}
+				if mbps != 0 {
+					t.Fatalf("failed read returned Mbps = %f, want 0", mbps)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("download failed: %v", err)
+			}
+			if mbps <= 0 {
+				t.Fatalf("successful download Mbps = %f, want positive", mbps)
+			}
+		})
 	}
 }
 

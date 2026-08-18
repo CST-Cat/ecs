@@ -128,9 +128,17 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 		if name == "" {
 			name = host
 		}
+		networks := ""
+		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+			if ip.To4() != nil {
+				networks = "IPv4"
+			} else {
+				networks = "IPv6"
+			}
+		}
 		targets = append(targets, IPerfEndpoint{
 			Name: name, Host: host, PortStart: start, PortEnd: end,
-			Location: "命令行指定", Networks: "IPv4", Region: "custom",
+			Location: "命令行指定", Networks: networks, Region: "custom",
 		})
 	}
 	return targets, nil

@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -91,8 +92,17 @@ func TestExtractNextTraceDetailsParsesMetadataWithoutInventingGeo(t *testing.T) 
 	}
 	withoutMetadata := []backtraceHop{{IP: "59.43.130.22", ASN: "—", Network: "—"}}
 	annotateBacktraceDetails(withoutMetadata)
-	if withoutMetadata[0].ASN != "—" || withoutMetadata[0].Network == "—" {
+	if withoutMetadata[0].ASN != "—" || withoutMetadata[0].Network != "电信 CN2" {
 		t.Fatalf("route signature must not fabricate ASN, but may label line: %+v", withoutMetadata[0])
+	}
+}
+
+func TestRouteSignaturesDoNotContainStaticASN(t *testing.T) {
+	asNumber := regexp.MustCompile(`(?i)\bAS\d+\b`)
+	for _, signature := range chinaRouteSignatures {
+		if asNumber.MatchString(signature.Label) {
+			t.Fatalf("signature label %q contains a static ASN", signature.Label)
+		}
 	}
 }
 

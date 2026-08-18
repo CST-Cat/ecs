@@ -179,7 +179,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "best_dns_median_ms", Label: "最佳 DNS P50",
 			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
-			Method: "udp-a-query-v1", HigherIsBetter: model.BoolPtr(false),
+			Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 		result.Summary = fmt.Sprintf("%s 最快 · P50 %s", bestName, formatMilliseconds(best))
 	}
