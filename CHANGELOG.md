@@ -9,6 +9,9 @@
 
 ## Unreleased
 
+- 将主模块与 `devtools` 模块的 Go 工具链统一固定为 1.26.5，并同步中英文构建文档。
+- 安全升级候选现在必须先通过 Go 官方稳定 Release 列表的精确版本门禁；未确认正式发布时不自动提出升级 PR。
+
 - 后续版本的变更记录写在这里；release workflow 会按 tag 从本文件提取对应版本章节，作为 GitHub Release 正文，并附上该 tag 提交中的 `CHANGELOG.md` 链接。
 
 ## 0.7.0 — 2026-08-18

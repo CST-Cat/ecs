@@ -60,6 +60,7 @@ jobs:
       released_tag: ${{ steps.scan.outputs.released_tag }}
       vulnerable: ${{ steps.triage.outputs.vulnerable }}
       upgrade_to: ${{ steps.triage.outputs.upgrade_to }}
+      upgrade_released: ${{ steps.release_gate.outputs.released }}
       reason: ${{ steps.triage.outputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -87,6 +88,33 @@ jobs:
             --current "$(go env GOVERSION)" \
             "${findings[@]}" | tee -a "$GITHUB_OUTPUT"
 
+      # OSV 的 fixed 版本只说明漏洞数据库认为该版本修复了问题，不代表
+      # 该 Go 版本已经正式发布。go.dev/dl/?mode=json 返回官方稳定 release
+      # 列表；查询或解析失败都保持默认 false，不能因此放行 propose。
+      - name: Check whether the proposed Go release exists
+        id: release_gate
+        if: always()
+        env:
+          UPGRADE_TO: ${{ steps.triage.outputs.upgrade_to }}
+        run: |
+          set -euo pipefail
+          echo 'released=false' >> "$GITHUB_OUTPUT"
+
+          if [[ -z "$UPGRADE_TO" ]]; then
+            exit 0
+          fi
+
+          if curl --fail --silent --show-error --location \
+            --retry 3 --connect-timeout 10 --max-time 30 \
+            'https://go.dev/dl/?mode=json' \
+            | jq -e --arg target "go${UPGRADE_TO}" \
+              'any(.[]; .version == $target and .stable == true)' >/dev/null
+          then
+            sed -i 's/^released=false$/released=true/' "$GITHUB_OUTPUT"
+          else
+            echo "未确认 Go $UPGRADE_TO 已正式发布，跳过自动升级 PR。" >&2
+          fi
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -112,7 +140,7 @@ jobs:
   # 唯一带写权限的 job，而且只做 sed + commit + PR：不编译、不跑容器、
   # 不调用第三方工具。写权限的暴露面被压到最小。
   propose:
-    if: always() && needs.released.outputs.upgrade_to != ''
+    if: always() && needs.released.outputs.upgrade_to != '' && needs.released.outputs.upgrade_released == 'true'
     needs: [released]
     runs-on: ubuntu-latest
     timeout-minutes: 10

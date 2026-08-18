@@ -66,7 +66,7 @@ make check          # go vet + go test -race
 make cross          # cross-compile all seven Linux architectures into dist/
 ```
 
-Building ecs from source requires Go 1.26.6 (defined once in `go.mod`; the toolchain is fetched automatically). Running a release binary requires no Go toolchain at all — they are statically linked, so downloading and extracting is enough.
+Building ecs from source requires Go 1.26.5 (defined once in `go.mod`; the toolchain is fetched automatically). Running a release binary requires no Go toolchain at all — they are statically linked, so downloading and extracting is enough.
 
 ## Commands
 
