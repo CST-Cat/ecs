@@ -71,6 +71,11 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 
 # ---- 发布说明 ----
 #
+# preflight 已经检查过一次；publish 再检查一次，防止单独调用这个脚本时绕过
+# 发布门禁。检查脚本还会拒绝只有标题、没有正文的版本章节。
+./scripts/release/check_changelog.sh --version "$version" ||
+  die "CHANGELOG.md 的 $version 章节校验失败"
+
 # 取自 CHANGELOG.md 里对应版本那一节。取不到就失败：一个没有说明的 Release
 # 对用户没有意义，而"忘了写 CHANGELOG"正是应该在这里被拦住的疏漏。
 notes_file=$(mktemp)

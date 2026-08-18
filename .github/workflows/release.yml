@@ -12,6 +12,9 @@ name: release
 #   attest     id-token: write   为最终制品生成 provenance
 #   publish    contents: write   唯一持有写权限的 job
 #
+# 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release；它
+# 不等同于 ci、live 或发布后 security 的红灯。
+#
 # 编译器、Docker、tar、govulncheck、构建脚本、全部第三方工具都跑在没有仓库
 # 写权限的 job 里。真正拿到 contents: write 的只有最后那个上传步骤。
 #
@@ -65,6 +68,14 @@ jobs:
         run: |
           ./scripts/release/freeze.sh --event "$EVENT" --ref "$REF" --sha "$SHA" \
             | tee -a "$GITHUB_OUTPUT"
+
+      # 忘写发布说明必须在七架构工具构建前失败，不能等到最后的 publish 才发现。
+      # workflow_dispatch 的 dev 演练没有对应版本章节，因此只对实际 tag 校验。
+      - name: Validate release changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.freeze.outputs.version }}
+        run: ./scripts/release/check_changelog.sh --version "$VERSION"
 
       - name: Deterministic source checks
         run: ./scripts/ci/check.sh

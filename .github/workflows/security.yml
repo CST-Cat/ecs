@@ -18,6 +18,8 @@ name: security
 #     -> 让 workflow 红着，交给人判断。
 #
 # 判定逻辑在 scripts/security/triage.py，不在这个 YAML 里。
+# 红灯语义：security 红不是 live 的“上游变了”提示；尤其是 released job 发现
+# 已发布二进制存在漏洞时，本来就应该保持红，直到用户手上的版本得到处理。
 
 on:
   schedule:
@@ -49,7 +51,8 @@ jobs:
           govulncheck=$(ecs_devtool govulncheck)
           "$govulncheck" ./...
 
-  # 已发布的七架构二进制。它红了说明"用户手上正在跑的东西有问题"。
+  # 已发布的七架构二进制。它红了说明"用户手上正在跑的东西有问题"，这是
+  # security workflow 应该阻止被忽略的结果，不应为了消红而放宽扫描或 triage。
   released:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -7,8 +7,9 @@ set -euo pipefail
 # 与合并前检查一旦是两份实现，就一定会在某次改动后悄悄分叉，而分叉的那一侧
 # 通常是发布路径——因为它跑得少。
 #
-# 这里只做不联网、可重复的检查。需要真实工具的归 integration，需要第三方
-# 服务的归 live。
+# 这里的检查版本固定、且无 live 外部服务依赖，但不是“完全不联网”：首次构建
+# staticcheck/govulncheck、govulncheck 获取漏洞数据库，以及首次建立 Python venv
+# 时的 pip 都可能联网。需要真实工具的归 integration，需要第三方服务的归 live。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
