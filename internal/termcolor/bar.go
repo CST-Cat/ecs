@@ -53,21 +53,3 @@ func (p Palette) Bar(ratio float64, width int) string {
 	}
 	return body
 }
-
-// BarRelative 渲染组内相对柱：value 相对本组最大值的占比。
-//
-// 组内相对不需要基线，因此适用于任何一组同口径的数值——各 DNS 解析器互比、
-// 各测速节点互比。它只回答"这几个里谁大"，不声称任何绝对水平。
-func (p Palette) BarRelative(value, groupMax float64, width int) string {
-	if groupMax <= 0 {
-		return p.Dim(strings.Repeat("·", max(width, 0)))
-	}
-	return p.Bar(value/groupMax, width)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

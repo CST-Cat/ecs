@@ -112,11 +112,6 @@ func ParseLevel(raw string) (Level, bool) {
 	return LevelNone, false
 }
 
-// LevelNames 列出可显式指定的档位。
-func LevelNames() []string {
-	return []string{"none", "basic", "256", "truecolor"}
-}
-
 // RGB 是一个 24 位颜色。
 type RGB struct{ R, G, B uint8 }
 

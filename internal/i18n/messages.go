@@ -252,10 +252,8 @@ var chinese = map[string]string{
 	"term.networkUsage": "网络流量",
 	"term.uncapped":     "iperf3 按带宽计（不封顶）",
 	"term.hint":         "提示",
-	"term.finished":     "测试完成",
 	"term.localReports": "本地报告",
 	"term.noUpload":     "未上传任何报告；分享文件前请确认敏感字段遮盖状态。",
-	"term.ipDetail":     "IP 质量明细",
 	"term.writeFailed":  "报告写入失败",
 
 	// ── 标点 ────────────────────────────────────────────────
@@ -540,10 +538,8 @@ var english = map[string]string{
 	"term.networkUsage": "Network",
 	"term.uncapped":     "iperf3 saturates the link (uncapped)",
 	"term.hint":         "Note",
-	"term.finished":     "Finished",
 	"term.localReports": "Local reports",
 	"term.noUpload":     "Nothing was uploaded; check redaction before sharing these files.",
-	"term.ipDetail":     "IP quality detail",
 	"term.writeFailed":  "failed to write report",
 
 	// ── Punctuation ─────────────────────────────────────────

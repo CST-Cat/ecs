@@ -392,45 +392,6 @@ func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
 	terminal.line("")
 }
 
-func (terminal *Terminal) Summary(data model.Report, files map[string]string) {
-	terminal.line("")
-	terminal.line(terminal.style("1", i18n.T("term.finished")) + "  " + data.Summary.Headline)
-	for _, result := range data.Results {
-		if len(result.Measurements) == 0 {
-			continue
-		}
-		values := make([]string, 0, 2)
-		for _, metric := range result.Measurements {
-			if len(values) == 2 {
-				break
-			}
-			values = append(values, metric.Label+" "+metric.Display)
-		}
-		label := methodologyLabel(result.Methodology)
-		if label == "" {
-			label = i18n.T("methodology.unlabeled")
-		}
-		terminal.line(fmt.Sprintf("  %-18s %-10s %s", result.Title, "["+label+"]", strings.Join(values, " · ")))
-	}
-	for _, result := range data.Results {
-		if result.ID != "network" || len(result.Tables) == 0 {
-			continue
-		}
-		terminal.line("")
-		terminal.line(terminal.style("1;36", i18n.T("term.ipDetail")))
-		for _, field := range result.Fields {
-			if strings.HasSuffix(field.Key, "_ip_type") {
-				terminal.line("  " + field.Label + "  " + terminal.style("1", field.Value))
-			}
-		}
-		for _, table := range result.Tables {
-			terminal.printTable(table)
-		}
-	}
-	terminal.printFiles(files)
-	terminal.printNoUpload()
-}
-
 // FullReport 在所有模块完成、脱敏、评分和文件写入后一次性输出完整报告。
 // data 必须是已经按当前语言本地化的副本；结构化 measurements、fields 和 tables
 // 由 reporter.Text 统一渲染。终端 txt 有意隐藏原始 text blocks、冗余 notes 与
@@ -447,11 +408,6 @@ func (terminal *Terminal) FullReport(data model.Report, files map[string]string,
 	}
 	terminal.printFiles(files)
 	terminal.printNoUpload()
-}
-
-// Report 是 FullReport 的简短别名，供调用方按语义选择名称。
-func (terminal *Terminal) Report(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
-	terminal.FullReport(data, files, scored, color)
 }
 
 func (terminal *Terminal) printFiles(files map[string]string) {
@@ -488,48 +444,6 @@ func (terminal *Terminal) printNoUpload() {
 	for _, line := range wrapTerminalText(i18n.T("term.noUpload"), terminal.progressColumns()) {
 		terminal.line(terminal.style("2", line))
 	}
-}
-
-func (terminal *Terminal) printTable(table model.Table) {
-	if len(table.Columns) == 0 {
-		return
-	}
-	terminal.line("")
-	if table.Title != "" {
-		terminal.line(terminal.style("1", table.Title))
-	}
-	widths := make([]int, len(table.Columns))
-	for index, value := range table.Columns {
-		widths[index] = textwidth.Width(value)
-	}
-	for _, row := range table.Rows {
-		for index := range table.Columns {
-			if index < len(row) && textwidth.Width(row[index]) > widths[index] {
-				widths[index] = textwidth.Width(row[index])
-			}
-		}
-	}
-	terminal.line(formatTableRow(table.Columns, widths))
-	for _, row := range table.Rows {
-		values := make([]string, len(table.Columns))
-		copy(values, row)
-		terminal.line(formatTableRow(values, widths))
-	}
-}
-
-func formatTableRow(values []string, widths []int) string {
-	var output strings.Builder
-	output.WriteString("  ")
-	for index, value := range values {
-		if index > 0 {
-			output.WriteString("  ")
-		}
-		output.WriteString(value)
-		if index < len(values)-1 {
-			output.WriteString(strings.Repeat(" ", max(0, widths[index]-textwidth.Width(value))))
-		}
-	}
-	return output.String()
 }
 
 // wrapTerminalText wraps unstyled terminal UI text by visible columns. The
@@ -575,16 +489,6 @@ func (terminal *Terminal) style(code, value string) string {
 		return value
 	}
 	return "\x1b[" + code + "m" + value + "\x1b[0m"
-}
-
-// methodologyLabel 优先按 kind 查译文，回落到探针写死的 Label。
-func methodologyLabel(m model.Methodology) string {
-	if m.Kind != "" {
-		if key := "methodology." + m.Kind; i18n.Has(i18n.Current(), key) {
-			return i18n.T(key)
-		}
-	}
-	return m.Label
 }
 
 func isTerminal(writer io.Writer) bool {
