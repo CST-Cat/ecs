@@ -137,31 +137,3 @@ ecs_devtool() {
   fi
   printf '%s\n' "$bin"
 }
-
-# ecs_python 回显一个装齐了校验依赖的 python3。
-#
-# 与 Go 工具同一个思路：版本钉在这里，CI 和本地拿到的是同一套。宿主上已经
-# 装好时直接用宿主的，否则在 .devtools-bin/pyenv 建一个隔离的 venv——不往
-# 开发机的全局 site-packages 里装东西。
-ECS_PYTHON_REQUIREMENTS=(PyYAML==6.0.2)
-
-ecs_python() {
-  local venv python
-  if python3 -c 'import yaml' 2>/dev/null; then
-    command -v python3
-    return 0
-  fi
-
-  venv="$ECS_REPO_ROOT/.devtools-bin/pyenv"
-  python="$venv/bin/python"
-  if [[ ! -x "$python" ]]; then
-    echo "devtools: 建立 python venv（${ECS_PYTHON_REQUIREMENTS[*]}）" >&2
-    python3 -m venv "$venv" >&2 || {
-      echo "ecs_python: 无法建立 venv，请安装 python3-venv 或自行安装 ${ECS_PYTHON_REQUIREMENTS[*]}" >&2
-      return 1
-    }
-    "$python" -m pip install --quiet --disable-pip-version-check \
-      "${ECS_PYTHON_REQUIREMENTS[@]}" >&2 || return 1
-  fi
-  printf '%s\n' "$python"
-}

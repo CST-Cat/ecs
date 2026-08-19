@@ -1,15 +1,15 @@
 # ecs 竞品与上游能力调研
 
-> 调研快照：2026-07-31  
+> Historical research snapshot（2026-07-31）：本文记录该日期的调研，不代表当前实现、依赖策略或项目规范。
 > 方法：阅读公开 README、入口代码、输出格式、依赖下载逻辑和许可证。IPQuality 的多源覆盖、字段语义与分段规则按 AGPL 合规吸收并明确归属；其他项目只吸收功能思想与工程经验。
 >
-> 当前实现和依赖策略已收敛为 NextTrace Tiny，路由模块只安装或调用这一套官方资产。
+> 截至该快照，实现和依赖策略已收敛为 NextTrace Tiny，路由模块只安装或调用这一套官方资产。
 >
-> 当前本地性能口径：CPU scalar/vCPU scaling 使用 sysbench，压缩使用固定 zstd 1.5.7 + Silesia corpus，FP/FFT 使用 NPB-OMP 3.4.4 EP + FT Class A，密码学使用固定 OpenSSL 3.5.7 speed。内存使用官方 STREAM 5.10 的
+> 快照记录的本地性能口径：CPU scalar/vCPU scaling 使用 sysbench，压缩使用固定 zstd 1.5.7 + Silesia corpus，FP/FFT 使用 NPB-OMP 3.4.4 EP + FT Class A，密码学使用固定 OpenSSL 3.5.7 speed。内存使用官方 STREAM 5.10 的
 > 10,000,000 elements/10 iterations，分别真实运行 1T/NT 的 Copy、Scale、Add、Triad；
 > STREAM 不可用时明确报告内存基准未运行。磁盘使用 fio Direct I/O，包含 fio JSON 的
-> QD1 延迟；mbw/ioping 不属于当前实现、RequiredTools 或 `ecs-tools`。综合评分只在显式提供当前参考或发行包内嵌新参考时出现；
-> 当前 `full` 默认包含 Ookla，`standard` 默认不含；
+> QD1 延迟；mbw/ioping 不属于该快照记录的测试依赖、RequiredTools 或 `ecs-tools`。综合评分只在显式提供快照参考或发行包内嵌新参考时出现；
+> 快照中的 `full` 默认包含 Ookla，`standard` 默认不含；
 > `--only ookla` 可从任意配置档显式单独选择。
 
 ## 样本选择
@@ -39,7 +39,7 @@
 ## 对 ecs 的直接设计约束
 
 1. **运行时零广告**：二进制、终端、JSON、txt、Markdown、HTML 和安装脚本均不展示赞助商、返利链接、二维码或推广语。
-2. **默认零上传**：所有报告只写本地。当前发行版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
+2. **默认零上传**：所有报告只写本地。该快照记录的发行版不提供隐式上传路径；未来即使加入分享，也必须由用户显式指定目标。
 3. **结构化数据优先**：探针先产生带 schema 版本的 JSON 数据，终端、JSON、txt、Markdown 和独立 HTML 都由同一份数据渲染，避免各输出路径互相漂移。
 4. **标准性能工具唯一**：CPU scalar/vCPU scaling、压缩、FP/FFT、内存、密码学、磁盘和网络吞吐原始成绩分别调用 sysbench、zstd、NPB EP+FT、官方 STREAM、OpenSSL speed、fio、iperf3。固定工具或 corpus 缺失时不生成替代成绩；fio 同时产出 QD1 延迟。mbw/ioping 不属于默认依赖或 `ecs-tools`；综合评分是独立的，zstd/NPB/crypto 不并入 CPU 分数。
 5. **外部引擎必须可审计**：外部工具只作为可关闭的本地适配器；调用时记录版本、完整参数、二进制 SHA-256、原始输出、method version 和数据来源。`run.sh` 只从当前架构的已校验 `ecs-tools` 包解包缺失/不合口径的工具到临时 WORK；工具包固定 10 个经过功能裁剪的二进制，只有选中 zstd 时才从独立 Release 资产准备固定 corpus。七架构 CI 先原生/交叉编译，再直接或用 QEMU 做短功能 smoke；交叉 NPB 用不入包的 Class S 验证运行时，发行 Class A 只做目标 ELF 校验，不在模拟器中跑性能负载。Ookla 仅在选中时走独立官方签名源。
@@ -77,7 +77,7 @@
 | 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | ✓ | ✓ |
 | 多目标正向路由 | NextTrace JSON | 官方 NextTrace Tiny release asset | ✓ | ✓ |
 | 三网回程线路识别 | 骨干网段特征表 | NextTrace JSON | ✓ | ✓ |
-| 当前公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
+| 快照时公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
 | 中国三网 HTTP 下载带宽 | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
 | Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（standard 默认不运行；full 默认运行；`--only ookla` 可从任意档位显式选择；run.sh 缺失时从官方签名源下载并临时解包） | — | ✓ |
 | JSON、txt、Markdown、独立 HTML | ✓ | — | ✓ | ✓ |
@@ -204,7 +204,7 @@ full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` �
 ## 与 oneclickvirt/ecs、spiritLHLS/ecs 的逐项差距（2026-08-01 按 README 参数面核对）
 
 用户指定的这两个项目是功能覆盖最全的同类。逐条对照它们的命令行参数与 README 声明，
-`ecs` **并未覆盖全部功能**。如实记录差距，不夸大；目前新增的 Ookla 与 BGP 能力仍保留各自的外部服务边界。
+截至该快照，`ecs` **并未覆盖全部功能**。如实记录差距，不夸大；快照记录的 Ookla 与 BGP 能力仍保留各自的外部服务边界。
 
 ### 已覆盖（能力相当或更强）
 
@@ -259,8 +259,8 @@ full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` �
 | 系统信息 | basics（GPL-3.0）/ bench.sh 等拼装 | ✅ | 标准库读 `/proc`、`/sys` | 已自实现，另有 cgroup、steal |
 | NAT 类型 | gostun（GPL-3.0） | ✅ | 自实现 STUN RFC 5389/5780 | 已自实现 |
 | CPU | sysbench / **geekbench** | sysbench ✅ GPL-2.0；geekbench ❌ 闭源且强制上传 | sysbench | 已用 sysbench |
-| 内存 | sysbench / dd / **mbw** / **stream** | mbw ✅ Debian 有包；STREAM ✅ 但无 Debian 包需自编译 | **官方 STREAM 10M/10** | 当前使用 STREAM 1T/NT 四 kernel；不接入 sysbench memory 或 mbw |
-| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + QD1 | 当前使用 fio JSON + QD1 avg/P95/P99/max；不接入 ioping |
+| 内存 | sysbench / dd / **mbw** / **stream** | mbw ✅ Debian 有包；STREAM ✅ 但无 Debian 包需自编译 | **官方 STREAM 10M/10** | 快照中使用 STREAM 1T/NT 四 kernel；不接入 sysbench memory 或 mbw |
+| 磁盘 | fio / dd | fio ✅ GPL-2.0 | fio + QD1 | 快照中使用 fio JSON + QD1 avg/P95/P99/max；不接入 ioping |
 | 流媒体 | UnlockTests（GPL-3.0）、RegionRestrictionCheck（AGPL-3.0） | ✅ | 自实现规则引擎 | 已自实现 |
 | 邮件端口 | portchecker（GPL-3.0） | ✅ | 标准库 TCP | 已自实现 |
 | 回程 / 路由 | backtrace（MIT 衍生）、nt3（GPL-3.0，基于 NTrace-core） | ✅ | 自实现特征表 + NextTrace 适配器 | 已自实现 |
@@ -293,9 +293,9 @@ full 额外包含多源 IP 质量与 Ookla。任意模块仍可通过 `--only` �
 ### 结论
 
 两个项目的技术栈里，**除中国三网测速、商业 IP 数据库和完整私有 BGP 图外，其余都有可靠开源替代，且 ecs 大多
-已用更彻底的方式实现**（自实现协议、零第三方 Go 依赖，不下载他人二进制）。
+截至该快照已用更彻底的方式实现**（自实现协议、零第三方 Go 依赖，不下载他人二进制）。
 
-- `mbw`（内存带宽）和 `ioping`（I/O 延迟）是调研过的候选，但不属于当前测试依赖或
+- `mbw`（内存带宽）和 `ioping`（I/O 延迟）是调研过的候选，但不属于该快照记录的测试依赖或
   `ecs-tools` 内容。`librespeed-cli` 仍是通用 HTTP 测速候选。
 - **三网测速没有零外部服务的开源解**：`librespeed-cli` 可审计，但公共节点不覆盖中国三网的
   同等服务器集合；`ookla` 适配器因此继续使用官方客户端，并把条款、实际流量和外部数据处理写进报告。

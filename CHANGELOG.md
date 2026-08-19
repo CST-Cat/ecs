@@ -1,7 +1,7 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.6.16` 的主要变化。
+`v0.1.0` 到 `v0.7.3` 及后续 `Unreleased` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -17,8 +17,9 @@
 - 收紧 Go Release 与安全升级职责：根 `go.mod` 仅声明最低源码兼容版本（1.22），`devtools/go.mod` 仅管理分析工具环境，正式 Release 编译器唯一由 `release.yml` 的 `ECS_RELEASE_GO` pin 选择（当前 1.26.5），Release 与最低兼容 CI 均强制 `GOTOOLCHAIN=local`；compat 只保留 1.22.x，stable 由 unit 覆盖。
 - 安全自动升级现在只修改 Release compiler pin，不改根 `go.mod`；发布后安全复审从下载的七架构 `ecs` 二进制 `go version -m` 提取并校验一致的实际构建 Go 版本，再将该 metadata 传给 triage，避免误用 security runner 自身的 Go 版本。
 - 删除运行时 module factory/estimate 注册表、`sync.RWMutex`、`any` 构造和 `init()` 反向注册：config 只保留静态模块描述，probe 提供强类型内建列表，runner 在执行边界显式绑定描述与探针，估算也由 probe 的显式调用负责。该内部重构不新增或改变用户配置字段；既有配置仍按相同模块 ID 解析，绑定完整性在执行前显式校验。
-- 工具 manifest 收敛为 `internal/toolsmanifest` 的 Go parser/validator 唯一合同；删除经仓内搜索未发现独立消费者、且未被定位为公开权威合同的重复手工 JSON Schema 文件，CI 与发布阶段改为调用同一个 Go 入口校验示例和实际 manifest，`run.sh` 仅依赖 Release `checksums.txt` 并检查实际请求的可执行文件，同时移除旧 JSON Schema 门禁的 `jsonschema` 依赖；workflow YAML 检查仍由现有 PyYAML 路径负责。构建与 stage 校验脚本共享唯一架构/工具清单。
+- 工具 manifest 收敛为 `internal/toolsmanifest` 的 Go parser/validator 唯一合同；删除经仓内搜索未发现独立消费者、且未被定位为公开权威合同的重复手工 JSON Schema 文件，CI 与发布阶段改为调用同一个 Go 入口校验示例和实际 manifest，`run.sh` 仅依赖 Release `checksums.txt` 并检查实际请求的可执行文件，同时移除旧 JSON Schema 门禁的 `jsonschema` 依赖；删除仅检查 workflow YAML 能否被 PyYAML 解析的浅层门禁，workflow wiring 由现有 shell policy 检查负责，其它 workflow 语义不由该检查覆盖。构建与 stage 校验脚本共享唯一架构/工具清单。
 - 第一批迁移探针工具缺失/版本提示为稳定 `probe.*` message key；canonical JSON 保留 key，TXT/Markdown/HTML 按当前语言显示中英文，外部工具原始输出与尚未迁移的探针说明继续原样保留。
+- 删除 Linux-only 项目的非 Linux TTY fallback；CONTRIBUTING/SECURITY 改为说明根 `go.mod` 最低源码兼容、`ECS_RELEASE_GO` 正式编译器、`devtools/go.mod` 分析工具环境及安全升级只改 Release pin；移除无活跃引用的 HANDOFF，并将 research 标为历史调研快照。README、examples 和 submissions 只保留用户行为、命令和目录特有格式，公共政策统一链接到根文档。
 
 ## 0.7.3 — 2026-08-18
 

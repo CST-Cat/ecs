@@ -8,7 +8,7 @@
 
 磁盘模块只在用户指定目录创建名称随机的 `.ecs-fio-*` 临时文件，并在完成、错误或取消时清理。它会把文件限制在测试前可用空间的 20% 以内。
 
-路由模块只调用官方 NextTrace Tiny，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 Tiny 从当前架构的 `ecs-tools` 发行包取得：该包整体校验 `checksums.txt`，包内 `manifest.json` 再逐个校验每个 binary 的 SHA-256，通过后才放入本次 `$WORK/bin`；脚本退出时随工作目录清理。发行包本身在构建期从官方 NextTrace Release 取得对应 Linux Tiny asset，并强制比对 GitHub API 提供的 SHA-256 digest——digest 缺失即构建失败，不会以"无 digest"为由跳过校验。`ECS_AUTO_DEPS=0` 或任一环节校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace Tiny 只使用无启动横幅的 JSON 输出模式。
+路由模块只调用官方 NextTrace Tiny，参数以数组传递，不经过 shell，并在报告中记录参数与程序 SHA-256。通过 `run.sh` 运行时，缺失的 Tiny 从当前架构的 `ecs-tools` 发行包取得：`run.sh` 校验 Release `checksums.txt` 中的完整归档摘要，只提取本次实际请求的可执行成员到 `$WORK/bin`；退出时随工作目录清理。工具 manifest 的结构、字段和 digest 格式由 canonical Go validator 在 CI、package 与 stage 路径验证，构建脚本还会把记录的摘要与每个实际 binary 的 SHA-256 对照。发行包本身在构建期从官方 NextTrace Release 取得对应 Linux Tiny asset，并强制比对 GitHub API 提供的 SHA-256 digest——digest 缺失即构建失败，不会以"无 digest"为由跳过校验。`ECS_AUTO_DEPS=0` 或任一环节校验失败会明确跳过路由模块，不安装其他路由程序。NextTrace Tiny 只使用无启动横幅的 JSON 输出模式。
 
 磁盘模块只会调用 `PATH` 中现有的 `fio`，解析其本地 JSON 输出并记录参数、版本与程序 SHA-256。运行 `ecs` 本身不会调用包管理器；只有用户显式执行 `install.sh --with-benchmarks` 才会安装依赖。fio 临时文件仍受 20% 可用空间上限约束。
 
@@ -46,8 +46,6 @@ Ookla 可能接收测量所需的出口 IP、客户端和服务器元数据，ec
 `ecs-tools` 中本次需要的固定版本工具放入本次 `$WORK/bin` 的临时 PATH，退出时清理，
 不安装到系统；这不等同于 `install.sh --with-benchmarks` 的显式系统包安装。
 
-在最终 GitHub 仓库确定前，远程安装必须显式设置 `ECS_REPOSITORY=owner/ecs`，避免脚本指向虚假的默认仓库。
-
 ## 发布前门禁
 
 Release 从一个**冻结的提交 SHA** 开始：入口处确认候选提交等于当时的远端 `main`，此后所有阶段只认这个 SHA，不再与移动中的 `main` 比较。
@@ -61,9 +59,9 @@ preflight → tools × 7 → assemble → verify / security → attest → publi
 
 编译器、Docker、tar、`govulncheck`、构建脚本和全部第三方工具都运行在没有仓库写权限的阶段中。
 
-- 根 `go.mod` 中的 `go 1.22` 只表示源码最低兼容版本，不是 Release 编译器版本。正式 Release 使用 workflow 独立设置的 `ECS_RELEASE_GO`；构建、验证和 Release security 使用同一条配置，并以二进制中由 `go env GOVERSION` 记录的实测版本复核，而不从 `go.mod` 自动漂移；
+- 根 `go.mod` 中的 `go 1.22` 只表示源码最低兼容版本，不是 Release 编译器版本。正式 Release 编译器由 workflow 唯一的 `ECS_RELEASE_GO` pin 选择；`devtools/go.mod` 只管理分析工具自身的构建环境，安全自动升级只修改 Release pin；
 - 打包前要求 Git 工作区洁净，CI 下载和中间目录全部显式忽略；
-- 每个主程序归档**解包后**用 `go version -m` 校验 `vcs.revision` 等于冻结 SHA、`vcs.modified=false`，以及 Go 工具链等于本次构建的**实测**版本（取自 `go env GOVERSION`，不是写死在配置里的期望值）；
+- Release build job 在 `ECS_RELEASE_GO` 下记录实际 `go env GOVERSION` 作为 expected build Go；每个主程序归档**解包后**由 release verify 用 `go version -m` 校验 `vcs.revision` 等于冻结 SHA、`vcs.modified=false`，以及工具链等于该 expected 版本；
 - 对解包出来的实际 ECS 二进制运行 `govulncheck -mode binary`。finding 本身不等于自动禁止发布：只有 Release security 确认 finding 有明确的严重性（HIGH/CRITICAL 或等价的明确高危分数），且由 trace 证明对该实际二进制可达时，才阻断 Release；普通、严重性不明或对实际二进制不可达的 finding 只记录告警。工具、输入、扫描命令或 JSON 解析失败仍然 hard fail；
 - 为全部发布资产生成 GitHub artifact attestation，可用 `gh attestation verify` 核对来源仓库、workflow 与提交。
 
@@ -73,7 +71,7 @@ preflight → tools × 7 → assemble → verify / security → attest → publi
 
 发布完成不代表安全生命周期结束：漏洞库每天都在更新，昨天干净的二进制今天可能已经不干净了。用户手上跑的是 Release 上的那些文件，因此每日复审的对象就是它们。
 
-`security.yml` 每天做两件事：对当前 `main` 的源码跑 `govulncheck`，以及下载最新正式 Release 的七个主程序归档、校验摘要后逐个跑 `govulncheck -mode binary`。源码 finding 只产生告警；正式 Release 的 finding 原样保存为 JSON artifact、运行 triage 并产生告警。finding 不用 `exit 1` 把普通开发或 Release 冻结；扫描工具、扫描输入、扫描命令或扫描 JSON 处理失败仍然 hard fail，不能用“普通 finding 只告警”掩盖执行错误。用于确认官方 Go Release 的查询或解析失败则按保守策略保持 `released=false`，不提出 PR。
+`security.yml` 每天做两件事：对当前 `main` 的源码跑 `govulncheck`，以及下载最新正式 Release 的七个主程序归档、校验摘要后逐个跑 `govulncheck -mode binary`。发布后监控由 `scan_released.sh` 对下载的实际七架构 `ecs` binary 运行 `go version -m`，提取并确认一致的 build Go 版本，再将该 artifact metadata 传给 triage；security runner 自身的 Go 只负责读取，不能作为 `--current`。源码 finding 只产生告警；正式 Release 的 finding 原样保存为 JSON artifact、运行 triage 并产生告警。finding 不用 `exit 1` 把普通开发或 Release 冻结；扫描工具、扫描输入、扫描命令或扫描 JSON 处理失败仍然 hard fail，不能用“普通 finding 只告警”掩盖执行错误。用于确认官方 Go Release 的查询或解析失败则按保守策略保持 `released=false`，不提出 PR。
 
 发布后二进制扫描通过机器可解析的 `release_security_result=clean|blocked|fatal` 标记结果：`clean` 表示无须阻断的 finding（包括普通、严重性不明或不可达 finding），`blocked` 表示明确高危且可达但仅在发布后监控中告警，`fatal` 表示扫描工具、输入、JSON 或输出错误并使 job hard fail。
 

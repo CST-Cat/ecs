@@ -7,10 +7,9 @@ set -euo pipefail
 # 与合并前检查一旦是两份实现，就一定会在某次改动后悄悄分叉，而分叉的那一侧
 # 通常是发布路径——因为它跑得少。
 #
-# 这里的检查版本固定、且无 live 外部服务依赖，但不是“完全不联网”：首次构建
-# staticcheck，以及首次建立 Python venv 时的 pip 都可能联网。源码漏洞扫描不在
-# 这里执行，由 security workflow/release security 负责。需要真实工具的归 integration，
-# 需要第三方服务的归 live。
+# 这里的检查版本固定、且无 live 外部服务依赖，但首次构建 staticcheck 仍可能
+# 联网。源码漏洞扫描不在这里执行，由 security workflow/release security 负责。
+# 需要真实工具的归 integration，需要第三方服务的归 live。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -62,23 +61,6 @@ bash scripts/security/scan_released_test.sh
 
 ecs_step "ecs-tools manifest 与示例"
 go run ./cmd/tools-manifest-check --architecture amd64 tools/manifest.example.json
-
-ecs_step "workflow YAML 语法"
-python=$(ecs_python)
-"$python" - <<'PY'
-from pathlib import Path
-
-import yaml
-
-workflows = sorted(Path(".github/workflows").glob("*.yml"))
-if not workflows:
-    raise SystemExit("没有找到任何 workflow")
-for path in workflows:
-    document = yaml.safe_load(path.read_text())
-    if not isinstance(document, dict) or "jobs" not in document:
-        raise SystemExit(f"{path} 不是一个带 jobs 的 workflow")
-    print(f"{path}: {len(document['jobs'])} 个 job")
-PY
 
 ecs_step "shell 语法"
 sh -n install.sh

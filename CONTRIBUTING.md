@@ -22,14 +22,17 @@
 
 本地检查：
 
-Go 工具链版本由 `go.mod` 单点定义（当前 `go 1.26.6`），CI、发布和安全复审都读它，任何地方都不再重复写版本号。升级 Go 只改那一行。本机装的是更低的补丁版时，`GOTOOLCHAIN=auto`（默认）会自动获取所需版本。运行 Release 二进制不需要 Go。
+Go 版本按职责分开维护：根 `go.mod` 的 `go 1.22` 是源码最低兼容版本；正式 Release 编译器由
+`.github/workflows/release.yml` 的唯一 `ECS_RELEASE_GO` pin 选择；`devtools/go.mod` 只管理
+`staticcheck`、`govulncheck` 等分析工具自身的构建环境。安全自动升级只修改 Release compiler pin，
+不提高源码最低兼容版本。运行 Release 二进制不需要 Go。
 
 `staticcheck` 与 `govulncheck` 的版本锁在 `devtools/go.mod`（含 `go.sum` 哈希）。主模块 `go.mod` 保持零依赖：从源码构建 ecs 不下载任何模块，这是发布物的一项属性，不为了跑分析工具而放弃。
 
 ```bash
 gofmt -w $(git ls-files '*.go')
 make test            # go test ./...，不需要任何外部工具
-make check           # 格式、vet、staticcheck、源码漏洞、schema、脚本与 workflow 语法
+make check           # 格式、vet、staticcheck、manifest、脚本与 workflow wiring
 make integration     # 需要真实 fio / sysbench / iperf3
 go test -race ./...
 ```
@@ -54,8 +57,8 @@ make live
 
 模块的跨切面元数据集中在 [`internal/config/modules.go`](internal/config/modules.go)：
 ID、配置档归属、外联级别、并发分类、方法学、依赖、文案键、估算和可选评分维度都从
-`ModuleDescriptor` 派生。探针包只负责把具体构造器注册到 descriptor 的
-`ProbeFactory`，不再维护执行顺序、曝光或方法学副本。
+`ModuleDescriptor` 派生。探针包通过 `internal/probe.Builtins` 提供强类型内建探针，
+`runner` 在执行边界按 ID 显式绑定；不再维护运行时 factory、执行顺序、曝光或方法学副本。
 
 新增或删除模块后，先运行：
 
@@ -65,6 +68,6 @@ go test ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./i
 sh -n run.sh
 ```
 
-`run.sh` 下载二进制后会读取并校验同一份机器可读 manifest；manifest 缺失或非法会直接停止，
-不会使用另一套过期模块列表。只有显式设置 `ScoreEnabled`/`ScoreKey` 的 descriptor 才能进入
+`run.sh` 下载 `ecs` 二进制后会调用其 `list --machine`，读取模块 descriptor 的 TSV contract，
+用于规划模块、配置档、暴露级别和工具依赖；该输出缺失或非法会直接停止，不会使用另一套过期模块列表。只有 `ScoreKey` 非空的 descriptor 才能进入
 排行榜；指标定义仍由 `internal/score` 单独维护。
