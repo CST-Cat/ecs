@@ -47,9 +47,9 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Summary = "未找到官方 STREAM，标准内存基准未运行"
 		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "STREAM", Count: 1, Message: result.Summary})
 		if streamErr != nil {
-			result.Notes = append(result.Notes, "未找到官方 STREAM 可执行文件；内存基准未运行。")
+			result.Notes = append(result.Notes, "probe.memory.stream_missing")
 		} else {
-			result.Notes = append(result.Notes, "PATH 中的 stream 不是官方 STREAM 可执行文件；内存基准未运行。")
+			result.Notes = append(result.Notes, "probe.memory.stream_invalid")
 		}
 		result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	} else {

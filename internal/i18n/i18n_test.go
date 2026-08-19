@@ -87,6 +87,23 @@ func TestEnglishFallsBackToChinese(t *testing.T) {
 	}
 }
 
+func TestStableProbeMessagesTranslateWithoutUsingChineseKeys(t *testing.T) {
+	original := Current()
+	defer Set(original)
+	const key = "probe.memory.stream_missing"
+	Set(LangZH)
+	if got, want := Text(key), "未找到官方 STREAM 可执行文件；内存基准未运行。"; got != want {
+		t.Fatalf("Chinese stable probe message = %q, want %q", got, want)
+	}
+	Set(LangEN)
+	if got, want := Text(key), "The official STREAM executable was not found; the memory benchmark did not run."; got != want {
+		t.Fatalf("English stable probe message = %q, want %q", got, want)
+	}
+	if got := Text("未找到官方 STREAM 可执行文件；内存基准未运行。"); got != "未找到官方 STREAM 可执行文件；内存基准未运行。" {
+		t.Fatalf("legacy Chinese sentence unexpectedly became a key: %q", got)
+	}
+}
+
 func TestModuleTitlesCoverAllModules(t *testing.T) {
 	// 模块标题表的中英文 key 必须一一对应；descriptor 与两种语言的
 	// 完整覆盖由外部 module_descriptor_test.go 统一检查。

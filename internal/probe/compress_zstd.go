@@ -98,7 +98,7 @@ func missingZstdResult(summary, target string) model.Result {
 	})
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
-		"请使用 run.sh；它会从已校验的 ecs-tools 包提供固定 zstd binary，并从独立 Release 资产准备固定 corpus。ecs 不生成自定义压缩综合分。",
+		"probe.zstd.tool_missing",
 	)
 	result.Finish(start)
 	return result

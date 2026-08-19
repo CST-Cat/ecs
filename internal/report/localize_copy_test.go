@@ -33,6 +33,9 @@ func TestLocalizeReturnsIndependentCopyForEveryReportContainer(t *testing.T) {
 				localized.Results[0].Fields[0].Value != i18n.Text("Linux") {
 				t.Fatalf("field display was not localized: %+v", localized.Results[0].Fields[0])
 			}
+			if got, want := localized.Results[0].Notes[0], i18n.Text("probe.memory.stream_missing"); got != want {
+				t.Fatalf("stable probe note display = %q, want %q", got, want)
+			}
 			if localized.Results[0].Tables[0].Title != i18n.Text("当前值") ||
 				localized.Results[0].Tables[0].Columns[0] != i18n.Text("当前值") ||
 				localized.Results[0].Tables[0].Rows[0][0] != i18n.Text("Linux") {
@@ -83,7 +86,7 @@ func localizeCopyFixture() model.Report {
 		NumericHigherIsBetter: []bool{true}, SensitiveColumns: []int{0},
 	}}
 	data.Results[0].TextBlocks = []model.TextBlock{{Title: "系统", Content: "raw output"}}
-	data.Results[0].Notes = []string{"系统"}
+	data.Results[0].Notes = []string{"probe.memory.stream_missing"}
 	data.Results[0].Sources = []model.Source{{Name: "source", Purpose: "系统"}}
 	data.Results[0].Failures = []model.Failure{{Message: "failure"}}
 	data.Results[0].Evidence = model.NewEvidence(1, 2, "sample")

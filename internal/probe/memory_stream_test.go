@@ -198,6 +198,9 @@ func TestMemoryProbeDoesNotRunImageMagickStreamOrSysbench(t *testing.T) {
 	if len(result.Measurements) != 0 {
 		t.Fatalf("collision produced benchmark measurements: %+v", result.Measurements)
 	}
+	if !containsNote(result.Notes, "probe.memory.stream_invalid") {
+		t.Fatalf("collision did not retain stable stream-notice key: %v", result.Notes)
+	}
 	if strings.Contains(strings.ToLower(result.Summary), "sysbench") {
 		t.Fatalf("collision summary unexpectedly mentions sysbench fallback: %q", result.Summary)
 	}

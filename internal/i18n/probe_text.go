@@ -7,12 +7,9 @@ import (
 
 // 探针文本的翻译。
 //
-// 与结构性文本不同，探针产出的是成句的技术说明，数量大（实际运行会产生三百余条
-// 唯一文本）且大量带有运行时数值。给每一句编一个 key 再改所有调用点，改动面会
-// 铺满整个 probe 包；因此这里换一种做法：**在渲染层按原文查表**，探针代码一行不动。
-//
-// 代价是原文改字会静默丢译文。为此有测试遍历真实运行产出的文本，检查是否都能
-// 命中译文表——改了句子而忘了改译文，测试会指出来。
+// 新迁移的 ecs 自生成提示先使用稳定 message key，再由渲染层解析；外部命令输出
+// 和尚未迁移的长篇技术说明仍按原文查表。后者数量大（实际运行会产生三百余条
+// 唯一文本）且大量带有运行时数值，因此保留模板匹配，避免把原始证据拆成消息条目。
 //
 // 带数值的句子用占位模板匹配：先把数字序列抠成占位符去查表，命中后把原来的数字
 // 按顺序填回译文。这样 "16 线程事件率" 与 "8 线程事件率" 共用一条译文。
@@ -83,10 +80,17 @@ func tokenTemplateOf(text string) (string, []string, bool) {
 
 // Text 翻译一句探针文案。
 //
-// 查找顺序：整句精确匹配 → 数值占位模板 → 非中文片段占位模板 → 原样返回。
+// 查找顺序：稳定 message key → legacy 整句精确匹配 → 数值占位模板 →
+// 非中文片段占位模板 → 原样返回。
 // 任何一步都不会返回空串：缺译文只应表现为那一句没翻译。
 func Text(text string) string {
-	if text == "" || Current() == LangZH {
+	if text == "" {
+		return text
+	}
+	if translated := T(text); translated != text {
+		return translated
+	}
+	if Current() == LangZH {
 		return text
 	}
 	if translated, ok := probeEnglish[text]; ok && translated != "" {
@@ -109,21 +113,12 @@ func Text(text string) string {
 	return text
 }
 
-// TextSlice 翻译一组文案。
-func TextSlice(items []string) []string {
-	if len(items) == 0 || Current() == LangZH {
-		return items
-	}
-	out := make([]string, len(items))
-	for index, item := range items {
-		out[index] = Text(item)
-	}
-	return out
-}
-
 // HasProbeText 报告某句文案是否有译文，供测试核对覆盖率。
 func HasProbeText(text string) bool {
 	if text == "" {
+		return true
+	}
+	if Has(LangEN, text) {
 		return true
 	}
 	if _, ok := probeEnglish[text]; ok {

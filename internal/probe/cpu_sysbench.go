@@ -57,7 +57,7 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Summary = "未找到 sysbench，标准 CPU 基准未运行"
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "sysbench", Count: 1, Message: result.Summary})
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
-	result.Notes = append(result.Notes, "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。")
+	result.Notes = append(result.Notes, "probe.cpu.tool_missing")
 	result.Finish(start)
 	return result
 }

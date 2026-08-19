@@ -93,7 +93,7 @@ func missingOpenSSLResult(summary string) model.Result {
 	})
 	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
-		"请使用 run.sh；它会提供版本与哈希经过 ecs-tools manifest 校验的固定 OpenSSL binary。crypto 不并入 CPU 综合结果。",
+		"probe.crypto.tool_missing",
 	)
 	result.Finish(start)
 	return result
@@ -125,7 +125,7 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 			{Key: "binary_sha256", Label: "OpenSSL SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
 		}
 		result.Evidence = model.NewEvidence(0, len(specs)*len(threadCounts), "run")
-		result.Notes = append(result.Notes, "请使用 run.sh 提供固定 OpenSSL 3.5.7 static binary；不接受系统中其他版本生成可比较成绩。")
+		result.Notes = append(result.Notes, "probe.crypto.version_mismatch")
 		result.Finish(start)
 		return result
 	}

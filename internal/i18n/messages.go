@@ -3,8 +3,9 @@ package i18n
 // 结构性文本的译文表。
 //
 // 只收录决定"报告骨架能否被读懂"的文本：命令行、模块名称与描述、运行状态、
-// 表格列名、报告章节标题、方法学标签。探针内部的长篇技术说明未收录，
-// 会回退到中文——见 i18n.go 顶部关于分层的说明。
+// 表格列名、报告章节标题、方法学标签，以及已迁移的探针稳定 message key。
+// 探针内部尚未迁移的长篇技术说明未收录，会回退到中文——见 i18n.go 顶部
+// 关于分层的说明。
 //
 // 两张表的 key 必须一一对应，有测试强制校验；缺 key 会在界面上显示为 key 本身，
 // 一眼就能发现。
@@ -285,6 +286,16 @@ var chinese = map[string]string{
 	"value.success":  "成功",
 	"value.failed":   "失败",
 	"value.partial":  "部分",
+
+	// ── 已迁移的探针提示 key ─────────────────────────────────
+	"probe.cpu.tool_missing":        "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。",
+	"probe.disk.tool_missing":       "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 fio，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供缓存 I/O 或自研替代分数。",
+	"probe.speed.tool_missing":      "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 iperf3，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供 HTTP 或自研替代分数。",
+	"probe.memory.stream_missing":   "未找到官方 STREAM 可执行文件；内存基准未运行。",
+	"probe.memory.stream_invalid":   "PATH 中的 stream 不是官方 STREAM 可执行文件；内存基准未运行。",
+	"probe.zstd.tool_missing":       "请使用 run.sh；它会从已校验的 ecs-tools 包提供固定 zstd binary，并从独立 Release 资产准备固定 corpus。ecs 不生成自定义压缩综合分。",
+	"probe.crypto.tool_missing":     "请使用 run.sh；它会提供版本与哈希经过 ecs-tools manifest 校验的固定 OpenSSL binary。crypto 不并入 CPU 综合结果。",
+	"probe.crypto.version_mismatch": "请使用 run.sh 提供固定 OpenSSL 3.5.7 static binary；不接受系统中其他版本生成可比较成绩。",
 }
 
 var english = map[string]string{
@@ -562,4 +573,14 @@ var english = map[string]string{
 	"value.success":  "success",
 	"value.failed":   "failed",
 	"value.partial":  "partial",
+
+	// ── Migrated probe notice keys ─────────────────────────
+	"probe.cpu.tool_missing":        "run.sh can temporarily stage sysbench from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no in-house replacement score.",
+	"probe.disk.tool_missing":       "run.sh can temporarily stage fio from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no cached-I/O or in-house replacement score.",
+	"probe.speed.tool_missing":      "run.sh can temporarily stage iperf3 from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no HTTP or in-house replacement score.",
+	"probe.memory.stream_missing":   "The official STREAM executable was not found; the memory benchmark did not run.",
+	"probe.memory.stream_invalid":   "The stream found in PATH is not the official STREAM executable; the memory benchmark did not run.",
+	"probe.zstd.tool_missing":       "Use run.sh; it stages the pinned zstd binary from the verified ecs-tools package and prepares the fixed corpus from the standalone Release asset. ecs does not produce a custom compression score.",
+	"probe.crypto.tool_missing":     "Use run.sh; it provides the pinned OpenSSL binary after version and hash verification by the ecs-tools manifest. crypto is not included in the CPU composite.",
+	"probe.crypto.version_mismatch": "Use run.sh to provide the pinned static OpenSSL 3.5.7 binary; results from other system versions are not accepted as comparable.",
 }

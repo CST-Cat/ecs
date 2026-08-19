@@ -7,9 +7,9 @@ import (
 
 // Localize 按当前语言翻译整份报告的可见文本，并返回独立的展示副本。
 //
-// 翻译放在渲染层而不是探针里：探针照常产出中文，这里统一按原文查表。
-// 好处是 probe 包一行不用改；代价是原文改字会丢译文，因此有测试遍历真实运行
-// 产出的文本核对覆盖率。
+// 翻译放在渲染层而不是探针里：已迁移的 ecs 自生成提示由稳定 message key
+// 映射到当前语言，尚未迁移的探针说明仍按原文查表；外部工具原始输出不翻译。
+// 原文查表的代价是句子改字会丢译文，因此有测试遍历真实运行产出的文本核对覆盖率。
 //
 // 返回值与 data 不共享可变的 slice、map 或 pointer。调用方可以把返回值交给
 // TXT/MD/HTML 渲染器，或在渲染过程中修改它，而不会回写保存用的 canonical
@@ -179,10 +179,8 @@ func localizeMeasurement(measurement model.Measurement) model.Measurement {
 	return out
 }
 
-// localizeStrings always allocates for a non-nil slice, including Chinese mode.
-// i18n.TextSlice intentionally returns its input unchanged in Chinese mode;
-// that is useful for callers that only need a translation, but Localize's
-// contract requires the returned display report to be independently mutable.
+// localizeStrings always allocates for a non-nil slice and resolves each item
+// in both languages, including stable probe message keys in Chinese mode.
 func localizeStrings(items []string) []string {
 	if items == nil {
 		return nil
