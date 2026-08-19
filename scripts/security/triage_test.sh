@@ -12,6 +12,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 triage="$repo_root/scripts/security/triage.py"
+source "$repo_root/scripts/lib/common.sh"
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
@@ -105,7 +106,7 @@ expect "混合命中 -> 不自动升级" "$work/mixed.json" go1.26.6 upgrade_to 
 expect "已在修复版上 -> 不升级" "$work/stdlib.json" go1.26.7 upgrade_to ""
 
 # ---- 9. 七个架构各报一次同一个漏洞 -> 去重后仍是一次升级 ----
-for arch in amd64 arm64 armv7 386 s390x riscv64 ppc64le; do
+for arch in "${ECS_ARCHES[@]}"; do
   cp "$work/stdlib.json" "$work/ecs_linux_$arch.json"
 done
 if output=$("$triage" --current go1.26.6 "$work"/ecs_linux_*.json 2>/dev/null); then

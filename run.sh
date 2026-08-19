@@ -15,7 +15,7 @@
 # 依赖策略：
 #   - 已有的通用组件优先使用；固定口径基准选中时使用发行版提供的指定版本与数据。
 #   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
-#     校验 checksums.txt 与 manifest.json 后，只把本次需要的 binary 放入 WORK/bin；
+#     校验 checksums.txt 后，只把本次需要的 binary 放入 WORK/bin；
 #     zstd 选中时再从独立 corpus 发行资产准备固定输入。
 #     绝不调用系统包安装器，也不改动系统数据库。
 #   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
@@ -320,13 +320,10 @@ OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
 TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.gz"
 TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
-TOOLS_MANIFEST_FILE="$WORK/ecs-tools.manifest.json"
-TOOLS_LIST_FILE="$WORK/ecs-tools.list"
 TOOLS_EXTRACT_ROOT="$WORK/tools"
 TOOLS_STAGING_BIN="$WORK/tools-staging-bin"
 TOOLS_REQUESTED=""
 TOOLS_READY=0
-TOOLS_ARCHIVE_DIGESTS="$WORK/ecs-tools.sha256"
 TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
 TOOLS_BASE=${TOOLS_BASE%/}
 TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
@@ -367,7 +364,7 @@ trap 'exit 130' INT TERM HUP
 # compare.sh 里实现并测试过，写第二份只会制造一处迟早分叉的实现。
 #
 # 关于这个未校验的下载：run.sh 下载的其它东西都对得上摘要（Release 资产对
-# checksums.txt，工具包再对 manifest.json），而 compare.sh 不是 Release 资产，
+# checksums.txt），而 compare.sh 不是 Release 资产，
 # 没有摘要可对。它从 run.sh 自身被取回的同一个 origin 与同一个 ref 拉取，能篡改
 # 它的人同样能篡改 run.sh，因此对 curl|sh 的用户边际风险为零。Release 资产的逐个
 # 校验不受影响。
@@ -466,13 +463,6 @@ tool_available() {
   esac
 }
 
-archive_tool_for() {
-  case "$1" in
-    sysbench|zstd|npb-ep|npb-ft|openssl|stream|fio|iperf3|nexttrace-tiny|ping) printf '%s\n' "$1" ;;
-    *) return 1 ;;
-  esac
-}
-
 add_tools_request() {
   tools_request=$1
   case " $TOOLS_REQUESTED " in
@@ -481,168 +471,11 @@ add_tools_request() {
   esac
 }
 
-# Read simple string fields from the release manifest without requiring jq.
-# The package manifest is generated in a stable, string-valued schema; the
-# optional jq check below adds strict JSON/schema validation when jq is already
-# present, while this parser keeps minimal VPS images supported.
-tools_manifest_field_values() {
-  tools_manifest_field=$1
-  tools_manifest_path=$2
-  awk -v field="$tools_manifest_field" '
-    {
-      text = $0
-      pattern = "\\\"" field "\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\""
-      while (match(text, pattern)) {
-        value = substr(text, RSTART, RLENGTH)
-        sub(".*:[[:space:]]*\\\"", "", value)
-        sub("\\\"$", "", value)
-        print value
-        text = substr(text, RSTART + RLENGTH)
-      }
-    }
-  ' "$tools_manifest_path"
-}
-
-tools_value_count() {
-  awk 'NF {count++} END {print count + 0}' "$1"
-}
-
-tools_manifest_digest_for() {
-  tools_manifest_wanted=$1
-  # Tool records are objects; splitting only JSON object delimiters keeps the
-  # lookup independent of field order and also works for compact manifests.
-  tr '{}' '\n' <"$TOOLS_MANIFEST_FILE" |
-    awk -v wanted="$tools_manifest_wanted" '
-      function string_value(text, key, pattern, value) {
-        pattern = "\\\"" key "\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\""
-        if (!match(text, pattern)) return ""
-        value = substr(text, RSTART, RLENGTH)
-        sub(".*:[[:space:]]*\\\"", "", value)
-        sub("\\\"$", "", value)
-        return value
-      }
-      {
-        name = string_value($0, "name")
-        if (name != "") active = (name == wanted)
-        if (active) {
-          digest = string_value($0, "sha256")
-          if (digest != "") {
-            print digest
-            found = 1
-            exit
-          }
-        }
-      }
-      END { if (!found) exit 1 }
-    '
-}
-
-verify_tools_binary_digest() {
-  tools_digest_tool=$1
-  tools_digest_path=$2
-  tools_digest=$(tools_manifest_digest_for "$tools_digest_tool" 2>/dev/null || true)
-  case "$tools_digest" in
-    unknown|unavailable) return 0 ;;
-    ''|*[!A-Fa-f0-9]*) return 1 ;;
-  esac
-  [ "${#tools_digest}" -eq 64 ] || return 1
-  if command -v sha256sum >/dev/null 2>&1; then
-    tools_digest_actual=$(sha256sum "$tools_digest_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-  elif command -v shasum >/dev/null 2>&1; then
-    tools_digest_actual=$(shasum -a 256 "$tools_digest_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-  else
-    return 1
-  fi
-  tools_digest_expected=$(printf '%s\n' "$tools_digest" | tr '[:upper:]' '[:lower:]')
-  [ "$tools_digest_actual" = "$tools_digest_expected" ]
-}
-
-validate_tools_manifest() {
-  tools_manifest_path=$1
-  [ -s "$tools_manifest_path" ] || return 1
-
-  tools_manifest_field_values schema_version "$tools_manifest_path" >"$WORK/tools-manifest.schema"
-  [ "$(tools_value_count "$WORK/tools-manifest.schema")" -eq 1 ] || return 1
-  grep -F -x 'ecs-tools.manifest/v1' "$WORK/tools-manifest.schema" >/dev/null || return 1
-
-  tools_manifest_field_values architecture "$tools_manifest_path" >"$WORK/tools-manifest.arch"
-  tools_manifest_arch_count=$(tools_value_count "$WORK/tools-manifest.arch")
-  # One top-level architecture plus one for every declared tool.
-  [ "$tools_manifest_arch_count" -eq 11 ] || return 1
-  while IFS= read -r tools_manifest_arch; do
-    [ "$tools_manifest_arch" = "$ARCH" ] || return 1
-  done <"$WORK/tools-manifest.arch"
-
-  tools_manifest_field_values name "$tools_manifest_path" >"$WORK/tools-manifest.names"
-  [ "$(tools_value_count "$WORK/tools-manifest.names")" -eq 10 ] || return 1
-  sort -u "$WORK/tools-manifest.names" >"$WORK/tools-manifest.names.unique"
-  printf '%s\n' fio iperf3 nexttrace-tiny npb-ep npb-ft openssl ping stream sysbench zstd >"$WORK/tools-manifest.names.expected"
-  cmp -s "$WORK/tools-manifest.names.unique" "$WORK/tools-manifest.names.expected" || return 1
-
-  # Every tool record must expose a usable or explicitly unavailable digest.
-  # A concrete digest is checked against the extracted binary below when one
-  # is present; unknown/unavailable is allowed for source-built packages whose
-  # release manifest has no reproducible source digest.
-  tools_manifest_field_values sha256 "$tools_manifest_path" >"$WORK/tools-manifest.sha256"
-  [ "$(tools_value_count "$WORK/tools-manifest.sha256")" -eq 10 ] || return 1
-  while IFS= read -r tools_manifest_sha; do
-    case "$tools_manifest_sha" in
-      unknown|unavailable) ;;
-      ''|*[!A-Fa-f0-9]*) return 1 ;;
-      *) [ "${#tools_manifest_sha}" -eq 64 ] || return 1 ;;
-    esac
-  done <"$WORK/tools-manifest.sha256"
-
-  tools_manifest_field_values corpus_sha256 "$tools_manifest_path" >"$WORK/tools-manifest.corpus-sha256"
-  [ "$(tools_value_count "$WORK/tools-manifest.corpus-sha256")" -eq 1 ] || return 1
-  grep -F -x "$ZSTD_CORPUS_SHA256" "$WORK/tools-manifest.corpus-sha256" >/dev/null || return 1
-
-  if command -v jq >/dev/null 2>&1; then
-    jq -e --arg arch "$ARCH" '
-      .schema_version == "ecs-tools.manifest/v1" and
-      .architecture == $arch and
-      (.tools | type == "array" and length == 10) and
-      ([.tools[].name] | sort) == ["fio", "iperf3", "nexttrace-tiny", "npb-ep", "npb-ft", "openssl", "ping", "stream", "sysbench", "zstd"] and
-      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_sha256 == "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0") and
-      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_bytes == 211938580) and
-      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_path == "runtime/ecs-silesia-v1.corpus") and
-      ([.tools[] | select(.name == "zstd")][0].parameters.corpus_source == "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip") and
-      (all(.tools[]; has("name") and has("architecture") and has("sha256") and
-        (.architecture == $arch) and
-        ((.sha256 == "unknown") or (.sha256 == "unavailable") or (.sha256 | test("^[A-Fa-f0-9]{64}$")))))
-    ' "$tools_manifest_path" >/dev/null 2>&1 || return 1
-  fi
-  return 0
-}
-
-tools_tar_list() {
-  tools_archive_path=$1
-  tar -tzf "$tools_archive_path"
-}
-
 tools_tar_extract_member() {
   tools_archive_path=$1
   tools_extract_path=$2
   tools_member=$3
   tar -xzf "$tools_archive_path" -C "$tools_extract_path" "$tools_member"
-}
-
-validate_tools_archive_layout() {
-  tools_list_path=$1
-  while IFS= read -r tools_entry; do
-    case "$tools_entry" in
-      ''|/*|../*|*/../*|*/..|./*|*/./*) return 1 ;;
-    esac
-  done <"$tools_list_path"
-  grep -F -x 'bin/' "$tools_list_path" >/dev/null || return 1
-  grep -F -x 'manifest.json' "$tools_list_path" >/dev/null || return 1
-  for tools_entry in sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping; do
-    grep -F -x "bin/$tools_entry" "$tools_list_path" >/dev/null || return 1
-  done
-  if grep -E '(^|/)share(/|$)|(^|/)ecs-silesia-v1[.]corpus$' "$tools_list_path" >/dev/null; then
-    return 1
-  fi
-  return 0
 }
 
 prepare_zstd_corpus() {
@@ -710,22 +543,14 @@ prepare_tools_archive() {
     return 1
   fi
   [ "$TOOLS_ACTUAL" = "$TOOLS_EXPECTED" ] || return 1
-  printf '%s  %s\n' "$TOOLS_ACTUAL" "$TOOLS_ASSET" >"$TOOLS_ARCHIVE_DIGESTS"
-
-  tools_tar_list "$TOOLS_ARCHIVE" >"$TOOLS_LIST_FILE" || return 1
-  validate_tools_archive_layout "$TOOLS_LIST_FILE" || return 1
   mkdir -p "$TOOLS_EXTRACT_ROOT" "$TOOLS_STAGING_BIN" || return 1
-  tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" manifest.json || return 1
-  [ -f "$TOOLS_EXTRACT_ROOT/manifest.json" ] && [ ! -L "$TOOLS_EXTRACT_ROOT/manifest.json" ] || return 1
-  cp "$TOOLS_EXTRACT_ROOT/manifest.json" "$TOOLS_MANIFEST_FILE" || return 1
-  validate_tools_manifest "$TOOLS_MANIFEST_FILE" || return 1
   for tools_requested in $TOOLS_REQUESTED; do
     tools_tar_extract_member "$TOOLS_ARCHIVE" "$TOOLS_EXTRACT_ROOT" "bin/$tools_requested" || return 1
     tools_source="$TOOLS_EXTRACT_ROOT/bin/$tools_requested"
     [ -f "$tools_source" ] && [ ! -L "$tools_source" ] && [ -x "$tools_source" ] || return 1
-    verify_tools_binary_digest "$tools_requested" "$tools_source" || return 1
     # Copy, instead of exposing the whole extracted tree, so PATH contains
-    # exactly the binaries needed by this invocation.
+    # exactly the binaries needed by this invocation. The complete archive
+    # SHA-256 was verified above; there is no second JSON digest contract.
     cp "$tools_source" "$TOOLS_STAGING_BIN/$tools_requested" || return 1
     chmod 0755 "$TOOLS_STAGING_BIN/$tools_requested" || return 1
   done
@@ -735,8 +560,8 @@ prepare_tools_archive() {
       ;;
   esac
   # Do not alter MISSING_TOOLS or PATH until every requested binary has passed
-  # its own digest check.  A later mismatch therefore keeps the whole request
-  # unresolved instead of exposing a partially verified tool set.
+  # its regular-file/executable checks. A later failure therefore keeps the
+  # whole request unresolved instead of exposing a partial tool set.
   [ ! -e "$TEMP_TOOL_BIN" ] || return 1
   mv "$TOOLS_STAGING_BIN" "$TEMP_TOOL_BIN" || return 1
   for tools_requested in $TOOLS_REQUESTED; do
@@ -1394,7 +1219,12 @@ collect_missing_tools() {
         *)
           if ! tool_available "$tool"; then
             add_missing_tool "$tool"
-            archive_tool_for "$tool" >/dev/null 2>&1 && add_tools_request "$tool"
+            # Every non-Ookla RequiredTools entry is resolved from the
+            # checksummed architecture archive. The archive extraction below
+            # accepts only the exact requested bin/<name> member, so a future
+            # descriptor entry that is not shipped there fails closed instead
+            # of needing a second shell-side tool registry.
+            [ "$tool" = speedtest ] || add_tools_request "$tool"
           fi
           ;;
       esac
@@ -1468,8 +1298,8 @@ prepare_dependencies() {
     if prepare_tools_archive; then
       say "缺失工具已放入本次临时 PATH" "missing tools staged in this run's temporary PATH"
     else
-      say "架构工具包下载、SHA-256 或 manifest 校验失败，相关测试将跳过" \
-        "architecture tool package download, SHA-256, or manifest verification failed; related tests will be skipped"
+      say "架构工具包下载、SHA-256 或可执行文件校验失败，相关测试将跳过" \
+        "architecture tool package download, SHA-256, or executable verification failed; related tests will be skipped"
     fi
   fi
   if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! nexttrace_tool_exists; then

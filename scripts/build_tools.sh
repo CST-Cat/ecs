@@ -13,6 +13,7 @@ the compiler native and uses TARGET_RUNNER only for final binary smoke tests.
 EOF
 }
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/stream.sh"
 
 die() {
@@ -58,8 +59,7 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-architectures=(amd64 arm64 armv7 386 s390x riscv64 ppc64le)
-case " ${architectures[*]} " in
+case " ${ECS_ARCHES[*]} " in
   *" $arch "*) ;;
   *) die "unsupported architecture: ${arch:-<empty>}" ;;
 esac
@@ -738,11 +738,12 @@ cp "$nexttrace_download" "$stage/bin/nexttrace-tiny"
 # Remove compiler/debug sections from binaries built in this job. The official
 # NextTrace asset is kept byte-for-byte so its GitHub release digest remains
 # independently verifiable.
-for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl ping; do
+for tool in "${ECS_TOOL_NAMES[@]}"; do
+  [[ "$tool" == nexttrace-tiny ]] && continue
   "$strip_command" --strip-unneeded "$stage/bin/$tool"
 done
 
-for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl nexttrace-tiny ping; do
+for tool in "${ECS_TOOL_NAMES[@]}"; do
   chmod 0755 "$stage/bin/$tool"
   [[ -s "$stage/bin/$tool" ]] || die "built $tool is empty"
 done
@@ -780,7 +781,7 @@ ping_bin="$stage/bin/ping"
 # dependency or a benchmark-specific runtime library is a hard failure. Do not
 # use ldd here: under binfmt/QEMU it executes the target loader and can crash on
 # a valid static binary. ELF program and dynamic headers are architecture-safe.
-for tool in sysbench zstd npb-ep npb-ft stream fio iperf3 openssl nexttrace-tiny ping; do
+for tool in "${ECS_TOOL_NAMES[@]}"; do
   binary="$stage/bin/$tool"
   "$readelf_command" -dW "$binary" >"$work/${tool}.dynamic" 2>&1 || die "dynamic-header readelf failed for $tool"
   "$readelf_command" -lW "$binary" >"$work/${tool}.program" 2>&1 || die "program-header readelf failed for $tool"
@@ -1062,9 +1063,11 @@ zstd_version=$(release_version "$zstd_tag")
 fio_version=$(release_version "$fio_tag")
 iperf3_version=$(release_version "$iperf3_tag")
 iputils_version=$(release_version "$iputils_tag")
+supported_architectures_json=$(printf '%s\n' "${ECS_ARCHES[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
 
 jq -n \
   --arg architecture "$arch" \
+  --argjson supported_architectures "$supported_architectures_json" \
   --arg toolchain_mode "$build_mode" \
   --arg build_triplet "$build_triplet" \
   --arg target_triplet "$target_triplet" \
@@ -1147,7 +1150,7 @@ jq -n \
   ' {
       schema_version: "ecs-tools.manifest/v1",
       architecture: $architecture,
-      supported_architectures: ["amd64", "arm64", "armv7", "386", "s390x", "riscv64", "ppc64le"],
+      supported_architectures: $supported_architectures,
       build: {
         toolchain_mode: $toolchain_mode,
         build_triplet: $build_triplet,
@@ -1302,23 +1305,11 @@ jq -n \
       ]
     }' | jq . >"$stage/manifest.json"
 
-for tool in sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping; do
+for tool in "${ECS_TOOL_NAMES[@]}"; do
   actual=$(sha256sum "$stage/bin/$tool" | awk '{print $1}')
   recorded=$(jq -er --arg name "$tool" '.tools[] | select(.name == $name) | .sha256' "$stage/manifest.json")
   [[ "$actual" == "$recorded" ]] || die "manifest hash mismatch for $tool"
   [[ "$recorded" =~ ^[[:xdigit:]]{64}$ ]] || die "manifest hash is not concrete for $tool"
 done
-jq -e --arg architecture "$arch" '
-  .schema_version == "ecs-tools.manifest/v1" and
-  .architecture == $architecture and
-  (.build.toolchain_mode == "native" or .build.toolchain_mode == "cross") and
-  (.build.build_triplet | type == "string" and length > 0) and
-  (.build.target_triplet | type == "string" and length > 0) and
-  (.build.smoke_runner | type == "string" and length > 0) and
-  .build.validation.scope == "functional" and
-  .build.validation.performance_valid == false and
-  (.tools | length == 10) and
-  (all(.tools[]; .architecture == $architecture and .version != "unknown" and .tag_or_commit != "unknown" and .source != "unknown" and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
-' "$stage/manifest.json" >/dev/null || die "generated manifest failed concrete metadata checks"
 
 echo "completed real tools stage: $stage"

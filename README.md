@@ -254,7 +254,7 @@ ecs --config ecs.json
 
 `zstd`、`openssl`、NPB 三项**校验版本**：口径固定才谈得上跨机器比较，版本不符按缺失处理。工具缺失时报告会明确写出"该标准成绩未运行"，**不会用替代算法凑一个分数出来**。
 
-通过 `run.sh` 运行时，缺失工具从当前架构的 `ecs-tools` 发行包临时取得：整包校验 `checksums.txt`，包内 `manifest.json` 再逐个校验每个二进制的 SHA-256，通过后才放进本次临时 PATH，退出时随工作目录清理。`ECS_AUTO_DEPS=0` 可关闭这套自动准备。
+通过 `run.sh` 运行时，缺失工具从当前架构的 `ecs-tools` 发行包临时取得：先用 Release `checksums.txt` 校验整个归档，再只提取本次实际请求、确实存在且为普通可执行文件的成员到本次临时 PATH，退出时随工作目录清理。manifest 的结构、字段和 digest 格式由 Go 校验入口负责，构建阶段另将生成 manifest 中的 digest 与实际 binary 对照。`ECS_AUTO_DEPS=0` 可关闭这套自动准备。
 
 ## 平台支持
 

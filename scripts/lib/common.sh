@@ -39,7 +39,13 @@ ECS_TARGETS=(
   "linux ppc64le ppc64le"
 )
 
-ECS_ARCHES=(amd64 arm64 armv7 386 s390x riscv64 ppc64le)
+# Package architecture names are derived from the target table above; keeping
+# only one literal architecture list prevents release/package loops drifting.
+ECS_ARCHES=()
+for ecs_target in "${ECS_TARGETS[@]}"; do
+  read -r _ _ ecs_arch <<<"$ecs_target"
+  ECS_ARCHES+=("$ecs_arch")
+done
 
 # 每个架构的工具包必须包含的十个二进制。
 ECS_TOOL_NAMES=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
@@ -137,11 +143,11 @@ ecs_devtool() {
 # 与 Go 工具同一个思路：版本钉在这里，CI 和本地拿到的是同一套。宿主上已经
 # 装好时直接用宿主的，否则在 .devtools-bin/pyenv 建一个隔离的 venv——不往
 # 开发机的全局 site-packages 里装东西。
-ECS_PYTHON_REQUIREMENTS=(jsonschema==4.25.1 PyYAML==6.0.2)
+ECS_PYTHON_REQUIREMENTS=(PyYAML==6.0.2)
 
 ecs_python() {
   local venv python
-  if python3 -c 'import jsonschema, yaml' 2>/dev/null; then
+  if python3 -c 'import yaml' 2>/dev/null; then
     command -v python3
     return 0
   fi

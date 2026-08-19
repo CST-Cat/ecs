@@ -254,7 +254,7 @@ Local performance modules drive standard benchmark programs instead of reimpleme
 
 `zstd`, `openssl` and NPB are **version-verified**: cross-machine comparison only means something when the measurement contract is fixed, so a mismatched version is treated as missing. When a tool is absent the report says plainly that the standard result did not run — **no substitute score is ever synthesized**.
 
-Under `run.sh`, missing tools are staged temporarily from the architecture-matched `ecs-tools` release asset: the archive is verified against `checksums.txt`, then its `manifest.json` verifies each binary's SHA-256 individually before anything enters the temporary PATH, which is removed with the work directory on exit. `ECS_AUTO_DEPS=0` disables this staging entirely.
+Under `run.sh`, missing tools are staged temporarily from the architecture-matched `ecs-tools` release asset: the whole archive is verified against the Release `checksums.txt`, then only requested members that exist as regular executable files are copied into the temporary PATH, which is removed with the work directory on exit. The Go validator owns manifest structure, fields and digest format; during the build, `build_tools.sh` separately compares generated manifest digests with the actual binaries. `ECS_AUTO_DEPS=0` disables this staging entirely.
 
 ## Platform support
 

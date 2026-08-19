@@ -6,7 +6,7 @@
 和 `LICENSES/` 为准。源码中的示例 manifest 允许 `unknown`/`unavailable`，这里不填写尚未由
 CI 产出的工具版本、发布资产或许可证正文。
 
-`tools/ecs-tools-manifest.schema.json` 与 Go 解析器使用同一严格合同：顶层必须包含 `build`，`build.validation` 必须明确为功能校验且不具备性能有效性，`tools` 必须恰好各含一个下文十个工具，未知字段会同时被 schema 和解析器拒绝。CI 会先检查 Draft 2020-12 schema 本身，再校验示例与实际生成的 manifest。
+`internal/toolsmanifest` 中的 Go 解析器是工具清单的唯一合同入口：顶层必须包含 `build`，`build.validation` 必须明确为功能校验且不具备性能有效性，`tools` 必须恰好各含一个下文十个工具，未知字段会被拒绝。CI 和发布阶段都通过这个解析器校验示例与实际生成的 manifest。
 
 ## 可选本地程序
 
@@ -39,7 +39,7 @@ Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政�
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
 `run.sh` 优先使用符合口径的系统程序；需要临时工具时选择当前 Linux 架构匹配的 `ecs-tools`
-`tar.gz`，并核对 `checksums.txt`、`manifest.json` 和 10 个二进制 digest 后，才解包到本次运行的 `$WORK`；选中 zstd 时，另从独立 Release 资产核对 checksum、长度和 SHA-256 后解包 corpus。
+`tar.gz`，先核对 Release `checksums.txt`，再只解包本次实际请求且确实存在、为普通可执行文件的成员到本次运行的 `$WORK`；Go 入口负责 manifest 的结构、字段和 digest 格式，`build_tools.sh` 在构建时另将生成 manifest 中的 digest 与实际 binary 对照，发布归档整体完整性由 `checksums.txt` 校验。选中 zstd 时，另从独立 Release 资产核对 checksum、长度和 SHA-256 后解包 corpus。
 APT/Packagecloud 不用于这些通用缺失工具。Ookla 缺失且模块被 profile 选中或被 `--only` 显式选中时，才走独立的官方 Packagecloud 源、固定指纹的 GPG
 公钥、索引和缓存路径；由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 安装脚本。
 `full` 缺失 `speedtest` 时走该独立官方签名源，`standard` 只有显式 `--only ookla` 时走该路径；Ookla 永不进入

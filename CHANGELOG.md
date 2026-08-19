@@ -17,6 +17,7 @@
 - 收紧 Go Release 与安全升级职责：根 `go.mod` 仅声明最低源码兼容版本（1.22），`devtools/go.mod` 仅管理分析工具环境，正式 Release 编译器唯一由 `release.yml` 的 `ECS_RELEASE_GO` pin 选择（当前 1.26.5），Release 与最低兼容 CI 均强制 `GOTOOLCHAIN=local`；compat 只保留 1.22.x，stable 由 unit 覆盖。
 - 安全自动升级现在只修改 Release compiler pin，不改根 `go.mod`；发布后安全复审从下载的七架构 `ecs` 二进制 `go version -m` 提取并校验一致的实际构建 Go 版本，再将该 metadata 传给 triage，避免误用 security runner 自身的 Go 版本。
 - 删除运行时 module factory/estimate 注册表、`sync.RWMutex`、`any` 构造和 `init()` 反向注册：config 只保留静态模块描述，probe 提供强类型内建列表，runner 在执行边界显式绑定描述与探针，估算也由 probe 的显式调用负责。该内部重构不新增或改变用户配置字段；既有配置仍按相同模块 ID 解析，绑定完整性在执行前显式校验。
+- 工具 manifest 收敛为 `internal/toolsmanifest` 的 Go parser/validator 唯一合同；删除经仓内搜索未发现独立消费者、且未被定位为公开权威合同的重复手工 JSON Schema 文件，CI 与发布阶段改为调用同一个 Go 入口校验示例和实际 manifest，`run.sh` 仅依赖 Release `checksums.txt` 并检查实际请求的可执行文件，同时移除旧 JSON Schema 门禁的 `jsonschema` 依赖；workflow YAML 检查仍由现有 PyYAML 路径负责。构建与 stage 校验脚本共享唯一架构/工具清单。
 
 ## 0.7.3 — 2026-08-18
 

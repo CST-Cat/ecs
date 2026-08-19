@@ -310,20 +310,16 @@ func TestRunScriptNextTraceOnlyDependencyPolicy(t *testing.T) {
 		"ECS_TOOLS_BASE_URL",
 		"TOOLS_BASE",
 		"TOOLS_ASSET=\"ecs-tools_linux_${ARCH}.tar.gz\"",
-		"validate_tools_manifest",
-		"validate_tools_archive_layout",
 		"tools_tar_extract_member",
-		`tar -tzf "$tools_archive_path"`,
 		`tar -xzf "$tools_archive_path"`,
-		"tools_manifest_digest_for",
-		"verify_tools_binary_digest",
 		"TOOLS_STAGING_BIN",
 		"sha256sum",
 		"shasum -a 256",
 		"nexttrace-tiny",
 		"nexttrace_tool_exists",
-		"archive_tool_for",
 		"remove_missing_tool \"$tools_requested\"",
+		`[ -f "$tools_source" ] && [ ! -L "$tools_source" ] && [ -x "$tools_source" ]`,
+		`[ "$TOOLS_ACTUAL" = "$TOOLS_EXPECTED" ]`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh is missing NextTrace dependency guard %q", required)
@@ -368,28 +364,39 @@ func TestRunScriptPrefersSystemPingAndStagesOnlyRequestedTools(t *testing.T) {
 			t.Fatalf("run.sh missing runtime fallback guard %q", required)
 		}
 	}
-	if strings.Contains(text, `archive_tool_for "$tool" && add_tools_request "$tool"`) {
-		t.Fatal("run.sh must not stage a missing tool unless it is declared by the archive")
-	}
 }
 
-func TestRunScriptVerifiesConcreteToolDigestsAndRejectsImageMagickStream(t *testing.T) {
+func TestRunScriptUsesArchiveChecksumsAndRejectsImageMagickStream(t *testing.T) {
 	contents, err := os.ReadFile(runScriptPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(contents)
 	for _, required := range []string{
-		`case "$tools_digest" in`,
-		`unknown|unavailable) return 0`,
-		`[ "${#tools_digest}" -eq 64 ]`,
-		`[ "$tools_digest_actual" = "$tools_digest_expected" ]`,
+		`EXPECTED=$(awk -v f="$ASSET"`,
+		`TOOLS_EXPECTED=$(awk -v f="$TOOLS_ASSET"`,
+		`[ "$ACTUAL" = "$EXPECTED" ]`,
+		`[ "$TOOLS_ACTUAL" = "$TOOLS_EXPECTED" ]`,
 		`stream_is_official`,
 		`grep -F 'Number of Threads requested'`,
 		`grep -F 'Best Rate'`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("run.sh missing concrete digest/STREAM guard %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"manifest.json",
+		"tools_manifest_field_values",
+		"tools_manifest_digest_for",
+		"verify_tools_binary_digest",
+		"validate_tools_manifest",
+		"validate_tools_archive_layout",
+		"jq -e",
+		"tr '{}'",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("run.sh must not carry a second manifest parser %q", forbidden)
 		}
 	}
 	if strings.Contains(text, `stream --version`) {

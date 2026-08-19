@@ -18,20 +18,6 @@ func exampleBytes(t *testing.T) []byte {
 	return data
 }
 
-func schemaObject(t *testing.T) map[string]any {
-	t.Helper()
-	path := filepath.Join("..", "..", "tools", "ecs-tools-manifest.schema.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var object map[string]any
-	if err := json.Unmarshal(data, &object); err != nil {
-		t.Fatalf("schema is not valid JSON: %v", err)
-	}
-	return object
-}
-
 func exampleObject(t *testing.T) map[string]any {
 	t.Helper()
 	var object map[string]any
@@ -69,49 +55,6 @@ func TestExampleManifestParsesAndValidates(t *testing.T) {
 	}
 	if manifest.Build.Validation.Scope != "functional" || manifest.Build.Validation.PerformanceValid {
 		t.Fatalf("example validation metadata = %#v, want functional/non-performance", manifest.Build.Validation)
-	}
-}
-
-func TestJSONSchemaMirrorsRequiredBuildAndToolSetContract(t *testing.T) {
-	schema := schemaObject(t)
-	required := schema["required"].([]any)
-	for _, field := range []string{"schema_version", "architecture", "build", "tools"} {
-		found := false
-		for _, value := range required {
-			found = found || value == field
-		}
-		if !found {
-			t.Errorf("JSON Schema required list omits %q", field)
-		}
-	}
-	properties := schema["properties"].(map[string]any)
-	tools := properties["tools"].(map[string]any)
-	if tools["minItems"] != float64(len(ToolNames)) || tools["maxItems"] != float64(len(ToolNames)) {
-		t.Fatalf("JSON Schema tool cardinality = %#v/%#v, want %d", tools["minItems"], tools["maxItems"], len(ToolNames))
-	}
-	definitions := schema["$defs"].(map[string]any)
-	tool := definitions["tool"].(map[string]any)
-	if tool["additionalProperties"] != false {
-		t.Fatal("JSON Schema tool objects must reject unknown fields like the Go parser")
-	}
-	toolProperties := tool["properties"].(map[string]any)
-	names := toolProperties["name"].(map[string]any)["enum"].([]any)
-	if len(names) != len(ToolNames) {
-		t.Fatalf("JSON Schema tool name count = %d, want %d", len(names), len(ToolNames))
-	}
-	for _, name := range ToolNames {
-		found := false
-		for _, value := range names {
-			found = found || value == name
-		}
-		if !found {
-			t.Errorf("JSON Schema tool enum omits %q", name)
-		}
-	}
-	for _, definition := range []string{"build", "validation"} {
-		if definitions[definition].(map[string]any)["additionalProperties"] != false {
-			t.Errorf("JSON Schema %s object must reject unknown fields", definition)
-		}
 	}
 }
 
@@ -374,6 +317,41 @@ func TestParseRejectsMissingParameters(t *testing.T) {
 	delete(tools[0].(map[string]any), "parameters")
 	if _, err := Parse(objectBytes(t, object)); err == nil {
 		t.Fatal("manifest with missing parameters unexpectedly passed")
+	}
+}
+
+func TestParseRejectsInvalidOptionalFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "null supported architectures",
+			mutate: func(object map[string]any) {
+				object["supported_architectures"] = nil
+			},
+		},
+		{
+			name: "null fallback",
+			mutate: func(object map[string]any) {
+				object["tools"].([]any)[0].(map[string]any)["fallback"] = nil
+			},
+		},
+		{
+			name: "empty fallback",
+			mutate: func(object map[string]any) {
+				object["tools"].([]any)[0].(map[string]any)["fallback"] = ""
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			object := exampleObject(t)
+			test.mutate(object)
+			if _, err := Parse(objectBytes(t, object)); err == nil {
+				t.Fatal("manifest with invalid optional field unexpectedly passed")
+			}
+		})
 	}
 }
 

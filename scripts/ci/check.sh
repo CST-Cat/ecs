@@ -60,23 +60,11 @@ ecs_step "security script wiring"
 bash scripts/security/propose_go_upgrade_test.sh
 bash scripts/security/scan_released_test.sh
 
-python=$(ecs_python)
-
-ecs_step "ecs-tools JSON Schema 与示例"
-"$python" - <<'PY'
-import json
-from pathlib import Path
-
-from jsonschema import Draft202012Validator
-
-schema = json.loads(Path("tools/ecs-tools-manifest.schema.json").read_text())
-example = json.loads(Path("tools/manifest.example.json").read_text())
-Draft202012Validator.check_schema(schema)
-Draft202012Validator(schema).validate(example)
-print("schema 与示例一致")
-PY
+ecs_step "ecs-tools manifest 与示例"
+go run ./cmd/tools-manifest-check --architecture amd64 tools/manifest.example.json
 
 ecs_step "workflow YAML 语法"
+python=$(ecs_python)
 "$python" - <<'PY'
 from pathlib import Path
 

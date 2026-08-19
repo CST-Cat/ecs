@@ -10,8 +10,9 @@ package_tmp="$stage_root/package-tmp"
 mkdir -p "$package_tmp"
 trap 'rm -rf -- "$stage_root"' EXIT
 
-architectures=(amd64 arm64 armv7 386 s390x riscv64 ppc64le)
-tools=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3 nexttrace-tiny ping)
+source "$repo_root/scripts/lib/common.sh"
+architectures=("${ECS_ARCHES[@]}")
+tools=("${ECS_TOOL_NAMES[@]}")
 
 write_fixture() {
   local path=$1
@@ -51,27 +52,11 @@ for arch in "${architectures[@]}"; do
     exit 1
   }
   listing=$(tar -tzf "$archive")
-  [[ "$(printf '%s\n' "$listing" | wc -l)" -eq 16 ]] || {
+  [[ "$(printf '%s\n' "$listing" | wc -l)" -eq $(( ${#tools[@]} + 6 )) ]] || {
     echo "archive $archive has an unexpected number of entries" >&2
     exit 1
   }
-  for entry in \
-    bin/ \
-    bin/sysbench \
-    bin/zstd \
-    bin/npb-ep \
-    bin/npb-ft \
-    bin/openssl \
-    bin/stream \
-    bin/fio \
-    bin/iperf3 \
-    bin/nexttrace-tiny \
-    bin/ping \
-    LICENSES/ \
-    LICENSES/project-license.txt \
-    LICENSE \
-    NOTICE \
-    manifest.json; do
+  for entry in bin/ "${tools[@]/#/bin/}" LICENSES/ LICENSES/project-license.txt LICENSE NOTICE manifest.json; do
     printf '%s\n' "$listing" | grep -F -x "$entry" >/dev/null || {
       echo "archive $archive is missing $entry" >&2
       exit 1
@@ -85,34 +70,6 @@ for arch in "${architectures[@]}"; do
     echo "archive $archive contains an Ookla path" >&2
     exit 1
   fi
-  manifest=$(tar -xzOf "$archive" manifest.json)
-  printf '%s\n' "$manifest" | grep -F -x "  \"architecture\": \"$arch\"," >/dev/null || {
-    echo "manifest in $archive has the wrong architecture" >&2
-    exit 1
-  }
-  for field in \
-    '"license": "GPL-2.0-only"' \
-    '"database-drivers"' \
-    '"io_uring"' \
-    '"libaio"' \
-    '"psync"' \
-    '"ceph"' \
-    '"rbd"' \
-    '"rados"' \
-    '"gluster"' \
-    '"rdma"' \
-    '"sctp"' \
-    '"thread_modes"' \
-    '"corpus_sha256"' \
-    '"ci_smoke_class"' \
-    '"build_target": "apps/openssl"' \
-    '"tiny"' \
-    '"iputils-parser"'; do
-    printf '%s\n' "$manifest" | grep -F "$field" >/dev/null || {
-      echo "manifest in $archive is missing feature/license field $field" >&2
-      exit 1
-    }
-  done
 done
 
 if find "$package_tmp" -mindepth 1 -print -quit | grep -q .; then

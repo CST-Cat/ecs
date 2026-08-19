@@ -109,6 +109,9 @@ func Parse(data []byte) (Manifest, error) {
 			return Manifest{}, err
 		}
 	}
+	if value, ok := raw["supported_architectures"]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return Manifest{}, fmt.Errorf("supported_architectures must be an array when present")
+	}
 	buildRaw, err := rawObject(raw["build"], "build")
 	if err != nil {
 		return Manifest{}, err
@@ -153,6 +156,12 @@ func Parse(data []byte) (Manifest, error) {
 		} {
 			if err := requireField(toolRaw, field); err != nil {
 				return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
+			}
+		}
+		if value, ok := toolRaw["fallback"]; ok {
+			var fallback string
+			if err := json.Unmarshal(value, &fallback); err != nil || fallback == "" {
+				return Manifest{}, fmt.Errorf("tool %d: fallback must be a non-empty string when present", index)
 			}
 		}
 	}

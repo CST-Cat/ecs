@@ -6,12 +6,14 @@ set -euo pipefail
 # 校验分两层：
 #
 #   1. cmd/tools-manifest-check 用 ecs 自己的解析器读 manifest——发布物必须能被
-#      将要读它的那份代码认下来，而不是只能被 jq 认下来；
-#   2. 下面的 jq 契约再断言构建口径本身：工具数量、toolchain_mode、smoke 运行器、
-#      三元组、验证范围、NPB 的 smoke class、每个工具的架构与 SHA-256 格式。
+#      将要读它的那份代码认下来，而不是只能被另一份 shell parser 认下来；
+#      build mode、smoke runner 和 NPB smoke class 的 stage 口径也通过同一入口
+#      与构建容器的解析结果比对；
+#   2. 下面只保留 stage 特有检查：十个 executable、LICENSES 与独立语料。
 #
 # 构建口径（cross 还是 native、smoke 运行器是谁）不在这里第二次定义，而是向
-# build_tools_container.sh --print-params 索取。两处各写一份迟早会分叉。
+# build_tools_container.sh --print-params 索取。manifest checker 只负责把 stage
+# 中记录的值与这份解析结果比对。
 #
 # 语料是独立发布物：它 200 MB 出头，七个架构各带一份会让 Release 膨胀到没有
 # 必要的体积。摘除前先核对尺寸与摘要，确认摘掉的确实是那一份。
@@ -66,8 +68,6 @@ done
   usage
   die "--stage-root is required"
 }
-command -v jq >/dev/null 2>&1 || die "jq is required"
-
 stage_dir="$stage_root/linux_$arch"
 manifest="$stage_dir/manifest.json"
 [[ -s "$manifest" ]] || die "missing manifest: $manifest"
@@ -82,28 +82,16 @@ npb_class=$(awk -F= '$1 == "npb_ci_smoke_class" { print $2 }' <<<"$params")
 
 echo "verify-tools-stage: $arch mode=$toolchain_mode runner=$target_runner npb_class=$npb_class" >&2
 
-# 第一层：用 ecs 自己的解析器读。
-go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" --architecture "$arch" "$manifest"
-
-# 第二层：构建口径契约。
-jq -e \
-  --arg arch "$arch" \
-  --arg toolchain_mode "$toolchain_mode" \
-  --arg target_runner "$target_runner" \
-  --arg npb_class "$npb_class" \
-  --argjson tool_count "${#ECS_TOOL_NAMES[@]}" '
-  .architecture == $arch and
-  (.tools | length == $tool_count) and
-  (.build.toolchain_mode == $toolchain_mode) and
-  (.build.smoke_runner == $target_runner) and
-  (.build.build_triplet | type == "string" and length > 0) and
-  (.build.target_triplet | type == "string" and length > 0) and
-  (.build.validation.scope == "functional") and
-  (.build.validation.performance_valid == false) and
-  (all(.tools[] | select(.name == "npb-ep" or .name == "npb-ft");
-    .parameters.ci_smoke_class == $npb_class)) and
-  (all(.tools[]; .architecture == $arch and (.sha256 | test("^[0-9A-Fa-f]{64}$"))))
-' "$manifest" >/dev/null || die "$arch manifest violates the build contract"
+# Canonical parser/validator owns manifest structure, fields, tool set, hashes,
+# and architecture semantics. The expected build mode, smoke runner, and NPB
+# class are stage-specific values supplied by the build container, so they are
+# checked by the same Go entry point rather than duplicated in jq.
+go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
+  --architecture "$arch" \
+  --toolchain-mode "$toolchain_mode" \
+  --smoke-runner "$target_runner" \
+  --npb-smoke-class "$npb_class" \
+  "$manifest"
 
 # 十个工具都必须真的在 stage 里，且可执行。
 for tool in "${ECS_TOOL_NAMES[@]}"; do
