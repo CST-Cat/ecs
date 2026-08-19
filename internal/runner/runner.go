@@ -210,12 +210,14 @@ func localInterfaceIPs() []string {
 // runOne 执行单个探针，统一处理离线跳过与方法学补全。
 func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
 	descriptor, hasDescriptor := config.ModuleDescriptorFor(item.ID())
-	displayTitle := item.Title()
+	canonicalTitle := item.Title()
 	needsNetwork := item.NeedsNetwork()
 	if hasDescriptor {
 		// Descriptor metadata is authoritative for cross-cutting runner policy;
-		// the probe title remains the fallback only when localization is absent.
-		displayTitle = localizedDescriptorTitle(descriptor, displayTitle)
+		// keep the report title in the canonical source language. The terminal
+		// progress title is localized separately by localizedTitle, and report
+		// renderers localize this canonical title only for human-facing output.
+		canonicalTitle = canonicalDescriptorTitle(descriptor, canonicalTitle)
 		needsNetwork = descriptor.NeedsNetwork
 	}
 	var result model.Result
@@ -251,7 +253,7 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 		result.Evidence = model.NewEvidence(valid, 1, "module")
 	}
 	failure.EnsureResult(&result)
-	result.Title = displayTitle
+	result.Title = canonicalTitle
 	return result
 }
 
@@ -322,6 +324,16 @@ func localizedTitle(id, fallback string) string {
 func localizedDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {
 	if descriptor.TitleKey != "" && i18n.Has(i18n.Current(), descriptor.TitleKey) {
 		return i18n.T(descriptor.TitleKey)
+	}
+	return fallback
+}
+
+// canonicalDescriptorTitle returns the stable source-language title stored in
+// a Report. Human-facing renderers apply Localize later, so collection must not
+// depend on the current UI language.
+func canonicalDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {
+	if descriptor.TitleKey != "" && i18n.Has(i18n.LangZH, descriptor.TitleKey) {
+		return i18n.TL(i18n.LangZH, descriptor.TitleKey)
 	}
 	return fallback
 }

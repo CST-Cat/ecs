@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 )
 
 func TestBuildSTUNRequest(t *testing.T) {
@@ -334,6 +335,21 @@ func TestNATServerPoolIsWellFormed(t *testing.T) {
 		if err != nil || host == "" || port == "" {
 			t.Fatalf("STUN 地址格式错误：%s", server.Address)
 		}
+	}
+}
+
+func TestNATServerPoolValueIsCanonicalAcrossUILanguages(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	servers := []config.Endpoint{{Address: "198.51.100.1:3478"}, {Address: "203.0.113.1:3478"}}
+
+	var values []string
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		values = append(values, describeNATServers(servers))
+	}
+	if values[0] != values[1] {
+		t.Fatalf("NAT server pool changed with UI language: zh=%q en=%q", values[0], values[1])
 	}
 }
 

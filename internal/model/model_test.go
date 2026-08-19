@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"ecs/internal/i18n"
 )
 
 func TestMask(t *testing.T) {
@@ -133,6 +135,26 @@ func TestSummarize(t *testing.T) {
 	Summarize(&report)
 	if report.Summary.Status != StatusWarning || report.Summary.OK != 1 || report.Summary.Warnings != 1 || report.Summary.Skipped != 1 {
 		t.Fatalf("summary = %+v", report.Summary)
+	}
+}
+
+func TestSummarizeIsCanonicalAcrossUILanguages(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+
+	var summaries []Summary
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		report := Report{Results: []Result{
+			{Status: StatusOK},
+			{Status: StatusWarning},
+			{Status: StatusSkipped},
+		}}
+		Summarize(&report)
+		summaries = append(summaries, report.Summary)
+	}
+	if summaries[0] != summaries[1] {
+		t.Fatalf("summary changed with UI language: zh=%+v en=%+v", summaries[0], summaries[1])
 	}
 }
 

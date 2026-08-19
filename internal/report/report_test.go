@@ -234,6 +234,60 @@ func TestWriteAndLoadJSON(t *testing.T) {
 	}
 }
 
+func TestWriteFilesKeepsCanonicalJSONAcrossLanguages(t *testing.T) {
+	originalLanguage := i18n.Current()
+	defer i18n.Set(originalLanguage)
+
+	data := sampleReport()
+	data.Results[0].Fields = []model.Field{{Key: "state", Label: "系统", Value: "系统"}}
+	data.Results[0].Tables = []model.Table{{
+		Title:   "当前值",
+		Columns: []string{"当前值", "状态"},
+		Rows:    [][]string{{"系统", "完成"}},
+	}}
+
+	var canonicalJSON []byte
+	var chineseMarkdown, englishMarkdown string
+	for _, testCase := range []struct {
+		language i18n.Lang
+		output   *string
+	}{
+		{language: i18n.LangZH, output: &chineseMarkdown},
+		{language: i18n.LangEN, output: &englishMarkdown},
+	} {
+		i18n.Set(testCase.language)
+		written, err := WriteFiles(data, t.TempDir(), "report", []string{"json", "md"})
+		if err != nil {
+			t.Fatalf("write %s report: %v", testCase.language, err)
+		}
+		jsonBytes, err := os.ReadFile(written["json"])
+		if err != nil {
+			t.Fatalf("read %s JSON: %v", testCase.language, err)
+		}
+		if canonicalJSON == nil {
+			canonicalJSON = jsonBytes
+		} else if string(jsonBytes) != string(canonicalJSON) {
+			t.Fatalf("JSON changed with language %s:\n%s\n---\n%s", testCase.language, canonicalJSON, jsonBytes)
+		}
+		markdown, err := os.ReadFile(written["md"])
+		if err != nil {
+			t.Fatalf("read %s Markdown: %v", testCase.language, err)
+		}
+		*testCase.output = string(markdown)
+	}
+	for _, marker := range []string{`"系统"`, `"完成"`} {
+		if !strings.Contains(string(canonicalJSON), marker) {
+			t.Fatalf("canonical JSON lost machine value %s:\n%s", marker, canonicalJSON)
+		}
+	}
+	if !strings.Contains(chineseMarkdown, "当前值") || !strings.Contains(chineseMarkdown, "完成") {
+		t.Fatalf("Chinese Markdown did not keep Chinese display text:\n%s", chineseMarkdown)
+	}
+	if !strings.Contains(englishMarkdown, "Current value") || !strings.Contains(englishMarkdown, "Done") {
+		t.Fatalf("English Markdown did not localize display text:\n%s", englishMarkdown)
+	}
+}
+
 func TestLoadJSONIgnoresUnknownOptionalFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.json")
 	content := []byte(`{

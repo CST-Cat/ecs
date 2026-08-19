@@ -49,21 +49,34 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 		baseName = "ecs-report-" + data.Run.StartedAt.Format("20060102-150405")
 	}
 	baseName = sanitizeBaseName(baseName)
-	// 选了哪种语言，全部输出就用哪种语言，JSON 也不例外。
-	// 机器标识符（模块 id、measurement.key、method、unit、status、
-	// methodology.kind）本来就不参与翻译，下游按这些字段解析不受影响。
-	localized := Localize(data)
+	// JSON 是 canonical machine data，必须保留调用方传入的、已完成 redaction
+	// 的报告。只有面向人的格式才使用独立的本地化展示副本；不能把已经
+	// Localize 的对象同时当作 JSON 数据。
+	var localized model.Report
+	localizedReady := false
 	written := make(map[string]string)
 	for _, format := range formats {
 		var content []byte
 		switch format {
 		case "json":
-			content, err = JSON(localized)
+			content, err = JSON(data)
 		case "md":
+			if !localizedReady {
+				localized = Localize(data)
+				localizedReady = true
+			}
 			content = []byte(markdownLocalized(localized, options.Score))
 		case "html":
+			if !localizedReady {
+				localized = Localize(data)
+				localizedReady = true
+			}
 			content, err = htmlLocalized(localized, options.Score)
 		case "txt":
+			if !localizedReady {
+				localized = Localize(data)
+				localizedReady = true
+			}
 			content = []byte(textLocalized(localized, TextOptions{Color: options.TextColor, Score: options.Score}))
 		default:
 			err = i18n.Errorf("err.reportUnknownFormat", format)

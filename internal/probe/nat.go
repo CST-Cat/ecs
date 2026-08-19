@@ -403,5 +403,8 @@ func describeNATServers(servers []config.Endpoint) string {
 	for _, server := range servers {
 		names = append(names, server.Address)
 	}
-	return strings.Join(names, i18n.T("punct.listSep"))
+	// This value is persisted in the canonical report. Keep collection
+	// independent of the current UI language; human renderers may localize the
+	// surrounding display copy later.
+	return strings.Join(names, i18n.TL(i18n.LangZH, "punct.listSep"))
 }

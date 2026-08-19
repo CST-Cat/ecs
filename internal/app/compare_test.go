@@ -134,3 +134,77 @@ func TestCompareCommandEnglishOutput(t *testing.T) {
 		t.Fatalf("English compare status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 }
+
+func writeLocalizedObservationInput(t *testing.T, directory, name, fieldValue, tableValue string) string {
+	t.Helper()
+	report := model.Report{
+		SchemaVersion: buildinfo.SchemaVersion,
+		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
+		Run: model.RunInfo{
+			ID: name, Profile: "standard", StartedAt: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Redacted: true,
+		},
+		Results: []model.Result{{
+			ID: "system", Title: "系统", Status: model.StatusOK,
+			Fields: []model.Field{{Key: "state", Label: "状态", Value: fieldValue}},
+			Tables: []model.Table{{
+				Title:   "当前值",
+				Columns: []string{"名称", "状态"},
+				Rows:    [][]string{{"系统", tableValue}},
+			}},
+		}},
+	}
+	content, err := reporter.JSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, name+".json")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCompareUsesCanonicalObservationValuesWhenLanguageIsEnglish(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	inputs := t.TempDir()
+	first := writeLocalizedObservationInput(t, inputs, "first", "系统", "系统")
+	second := writeLocalizedObservationInput(t, inputs, "second", "完成", "完成")
+	output := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"compare", first, second, "--lang", "en", "--format", "json", "--output", output, "--name", "canonical", "--no-color",
+	}, &stdout, &stderr)
+	if status != 0 {
+		t.Fatalf("canonical compare status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	content, err := os.ReadFile(filepath.Join(output, "canonical.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data comparison.Report
+	if err := json.Unmarshal(content, &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Modules) != 1 {
+		t.Fatalf("canonical observations missing: %+v", data.Modules)
+	}
+	values := make(map[string]bool)
+	for _, change := range data.Modules[0].Changes {
+		for _, value := range change.Values {
+			if value.Available {
+				values[value.Value] = true
+			}
+		}
+	}
+	for _, expected := range []string{"系统", "完成"} {
+		if !values[expected] {
+			t.Fatalf("comparison localized canonical value %q: values=%v, json=%s", expected, values, content)
+		}
+	}
+	for _, translated := range []string{"OS", "Done"} {
+		if values[translated] {
+			t.Fatalf("comparison unexpectedly used localized machine value %q: values=%v", translated, values)
+		}
+	}
+}

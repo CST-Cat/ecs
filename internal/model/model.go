@@ -356,16 +356,16 @@ func Summarize(report *Report) {
 	switch {
 	case summary.Errors > 0:
 		summary.Status = StatusError
-		summary.Headline = fmt.Sprintf(i18n.T("summary.withErrors"), summary.OK, summary.Errors)
+		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.withErrors"), summary.OK, summary.Errors)
 	case summary.Warnings > 0:
 		summary.Status = StatusWarning
-		summary.Headline = fmt.Sprintf(i18n.T("summary.withWarnings"), summary.OK, summary.Warnings)
+		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.withWarnings"), summary.OK, summary.Warnings)
 	default:
 		summary.Status = StatusOK
-		summary.Headline = fmt.Sprintf(i18n.T("summary.allOK"), summary.OK)
+		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.allOK"), summary.OK)
 	}
 	if summary.Skipped > 0 {
-		summary.Headline += fmt.Sprintf(i18n.T("summary.skipped"), summary.Skipped)
+		summary.Headline += fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.skipped"), summary.Skipped)
 	}
 	report.Summary = summary
 }

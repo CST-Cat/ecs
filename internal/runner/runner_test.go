@@ -6,9 +6,38 @@ import (
 	"testing"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/probe"
 )
+
+type canonicalTitleProbe struct{}
+
+func (canonicalTitleProbe) ID() string         { return "system" }
+func (canonicalTitleProbe) Title() string      { return "探针自带标题" }
+func (canonicalTitleProbe) NeedsNetwork() bool { return false }
+func (canonicalTitleProbe) Run(context.Context, probe.Environment) model.Result {
+	return model.Result{ID: "system", Title: "探针自带标题", Status: model.StatusOK}
+}
+
+func TestRunStoresCanonicalModuleTitleAcrossUILanguages(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangEN)
+
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := runOne(context.Background(), canonicalTitleProbe{}, cfg, probe.Environment{}, false)
+	want := i18n.TL(i18n.LangZH, "module.system.title")
+	if result.Title != want {
+		t.Fatalf("stored title = %q, want canonical %q", result.Title, want)
+	}
+	if localized := localizedTitle("system", result.Title); localized != i18n.T("module.system.title") {
+		t.Fatalf("progress/display title = %q, want localized %q", localized, i18n.T("module.system.title"))
+	}
+}
 
 func TestLocalExposureSkipsNetworkProbe(t *testing.T) {
 	setNetworkCapabilityDetector(t, probe.NetworkCapabilities{IPv4Usable: true})

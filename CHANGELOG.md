@@ -9,6 +9,9 @@
 
 ## Unreleased
 
+- 修复报告本地化边界：采集阶段的模块标题、汇总和 NAT 清单保持 canonical 源文本，`run`、`render` 与 `compare` 始终以 canonical Report 进行输入、评分和比较；JSON 保留采集后的机器数据，TXT/Markdown/HTML 才按 `--lang` 生成独立的展示副本。因此同一事实以中文或英文渲染时 JSON 字节保持一致，字段值、表格列和行内容不会因界面语言改变，英文渲染后的 JSON 也可再次按中文渲染。
+- 这是 JSON 持久化语义的兼容修复：此前已生成的英文本地化 JSON 不包含可靠的原文标识，当前实现不会尝试英文→中文逆翻译；需要恢复完整 canonical 数据时，应从原始中文/canonical 报告重新生成。旧 JSON 仍可读取，但其中已被本地化的可见字符串只能按其现有文本展示。
+
 ## 0.7.3 — 2026-08-18
 
 - 修复 integration CI 的 apt 安装可靠性：`apt-get update/install` 均设置有限 HTTP/HTTPS 超时、重试次数和单操作硬超时；首次 `update` 失败只在检测到 `azure.archive.ubuntu.com` 时通过临时源文件将该 Ubuntu 源替换为 `archive.ubuntu.com` 再试，第三方源不变；普通 `install`、备用 `update` 或备用 `install` 失败均保留诊断并 hard fail，不静默跳过；新增确定性回归测试。

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ecs/internal/buildinfo"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 	reporter "ecs/internal/report"
 )
@@ -61,6 +62,90 @@ func TestRenderPreservesRawTextBlocksAcrossFormats(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "text_blocks") || !strings.Contains(string(data), "structured") || !strings.Contains(string(data), "SECRET_RAW_TRANSCRIPT") {
 		t.Fatalf("rendered JSON lost structured or raw evidence: %s", data)
+	}
+}
+
+func TestRenderKeepsCanonicalJSONAndLocalizesHumanFormats(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+
+	root := t.TempDir()
+	input := filepath.Join(root, "canonical.json")
+	report := model.Report{
+		SchemaVersion: buildinfo.SchemaVersion,
+		Run: model.RunInfo{
+			ID: "canonical", Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true,
+		},
+		Summary: model.Summary{Status: model.StatusOK, Headline: "完成"},
+		Results: []model.Result{{
+			ID: "system", Title: "系统", Status: model.StatusOK,
+			Fields: []model.Field{{Key: "state", Label: "状态", Value: "系统"}},
+		}},
+	}
+	canonical, err := reporter.JSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input, canonical, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	englishOutput := filepath.Join(root, "english")
+	for _, testCase := range []struct {
+		language string
+		output   string
+		label    string
+		value    string
+	}{
+		{language: "zh", output: filepath.Join(root, "chinese"), label: "状态", value: "系统"},
+		{language: "en", output: englishOutput, label: "Status", value: "OS"},
+	} {
+		var stdout, stderr bytes.Buffer
+		status := Main(context.Background(), []string{
+			"render", "--lang", testCase.language, "--input", input,
+			"--output", testCase.output, "--format", "json,txt,html", "--color", "none",
+		}, &stdout, &stderr)
+		if status != 0 {
+			t.Fatalf("render %s status=%d stdout=%s stderr=%s", testCase.language, status, stdout.String(), stderr.String())
+		}
+		jsonBytes, err := os.ReadFile(filepath.Join(testCase.output, "canonical.json"))
+		if err != nil {
+			t.Fatalf("read %s JSON: %v", testCase.language, err)
+		}
+		if string(jsonBytes) != string(canonical) {
+			t.Fatalf("render %s changed canonical JSON:\nwant:\n%s\ngot:\n%s", testCase.language, canonical, jsonBytes)
+		}
+		for _, format := range []string{"txt", "html"} {
+			content, err := os.ReadFile(filepath.Join(testCase.output, "canonical."+format))
+			if err != nil {
+				t.Fatalf("read %s %s: %v", testCase.language, format, err)
+			}
+			if !strings.Contains(string(content), testCase.label) || !strings.Contains(string(content), testCase.value) {
+				t.Fatalf("render %s %s did not use localized label/value %q/%q:\n%s", testCase.language, format, testCase.label, testCase.value, content)
+			}
+		}
+	}
+
+	// The English render still contains canonical Chinese JSON. Rendering that
+	// artifact back to Chinese must therefore work without any reverse
+	// translation or state leaking from the previous render.
+	chineseAgain := filepath.Join(root, "chinese-again")
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"render", "--lang", "zh", "--input", filepath.Join(englishOutput, "canonical.json"),
+		"--output", chineseAgain, "--format", "txt,html", "--color", "none",
+	}, &stdout, &stderr)
+	if status != 0 {
+		t.Fatalf("render Chinese after English status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	for _, format := range []string{"txt", "html"} {
+		content, err := os.ReadFile(filepath.Join(chineseAgain, "canonical."+format))
+		if err != nil {
+			t.Fatalf("read Chinese-after-English %s: %v", format, err)
+		}
+		if !strings.Contains(string(content), "状态") || !strings.Contains(string(content), "系统") {
+			t.Fatalf("Chinese-after-English %s lost canonical display text:\n%s", format, content)
+		}
 	}
 }
 

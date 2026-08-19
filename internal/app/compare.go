@@ -66,7 +66,9 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "%s: %s: %v\n", i18n.T("cli.error"), path, loadErr)
 			return 1
 		}
-		reports = append(reports, reporter.Localize(data))
+		// Comparison is a machine-data operation. Keep the canonical report
+		// untouched here; localization belongs only to human-facing renderers.
+		reports = append(reports, data)
 		base := filepath.Base(path)
 		labels = append(labels, strings.TrimSuffix(base, filepath.Ext(base)))
 	}

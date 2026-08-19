@@ -142,6 +142,56 @@ func TestBuildIgnoresLocalizedMethodologyProseAndMapInsertionOrder(t *testing.T)
 	}
 }
 
+func TestBuildUsesCanonicalFieldsAndTablesRegardlessOfUILanguage(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+
+	canonical := comparisonTestReport("same", 10, "m-v1", "same", "速率", true)
+	canonical.Results[0].Fields = []model.Field{{Key: "state", Label: "状态", Value: "完成"}}
+	canonical.Results[0].Tables = []model.Table{{
+		Title:   "当前值",
+		Columns: []string{"名称", "状态"},
+		Rows:    [][]string{{"系统", "完成"}},
+	}}
+
+	// Build is allowed to localize user-facing notices, but its comparison
+	// inputs, observations, and summary must be byte-stable for the same
+	// canonical reports regardless of the current UI language.
+	i18n.Set(i18n.LangZH)
+	zhComparison, err := Build([]model.Report{canonical, canonical}, Options{})
+	if err != nil {
+		t.Fatalf("Chinese-language Build: %v", err)
+	}
+	i18n.Set(i18n.LangEN)
+	enComparison, err := Build([]model.Report{canonical, canonical}, Options{})
+	if err != nil {
+		t.Fatalf("English-language Build: %v", err)
+	}
+	if reflect.DeepEqual(zhComparison.Notices, enComparison.Notices) {
+		t.Fatalf("UI language did not affect only the expected localized notices: zh=%v en=%v", zhComparison.Notices, enComparison.Notices)
+	}
+	if zhComparison.Summary.ObservedChanges != 0 || enComparison.Summary.ObservedChanges != 0 {
+		t.Fatalf("canonical reports produced false observations: zh=%+v en=%+v", zhComparison.Summary, enComparison.Summary)
+	}
+	for _, comparison := range []Report{zhComparison, enComparison} {
+		for _, module := range comparison.Modules {
+			if len(module.Changes) != 0 {
+				t.Fatalf("canonical reports produced false module changes: %+v", module.Changes)
+			}
+		}
+	}
+
+	// GeneratedAt and Notices are intentionally run/UI-language dependent;
+	// every other comparison field is canonical machine data.
+	zhComparison.GeneratedAt = time.Time{}
+	enComparison.GeneratedAt = time.Time{}
+	zhComparison.Notices = nil
+	enComparison.Notices = nil
+	if !reflect.DeepEqual(zhComparison, enComparison) {
+		t.Fatalf("canonical comparison depends on UI language:\nzh=%+v\nen=%+v", zhComparison, enComparison)
+	}
+}
+
 func TestBuildRejectsMissingOrInvalidMachineParameterScope(t *testing.T) {
 	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 	second := comparisonTestReport("second", 20, "m-v1", "same", "rate", true)
