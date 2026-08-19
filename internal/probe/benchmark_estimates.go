@@ -1,30 +1,127 @@
 package probe
 
 import (
+	"fmt"
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 )
 
-// The descriptor defaults describe the ordinary two-context plan. Register
-// allowance-aware estimates here (config cannot import probe) so a one-core
-// host is not told to expect work that is deliberately no longer executed.
-func init() {
-	_ = config.RegisterModuleEstimate("cpu", func(runtime config.Runtime) time.Duration {
-		return cpuBenchmarkEstimate(runtime, detectCPUAllowance().Threads)
-	})
-	_ = config.RegisterModuleEstimate("zstd", func(config.Runtime) time.Duration {
-		return twoContextBenchmarkEstimate(25*time.Second, detectCPUAllowance().Threads)
-	})
-	_ = config.RegisterModuleEstimate("npb", func(config.Runtime) time.Duration {
-		return twoContextBenchmarkEstimate(60*time.Second, detectCPUAllowance().Threads)
-	})
-	_ = config.RegisterModuleEstimate("memory", func(runtime config.Runtime) time.Duration {
-		return streamBenchmarkEstimate(runtime, detectCPUAllowance().Threads)
-	})
-	_ = config.RegisterModuleEstimate("crypto", func(config.Runtime) time.Duration {
-		return twoContextBenchmarkEstimate(45*time.Second, detectCPUAllowance().Threads)
-	})
+// EstimateFor owns the complete user-facing runtime estimate.  Keeping the
+// orchestration with the probe workload plans means allowance-sensitive
+// benchmarks and the fio plan cannot drift from the work that actually runs.
+func EstimateFor(runtime config.Runtime) config.Estimate {
+	workers := detectCPUAllowance().Threads
+	estimate := config.Estimate{DiskMiB: runtime.DiskMiB}
+	if hasModule(runtime, "speed") {
+		estimate.NetworkMiB = -1
+		estimate.Notes = append(estimate.Notes,
+			fmt.Sprintf("iperf3 为按时长跑满：%d 节点、每方向 %s、%d 并发流；实际流量随带宽变化",
+				len(runtime.IPerfTargets), runtime.IPerfDuration, runtime.SpeedThreads))
+	}
+	if !hasModule(runtime, "disk") {
+		estimate.DiskMiB = 0
+	}
+	typical := estimateTypicalDuration(runtime, workers)
+	estimate.DurationText = durationEstimateText(typical*3/5, typical*2)
+	if runtime.OfflineOnly() {
+		estimate.NetworkMiB = 0
+		estimate.Notes = append(estimate.Notes, i18n.T("estimate.offline"))
+	}
+	if hasModule(runtime, "route") {
+		estimate.Notes = append(estimate.Notes, i18n.T("estimate.route"))
+	}
+	return estimate
+}
+
+func hasModule(runtime config.Runtime, id string) bool {
+	for _, module := range runtime.Modules {
+		if module == id {
+			return true
+		}
+	}
+	return false
+}
+
+func estimateTypicalDuration(runtime config.Runtime, workers int) time.Duration {
+	var total time.Duration
+	for _, module := range runtime.Modules {
+		descriptor, ok := config.ModuleDescriptorFor(module)
+		if !ok {
+			continue
+		}
+		if runtime.OfflineOnly() && descriptor.Exposure > config.ExposureLocal {
+			total += 100 * time.Millisecond
+			continue
+		}
+		total += estimateModuleDuration(runtime, descriptor, workers)
+	}
+	if total < 5*time.Second {
+		return 5 * time.Second
+	}
+	return total
+}
+
+func estimateModuleDuration(runtime config.Runtime, descriptor config.ModuleDescriptor, workers int) time.Duration {
+	switch descriptor.EstimateMode {
+	case config.EstimateModeCPU:
+		return cpuBenchmarkEstimate(runtime, workers)
+	case config.EstimateModeMemory:
+		return streamBenchmarkEstimate(runtime, workers)
+	case config.EstimateModeDisk:
+		// Add startup and --enghelp discovery around the complete fio plan.
+		return FIOPlanDuration() + 10*time.Second
+	case config.EstimateModeDNS:
+		return time.Duration(runtime.DNSAttempts) * time.Second
+	case config.EstimateModeLatency:
+		return time.Duration(runtime.LatencyAttempts) * 1500 * time.Millisecond
+	case config.EstimateModeSpeed:
+		// Each target/family row runs forward, reverse, and one UDP sample.
+		families := 1
+		if runtime.IPVersion == "" || runtime.IPVersion == config.IPVersionAuto {
+			families = 2
+		}
+		perRow := 2*runtime.IPerfDuration + config.IPerfUDPDuration
+		return time.Duration(len(runtime.IPerfTargets)*families) * perRow
+	case config.EstimateModeRoute:
+		return time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
+	case config.EstimateModeFixed:
+		// These workloads share the ordinary two-context descriptor default,
+		// but collapse to one context on a single-core allowance.
+		switch descriptor.ID {
+		case "zstd", "npb", "crypto":
+			return twoContextBenchmarkEstimate(descriptor.Estimate, workers)
+		}
+		return descriptor.Estimate
+	default:
+		// ValidateModuleDescriptors rejects unknown modes. Treat a descriptor
+		// assembled by an external caller defensively as a fixed estimate.
+		return descriptor.Estimate
+	}
+}
+
+func durationEstimateText(lower, upper time.Duration) string {
+	if lower < 5*time.Second {
+		lower = 5 * time.Second
+	}
+	if upper < lower {
+		upper = lower
+	}
+	if upper < time.Minute {
+		lowerSeconds := int((lower.Seconds()+4)/5) * 5
+		upperSeconds := int((upper.Seconds()+4)/5) * 5
+		return fmt.Sprintf(i18n.T("estimate.seconds"), lowerSeconds, upperSeconds)
+	}
+	lowerMinutes := int((lower + time.Minute - 1) / time.Minute)
+	upperMinutes := int((upper + time.Minute - 1) / time.Minute)
+	if lowerMinutes < 1 {
+		lowerMinutes = 1
+	}
+	if upperMinutes <= lowerMinutes {
+		upperMinutes = lowerMinutes + 1
+	}
+	return fmt.Sprintf(i18n.T("estimate.minutes"), lowerMinutes, upperMinutes)
 }
 
 func cpuBenchmarkEstimate(runtime config.Runtime, workers int) time.Duration {

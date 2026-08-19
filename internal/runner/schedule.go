@@ -26,28 +26,12 @@ const (
 	classProbe
 )
 
-// moduleClass 给出各模块的并发特性。
-var moduleClass = descriptorModuleClass()
-
-func descriptorModuleClass() map[string]concurrencyClass {
-	out := make(map[string]concurrencyClass)
-	for _, descriptor := range config.ModuleDescriptors() {
-		if descriptor.Concurrency == config.ModuleConcurrencyProbe {
-			out[descriptor.ID] = classProbe
-			continue
-		}
-		// Unknown descriptor values intentionally fall back to exclusive.  The
-		// config descriptor validator catches malformed registrations in tests;
-		// this runtime fallback preserves the scheduler's safe default.
-		out[descriptor.ID] = classExclusive
-	}
-	return out
-}
-
-// classOf 返回模块的并发特性，未登记的一律独占。
-func classOf(id string) concurrencyClass {
-	if class, ok := moduleClass[id]; ok {
-		return class
+// classOf returns a binding's concurrency class. An invalid or missing
+// descriptor conservatively runs exclusively; built-in bindings are validated
+// before they reach the scheduler.
+func classOf(binding moduleBinding) concurrencyClass {
+	if binding.Descriptor.Concurrency == config.ModuleConcurrencyProbe {
+		return classProbe
 	}
 	return classExclusive
 }
@@ -59,11 +43,11 @@ type scheduleGroup struct {
 	Indices  []int
 }
 
-// planSchedule 把模块序列切成执行批次。
+// planSchedule 把已绑定的模块序列切成执行批次。
 //
 // 保持原有顺序：连续的可并行模块合成一批，遇到独占模块就单独成批。
 // 这样报告里的结果顺序仍与用户指定的模块顺序一致，只是执行方式变了。
-func planSchedule(ids []string) []scheduleGroup {
+func planSchedule(bindings []moduleBinding) []scheduleGroup {
 	var groups []scheduleGroup
 	var pending []int
 	flush := func() {
@@ -73,8 +57,8 @@ func planSchedule(ids []string) []scheduleGroup {
 		groups = append(groups, scheduleGroup{Parallel: len(pending) > 1, Indices: pending})
 		pending = nil
 	}
-	for index, id := range ids {
-		if classOf(id) == classProbe {
+	for index, binding := range bindings {
+		if classOf(binding) == classProbe {
 			pending = append(pending, index)
 			continue
 		}

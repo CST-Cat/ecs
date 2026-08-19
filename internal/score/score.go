@@ -142,7 +142,7 @@ func Dimensions() []Dimension {
 	filtered := dimensions[:0]
 	for _, dimension := range dimensions {
 		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
-		if !ok || !descriptor.ScoreEnabled || descriptor.ScoreKey != dimension.Key {
+		if !ok || descriptor.ScoreKey != dimension.Key {
 			continue
 		}
 		filtered = append(filtered, dimension)
@@ -166,7 +166,7 @@ func ValidateDimensions() error {
 		if !ok {
 			return fmt.Errorf("score dimension %q references unknown module %q", dimension.Key, dimension.ModuleID)
 		}
-		if !descriptor.ScoreEnabled {
+		if descriptor.ScoreKey == "" {
 			return fmt.Errorf("score dimension %q is not explicitly enabled by module descriptor", dimension.Key)
 		}
 		if descriptor.ScoreKey != dimension.Key {
@@ -174,10 +174,10 @@ func ValidateDimensions() error {
 		}
 	}
 	for _, descriptor := range config.ModuleDescriptors() {
-		if !descriptor.ScoreEnabled {
+		if descriptor.ScoreKey == "" {
 			continue
 		}
-		if descriptor.ScoreKey == "" || !seen[descriptor.ScoreKey] {
+		if !seen[descriptor.ScoreKey] {
 			return fmt.Errorf("score-enabled module %q has no registered dimension %q", descriptor.ID, descriptor.ScoreKey)
 		}
 	}

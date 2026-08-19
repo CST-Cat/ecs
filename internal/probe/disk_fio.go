@@ -785,7 +785,7 @@ func describeFIOEngine(engine fioEngine) string {
 }
 
 // FIOPlanDuration 是磁盘模块一次完整作业计划的串行执行下限。
-// config 通过模块估算注册表读取它，避免把作业时长在两处各写一份。
+// probe.EstimateFor 直接读取它，避免把作业时长在两处各写一份。
 func FIOPlanDuration() time.Duration {
 	return fioPlanDuration(fioJobPlan())
 }

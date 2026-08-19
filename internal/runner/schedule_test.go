@@ -9,7 +9,8 @@ import (
 
 func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
 	ids := []string{"system", "network", "cpu", "memory", "disk", "dns", "latency", "speed", "ports", "nat", "media", "route", "backtrace"}
-	groups := planSchedule(ids)
+	bindings := scheduleBindings(ids)
+	groups := planSchedule(bindings)
 
 	// 展平后必须与原顺序完全一致：报告顺序不能因为并行而漂移。
 	var flat []int
@@ -33,7 +34,7 @@ func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
 			t.Fatalf("多模块组必须标记为并行：%+v", group)
 		}
 		for _, index := range group.Indices {
-			if classOf(ids[index]) != classProbe {
+			if classOf(bindings[index]) != classProbe {
 				t.Fatalf("独占模块 %q 混进了并行组", ids[index])
 			}
 		}
@@ -41,7 +42,7 @@ func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
 
 	// cpu/memory/disk 三个性能基准必须各自独占，任何并发都会压低成绩。
 	for _, id := range []string{"cpu", "memory", "disk", "speed", "cnspeed", "route", "backtrace"} {
-		if classOf(id) != classExclusive {
+		if classOf(scheduleBindings([]string{id})[0]) != classExclusive {
 			t.Errorf("%q 必须独占运行", id)
 		}
 	}
@@ -60,12 +61,12 @@ func TestPlanSchedulePreservesOrderAndIsolatesExclusive(t *testing.T) {
 
 func TestPlanScheduleGroupsAdjacentProbes(t *testing.T) {
 	// 连续的轻量探测应合成一批。
-	groups := planSchedule([]string{"dns", "latency", "ports"})
+	groups := planSchedule(scheduleBindings([]string{"dns", "latency", "ports"}))
 	if len(groups) != 1 || !groups[0].Parallel || len(groups[0].Indices) != 3 {
 		t.Fatalf("连续探测未合批：%+v", groups)
 	}
 	// 被独占模块隔断时分成三批。
-	groups = planSchedule([]string{"dns", "cpu", "latency"})
+	groups = planSchedule(scheduleBindings([]string{"dns", "cpu", "latency"}))
 	if len(groups) != 3 {
 		t.Fatalf("独占模块未隔断批次：%+v", groups)
 	}
@@ -78,33 +79,22 @@ func TestPlanScheduleGroupsAdjacentProbes(t *testing.T) {
 	}
 }
 
-func TestUnknownModuleDefaultsToExclusive(t *testing.T) {
+func TestUnknownBindingDefaultsToExclusive(t *testing.T) {
 	// 新增模块时漏配分类，只会慢一点，不会得到被污染的数据。
-	if classOf("某个未来才有的模块") != classExclusive {
+	binding := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "某个未来才有的模块"}}
+	if classOf(binding) != classExclusive {
 		t.Fatal("未登记的模块必须默认独占")
 	}
 }
 
-// 新增模块漏配并发特性只会让它被当成独占跑——不报错，只是慢。
-// 这个守卫让漏配在 CI 上可见。
-func TestScheduleCoversEveryModule(t *testing.T) {
-	for _, id := range config.ModuleOrder {
-		if _, ok := moduleClass[id]; !ok {
-			t.Errorf("模块 %q 未登记并发特性（schedule.go 的 moduleClass）", id)
+func scheduleBindings(ids []string) []moduleBinding {
+	bindings := make([]moduleBinding, len(ids))
+	for index, id := range ids {
+		descriptor, ok := config.ModuleDescriptorFor(id)
+		if !ok {
+			descriptor.ID = id
 		}
+		bindings[index] = moduleBinding{Descriptor: descriptor}
 	}
-	for id := range moduleClass {
-		if !containsModule(config.ModuleOrder, id) {
-			t.Errorf("moduleClass 里的 %q 不是已注册模块", id)
-		}
-	}
-}
-
-func containsModule(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
+	return bindings
 }

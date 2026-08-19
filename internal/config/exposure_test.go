@@ -138,7 +138,7 @@ func TestFullOnlyThirdPartyMembershipIsExplicit(t *testing.T) {
 			t.Fatalf("full 档默认应包含 %s", id)
 		}
 		descriptor, ok := ModuleDescriptorFor(id)
-		if !ok || descriptor.ProfileExplicitOnly || descriptor.ProfileStandard || !descriptor.ProfileFull {
+		if !ok || descriptor.ProfileStandard {
 			t.Fatalf("%s profile metadata = %+v, want full-only default module", id, descriptor)
 		}
 	}

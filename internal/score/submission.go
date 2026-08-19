@@ -228,7 +228,7 @@ func extractToolSpec(data model.Report) ToolSpec {
 				continue
 			}
 			descriptor, ok := config.ModuleDescriptorFor(result.ID)
-			if !ok || !descriptor.ScoreEnabled {
+			if !ok || descriptor.ScoreKey == "" {
 				continue
 			}
 			tool := ""

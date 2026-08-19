@@ -19,7 +19,7 @@ func TestDimensionsRequireExplicitModuleOptIn(t *testing.T) {
 	}
 	for _, dimension := range Dimensions() {
 		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
-		if !ok || !descriptor.ScoreEnabled || descriptor.ScoreKey != dimension.Key {
+		if !ok || descriptor.ScoreKey != dimension.Key {
 			t.Fatalf("dimension %q is not explicitly enabled by its module descriptor", dimension.Key)
 		}
 	}

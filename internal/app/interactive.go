@@ -9,6 +9,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/probe"
 )
 
 // 交互向导。
@@ -128,7 +129,7 @@ func wizardModules() []wizardModule {
 			positions[descriptor.WizardGroup] = len(groups)
 			groups = append(groups, wizardModule{
 				Key:         descriptor.WizardGroup,
-				DefaultOn:   descriptor.WizardDefaultOn,
+				DefaultOn:   true,
 				QuestionKey: descriptor.WizardQuestionKey,
 			})
 			position = len(groups) - 1
@@ -244,7 +245,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 
 	// 五、确认
 	prompt.line("")
-	estimate := config.EstimateFor(*cfg)
+	estimate := probe.EstimateFor(*cfg)
 	prompt.line("%s", prompt.style("1", i18n.T("wizard.summaryTitle")))
 	prompt.line("  %s %s", i18n.T("term.profileLine"), cfg.Profile)
 	prompt.line("  %s %s — %s", i18n.T("report.exposure"), cfg.Exposure.String(), i18n.T("exposure."+cfg.Exposure.String()))

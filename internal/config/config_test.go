@@ -174,26 +174,6 @@ func TestFileCanSetIPerfDuration(t *testing.T) {
 	}
 }
 
-func TestEstimateOnlyCountsSelectedPressureModules(t *testing.T) {
-	cfg, err := Defaults(ProfileFull)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Modules = []string{"system", "network"}
-	estimate := EstimateFor(cfg)
-	if estimate.DiskMiB != 0 || estimate.NetworkMiB != 0 {
-		t.Fatalf("estimate = %+v", estimate)
-	}
-	if estimate.DurationText == "" {
-		t.Fatal("duration estimate is empty")
-	}
-	cfg.Modules = []string{"disk", "speed"}
-	estimate = EstimateFor(cfg)
-	if estimate.DiskMiB != cfg.DiskMiB || estimate.NetworkMiB != -1 || len(estimate.Notes) == 0 {
-		t.Fatalf("iperf estimate = %+v", estimate)
-	}
-}
-
 func TestValidateRejectsUnknownModule(t *testing.T) {
 	cfg, err := Defaults(ProfileStandard)
 	if err != nil {

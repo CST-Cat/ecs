@@ -50,7 +50,7 @@ var discoverEgress = probe.DiscoverEgress
 
 func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.Report {
 	started := time.Now().UTC()
-	selected := selectedProbes(cfg.Modules)
+	selected := selectBindings(bindBuiltinModules(), cfg.Modules)
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool: model.ToolInfo{
@@ -124,17 +124,15 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			fmt.Sprintf("出口 IP 由 %s 统一发现一次，供需要它的模块共用。", env.Egress.SourceName))
 	}
 
-	ids := make([]string, len(selected))
 	titles := make([]string, len(selected))
-	for index, item := range selected {
-		ids[index] = item.ID()
-		titles[index] = localizedTitle(item.ID(), item.Title())
+	for index, binding := range selected {
+		titles[index] = localizedDescriptorTitle(binding.Descriptor, binding.Probe.Title())
 	}
 	results := make([]model.Result, len(selected))
 	completed := 0
 
 	// 结果按模块原顺序写入固定槽位，因此并行不会打乱报告顺序。
-	for _, group := range planSchedule(ids) {
+	for _, group := range planSchedule(selected) {
 		if ctx.Err() != nil {
 			report.Run.Canceled = true
 			break
@@ -144,8 +142,8 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			// 模块误显示成尚未开始；回调本身不携带结果，详细报告仍在最后渲染。
 			if progress != nil {
 				for _, index := range group.Indices {
-					item := selected[index]
-					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
+					binding := selected[index]
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index]})
 				}
 			}
 			var wg sync.WaitGroup
@@ -153,23 +151,23 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 				wg.Add(1)
 				go func(index int) {
 					defer wg.Done()
-					results[index] = runOne(ctx, selected[index], effectiveCfg, env, networkRunnable)
+					results[index] = runBinding(ctx, selected[index], effectiveCfg, env, networkRunnable)
 				}(index)
 			}
 			wg.Wait()
 		} else {
 			index := group.Indices[0]
-			item := selected[index]
+			binding := selected[index]
 			if progress != nil {
-				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index]})
+				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index]})
 			}
-			results[index] = runOne(ctx, item, effectiveCfg, env, networkRunnable)
+			results[index] = runBinding(ctx, binding, effectiveCfg, env, networkRunnable)
 		}
 		for _, index := range group.Indices {
-			item := selected[index]
+			binding := selected[index]
 			completed++
 			if progress != nil {
-				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: item.ID(), Title: titles[index], Result: results[index]})
+				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], Result: results[index]})
 			}
 		}
 		if ctx.Err() != nil {
@@ -207,9 +205,12 @@ func localInterfaceIPs() []string {
 	return result
 }
 
-// runOne 执行单个探针，统一处理离线跳过与方法学补全。
-func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
-	descriptor, hasDescriptor := config.ModuleDescriptorFor(item.ID())
+// runBinding executes one validated module binding, uniformly handling
+// offline skipping and methodology completion.
+func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
+	item := binding.Probe
+	descriptor := binding.Descriptor
+	hasDescriptor := descriptor.ID != ""
 	canonicalTitle := item.Title()
 	needsNetwork := item.NeedsNetwork()
 	if hasDescriptor {
@@ -218,7 +219,7 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 		// progress title is localized separately by localizedTitle, and report
 		// renderers localize this canonical title only for human-facing output.
 		canonicalTitle = canonicalDescriptorTitle(descriptor, canonicalTitle)
-		needsNetwork = descriptor.NeedsNetwork
+		needsNetwork = descriptor.Exposure > config.ExposureLocal
 	}
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
@@ -257,15 +258,21 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 	return result
 }
 
-func hasNetworkModules(selected []probe.Probe) bool {
-	for _, item := range selected {
-		if descriptor, ok := config.ModuleDescriptorFor(item.ID()); ok {
-			if descriptor.NeedsNetwork {
+// runOne is retained as a small test/custom-probe convenience. Production
+// paths call runBinding with a descriptor already joined by bindBuiltinModules.
+func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
+	return runBinding(ctx, bindingForProbe(item), cfg, env, networkRunnable)
+}
+
+func hasNetworkModules(selected []moduleBinding) bool {
+	for _, binding := range selected {
+		if binding.Descriptor.ID != "" {
+			if binding.Descriptor.Exposure > config.ExposureLocal {
 				return true
 			}
 			continue
 		}
-		if item.NeedsNetwork() {
+		if binding.Probe != nil && binding.Probe.NeedsNetwork() {
 			return true
 		}
 	}
@@ -336,20 +343,6 @@ func canonicalDescriptorTitle(descriptor config.ModuleDescriptor, fallback strin
 		return i18n.TL(i18n.LangZH, descriptor.TitleKey)
 	}
 	return fallback
-}
-
-func selectedProbes(ids []string) []probe.Probe {
-	requested := make(map[string]bool)
-	for _, id := range ids {
-		requested[id] = true
-	}
-	var out []probe.Probe
-	for _, item := range probe.Registry() {
-		if requested[item.ID()] {
-			out = append(out, item)
-		}
-	}
-	return out
 }
 
 func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (result model.Result) {

@@ -16,6 +16,7 @@
 - 这是 JSON 持久化语义的兼容修复：此前已生成的英文本地化 JSON 不包含可靠的原文标识，当前实现不会尝试英文→中文逆翻译；需要恢复完整 canonical 数据时，应从原始中文/canonical 报告重新生成。旧 JSON 仍可读取，但其中已被本地化的可见字符串只能按其现有文本展示。
 - 收紧 Go Release 与安全升级职责：根 `go.mod` 仅声明最低源码兼容版本（1.22），`devtools/go.mod` 仅管理分析工具环境，正式 Release 编译器唯一由 `release.yml` 的 `ECS_RELEASE_GO` pin 选择（当前 1.26.5），Release 与最低兼容 CI 均强制 `GOTOOLCHAIN=local`；compat 只保留 1.22.x，stable 由 unit 覆盖。
 - 安全自动升级现在只修改 Release compiler pin，不改根 `go.mod`；发布后安全复审从下载的七架构 `ecs` 二进制 `go version -m` 提取并校验一致的实际构建 Go 版本，再将该 metadata 传给 triage，避免误用 security runner 自身的 Go 版本。
+- 删除运行时 module factory/estimate 注册表、`sync.RWMutex`、`any` 构造和 `init()` 反向注册：config 只保留静态模块描述，probe 提供强类型内建列表，runner 在执行边界显式绑定描述与探针，估算也由 probe 的显式调用负责。该内部重构不新增或改变用户配置字段；既有配置仍按相同模块 ID 解析，绑定完整性在执行前显式校验。
 
 ## 0.7.3 — 2026-08-18
 
