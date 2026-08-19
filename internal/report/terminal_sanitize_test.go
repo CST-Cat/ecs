@@ -8,7 +8,7 @@ import (
 )
 
 func TestTextSanitizesRepresentativeControlWithoutMutatingInput(t *testing.T) {
-	payload := "before\x1b[2Jafter"
+	payload := "before\x00\x1b[2J\x7f\x9b31mafter"
 	data := textSampleReport()
 	data.Results[0].Fields[0].Value = payload
 

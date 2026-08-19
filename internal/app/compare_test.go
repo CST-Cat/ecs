@@ -53,9 +53,14 @@ func TestCompareCommandWritesReadableJSONAndPreservesCanonicalValues(t *testing.
 	output := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	if status := Main(context.Background(), []string{
-		"compare", first, second, "--lang", "en", "--format", "json", "--output", output, "--name", "fleet", "--no-color",
+		"compare", first, second, "--lang", "en", "--format", "json,txt,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
 	}, &stdout, &stderr); status != 0 {
 		t.Fatalf("compare failed: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	for _, format := range []string{"json", "txt", "md", "html"} {
+		if _, err := os.Stat(filepath.Join(output, "fleet."+format)); err != nil {
+			t.Fatalf("compare did not write %s: %v", format, err)
+		}
 	}
 	content, err := os.ReadFile(filepath.Join(output, "fleet.json"))
 	if err != nil {
@@ -88,31 +93,87 @@ func TestCompareCommandWritesReadableJSONAndPreservesCanonicalValues(t *testing.
 	}
 }
 
-func TestCompareCommandRejectsTooFewReportsBeforeWriting(t *testing.T) {
-	report := writeLocalizedObservationInput(t, t.TempDir(), "only", "系统", "系统")
-	output := filepath.Join(t.TempDir(), "not-created")
-	var stdout, stderr bytes.Buffer
-	if status := Main(context.Background(), []string{"compare", report, "--output", output}, &stdout, &stderr); status == 0 {
-		t.Fatalf("one-report compare unexpectedly succeeded: stdout=%s stderr=%s", stdout.String(), stderr.String())
+func TestCompareCommandReportsDistinctFailures(t *testing.T) {
+	root := t.TempDir()
+	first := writeLocalizedObservationInput(t, root, "first", "系统", "系统")
+	second := writeLocalizedObservationInput(t, root, "second", "完成", "完成")
+	only := writeLocalizedObservationInput(t, root, "only", "系统", "系统")
+	bad := filepath.Join(root, "bad.json")
+	if err := os.WriteFile(bad, []byte("not json\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(output); !os.IsNotExist(err) {
-		t.Fatalf("invalid comparison created output: %v", err)
+	outputFile := filepath.Join(root, "output-file")
+	if err := os.WriteFile(outputFile, []byte("occupied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		args     []string
+		marker   string
+		noOutput string
+	}{
+		{
+			name:     "too few reports",
+			args:     []string{"compare", only, "--lang", "en", "--output", filepath.Join(root, "too-few")},
+			marker:   "requires at least two JSON reports",
+			noOutput: filepath.Join(root, "too-few"),
+		},
+		{
+			name:   "missing normalized flag value",
+			args:   []string{"compare", "--lang", "en", "--format"},
+			marker: "--format requires a value",
+		},
+		{
+			name:   "load JSON",
+			args:   []string{"compare", bad, second, "--lang", "en", "--format", "json"},
+			marker: "error:",
+		},
+		{
+			name:   "invalid reference",
+			args:   []string{"compare", first, second, "--lang", "en", "--reference", "3"},
+			marker: "--reference must be between 1 and 2",
+		},
+		{
+			name:   "unsupported format",
+			args:   []string{"compare", first, second, "--lang", "en", "--format", "xml"},
+			marker: `unknown output format "xml"`,
+		},
+		{
+			name:   "no formats",
+			args:   []string{"compare", first, second, "--lang", "en", "--format", ""},
+			marker: "at least one output format is required",
+		},
+		{
+			name:   "output directory",
+			args:   []string{"compare", first, second, "--lang", "en", "--format", "json", "--output", outputFile},
+			marker: "create output directory",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			if test.noOutput != "" {
+				if _, err := os.Stat(test.noOutput); !os.IsNotExist(err) {
+					t.Fatalf("invalid comparison created output: %v", err)
+				}
+			}
+			if test.name == "invalid reference" && strings.Contains(stderr, "compare.help") {
+				t.Fatalf("localized comparison error leaked its key: %q", stderr)
+			}
+		})
 	}
 }
 
-func TestCompareBuildValidationErrorUsesCurrentLanguageAtCLI(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	_, err := comparison.Build([]model.Report{{}, {}}, comparison.Options{Reference: 2})
-	if err == nil {
-		t.Fatal("invalid comparison reference unexpectedly succeeded")
+func TestCompareCommandReportsHelpAndUnknownFlag(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("compare", "--lang", "en", "--help")
+	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs compare") {
+		t.Fatalf("compare help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
-		i18n.Set(language)
-		got := localizeComparisonError(err)
-		want := i18n.Errorf("compare.help.referenceRange", 2).Error()
-		if got != want || strings.Contains(got, "compare.help.referenceRange") {
-			t.Fatalf("%s comparison validation error = %q, want %q", language, got, want)
-		}
+	status, stdout, stderr = invokeAppMain("compare", "--lang", "en", "--unknown")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
+		t.Fatalf("compare unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }

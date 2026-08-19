@@ -7,36 +7,125 @@ import (
 
 	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/score"
 	"ecs/internal/termcolor"
+	"ecs/internal/textwidth"
 )
 
 func textSampleReport() model.Report {
-	return model.Report{
-		SchemaVersion: "ecs.report/v1",
-		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{ID: "abc", Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
-		Summary:       model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项完成"},
-		Results: []model.Result{{
-			ID: "cpu", Title: "CPU 性能", Status: model.StatusOK,
-			Fields:       []model.Field{{Key: "engine", Label: "引擎", Value: "sysbench"}},
-			Measurements: []model.Measurement{{Key: "events", Label: "事件率", Value: 780, Unit: "events/s", Display: "780 events/s", HigherIsBetter: model.BoolPtr(true)}},
-			Tables:       []model.Table{{Title: "明细", Columns: []string{"项目", "数值"}, Rows: [][]string{{"单线程", "780"}}}},
+	data := sampleReport()
+	data.Run.Canceled = true
+	data.Run.Requested = []string{"system", "memory", "disk", "skipped"}
+	data.Summary = model.Summary{
+		Status: model.StatusError, OK: 1, Warnings: 1, Skipped: 1, Errors: 1, Headline: "报告含异常",
+	}
+	start := data.Run.StartedAt
+	memory := model.Result{
+		ID: "memory", Title: "内存", Description: "内存带宽测量", Status: model.StatusWarning,
+		StartedAt: start, DurationMS: 1500, Summary: "需留意",
+		Methodology: model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "stream", Profile: "standard"},
+		Fields:      []model.Field{{Key: "memory_state", Label: "状态", Value: "需留意"}},
+		Measurements: []model.Measurement{
+			{Key: "copy", Label: "复制", Value: 100, Unit: "MiB/s", Display: "100 MiB/s", Rating: "成功", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
+			{Key: "scale", Label: "缩放", Value: 80, Unit: "MiB/s", Display: "80 MiB/s", Rating: "需留意", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
+		},
+		Tables: []model.Table{{
+			Key: "memory.samples", Title: "采样", Columns: []string{"项目", "数值"}, ColumnKeys: []string{"name", "value"},
+			Rows: [][]string{{"复制", "100"}, {"缩放", "80"}}, NumericColumns: []int{1}, NumericHigherIsBetter: []bool{true},
 		}},
+		Evidence: model.NewEvidence(1, 1, "sample"),
+	}
+	disk := model.Result{
+		ID: "disk", Title: "磁盘", Description: "磁盘测试失败", Status: model.StatusError,
+		StartedAt: start, DurationMS: 2, Error: "失败",
+		Methodology:  model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio"},
+		Measurements: []model.Measurement{{Key: "disk", Label: "吞吐", Value: 0, Unit: "MiB/s", Display: "0 MiB/s", HigherIsBetter: model.BoolPtr(true)}},
+		Evidence:     model.NewEvidence(0, 1, "sample"),
+		Failures:     []model.Failure{{Category: model.FailurePermissionDenied, Stage: "open", Target: "/dev/test", Retryable: false, Message: "permission denied"}},
+	}
+	skipped := model.Result{
+		ID: "skipped", Title: "可选检查", Status: model.StatusSkipped, Summary: "未运行",
+		StartedAt: start, Evidence: model.NewEvidence(0, 0, "sample"),
+	}
+	data.Results[0].Evidence = model.NewEvidence(1, 2, "sample")
+	disk.Failures = append(disk.Failures, model.Failure{Category: "mystery"})
+	data.Results = append(data.Results, memory, disk, skipped)
+	return data
+}
+
+func rendererScoreFixture() *score.Report {
+	return &score.Report{
+		Total: 850, Ratio: 0.85, Covered: 1, Possible: 2, Complete: false,
+		BaselineSource: "global", BaselineSample: 3, HostVCPU: 4, TierLabel: "4 vCPU",
+		RankStatus: score.RankStatusInsufficient, RankSamples: 3, RankMinSamples: 5,
+		Dimensions: []score.DimensionScore{
+			{Key: "cpu", Score: 850, Ratio: 0.85, Metrics: []score.MetricScore{{Key: "cpu_single", Label: "Single", Value: 850, Unit: "events/s", Baseline: 1000, Score: 850, Ratio: 0.85}}, Groups: []score.GroupScore{{Key: "cpu", Score: 850, Ratio: 0.85, MetricCount: 1}}},
+			{Key: "memory", Missing: true, MissingReason: "module", MissingMetrics: []string{"memory_copy"}},
+		},
 	}
 }
 
-func TestTextRendersBasicReportDetails(t *testing.T) {
+func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	originalLanguage := i18n.Current()
-	defer i18n.Set(originalLanguage)
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangZH)
-
-	output := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone})
-	if strings.Contains(output, "\x1b") {
-		t.Fatal("plain text contains ANSI escapes")
-	}
-	for _, marker := range []string{"CPU 性能", "引擎", "sysbench", "780 events/s", "明细", "单线程", "780"} {
+	scoreReport := rendererScoreFixture()
+	scoreReport.RankStatus = score.RankStatusAvailable
+	scoreReport.RankSamples = 12
+	scoreReport.RankMinSamples = 5
+	scoreReport.TopPercent = 10.5
+	output := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scoreReport})
+	for _, marker := range []string{
+		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "单线程事件率", "复制", "采样", "raw output 192.0.2.10",
+		"api.example", "permission denied", "mystery", "证据完整度", "100% · 完整", "50% · 部分", "0% · 证据不足", "0/0 样本 · 本轮无计划样本", "评分", "排行榜参考", "排行榜前", "报告说明",
+	} {
 		if !strings.Contains(output, marker) {
 			t.Fatalf("text report missing %q:\n%s", marker, output)
 		}
+	}
+	if strings.Contains(output, "\x1b") {
+		t.Fatal("plain text contains ANSI escapes")
+	}
+	if !strings.Contains(output, "█") {
+		t.Fatalf("text report omitted numeric density bar:\n%s", output)
+	}
+	compact := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Compact: true, Width: 40})
+	if !strings.Contains(compact, "需留意") || strings.Contains(compact, "raw output 192.0.2.10") || strings.Contains(compact, "标准基准") {
+		t.Fatalf("compact text did not keep core status while omitting evidence details:\n%s", compact)
+	}
+}
+
+func TestTextRendersSparseAndNarrowLayouts(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	rich := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Width: 30})
+	for _, line := range strings.Split(rich, "\n") {
+		if textwidth.Width(line) > 30 {
+			t.Fatalf("narrow text line width=%d: %q", textwidth.Width(line), line)
+		}
+	}
+	if !strings.Contains(rich, "Memory benchmark") {
+		t.Fatalf("narrow report lost result title:\n%s", rich)
+	}
+	sparse := model.Report{
+		SchemaVersion: "ecs.report/v1", Tool: model.ToolInfo{Name: "ecs", Version: "test"},
+		Run:     model.RunInfo{ID: "sparse", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
+		Summary: model.Summary{Status: model.StatusSkipped, Skipped: 1, Headline: "not run"},
+		Results: []model.Result{{ID: "optional", Title: "Optional", Status: model.StatusSkipped}},
+	}
+	output := Text(sparse, TextOptions{Color: termcolor.LevelNone, Compact: true, Width: 40})
+	if !strings.Contains(output, "Optional") || !strings.Contains(output, "Skipped") {
+		t.Fatalf("sparse report omitted status:\n%s", output)
+	}
+	markdown := Markdown(sparse, nil)
+	if !strings.Contains(markdown, "ecs VPS Benchmark Report") || strings.Contains(markdown, "Composite score") || strings.Contains(markdown, "Structured failures") || strings.Contains(markdown, "Raw output") {
+		t.Fatalf("sparse Markdown rendered optional sections:\n%s", markdown)
+	}
+	i18n.Set(i18n.LangZH)
+	html, err := HTML(sparse, nil)
+	htmlOutput := string(html)
+	if err != nil || !strings.Contains(htmlOutput, `<html lang="zh-CN">`) || !strings.Contains(htmlOutput, `<section id="optional">`) || !strings.Contains(htmlOutput, `<span class="badge skipped">`) || strings.Contains(htmlOutput, `<div class="score-card">`) || strings.Contains(htmlOutput, `<details>`) || strings.Contains(htmlOutput, `<table`) || strings.Contains(htmlOutput, `<h3>结构化失败</h3>`) || strings.Contains(htmlOutput, `<h3>Structured failures</h3>`) {
+		t.Fatalf("sparse HTML rendered optional sections: %v\n%s", err, html)
 	}
 }
