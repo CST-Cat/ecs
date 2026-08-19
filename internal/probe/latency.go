@@ -82,13 +82,6 @@ func resolveEndpoint(ctx context.Context, address, family string) (string, time.
 	return "", elapsed, fmt.Errorf("解析 %s 没有 IPv%s 地址", host, family)
 }
 
-// latencyFamilies is retained for direct callers that do not have a runner
-// environment. Runner paths use latencyFamiliesForEndpoint with the shared
-// NetworkCapabilities snapshot instead of probing the host again.
-func latencyFamilies(address, mode string) []string {
-	return latencyFamiliesWithCapability(address, mode, true, true)
-}
-
 func latencyFamiliesWithCapability(address, mode string, hasIPv4, hasIPv6 bool) []string {
 	var families []string
 	for _, family := range config.IPVersions(mode) {
@@ -364,10 +357,6 @@ func formatICMPMilliseconds(value float64) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%.2f ms", value)
-}
-
-func appendICMPMeasurements(result *model.Result, targetName string, stats icmpStats) {
-	appendICMPMeasurementsForFamily(result, targetName, "", stats)
 }
 
 func appendICMPMeasurementsForFamily(result *model.Result, targetName, family string, stats icmpStats) {

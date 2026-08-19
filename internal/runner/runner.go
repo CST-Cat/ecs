@@ -216,8 +216,8 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	if hasDescriptor {
 		// Descriptor metadata is authoritative for cross-cutting runner policy;
 		// keep the report title in the canonical source language. The terminal
-		// progress title is localized separately by localizedTitle, and report
-		// renderers localize this canonical title only for human-facing output.
+		// progress title is localized separately at the Run display boundary, and
+		// report renderers localize this canonical title only for human-facing output.
 		canonicalTitle = canonicalDescriptorTitle(descriptor, canonicalTitle)
 		needsNetwork = descriptor.Exposure > config.ExposureLocal
 	}
@@ -316,16 +316,6 @@ func runWithConditionalRetryHooks(
 		probe.AppendInterferenceDiagnostics(&selected, firstInterference)
 	}
 	return selected
-}
-
-// localizedTitle 按模块 ID 查标题译文。
-//
-// ID 是稳定的机器标识，正适合做 i18n 的 key；没有译文时保留探针自带的标题。
-func localizedTitle(id, fallback string) string {
-	if descriptor, ok := config.ModuleDescriptorFor(id); ok {
-		return localizedDescriptorTitle(descriptor, fallback)
-	}
-	return fallback
 }
 
 func localizedDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {

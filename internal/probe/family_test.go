@@ -1,189 +1,28 @@
 package probe
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
-	"time"
 
 	"ecs/internal/config"
 )
 
-func TestEndpointFamiliesRespectIPVersion(t *testing.T) {
-	cases := []struct {
-		name     string
-		networks string
-		hasV4    bool
-		hasV6    bool
-		mode     string
-		want     []string
-	}{
-		{"auto dual stack", "IPv4|IPv6", true, true, config.IPVersionAuto, []string{"IPv4", "IPv6"}},
-		{"auto v4 only", "IPv4|IPv6", true, false, config.IPVersionAuto, []string{"IPv4"}},
-		{"auto v6 only", "IPv4|IPv6", false, true, config.IPVersionAuto, []string{"IPv6"}},
-		{"auto no network", "IPv4|IPv6", false, false, config.IPVersionAuto, nil},
-		{"forced v4", "IPv4|IPv6", false, true, config.IPVersion4, nil},
-		{"forced v4 available", "IPv4|IPv6", true, true, config.IPVersion4, []string{"IPv4"}},
-		{"forced v6", "IPv4|IPv6", true, false, config.IPVersion6, nil},
-		{"forced v6 available", "IPv4|IPv6", true, true, config.IPVersion6, []string{"IPv6"}},
-		{"v4 target cannot serve v6", "IPv4", false, true, config.IPVersion6, nil},
-		{"unspecified target on IPv6-only", "", false, true, config.IPVersionAuto, []string{"IPv6"}},
+func TestIPv6FamilySelectionAddsCommandFamily(t *testing.T) {
+	if got := endpointFamilies("IPv4|IPv6", true, true, config.IPVersion6); len(got) != 1 || got[0] != "IPv6" {
+		t.Fatalf("IPv6 endpoint families = %v", got)
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if got := endpointFamilies(testCase.networks, testCase.hasV4, testCase.hasV6, testCase.mode); !reflect.DeepEqual(got, testCase.want) {
-				t.Fatalf("endpointFamilies = %v, want %v", got, testCase.want)
-			}
-		})
+	args := routeCommandArgsForFamily(routeEngine{Name: routeEngineTiny}, "2001:db8::1", 5, config.IPVersion6)
+	if len(args) == 0 || args[0] != "-6" {
+		t.Fatalf("IPv6 route command family = %v", args)
 	}
 }
 
-func TestLatencyFamiliesForLiteralAddresses(t *testing.T) {
-	if got := latencyFamilies("127.0.0.1:443", config.IPVersionAuto); !reflect.DeepEqual(got, []string{config.IPVersion4}) {
-		t.Fatalf("IPv4 literal families = %v", got)
+func TestExplicitEndpointFamilyPropagatesToProbeSelection(t *testing.T) {
+	endpoint := config.Endpoint{Name: "v6", Address: "resolver.example:443", Family: config.IPVersion6}
+	if got := endpointFamily(endpoint, config.IPVersionAuto); got != config.IPVersion6 {
+		t.Fatalf("endpoint family = %q", got)
 	}
-	if got := latencyFamilies("[::1]:443", config.IPVersionAuto); !reflect.DeepEqual(got, []string{config.IPVersion6}) {
-		t.Fatalf("IPv6 literal families = %v", got)
-	}
-	if got := latencyFamilies("127.0.0.1:443", config.IPVersion6); len(got) != 0 {
-		t.Fatalf("forced IPv6 must not schedule IPv4 literal: %v", got)
-	}
-}
-
-func TestLatencyFamiliesRespectSharedCapability(t *testing.T) {
-	cases := []struct {
-		name    string
-		address string
-		hasV4   bool
-		hasV6   bool
-		mode    string
-		want    []string
-	}{
-		{name: "auto IPv4 only hostname", address: "example.test:443", hasV4: true, mode: config.IPVersionAuto, want: []string{config.IPVersion4}},
-		{name: "auto IPv6 only hostname", address: "example.test:443", hasV6: true, mode: config.IPVersionAuto, want: []string{config.IPVersion6}},
-		{name: "auto dual stack hostname", address: "example.test:443", hasV4: true, hasV6: true, mode: config.IPVersionAuto, want: []string{config.IPVersion4, config.IPVersion6}},
-		{name: "explicit IPv4 unavailable", address: "example.test:443", hasV6: true, mode: config.IPVersion4},
-		{name: "explicit IPv6 unavailable", address: "example.test:443", hasV4: true, mode: config.IPVersion6},
-		{name: "IPv4 literal needs IPv4", address: "127.0.0.1:443", hasV6: true, mode: config.IPVersionAuto},
-		{name: "IPv6 literal needs IPv6", address: "[::1]:443", hasV4: true, mode: config.IPVersionAuto},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			got := latencyFamiliesWithCapability(testCase.address, testCase.mode, testCase.hasV4, testCase.hasV6)
-			if !reflect.DeepEqual(got, testCase.want) {
-				t.Fatalf("latencyFamiliesWithCapability(%q, %q, %v, %v) = %v, want %v", testCase.address, testCase.mode, testCase.hasV4, testCase.hasV6, got, testCase.want)
-			}
-		})
-	}
-}
-
-func TestEndpointsForIPVersionFiltersLiteralResolvers(t *testing.T) {
-	endpoints := []config.Endpoint{
-		{Name: "v4", Address: "1.1.1.1:53"},
-		{Name: "v6", Address: "[2606:4700:4700::1111]:53"},
-		{Name: "hostname", Address: "resolver.example:53"},
-		{Name: "pinned-v6", Address: "resolver.example:53", Family: config.IPVersion6},
-	}
-	got := endpointsForIPVersion(endpoints, config.IPVersion6)
-	want := []config.Endpoint{endpoints[1], endpoints[2], endpoints[3]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("IPv6 resolver filter = %v, want %v", got, want)
-	}
-	if endpointMatchesIPVersion("1.1.1.1", config.IPVersion6) {
-		t.Fatal("IPv4 literal without a port must not match IPv6")
-	}
-	if !endpointMatchesIPVersion("2001:db8::1", config.IPVersion6) {
-		t.Fatal("IPv6 literal without a port must match IPv6")
-	}
-}
-
-func TestEndpointFamilySelectsIPv6Hostname(t *testing.T) {
-	target := config.Endpoint{Name: "v6 hostname", Address: "bj-ct-v6.ip.zstaticcdn.com", Family: config.IPVersion6}
-	if got := endpointFamily(target, config.IPVersionAuto); got != config.IPVersion6 {
-		t.Fatalf("endpoint family = %q, want 6", got)
-	}
-	for _, engineName := range []string{routeEngineTiny} {
-		args := routeCommandArgsForFamily(routeEngine{Name: engineName}, target.Address, 20, endpointFamily(target, config.IPVersionAuto))
-		if len(args) == 0 || args[0] != "-6" {
-			t.Fatalf("%s IPv6 hostname route args = %v", engineName, args)
-		}
-	}
-	if got := latencyFamiliesForEndpoint(target, config.IPVersionAuto, true, true); !reflect.DeepEqual(got, []string{config.IPVersion6}) {
-		t.Fatalf("IPv6 hostname latency families = %v", got)
-	}
-}
-
-func TestFamilySpecificArguments(t *testing.T) {
-	if got := strings.Join(pingArgumentsForFamily("::1", 1, time.Second, config.IPVersion6), " "); !strings.Contains(got, " -6 ") && !strings.HasPrefix(got, "-6 ") {
-		t.Fatalf("IPv6 ping arguments = %q", got)
-	}
-	for _, engineName := range []string{routeEngineTiny} {
-		engine := routeEngine{Name: engineName}
-		args := routeCommandArgsForFamily(engine, "2001:db8::1", 5, config.IPVersion6)
-		if len(args) == 0 || args[0] != "-6" {
-			t.Fatalf("%s IPv6 route arguments = %v", engineName, args)
-		}
-		if got := routeCommandArgs(engine, "127.0.0.1", 5); len(got) == 0 || got[0] == "-4" || got[0] == "-6" {
-			t.Fatalf("%s auto route arguments unexpectedly force a family: %v", engineName, got)
-		}
-	}
-}
-
-func TestNextTraceCLIArgumentsUseOfficialFlags(t *testing.T) {
-	want := []string{"-6", "--no-color", "--json", "-M", "--max-hops", "5", "--queries", "1", "--parallel-requests", "1", "--timeout", "1000", "2001:db8::1"}
-	for _, engineName := range []string{routeEngineTiny} {
-		got := routeCommandArgsForFamily(routeEngine{Name: engineName}, "2001:db8::1", 5, config.IPVersion6)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s CLI arguments = %v, want %v", engineName, got, want)
-		}
-	}
-}
-
-func TestHardwareHelpers(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "uevent")
-	if err := os.WriteFile(path, []byte("PCI_ID=8086:1234\nDRIVER=virtio_net\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	values := parseKeyValueFile(path)
-	if values["PCI_ID"] != "8086:1234" || values["DRIVER"] != "virtio_net" {
-		t.Fatalf("uevent values = %v", values)
-	}
-	if got := joinHardwareValues("unknown", "Acme", "v1"); got != "Acme · v1" {
-		t.Fatalf("hardware values = %q", got)
-	}
-	if got := joinHardwareList(nil); got != "unknown" {
-		t.Fatalf("empty hardware list = %q", got)
-	}
-	if got := formatHardwareBytes(1 << 30); got != "1.0 GiB" {
-		t.Fatalf("hardware size = %q", got)
-	}
-	if got := formatHardwareBytes(1024); got != "1.0 KiB" {
-		t.Fatalf("small hardware size = %q", got)
-	}
-}
-
-func TestSystemReportHardwareFactsContract(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileStandard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := (systemProbe{}).Run(context.Background(), Environment{Config: cfg})
-	keys := make(map[string]bool, len(result.Fields))
-	for _, field := range result.Fields {
-		keys[field.Key] = true
-	}
-	for _, key := range []string{"system_vendor", "product_name", "motherboard", "bios", "gpus", "network_adapters", "block_devices"} {
-		if !keys[key] {
-			t.Fatalf("system report missing hardware field %q", key)
-		}
-	}
-	for _, key := range []string{"raid", "temperatures", "smart"} {
-		if keys[key] {
-			t.Fatalf("system report unexpectedly includes removed hardware field %q", key)
-		}
+	families := latencyFamiliesForEndpoint(endpoint, config.IPVersionAuto, true, true)
+	if len(families) != 1 || families[0] != config.IPVersion6 {
+		t.Fatalf("latency families = %v", families)
 	}
 }

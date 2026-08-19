@@ -123,30 +123,6 @@ func classifyNetworkAddresses(addresses []net.Addr) NetworkCapabilities {
 	return capabilities
 }
 
-// hasUsableIPv4 reports whether an address list contains an IPv4 address that
-// can serve as a local/NAT egress source. RFC1918 addresses are intentionally
-// accepted; loopback, link-local, multicast and unspecified addresses are not.
-func hasUsableIPv4(addresses []net.Addr) bool {
-	for _, address := range addresses {
-		if ip := ipFromNetworkAddress(address); ip != nil && isUsableIPv4(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasGlobalUnicastIPv6 reports whether an address list contains a usable
-// public IPv6 address. net.IP.IsGlobalUnicast alone is insufficient because
-// it also returns true for ULA addresses.
-func hasGlobalUnicastIPv6(addresses []net.Addr) bool {
-	for _, address := range addresses {
-		if ip := ipFromNetworkAddress(address); ip != nil && isUsableIPv6(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 func isUsableIPv4(ip net.IP) bool {
 	ip = ip.To4()
 	if ip == nil {

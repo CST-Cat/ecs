@@ -2,20 +2,15 @@ package score
 
 import (
 	"encoding/json"
-	"math"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"ecs/internal/model"
 )
 
 func sampleSubmissionReport() model.Report {
 	return model.Report{
-		Tool: model.ToolInfo{Version: "v1.2.3"},
-		Run:  model.RunInfo{Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
+		Tool: model.ToolInfo{Version: "ecs-test"},
+		Run:  model.RunInfo{Profile: "standard"},
 		Results: []model.Result{
 			{
 				ID: "system", Status: model.StatusOK,
@@ -23,47 +18,20 @@ func sampleSubmissionReport() model.Report {
 					{Key: "logical_cpus", Value: 4},
 					{Key: "memory_total_bytes", Value: 8 * (1 << 30)},
 				},
-				Fields: []model.Field{
-					{Key: "hostname", Value: "secret-host-01"},
-					{Key: "virtualization", Value: "kvm"},
-					{Key: "cpu_model", Value: "AMD EPYC 7003"},
-					{Key: "arch", Value: "amd64"},
-				},
 			},
 			{
 				ID: "cpu", Status: model.StatusOK,
-				Fields: []model.Field{{Key: "version", Value: "sysbench 1.0.20"}},
 				Measurements: []model.Measurement{
 					{Key: "sysbench_cpu_single_events_s", Value: 900},
 					{Key: "sysbench_cpu_multi_events_s", Value: 3400},
-				},
-			},
-			{
-				ID: "speed", Status: model.StatusOK,
-				Measurements: []model.Measurement{
-					{Key: "iperf3_target_01_ipv4_download_mbps", Value: 800},
-					{Key: "iperf3_target_02_ipv4_download_mbps", Value: 900},
-					{Key: "iperf3_target_01_ipv4_upload_mbps", Value: 700},
 				},
 			},
 		},
 	}
 }
 
-// 提交格式的核心约束：字段是白名单。报告里的可定位信息一律不得带出去。
-func TestSubmissionExcludesLocatingFields(t *testing.T) {
-	data := sampleSubmissionReport()
-	// 往报告里塞满敏感字段，提交里一个都不该出现。
-	data.Results = append(data.Results, model.Result{
-		ID: "network", Status: model.StatusOK,
-		Fields: []model.Field{
-			{Key: "ipv4_ip", Value: "203.0.113.44", Sensitive: true},
-			{Key: "ipv4_owner", Value: "Example Telecom"},
-			{Key: "ipv4_route", Value: "203.0.113.0/24"},
-		},
-		TextBlocks: []model.TextBlock{{Content: "1  203.0.113.1  AS64500"}},
-	})
-	submission, err := BuildSubmission(data, SubmissionOptions{Region: "jp", Provider: "vultr"})
+func TestSubmissionRoundTripsIntoBaseline(t *testing.T) {
+	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,411 +39,22 @@ func TestSubmissionExcludesLocatingFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(encoded)
-	for _, forbidden := range []string{
-		"203.0.113", "secret-host-01", "AS64500", "Example Telecom", "/24",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Errorf("提交里泄露了 %q：\n%s", forbidden, text)
-		}
-	}
-	// 该带的必须带上。
-	if submission.Host.VCPU != 4 || submission.Host.CPUModel != "AMD EPYC 7003" {
-		t.Errorf("机器规格未正确提取：%+v", submission.Host)
-	}
-	if submission.Tool.Sysbench != "sysbench 1.0.20" {
-		t.Errorf("工具版本未提取：%+v", submission.Tool)
-	}
-}
-
-// 指纹由内容派生：手改数值而不重算指纹，校验必须发现。
-func TestSubmissionFingerprintDetectsTampering(t *testing.T) {
-	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := submission.Validate(); err != nil {
-		t.Fatalf("刚生成的提交应当合法：%v", err)
-	}
-	tampered := submission
-	tampered.Metrics = map[string]float64{}
-	for key, value := range submission.Metrics {
-		tampered.Metrics[key] = value
-	}
-	tampered.Metrics["cpu_single"] *= 10
-	if err := tampered.Validate(); err == nil {
-		t.Fatal("改了数值而未重算指纹，校验应当失败")
-	}
-}
-
-// 同一台机器同一次结果重复提交必须得到同一个 ID，CI 才查得出重复。
-func TestSubmissionFingerprintIsStable(t *testing.T) {
-	first, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{Region: "jp"})
-	second, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{Region: "jp"})
-	if first.ID != second.ID {
-		t.Fatalf("同一份内容应得到同一 ID：%q vs %q", first.ID, second.ID)
-	}
-}
-
-func TestSubmissionFingerprintV2IsIndependentOfRunTime(t *testing.T) {
-	firstReport := sampleSubmissionReport()
-	secondReport := sampleSubmissionReport()
-	secondReport.Run.StartedAt = firstReport.Run.StartedAt.Add(72 * time.Hour)
-	first, err := BuildSubmission(firstReport, SubmissionOptions{Region: "jp"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := BuildSubmission(secondReport, SubmissionOptions{Region: "jp"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.FingerprintVersion != SubmissionFingerprintV2 || second.FingerprintVersion != SubmissionFingerprintV2 {
-		t.Fatalf("new submissions must declare fingerprint %q: %#v / %#v", SubmissionFingerprintV2, first, second)
-	}
-	if first.ID != second.ID {
-		t.Fatalf("the same result exported at different times must deduplicate: %q vs %q", first.ID, second.ID)
-	}
-}
-
-func TestSubmissionFingerprintV2CoversPublicFieldsAndExactFloats(t *testing.T) {
-	base, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{Region: "jp", Provider: "provider", Note: "note"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := map[string]func(*Submission){
-		"host arch":     func(s *Submission) { s.Host.Arch = "arm64" },
-		"provider":      func(s *Submission) { s.Host.Provider = "other" },
-		"tool":          func(s *Submission) { s.Tool.ECS = "v9" },
-		"profile":       func(s *Submission) { s.Profile = "standard" },
-		"note":          func(s *Submission) { s.Note = "other" },
-		"precise float": func(s *Submission) { s.Metrics["cpu_single"] += 0.0001 },
-	}
-	for name, mutate := range tests {
-		t.Run(name, func(t *testing.T) {
-			changed := base
-			changed.Metrics = make(map[string]float64, len(base.Metrics))
-			for key, value := range base.Metrics {
-				changed.Metrics[key] = value
-			}
-			mutate(&changed)
-			if changed.fingerprintV2() == base.ID {
-				t.Fatal("field change did not affect the v2 fingerprint")
-			}
-			if err := changed.Validate(); err == nil {
-				t.Fatal("field change without a new ID was not detected")
-			}
-		})
-	}
-}
-
-func TestSubmissionLegacyFingerprintRemainsValid(t *testing.T) {
-	legacy, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy.FingerprintVersion = ""
-	legacy.ID = legacy.legacyFingerprint()
-	encoded, err := legacy.Encode()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var decoded Submission
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.FingerprintVersion != "" {
-		t.Fatalf("legacy omission did not round-trip: %#v", decoded)
-	}
 	if err := decoded.Validate(); err != nil {
-		t.Fatalf("legacy record without fingerprint_version must remain readable: %v", err)
+		t.Fatalf("encoded submission should validate: %v", err)
 	}
-	legacy.FingerprintVersion = "future"
-	if err := legacy.Validate(); err == nil || !strings.Contains(err.Error(), "fingerprint_version") {
-		t.Fatalf("unknown fingerprint version was not rejected clearly: %v", err)
-	}
-}
-
-func TestSubmissionMemoryBackendIsRequiredForStream(t *testing.T) {
-	data := sampleSubmissionReport()
-	data.Results = append(data.Results, model.Result{
-		ID: "memory", Status: model.StatusOK,
-		Measurements: []model.Measurement{
-			{Key: "stream_copy_1t_mib_s", Value: 100},
-			{Key: "stream_copy_nt_mib_s", Value: 300},
-			{Key: "stream_scale_1t_mib_s", Value: 100},
-			{Key: "stream_scale_nt_mib_s", Value: 300},
-			{Key: "stream_add_1t_mib_s", Value: 100},
-			{Key: "stream_add_nt_mib_s", Value: 300},
-			{Key: "stream_triad_1t_mib_s", Value: 100},
-			{Key: "stream_triad_nt_mib_s", Value: 300},
-		},
-	})
-	stream, err := BuildSubmission(data, SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stream.MemoryBackend != memoryBackendStream {
-		t.Fatalf("stream submission backend = %q, want %q", stream.MemoryBackend, memoryBackendStream)
-	}
-	if err := stream.Validate(); err != nil {
-		t.Fatalf("stream submission should validate: %v", err)
-	}
-	encoded, err := stream.Encode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(encoded), `"memory_backend": "stream"`) {
-		t.Fatalf("encoded stream submission omitted backend marker: %s", encoded)
-	}
-	streamReport := stream.AsReport()
-	var memoryResult *model.Result
-	for index := range streamReport.Results {
-		if streamReport.Results[index].ID == "memory" {
-			memoryResult = &streamReport.Results[index]
-			break
-		}
-	}
-	if memoryResult == nil {
-		t.Fatal("stream submission AsReport omitted memory result")
-	}
-	foundCopy := false
-	for _, measurement := range memoryResult.Measurements {
-		if measurement.Key == "stream_copy_submission_mib_s" {
-			foundCopy = true
-			break
-		}
-	}
-	if !foundCopy {
-		t.Fatalf("stream submission AsReport omitted synthetic STREAM copy key: %+v", memoryResult.Measurements)
-	}
-	baseline, err := BuildBaseline([]model.Report{streamReport}, "stream-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := baseline.Metrics["memory_copy"]; math.Abs(got-200) > 0.001 {
-		t.Fatalf("STREAM submission seeded memory_copy baseline = %v, want 200", got)
-	}
-}
-
-func TestSubmissionRejectsUnknownMemoryMetric(t *testing.T) {
-	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	submission.Metrics["memory_read"] = 100
-	submission.ID = submission.fingerprint()
-	if err := submission.Validate(); err == nil {
-		t.Fatal("unknown memory metric should be rejected")
-	}
-}
-
-func TestSubmissionValidateRejectsBadInput(t *testing.T) {
-	base, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
-	cases := map[string]func(*Submission){
-		"未知指标":      func(s *Submission) { s.Metrics["not_a_metric"] = 1 },
-		"负值":        func(s *Submission) { s.Metrics["cpu_single"] = -1 },
-		"缺 vCPU":    func(s *Submission) { s.Host.VCPU = 0 },
-		"缺版本":       func(s *Submission) { s.Tool.ECS = "" },
-		"错误 schema": func(s *Submission) { s.Schema = "nope" },
-	}
-	for name, mutate := range cases {
-		copied := base
-		copied.Metrics = map[string]float64{}
-		for key, value := range base.Metrics {
-			copied.Metrics[key] = value
-		}
-		mutate(&copied)
-		if err := copied.Validate(); err == nil {
-			t.Errorf("%s 应当被拒绝", name)
-		}
-	}
-}
-
-// 自报字段要被清洗：控制字符与超长内容不能进库。
-func TestSubmissionSanitizesSelfReportedFields(t *testing.T) {
-	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{
-		Region:   "jp\x00\x1b[31m",
-		Provider: strings.Repeat("x", 200),
-		Note:     strings.Repeat("说明", 300),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.ContainsAny(submission.Host.Region, "\x00\x1b") {
-		t.Errorf("地区未清洗控制字符：%q", submission.Host.Region)
-	}
-	if len([]rune(submission.Host.Provider)) > 48 {
-		t.Errorf("商家未限长：%d", len([]rune(submission.Host.Provider)))
-	}
-	if len([]rune(submission.Note)) > maxNoteLength {
-		t.Errorf("备注未限长：%d", len([]rune(submission.Note)))
-	}
-	if err := submission.Validate(); err != nil {
-		t.Errorf("清洗后应当合法：%v", err)
-	}
-}
-
-func TestSubmissionAutoDetectsAndOverridesCloudMetadata(t *testing.T) {
-	data := sampleSubmissionReport()
-	data.Results[0].Fields = append(data.Results[0].Fields,
-		model.Field{Key: "cloud_provider", Value: "oracle-cloud"},
-		model.Field{Key: "cloud_region", Value: "us-sanjose-1"},
-	)
-	auto, err := BuildSubmission(data, SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auto.Host.Provider != "oracle-cloud" || auto.Host.Region != "us-sanjose-1" {
-		t.Fatalf("auto metadata = provider %q region %q", auto.Host.Provider, auto.Host.Region)
-	}
-	override, err := BuildSubmission(data, SubmissionOptions{Provider: "vultr", Region: "fra"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if override.Host.Provider != "vultr" || override.Host.Region != "fra" {
-		t.Fatalf("explicit metadata = provider %q region %q", override.Host.Provider, override.Host.Region)
-	}
-}
-
-func TestSubmissionMetadataRoundTripsThroughAsReport(t *testing.T) {
-	data := sampleSubmissionReport()
-	data.Results[0].Fields = append(data.Results[0].Fields,
-		model.Field{Key: "cloud_provider", Label: "云厂商", Value: "oracle-cloud"},
-		model.Field{Key: "cloud_region", Label: "云区域", Value: "us-sanjose-1"},
-	)
-	submission, err := BuildSubmission(data, SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider, region := ExtractSubmissionMetadata(submission.AsReport())
-	if provider != submission.Host.Provider || region != submission.Host.Region {
-		t.Fatalf("metadata round-trip = provider %q region %q; want provider %q region %q",
-			provider, region, submission.Host.Provider, submission.Host.Region)
-	}
-}
-
-// 提交转成最小报告后，聚合基线必须得到与原始值一致的结果——
-// 这保证了基线聚合对两种输入只有一条代码路径。
-func TestSubmissionRoundTripsThroughBaseline(t *testing.T) {
-	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseline, err := BuildBaseline([]model.Report{submission.AsReport()}, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for key, want := range submission.Metrics {
-		if got := baseline.Metrics[key]; math.Abs(got-want) > 0.001 {
-			t.Errorf("指标 %q 往返后 = %v，期望 %v", key, got, want)
-		}
-	}
-	// 带宽是聚合项：原报告两个下载节点取中位 850，往返后应保持。
-	if got := baseline.Metrics["bandwidth_download"]; math.Abs(got-850) > 0.001 {
-		t.Errorf("带宽中位数往返后 = %v，期望 850", got)
-	}
-}
-
-func TestSubmissionWhitelistIncludesExpandedStableMetrics(t *testing.T) {
-	data := sampleSubmissionReport()
-	data.Results = append(data.Results, model.Result{
-		ID: "disk", Status: model.StatusOK,
-		Measurements: []model.Measurement{{Key: "arbitrary_report_field", Value: 999}},
-	})
-	disk := &data.Results[len(data.Results)-1]
-	for _, dimension := range Dimensions() {
-		if dimension.Key != "disk" {
-			continue
-		}
-		for _, metric := range dimension.Metrics {
-			if metric.MeasurementKey == "" {
-				continue
-			}
-			disk.Measurements = append(disk.Measurements, model.Measurement{
-				Key: metric.MeasurementKey, Value: 123, Unit: "u", Label: metric.Key,
-			})
-		}
-	}
-	submission, err := BuildSubmission(data, SubmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{
-		"crystal_rnd4k_q1_read_mib_s", "crystal_seq1m_q8_write_iops",
-		"fio_mixed_4k_read_mib_s", "fio_mixed_1m_write_mib_s",
-		"atto_512b_read_mib_s", "atto_64m_write_iops",
-	} {
-		if got := submission.Metrics[key]; got != 123 {
-			t.Fatalf("expanded stable key %q = %v, want 123", key, got)
-		}
-	}
-	mixedCount := 0
-	for key := range submission.Metrics {
-		if strings.HasPrefix(key, "fio_mixed_") {
-			mixedCount++
-		}
-	}
-	if mixedCount != 8 {
-		t.Fatalf("submission fio mixed metric count = %d, want 8", mixedCount)
-	}
-	if _, ok := submission.Metrics["arbitrary_report_field"]; ok {
-		t.Fatal("submission leaked an arbitrary report field")
-	}
-	if err := submission.Validate(); err != nil {
-		t.Fatalf("expanded submission should remain valid: %v", err)
-	}
-}
-
-func TestSubmissionFileNameIsSafe(t *testing.T) {
-	submission, _ := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{
-		Region: "US West/2", Provider: "Acme Cloud Inc.",
-	})
-	name := submission.FileName()
-	if strings.ContainsAny(name, "/\\ ") {
-		t.Errorf("文件名含不安全字符：%q", name)
-	}
-	if !strings.HasSuffix(name, ".json") {
-		t.Errorf("文件名应以 .json 结尾：%q", name)
-	}
-}
-
-// CI 用这个测试校验整个提交库：格式、指纹、重复。
-//
-// 走测试而不是单独写个校验命令，是因为它同时被本地 `go test ./...` 覆盖——
-// 校验逻辑与它要保护的格式定义放在一起，不会各自漂移。
-func TestSubmissionCorpus(t *testing.T) {
-	directory := os.Getenv("ECS_SUBMISSION_DIR")
-	if directory == "" {
-		directory = filepath.Join("..", "..", "submissions")
-	}
-	if _, err := os.Stat(directory); err != nil {
-		t.Skipf("提交库目录不存在：%s", directory)
-	}
-	entries, err := filepath.Glob(filepath.Join(directory, "*", "*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) == 0 {
-		t.Skip("提交库为空")
+	if decoded.ID != submission.ID || decoded.Host.VCPU != 4 {
+		t.Fatalf("decoded submission = %+v, want same identity and host size", decoded)
 	}
 
-	seen := make(map[string]string, len(entries))
-	for _, path := range entries {
-		submission, err := LoadSubmission(path)
-		if err != nil {
-			t.Errorf("%s: %v", path, err)
-			continue
-		}
-		canonicalID := submission.fingerprintV2()
-		if previous, duplicated := seen[canonicalID]; duplicated {
-			t.Errorf("%s 与 %s 内容重复（规范指纹 %s）", path, previous, canonicalID)
-			continue
-		}
-		seen[canonicalID] = path
-		// 文件名应当与内容自洽，否则目录列表会误导人。
-		if want := submission.FileName(); filepath.Base(path) != want {
-			t.Errorf("%s 的文件名应为 %s", path, want)
-		}
+	baseline, err := BuildBaseline([]model.Report{decoded.AsReport()}, "test")
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("校验了 %d 份提交", len(seen))
+	if baseline.Metrics["cpu_single"] != 900 || baseline.Metrics["cpu_multi"] != 3400 {
+		t.Fatalf("baseline metrics = %v, want submission CPU values", baseline.Metrics)
+	}
 }

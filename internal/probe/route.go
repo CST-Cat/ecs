@@ -205,14 +205,6 @@ func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target st
 	return output, err
 }
 
-// routeCommandArgs 组装路由追踪参数。
-//
-// maxHops 由调用方决定：路径快照 12 跳足够看清出口方向，但三网回程识别必须给到
-// 更大的跳数——从海外到中国骨干通常要走 15 跳以上，截断会让骨干特征根本不出现。
-func routeCommandArgs(engine routeEngine, target string, maxHops int) []string {
-	return routeCommandArgsForFamily(engine, target, maxHops, config.IPVersionAuto)
-}
-
 func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, family string) []string {
 	hops := strconv.Itoa(maxHops)
 	familyArg := ""

@@ -51,14 +51,6 @@ func icmpAvailable() bool {
 // pingCommand 是 Linux 上的 ICMP 探测程序。
 const pingCommand = "ping"
 
-// pingArguments 给出 ping 参数。
-//
-// -n 保持输出数字化、-q 只打印统计，避免逐包刷屏。iputils 与 busybox 的 -W 都以
-// 秒为单位，且都不接受小数，因此不足一秒一律进位到 1 秒。
-func pingArguments(host string, count int, timeout time.Duration) []string {
-	return pingArgumentsForFamily(host, count, timeout, "")
-}
-
 func pingArgumentsForFamily(host string, count int, timeout time.Duration, family string) []string {
 	seconds := int(timeout.Seconds())
 	if seconds < 1 {

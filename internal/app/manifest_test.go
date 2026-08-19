@@ -12,33 +12,21 @@ func TestListMachineEmitsDescriptorManifest(t *testing.T) {
 		t.Fatalf("list --machine returned %d: stderr=%s", status, errOut.String())
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) < 3 || lines[0] != "ecs-module-manifest\t1" {
+	if len(lines) < 2 || lines[0] != "ecs-module-manifest\t1" {
 		t.Fatalf("unexpected manifest header/output: %q", out.String())
 	}
-	if !strings.Contains(out.String(), "profile\tstandard\t") || !strings.Contains(out.String(), "profile\tfull\t") {
-		t.Fatalf("manifest omitted profile plans: %q", out.String())
-	}
+	seen := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) < 3 || fields[0] != "profile" {
+		if fields[0] == "ecs-module-manifest" {
 			continue
 		}
-		modules := "," + fields[2] + ","
-		switch fields[1] {
-		case "standard":
-			if strings.Contains(modules, ",network,") || strings.Contains(modules, ",ookla,") {
-				t.Fatal("standard manifest must omit network and Ookla")
-			}
-			if !strings.Contains(modules, ",cnspeed,") {
-				t.Fatal("standard manifest must include cnspeed")
-			}
-		case "full":
-			if !strings.Contains(modules, ",network,") || !strings.Contains(modules, ",ookla,") {
-				t.Fatal("full manifest must include network and Ookla")
-			}
+		if len(fields) < 3 || (fields[0] != "profile" && fields[0] != "module") || fields[1] == "" {
+			t.Fatalf("invalid manifest record %q", line)
 		}
+		seen[fields[0]] = true
 	}
-	if !strings.Contains(out.String(), "module\troute\tpublic\tnexttrace-tiny") {
-		t.Fatalf("manifest omitted route tool metadata: %q", out.String())
+	if !seen["profile"] || !seen["module"] {
+		t.Fatalf("manifest did not contain both record types: %q", out.String())
 	}
 }

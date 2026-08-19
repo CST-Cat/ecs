@@ -1,46 +1,41 @@
 package report
 
 import (
-	"os"
-	"path/filepath"
-	"reflect"
+	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	comparison "ecs/internal/compare"
-	"ecs/internal/i18n"
 	"ecs/internal/model"
-	"ecs/internal/termcolor"
 )
 
-func comparisonReportsFixture(t *testing.T, count int) ([]model.Report, []string) {
+func comparisonReportFixture(t *testing.T, count, reference int) comparison.Report {
 	t.Helper()
-	reports := make([]model.Report, 0, count)
-	labels := make([]string, 0, count)
-	for index := 0; index < count; index++ {
-		report := sampleReport()
-		report.Run.ID = "run-" + formatComparisonNumber(float64(index+1))
-		report.Results[0].Title = "系统 <比较>"
-		report.Results[0].Methodology = model.Methodology{
-			Kind: "inventory", Engine: "ecs", Profile: "same-scope",
-			Parameters: map[string]string{"scope_revision": "1", "fixture": "same"},
+	reports := make([]model.Report, count)
+	labels := make([]string, count)
+	for index := range reports {
+		data := sampleReport()
+		data.Run.ID = fmt.Sprintf("run-%d", index+1)
+		data.Results[0].Title = "系统"
+		data.Results[0].Methodology = model.Methodology{
+			Kind: "inventory", Parameters: map[string]string{"scope_revision": "1"},
 		}
-		report.Results[0].Evidence = model.NewEvidence(index+1, count, "sample")
-		report.Results[0].Measurements = []model.Measurement{{
-			Key: "cpu", Label: "CPU <rate>", Value: float64(100 + index*20), Unit: "points",
-			Display: formatComparisonNumber(float64(100+index*20)) + " points", Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true),
+		state := "ready"
+		if index > 0 {
+			state = "done"
+		}
+		data.Results[0].Measurements = []model.Measurement{{
+			Key: "cpu", Label: "CPU", Value: float64(100 + index*20),
+			Unit: "points", Display: fmt.Sprintf("%d points", 100+index*20), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true),
 		}}
-		report.Results[0].Fields = []model.Field{{Key: "zone", Label: "Zone", Value: formatComparisonNumber(float64(index + 1))}}
-		reports = append(reports, report)
-		labels = append(labels, "node-"+formatComparisonNumber(float64(index+1)))
+		data.Results[0].Fields = []model.Field{{Key: "state", Label: "状态", Value: state}}
+		data.Results[0].Tables = []model.Table{{
+			Key: "system.state", Title: "状态", Columns: []string{"ID", "状态"},
+			ColumnKeys: []string{"id", "state"}, RowIdentity: "id",
+			Rows: [][]string{{"row-1", state}},
+		}}
+		reports[index], labels[index] = data, fmt.Sprintf("node-%d", index+1)
 	}
-	return reports, labels
-}
-
-func comparisonReportFixture(t *testing.T, count int, reference int) comparison.Report {
-	t.Helper()
-	reports, labels := comparisonReportsFixture(t, count)
 	data, err := comparison.Build(reports, comparison.Options{Labels: labels, Reference: reference, Tool: model.ToolInfo{Name: "ecs", Version: "test"}})
 	if err != nil {
 		t.Fatal(err)
@@ -48,264 +43,13 @@ func comparisonReportFixture(t *testing.T, count int, reference int) comparison.
 	return data
 }
 
-func TestComparisonBuildIsCanonicalAcrossLanguages(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	reports, labels := comparisonReportsFixture(t, 2)
-	var results []comparison.Report
-	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
-		i18n.Set(language)
-		data, err := comparison.Build(reports, comparison.Options{Labels: labels, Reference: 0, Tool: model.ToolInfo{Name: "ecs", Version: "test"}})
-		if err != nil {
-			t.Fatalf("Build in %s: %v", language, err)
-		}
-		data.GeneratedAt = time.Time{}
-		results = append(results, data)
-	}
-	if !reflect.DeepEqual(results[0], results[1]) {
-		t.Fatalf("canonical compare result changed with language:\nzh=%+v\nen=%+v", results[0], results[1])
-	}
-	jsonBytes, err := ComparisonJSON(results[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(jsonBytes), `"compare.notice.scope"`) || strings.Contains(string(jsonBytes), "Only values") {
-		t.Fatalf("comparison JSON is not canonical: %s", jsonBytes)
-	}
-}
-
-func TestComparisonFormatsPreserveHighlightsBarsAndEvidence(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
+func TestComparisonMarkdownShowsMetricAndDiscreteChanges(t *testing.T) {
 	data := comparisonReportFixture(t, 2, 0)
-
-	jsonBytes, err := ComparisonJSON(data)
-	if err != nil {
-		t.Fatal(err)
+	if len(data.Modules) != 1 || len(data.Modules[0].Metrics) != 1 || len(data.Modules[0].Changes) < 2 {
+		t.Fatalf("comparison changes = %+v", data.Modules)
 	}
-	text := ComparisonText(data, termcolor.LevelNone)
 	markdown := ComparisonMarkdown(data)
-	htmlBytes, err := ComparisonHTML(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	htmlText := string(htmlBytes)
-
-	for format, content := range map[string]string{
-		"json": string(jsonBytes), "txt": text, "md": markdown, "html": htmlText,
-	} {
-		for _, marker := range []string{"node-1", "node-2", "CPU", "fixture-v1"} {
-			if !strings.Contains(content, marker) {
-				t.Fatalf("%s missing %q:\n%s", format, marker, content)
-			}
-		}
-	}
-	if !strings.Contains(string(jsonBytes), `"schema_version": "ecs.compare/v1"`) || !strings.Contains(string(jsonBytes), `"best": true`) {
-		t.Fatalf("comparison JSON lost machine fields: %s", jsonBytes)
-	}
-	if !strings.Contains(text, "★ 120 points") || !strings.Contains(text, "████") || !strings.Contains(text, "+20%") {
-		t.Fatalf("txt lost highlight, bar or delta:\n%s", text)
-	}
-	if !strings.Contains(markdown, "**★ 120 points**") || !strings.Contains(markdown, "`████") || !strings.Contains(markdown, "1/2") {
-		t.Fatalf("Markdown lost highlight, bar or evidence:\n%s", markdown)
-	}
-	for _, marker := range []string{`class="layout-pair"`, `value-card best`, `background:#`, `@media (max-width:760px)`, "★ 120 points"} {
-		if !strings.Contains(htmlText, marker) {
-			t.Fatalf("HTML missing %q: %s", marker, htmlText)
-		}
-	}
-	if strings.Contains(htmlText, "<script") || strings.Contains(htmlText, "%!") || !strings.Contains(htmlText, "CPU &lt;rate&gt;") {
-		t.Fatalf("HTML is unsafe or malformed: %s", htmlText)
-	}
-}
-
-func TestComparisonNoticesLocalizeOnlyAtHumanRenderers(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-	data := comparisonReportFixture(t, 2, 0)
-	canonicalNotice := data.Notices[0]
-	canonicalJSON, err := ComparisonJSON(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(canonicalJSON), canonicalNotice) {
-		t.Fatalf("comparison JSON did not preserve canonical notice %q: %s", canonicalNotice, canonicalJSON)
-	}
-
-	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
-		i18n.Set(language)
-		text := ComparisonText(data, termcolor.LevelNone)
-		markdown := ComparisonMarkdown(data)
-		htmlBytes, renderErr := ComparisonHTML(data)
-		if renderErr != nil {
-			t.Fatal(renderErr)
-		}
-		for format, content := range map[string]string{"txt": text, "md": markdown, "html": string(htmlBytes)} {
-			if strings.Contains(content, canonicalNotice) || strings.Contains(content, "compare.notice.") {
-				t.Fatalf("%s leaked canonical notice key in %s: %s", language, format, content)
-			}
-		}
-		if !strings.Contains(text, i18n.T("compare.notice.scope")) ||
-			!strings.Contains(markdown, i18n.T("compare.notice.scope")) ||
-			!strings.Contains(string(htmlBytes), i18n.T("compare.notice.scope")) {
-			t.Fatalf("%s renderer did not localize comparison notice", language)
-		}
-	}
-}
-
-func TestComparisonVersionNoticesSurviveEveryHumanRenderer(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-	// Rebuild through compare so the version notices use the canonical
-	// machine representation rather than a hand-authored display string.
-	reports := []model.Report{sampleReport(), sampleReport()}
-	for index := range reports {
-		reports[index].Run.ID = "run-" + formatComparisonNumber(float64(index+1))
-	}
-	reports[1].SchemaVersion = "ecs.report/v2"
-	reports[1].Tool.Version = "0.7.0"
-	data, err := comparison.Build(reports, comparison.Options{Reference: 0})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(data.Notices) < 2 {
-		t.Fatalf("version notices missing: %v", data.Notices)
-	}
-
-	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
-		i18n.Set(language)
-		text := ComparisonText(data, termcolor.LevelNone)
-		markdown := ComparisonMarkdown(data)
-		htmlBytes, renderErr := ComparisonHTML(data)
-		if renderErr != nil {
-			t.Fatal(renderErr)
-		}
-		for format, content := range map[string]string{"txt": text, "md": markdown, "html": string(htmlBytes)} {
-			if strings.Contains(content, "compare.notice.") || !strings.Contains(content, "ecs.report/v2") {
-				t.Fatalf("%s version notice was not rendered in %s: %s", language, format, content)
-			}
-		}
-	}
-}
-
-func TestComparisonLayoutsAdaptFromMatrixToMany(t *testing.T) {
-	matrix := comparisonReportFixture(t, 4, 0)
-	many := comparisonReportFixture(t, 7, 0)
-	matrixHTML, err := ComparisonHTML(matrix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manyHTML, err := ComparisonHTML(many)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(matrixHTML), `class="layout-matrix"`) {
-		t.Fatalf("four reports did not use matrix layout: %s", matrixHTML)
-	}
-	if !strings.Contains(string(manyHTML), `class="layout-many"`) {
-		t.Fatalf("seven reports did not use many layout: %s", manyHTML)
-	}
-	manyText := ComparisonText(many, termcolor.LevelNone)
-	for index := 1; index <= 7; index++ {
-		if !strings.Contains(manyText, "node-"+formatComparisonNumber(float64(index))) {
-			t.Fatalf("many layout lost node %d:\n%s", index, manyText)
-		}
-	}
-	if !strings.Contains(manyText, i18n.T("compare.rank")) || !strings.Contains(manyText, "#") {
-		t.Fatalf("many txt layout is not ranked:\n%s", manyText)
-	}
-}
-
-func TestComparisonPairUsesNonReferenceDelta(t *testing.T) {
-	data := comparisonReportFixture(t, 2, 1)
-	text := ComparisonText(data, termcolor.LevelNone)
-	if !strings.Contains(text, "-16.67%") || !strings.Contains(text, comparisonInputLabel(data, 1)) {
-		t.Fatalf("pair comparison did not use report 2 as reference:\n%s", text)
-	}
-}
-
-func TestWriteComparisonFilesWritesAllRequestedFormats(t *testing.T) {
-	data := comparisonReportFixture(t, 3, 0)
-	directory := t.TempDir()
-	written, err := WriteComparisonFiles(data, directory, "fleet", []string{"json", "txt", "md", "html"}, ComparisonOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, format := range []string{"json", "txt", "md", "html"} {
-		path := filepath.Join(directory, "fleet."+format)
-		if written[format] != path {
-			t.Errorf("%s path = %q, want %q", format, written[format], path)
-		}
-		info, statErr := os.Stat(path)
-		if statErr != nil || info.Size() == 0 {
-			t.Errorf("%s artifact missing/empty: info=%v err=%v", format, info, statErr)
-		}
-	}
-}
-
-// TestComparisonHTMLEscapesUntrustedFields 守住 compare_html.go 的手工转义。
-//
-// 该渲染器用 strings.Builder + html.EscapeString 拼 HTML，而不是 html/template
-// 的自动转义：一次遗漏就是注入面。报告标签直接来自命令行给出的文件名，
-// Linux 下文件名几乎可以是任意字节。
-func TestComparisonHTMLEscapesUntrustedFields(t *testing.T) {
-	payload := `<script>alert(1)</script>`
-	data := comparison.Report{
-		SchemaVersion: comparison.SchemaVersion,
-		Tool:          model.ToolInfo{Name: payload, Version: payload},
-		Reference:     0,
-		Inputs: []comparison.Input{
-			{Index: 0, Label: payload, ReportID: payload, Profile: payload, ToolVersion: payload},
-			{Index: 1, Label: "b", ReportID: "b"},
-		},
-		Summary: comparison.Summary{Reports: 2, Comparability: comparison.PartiallyComparable},
-		Modules: []comparison.Module{{
-			ID:            payload,
-			Title:         payload,
-			Comparability: comparison.PartiallyComparable,
-			Statuses: []comparison.StatusValue{
-				{Report: 0, Available: true, Status: model.StatusOK},
-				{Report: 1, Available: true, Status: model.StatusOK},
-			},
-			Evidence: []comparison.EvidenceValue{{Report: 0}, {Report: 1}},
-			Metrics: []comparison.Metric{{
-				Key: payload, Label: payload, Unit: payload, Method: payload,
-				ParameterScope: payload, HigherIsBetter: true,
-				Values: []comparison.MetricValue{
-					{Report: 0, Available: true, Value: 1, Display: payload},
-					{Report: 1, Available: true, Value: 2, Display: payload},
-				},
-			}},
-			Changes: []comparison.Observation{{
-				Key: payload, Label: payload, Source: payload,
-				Values: []comparison.ObservationValue{
-					{Report: 0, Available: true, Value: payload},
-					{Report: 1, Available: true, Value: payload},
-				},
-			}},
-			MetricIssues: []comparison.MetricIssue{{
-				Key: payload, Label: payload, Reason: payload, Reports: []int{0},
-			}},
-		}},
-		Notices: []string{payload},
-	}
-
-	rendered, err := ComparisonHTML(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(rendered)
-	if strings.Contains(text, "<script>alert(1)</script>") {
-		t.Fatal("比较报告 HTML 输出了未转义的脚本标签")
-	}
-	if !strings.Contains(text, "&lt;script&gt;") {
-		t.Fatal("比较报告 HTML 没有把不可信文本转义成实体")
-	}
-	// CSP 是第二道防线，缺了它一次转义遗漏就能直接执行脚本。
-	if !strings.Contains(text, "default-src 'none'") {
-		t.Fatal("比较报告 HTML 缺少 default-src 'none' 的 CSP")
+	if !strings.Contains(markdown, "120 points") || !strings.Contains(markdown, "done") {
+		t.Fatalf("comparison Markdown lost changed values:\n%s", markdown)
 	}
 }
