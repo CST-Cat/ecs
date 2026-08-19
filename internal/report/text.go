@@ -1362,9 +1362,33 @@ func visibleTableColumns(table model.Table) model.Table {
 	columnMap := make(map[int]int, len(keep))
 	out := table
 	out.Columns = make([]string, 0, len(keep))
+	if table.ColumnKeys != nil {
+		out.ColumnKeys = make([]string, 0, len(keep))
+	}
 	for index, original := range keep {
 		columnMap[original] = index
 		out.Columns = append(out.Columns, table.Columns[original])
+		if table.ColumnKeys != nil {
+			if original < len(table.ColumnKeys) {
+				out.ColumnKeys = append(out.ColumnKeys, table.ColumnKeys[original])
+			} else {
+				// Keep the parallel shape even for malformed legacy input. Such
+				// an empty key is not a usable identity, but it is safer than
+				// shifting the remaining column keys onto the wrong columns.
+				out.ColumnKeys = append(out.ColumnKeys, "")
+			}
+		}
+	}
+	if table.RowIdentity != "" {
+		out.RowIdentity = ""
+		for original, key := range table.ColumnKeys {
+			if key == table.RowIdentity {
+				if _, ok := columnMap[original]; ok {
+					out.RowIdentity = key
+				}
+				break
+			}
+		}
 	}
 	out.Rows = make([][]string, len(table.Rows))
 	for rowIndex, row := range table.Rows {

@@ -119,8 +119,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	table := model.Table{
-		Title:   "Ookla 测速结果",
-		Columns: []string{"运营商标签", "服务器", "延迟", "下载", "上传", "丢包", "状态"},
+		Key:        "network.ookla.results",
+		Title:      "Ookla 测速结果",
+		Columns:    []string{"运营商标签", "服务器", "延迟", "下载", "上传", "丢包", "状态"},
+		ColumnKeys: []string{"carrier", "server", "latency_ms", "download_mbps", "upload_mbps", "packet_loss_percent", "status"},
 	}
 	successes := 0
 	validResults := 0

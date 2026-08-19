@@ -96,8 +96,11 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
+		Key:                   "network.dns.resolvers",
 		Title:                 "递归解析器",
 		Columns:               []string{"解析器", "地址", "成功", "P50", "P95", "抖动", "状态"},
+		ColumnKeys:            []string{"resolver", "address", "success_count", "p50_ms", "p95_ms", "jitter_ms", "status"},
+		RowIdentity:           "address",
 		NumericColumns:        []int{3, 4, 5},
 		NumericHigherIsBetter: []bool{false, false, false},
 	}

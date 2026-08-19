@@ -59,13 +59,14 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	// 按分类分组呈现，组内保持规则声明顺序。
-	categories := make([]string, 0, 8)
+	categories := make([]mediaCategory, 0, 8)
 	grouped := make(map[string][]mediaResult)
 	for _, item := range results {
-		if _, seen := grouped[item.Check.Category]; !seen {
-			categories = append(categories, item.Check.Category)
+		category := item.Check.Category
+		if _, seen := grouped[category.Key]; !seen {
+			categories = append(categories, category)
 		}
-		grouped[item.Check.Category] = append(grouped[item.Check.Category], item)
+		grouped[category.Key] = append(grouped[category.Key], item)
 	}
 	sort.SliceStable(categories, func(i, j int) bool {
 		return categoryOrder(categories[i]) < categoryOrder(categories[j])
@@ -74,10 +75,13 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	unlocked, unknown, locked := 0, 0, 0
 	for _, category := range categories {
 		table := model.Table{
-			Title:   category,
-			Columns: []string{"平台", "结论", "地区", "证据", "强度", "耗时"},
+			Key:         "network.media." + category.Key,
+			Title:       category.Label,
+			Columns:     []string{"平台", "结论", "地区", "证据", "强度", "耗时"},
+			ColumnKeys:  []string{"platform", "verdict", "region", "evidence", "strength", "latency_ms"},
+			RowIdentity: "platform",
 		}
-		for _, item := range grouped[category] {
+		for _, item := range grouped[category.Key] {
 			switch item.Verdict.State {
 			case stateUnlocked, stateOriginals:
 				unlocked++
@@ -146,23 +150,23 @@ func runMediaCheck(ctx context.Context, env Environment, check mediaCheck) media
 }
 
 // categoryOrder 固定分类展示顺序。
-func categoryOrder(category string) int {
-	switch category {
-	case "流媒体":
+func categoryOrder(category mediaCategory) int {
+	switch category.Key {
+	case mediaCategoryStreaming.Key:
 		return 0
-	case "AI 服务":
+	case mediaCategoryAIServices.Key:
 		return 1
-	case "社交":
+	case mediaCategorySocial.Key:
 		return 2
-	case "音乐":
+	case mediaCategoryMusic.Key:
 		return 3
-	case "日本":
+	case mediaCategoryJapan.Key:
 		return 4
-	case "台湾":
+	case mediaCategoryTaiwan.Key:
 		return 5
-	case "香港":
+	case mediaCategoryHongKong.Key:
 		return 6
-	case "中国大陆":
+	case mediaCategoryMainlandChina.Key:
 		return 7
 	default:
 		return 8

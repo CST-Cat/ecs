@@ -25,9 +25,24 @@ func (appsProbe) ID() string         { return "apps" }
 func (appsProbe) Title() string      { return "应用服务可达性" }
 func (appsProbe) NeedsNetwork() bool { return true }
 
+// appCategory keeps the machine identity and display title together. The
+// machine key is declared at the target descriptor, never recovered from a
+// localized title at render time.
+type appCategory struct {
+	Key   string
+	Label string
+}
+
+var (
+	appCategoryTelegram       = appCategory{Key: "telegram", Label: "Telegram"}
+	appCategoryCodeAndImages  = appCategory{Key: "code_and_images", Label: "代码与镜像"}
+	appCategoryRepositories   = appCategory{Key: "software_repositories", Label: "软件源"}
+	appCategoryInfrastructure = appCategory{Key: "infrastructure", Label: "基础设施"}
+)
+
 // appTarget 是一个待测服务端点。
 type appTarget struct {
-	Category string
+	Category appCategory
 	Name     string
 	Host     string
 	Port     int
@@ -41,26 +56,26 @@ type appTarget struct {
 // 其余条目全部于 2026-08-01 实测可解析、可建连。
 func appTargets() []appTarget {
 	return []appTarget{
-		{Category: "Telegram", Name: "DC1 Miami", Host: "pluto.web.telegram.org", Port: 443, Note: "美洲"},
-		{Category: "Telegram", Name: "DC2 Amsterdam", Host: "venus.web.telegram.org", Port: 443, Note: "欧洲"},
-		{Category: "Telegram", Name: "DC3 Miami", Host: "aurora.web.telegram.org", Port: 443, Note: "美洲"},
-		{Category: "Telegram", Name: "DC4 Amsterdam", Host: "vesta.web.telegram.org", Port: 443, Note: "欧洲"},
-		{Category: "Telegram", Name: "DC5 Singapore", Host: "flora.web.telegram.org", Port: 443, Note: "亚洲"},
+		{Category: appCategoryTelegram, Name: "DC1 Miami", Host: "pluto.web.telegram.org", Port: 443, Note: "美洲"},
+		{Category: appCategoryTelegram, Name: "DC2 Amsterdam", Host: "venus.web.telegram.org", Port: 443, Note: "欧洲"},
+		{Category: appCategoryTelegram, Name: "DC3 Miami", Host: "aurora.web.telegram.org", Port: 443, Note: "美洲"},
+		{Category: appCategoryTelegram, Name: "DC4 Amsterdam", Host: "vesta.web.telegram.org", Port: 443, Note: "欧洲"},
+		{Category: appCategoryTelegram, Name: "DC5 Singapore", Host: "flora.web.telegram.org", Port: 443, Note: "亚洲"},
 
-		{Category: "代码与镜像", Name: "GitHub", Host: "github.com", Port: 443, Note: "git 与发布下载"},
-		{Category: "代码与镜像", Name: "GitHub Raw", Host: "raw.githubusercontent.com", Port: 443, Note: "脚本与原始文件"},
-		{Category: "代码与镜像", Name: "Docker Hub", Host: "registry-1.docker.io", Port: 443, Note: "容器镜像"},
-		{Category: "代码与镜像", Name: "Google GCR", Host: "gcr.io", Port: 443, Note: "容器镜像"},
+		{Category: appCategoryCodeAndImages, Name: "GitHub", Host: "github.com", Port: 443, Note: "git 与发布下载"},
+		{Category: appCategoryCodeAndImages, Name: "GitHub Raw", Host: "raw.githubusercontent.com", Port: 443, Note: "脚本与原始文件"},
+		{Category: appCategoryCodeAndImages, Name: "Docker Hub", Host: "registry-1.docker.io", Port: 443, Note: "容器镜像"},
+		{Category: appCategoryCodeAndImages, Name: "Google GCR", Host: "gcr.io", Port: 443, Note: "容器镜像"},
 
-		{Category: "软件源", Name: "npm", Host: "registry.npmjs.org", Port: 443, Note: "Node 包"},
-		{Category: "软件源", Name: "PyPI", Host: "pypi.org", Port: 443, Note: "Python 包"},
-		{Category: "软件源", Name: "Go Proxy", Host: "proxy.golang.org", Port: 443, Note: "Go 模块"},
-		{Category: "软件源", Name: "Debian", Host: "deb.debian.org", Port: 443, Note: "APT 源"},
-		{Category: "软件源", Name: "Ubuntu", Host: "archive.ubuntu.com", Port: 80, Note: "APT 源"},
-		{Category: "软件源", Name: "Alpine", Host: "dl-cdn.alpinelinux.org", Port: 443, Note: "APK 源"},
+		{Category: appCategoryRepositories, Name: "npm", Host: "registry.npmjs.org", Port: 443, Note: "Node 包"},
+		{Category: appCategoryRepositories, Name: "PyPI", Host: "pypi.org", Port: 443, Note: "Python 包"},
+		{Category: appCategoryRepositories, Name: "Go Proxy", Host: "proxy.golang.org", Port: 443, Note: "Go 模块"},
+		{Category: appCategoryRepositories, Name: "Debian", Host: "deb.debian.org", Port: 443, Note: "APT 源"},
+		{Category: appCategoryRepositories, Name: "Ubuntu", Host: "archive.ubuntu.com", Port: 80, Note: "APT 源"},
+		{Category: appCategoryRepositories, Name: "Alpine", Host: "dl-cdn.alpinelinux.org", Port: 443, Note: "APK 源"},
 
-		{Category: "基础设施", Name: "Let's Encrypt", Host: "acme-v02.api.letsencrypt.org", Port: 443, Note: "免费证书签发"},
-		{Category: "基础设施", Name: "Cloudflare", Host: "cloudflare.com", Port: 443, Note: "CDN 与 DNS"},
+		{Category: appCategoryInfrastructure, Name: "Let's Encrypt", Host: "acme-v02.api.letsencrypt.org", Port: 443, Note: "免费证书签发"},
+		{Category: appCategoryInfrastructure, Name: "Cloudflare", Host: "cloudflare.com", Port: 443, Note: "CDN 与 DNS"},
 	}
 }
 
@@ -100,13 +115,14 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	// 按声明顺序分组，组内保持清单顺序。
-	categories := make([]string, 0, 4)
+	categories := make([]appCategory, 0, 4)
 	grouped := make(map[string][]appResult)
 	for _, item := range results {
-		if _, seen := grouped[item.Target.Category]; !seen {
-			categories = append(categories, item.Target.Category)
+		category := item.Target.Category
+		if _, seen := grouped[category.Key]; !seen {
+			categories = append(categories, category)
 		}
-		grouped[item.Target.Category] = append(grouped[item.Target.Category], item)
+		grouped[category.Key] = append(grouped[category.Key], item)
 	}
 
 	reachable := 0
@@ -115,10 +131,13 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	var telegramBestName string
 	for _, category := range categories {
 		table := model.Table{
-			Title:   category,
-			Columns: []string{"服务", "端点", "用途", "结果", "延迟/原因"},
+			Key:         "network.apps." + category.Key,
+			Title:       category.Label,
+			Columns:     []string{"服务", "端点", "用途", "结果", "延迟/原因"},
+			ColumnKeys:  []string{"service", "endpoint", "purpose", "status", "detail"},
+			RowIdentity: "endpoint",
 		}
-		items := grouped[category]
+		items := grouped[category.Key]
 		sortAppResults(items)
 		for _, item := range items {
 			if item.Reachable || item.Detail != "" {
@@ -130,7 +149,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 				status = "可达"
 				detail = formatMilliseconds(item.Latency)
 				reachable++
-				if category == "Telegram" && (telegramBest == 0 || item.Latency < telegramBest) {
+				if category.Key == appCategoryTelegram.Key && (telegramBest == 0 || item.Latency < telegramBest) {
 					telegramBest = item.Latency
 					telegramBestName = item.Target.Name
 				}

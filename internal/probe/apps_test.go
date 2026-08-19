@@ -13,7 +13,7 @@ func TestAppTargetsAreWellFormed(t *testing.T) {
 	}
 	seen := make(map[string]bool)
 	for _, target := range targets {
-		if target.Name == "" || target.Host == "" || target.Category == "" || target.Note == "" {
+		if target.Name == "" || target.Host == "" || target.Category.Key == "" || target.Category.Label == "" || target.Note == "" {
 			t.Fatalf("清单项缺字段：%+v", target)
 		}
 		if target.Port < 1 || target.Port > 65535 {
@@ -26,7 +26,7 @@ func TestAppTargetsAreWellFormed(t *testing.T) {
 		seen[key] = true
 		// Telegram 必须用域名而不是硬编码 IP：多个 DC 会解析到同一地址，
 		// 且 Telegram 会不定期调整，写死必然过期。
-		if target.Category == "Telegram" && !strings.HasSuffix(target.Host, ".telegram.org") {
+		if target.Category.Key == appCategoryTelegram.Key && !strings.HasSuffix(target.Host, ".telegram.org") {
 			t.Fatalf("Telegram 端点应使用官方域名：%s", target.Host)
 		}
 		if strings.Count(target.Host, ".") == 3 && !strings.ContainsAny(target.Host, "abcdefghijklmnopqrstuvwxyz") {

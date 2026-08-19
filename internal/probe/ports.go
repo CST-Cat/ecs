@@ -92,8 +92,11 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Title:   "TCP 出站能力",
-		Columns: []string{"服务", "目标", "类型", "结果", "延迟/原因"},
+		Key:         "network.ports.tcp",
+		Title:       "TCP 出站能力",
+		Columns:     []string{"服务", "目标", "类型", "结果", "延迟/原因"},
+		ColumnKeys:  []string{"service", "target", "target_type", "status", "detail"},
+		RowIdentity: "target",
 	}
 	openCount := 0
 	emailOpen := 0

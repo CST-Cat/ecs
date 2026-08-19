@@ -254,8 +254,16 @@ func TestBuildFlattensOnlyChangedSafeTableCells(t *testing.T) {
 	second := comparisonTestReport("second", 11, "m-v1", "same", "rate", true)
 	first.Results[0].Fields = []model.Field{{Key: "provider", Label: "Provider", Value: "A"}}
 	second.Results[0].Fields = []model.Field{{Key: "provider", Label: "Provider", Value: "B"}}
-	first.Results[0].Tables = []model.Table{{Title: "Route", Columns: []string{"Target", "ASN"}, Rows: [][]string{{"example", "AS1"}}}}
-	second.Results[0].Tables = []model.Table{{Title: "Route", Columns: []string{"Target", "ASN"}, Rows: [][]string{{"example", "AS2"}}}}
+	first.Results[0].Tables = []model.Table{{
+		Key: "network.routes", Title: "Route", Columns: []string{"Target", "ASN"},
+		ColumnKeys: []string{"target", "asn"}, RowIdentity: "target",
+		Rows: [][]string{{"example", "AS1"}},
+	}}
+	second.Results[0].Tables = []model.Table{{
+		Key: "network.routes", Title: "Route", Columns: []string{"Target", "ASN"},
+		ColumnKeys: []string{"target", "asn"}, RowIdentity: "target",
+		Rows: [][]string{{"example", "AS2"}},
+	}}
 	data, err := Build([]model.Report{first, second}, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +274,112 @@ func TestBuildFlattensOnlyChangedSafeTableCells(t *testing.T) {
 	}
 	if changes[0].Source != "field" || changes[1].Source != "table" {
 		t.Fatalf("change sources = %+v", changes)
+	}
+}
+
+func TestBuildTableCompareUsesDeclaredIdentityAndStableSchema(t *testing.T) {
+	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 11, "m-v1", "same", "rate", true)
+	first.Results[0].Tables = []model.Table{{
+		Key: "network.routes", Title: "路由", Columns: []string{"目标", "状态"},
+		ColumnKeys: []string{"target", "state"}, RowIdentity: "target",
+		Rows: [][]string{{"route-a", "10"}, {"route-b", "20"}},
+	}}
+	second.Results[0].Tables = []model.Table{{
+		Key: "network.routes", Title: "Routes", Columns: []string{"Target", "State"},
+		ColumnKeys: []string{"target", "state"}, RowIdentity: "target",
+		Rows: [][]string{{"route-a", "11"}, {"route-b", "20"}},
+	}}
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := data.Modules[0].Changes
+	if len(changes) != 1 {
+		t.Fatalf("localized table labels should not split the schema: %+v", changes)
+	}
+	if changes[0].Key != "table:network.routes\x1ftarget\x1estate:route-a:state" {
+		t.Fatalf("table observation key = %q, want declared schema/identity/column key", changes[0].Key)
+	}
+	if len(changes[0].Values) != 2 || !changes[0].Values[0].Available || !changes[0].Values[1].Available {
+		t.Fatalf("changed table cell was treated as a row add/remove: %+v", changes[0].Values)
+	}
+	if changes[0].Values[0].Value != "10" || changes[0].Values[1].Value != "11" {
+		t.Fatalf("table cell values = %+v", changes[0].Values)
+	}
+}
+
+func TestBuildTableCompareUsesConservativeFallbackForUndeclaredIdentity(t *testing.T) {
+	tests := []struct {
+		name           string
+		firstIdentity  string
+		secondIdentity string
+	}{
+		{name: "missing identity"},
+		{name: "invalid identity", firstIdentity: "missing", secondIdentity: "missing"},
+		{name: "duplicate identity", firstIdentity: "target", secondIdentity: "target"},
+		{name: "mismatched identity", firstIdentity: "target", secondIdentity: "value"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
+			second := comparisonTestReport("second", 11, "m-v1", "same", "rate", true)
+			first.Results[0].Tables = []model.Table{{
+				Key: "network.routes", Title: "Routes", Columns: []string{"Target", "Value"},
+				ColumnKeys: []string{"target", "value"}, RowIdentity: testCase.firstIdentity,
+				// The first column is deliberately duplicated while the numeric
+				// value column is unique. It must never become an inferred key.
+				Rows: [][]string{{"same", "10"}, {"same", "20"}},
+			}}
+			second.Results[0].Tables = []model.Table{{
+				Key: "network.routes", Title: "Routes", Columns: []string{"Target", "Value"},
+				ColumnKeys: []string{"target", "value"}, RowIdentity: testCase.secondIdentity,
+				Rows: [][]string{{"same", "11"}, {"same", "20"}},
+			}}
+			data, err := Build([]model.Report{first, second}, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changes := data.Modules[0].Changes
+			if len(changes) != 1 {
+				t.Fatalf("undeclared/invalid identity should use one positional cell change: %+v", changes)
+			}
+			wantKey := "table:network.routes\x1ftarget\x1evalue:row-index:0:column:value"
+			if changes[0].Key != wantKey {
+				t.Fatalf("fallback observation key = %q, want %q", changes[0].Key, wantKey)
+			}
+			if strings.Contains(changes[0].Key, "10") || strings.Contains(changes[0].Key, "11") || strings.Contains(changes[0].Key, "same") {
+				t.Fatalf("fallback observation key used row data as identity: %q", changes[0].Key)
+			}
+			if len(changes[0].Values) != 2 || !changes[0].Values[0].Available || !changes[0].Values[1].Available {
+				t.Fatalf("fallback treated the numeric change as a row add/remove: %+v", changes[0].Values)
+			}
+			if changes[0].Values[0].Value != "10" || changes[0].Values[1].Value != "11" {
+				t.Fatalf("fallback cell values = %+v", changes[0].Values)
+			}
+		})
+	}
+}
+
+func TestBuildLegacyTableFallbackDoesNotUseDisplaySchemaOrRowValuesAsKeys(t *testing.T) {
+	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 11, "m-v1", "same", "rate", true)
+	first.Results[0].Tables = []model.Table{{
+		Title: "路由", Columns: []string{"目标", "数值"}, Rows: [][]string{{"route-a", "10"}},
+	}}
+	second.Results[0].Tables = []model.Table{{
+		Title: "Routes", Columns: []string{"Target", "Value"}, Rows: [][]string{{"route-a", "11"}},
+	}}
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := data.Modules[0].Changes
+	if len(changes) != 1 || changes[0].Key != "table:legacy:0" {
+		t.Fatalf("legacy table should use a positional whole-table observation: %+v", changes)
+	}
+	if strings.Contains(changes[0].Key, "route-a") || strings.Contains(changes[0].Key, "11") {
+		t.Fatalf("legacy observation key used display/data values: %+v", changes[0])
 	}
 }
 

@@ -294,8 +294,11 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	table := model.Table{
-		Title:   "三网就近节点下载带宽",
-		Columns: []string{"运营商", "节点", "位置", "HTTP 延迟", "下载", "已传输", "状态"},
+		Key:         "network.cnspeed.nodes",
+		Title:       "三网就近节点下载带宽",
+		Columns:     []string{"运营商", "节点", "位置", "HTTP 延迟", "下载", "已传输", "状态"},
+		ColumnKeys:  []string{"carrier", "node", "location", "http_latency_ms", "download_mbps", "transferred_bytes", "status"},
+		RowIdentity: "carrier",
 	}
 	succeeded := 0
 	var totalBytes int64

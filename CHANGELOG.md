@@ -9,6 +9,9 @@
 
 ## Unreleased
 
+- 为表格报告增加可选的机器 schema 字段 `key`、`column_keys` 与 `row_identity`；旧 JSON 缺少这些字段时仍可读取，不会从显示标题、列名或当前数据猜测身份。`compare` 现在按稳定 table/column key 匹配，并且只有显式声明的行身份才逐行比较；无稳定行身份的 legacy 表改用位置式或整表快照的保守比较，避免数据变化伪造行重排。
+- 补齐全部生产 probe 表的稳定 schema，并让 apps/media 的分类按独立 machine key 分组；本地化、脱敏和文本渲染的裁剪会保留表格机器字段，中文/英文标题或列名不会再改变机器比较 contract。
+
 - 修复报告本地化边界：采集阶段的模块标题、汇总和 NAT 清单保持 canonical 源文本，`run`、`render` 与 `compare` 始终以 canonical Report 进行输入、评分和比较；JSON 保留采集后的机器数据，TXT/Markdown/HTML 才按 `--lang` 生成独立的展示副本。因此同一事实以中文或英文渲染时 JSON 字节保持一致，字段值、表格列和行内容不会因界面语言改变，英文渲染后的 JSON 也可再次按中文渲染。
 - 这是 JSON 持久化语义的兼容修复：此前已生成的英文本地化 JSON 不包含可靠的原文标识，当前实现不会尝试英文→中文逆翻译；需要恢复完整 canonical 数据时，应从原始中文/canonical 报告重新生成。旧 JSON 仍可读取，但其中已被本地化的可见字符串只能按其现有文本展示。
 

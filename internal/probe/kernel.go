@@ -59,8 +59,10 @@ func bdpThroughputMbps(bufferBytes int, rttMS float64) float64 {
 // appendKernelNetworkParams 采集内核参数并给出解读。
 func appendKernelNetworkParams(result *model.Result) {
 	table := model.Table{
-		Title:   "内核网络参数",
-		Columns: []string{"参数", "当前值", "为什么值得看"},
+		Key:        "system.kernel.network_parameters",
+		Title:      "内核网络参数",
+		Columns:    []string{"参数", "当前值", "为什么值得看"},
+		ColumnKeys: []string{"parameter", "current_value", "rationale"},
 	}
 	values := make(map[string]string)
 	for _, param := range kernelParams() {

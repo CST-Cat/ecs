@@ -437,8 +437,10 @@ func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs 
 
 func npbResultsTable(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSample, workers int) model.Table {
 	table := model.Table{
+		Key:            "benchmark.npb.results",
 		Title:          "NPB EP + FT Class A 原始结果",
 		Columns:        []string{"Benchmark", "负载", "线程上下文", "Mop/s total", "Mop/s/thread", "耗时", "扩展倍率", "验证"},
+		ColumnKeys:     []string{"benchmark", "load", "worker_context", "mops_total", "mops_per_thread", "elapsed_seconds", "scaling_ratio", "verification"},
 		NumericColumns: []int{3, 4, 5, 6}, NumericHigherIsBetter: []bool{true, true, false, true},
 	}
 	for _, spec := range specs {

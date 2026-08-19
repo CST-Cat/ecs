@@ -216,8 +216,11 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	overview := model.Table{
-		Title:   "出口概览",
-		Columns: []string{"协议", "网络类型", "机房", "代理", "VPN", "Tor", "滥用记录", "数据源耗时"},
+		Key:         "network.egress.overview",
+		Title:       "出口概览",
+		Columns:     []string{"协议", "网络类型", "机房", "代理", "VPN", "Tor", "滥用记录", "数据源耗时"},
+		ColumnKeys:  []string{"ip_family", "network_type", "datacenter", "proxy", "vpn", "tor", "abuse_record", "source_duration"},
+		RowIdentity: "ip_family",
 	}
 	var summaries []string
 	var providerNotes []string

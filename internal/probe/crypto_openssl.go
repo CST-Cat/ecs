@@ -378,8 +378,10 @@ func appendOpenSSLMeasurements(result *model.Result, specs []openSSLAlgorithmSpe
 
 func openSSLResultsTable(specs []openSSLAlgorithmSpec, runs map[string][]openSSLSpeedSample, workers int) model.Table {
 	table := model.Table{
+		Key:            "benchmark.openssl.results",
 		Title:          "OpenSSL speed 密码学吞吐",
 		Columns:        []string{"算法", "worker 上下文", "block", "原始 bytes/s", "吞吐", "扩展倍率"},
+		ColumnKeys:     []string{"algorithm", "worker_context", "block_bytes", "raw_bytes_per_second", "throughput_mbps", "scaling_ratio"},
 		NumericColumns: []int{2, 3, 4, 5}, NumericHigherIsBetter: []bool{false, true, true, true},
 	}
 	for _, spec := range specs {

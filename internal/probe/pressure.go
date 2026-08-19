@@ -457,7 +457,15 @@ func AppendSystemResourceDiagnostics(result *model.Result, snapshot EnvironmentS
 			})
 		}
 	}
-	table := model.Table{Title: "cgroup 与 PSI 压力诊断", Columns: []string{"资源", "some avg10", "full avg10", "累计事件", "来源"}, NumericColumns: []int{1, 2}, NumericHigherIsBetter: []bool{false, false}}
+	table := model.Table{
+		Key:                   "system.pressure.cgroup",
+		Title:                 "cgroup 与 PSI 压力诊断",
+		Columns:               []string{"资源", "some avg10", "full avg10", "累计事件", "来源"},
+		ColumnKeys:            []string{"resource", "psi_some_avg10", "psi_full_avg10", "cumulative_events", "source"},
+		RowIdentity:           "resource",
+		NumericColumns:        []int{1, 2},
+		NumericHigherIsBetter: []bool{false, false},
+	}
 	for _, resource := range []string{"cpu", "memory", "io"} {
 		pressure := snapshot.PSI[resource]
 		some, full := "—", "—"
@@ -527,7 +535,8 @@ func AppendInterferenceDiagnostics(result *model.Result, assessment model.Interf
 	}
 	if len(rows) > 0 {
 		result.Tables = append(result.Tables, model.Table{
-			Title: "测试窗口资源干扰", Columns: []string{"指标", "数值", "方法"}, Rows: rows,
+			Key: "system.pressure.interference", Title: "测试窗口资源干扰",
+			Columns: []string{"指标", "数值", "方法"}, ColumnKeys: []string{"metric", "value", "method"}, Rows: rows,
 		})
 	}
 	if assessment.Detected {
@@ -586,7 +595,10 @@ func FinalizeBenchmarkRetry(first model.Result, firstInterference model.Interfer
 		{"2", string(second.Status), retryEvidenceText(second.Evidence), strconv.Itoa(secondInterference.Score), strings.Join(secondInterference.Reasons, "；"), retrySelectionText(selectedNumber == 2)},
 	}
 	selected.Tables = append(selected.Tables, model.Table{
-		Title: "自动复测判定", Columns: []string{"轮次", "状态", "证据", "干扰评分", "检测依据", "采用"}, Rows: rows,
+		Key: "system.pressure.retry", Title: "自动复测判定",
+		Columns:     []string{"轮次", "状态", "证据", "干扰评分", "检测依据", "采用"},
+		ColumnKeys:  []string{"attempt", "status", "evidence", "interference_score", "reasons", "selected"},
+		RowIdentity: "attempt", Rows: rows,
 		NumericColumns: []int{3}, NumericHigherIsBetter: []bool{false},
 	})
 	selected.Notes = append(selected.Notes, "仅因检测到环境干扰而自动复测一次；先排除无有效证据的轮次，再按干扰评分选择，不按性能数字高低挑选。")

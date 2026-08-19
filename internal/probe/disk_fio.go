@@ -429,8 +429,11 @@ func appendFIOBaseMeasurement(result *model.Result, key, label string, value flo
 // warning；只有读写吞吐都存在时才计算“合计”，避免用一侧数据冒充总吞吐。
 func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[string]fioJob, mixDepth int) {
 	table := model.Table{
-		Title:   fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
-		Columns: []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
+		Key:         "disk.fio.mixed",
+		Title:       fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
+		Columns:     []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
+		ColumnKeys:  []string{"block_size", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "total_mib_s"},
+		RowIdentity: "block_size",
 	}
 	incomplete := 0
 	for _, job := range plan {
@@ -538,6 +541,9 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 	table := model.Table{
 		Title:                 "Crystal",
 		Columns:               []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "起始偏移", "状态"},
+		Key:                   "disk.fio.crystal",
+		ColumnKeys:            []string{"workload", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "start_offset", "status"},
+		RowIdentity:           "workload",
 		NumericColumns:        []int{1, 2, 3, 4},
 		NumericHigherIsBetter: []bool{true, true, true, true},
 	}
@@ -599,6 +605,9 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 	table := model.Table{
 		Title:                 "ATTO",
 		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "计时", "起始偏移", "状态"},
+		Key:                   "disk.fio.atto",
+		ColumnKeys:            []string{"block_size", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "runtime", "start_offset", "status"},
+		RowIdentity:           "block_size",
 		NumericColumns:        []int{1, 2, 3, 4},
 		NumericHigherIsBetter: []bool{true, true, true, true},
 	}

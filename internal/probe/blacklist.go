@@ -227,8 +227,11 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	table := model.Table{
+		Key:                   "network.dnsbl.results",
 		Title:                 "DNS 黑名单查询",
 		Columns:               []string{"名单", "结论", "返回码", "收录范围", "耗时"},
+		ColumnKeys:            []string{"list", "outcome", "response_code", "scope", "latency_ms"},
+		RowIdentity:           "list",
 		NumericColumns:        []int{4},
 		NumericHigherIsBetter: []bool{false},
 	}

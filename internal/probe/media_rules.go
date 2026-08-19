@@ -24,6 +24,24 @@ import (
 
 const mediaRulesVersion = "v2 (2026-07)"
 
+// mediaCategory keeps the machine identity and display title together. Region
+// selection and report grouping use Key; renderers use Label for presentation.
+type mediaCategory struct {
+	Key   string
+	Label string
+}
+
+var (
+	mediaCategoryStreaming     = mediaCategory{Key: "streaming", Label: "流媒体"}
+	mediaCategoryAIServices    = mediaCategory{Key: "ai_services", Label: "AI 服务"}
+	mediaCategorySocial        = mediaCategory{Key: "social", Label: "社交"}
+	mediaCategoryMusic         = mediaCategory{Key: "music", Label: "音乐"}
+	mediaCategoryJapan         = mediaCategory{Key: "japan", Label: "日本"}
+	mediaCategoryTaiwan        = mediaCategory{Key: "taiwan", Label: "台湾"}
+	mediaCategoryHongKong      = mediaCategory{Key: "hong_kong", Label: "香港"}
+	mediaCategoryMainlandChina = mediaCategory{Key: "mainland_china", Label: "中国大陆"}
+)
+
 // mediaEvidenceStrength 表示一条规则的判定强度。
 type mediaEvidenceStrength string
 
@@ -62,7 +80,7 @@ type mediaVerdict struct {
 // mediaCheck 是一条平台检测规则。
 type mediaCheck struct {
 	Name     string
-	Category string
+	Category mediaCategory
 	Strength mediaEvidenceStrength
 	Requests []mediaRequest
 	// Decide 把所有响应翻译成结论。
@@ -136,15 +154,15 @@ func mediaChecks() []mediaCheck {
 // 全跑一遍——那既慢又会给无关平台平白制造请求。
 var MediaRegionOrder = []string{"global", "jp", "tw", "hk", "cn"}
 
-// mediaRegionCategories 把地区选项映射到规则分类。
+// mediaRegionCategories 把地区选项映射到显式的规则分类描述。
 //
-// global 是不分地区的通用平台（流媒体、AI、社交、音乐），其余按分类名对应。
-var mediaRegionCategories = map[string][]string{
-	"global": {"流媒体", "AI 服务", "社交", "音乐"},
-	"jp":     {"日本"},
-	"tw":     {"台湾"},
-	"hk":     {"香港"},
-	"cn":     {"中国大陆"},
+// global 是不分地区的通用平台（流媒体、AI、社交、音乐），其余按 machine key 对应。
+var mediaRegionCategories = map[string][]mediaCategory{
+	"global": {mediaCategoryStreaming, mediaCategoryAIServices, mediaCategorySocial, mediaCategoryMusic},
+	"jp":     {mediaCategoryJapan},
+	"tw":     {mediaCategoryTaiwan},
+	"hk":     {mediaCategoryHongKong},
+	"cn":     {mediaCategoryMainlandChina},
 }
 
 // mediaChecksForRegions 按地区筛选规则，保持声明顺序。
@@ -155,7 +173,7 @@ func mediaChecksForRegions(regions []string) []mediaCheck {
 	allowed := make(map[string]bool)
 	for _, region := range regions {
 		for _, category := range mediaRegionCategories[region] {
-			allowed[category] = true
+			allowed[category.Key] = true
 		}
 	}
 	if len(allowed) == 0 {
@@ -163,7 +181,7 @@ func mediaChecksForRegions(regions []string) []mediaCheck {
 	}
 	var selected []mediaCheck
 	for _, check := range mediaChecks() {
-		if allowed[check.Category] {
+		if allowed[check.Category.Key] {
 			selected = append(selected, check)
 		}
 	}
@@ -177,7 +195,7 @@ func mediaChecksForRegions(regions []string) []mediaCheck {
 func netflixCheck() mediaCheck {
 	return mediaCheck{
 		Name:     "Netflix",
-		Category: "流媒体",
+		Category: mediaCategoryStreaming,
 		Strength: strengthStrong,
 		Requests: []mediaRequest{
 			{URL: "https://www.netflix.com/title/81280792"}, // LEGO Ninjago，非自制
@@ -231,7 +249,7 @@ func netflixCheck() mediaCheck {
 func youtubePremiumCheck() mediaCheck {
 	return mediaCheck{
 		Name:     "YouTube Premium",
-		Category: "流媒体",
+		Category: mediaCategoryStreaming,
 		Strength: strengthStrong,
 		Requests: []mediaRequest{{URL: "https://www.youtube.com/premium"}},
 		Decide: func(responses []mediaResponse) mediaVerdict {
@@ -257,7 +275,7 @@ func youtubePremiumCheck() mediaCheck {
 func chatGPTCheck() mediaCheck {
 	return mediaCheck{
 		Name:     "ChatGPT",
-		Category: "AI 服务",
+		Category: mediaCategoryAIServices,
 		Strength: strengthStrong,
 		Requests: []mediaRequest{
 			{URL: "https://chatgpt.com/cdn-cgi/trace"},
@@ -294,7 +312,7 @@ func chatGPTCheck() mediaCheck {
 func tiktokCheck() mediaCheck {
 	return mediaCheck{
 		Name:     "TikTok",
-		Category: "社交",
+		Category: mediaCategorySocial,
 		Strength: strengthStrong,
 		Requests: []mediaRequest{{URL: "https://www.tiktok.com/"}},
 		Decide: func(responses []mediaResponse) mediaVerdict {
@@ -318,45 +336,45 @@ func tiktokCheck() mediaCheck {
 func genericChecks() []mediaCheck {
 	targets := []struct {
 		name     string
-		category string
+		category mediaCategory
 		url      string
 	}{
-		{"Disney+", "流媒体", "https://www.disneyplus.com/"},
-		{"Amazon Prime Video", "流媒体", "https://www.primevideo.com/"},
-		{"HBO Max", "流媒体", "https://www.max.com/"},
-		{"Hulu", "流媒体", "https://www.hulu.com/"},
-		{"Paramount+", "流媒体", "https://www.paramountplus.com/"},
-		{"Peacock", "流媒体", "https://www.peacocktv.com/"},
-		{"Crunchyroll", "流媒体", "https://www.crunchyroll.com/"},
-		{"DAZN", "流媒体", "https://www.dazn.com/"},
+		{"Disney+", mediaCategoryStreaming, "https://www.disneyplus.com/"},
+		{"Amazon Prime Video", mediaCategoryStreaming, "https://www.primevideo.com/"},
+		{"HBO Max", mediaCategoryStreaming, "https://www.max.com/"},
+		{"Hulu", mediaCategoryStreaming, "https://www.hulu.com/"},
+		{"Paramount+", mediaCategoryStreaming, "https://www.paramountplus.com/"},
+		{"Peacock", mediaCategoryStreaming, "https://www.peacocktv.com/"},
+		{"Crunchyroll", mediaCategoryStreaming, "https://www.crunchyroll.com/"},
+		{"DAZN", mediaCategoryStreaming, "https://www.dazn.com/"},
 
-		{"Claude", "AI 服务", "https://claude.ai/"},
-		{"Gemini", "AI 服务", "https://gemini.google.com/"},
-		{"Copilot", "AI 服务", "https://copilot.microsoft.com/"},
+		{"Claude", mediaCategoryAIServices, "https://claude.ai/"},
+		{"Gemini", mediaCategoryAIServices, "https://gemini.google.com/"},
+		{"Copilot", mediaCategoryAIServices, "https://copilot.microsoft.com/"},
 
-		{"Spotify", "音乐", "https://open.spotify.com/"},
-		{"Apple Music", "音乐", "https://music.apple.com/"},
+		{"Spotify", mediaCategoryMusic, "https://open.spotify.com/"},
+		{"Apple Music", mediaCategoryMusic, "https://music.apple.com/"},
 
-		{"Instagram", "社交", "https://www.instagram.com/"},
-		{"X", "社交", "https://x.com/"},
-		{"Reddit", "社交", "https://www.reddit.com/"},
+		{"Instagram", mediaCategorySocial, "https://www.instagram.com/"},
+		{"X", mediaCategorySocial, "https://x.com/"},
+		{"Reddit", mediaCategorySocial, "https://www.reddit.com/"},
 
-		{"Abema", "日本", "https://abema.tv/"},
-		{"Niconico", "日本", "https://www.nicovideo.jp/"},
-		{"U-NEXT", "日本", "https://video.unext.jp/"},
-		{"DMM", "日本", "https://www.dmm.com/"},
+		{"Abema", mediaCategoryJapan, "https://abema.tv/"},
+		{"Niconico", mediaCategoryJapan, "https://www.nicovideo.jp/"},
+		{"U-NEXT", mediaCategoryJapan, "https://video.unext.jp/"},
+		{"DMM", mediaCategoryJapan, "https://www.dmm.com/"},
 
-		{"巴哈姆特動畫瘋", "台湾", "https://ani.gamer.com.tw/"},
-		{"KKTV", "台湾", "https://www.kktv.me/"},
-		{"LiTV", "台湾", "https://www.litv.tv/"},
+		{"巴哈姆特動畫瘋", mediaCategoryTaiwan, "https://ani.gamer.com.tw/"},
+		{"KKTV", mediaCategoryTaiwan, "https://www.kktv.me/"},
+		{"LiTV", mediaCategoryTaiwan, "https://www.litv.tv/"},
 
-		{"Viu", "香港", "https://www.viu.com/"},
-		{"Now E", "香港", "https://www.nowe.com/"},
-		{"Bilibili 港澳台", "香港", "https://www.bilibili.com/"},
+		{"Viu", mediaCategoryHongKong, "https://www.viu.com/"},
+		{"Now E", mediaCategoryHongKong, "https://www.nowe.com/"},
+		{"Bilibili 港澳台", mediaCategoryHongKong, "https://www.bilibili.com/"},
 
-		{"iQIYI", "中国大陆", "https://www.iq.com/"},
-		{"Youku", "中国大陆", "https://www.youku.com/"},
-		{"网易云音乐", "中国大陆", "https://music.163.com/"},
+		{"iQIYI", mediaCategoryMainlandChina, "https://www.iq.com/"},
+		{"Youku", mediaCategoryMainlandChina, "https://www.youku.com/"},
+		{"网易云音乐", mediaCategoryMainlandChina, "https://music.163.com/"},
 	}
 	checks := make([]mediaCheck, 0, len(targets))
 	for _, target := range targets {

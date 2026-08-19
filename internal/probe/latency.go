@@ -213,8 +213,10 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
+		Key:                   "network.latency.tcp_icmp",
 		Title:                 "TCP 建连与 ICMP 往返",
 		Columns:               []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 最小", "ICMP 平均", "ICMP 最大", "ICMP mdev", "ICMP 丢包", "DNS 解析"},
+		ColumnKeys:            []string{"target", "protocol", "region", "success", "tcp_p50_ms", "tcp_p95_ms", "tcp_stddev_ms", "icmp_min_ms", "icmp_avg_ms", "icmp_max_ms", "icmp_mdev_ms", "icmp_loss_percent", "dns_resolution"},
 		NumericColumns:        []int{4, 5, 6, 7, 8, 9, 10, 11, 12},
 		NumericHigherIsBetter: []bool{false, false, false, false, false, false, false, false, false},
 	}

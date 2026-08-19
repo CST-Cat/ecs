@@ -38,6 +38,14 @@ func TestLocalizeReturnsIndependentCopyForEveryReportContainer(t *testing.T) {
 				localized.Results[0].Tables[0].Rows[0][0] != i18n.Text("Linux") {
 				t.Fatalf("table display was not localized: %+v", localized.Results[0].Tables[0])
 			}
+			table := localized.Results[0].Tables[0]
+			canonicalTable := data.Results[0].Tables[0]
+			if table.Key != canonicalTable.Key ||
+				len(table.ColumnKeys) != len(canonicalTable.ColumnKeys) ||
+				table.ColumnKeys[0] != canonicalTable.ColumnKeys[0] ||
+				table.RowIdentity != canonicalTable.RowIdentity {
+				t.Fatalf("table machine schema was localized or lost: got=%+v want=%+v", table, canonicalTable)
+			}
 
 			mutateLocalizedReport(&localized)
 			afterMutation, err := json.Marshal(data)
@@ -67,7 +75,10 @@ func localizeCopyFixture() model.Report {
 		Key: "cpu", Label: "当前值", Display: "1 point", HigherIsBetter: &higherIsBetter,
 	}}
 	data.Results[0].Tables = []model.Table{{
-		Title: "当前值", Columns: []string{"当前值", "状态"},
+		// Deliberately use values that are also translatable probe text for the
+		// machine keys: Localize must leave them byte-for-byte unchanged.
+		Key: "当前值", Title: "当前值", Columns: []string{"当前值", "状态"},
+		ColumnKeys: []string{"当前值", "状态"}, RowIdentity: "状态",
 		Rows: [][]string{{"Linux", "完成"}}, NumericColumns: []int{1},
 		NumericHigherIsBetter: []bool{true}, SensitiveColumns: []int{0},
 	}}
@@ -105,6 +116,7 @@ func mutateLocalizedReport(data *model.Report) {
 	*result.Measurements[0].HigherIsBetter = false
 	result.Tables[0].Title = "changed"
 	result.Tables[0].Columns[0] = "changed"
+	result.Tables[0].ColumnKeys[0] = "changed"
 	result.Tables[0].Rows[0][0] = "changed"
 	result.Tables[0].NumericColumns[0] = 99
 	result.Tables[0].NumericHigherIsBetter[0] = false

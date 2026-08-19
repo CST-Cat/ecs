@@ -264,14 +264,18 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	table := model.Table{
+		Key:                   "network.iperf3.results",
 		Title:                 "iperf3 TCP/UDP 节点",
 		Columns:               []string{"服务商", "位置", "协议", "上传", "下载", "UDP 丢包", "UDP 抖动", "端口", "状态"},
+		ColumnKeys:            []string{"provider", "location", "protocol", "upload_mbps", "download_mbps", "udp_loss_percent", "udp_jitter_ms", "port", "status"},
 		NumericColumns:        []int{3, 4, 5, 6},
 		NumericHigherIsBetter: []bool{true, true, false, false},
 	}
 	stabilityTable := model.Table{
+		Key:                   "network.iperf3.stability",
 		Title:                 "iperf3 TCP 分秒稳定性",
 		Columns:               []string{"服务商", "协议", "方向", "最低", "P50", "变异系数", "重传", "区间"},
+		ColumnKeys:            []string{"provider", "protocol", "direction", "minimum_mbps", "p50_mbps", "coefficient_of_variation_percent", "retransmits", "interval"},
 		NumericColumns:        []int{3, 4, 5, 6},
 		NumericHigherIsBetter: []bool{true, true, false, false},
 	}

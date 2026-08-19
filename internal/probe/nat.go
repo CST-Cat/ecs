@@ -116,8 +116,10 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	table := model.Table{
-		Title:   "STUN 探测明细",
-		Columns: []string{"协议", "服务器", "映射地址", "映射行为", "过滤行为", "备用地址", "状态"},
+		Key:        "network.nat.stun",
+		Title:      "STUN 探测明细",
+		Columns:    []string{"协议", "服务器", "映射地址", "映射行为", "过滤行为", "备用地址", "状态"},
+		ColumnKeys: []string{"protocol", "server", "mapped_address", "mapping_behavior", "filtering_behavior", "alternate_address", "status"},
 		// 映射地址是本机公网出口，默认按段遮盖。
 		SensitiveColumns: []int{2},
 	}

@@ -70,8 +70,11 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		Purpose: "当前 RIB 前缀、起源 ASN、RPKI 状态与观测 AS 路径",
 	}}
 	table := model.Table{
-		Title:   "公共 BGP / 互联观测",
-		Columns: []string{"协议族", "匹配前缀", "起源 ASN", "RPKI", "观测 peer/collector", "AS 路径样本"},
+		Key:         "network.bgp.observation",
+		Title:       "公共 BGP / 互联观测",
+		Columns:     []string{"协议族", "匹配前缀", "起源 ASN", "RPKI", "观测 peer/collector", "AS 路径样本"},
+		ColumnKeys:  []string{"ip_family", "matched_prefix", "origin_asn", "rpki_state", "peer_collector", "as_path_sample"},
+		RowIdentity: "ip_family",
 	}
 
 	versions := config.IPVersions(env.Config.IPVersion)

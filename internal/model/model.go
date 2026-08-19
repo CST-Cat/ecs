@@ -285,9 +285,21 @@ type Measurement struct {
 }
 
 type Table struct {
-	Title   string     `json:"title,omitempty"`
-	Columns []string   `json:"columns"`
-	Rows    [][]string `json:"rows"`
+	// Key is the stable machine identifier for this table schema. It is not
+	// derived from Title, Columns, or Rows, and renderers must never localize it.
+	Key   string `json:"key,omitempty"`
+	Title string `json:"title,omitempty"`
+	// Columns contains display labels. ColumnKeys, when present, is parallel
+	// to it by index and contains stable machine identifiers instead of labels.
+	// Legacy reports may omit ColumnKeys; callers must not infer them from
+	// display text or cell values.
+	Columns    []string   `json:"columns"`
+	ColumnKeys []string   `json:"column_keys,omitempty"`
+	Rows       [][]string `json:"rows"`
+	// RowIdentity names the stable machine key of the row-identity column. It
+	// must match one entry in ColumnKeys; an empty value means this table has no
+	// declared row identity and must not be compared by a guessed data column.
+	RowIdentity string `json:"row_identity,omitempty"`
 	// NumericColumns lists columns whose cells contain comparable numeric values.
 	// Renderers may add a data-proportional relative bar without having to guess
 	// from localized labels or display strings.  The optional direction slice is
@@ -410,6 +422,7 @@ func RedactedCopy(in Report, reveal bool) Report {
 		for j, table := range result.Tables {
 			out.Results[i].Tables[j] = table
 			out.Results[i].Tables[j].Columns = append([]string(nil), table.Columns...)
+			out.Results[i].Tables[j].ColumnKeys = append([]string(nil), table.ColumnKeys...)
 			out.Results[i].Tables[j].NumericColumns = append([]int(nil), table.NumericColumns...)
 			out.Results[i].Tables[j].NumericHigherIsBetter = append([]bool(nil), table.NumericHigherIsBetter...)
 			out.Results[i].Tables[j].SensitiveColumns = append([]int(nil), table.SensitiveColumns...)

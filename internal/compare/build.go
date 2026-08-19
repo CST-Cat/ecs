@@ -634,92 +634,261 @@ func buildObservations(results []*model.Result) []Observation {
 }
 
 func appendTableObservations(results []*model.Result, add func(int, string, string, string, string)) {
-	tables := make(map[string]map[int]model.Table)
+	// A machine schema is the only safe way to match a table across reports.
+	// Legacy tables are kept in a separate positional fallback path so display
+	// labels can never become an accidental identity.
+	tables := make(map[string]map[int][]tableRef)
 	order := make([]string, 0)
 	seen := make(map[string]bool)
+	legacy := make(map[int]map[int]tableRef)
+	legacyOrder := make([]int, 0)
 	for input, result := range results {
 		if result == nil {
 			continue
 		}
-		counts := make(map[string]int)
-		for _, table := range result.Tables {
-			counts[tableSchemaKey(table)]++
-		}
-		for _, table := range result.Tables {
-			key := tableSchemaKey(table)
-			if len(table.Columns) < 2 || counts[key] != 1 {
+		for position, table := range result.Tables {
+			ref := tableRef{input: input, position: position, table: table}
+			schema := tableSchemaKey(table)
+			if schema == "" {
+				appendLegacyTableRef(legacy, &legacyOrder, ref)
 				continue
 			}
-			if tables[key] == nil {
-				tables[key] = make(map[int]model.Table)
+			if tables[schema] == nil {
+				tables[schema] = make(map[int][]tableRef)
 			}
-			tables[key][input] = table
-			if !seen[key] {
-				seen[key] = true
-				order = append(order, key)
+			tables[schema][input] = append(tables[schema][input], ref)
+			if !seen[schema] {
+				seen[schema] = true
+				order = append(order, schema)
 			}
 		}
 	}
 	for _, schema := range order {
 		group := tables[schema]
+		if hasDuplicateTableInput(group) {
+			// Duplicate declarations are malformed. Reclassify their tables as
+			// legacy and compare by position, never by an arbitrary duplicate.
+			for _, refs := range group {
+				for _, ref := range refs {
+					appendLegacyTableRef(legacy, &legacyOrder, ref)
+				}
+			}
+			continue
+		}
+		refs := make(map[int]tableRef, len(group))
+		for input, values := range group {
+			refs[input] = values[0]
+		}
+		if len(refs) < 2 {
+			continue
+		}
+		appendMachineTableObservations(results, schema, refs, add)
+	}
+	for _, position := range legacyOrder {
+		group := legacy[position]
 		if len(group) < 2 {
 			continue
 		}
-		identity := uniqueIdentityColumn(group)
-		if identity < 0 {
+		appendWholeTableObservation(results, "legacy:"+strconv.Itoa(position), group, add)
+	}
+}
+
+type tableRef struct {
+	input    int
+	position int
+	table    model.Table
+}
+
+func appendLegacyTableRef(groups map[int]map[int]tableRef, order *[]int, ref tableRef) {
+	if groups[ref.position] == nil {
+		groups[ref.position] = make(map[int]tableRef)
+		*order = append(*order, ref.position)
+	}
+	groups[ref.position][ref.input] = ref
+}
+
+func hasDuplicateTableInput(group map[int][]tableRef) bool {
+	for _, refs := range group {
+		if len(refs) != 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func appendMachineTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+	if keyedTableGroup(group) {
+		appendKeyedTableObservations(results, schema, group, add)
+		return
+	}
+	if tablesHaveSameShape(group) {
+		appendPositionalTableObservations(results, schema, group, add)
+		return
+	}
+	// A malformed row shape cannot be safely aligned even positionally. The
+	// whole-table snapshot still exposes a change without inventing row keys.
+	appendWholeTableObservation(results, schema+":whole", group, add)
+}
+
+func keyedTableGroup(group map[int]tableRef) bool {
+	identity := ""
+	for _, ref := range group {
+		table := ref.table
+		index := tableRowIdentityIndex(table)
+		if index < 0 {
+			return false
+		}
+		if identity == "" {
+			identity = table.RowIdentity
+		} else if identity != table.RowIdentity {
+			return false
+		}
+		seen := make(map[string]bool, len(table.Rows))
+		for _, row := range table.Rows {
+			if index >= len(row) {
+				return false
+			}
+			rowKey := strings.TrimSpace(row[index])
+			if rowKey == "" || seen[rowKey] {
+				return false
+			}
+			seen[rowKey] = true
+		}
+	}
+	return true
+}
+
+func appendKeyedTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+	for input := range results {
+		ref, exists := group[input]
+		if !exists {
 			continue
 		}
-		for input := range results {
-			table, exists := group[input]
-			if !exists {
-				continue
-			}
-			for _, row := range table.Rows {
-				if identity >= len(row) {
+		table := ref.table
+		identity := tableRowIdentityIndex(table)
+		for _, row := range table.Rows {
+			rowKey := row[identity]
+			for column, cell := range row {
+				if column == identity || column >= len(table.ColumnKeys) {
 					continue
 				}
-				rowKey := row[identity]
-				for column, cell := range row {
-					if column == identity || column >= len(table.Columns) {
-						continue
-					}
-					key := "table:" + schema + ":" + rowKey + ":" + strconv.Itoa(column)
-					label := table.Title + " · " + rowKey + " · " + table.Columns[column]
-					add(input, key, label, "table", cell)
-				}
+				columnKey := table.ColumnKeys[column]
+				key := tableObservationKey(schema, rowKey, columnKey)
+				label := tableCellLabel(table, rowKey, column)
+				add(input, key, label, "table", cell)
 			}
 		}
 	}
+}
+
+func appendPositionalTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+	for input := range results {
+		ref, exists := group[input]
+		if !exists {
+			continue
+		}
+		table := ref.table
+		for rowIndex, row := range table.Rows {
+			for column, cell := range row {
+				if column >= len(table.ColumnKeys) {
+					continue
+				}
+				columnKey := table.ColumnKeys[column]
+				key := "table:" + schema + ":row-index:" + strconv.Itoa(rowIndex) + ":column:" + columnKey
+				label := tableCellLabel(table, "row "+strconv.Itoa(rowIndex+1), column)
+				add(input, key, label, "table", cell)
+			}
+		}
+	}
+}
+
+func appendWholeTableObservation(results []*model.Result, key string, group map[int]tableRef, add func(int, string, string, string, string)) {
+	for input := range results {
+		ref, exists := group[input]
+		if !exists {
+			continue
+		}
+		label := ref.table.Title
+		if strings.TrimSpace(label) == "" {
+			label = "table #" + strconv.Itoa(ref.position+1)
+		}
+		add(input, "table:"+key, label, "table", tableSnapshot(ref.table))
+	}
+}
+
+func tableCellLabel(table model.Table, rowKey string, column int) string {
+	columnLabel := "column " + strconv.Itoa(column+1)
+	if column >= 0 && column < len(table.Columns) && strings.TrimSpace(table.Columns[column]) != "" {
+		columnLabel = table.Columns[column]
+	}
+	return table.Title + " · " + rowKey + " · " + columnLabel
+}
+
+func tableObservationKey(schema, rowKey, columnKey string) string {
+	return "table:" + schema + ":" + rowKey + ":" + columnKey
+}
+
+func tableSnapshot(table model.Table) string {
+	rows := make([]string, len(table.Rows))
+	for rowIndex, row := range table.Rows {
+		cells := make([]string, len(row))
+		for column, cell := range row {
+			cells[column] = strconv.Quote(cell)
+		}
+		rows[rowIndex] = "[" + strings.Join(cells, ", ") + "]"
+	}
+	return "columns=" + strconv.Itoa(len(table.Columns)) + "; rows=" + strings.Join(rows, ", ")
+}
+
+func tablesHaveSameShape(group map[int]tableRef) bool {
+	var first [][]string
+	set := false
+	for _, ref := range group {
+		if !set {
+			first, set = ref.table.Rows, true
+			continue
+		}
+		if len(ref.table.Rows) != len(first) {
+			return false
+		}
+		for rowIndex, row := range ref.table.Rows {
+			if len(row) != len(first[rowIndex]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func tableSchemaKey(table model.Table) string {
-	return table.Title + "\x1f" + strings.Join(table.Columns, "\x1e")
+	if !validTableMachineSchema(table) {
+		return ""
+	}
+	return table.Key + "\x1f" + strings.Join(table.ColumnKeys, "\x1e")
 }
 
-func uniqueIdentityColumn(tables map[int]model.Table) int {
-	columnCount := -1
-	for _, table := range tables {
-		if columnCount < 0 || len(table.Columns) < columnCount {
-			columnCount = len(table.Columns)
-		}
+func validTableMachineSchema(table model.Table) bool {
+	if strings.TrimSpace(table.Key) == "" || len(table.ColumnKeys) == 0 || len(table.ColumnKeys) != len(table.Columns) {
+		return false
 	}
-	for column := 0; column < columnCount; column++ {
-		valid := true
-		for _, table := range tables {
-			seen := make(map[string]bool)
-			for _, row := range table.Rows {
-				if column >= len(row) || strings.TrimSpace(row[column]) == "" || seen[row[column]] {
-					valid = false
-					break
-				}
-				seen[row[column]] = true
-			}
-			if !valid {
-				break
-			}
+	seen := make(map[string]bool, len(table.ColumnKeys))
+	for _, columnKey := range table.ColumnKeys {
+		columnKey = strings.TrimSpace(columnKey)
+		if columnKey == "" || seen[columnKey] {
+			return false
 		}
-		if valid {
-			return column
+		seen[columnKey] = true
+	}
+	return true
+}
+
+func tableRowIdentityIndex(table model.Table) int {
+	if !validTableMachineSchema(table) || strings.TrimSpace(table.RowIdentity) == "" {
+		return -1
+	}
+	for index, columnKey := range table.ColumnKeys {
+		if columnKey == table.RowIdentity {
+			return index
 		}
 	}
 	return -1

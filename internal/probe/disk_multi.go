@@ -189,8 +189,11 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 	}
 
 	table := model.Table{
-		Title:   "其他挂载盘 I/O",
-		Columns: []string{"挂载点", "设备", "文件系统", "顺序写", "4K 随机读", "状态"},
+		Key:         "disk.fio.mounts",
+		Title:       "其他挂载盘 I/O",
+		Columns:     []string{"挂载点", "设备", "文件系统", "顺序写", "4K 随机读", "状态"},
+		ColumnKeys:  []string{"mount_path", "device", "filesystem", "sequential_write_mibs", "random_read_iops", "status"},
+		RowIdentity: "mount_path",
 	}
 	engine := detectFIOEngine(ctx, fioPath)
 	tested := 0

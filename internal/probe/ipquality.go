@@ -1290,10 +1290,17 @@ func decodeJSON(body []byte, destination any) error {
 	return nil
 }
 
+func ipQualityTableKey(version, kind string) string {
+	return "network.ipquality.ipv" + version + "." + kind
+}
+
 func (bundle ipQualityBundle) typeTable() model.Table {
 	table := model.Table{
-		Title:   "IPv" + bundle.Version + " · IP 类型属性",
-		Columns: []string{"数据库", "使用类型", "公司类型", "国家/地区", "通道"},
+		Key:         ipQualityTableKey(bundle.Version, "types"),
+		Title:       "IPv" + bundle.Version + " · IP 类型属性",
+		Columns:     []string{"数据库", "使用类型", "公司类型", "国家/地区", "通道"},
+		ColumnKeys:  []string{"source", "usage_type", "company_type", "country", "channel"},
+		RowIdentity: "source",
 	}
 	for _, id := range typeSourceOrder {
 		finding := bundle.Findings[id]
@@ -1310,8 +1317,11 @@ func (bundle ipQualityBundle) typeTable() model.Table {
 
 func (bundle ipQualityBundle) scoreTable() model.Table {
 	table := model.Table{
-		Title:   "IPv" + bundle.Version + " · 风险评分",
-		Columns: []string{"数据库", "原始/等效值", "风险等级", "可视化", "指标口径", "分段规则", "通道"},
+		Key:         ipQualityTableKey(bundle.Version, "scores"),
+		Title:       "IPv" + bundle.Version + " · 风险评分",
+		Columns:     []string{"数据库", "原始/等效值", "风险等级", "可视化", "指标口径", "分段规则", "通道"},
+		ColumnKeys:  []string{"source", "raw_or_equivalent_value", "risk_level", "visualization", "metric_definition", "bucket_rule", "channel"},
+		RowIdentity: "source",
 	}
 	for _, id := range scoreSourceOrder {
 		finding := bundle.Findings[id]
@@ -1354,12 +1364,17 @@ func scoreBands(id string) string {
 
 func (bundle ipQualityBundle) factorTable() model.Table {
 	columns := []string{"因子"}
+	columnKeys := []string{"factor"}
 	for _, id := range factorSourceOrder {
 		columns = append(columns, qualitySourceLabels[id])
+		columnKeys = append(columnKeys, id)
 	}
 	table := model.Table{
-		Title:   "IPv" + bundle.Version + " · 风险因子矩阵",
-		Columns: columns,
+		Key:         ipQualityTableKey(bundle.Version, "factors"),
+		Title:       "IPv" + bundle.Version + " · 风险因子矩阵",
+		Columns:     columns,
+		ColumnKeys:  columnKeys,
+		RowIdentity: "factor",
 	}
 	type factor struct {
 		label string
@@ -1386,8 +1401,11 @@ func (bundle ipQualityBundle) factorTable() model.Table {
 
 func (bundle ipQualityBundle) statusTable() model.Table {
 	table := model.Table{
-		Title:   "IPv" + bundle.Version + " · 数据源状态",
-		Columns: []string{"数据源", "状态", "通道", "耗时"},
+		Key:         ipQualityTableKey(bundle.Version, "sources"),
+		Title:       "IPv" + bundle.Version + " · 数据源状态",
+		Columns:     []string{"数据源", "状态", "通道", "耗时"},
+		ColumnKeys:  []string{"source", "status", "channel", "duration_ms"},
+		RowIdentity: "source",
 	}
 	if bundle.Origin.Enabled {
 		table.Rows = append(table.Rows, []string{

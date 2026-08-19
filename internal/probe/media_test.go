@@ -151,7 +151,7 @@ func TestMediaChecksAreWellFormed(t *testing.T) {
 	}
 	seen := make(map[string]bool)
 	for _, check := range checks {
-		if check.Name == "" || check.Category == "" {
+		if check.Name == "" || check.Category.Key == "" || check.Category.Label == "" {
 			t.Fatalf("rule missing name or category: %+v", check)
 		}
 		if seen[check.Name] {
@@ -188,8 +188,8 @@ func TestMediaChecksForRegions(t *testing.T) {
 		t.Fatalf("日本地区筛选结果异常：%d/%d", len(jp), len(all))
 	}
 	for _, check := range jp {
-		if check.Category != "日本" {
-			t.Fatalf("jp 筛选混入了 %q 分类的 %q", check.Category, check.Name)
+		if check.Category.Key != mediaCategoryJapan.Key {
+			t.Fatalf("jp 筛选混入了 %+v 分类的 %q", check.Category, check.Name)
 		}
 	}
 	// 多地区取并集。

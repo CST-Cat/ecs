@@ -459,8 +459,10 @@ func streamThreadControlField(workers int) string {
 
 func streamStabilityTable(runs []streamMemoryRun) model.Table {
 	table := model.Table{
+		Key:                   "memory.stream.stability",
 		Title:                 "STREAM 运行稳定性",
 		Columns:               []string{"内核 / 线程", "平均时间", "最短时间", "最长时间", "时间波动"},
+		ColumnKeys:            []string{"kernel_context", "average_seconds", "minimum_seconds", "maximum_seconds", "spread_percent"},
 		NumericColumns:        []int{1, 2, 3, 4},
 		NumericHigherIsBetter: []bool{false, false, false, false},
 	}
@@ -485,8 +487,10 @@ func streamStabilityTable(runs []streamMemoryRun) model.Table {
 
 func streamMemoryTable(runs []streamMemoryRun) model.Table {
 	table := model.Table{
+		Key:                   "memory.stream.bandwidth",
 		Title:                 "STREAM 四 kernel 带宽（Copy/Triad 主结果）",
 		Columns:               []string{"内核 / 线程", "最佳速率", "原始单位", "方法", "证据"},
+		ColumnKeys:            []string{"kernel_context", "best_rate_mibs", "raw_unit", "method", "evidence"},
 		NumericColumns:        []int{1},
 		NumericHigherIsBetter: []bool{true},
 	}

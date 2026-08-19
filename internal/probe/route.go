@@ -77,8 +77,10 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		Name: "NextTrace Tiny", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "以纯 JSON、无启动横幅模式执行官方 Tiny 路由追踪",
 	})
 	table := model.Table{
+		Key:                   "network.route.summary",
 		Title:                 "追踪摘要",
 		Columns:               []string{"目标", "类型", "状态", "探测跳位", "可见跳点", "超时跳点", "耗时"},
+		ColumnKeys:            []string{"target", "target_type", "status", "probed_hops", "visible_hops", "timeout_hops", "elapsed_ms"},
 		NumericColumns:        []int{3, 4, 5, 6},
 		NumericHigherIsBetter: []bool{false, true, false, false},
 	}

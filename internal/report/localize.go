@@ -84,6 +84,9 @@ func localizeResult(result model.Result) model.Result {
 			localized := table
 			localized.Title = i18n.Text(table.Title)
 			localized.Columns = localizeStrings(table.Columns)
+			// ColumnKeys and RowIdentity are machine schema, never display text.
+			// Clone ColumnKeys so a renderer cannot mutate the canonical report.
+			localized.ColumnKeys = cloneStrings(table.ColumnKeys)
 			localized.NumericColumns = cloneInts(table.NumericColumns)
 			localized.NumericHigherIsBetter = cloneBools(table.NumericHigherIsBetter)
 			localized.SensitiveColumns = cloneInts(table.SensitiveColumns)

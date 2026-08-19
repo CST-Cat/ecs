@@ -483,8 +483,10 @@ func appendZstdScalingMeasurements(result *model.Result, key, label string, scal
 
 func zstdThroughputTable(runs []zstdBenchmarkSample, workers int) model.Table {
 	table := model.Table{
+		Key:                   "benchmark.zstd.throughput",
 		Title:                 "zstd 压缩与解压吞吐",
 		Columns:               []string{"线程上下文", "压缩吞吐", "解压吞吐", "压缩扩展", "解压扩展", "压缩每 worker 效率", "解压每 worker 效率"},
+		ColumnKeys:            []string{"worker_context", "compress_mbps", "decompress_mbps", "compress_scaling_ratio", "decompress_scaling_ratio", "compress_efficiency_percent", "decompress_efficiency_percent"},
 		NumericColumns:        []int{1, 2, 3, 4, 5, 6},
 		NumericHigherIsBetter: []bool{true, true, true, true, true, true},
 	}

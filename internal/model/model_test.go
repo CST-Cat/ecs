@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,7 +34,10 @@ func TestRedactedCopyDoesNotMutateSource(t *testing.T) {
 			Methodology: Methodology{Parameters: map[string]string{"target": "203.0.113.10:443"}},
 			Evidence:    &Evidence{Valid: 2, Expected: 3, Unit: "sample"},
 			Fields:      []Field{{Key: "ip", Value: "203.0.113.10", Sensitive: true}},
-			Tables:      []Table{{Columns: []string{"a"}, Rows: [][]string{{"b"}}}},
+			Tables: []Table{{
+				Key: "table.example", Columns: []string{"a"}, ColumnKeys: []string{"column.a"},
+				RowIdentity: "column.a", Rows: [][]string{{"b"}},
+			}},
 		}},
 	}
 	copy := RedactedCopy(original, false)
@@ -50,9 +54,58 @@ func TestRedactedCopyDoesNotMutateSource(t *testing.T) {
 	if original.Results[0].Tables[0].Rows[0][0] != "b" {
 		t.Fatal("nested table was not deep copied")
 	}
+	copy.Results[0].Tables[0].ColumnKeys[0] = "changed"
+	if original.Results[0].Tables[0].ColumnKeys[0] != "column.a" {
+		t.Fatal("table machine schema was not deep copied")
+	}
 	copy.Results[0].Evidence.Valid = 0
 	if original.Results[0].Evidence.Valid != 2 {
 		t.Fatal("evidence pointer was not deep copied")
+	}
+}
+
+func TestTableMachineSchemaJSONRoundTrip(t *testing.T) {
+	original := Table{
+		Key: "network.routes", Title: "路由", Columns: []string{"目标", "状态"},
+		ColumnKeys: []string{"target", "status"}, RowIdentity: "target",
+		Rows: [][]string{{"example.test", "完成"}}, NumericColumns: []int{1},
+		NumericHigherIsBetter: []bool{true}, SensitiveColumns: []int{0},
+	}
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Table
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, original) {
+		t.Fatalf("table JSON round-trip changed machine schema: got=%+v want=%+v", decoded, original)
+	}
+	for _, field := range []string{`"key":"network.routes"`, `"column_keys":["target","status"]`, `"row_identity":"target"`} {
+		if !strings.Contains(string(encoded), field) {
+			t.Fatalf("table JSON omitted %s: %s", field, encoded)
+		}
+	}
+}
+
+func TestTableMachineSchemaIsBackwardCompatibleWithLegacyJSON(t *testing.T) {
+	legacy := []byte(`{"title":"路由","columns":["目标","状态"],"rows":[["example.test","完成"]]}`)
+	var table Table
+	if err := json.Unmarshal(legacy, &table); err != nil {
+		t.Fatal(err)
+	}
+	if table.Key != "" || table.ColumnKeys != nil || table.RowIdentity != "" {
+		t.Fatalf("legacy table unexpectedly inferred machine schema: %+v", table)
+	}
+	encoded, err := json.Marshal(table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"\"key\"", "\"column_keys\"", "\"row_identity\""} {
+		if strings.Contains(string(encoded), field) {
+			t.Fatalf("legacy table gained guessed %s: %s", field, encoded)
+		}
 	}
 }
 

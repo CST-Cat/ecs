@@ -184,8 +184,10 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	table := model.Table{
-		Title:   "三网回程线路",
-		Columns: []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"},
+		Key:        "network.backtrace.summary",
+		Title:      "三网回程线路",
+		Columns:    []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"},
+		ColumnKeys: []string{"provider", "reference_target", "line", "hit_hop", "hit_ip", "status"},
 	}
 	identified := 0
 	validTraces := 0
@@ -228,8 +230,10 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		summaries = append(summaries, row.Target.Kind+" "+best.Signature.Code)
 	}
 	detailTable := model.Table{
-		Title:   "逐跳明细",
-		Columns: []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"},
+		Key:        "network.backtrace.hops",
+		Title:      "逐跳明细",
+		Columns:    []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"},
+		ColumnKeys: []string{"reference_target", "provider", "hop", "latency_ms", "ip", "asn", "network", "location", "status"},
 		// 回程跳点是远端路径信息；按要求只脱敏本机出口 IP。
 	}
 	for _, row := range rows {

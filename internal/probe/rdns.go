@@ -101,8 +101,11 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	check := checkReverseDNS(ctx, resolver, ip)
 
 	table := model.Table{
-		Title:   "反向解析与 FCrDNS",
-		Columns: []string{"项目", "结果", "说明"},
+		Key:         "network.reverse_dns.checks",
+		Title:       "反向解析与 FCrDNS",
+		Columns:     []string{"项目", "结果", "说明"},
+		ColumnKeys:  []string{"item", "result", "description"},
+		RowIdentity: "item",
 	}
 	ptrValue := "无 PTR 记录"
 	if len(check.Names) > 0 {
