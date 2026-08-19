@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 发布制品版本与 security runner 版本不同、漏洞 fixed=1.26.6 时，
-# triage 必须根据制品的 1.26.5 推荐 1.26.6。
+# 发布制品版本与 security runner 版本不同、漏洞 fixed=1.26.5 时，
+# triage 必须根据制品的 1.26.4 推荐 1.26.5。
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 triage="$repo_root/scripts/security/triage.py"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-triage-test.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 cat >"$work/finding.json" <<'JSON'
-{"osv":{"id":"GO-2026-WIRING","affected":[{"package":{"name":"stdlib","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"1.26.0-0"},{"fixed":"1.26.6"}]}]}]}}
+{"osv":{"id":"GO-2026-WIRING","affected":[{"package":{"name":"stdlib","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"1.26.0-0"},{"fixed":"1.26.5"}]}]}]}}
 {"finding":{"osv":"GO-2026-WIRING","trace":[{"module":"stdlib"}]}}
 JSON
 
-artifact_current=go1.26.5
-runner_current=go1.26.6
+artifact_current=go1.26.4
+runner_current=go1.26.5
 [[ "$artifact_current" != "$runner_current" ]] || { echo "fixture versions must differ" >&2; exit 1; }
 upgrade=$(
   "$triage" --current "$artifact_current" "$work/finding.json" |
     awk -F= '$1 == "upgrade_to" { print $2; exit }'
 )
-[[ "$upgrade" == 1.26.6 ]] || { echo "upgrade_to=$upgrade, want 1.26.6" >&2; exit 1; }
+[[ "$upgrade" == 1.26.5 ]] || { echo "upgrade_to=$upgrade, want 1.26.5" >&2; exit 1; }
 
-if ! no_upgrade=$("$triage" --current 1.26.6 "$work/finding.json" 2>"$work/no-upgrade.err"); then
+if ! no_upgrade=$("$triage" --current 1.26.5 "$work/finding.json" 2>"$work/no-upgrade.err"); then
   echo "already-fixed triage unexpectedly failed" >&2
   exit 1
 fi

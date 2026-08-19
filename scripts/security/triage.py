@@ -36,7 +36,7 @@ GO_VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
 def parse_go_version(value: str) -> tuple[int, int, int] | None:
-    """把 1.26.6 / go1.26.6 / 1.26 解析成可比较的三元组。"""
+    """把 1.26.5 / go1.26.5 / 1.26 解析成可比较的三元组。"""
     value = value.strip()
     if value.startswith("go"):
         value = value[2:]
@@ -108,7 +108,7 @@ def fixed_versions_for(osv: dict, module: str) -> list[tuple[int, int, int]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--current", required=True, help="当前工具链，如 go1.26.6")
+    parser.add_argument("--current", required=True, help="当前工具链，如 go1.26.5")
     parser.add_argument("json", nargs="+", help="govulncheck -format json 的输出文件")
     arguments = parser.parse_args()
 

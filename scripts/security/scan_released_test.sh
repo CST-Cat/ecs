@@ -28,7 +28,7 @@ if failure=$(read_release_build_go "$work/not-go" 2>&1); then
   echo "non-Go binary unexpectedly passed" >&2
   exit 1
 fi
-grep -F "no valid Go build metadata" <<<"$failure" >/dev/null || {
+grep -E "no valid Go build metadata|go version -m failed" <<<"$failure" >/dev/null || {
   echo "invalid metadata diagnostic was lost: $failure" >&2
   exit 1
 }

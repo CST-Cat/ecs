@@ -25,7 +25,7 @@ usage() {
 usage: scripts/release/verify.sh --dist DIR --build-go-version GOVERSION --revision SHA [--no-tools]
        scripts/release/verify.sh --dist DIR --dry-run
 
-  --build-go-version  本次构建实测的工具链，如 go1.26.6（由构建方给出）
+  --build-go-version  本次构建实测的工具链，如 go1.26.5（由构建方给出）
   --revision          冻结的发布提交 SHA
   --no-tools          只校验主程序与语料
   --dry-run           本地演练：隐含 --no-tools，自行取工具链与 HEAD，并跳过
@@ -96,7 +96,7 @@ else
 fi
 [[ "$dist" == /* ]] || dist="$ECS_REPO_ROOT/$dist"
 [[ -d "$dist" ]] || die "no such dist directory: $dist"
-[[ "$build_go_version" == go* ]] || die "--build-go-version must look like go1.26.6, got $build_go_version"
+[[ "$build_go_version" == go* ]] || die "--build-go-version must look like go1.26.5, got $build_go_version"
 
 verify_root=$(mktemp -d)
 trap 'rm -rf -- "$verify_root"' EXIT
