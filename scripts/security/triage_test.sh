@@ -121,6 +121,62 @@ else
   failures=$((failures + 1))
 fi
 
+# ---- 10. 发布后 wiring：current 必须来自制品元数据，而不是 security runner ----
+#
+# scan_released.sh 把实际 Release 二进制的 go version -m 结果作为
+# release_build_go 写进 $GITHUB_OUTPUT；security.yml 再把该字段传给 triage.py。
+# 这个 fixture 固定制品为 go1.26.5、runner 为 go1.26.6、OSV fixed 为
+# 1.26.6。若 workflow 又退回使用 runner 的 go env GOVERSION，triage 会把
+# 当前版本误认为已是修复版，upgrade_to 就会错误地为空。
+cat >"$work/wiring.json" <<'JSON'
+{"osv": {"id": "GO-2026-WIRING", "affected": [{"package": {"name": "stdlib", "ecosystem": "Go"},
+  "ranges": [{"type": "SEMVER", "events": [{"introduced": "1.26.0-0"}, {"fixed": "1.26.6"}]}]}]}}
+{"finding": {"osv": "GO-2026-WIRING", "trace": [{"module": "stdlib"}]}}
+JSON
+
+security_workflow="$repo_root/.github/workflows/security.yml"
+scan_output="$work/scan-output"
+printf '%s\n' \
+  'release_build_go=go1.26.5' \
+  'released_tag=v0.7.3' >"$scan_output"
+
+if ! grep -F -- 'RELEASE_BUILD_GO: ${{ steps.scan.outputs.release_build_go }}' \
+  "$security_workflow" >/dev/null; then
+  echo "FAIL 发布后 wiring：security.yml 未消费 scan 的 release_build_go" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -F -- '--current "$RELEASE_BUILD_GO"' "$security_workflow" >/dev/null; then
+  echo "FAIL 发布后 wiring：security.yml 未把 Release metadata 传给 triage" >&2
+  failures=$((failures + 1))
+fi
+if grep -F -- '--current "$(go env GOVERSION)"' "$security_workflow" >/dev/null; then
+  echo "FAIL 发布后 wiring：security runner 的 GOVERSION 仍被当作 current" >&2
+  failures=$((failures + 1))
+fi
+
+artifact_current=$(awk -F= '$1 == "release_build_go" { print $2; exit }' "$scan_output")
+runner_current=go1.26.6
+if [[ "$artifact_current" != go1.26.5 || "$runner_current" != go1.26.6 ||
+  "$artifact_current" == "$runner_current" ]]; then
+  echo "FAIL 发布后 wiring：fixture 未区分制品与 security runner 版本" >&2
+  failures=$((failures + 1))
+else
+  artifact_upgrade=$(
+    "$triage" --current "$artifact_current" "$work/wiring.json" |
+      awk -F= '$1 == "upgrade_to" { print $2; exit }'
+  )
+  runner_upgrade=$(
+    "$triage" --current "$runner_current" "$work/wiring.json" |
+      awk -F= '$1 == "upgrade_to" { print $2; exit }'
+  )
+  if [[ "$artifact_upgrade" == 1.26.6 && -z "$runner_upgrade" ]]; then
+    echo "ok   发布后 wiring：制品 go1.26.5 -> upgrade_to=1.26.6（runner go1.26.6 未被误用）"
+  else
+    echo "FAIL 发布后 wiring：artifact upgrade_to='$artifact_upgrade', runner upgrade_to='$runner_upgrade'" >&2
+    failures=$((failures + 1))
+  fi
+fi
+
 echo
 if [[ "$failures" -ne 0 ]]; then
   echo "triage tests failed: $failures" >&2

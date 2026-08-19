@@ -53,6 +53,13 @@ for_each_build_tag staticcheck "$staticcheck"
 # 源码漏洞扫描不属于普通 quality hard gate，不在这里调用 govulncheck；security
 # workflow 负责持续扫描，release security 负责发布前安全门禁。其他检查仍然失败即阻断。
 
+ecs_step "workflow policy wiring"
+bash scripts/ci/workflow_policy_test.sh
+
+ecs_step "security script wiring"
+bash scripts/security/propose_go_upgrade_test.sh
+bash scripts/security/scan_released_test.sh
+
 python=$(ecs_python)
 
 ecs_step "ecs-tools JSON Schema 与示例"

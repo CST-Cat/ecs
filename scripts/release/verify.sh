@@ -8,7 +8,10 @@ set -euo pipefail
 #
 #   - Go 工具链必须等于本次构建实测的版本（--build-go-version），而不是某个
 #     写死的期望值。这个值只能由构建方给出：让校验方自己去问 go env 就等于
-#     用同一个假设验证它自己。升级 Go 只需要改 go.mod。
+#     用同一个假设验证它自己。正式 Release 编译器由 release.yml 的
+#     ECS_RELEASE_GO 选择；根 go.mod 只声明源码最低兼容版本，devtools/go.mod
+#     只管理 staticcheck/govulncheck 等开发工具自身的构建环境。安全升级只改
+#     Release compiler pin，不提高源码最低兼容版本。
 #   - vcs.revision 必须等于冻结的发布 SHA；
 #   - vcs.modified 必须为 false，否则构建时工作区是脏的。
 #

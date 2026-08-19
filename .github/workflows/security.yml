@@ -75,6 +75,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       released_tag: ${{ steps.scan.outputs.released_tag }}
+      release_build_go: ${{ steps.scan.outputs.release_build_go }}
       vulnerable: ${{ steps.triage.outputs.vulnerable }}
       upgrade_to: ${{ steps.triage.outputs.upgrade_to }}
       upgrade_released: ${{ steps.release_gate.outputs.released }}
@@ -111,11 +112,16 @@ jobs:
       # triage 决定这批命中能不能靠升 Go 补丁机械修好。它不改任何文件。
       - name: Triage findings
         id: triage
+        env:
+          # This is extracted from each downloaded Release binary by
+          # scan_released.sh.  The security runner's own Go is only the reader;
+          # its go env GOVERSION must never stand in for the artifact metadata.
+          RELEASE_BUILD_GO: ${{ steps.scan.outputs.release_build_go }}
         run: |
           set -euo pipefail
           findings=("$RUNNER_TEMP/released/findings"/*.json)
           ./scripts/security/triage.py \
-            --current "$(go env GOVERSION)" \
+            --current "$RELEASE_BUILD_GO" \
             "${findings[@]}" | tee -a "$GITHUB_OUTPUT"
 
       # OSV 的 fixed 版本只说明漏洞数据库认为该版本修复了问题，不代表

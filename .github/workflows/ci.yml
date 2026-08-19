@@ -9,8 +9,9 @@ name: ci
 # 变化，不阻断合并；security 红表示已发布二进制发现漏洞，应该保持红；release
 # 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
-# compat 矩阵验证最低支持版本；其余 CI job 显式使用 stable。
-# 不要设置 GOTOOLCHAIN=local：compat 负责验证最低版本，其他 CI 使用当前稳定版。
+# compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
+# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余 CI job 显式使用
+# stable；unit 已经覆盖 stable，不再把 stable 重复放进 compat 矩阵。
 
 on:
   push:
@@ -49,7 +50,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ["1.22.x", "stable"]
+        go-version: ["1.22.x"]
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

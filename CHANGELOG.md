@@ -14,6 +14,8 @@
 
 - 修复报告本地化边界：采集阶段的模块标题、汇总和 NAT 清单保持 canonical 源文本，`run`、`render` 与 `compare` 始终以 canonical Report 进行输入、评分和比较；JSON 保留采集后的机器数据，TXT/Markdown/HTML 才按 `--lang` 生成独立的展示副本。因此同一事实以中文或英文渲染时 JSON 字节保持一致，字段值、表格列和行内容不会因界面语言改变，英文渲染后的 JSON 也可再次按中文渲染。
 - 这是 JSON 持久化语义的兼容修复：此前已生成的英文本地化 JSON 不包含可靠的原文标识，当前实现不会尝试英文→中文逆翻译；需要恢复完整 canonical 数据时，应从原始中文/canonical 报告重新生成。旧 JSON 仍可读取，但其中已被本地化的可见字符串只能按其现有文本展示。
+- 收紧 Go Release 与安全升级职责：根 `go.mod` 仅声明最低源码兼容版本（1.22），`devtools/go.mod` 仅管理分析工具环境，正式 Release 编译器唯一由 `release.yml` 的 `ECS_RELEASE_GO` pin 选择（当前 1.26.5），Release 与最低兼容 CI 均强制 `GOTOOLCHAIN=local`；compat 只保留 1.22.x，stable 由 unit 覆盖。
+- 安全自动升级现在只修改 Release compiler pin，不改根 `go.mod`；发布后安全复审从下载的七架构 `ecs` 二进制 `go version -m` 提取并校验一致的实际构建 Go 版本，再将该 metadata 传给 triage，避免误用 security runner 自身的 Go 版本。
 
 ## 0.7.3 — 2026-08-18
 

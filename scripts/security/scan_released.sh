@@ -22,6 +22,94 @@ die() {
   exit 1
 }
 
+# read_release_build_go BINARY
+#
+# `go version -m` prints the toolchain on its first line for current Go releases:
+#
+#   /path/to/ecs: go1.26.5
+#
+# Newer releases also expose the same value as a `build GoVersion=...` setting.
+# Accept either representation, but require exactly one distinct, parseable
+# version.  In particular, `go version -m` exits zero for a non-Go executable
+# after printing "could not read Go build info"; checking the parsed value is
+# therefore essential and cannot be replaced by the security runner's Go.
+read_release_build_go() {
+  local binary=$1 metadata
+  local -a versions
+
+  [[ -f "$binary" && -r "$binary" && -x "$binary" ]] ||
+    die "Release binary is not a readable executable: $binary"
+
+  if ! metadata=$(go version -m "$binary" 2>&1); then
+    die "go version -m failed for $binary"
+  fi
+
+  mapfile -t versions < <(
+    {
+      # The first line is the stable format emitted by Go 1.18+.
+      sed -nE '1s/^.*: (go[0-9]+\.[0-9]+(\.[0-9]+)?([[:alnum:]_.+-]*)?)$/\1/p' <<<"$metadata"
+      # Keep compatibility with the explicit build setting emitted by newer Go.
+      awk '$1 == "build" && $2 == "GoVersion" { print $3 }' <<<"$metadata"
+    } | sed '/^$/d' | sort -u
+  )
+
+  if [[ "${#versions[@]}" -ne 1 || ! "${versions[0]}" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?([[:alnum:]_.+-]*)?$ ]]; then
+    die "Release binary has no valid Go build metadata: $binary"
+  fi
+  printf '%s\n' "${versions[0]}"
+}
+
+# verify_release_build_go DIST EXTRACTED
+#
+# Extract each downloaded main-program archive and inspect the actual ecs binary
+# inside it.  The archive set must cover the shared seven-architecture list, and
+# all binaries must report exactly the same build toolchain.  The caller receives
+# that one authoritative version on stdout; diagnostics stay on stderr so the
+# result remains safe to append to GITHUB_OUTPUT.
+verify_release_build_go() {
+  local dist=$1 extracted=$2
+  local listing name binary arch version expected=""
+  local -A seen=()
+
+  mkdir -p "$extracted"
+  if ! listing=$(ecs_release_binaries "$dist" "$extracted"); then
+    die "无法解出 Release 主程序归档"
+  fi
+  [[ -n "$listing" ]] || die "Release 中未找到主程序二进制"
+
+  while IFS=$'\t' read -r name binary; do
+    [[ -n "$name" && -n "$binary" ]] || die "Release 主程序清单包含空行"
+    arch=${name#ecs_linux_}
+    case " ${ECS_ARCHES[*]} " in
+      *" $arch "*) ;;
+      *) die "Release 主程序包含未知架构：$name" ;;
+    esac
+    [[ "${seen[$arch]:-0}" -eq 0 ]] || die "Release 主程序重复架构：$arch"
+    seen[$arch]=1
+
+    version=$(read_release_build_go "$binary")
+    echo "scan-released: $name build Go $version" >&2
+    if [[ -z "$expected" ]]; then
+      expected=$version
+    elif [[ "$version" != "$expected" ]]; then
+      die "Release 主程序 Go 工具链不一致：$name=$version，want $expected"
+    fi
+  done <<<"$listing"
+
+  for arch in "${ECS_ARCHES[@]}"; do
+    [[ "${seen[$arch]:-0}" -eq 1 ]] || die "Release 缺少主程序架构：$arch"
+  done
+  [[ -n "$expected" ]] || die "Release 主程序没有统一的 Go 工具链版本"
+  printf '%s\n' "$expected"
+}
+
+# Keep the verification functions sourceable by the offline regression test.
+# The command-line workflow below still runs unchanged when this file is invoked
+# as a script.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 work_dir=""
 tag=""
 while [[ "$#" -gt 0 ]]; do
@@ -52,6 +140,7 @@ done
   die "--work-dir is required"
 }
 command -v gh >/dev/null 2>&1 || die "gh is required"
+command -v go >/dev/null 2>&1 || die "go is required to inspect Release build metadata"
 
 mkdir -p "$work_dir"
 work_dir=$(cd "$work_dir" && pwd)
@@ -87,6 +176,12 @@ ecs_retry gh release download "$tag" --dir "$dist" --pattern checksums.txt --clo
   rm -f downloaded-checksums.txt checksums.txt
 )
 echo "scan-released: $tag 的 ${#ECS_ARCHES[@]} 个主程序归档摘要一致" >&2
+
+# The runner's Go is only the reader for build metadata.  The value passed to
+# triage must come from the binaries users downloaded, not from `go env
+# GOVERSION` on this security runner.
+release_build_go=$(verify_release_build_go "$dist" "$work_dir/released-binaries")
+printf 'release_build_go=%s\n' "$release_build_go"
 
 # release/security.sh 在发现漏洞时以非零退出，这里要的是继续走 triage，
 # 因此显式接住它的退出码。

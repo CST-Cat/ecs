@@ -32,8 +32,11 @@ permissions:
   contents: read
 
 # 正式发布统一使用这条明确的 Go 工具链，不从主模块 go.mod 自动漂移。
+# 所有 release job（包括被脚本间接调用的 go build/go test/go run）都禁止
+# go 命令根据 go.mod 自动切换工具链；正式编译器只由 ECS_RELEASE_GO 选择。
 env:
   ECS_RELEASE_GO: "1.26.5"
+  GOTOOLCHAIN: local
 
 concurrency:
   group: release-${{ github.ref }}
