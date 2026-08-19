@@ -7,17 +7,30 @@ import (
 	"ecs/internal/config"
 )
 
-func TestPlanSchedulePreservesOrderAroundExclusiveModule(t *testing.T) {
-	bindings := []moduleBinding{
-		{Descriptor: config.ModuleDescriptor{ID: "first", Concurrency: config.ModuleConcurrencyProbe}},
-		{Descriptor: config.ModuleDescriptor{ID: "second", Concurrency: config.ModuleConcurrencyProbe}},
-		{Descriptor: config.ModuleDescriptor{ID: "exclusive", Concurrency: config.ModuleConcurrencyExclusive}},
+func TestPlanScheduleClassesAndOrder(t *testing.T) {
+	makeBindings := func(classes ...config.ModuleConcurrency) []moduleBinding {
+		bindings := make([]moduleBinding, len(classes))
+		for index, class := range classes {
+			bindings[index].Descriptor = config.ModuleDescriptor{ID: string(rune('a' + index)), Concurrency: class}
+		}
+		return bindings
 	}
-	groups := planSchedule(bindings)
-	if len(groups) != 2 || !reflect.DeepEqual(groups[0].Indices, []int{0, 1}) || !groups[0].Parallel {
-		t.Fatalf("parallel group = %+v, want the first two indices in order", groups)
+	cases := []struct {
+		name string
+		in   []moduleBinding
+		want []scheduleGroup
+	}{
+		{name: "empty", want: nil},
+		{name: "one probe", in: makeBindings(config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0}}}},
+		{name: "continuous probes", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Parallel: true, Indices: []int{0, 1}}}},
+		{name: "mixed groups", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe, config.ModuleConcurrencyExclusive, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Parallel: true, Indices: []int{0, 1}}, {Indices: []int{2}}, {Indices: []int{3}}}},
+		{name: "missing descriptor is exclusive", in: []moduleBinding{{}}, want: []scheduleGroup{{Indices: []int{0}}}},
 	}
-	if !reflect.DeepEqual(groups[1].Indices, []int{2}) || groups[1].Parallel {
-		t.Fatalf("exclusive group = %+v, want the final index alone", groups[1])
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := planSchedule(test.in); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("schedule = %+v, want %+v", got, test.want)
+			}
+		})
 	}
 }

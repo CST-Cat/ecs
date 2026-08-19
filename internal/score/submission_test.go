@@ -2,36 +2,113 @@ package score
 
 import (
 	"encoding/json"
+	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"ecs/internal/model"
 )
 
-func sampleSubmissionReport() model.Report {
-	return model.Report{
-		Tool: model.ToolInfo{Version: "ecs-test"},
-		Run:  model.RunInfo{Profile: "standard"},
-		Results: []model.Result{
-			{
-				ID: "system", Status: model.StatusOK,
-				Measurements: []model.Measurement{
-					{Key: "logical_cpus", Value: 4},
-					{Key: "memory_total_bytes", Value: 8 * (1 << 30)},
-				},
-			},
-			{
-				ID: "cpu", Status: model.StatusOK,
-				Measurements: []model.Measurement{
-					{Key: "sysbench_cpu_single_events_s", Value: 900},
-					{Key: "sysbench_cpu_multi_events_s", Value: 3400},
-				},
-			},
-		},
+func copySubmission(value Submission) Submission {
+	metrics := value.Metrics
+	value.Metrics = make(map[string]float64, len(value.Metrics))
+	for key, metric := range metrics {
+		value.Metrics[key] = metric
+	}
+	return value
+}
+
+func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
+	report := scoreReportFixture()
+	system := findResult(&report, "system")
+	system.Fields = append(system.Fields,
+		model.Field{Key: "public_ip", Value: "203.0.113.10"},
+	)
+	provider, region := ExtractSubmissionMetadata(report)
+	if provider != "fixture-cloud" || region != "fixture-region" {
+		t.Fatalf("safe report metadata = %q/%q", provider, region)
+	}
+	submission, err := BuildSubmission(report, SubmissionOptions{
+		Region:   "us\x00-west",
+		Provider: "Fixture Cloud",
+		Note:     "diagnostic\x00 fixture",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submission.Schema != SubmissionSchema || submission.FingerprintVersion != SubmissionFingerprintV2 || submission.Host.VCPU != 4 || submission.Host.MemoryGiB != 8 {
+		t.Fatalf("submission metadata = %+v", submission)
+	}
+	if submission.Host.Region != "us-west" || submission.Host.Provider != "Fixture Cloud" || submission.Note != "diagnostic fixture" {
+		t.Fatalf("sanitized metadata = %+v", submission)
+	}
+	if submission.MemoryBackend != memoryBackendStream || submission.Tool.ECS != "ecs-test" || submission.Tool.Sysbench != "sysbench 1.0.20" || submission.Tool.Fio != "fio-3.35" || submission.Tool.IPerf3 != "iperf 3.12" {
+		t.Fatalf("submission whitelist metadata = %+v", submission)
+	}
+	if len(submission.Metrics) < len(Dimensions()) || !strings.Contains(submission.FileName(), "fixture-cloud-us-west.json") {
+		t.Fatalf("submission metrics/filename = %d/%q", len(submission.Metrics), submission.FileName())
+	}
+	encoded, err := submission.Encode()
+	if err != nil || len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+		t.Fatalf("submission encode = %v", err)
+	}
+	if strings.Contains(string(encoded), "public_ip") {
+		t.Fatal("submission encoded non-whitelisted report fields")
+	}
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, submission.FileName())
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSubmission(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ID != submission.ID || loaded.Host != submission.Host || loaded.Note != submission.Note {
+		t.Fatalf("loaded submission = %+v", loaded)
+	}
+	baseline, err := BuildBaseline([]model.Report{loaded.AsReport()}, "submission fixture")
+	if err != nil || baseline.Metrics["cpu_single"] != 150 {
+		t.Fatalf("submission baseline = %v/%v", baseline.Metrics, err)
+	}
+
+	legacy := copySubmission(submission)
+	legacy.FingerprintVersion = ""
+	legacy.ID = legacy.fingerprint()
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("legacy fingerprint compatibility = %v", err)
+	}
+	unchanged := copySubmission(submission)
+	unchanged.RanAt = unchanged.RanAt.Add(24 * time.Hour)
+	if unchanged.fingerprint() != submission.ID {
+		t.Fatal("v2 fingerprint changed with RanAt")
+	}
+	changed := copySubmission(submission)
+	changed.Metrics["cpu_single"]++
+	if changed.fingerprint() == submission.ID {
+		t.Fatal("v2 fingerprint ignored a public metric change")
+	}
+
+	unsafe := scoreReportFixture()
+	unsafeSystem := findResult(&unsafe, "system")
+	unsafeSystem.Fields[0].Value = "https://provider.example"
+	unsafeSystem.Fields[1].Value = "203.0.113.10"
+	provider, region = ExtractSubmissionMetadata(unsafe)
+	if provider != "" || region != "" {
+		t.Fatalf("unsafe report metadata was retained: %q/%q", provider, region)
+	}
+	longNote, err := BuildSubmission(report, SubmissionOptions{Note: strings.Repeat("n", maxNoteLength+10)})
+	if err != nil || len([]rune(longNote.Note)) != maxNoteLength {
+		t.Fatalf("long note was not bounded: len=%d err=%v", len([]rune(longNote.Note)), err)
 	}
 }
 
-func TestSubmissionRoundTripsIntoBaseline(t *testing.T) {
-	submission, err := BuildSubmission(sampleSubmissionReport(), SubmissionOptions{})
+func TestSubmissionLoadAndValidationDiagnostics(t *testing.T) {
+	submission, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,22 +116,83 @@ func TestSubmissionRoundTripsIntoBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded Submission
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
+	directory := t.TempDir()
+	write := func(name string, content []byte) string {
+		t.Helper()
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := LoadSubmission(filepath.Join(directory, "missing.json")); err == nil || !strings.Contains(err.Error(), "missing.json") {
+		t.Fatalf("missing submission error = %v", err)
+	}
+	if _, err := LoadSubmission(write("syntax.json", []byte(`{"schema":`))); err == nil || !strings.Contains(err.Error(), "unexpected EOF") {
+		t.Fatalf("syntax submission error = %v", err)
+	}
+	if _, err := LoadSubmission(write("trailing.json", append(append([]byte(nil), encoded...), encoded...))); err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
+		t.Fatalf("trailing submission error = %v", err)
+	}
+	unknown := map[string]any{}
+	if err := json.Unmarshal(encoded, &unknown); err != nil {
 		t.Fatal(err)
 	}
-	if err := decoded.Validate(); err != nil {
-		t.Fatalf("encoded submission should validate: %v", err)
-	}
-	if decoded.ID != submission.ID || decoded.Host.VCPU != 4 {
-		t.Fatalf("decoded submission = %+v, want same identity and host size", decoded)
-	}
-
-	baseline, err := BuildBaseline([]model.Report{decoded.AsReport()}, "test")
+	unknown["future_field"] = true
+	unknownJSON, err := json.Marshal(unknown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if baseline.Metrics["cpu_single"] != 900 || baseline.Metrics["cpu_multi"] != 3400 {
-		t.Fatalf("baseline metrics = %v, want submission CPU values", baseline.Metrics)
+	if _, err := LoadSubmission(write("unknown.json", unknownJSON)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown field error = %v", err)
+	}
+	largePath := filepath.Join(directory, "large.json")
+	file, err := os.Create(largePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(256*1024 + 1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if _, err := LoadSubmission(largePath); err == nil || !strings.Contains(err.Error(), "256 KiB") {
+		t.Fatalf("oversize submission error = %v", err)
+	}
+
+	badCases := []struct {
+		name   string
+		mutate func(*Submission)
+		marker string
+	}{
+		{name: "schema", mutate: func(value *Submission) { value.Schema = "other/v1" }, marker: "unsupported submission schema"},
+		{name: "fingerprint version", mutate: func(value *Submission) { value.FingerprintVersion = "v9" }, marker: "unsupported fingerprint_version"},
+		{name: "no metrics", mutate: func(value *Submission) { value.Metrics = nil }, marker: "contains no metrics"},
+		{name: "memory marker", mutate: func(value *Submission) { value.MemoryBackend = "" }, marker: "STREAM metrics require"},
+		{name: "unknown metric", mutate: func(value *Submission) { value.Metrics["not_a_metric"] = 1 }, marker: "unknown metric"},
+		{name: "nonpositive metric", mutate: func(value *Submission) { value.Metrics["cpu_single"] = 0 }, marker: "must be positive"},
+		{name: "host vcpu", mutate: func(value *Submission) { value.Host.VCPU = 0 }, marker: "host vcpu must be positive"},
+		{name: "host memory", mutate: func(value *Submission) { value.Host.MemoryGiB = math.NaN() }, marker: "host memory must be positive"},
+		{name: "tool", mutate: func(value *Submission) { value.Tool.ECS = "" }, marker: "tool version is required"},
+		{name: "note", mutate: func(value *Submission) { value.Note = strings.Repeat("x", maxNoteLength+1) }, marker: "note exceeds"},
+		{name: "id", mutate: func(value *Submission) { value.ID = "tampered" }, marker: "does not match"},
+	}
+	for _, test := range badCases {
+		t.Run(test.name, func(t *testing.T) {
+			bad := copySubmission(submission)
+			test.mutate(&bad)
+			if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("validation error = %v, want %q", err, test.marker)
+			}
+		})
+	}
+	noScore := model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}
+	if _, err := BuildSubmission(noScore, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "no scoreable measurements") {
+		t.Fatalf("no-score report error = %v", err)
+	}
+	noHost := scoreReportFixture()
+	noHost.Results = noHost.Results[1:]
+	if _, err := BuildSubmission(noHost, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "host vcpu must be positive") {
+		t.Fatalf("missing-host report error = %v", err)
 	}
 }

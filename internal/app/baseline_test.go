@@ -1,9 +1,10 @@
 package app
 
 import (
-	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,37 +87,240 @@ func writeBaselineReport(t *testing.T, name string, report model.Report) string 
 	return path
 }
 
-func TestBaselineCommandWritesReadableResult(t *testing.T) {
-	input := writeBaselineReport(t, "report.json", submitTestReport())
-	output := filepath.Join(t.TempDir(), "baseline.json")
-	var stdout, stderr bytes.Buffer
-	if status := baselineCommand([]string{"--output", output, input}, &stdout, &stderr); status != 0 {
-		t.Fatalf("baseline command failed: status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
-	}
-	baseline, err := score.LoadBaseline(output)
+func writeSubmissionFixture(t *testing.T, path string) string {
+	t.Helper()
+	submission, err := score.BuildSubmission(submitTestReport(), score.SubmissionOptions{
+		Region: "us", Provider: "fixture",
+	})
 	if err != nil {
-		t.Fatalf("written baseline is not readable: %v", err)
+		t.Fatal(err)
 	}
-	if baseline.Schema != score.BaselineSchema || baseline.SampleCount != 1 || len(baseline.Metrics) == 0 {
-		t.Fatalf("unexpected baseline result: %+v", baseline)
+	content, err := submission.Encode()
+	if err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
-func TestBaselineStrictRejectsBadInputWithoutWriting(t *testing.T) {
+func writeOutlierSubmissionFixture(t *testing.T, path string, single float64, multi *float64) string {
+	t.Helper()
+	report := submitTestReport()
+	for index := range report.Results {
+		if report.Results[index].ID != "cpu" {
+			continue
+		}
+		report.Results[index].Measurements = []model.Measurement{{Key: "sysbench_cpu_single_events_s", Value: single}}
+		if multi != nil {
+			report.Results[index].Measurements = append(report.Results[index].Measurements,
+				model.Measurement{Key: "sysbench_cpu_multi_events_s", Value: *multi})
+		}
+	}
+	submission, err := score.BuildSubmission(report, score.SubmissionOptions{Region: "us", Provider: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := submission.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLeaderboardCommandsWriteReadableResults(t *testing.T) {
+	root := t.TempDir()
+	input := writeBaselineReport(t, "report.json", submitTestReport())
+	previousPath := filepath.Join(root, "previous-baseline.json")
+	previous, err := (score.Baseline{
+		Schema: score.BaselineSchema, Source: "previous", SampleCount: 1,
+		Metrics: map[string]float64{"sysbench_cpu_single_events_s": 1},
+	}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(previousPath, previous, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"baseline", "leaderboard"} {
+		t.Run(command, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), command+".json")
+			status, stdout, stderr := invokeAppMain(command, "--lang", "en", "--source", "fixture", "--output", output, previousPath, input)
+			if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
+				t.Fatalf("%s status=%d stdout=%q stderr=%q", command, status, stdout, stderr)
+			}
+			if command == "baseline" {
+				baseline, err := score.LoadBaseline(output)
+				if err != nil {
+					t.Fatalf("written baseline is not readable: %v", err)
+				}
+				if baseline.Schema != score.BaselineSchema || baseline.SampleCount != 1 || len(baseline.Metrics) == 0 || baseline.Source != "fixture" {
+					t.Fatalf("unexpected baseline result: %+v", baseline)
+				}
+			} else if _, err := os.Stat(output); err != nil {
+				t.Fatalf("leaderboard did not write output: %v", err)
+			}
+		})
+	}
+	t.Run("leaderboard annotations", func(t *testing.T) {
+		root := t.TempDir()
+		values := []float64{98, 99, 100, 101, 102, 103, 104, 1000}
+		inputs := make([]string, 0, len(values))
+		for index, value := range values {
+			var multi *float64
+			if index == 0 {
+				onlyMulti := 3400.0
+				multi = &onlyMulti
+			}
+			inputs = append(inputs, writeOutlierSubmissionFixture(t, filepath.Join(root, fmt.Sprintf("submission-%d.json", index)), value, multi))
+		}
+		output := filepath.Join(root, "annotated.json")
+		args := []string{"leaderboard", "--lang", "en", "--source", "fixture", "--annotate", "--verbose", "--output", output}
+		args = append(args, inputs...)
+		status, stdout, stderr := invokeAppMain(args...)
+		if status != 0 || stderr != "" || !strings.Contains(stdout, "Outlier notices:") ||
+			!strings.Contains(stdout, "::warning::") ||
+			!strings.Contains(stdout, "Combinations left unjudged for lack of samples:") ||
+			!strings.Contains(stdout, "active") {
+			t.Fatalf("leaderboard annotations status=%d stdout=%q stderr=%q", status, stdout, stderr)
+		}
+		if _, err := score.LoadBaseline(output); err != nil {
+			t.Fatalf("annotated leaderboard output is not loadable: %v", err)
+		}
+	})
+}
+
+func TestBaselineStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	valid := writeBaselineReport(t, "valid.json", submitTestReport())
 	bad := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(bad, []byte("{not json\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "baseline.json")
-	var stdout, stderr bytes.Buffer
-	status := baselineCommand([]string{
-		"--strict", "--output", target, valid, bad,
-	}, &stdout, &stderr)
-	if status == 0 {
-		t.Fatalf("strict baseline accepted bad JSON: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	for _, test := range []struct {
+		name  string
+		input []string
+	}{
+		{name: "bad JSON", input: []string{valid, bad}},
+		{name: "missing path", input: []string{missing}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "baseline.json")
+			args := append([]string{"baseline", "--lang", "en", "--strict", "--output", output}, test.input...)
+			status, stdout, stderr := invokeAppMain(args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, "strict mode rejected") {
+				t.Fatalf("strict input status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			if _, err := os.Lstat(output); !os.IsNotExist(err) {
+				t.Fatalf("strict input wrote output: %v", err)
+			}
+		})
 	}
-	if _, err := os.Lstat(target); !os.IsNotExist(err) {
-		t.Fatalf("strict baseline wrote output after bad input: err=%v", err)
+}
+
+func TestBaselineInputStates(t *testing.T) {
+	root := t.TempDir()
+	valid := writeBaselineReport(t, "valid.json", submitTestReport())
+	bad := filepath.Join(root, "bad.json")
+	if err := os.WriteFile(bad, []byte("not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	noMetrics := writeSubmitFixtureReport(t, filepath.Join(root, "no-metrics.json"), modelReportWithoutScoreableMeasurements())
+	firstSubmission := writeSubmissionFixture(t, filepath.Join(root, "first-submission.json"))
+	secondSubmission := writeSubmissionFixture(t, filepath.Join(root, "second-submission.json"))
+	cases := []struct {
+		name       string
+		args       func(string) []string
+		wantStatus int
+		markers    []string
+		checkOut   bool
+	}{
+		{
+			name:       "no input",
+			args:       func(output string) []string { return []string{"--lang", "en", "--output", output} },
+			wantStatus: 1,
+			markers:    []string{"at least one report file"},
+		},
+		{
+			name: "nonstrict skips bad report",
+			args: func(output string) []string {
+				return []string{"--lang", "en", "--output", output, valid, bad}
+			},
+			markers:  []string{"Skipped"},
+			checkOut: true,
+		},
+		{
+			name: "nonstrict skips duplicate submission",
+			args: func(output string) []string {
+				return []string{"--lang", "en", "--output", output, firstSubmission, secondSubmission}
+			},
+			markers:  []string{"Skipped"},
+			checkOut: true,
+		},
+		{
+			name:       "no usable report",
+			args:       func(output string) []string { return []string{"--lang", "en", "--output", output, noMetrics} },
+			wantStatus: 1,
+			markers:    []string{"Skipped", "no scoreable measurements", "no usable report files"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "baseline.json")
+			status, stdout, stderr := invokeAppMain(append([]string{"baseline"}, test.args(output)...)...)
+			if status != test.wantStatus {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			for _, marker := range test.markers {
+				if !strings.Contains(stdout+stderr, marker) {
+					t.Fatalf("missing marker %q in stdout=%q stderr=%q", marker, stdout, stderr)
+				}
+			}
+			if test.checkOut {
+				if _, err := score.LoadBaseline(output); err != nil {
+					t.Fatalf("nonstrict input did not produce baseline: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestBaselineReportsOutputWriteFailure(t *testing.T) {
+	input := writeBaselineReport(t, "report.json", submitTestReport())
+	outputDirectory := t.TempDir()
+	status, stdout, stderr := invokeAppMain("baseline", "--lang", "en", "--output", outputDirectory, input)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "is a directory") {
+		t.Fatalf("baseline output failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(outputDirectory); err != nil {
+		t.Fatalf("output failure changed the destination: %v", err)
+	}
+}
+
+func TestBaselineAndLeaderboardHelp(t *testing.T) {
+	for _, test := range []struct {
+		command string
+		marker  string
+	}{
+		{command: "baseline", marker: "Usage: ecs baseline"},
+		{command: "leaderboard", marker: "Usage: ecs leaderboard"},
+	} {
+		t.Run(test.command, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.command, "--lang", "en", "--help")
+			if status != 0 || stdout != "" || !strings.Contains(stderr, test.marker) {
+				t.Fatalf("%s help status=%d stdout=%q stderr=%q", test.command, status, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestBaselineAndLeaderboardRejectUnknownFlag(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("baseline", "--lang", "en", "--unknown")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
+		t.Fatalf("baseline unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }
