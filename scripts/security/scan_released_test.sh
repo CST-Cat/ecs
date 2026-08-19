@@ -22,4 +22,15 @@ got=$(read_release_build_go "$work/ecs")
   exit 1
 }
 
+printf '%s\n' 'not a Go binary' >"$work/not-go"
+chmod 0755 "$work/not-go"
+if failure=$(read_release_build_go "$work/not-go" 2>&1); then
+  echo "non-Go binary unexpectedly passed" >&2
+  exit 1
+fi
+grep -F "no valid Go build metadata" <<<"$failure" >/dev/null || {
+  echo "invalid metadata diagnostic was lost: $failure" >&2
+  exit 1
+}
+
 echo "scan-released tests passed"

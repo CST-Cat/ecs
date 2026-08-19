@@ -22,6 +22,19 @@ upgrade=$(
 )
 [[ "$upgrade" == 1.26.6 ]] || { echo "upgrade_to=$upgrade, want 1.26.6" >&2; exit 1; }
 
+if ! no_upgrade=$("$triage" --current 1.26.6 "$work/finding.json" 2>"$work/no-upgrade.err"); then
+  echo "already-fixed triage unexpectedly failed" >&2
+  exit 1
+fi
+grep -Fx 'upgrade_to=' <<<"$no_upgrade" >/dev/null || {
+  echo "already-fixed finding requested an upgrade: $no_upgrade" >&2
+  exit 1
+}
+grep -F "no fixed Go release" "$work/no-upgrade.err" >/dev/null || {
+  echo "already-fixed diagnostic was lost" >&2
+  exit 1
+}
+
 security_workflow="$repo_root/.github/workflows/security.yml"
 grep -F 'release_build_go: ${{ steps.scan.outputs.release_build_go }}' "$security_workflow" >/dev/null ||
   { echo "security workflow does not expose release build Go" >&2; exit 1; }

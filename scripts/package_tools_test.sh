@@ -19,4 +19,15 @@ done
 bash "$repo_root/scripts/verify_tools_stage.sh" \
   --arch amd64 --stage-root "$stage_root" --keep-corpus >/dev/null
 
+rm -f "$stage_dir/bin/ping"
+if failure=$(bash "$repo_root/scripts/verify_tools_stage.sh" \
+  --arch amd64 --stage-root "$stage_root" --keep-corpus 2>&1); then
+  echo "missing executable unexpectedly passed" >&2
+  exit 1
+fi
+grep -F "missing an executable ping" <<<"$failure" >/dev/null || {
+  echo "missing executable diagnostic was lost: $failure" >&2
+  exit 1
+}
+
 echo "package tools stage tests passed"

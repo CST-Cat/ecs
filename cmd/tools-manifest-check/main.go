@@ -3,28 +3,40 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"ecs/internal/toolsmanifest"
 )
 
 func main() {
-	expectedArchitecture := flag.String("architecture", "", "require this manifest architecture")
-	expectedToolchainMode := flag.String("toolchain-mode", "", "require this build toolchain mode")
-	expectedSmokeRunner := flag.String("smoke-runner", "", "require this build smoke runner")
-	expectedNPBSmokeClass := flag.String("npb-smoke-class", "", "require this NPB CI smoke class")
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [expectation flags] MANIFEST [MANIFEST ...]\n", os.Args[0])
-		flag.PrintDefaults()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	expectedArchitecture := flags.String("architecture", "", "require this manifest architecture")
+	expectedToolchainMode := flags.String("toolchain-mode", "", "require this build toolchain mode")
+	expectedSmokeRunner := flags.String("smoke-runner", "", "require this build smoke runner")
+	expectedNPBSmokeClass := flags.String("npb-smoke-class", "", "require this NPB CI smoke class")
+	flags.Usage = func() {
+		fmt.Fprintf(stderr, "usage: %s [expectation flags] MANIFEST [MANIFEST ...]\n", flags.Name())
+		flags.PrintDefaults()
 	}
-	flag.Parse()
-	if flag.NArg() == 0 {
-		flag.Usage()
-		os.Exit(2)
+	if err := flags.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() == 0 {
+		flags.Usage()
+		return 2
 	}
 
 	failed := false
-	for _, path := range flag.Args() {
+	for _, path := range flags.Args() {
 		data, err := os.ReadFile(path)
 		var manifest toolsmanifest.Manifest
 		if err == nil {
@@ -52,13 +64,14 @@ func main() {
 			}
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: invalid manifest: %v\n", path, err)
+			fmt.Fprintf(stderr, "%s: invalid manifest: %v\n", path, err)
 			failed = true
 			continue
 		}
-		fmt.Printf("%s: valid (%s)\n", path, manifest.Architecture)
+		fmt.Fprintf(stdout, "%s: valid (%s)\n", path, manifest.Architecture)
 	}
 	if failed {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

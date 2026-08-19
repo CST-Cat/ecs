@@ -54,4 +54,19 @@ grep -Fqx '  ECS_RELEASE_GO: "1.25.4"' "$fixture/.github/workflows/release.yml" 
 [[ "$(git -C "$fixture" diff-tree --no-commit-id --name-only -r HEAD)" == ".github/workflows/release.yml" ]] ||
   { echo "upgrade changed files outside release pin" >&2; exit 1; }
 
+release_hash=$(sha256sum "$fixture/.github/workflows/release.yml")
+if downgrade=$(cd "$fixture" && PATH="$fake_bin:$PATH" scripts/security/propose_go_upgrade.sh \
+  --to 1.25.3 --reason "fixture downgrade" 2>&1); then
+  echo "downgrade unexpectedly passed" >&2
+  exit 1
+fi
+grep -F "不是当前版本" <<<"$downgrade" >/dev/null || {
+  echo "downgrade diagnostic was lost: $downgrade" >&2
+  exit 1
+}
+[[ "$(sha256sum "$fixture/.github/workflows/release.yml")" == "$release_hash" ]] || {
+  echo "rejected downgrade changed release workflow" >&2
+  exit 1
+}
+
 echo "propose-go-upgrade tests passed"
