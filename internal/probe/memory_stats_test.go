@@ -2,23 +2,93 @@ package probe
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"ecs/internal/model"
 )
 
-func TestMemInfoFixtureProducesEffectiveUsage(t *testing.T) {
-	path := t.TempDir() + "/meminfo"
-	if err := os.WriteFile(path, []byte("MemTotal:       1024 kB\nMemAvailable:    256 kB\n"), 0o600); err != nil {
-		t.Fatal(err)
+func TestMemoryInventoryAndFacilities(t *testing.T) {
+	directory := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	memory := memoryUsageFromMemInfo(parseMemInfo(path), 512*1024)
-	if memory.HostTotalBytes != 1024*1024 || memory.HostAvailableBytes != 256*1024 ||
-		memory.HostUsedBytes != 768*1024 || memory.HostUsagePercent != 75 {
-		t.Fatalf("host memory = %+v", memory)
-	}
-	if !memory.LimitApplied || memory.EffectiveTotalBytes != 512*1024 ||
-		memory.EffectiveAvailableBytes != 256*1024 || memory.EffectiveUsedBytes != 256*1024 ||
-		memory.EffectiveUsagePercent != 50 {
+	meminfo := map[string]uint64{"MemTotal": 1024, "MemAvailable": 256}
+	memory := memoryUsageFromMemInfo(meminfo, 512*1024)
+	if !memory.AvailableKnown || !memory.LimitApplied || memory.HostUsedBytes != 768*1024 || memory.EffectiveUsedBytes != 256*1024 || memory.EffectiveUsagePercent != 50 {
 		t.Fatalf("effective memory = %+v", memory)
+	}
+	fallback := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 100, "MemFree": 20, "Buffers": 30, "Cached": 60}, 0)
+	if fallback.AvailableKnown || fallback.HostAvailableBytes != 100*1024 || fallback.HostUsedBytes != 0 {
+		t.Fatalf("memory available fallback = %+v", fallback)
+	}
+	clamped := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 10, "MemAvailable": 20}, 0)
+	if clamped.HostAvailableBytes != clamped.HostTotalBytes || clamped.HostUsedBytes != 0 {
+		t.Fatalf("memory availability clamp = %+v", clamped)
+	}
+
+	balloonRoot := filepath.Join(directory, "sys", "class", "virtio-balloon", "balloon0")
+	write(filepath.Join(balloonRoot, "reclaim"), "enabled\n")
+	balloon := detectBalloonReclaim(filepath.Join(directory, "sys"), filepath.Join(directory, "vmstat"))
+	if !balloon.Available || !strings.Contains(balloon.Evidence, "reclaim=enabled") {
+		t.Fatalf("balloon facility = %+v", balloon)
+	}
+	write(filepath.Join(directory, "vmstat"), "balloon_reclaim 7\nballoon_inflate 2\ninvalid nope\n")
+	balloon = detectBalloonReclaim(filepath.Join(directory, "absent-sys"), filepath.Join(directory, "vmstat"))
+	if !balloon.Available || !strings.Contains(balloon.Evidence, "balloon_reclaim=7") {
+		t.Fatalf("vmstat balloon facility = %+v", balloon)
+	}
+	write(filepath.Join(directory, "invalid-vmstat"), "balloon_reclaim nope\nballoon_inflate bad\n")
+	if detectBalloonReclaim(filepath.Join(directory, "absent-sys"), filepath.Join(directory, "invalid-vmstat")).Available {
+		t.Fatal("invalid balloon evidence reported as available")
+	}
+	ksmRoot := filepath.Join(directory, "ksm", "kernel", "mm", "ksm")
+	write(filepath.Join(ksmRoot, "run"), "0\n")
+	write(filepath.Join(ksmRoot, "pages_sharing"), "12\n")
+	ksm := detectKSM(filepath.Join(directory, "ksm"))
+	if !ksm.Available || !strings.Contains(ksm.Evidence, "pages_sharing=12") {
+		t.Fatalf("KSM facility = %+v", ksm)
+	}
+	partialKSM := filepath.Join(directory, "partial-ksm")
+	write(filepath.Join(partialKSM, "kernel", "mm", "ksm", "run"), "1\n")
+	if detectKSM(partialKSM).Available {
+		t.Fatal("incomplete KSM evidence reported as available")
+	}
+	if detectKSM(filepath.Join(directory, "absent-ksm")).Available {
+		t.Fatal("missing KSM evidence reported as available")
+	}
+
+	result := model.NewResult("memory", "memory")
+	appendMemoryInventory(&result, memory, balloon, ksm)
+	for _, key := range []string{"memory_total", "memory_available", "balloon_reclaim", "ksm_merging"} {
+		found := false
+		for _, field := range result.Fields {
+			if field.Key == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("memory inventory field %q missing: %+v", key, result.Fields)
+		}
+	}
+	limitedFallback := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 1024, "MemFree": 100, "Buffers": 100, "Cached": 100}, 512*1024)
+	limitedFallback.EffectiveCurrentKnown = true
+	degraded := model.NewResult("memory", "memory")
+	appendMemoryInventory(&degraded, limitedFallback, memoryFacility{Evidence: "none"}, memoryFacility{Evidence: "none"})
+	values := make(map[string]string)
+	for _, field := range degraded.Fields {
+		values[field.Key] = field.Value
+	}
+	if values["balloon_reclaim"] != "unavailable" || values["ksm_merging"] != "unavailable" || !strings.Contains(strings.Join(degraded.Notes, " "), "MemAvailable unavailable") || !strings.Contains(strings.Join(degraded.Notes, " "), "memory.current") || !strings.Contains(strings.Join(degraded.Notes, " "), "Balloon reclaim unavailable") || !strings.Contains(strings.Join(degraded.Notes, " "), "KSM merging unavailable") {
+		t.Fatalf("degraded memory inventory = fields:%v notes:%v", values, degraded.Notes)
 	}
 }

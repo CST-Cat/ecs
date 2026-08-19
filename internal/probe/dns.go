@@ -218,23 +218,30 @@ func dnsQueryNetwork(ctx context.Context, address, name string, timeout time.Dur
 	if err != nil {
 		return elapsed, err
 	}
-	if n < 12 {
-		return elapsed, fmt.Errorf("DNS 响应过短")
-	}
-	if binary.BigEndian.Uint16(buffer[:2]) != id {
-		return elapsed, fmt.Errorf("DNS 事务 ID 不匹配")
-	}
-	flags := binary.BigEndian.Uint16(buffer[2:4])
-	if flags&0x8000 == 0 {
-		return elapsed, fmt.Errorf("不是 DNS 响应")
-	}
-	if rcode := flags & 0x000f; rcode != 0 {
-		return elapsed, fmt.Errorf("DNS RCODE %d", rcode)
-	}
-	if binary.BigEndian.Uint16(buffer[6:8]) == 0 {
-		return elapsed, fmt.Errorf("DNS 无应答记录")
+	if err := validateDNSResponse(buffer[:n], id); err != nil {
+		return elapsed, err
 	}
 	return elapsed, nil
+}
+
+func validateDNSResponse(packet []byte, id uint16) error {
+	if len(packet) < 12 {
+		return fmt.Errorf("DNS 响应过短")
+	}
+	if binary.BigEndian.Uint16(packet[:2]) != id {
+		return fmt.Errorf("DNS 事务 ID 不匹配")
+	}
+	flags := binary.BigEndian.Uint16(packet[2:4])
+	if flags&0x8000 == 0 {
+		return fmt.Errorf("不是 DNS 响应")
+	}
+	if rcode := flags & 0x000f; rcode != 0 {
+		return fmt.Errorf("DNS RCODE %d", rcode)
+	}
+	if binary.BigEndian.Uint16(packet[6:8]) == 0 {
+		return fmt.Errorf("DNS 无应答记录")
+	}
+	return nil
 }
 
 func buildDNSQuery(name string) ([]byte, uint16, error) {

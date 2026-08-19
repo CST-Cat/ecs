@@ -324,6 +324,9 @@ func tiktokCheck() mediaCheck {
 			if response.OK() && region != "" {
 				return mediaVerdict{State: stateUnlocked, Region: region, Evidence: "页面回传 region"}
 			}
+			if response.OK() {
+				return mediaVerdict{State: stateUnknown, Evidence: "2xx 但未返回 region/缺少地区信号"}
+			}
 			return httpFallbackVerdict(response, region)
 		},
 	}

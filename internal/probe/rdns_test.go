@@ -1,16 +1,65 @@
 package probe
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net"
+	"strings"
+	"testing"
 
-func TestPTRFixtureProvidesHintAndBasicVerdict(t *testing.T) {
+	"ecs/internal/model"
+)
+
+type fixtureRDNSResolver struct {
+	addresses []string
+	addrErr   error
+	hosts     map[string][]string
+	hostErr   map[string]error
+}
+
+func (fixture fixtureRDNSResolver) LookupAddr(context.Context, string) ([]string, error) {
+	return fixture.addresses, fixture.addrErr
+}
+
+func (fixture fixtureRDNSResolver) LookupHost(_ context.Context, host string) ([]string, error) {
+	if err := fixture.hostErr[host]; err != nil {
+		return nil, err
+	}
+	return fixture.hosts[host], nil
+}
+
+func TestReverseDNSFixturesPreserveLookupDiagnoses(t *testing.T) {
 	if hits := matchResidentialHints("pppoe-dynamic.example.net"); len(hits) == 0 {
 		t.Fatal("residential PTR hint was not recognized")
 	}
-	confirmed := rdnsResult{
-		IP: "203.0.113.1", Names: []string{"mail.example.net."},
-		Forward: []string{"203.0.113.1"}, Confirmed: true,
+	if hits := matchResidentialHints("server1.resources.example.net"); len(hits) != 0 {
+		t.Fatalf("substring falsely matched residential hint: %v", hits)
 	}
-	if !confirmed.Confirmed || len(confirmed.Names) != 1 || len(confirmed.Forward) != 1 {
-		t.Fatalf("PTR fixture verdict = %+v", confirmed)
+	const ip = "203.0.113.1"
+	cases := []struct {
+		name, ptr, fcrdns, note string
+		resolver                fixtureRDNSResolver
+		status                  model.Status
+		failures                int
+		stage, detail           string
+	}{
+		{name: "PTR not found", resolver: fixtureRDNSResolver{addrErr: &net.DNSError{IsNotFound: true, Err: "NXDOMAIN"}}, status: model.StatusWarning, ptr: "无 PTR 记录", fcrdns: "未通过", note: "没有 PTR"},
+		{name: "PTR query failed", resolver: fixtureRDNSResolver{addrErr: errors.New("resolver unavailable")}, status: model.StatusWarning, ptr: "PTR 查询失败", fcrdns: "未通过", note: "PTR 查询失败", failures: 1, stage: "reverse_lookup", detail: "resolver unavailable"},
+		{name: "FCrDNS confirmed", resolver: fixtureRDNSResolver{addresses: []string{"mail.example.net."}, hosts: map[string][]string{"mail.example.net": {ip}}}, status: model.StatusOK, ptr: "mail.example.net.", fcrdns: "通过", note: "正反一致"},
+		{name: "forward mismatch", resolver: fixtureRDNSResolver{addresses: []string{"other.example.net."}, hosts: map[string][]string{"other.example.net": {"198.51.100.2"}}}, status: model.StatusWarning, ptr: "other.example.net.", fcrdns: "未通过", note: "正向解析回不到"},
+		{name: "forward query failed", resolver: fixtureRDNSResolver{addresses: []string{"mail.example.net."}, hostErr: map[string]error{"mail.example.net": errors.New("forward unavailable")}}, status: model.StatusWarning, ptr: "mail.example.net.", fcrdns: "未通过", note: "正向确认查询失败", failures: 1, stage: "forward_confirmation", detail: "forward unavailable"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			check := checkReverseDNS(context.Background(), test.resolver, ip)
+			result := model.NewResult("rdns", "反向解析")
+			appendReverseDNSResult(&result, check)
+			if result.Status != test.status || result.Fields[0].Value != test.ptr || result.Fields[1].Value != test.fcrdns || len(result.Failures) != test.failures || !strings.Contains(strings.Join(result.Notes, " "), test.note) || test.detail != "" && (len(result.Failures) == 0 || result.Failures[0].Stage != test.stage || !strings.Contains(result.Failures[0].Message, test.detail)) {
+				t.Fatalf("rDNS result = status:%s fields:%v failures:%v notes:%v", result.Status, result.Fields, result.Failures, result.Notes)
+			}
+			if len(result.Tables) != 1 || result.Tables[0].RowIdentity != "item" || len(result.Measurements) != 1 || result.Measurements[0].Value != boolValue(check.Confirmed) {
+				t.Fatalf("rDNS schema = table:%+v measurements:%+v", result.Tables[0], result.Measurements)
+			}
+		})
 	}
 }

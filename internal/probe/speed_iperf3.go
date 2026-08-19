@@ -91,13 +91,21 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 		result.Err = runCtx.Err().Error()
 		return result
 	}
-	if stdout.Len() > 4*1024*1024 {
+	return parseIPerfUDPJSON(stdout.Bytes(), err, stderr.Bytes())
+}
+
+// parseIPerfUDPJSON validates one iperf3 UDP JSON result.  commandErr and
+// stderr are supplied by the command boundary so parsing keeps execution
+// diagnostics while remaining deterministic for callers and tests.
+func parseIPerfUDPJSON(raw []byte, commandErr error, stderr []byte) udpResult {
+	result := udpResult{}
+	if len(raw) > 4*1024*1024 {
 		result.Err = "iperf3 UDP JSON 超过 4 MiB 安全上限"
 		return result
 	}
 	var output iperfJSONOutput
-	if decodeErr := json.Unmarshal(stdout.Bytes(), &output); decodeErr != nil {
-		detail := tailText(sanitizeCommandOutput(stderr.Bytes()), 200)
+	if decodeErr := json.Unmarshal(raw, &output); decodeErr != nil {
+		detail := tailText(sanitizeCommandOutput(stderr), 200)
 		result.Err = fmt.Sprintf("解析 UDP JSON: %v: %s", decodeErr, detail)
 		return result
 	}
@@ -105,8 +113,8 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 		result.Err = output.Error
 		return result
 	}
-	if err != nil {
-		result.Err = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 200))
+	if commandErr != nil {
+		result.Err = fmt.Sprintf("%v: %s", commandErr, tailText(sanitizeCommandOutput(stderr), 200))
 		return result
 	}
 	if !strings.EqualFold(output.Start.TestStart.Protocol, "UDP") {
@@ -156,33 +164,28 @@ type iperfRow struct {
 
 type speedProbe struct{}
 
-// iperfPortProbeTimeout bounds the optional TCP reachability check used by the
-// live node test.  Public nodes commonly leave part of their advertised port
-// range filtered; a bounded check keeps that diagnostic test from waiting on
-// every filtered port.  The check sends no application data.
-const iperfPortProbeTimeout = 1500 * time.Millisecond
+// iperfPortBudgetPerAttempt estimates the retry budget consumed by one
+// advertised port when a server silently drops the control connection.
+const iperfPortBudgetPerAttempt = 1500 * time.Millisecond
 
-// iperfControlConnectTimeout limits only TCP control-connection setup.  The
-// real iperf3 client can therefore move past a filtered or black-holed port
-// without a separate connect/close preflight that might disturb a public
-// iperf3 daemon still handling the previous test.
+// iperfControlConnectTimeout limits TCP control-connection setup, allowing
+// the real iperf3 client to move past a filtered or black-holed port while a
+// public daemon may still be handling the previous test.
 const iperfControlConnectTimeout = 1500 * time.Millisecond
 
-// Do not let a user-supplied or malformed endpoint range turn the cheap scan
-// into an unbounded wait.  The built-in longest range is 37 ports, so this
-// leaves room to inspect every built-in endpoint while capping larger ranges.
-const iperfPortScanBudget = 60 * time.Second
+// Do not let a user-supplied or malformed endpoint range turn retries into an
+// unbounded wait.  The built-in longest range is 37 ports, so this leaves room
+// for every built-in endpoint while capping larger ranges.
+const iperfPortBudget = 60 * time.Second
 
 // iperfDirectionBudgetWindows is the number of full iperf3 command windows a
-// direction may spend after the short port scan.  The configured ranges are
-// still traversed in order; this wall-clock budget only protects callers from
-// a pathological range whose every port silently drops packets.  A successful
-// session always stops the scan immediately.
+// direction may spend while retrying configured ports. The configured range
+// is traversed in order; this wall-clock budget protects callers from a
+// pathological range whose every port silently drops packets. A successful
+// session always stops retries immediately.
 const iperfDirectionBudgetWindows = 2
 
 type iperfDirectionRunner func(context.Context, string, string, int, string, bool, int, int) iperfDirectionResult
-
-type iperfPortChecker func(context.Context, string, int, string) error
 
 func (speedProbe) ID() string         { return "speed" }
 func (speedProbe) Title() string      { return "网络吞吐" }
@@ -478,21 +481,19 @@ func appendIPerfDirectionDiagnostics(
 }
 
 func runIPerfDirection(ctx context.Context, path string, target config.IPerfEndpoint, family string, reverse bool, threads, seconds int) iperfDirectionResult {
-	// Do not make a separate TCP connect/close preflight here: on an iperf3
-	// server that can leave an incomplete control session and reset the next
-	// direction.  executeIPerf uses --connect-timeout for the same fast retry
-	// behavior without that extra connection.
-	return runIPerfDirectionWith(ctx, path, target, family, reverse, threads, seconds, executeIPerf, nil)
+	// executeIPerf uses --connect-timeout to bound each retry without opening a
+	// separate connection that could disturb the next direction.
+	return runIPerfDirectionWith(ctx, path, target, family, reverse, threads, seconds, executeIPerf)
 }
 
 func runIPerfDirectionPreferred(ctx context.Context, path string, target config.IPerfEndpoint, family string, reverse bool, threads, seconds, preferredPort int) iperfDirectionResult {
-	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, preferredPort, executeIPerf, nil)
+	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, preferredPort, executeIPerf)
 }
 
 // runIPerfDirectionWith is the retry policy behind runIPerfDirection.  Keeping
-// the runner and port checker injectable makes the policy auditable without
-// replacing the real iperf3 process in production: tests can exercise every
-// port, protocol failure, success stop, and cancellation deterministically.
+// the runner injectable makes the policy auditable without replacing the real
+// iperf3 process in production: tests can exercise port retry, success stop,
+// and cancellation deterministically.
 func runIPerfDirectionWith(
 	ctx context.Context,
 	path string,
@@ -501,9 +502,8 @@ func runIPerfDirectionWith(
 	reverse bool,
 	threads, seconds int,
 	run iperfDirectionRunner,
-	check iperfPortChecker,
 ) iperfDirectionResult {
-	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, 0, run, check)
+	return runIPerfDirectionWithPreferred(ctx, path, target, family, reverse, threads, seconds, 0, run)
 }
 
 func runIPerfDirectionWithPreferred(
@@ -514,7 +514,6 @@ func runIPerfDirectionWithPreferred(
 	reverse bool,
 	threads, seconds, preferredPort int,
 	run iperfDirectionRunner,
-	check iperfPortChecker,
 ) iperfDirectionResult {
 	ports := iperfPortCandidates(target)
 	if len(ports) == 0 {
@@ -526,7 +525,7 @@ func runIPerfDirectionWithPreferred(
 
 	// executeIPerf already bounds each child process.  This outer budget adds a
 	// finite ceiling across a whole range of silently dropped ports while still
-	// leaving room for the short scan and one successful transfer.
+	// leaving room for configured-port retries and one successful transfer.
 	runCtx, cancel := context.WithTimeout(ctx, iperfDirectionBudget(seconds, len(ports)))
 	defer cancel()
 
@@ -542,19 +541,6 @@ func runIPerfDirectionWithPreferred(
 				last.Error = err.Error()
 			}
 			break
-		}
-
-		if check != nil {
-			if err := check(runCtx, target.Host, port, family); err != nil {
-				last = iperfDirectionResult{
-					Port:  port,
-					Error: fmt.Sprintf("iperf3 端口预检失败: %v", err),
-				}
-				if runCtx.Err() != nil {
-					break
-				}
-				continue
-			}
 		}
 
 		sample := run(runCtx, path, target.Host, port, family, reverse, threads, seconds)
@@ -625,11 +611,11 @@ func iperfDirectionBudget(seconds, portCount int) time.Duration {
 		seconds = 30
 	}
 	commandWindow := time.Duration(seconds+12) * time.Second
-	scanWindow := iperfPortScanBudget
-	if portCount >= 0 && portCount < int(iperfPortScanBudget/iperfPortProbeTimeout) {
-		scanWindow = time.Duration(portCount) * iperfPortProbeTimeout
+	portWindow := iperfPortBudget
+	if portCount >= 0 && portCount < int(iperfPortBudget/iperfPortBudgetPerAttempt) {
+		portWindow = time.Duration(portCount) * iperfPortBudgetPerAttempt
 	}
-	return iperfDirectionBudgetWindows*commandWindow + scanWindow + 2*iperfPortProbeTimeout
+	return iperfDirectionBudgetWindows*commandWindow + portWindow + 2*iperfPortBudgetPerAttempt
 }
 
 // iperfUDPPort chooses a port that actually produced TCP throughput.  Failed

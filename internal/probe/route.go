@@ -223,11 +223,6 @@ func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, f
 	}
 }
 
-func routeHopCount(engineName, output string) int {
-	_, visible, _, _ := routeHopSummary(engineName, output)
-	return visible
-}
-
 func routeHopSummary(engineName, output string) (slots, visible, timeouts int, ok bool) {
 	if !isNextTraceEngine(engineName) {
 		return 0, 0, 0, false

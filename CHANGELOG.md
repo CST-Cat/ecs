@@ -9,6 +9,8 @@
 
 ## Unreleased
 
+- 修复 TikTok 公开页返回 2xx 但缺少地区信号时的判定：现在保守标为“未知”并保留缺失信号诊断，不再误报为“不可达”。
+- 修复反向 DNS 诊断：NXDOMAIN（无 PTR）与 PTR/正向查询故障现在分开记录，FCrDNS 失败会保留可排查的查询错误而不再伪装成“无 PTR”。
 - 为表格报告增加可选的机器 schema 字段 `key`、`column_keys` 与 `row_identity`；旧 JSON 缺少这些字段时仍可读取，不会从显示标题、列名或当前数据猜测身份。`compare` 现在按稳定 table/column key 匹配，并且只有显式声明的行身份才逐行比较；无稳定行身份的 legacy 表改用位置式或整表快照的保守比较，避免数据变化伪造行重排。
 - 补齐全部生产 probe 表的稳定 schema，并让 apps/media 的分类按独立 machine key 分组；本地化、脱敏和文本渲染的裁剪会保留表格机器字段，中文/英文标题或列名不会再改变机器比较 contract。
 

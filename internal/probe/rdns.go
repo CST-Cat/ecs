@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -22,12 +23,18 @@ import (
 
 // rdnsResult 是一次反解校验的结果。
 type rdnsResult struct {
-	IP        string
-	Names     []string
-	Forward   []string
-	Confirmed bool
-	Err       error
-	Hints     []string
+	IP         string
+	Names      []string
+	Forward    []string
+	Confirmed  bool
+	ReverseErr error
+	ForwardErr error
+	Hints      []string
+}
+
+type rdnsResolver interface {
+	LookupAddr(context.Context, string) ([]string, error)
+	LookupHost(context.Context, string) ([]string, error)
 }
 
 // residentialPTRHints 是家宽/动态地址在 PTR 里的常见特征词。
@@ -41,32 +48,47 @@ var residentialPTRHints = []string{
 }
 
 // checkReverseDNS 反查 IP 并做正向确认。
-func checkReverseDNS(ctx context.Context, resolver *net.Resolver, ip string) rdnsResult {
+func checkReverseDNS(ctx context.Context, resolver rdnsResolver, ip string) rdnsResult {
 	result := rdnsResult{IP: ip}
 	lookupCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
 	names, err := resolver.LookupAddr(lookupCtx, ip)
-	if err != nil || len(names) == 0 {
-		result.Err = err
+	if err != nil {
+		var dnsErr *net.DNSError
+		if !errors.As(err, &dnsErr) || !dnsErr.IsNotFound {
+			result.ReverseErr = err
+		}
+		return result
+	}
+	if len(names) == 0 {
 		return result
 	}
 	result.Names = names
 
 	// 正向确认：PTR 指向的域名必须能解析回同一个 IP，否则任何人都能把 PTR
 	// 指向别人的域名来伪装身份。
+	var forwardErr error
+	forwardSucceeded := false
 	for _, name := range names {
 		host := strings.TrimSuffix(name, ".")
 		addresses, err := resolver.LookupHost(lookupCtx, host)
 		if err != nil {
+			if forwardErr == nil {
+				forwardErr = err
+			}
 			continue
 		}
+		forwardSucceeded = true
 		result.Forward = append(result.Forward, addresses...)
 		for _, address := range addresses {
 			if address == ip {
 				result.Confirmed = true
 			}
 		}
+	}
+	if !forwardSucceeded {
+		result.ForwardErr = forwardErr
 	}
 
 	result.Hints = matchResidentialHints(strings.Join(names, " "))
@@ -99,6 +121,13 @@ func matchResidentialHints(names string) []string {
 func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	resolver := &net.Resolver{}
 	check := checkReverseDNS(ctx, resolver, ip)
+	appendReverseDNSResult(result, check)
+}
+
+// appendReverseDNSResult renders a checked result separately from resolver I/O.
+// The split keeps report semantics deterministic for callers with a fixture while
+// appendReverseDNS retains the normal resolver behavior.
+func appendReverseDNSResult(result *model.Result, check rdnsResult) {
 
 	table := model.Table{
 		Key:         "network.reverse_dns.checks",
@@ -108,7 +137,9 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 		RowIdentity: "item",
 	}
 	ptrValue := "无 PTR 记录"
-	if len(check.Names) > 0 {
+	if check.ReverseErr != nil {
+		ptrValue = "PTR 查询失败"
+	} else if len(check.Names) > 0 {
 		ptrValue = strings.Join(check.Names, ", ")
 	}
 	table.Rows = append(table.Rows, []string{
@@ -121,6 +152,10 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	case check.Confirmed:
 		fcrdns = "通过"
 		fcrdnsWhy = "PTR 指向的域名能正向解析回本 IP"
+	case check.ReverseErr != nil:
+		fcrdnsWhy = "PTR 查询失败：" + compactError(check.ReverseErr)
+	case check.ForwardErr != nil:
+		fcrdnsWhy = "正向确认查询失败：" + compactError(check.ForwardErr)
 	case len(check.Names) > 0:
 		fcrdnsWhy = "PTR 存在但正向解析对不上——任何人都能把 PTR 指向别人的域名，因此必须正向确认"
 	}
@@ -143,14 +178,26 @@ func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 		Value: boolValue(check.Confirmed), Unit: "项", Display: fcrdns,
 		Method: "reverse-dns-forward-confirm-v1", HigherIsBetter: model.BoolPtr(true),
 	})
+	if check.ReverseErr != nil {
+		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "reverse_lookup", Target: check.IP, Count: 1, Message: fcrdnsWhy})
+	}
+	if check.ForwardErr != nil {
+		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "forward_confirmation", Target: check.IP, Count: 1, Message: fcrdnsWhy})
+	}
 
 	switch {
+	case check.ReverseErr != nil:
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fcrdnsWhy)
 	case len(check.Names) == 0:
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes,
 			"该 IP 没有 PTR 记录。主流邮件服务商会因此直接拒收或判为垃圾邮件；"+
 				"若要用这台机器发信，需要让服务商为该 IP 配置反向解析。"+
 				"（注意：很多云厂商的默认出口都没有 PTR，这与 IP 是否干净无关。）")
+	case check.ForwardErr != nil:
+		result.Status = model.StatusWarning
+		result.Notes = append(result.Notes, fcrdnsWhy)
 	case !check.Confirmed:
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes,

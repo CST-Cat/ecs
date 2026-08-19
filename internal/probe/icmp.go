@@ -80,7 +80,20 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 	output, runErr := command.CombinedOutput()
 	text := sanitizeCommandOutput(output)
 
+	stats = parseICMPOutput(text)
 	// ping 在有丢包时返回非零退出码，但统计行依然有效，所以先解析再判错。
+	if !stats.Available {
+		if runCtx.Err() != nil {
+			stats.Err = runCtx.Err()
+		} else if runErr != nil {
+			stats.Err = runErr
+		}
+	}
+	return stats
+}
+
+func parseICMPOutput(text string) icmpStats {
+	stats := icmpStats{}
 	if match := pingLossPattern.FindStringSubmatch(text); len(match) == 2 {
 		if loss, ok := parsePingFloat(match[1]); ok && loss <= 100 {
 			stats.LossPercent = loss
@@ -101,13 +114,6 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 			stats.MinMS, stats.AvgMS, stats.MaxMS = values[0], values[1], values[2]
 			stats.RTTKnown = true
 			stats.Available = true
-		}
-	}
-	if !stats.Available {
-		if runCtx.Err() != nil {
-			stats.Err = runCtx.Err()
-		} else if runErr != nil {
-			stats.Err = runErr
 		}
 	}
 	return stats
