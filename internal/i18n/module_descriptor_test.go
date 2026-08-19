@@ -7,14 +7,29 @@ import (
 	"ecs/internal/i18n"
 )
 
-func TestModuleDescriptorTitleIsTranslated(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor("system")
-	if !ok || descriptor.TitleKey == "" {
-		t.Fatalf("system descriptor = %+v, ok=%v", descriptor, ok)
+func TestModuleDescriptorsHaveLocalizedMetadata(t *testing.T) {
+	descriptors := config.ModuleDescriptors()
+	if len(descriptors) == 0 {
+		t.Fatal("module descriptor list is empty")
 	}
-	for _, lang := range i18n.Supported() {
-		if !i18n.Has(lang, descriptor.TitleKey) {
-			t.Errorf("system title %q missing %s translation", descriptor.TitleKey, lang)
+	for _, descriptor := range descriptors {
+		for _, lang := range i18n.Supported() {
+			if !i18n.Has(lang, descriptor.TitleKey) || !i18n.Has(lang, descriptor.DescriptionKey) {
+				t.Errorf("%s metadata missing %s translation: title=%q description=%q", descriptor.ID, lang, descriptor.TitleKey, descriptor.DescriptionKey)
+			}
+		}
+		if descriptor.WizardGroup == "" && descriptor.WizardQuestionKey != "" {
+			t.Errorf("%s has question without wizard group", descriptor.ID)
+		}
+		if descriptor.WizardGroup != "" && descriptor.WizardQuestionKey == "" {
+			t.Errorf("%s has wizard group without question", descriptor.ID)
+		}
+		if descriptor.WizardQuestionKey != "" {
+			for _, lang := range i18n.Supported() {
+				if !i18n.Has(lang, descriptor.WizardQuestionKey) {
+					t.Errorf("%s wizard question %q missing %s translation", descriptor.ID, descriptor.WizardQuestionKey, lang)
+				}
+			}
 		}
 	}
 }
