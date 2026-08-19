@@ -3,8 +3,10 @@ package report
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	comparison "ecs/internal/compare"
 	"ecs/internal/i18n"
@@ -12,7 +14,7 @@ import (
 	"ecs/internal/termcolor"
 )
 
-func comparisonReportFixture(t *testing.T, count int, reference int) comparison.Report {
+func comparisonReportsFixture(t *testing.T, count int) ([]model.Report, []string) {
 	t.Helper()
 	reports := make([]model.Report, 0, count)
 	labels := make([]string, 0, count)
@@ -33,11 +35,43 @@ func comparisonReportFixture(t *testing.T, count int, reference int) comparison.
 		reports = append(reports, report)
 		labels = append(labels, "node-"+formatComparisonNumber(float64(index+1)))
 	}
+	return reports, labels
+}
+
+func comparisonReportFixture(t *testing.T, count int, reference int) comparison.Report {
+	t.Helper()
+	reports, labels := comparisonReportsFixture(t, count)
 	data, err := comparison.Build(reports, comparison.Options{Labels: labels, Reference: reference, Tool: model.ToolInfo{Name: "ecs", Version: "test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestComparisonBuildIsCanonicalAcrossLanguages(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	reports, labels := comparisonReportsFixture(t, 2)
+	var results []comparison.Report
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		data, err := comparison.Build(reports, comparison.Options{Labels: labels, Reference: 0, Tool: model.ToolInfo{Name: "ecs", Version: "test"}})
+		if err != nil {
+			t.Fatalf("Build in %s: %v", language, err)
+		}
+		data.GeneratedAt = time.Time{}
+		results = append(results, data)
+	}
+	if !reflect.DeepEqual(results[0], results[1]) {
+		t.Fatalf("canonical compare result changed with language:\nzh=%+v\nen=%+v", results[0], results[1])
+	}
+	jsonBytes, err := ComparisonJSON(results[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(jsonBytes), `"compare.notice.scope"`) || strings.Contains(string(jsonBytes), "Only values") {
+		t.Fatalf("comparison JSON is not canonical: %s", jsonBytes)
+	}
 }
 
 func TestComparisonFormatsPreserveHighlightsBarsAndEvidence(t *testing.T) {
@@ -83,6 +117,77 @@ func TestComparisonFormatsPreserveHighlightsBarsAndEvidence(t *testing.T) {
 	}
 	if strings.Contains(htmlText, "<script") || strings.Contains(htmlText, "%!") || !strings.Contains(htmlText, "CPU &lt;rate&gt;") {
 		t.Fatalf("HTML is unsafe or malformed: %s", htmlText)
+	}
+}
+
+func TestComparisonNoticesLocalizeOnlyAtHumanRenderers(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+	data := comparisonReportFixture(t, 2, 0)
+	canonicalNotice := data.Notices[0]
+	canonicalJSON, err := ComparisonJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(canonicalJSON), canonicalNotice) {
+		t.Fatalf("comparison JSON did not preserve canonical notice %q: %s", canonicalNotice, canonicalJSON)
+	}
+
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		text := ComparisonText(data, termcolor.LevelNone)
+		markdown := ComparisonMarkdown(data)
+		htmlBytes, renderErr := ComparisonHTML(data)
+		if renderErr != nil {
+			t.Fatal(renderErr)
+		}
+		for format, content := range map[string]string{"txt": text, "md": markdown, "html": string(htmlBytes)} {
+			if strings.Contains(content, canonicalNotice) || strings.Contains(content, "compare.notice.") {
+				t.Fatalf("%s leaked canonical notice key in %s: %s", language, format, content)
+			}
+		}
+		if !strings.Contains(text, i18n.T("compare.notice.scope")) ||
+			!strings.Contains(markdown, i18n.T("compare.notice.scope")) ||
+			!strings.Contains(string(htmlBytes), i18n.T("compare.notice.scope")) {
+			t.Fatalf("%s renderer did not localize comparison notice", language)
+		}
+	}
+}
+
+func TestComparisonVersionNoticesSurviveEveryHumanRenderer(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	i18n.Set(i18n.LangZH)
+	// Rebuild through compare so the version notices use the canonical
+	// machine representation rather than a hand-authored display string.
+	reports := []model.Report{sampleReport(), sampleReport()}
+	for index := range reports {
+		reports[index].Run.ID = "run-" + formatComparisonNumber(float64(index+1))
+	}
+	reports[1].SchemaVersion = "ecs.report/v2"
+	reports[1].Tool.Version = "0.7.0"
+	data, err := comparison.Build(reports, comparison.Options{Reference: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Notices) < 2 {
+		t.Fatalf("version notices missing: %v", data.Notices)
+	}
+
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		text := ComparisonText(data, termcolor.LevelNone)
+		markdown := ComparisonMarkdown(data)
+		htmlBytes, renderErr := ComparisonHTML(data)
+		if renderErr != nil {
+			t.Fatal(renderErr)
+		}
+		for format, content := range map[string]string{"txt": text, "md": markdown, "html": string(htmlBytes)} {
+			if strings.Contains(content, "compare.notice.") || !strings.Contains(content, "ecs.report/v2") {
+				t.Fatalf("%s version notice was not rendered in %s: %s", language, format, content)
+			}
+		}
 	}
 }
 

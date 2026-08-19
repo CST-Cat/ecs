@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -21,18 +20,18 @@ type metricRef struct {
 // default reference; callers may select another valid index through Options.
 func Build(reports []model.Report, options Options) (Report, error) {
 	if len(reports) < 2 {
-		return Report{}, i18n.Errorf("compare.help.inputs")
+		return Report{}, newValidationError("compare.help.inputs")
 	}
 	reference := options.Reference
 	if reference < 0 || reference >= len(reports) {
-		return Report{}, i18n.Errorf("compare.help.referenceRange", len(reports))
+		return Report{}, newValidationError("compare.help.referenceRange", len(reports))
 	}
 	out := Report{
 		SchemaVersion: SchemaVersion, Tool: options.Tool, GeneratedAt: time.Now().UTC(), Reference: reference,
 		Notices: []string{
-			i18n.T("compare.notice.scope"),
-			i18n.T("compare.notice.relative"),
-			i18n.T("compare.notice.observation"),
+			canonicalNotice("compare.notice.scope"),
+			canonicalNotice("compare.notice.relative"),
+			canonicalNotice("compare.notice.observation"),
 		},
 	}
 	labels := uniqueLabels(options.Labels, len(reports))
@@ -115,11 +114,11 @@ func prependVersionNotices(out *Report) bool {
 	var leading []string
 	if len(schemas) > 1 {
 		leading = append(leading,
-			i18n.Errorf("compare.notice.schemaMixed", strings.Join(schemas, ", ")).Error())
+			canonicalNotice("compare.notice.schemaMixed", strings.Join(schemas, ", ")))
 	}
 	if len(tools) > 1 {
 		leading = append(leading,
-			i18n.Errorf("compare.notice.toolMixed", strings.Join(tools, ", ")).Error())
+			canonicalNotice("compare.notice.toolMixed", strings.Join(tools, ", ")))
 	}
 	out.Notices = append(leading, out.Notices...)
 	return len(schemas) > 1

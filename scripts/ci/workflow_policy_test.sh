@@ -3,8 +3,8 @@ set -euo pipefail
 
 # release.yml 与 ci.yml 的版本/工具链边界回归。
 #
-# 这是 Bash 脚本，故意无 Python/YAML 依赖：它在 check.sh 的 Python/schema 检查
-# 之前运行，即使分析工具环境尚未准备好，也不能让 workflow policy 静默回退。
+# 这是 Bash 脚本，故意无 Python/YAML 依赖：即使分析工具环境尚未准备好，
+# workflow policy 也必须被独立、确定性地验证，不能静默回退。
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 release_workflow="$repo_root/.github/workflows/release.yml"

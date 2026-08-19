@@ -81,7 +81,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		Reference: *referenceFlag - 1,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), localizeComparisonError(err))
 		return 1
 	}
 
@@ -104,6 +104,17 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s %s\n", strings.ToUpper(key), written[key])
 	}
 	return 0
+}
+
+func localizeComparisonError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var validation *comparison.ValidationError
+	if errors.As(err, &validation) && validation != nil {
+		return i18n.Errorf(validation.Key, validation.Args...).Error()
+	}
+	return err.Error()
 }
 
 func validateComparisonFormats(formats []string) error {

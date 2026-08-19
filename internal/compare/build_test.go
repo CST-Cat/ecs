@@ -1,13 +1,13 @@
 package compare
 
 import (
+	"errors"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -33,11 +33,22 @@ func comparisonTestReport(id string, value float64, method, profile, label strin
 }
 
 func TestBuildRequiresTwoReports(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-	if _, err := Build([]model.Report{{}}, Options{}); err == nil || !strings.Contains(err.Error(), "至少需要两份") {
+	_, err := Build([]model.Report{{}}, Options{})
+	var validation *ValidationError
+	if err == nil || !errors.As(err, &validation) || validation.Key != "compare.help.inputs" {
 		t.Fatalf("Build one report error = %v", err)
+	}
+}
+
+func TestParseNoticeRoundTripsArgumentsWithoutAmbiguity(t *testing.T) {
+	want := []string{"ecs.report/v2", "value::with separator", "", "终端\x1b[31m"}
+	encoded := canonicalNotice("compare.notice.schemaMixed", want...)
+	key, got, ok := ParseNotice(encoded)
+	if !ok || key != "compare.notice.schemaMixed" || !reflect.DeepEqual(got, want) {
+		t.Fatalf("notice round trip failed: encoded=%q key=%q got=%v ok=%v", encoded, key, got, ok)
+	}
+	if key, args, ok := ParseNotice("compare.notice.scope"); !ok || key != "compare.notice.scope" || args != nil {
+		t.Fatalf("static notice parse = key=%q args=%v ok=%v", key, args, ok)
 	}
 }
 
@@ -142,10 +153,7 @@ func TestBuildIgnoresLocalizedMethodologyProseAndMapInsertionOrder(t *testing.T)
 	}
 }
 
-func TestBuildUsesCanonicalFieldsAndTablesRegardlessOfUILanguage(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-
+func TestBuildUsesCanonicalFieldsAndTables(t *testing.T) {
 	canonical := comparisonTestReport("same", 10, "m-v1", "same", "速率", true)
 	canonical.Results[0].Fields = []model.Field{{Key: "state", Label: "状态", Value: "完成"}}
 	canonical.Results[0].Tables = []model.Table{{
@@ -154,26 +162,23 @@ func TestBuildUsesCanonicalFieldsAndTablesRegardlessOfUILanguage(t *testing.T) {
 		Rows:    [][]string{{"系统", "完成"}},
 	}}
 
-	// Build is allowed to localize user-facing notices, but its comparison
-	// inputs, observations, and summary must be byte-stable for the same
-	// canonical reports regardless of the current UI language.
-	i18n.Set(i18n.LangZH)
-	zhComparison, err := Build([]model.Report{canonical, canonical}, Options{})
+	// Build is a machine-data operation. Its inputs, observations, summary and
+	// notices must be byte-stable for the same canonical reports.
+	first, err := Build([]model.Report{canonical, canonical}, Options{})
 	if err != nil {
-		t.Fatalf("Chinese-language Build: %v", err)
+		t.Fatalf("first Build: %v", err)
 	}
-	i18n.Set(i18n.LangEN)
-	enComparison, err := Build([]model.Report{canonical, canonical}, Options{})
+	second, err := Build([]model.Report{canonical, canonical}, Options{})
 	if err != nil {
-		t.Fatalf("English-language Build: %v", err)
+		t.Fatalf("second Build: %v", err)
 	}
-	if reflect.DeepEqual(zhComparison.Notices, enComparison.Notices) {
-		t.Fatalf("UI language did not affect only the expected localized notices: zh=%v en=%v", zhComparison.Notices, enComparison.Notices)
+	if !reflect.DeepEqual(first.Notices, second.Notices) {
+		t.Fatalf("canonical notices changed between builds: first=%v second=%v", first.Notices, second.Notices)
 	}
-	if zhComparison.Summary.ObservedChanges != 0 || enComparison.Summary.ObservedChanges != 0 {
-		t.Fatalf("canonical reports produced false observations: zh=%+v en=%+v", zhComparison.Summary, enComparison.Summary)
+	if first.Summary.ObservedChanges != 0 || second.Summary.ObservedChanges != 0 {
+		t.Fatalf("canonical reports produced false observations: first=%+v second=%+v", first.Summary, second.Summary)
 	}
-	for _, comparison := range []Report{zhComparison, enComparison} {
+	for _, comparison := range []Report{first, second} {
 		for _, module := range comparison.Modules {
 			if len(module.Changes) != 0 {
 				t.Fatalf("canonical reports produced false module changes: %+v", module.Changes)
@@ -181,14 +186,52 @@ func TestBuildUsesCanonicalFieldsAndTablesRegardlessOfUILanguage(t *testing.T) {
 		}
 	}
 
-	// GeneratedAt and Notices are intentionally run/UI-language dependent;
-	// every other comparison field is canonical machine data.
-	zhComparison.GeneratedAt = time.Time{}
-	enComparison.GeneratedAt = time.Time{}
-	zhComparison.Notices = nil
-	enComparison.Notices = nil
-	if !reflect.DeepEqual(zhComparison, enComparison) {
-		t.Fatalf("canonical comparison depends on UI language:\nzh=%+v\nen=%+v", zhComparison, enComparison)
+	// GeneratedAt is intentionally run-dependent; every other comparison field,
+	// including Notices, is canonical machine data.
+	first.GeneratedAt = time.Time{}
+	second.GeneratedAt = time.Time{}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("canonical comparison changed between builds:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+}
+
+func TestBuildVersionNoticesAndValidationErrorsUseCanonicalValues(t *testing.T) {
+	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
+	second := comparisonTestReport("second", 20, "m-v1", "same", "rate", true)
+	second.SchemaVersion = "ecs.report/v2"
+	second.Tool.Version = "0.7.0"
+
+	firstResult, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondResult, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstResult.GeneratedAt = time.Time{}
+	secondResult.GeneratedAt = time.Time{}
+	if !reflect.DeepEqual(firstResult, secondResult) {
+		t.Fatalf("version notices changed between builds:\nfirst=%+v\nsecond=%+v", firstResult, secondResult)
+	}
+	if len(firstResult.Notices) < 2 {
+		t.Fatalf("version notices missing: %v", firstResult.Notices)
+	}
+	key, args, ok := ParseNotice(firstResult.Notices[0])
+	if !ok || key != "compare.notice.schemaMixed" || len(args) != 1 || !strings.Contains(args[0], "ecs.report/v2") {
+		t.Fatalf("schema notice is not canonical: key=%q args=%v ok=%v", key, args, ok)
+	}
+
+	_, inputErr := Build([]model.Report{first}, Options{})
+	var inputValidation *ValidationError
+	if inputErr == nil || !errors.As(inputErr, &inputValidation) || inputValidation.Key != "compare.help.inputs" || inputErr.Error() != inputValidation.Key {
+		t.Fatalf("input validation error is not canonical: err=%v value=%+v", inputErr, inputValidation)
+	}
+
+	_, rangeErr := Build([]model.Report{first, second}, Options{Reference: 2})
+	var rangeValidation *ValidationError
+	if rangeErr == nil || !errors.As(rangeErr, &rangeValidation) || rangeValidation.Key != "compare.help.referenceRange" || len(rangeValidation.Args) != 1 || rangeValidation.Args[0] != 2 {
+		t.Fatalf("reference validation error is not canonical: err=%v value=%+v", rangeErr, rangeValidation)
 	}
 }
 
@@ -632,10 +675,6 @@ func TestBuildKeepsUnsignedReportsOutOfDifferences(t *testing.T) {
 // 两件事：结论仍然出得来，且可比性被如实降级。
 
 func TestBuildComparesAcrossSchemaVersionsAndDowngradesComparability(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-
 	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
 	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
 	second.SchemaVersion = "ecs.report/v2"
@@ -669,10 +708,6 @@ func TestBuildComparesAcrossSchemaVersionsAndDowngradesComparability(t *testing.
 }
 
 func TestBuildExplainsDifferentToolVersionsWithoutDowngrading(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-
 	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
 	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
 	second.Tool.Version = "0.7.0"
@@ -685,17 +720,17 @@ func TestBuildExplainsDifferentToolVersionsWithoutDowngrading(t *testing.T) {
 	if data.Summary.Comparability != Comparable {
 		t.Fatalf("同 schema 不同 ecs 版本不应降级：%q", data.Summary.Comparability)
 	}
-	if len(data.Notices) == 0 || !strings.Contains(data.Notices[0], "ecs") ||
+	if len(data.Notices) == 0 || !strings.Contains(data.Notices[0], "compare.notice.toolMixed") ||
 		!strings.Contains(data.Notices[0], "0.7.0") {
-		t.Fatalf("缺少 ecs 版本差异提示：%v", data.Notices)
+		t.Fatalf("缺少 ecs 版本差异提示 key/参数：%v", data.Notices)
+	}
+	key, args, ok := ParseNotice(data.Notices[0])
+	if !ok || key != "compare.notice.toolMixed" || len(args) != 1 || !strings.Contains(args[0], "0.7.0") {
+		t.Fatalf("ecs 版本差异提示不是 canonical key/参数：key=%q args=%v ok=%v", key, args, ok)
 	}
 }
 
 func TestBuildKeepsNoticesUnchangedWhenVersionsAgree(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-
 	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
 	second := comparisonTestReport("b", 120, "m1", "p", "速率", true)
 
@@ -716,10 +751,6 @@ func TestBuildKeepsNoticesUnchangedWhenVersionsAgree(t *testing.T) {
 }
 
 func TestBuildStillFlagsMethodChangesAcrossSchemaVersions(t *testing.T) {
-	original := i18n.Current()
-	defer i18n.Set(original)
-	i18n.Set(i18n.LangZH)
-
 	first := comparisonTestReport("a", 100, "m1", "p", "速率", true)
 	second := comparisonTestReport("b", 120, "m2", "p", "速率", true)
 	second.SchemaVersion = "ecs.report/v2"

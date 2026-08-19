@@ -140,7 +140,7 @@ func ComparisonHTML(data comparison.Report) ([]byte, error) {
 		if index > 0 {
 			out.WriteString(" · ")
 		}
-		out.WriteString(html.EscapeString(notice))
+		out.WriteString(html.EscapeString(localizeComparisonNotice(notice)))
 	}
 	fmt.Fprintf(&out, `</p><p>Schema: %s · %s: %s %s</p></footer></main></body></html>`,
 		html.EscapeString(data.SchemaVersion), html.EscapeString(i18n.T("report.generator")), html.EscapeString(data.Tool.Name), html.EscapeString(data.Tool.Version))

@@ -104,7 +104,7 @@ func ComparisonMarkdown(data comparison.Report) string {
 
 	out.WriteString("## " + i18n.T("report.notices") + "\n\n")
 	for _, notice := range data.Notices {
-		out.WriteString("- " + markdownEscape(notice) + "\n")
+		out.WriteString("- " + markdownEscape(localizeComparisonNotice(notice)) + "\n")
 	}
 	out.WriteString("\n")
 	out.WriteString(fmt.Sprintf("Schema: `%s` · %s: `%s %s`\n", data.SchemaVersion, i18n.T("report.generator"), markdownEscape(data.Tool.Name), markdownEscape(data.Tool.Version)))

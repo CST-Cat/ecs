@@ -334,7 +334,10 @@ func (r *comparisonTextRenderer) issues(issues []comparison.MetricIssue) {
 func (r *comparisonTextRenderer) noticeBlock() {
 	r.prefaceTitle(i18n.T("report.notices"))
 	for _, notice := range r.data.Notices {
-		r.note(notice)
+		// Dynamic canonical notice arguments are decoded after terminalSafeCopy;
+		// sanitize the localized result once more so untrusted version text cannot
+		// reintroduce terminal controls.
+		r.note(sanitizeTerminalText(localizeComparisonNotice(notice)))
 	}
 	r.blank()
 	r.line(r.palette.Dim(fmt.Sprintf("Schema: %s · %s: %s %s", r.data.SchemaVersion, i18n.T("report.generator"), r.data.Tool.Name, r.data.Tool.Version)))

@@ -73,6 +73,21 @@ func ComparisonJSON(data comparison.Report) ([]byte, error) {
 	return append(content, '\n'), nil
 }
 
+// localizeComparisonNotice is deliberately kept in the report package: the
+// comparison package only produces and parses canonical keys, while report
+// formats are the user-facing localization boundary.
+func localizeComparisonNotice(value string) string {
+	key, args, ok := comparison.ParseNotice(value)
+	if !ok || !i18n.Has(i18n.LangZH, key) || !i18n.Has(i18n.LangEN, key) {
+		return value
+	}
+	values := make([]any, len(args))
+	for index, arg := range args {
+		values[index] = arg
+	}
+	return fmt.Sprintf(i18n.T(key), values...)
+}
+
 func comparisonInput(data comparison.Report, index int) comparison.Input {
 	if index >= 0 && index < len(data.Inputs) {
 		return data.Inputs[index]

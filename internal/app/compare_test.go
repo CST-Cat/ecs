@@ -135,6 +135,23 @@ func TestCompareCommandEnglishOutput(t *testing.T) {
 	}
 }
 
+func TestCompareBuildValidationErrorUsesCurrentLanguageAtCLI(t *testing.T) {
+	original := i18n.Current()
+	defer i18n.Set(original)
+	_, err := comparison.Build([]model.Report{{}, {}}, comparison.Options{Reference: 2})
+	if err == nil {
+		t.Fatal("invalid comparison reference unexpectedly succeeded")
+	}
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		got := localizeComparisonError(err)
+		want := i18n.Errorf("compare.help.referenceRange", 2).Error()
+		if got != want || strings.Contains(got, "compare.help.referenceRange") {
+			t.Fatalf("%s comparison validation error = %q, want %q", language, got, want)
+		}
+	}
+}
+
 func writeLocalizedObservationInput(t *testing.T, directory, name, fieldValue, tableValue string) string {
 	t.Helper()
 	report := model.Report{
