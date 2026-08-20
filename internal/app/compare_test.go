@@ -53,11 +53,11 @@ func TestCompareCommandWritesReadableJSONAndPreservesCanonicalValues(t *testing.
 	output := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	if status := Main(context.Background(), []string{
-		"compare", first, second, "--lang", "en", "--format", "json,txt,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
+		"compare", first, second, "--lang", "en", "--format", "json,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
 	}, &stdout, &stderr); status != 0 {
 		t.Fatalf("compare failed: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	for _, format := range []string{"json", "txt", "md", "html"} {
+	for _, format := range []string{"json", "md", "html"} {
 		if _, err := os.Stat(filepath.Join(output, "fleet."+format)); err != nil {
 			t.Fatalf("compare did not write %s: %v", format, err)
 		}
@@ -135,8 +135,8 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 		},
 		{
 			name:   "unsupported format",
-			args:   []string{"compare", first, second, "--lang", "en", "--format", "xml"},
-			marker: `unknown output format "xml"`,
+			args:   []string{"compare", first, second, "--lang", "en", "--format", "txt"},
+			marker: `unknown output format "txt"`,
 		},
 		{
 			name:   "no formats",

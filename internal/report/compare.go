@@ -10,20 +10,12 @@ import (
 
 	comparison "ecs/internal/compare"
 	"ecs/internal/i18n"
-	"ecs/internal/termcolor"
 )
 
-// ComparisonOptions controls rendering of a multi-report comparison.
-// Structured JSON, Markdown and HTML never contain terminal escape sequences;
-// TextColor only applies to the txt artifact.
-type ComparisonOptions struct {
-	TextColor termcolor.Level
-}
-
-// WriteComparisonFiles writes one comparison in the same four formats as a
+// WriteComparisonFiles writes one comparison in JSON, Markdown and HTML as a
 // normal ecs report.  Paths are always resolved below an explicit output
 // directory and each artifact is installed atomically.
-func WriteComparisonFiles(data comparison.Report, directory, baseName string, formats []string, options ComparisonOptions) (map[string]string, error) {
+func WriteComparisonFiles(data comparison.Report, directory, baseName string, formats []string) (map[string]string, error) {
 	if directory == "" {
 		directory = "./reports"
 	}
@@ -44,8 +36,6 @@ func WriteComparisonFiles(data comparison.Report, directory, baseName string, fo
 		switch format {
 		case "json":
 			content, err = ComparisonJSON(data)
-		case "txt":
-			content = []byte(ComparisonText(data, options.TextColor))
 		case "md":
 			content = []byte(ComparisonMarkdown(data))
 		case "html":

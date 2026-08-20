@@ -394,7 +394,7 @@ func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
 
 // FullReport 在所有模块完成、脱敏、评分和文件写入后一次性输出完整报告。
 // data 必须是已经按当前语言本地化的副本；结构化 measurements、fields 和 tables
-// 由 reporter.Text 统一渲染。终端 txt 有意隐藏原始 text blocks、冗余 notes 与
+// 由 reporter.Text 统一渲染。终端文本报告有意隐藏原始 text blocks、冗余 notes 与
 // 方法学长说明，避免把实现细节混入模板正文。
 func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
 	terminal.line("")

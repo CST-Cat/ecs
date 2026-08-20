@@ -22,7 +22,7 @@ Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显�
 
 报告文件默认权限为 `0600`；由 `ecs` 新建的输出目录为 `0700`。API 密钥只从环境变量读取，不进入配置、命令参数或报告，但运行环境、进程转储和 shell 历史仍由用户保护。
 
-`ecs render`、`ecs compare` 会处理外部 JSON。终端与 txt 输出会把 C0、DEL 和 C1 控制字符替换为空格，再由 `ecs` 自己添加 SGR 颜色，阻止 OSC/CSI、剪贴板、清屏和伪造布局等终端注入；原始 JSON 不会因此改写。
+`ecs render`、`ecs compare` 会处理外部 JSON。终端文本输出会把 C0、DEL 和 C1 控制字符替换为空格，再由 `ecs` 自己添加 SGR 颜色，阻止 OSC/CSI、剪贴板、清屏和伪造布局等终端注入；原始 JSON 不会因此改写。
 
 ## 安装与供应链
 
@@ -36,7 +36,7 @@ preflight → tools × 7 → assemble → verify → attest → publish
 
 发布入口确认候选提交等于当时远端 `main`，随后所有阶段只使用该冻结 SHA；发布构建要求 Git 工作区洁净。工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败。工具 manifest 记录来源和实际二进制 SHA-256，并在构建、staging 和打包路径校验。最终资产由 `checksums.txt` 与实际字节逐项对应。
 
-当前 Release workflow 的编译器 pin 是 Go 1.26.5；根模块声明的最低源码版本不是发布编译器版本。Go 编译器及各工具版本由维护者人工选择、审查和升级：项目不追随 `stable`/`latest`，不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
+当前开发、普通 CI、排行榜重建与 Release 的 Go 工具链由仓库根 `.go-version` 人工固定；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本。Go 编译器及各工具版本由维护者人工选择、审查和升级：项目不追随 `stable`/`latest`，不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
 
 所有 GitHub Actions `uses` 引用固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。最终发布资产还会生成 GitHub artifact attestation，可用 `gh attestation verify` 核对仓库、workflow 和提交来源。
 

@@ -1,12 +1,12 @@
 # ecs
 
-An ad-free, local-first Linux VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, txt, Markdown and HTML reports locally.
+An ad-free, local-first Linux VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, Markdown and HTML reports locally.
 
 Project boundaries:
 
 - no ads, sponsorships or affiliate links;
 - reports are not uploaded; `run.sh` defaults to `${TMPDIR:-/tmp}`, while a directly invoked binary defaults to `./reports`;
-- JSON is the canonical machine-data source; the other formats are rendered from it, and `--lang` changes only terminal and human-readable txt/Markdown/HTML output;
+- JSON is the machine truth; human-readable output includes terminal text, Markdown and HTML, all rendered from JSON; `--lang` changes only these human-readable outputs;
 - local performance uses standard benchmark tools. Missing or contract-mismatched tools are reported as not run; no substitute score is synthesized;
 - `ookla` invokes the official client and follows its independent data-handling terms; see [THIRD_PARTY.md](THIRD_PARTY.md).
 
@@ -26,6 +26,8 @@ Compare existing reports by downloading only the main program:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
+
+`compare.sh` is the only shell compare entry. When run through a pipe, the script is not saved to disk; it downloads only a temporary `ecs`, removes the temporary file after comparison, and preserves the result.
 
 Install a release binary:
 
@@ -55,11 +57,10 @@ All commands accept `--lang zh|en`. Exit codes are `0` (success), `1` (argument 
 
 ## Reports, rendering and comparison
 
-A run can write four formats:
+A run can write three file formats:
 
 ```text
 ecs-report-YYYYMMDD-HHMMSS.json    # ecs.report/v1, canonical machine data
-ecs-report-YYYYMMDD-HHMMSS.txt
 ecs-report-YYYYMMDD-HHMMSS.md
 ecs-report-YYYYMMDD-HHMMSS.html
 ```
@@ -67,7 +68,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ```sh
 ecs --format json,html --output ./reports --name my-run
 ecs render --input ./reports/my-run.json --format html,md --lang en
-ecs compare yesterday.json today.json --format txt,html
+ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
@@ -134,7 +135,7 @@ When the embedded release reference is empty, provide your own `--score-baseline
 --only / --skip MODULE,...       select or skip modules
 --exposure local|public|thirdparty|any
 --lang zh|en                     interface language
---format json,txt,md,html        output formats
+--format json,md,html             output formats
 --output DIR / --name PREFIX     report location and name
 --reveal                         keep full local IP addresses
 --strict                         return 2 on warnings or failures

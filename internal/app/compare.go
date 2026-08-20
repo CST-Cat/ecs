@@ -21,7 +21,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs compare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
-	formatsFlag := flags.String("format", "json,txt,md,html", i18n.T("flag.format"))
+	formatsFlag := flags.String("format", "json,md,html", i18n.T("flag.format"))
 	outputFlag := flags.String("output", "./reports", i18n.T("compare.flag.output"))
 	nameFlag := flags.String("name", "", i18n.T("flag.name"))
 	referenceFlag := flags.Int("reference", 1, i18n.T("compare.flag.reference"))
@@ -85,9 +85,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	written, err := reporter.WriteComparisonFiles(data, *outputFlag, *nameFlag, formats, reporter.ComparisonOptions{
-		TextColor: resolveFileTextColor(*colorFlag, *noColorFlag),
-	})
+	written, err := reporter.WriteComparisonFiles(data, *outputFlag, *nameFlag, formats)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
@@ -121,7 +119,7 @@ func validateComparisonFormats(formats []string) error {
 	if len(formats) == 0 {
 		return i18n.Errorf("err.noFormats")
 	}
-	allowed := map[string]bool{"json": true, "txt": true, "md": true, "html": true}
+	allowed := map[string]bool{"json": true, "md": true, "html": true}
 	for _, format := range formats {
 		if !allowed[format] {
 			return i18n.Errorf("err.unknownFormat", format)

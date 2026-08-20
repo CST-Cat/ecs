@@ -1,12 +1,12 @@
 # ecs
 
-无广告、默认零上传的 Linux VPS 综合测试工具。一次运行覆盖本地性能、网络质量、路由与回程、流媒体和 IP 信誉，报告只写到本地 JSON、txt、Markdown、HTML 文件。
+无广告、默认零上传的 Linux VPS 综合测试工具。一次运行覆盖本地性能、网络质量、路由与回程、流媒体和 IP 信誉，报告只写到本地 JSON、Markdown、HTML 文件。
 
 项目边界：
 
 - 不展示广告、赞助或返利内容；
 - 默认不上传报告；`run.sh` 的报告默认写入 `${TMPDIR:-/tmp}`，直接运行二进制时默认写入 `./reports`；
-- JSON 是机器数据的唯一事实来源，其他格式由它渲染；`--lang` 只改变终端和人类可读的 txt/Markdown/HTML；
+- JSON 是机器事实来源；人类可读展示包括终端文本、Markdown 和 HTML，均由 JSON 渲染；`--lang` 只改变这些人类可读展示；
 - 本地性能使用标准基准工具。工具缺失或版本不符合固定口径时明确报告未运行，不合成替代分数；
 - `ookla` 调用官方客户端并遵守其独立的数据处理条款，详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
@@ -26,6 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
+
+`compare.sh` 是唯一的 shell compare 入口。通过管道执行时，脚本本身不会落盘，只下载临时 `ecs`；比较完成后删除临时文件并保留结果。
 
 安装发行二进制：
 
@@ -55,11 +57,10 @@ ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks
 
 ## 报告、渲染与比较
 
-一次运行可以写四种格式：
+一次运行可以写三种文件格式：
 
 ```text
 ecs-report-YYYYMMDD-HHMMSS.json    # ecs.report/v1，canonical machine data
-ecs-report-YYYYMMDD-HHMMSS.txt
 ecs-report-YYYYMMDD-HHMMSS.md
 ecs-report-YYYYMMDD-HHMMSS.html
 ```
@@ -67,7 +68,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 ```sh
 ecs --format json,html --output ./reports --name my-run
 ecs render --input ./reports/my-run.json --format html,md --lang en
-ecs compare yesterday.json today.json --format txt,html
+ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
@@ -134,7 +135,7 @@ ecs submit --input report.json --provider vultr --region jp-tokyo --note "monthl
 --only / --skip MODULE,...       选择或跳过模块
 --exposure local|public|thirdparty|any
 --lang zh|en                     界面语言
---format json,txt,md,html        输出格式
+--format json,md,html             输出格式
 --output DIR / --name PREFIX     报告位置与命名
 --reveal                         保留完整本机 IP
 --strict                         有警告或失败时返回 2

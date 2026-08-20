@@ -54,14 +54,13 @@ func TestRenderWritesRequestedFormats(t *testing.T) {
 	output := filepath.Join(root, "out")
 	status, stdout, stderr := invokeAppMain(
 		"render", "--lang", "en", "--input", input, "--output", output,
-		"--format", "json,txt,md,html", "--color", "none",
+		"--format", "json,md,html",
 	)
 	if status != 0 || stderr != "" {
 		t.Fatalf("render status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 	markers := map[string]string{
 		"json": `"schema_version"`,
-		"txt":  "ecs VPS Benchmark Report",
 		"md":   "# ecs VPS Benchmark Report",
 		"html": "<html",
 	}
@@ -95,7 +94,7 @@ func TestRenderLoadsScoreBaseline(t *testing.T) {
 	output := filepath.Join(root, "out")
 	status, stdout, stderr := invokeAppMain(
 		"render", "--lang", "en", "--input", input, "--score-baseline", baselinePath,
-		"--output", output, "--format", "json", "--color", "none",
+		"--output", output, "--format", "json",
 	)
 	if status != 0 || stderr != "" {
 		t.Fatalf("render with baseline status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -197,6 +196,13 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 			marker: "flag provided but not defined",
 		},
 		{
+			name: "color flag parse",
+			args: func(string, string, string, string) []string {
+				return []string{"render", "--lang", "en", "--color", "none"}
+			},
+			marker: "flag provided but not defined: -color",
+		},
+		{
 			name:   "input required",
 			args:   func(string, string, string, string) []string { return []string{"render", "--lang", "en"} },
 			marker: "error: --input is required",
@@ -218,9 +224,9 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 		{
 			name: "unsupported format",
 			args: func(input, _, _, _ string) []string {
-				return []string{"render", "--lang", "en", "--input", input, "--format", "xml"}
+				return []string{"render", "--lang", "en", "--input", input, "--format", "txt"}
 			},
-			marker: `unknown report format "xml"`,
+			marker: `unknown report format "txt"`,
 		},
 		{
 			name: "output directory",

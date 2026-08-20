@@ -189,11 +189,11 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 	}
 	i18n.Set(i18n.LangEN)
 	directory := t.TempDir()
-	written, err := WriteComparisonFiles(data, directory, "compare unsafe", []string{"json", "txt", "md", "html"}, ComparisonOptions{TextColor: termcolor.LevelNone})
-	if err != nil || len(written) != 4 {
+	written, err := WriteComparisonFiles(data, directory, "compare unsafe", []string{"json", "md", "html"})
+	if err != nil || len(written) != 3 {
 		t.Fatalf("comparison files = %v, %v", written, err)
 	}
-	for _, format := range []string{"json", "txt", "md", "html"} {
+	for _, format := range []string{"json", "md", "html"} {
 		path := written[format]
 		info, statErr := os.Stat(path)
 		if statErr != nil {
@@ -213,7 +213,7 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 			t.Fatalf("comparison %s omitted metric", format)
 		}
 	}
-	defaultWritten, err := WriteComparisonFiles(data, t.TempDir(), "", []string{"json"}, ComparisonOptions{})
+	defaultWritten, err := WriteComparisonFiles(data, t.TempDir(), "", []string{"json"})
 	if err != nil || !strings.HasPrefix(filepath.Base(defaultWritten["json"]), "ecs-compare-") {
 		t.Fatalf("comparison default filename = %v, %v", defaultWritten, err)
 	}
@@ -226,32 +226,32 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
-	currentDirectoryWritten, err := WriteComparisonFiles(data, "", "", []string{"json"}, ComparisonOptions{})
+	currentDirectoryWritten, err := WriteComparisonFiles(data, "", "", []string{"json"})
 	if err != nil || filepath.Dir(currentDirectoryWritten["json"]) != filepath.Join(workingDirectory, "reports") {
 		t.Fatalf("comparison empty-directory output = %v, %v", currentDirectoryWritten, err)
 	}
 
-	partial, err := WriteComparisonFiles(data, t.TempDir(), "partial", []string{"json", "unknown"}, ComparisonOptions{})
+	partial, err := WriteComparisonFiles(data, t.TempDir(), "partial", []string{"json", "unknown"})
 	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(partial) != 1 {
 		t.Fatalf("comparison partial unknown-format result = %v, %v", partial, err)
 	}
 	invalid := comparisonReportFixture(t, 2, 0)
 	invalid.Modules[0].Metrics[0].Values[0].Value = math.NaN()
-	if written, err := WriteComparisonFiles(invalid, t.TempDir(), "invalid", []string{"json"}, ComparisonOptions{}); err == nil || !strings.Contains(err.Error(), "generate json report") || len(written) != 0 {
+	if written, err := WriteComparisonFiles(invalid, t.TempDir(), "invalid", []string{"json"}); err == nil || !strings.Contains(err.Error(), "generate json report") || len(written) != 0 {
 		t.Fatalf("comparison JSON generation failure = %v, %v", written, err)
 	}
 	parentFile := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := WriteComparisonFiles(data, filepath.Join(parentFile, "child"), "x", []string{"json"}, ComparisonOptions{}); err == nil || !strings.Contains(err.Error(), "create output directory") {
+	if _, err := WriteComparisonFiles(data, filepath.Join(parentFile, "child"), "x", []string{"json"}); err == nil || !strings.Contains(err.Error(), "create output directory") {
 		t.Fatalf("comparison mkdir failure = %v", err)
 	}
 	atomicDirectory := t.TempDir()
 	if err := os.Mkdir(filepath.Join(atomicDirectory, "atomic.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if written, err := WriteComparisonFiles(data, atomicDirectory, "atomic", []string{"json"}, ComparisonOptions{}); err == nil || !strings.Contains(err.Error(), "write json report") || len(written) != 0 {
+	if written, err := WriteComparisonFiles(data, atomicDirectory, "atomic", []string{"json"}); err == nil || !strings.Contains(err.Error(), "write json report") || len(written) != 0 {
 		t.Fatalf("comparison atomic failure = %v, %v", written, err)
 	}
 }

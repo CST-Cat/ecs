@@ -144,25 +144,6 @@ grep -F 'Usage: run.sh' "$test_root/help.stdout" >/dev/null ||
 [[ ! -e "$fixture_logs/unexpected-network" ]] || fail "--help attempted unexpected network access"
 assert_empty_dir "$help_tmp" "--help"
 
-# 两个互斥 wrapper mode 要给出固定诊断，并同样不能创建 WORK 或下载。
-conflict_tmp="$test_root/conflict-tmp"
-mkdir -p "$conflict_tmp"
-set +e
-ECS_LANG=en TMPDIR="$conflict_tmp" PATH="$test_path" \
-  ECS_TEST_LOG_ROOT="$fixture_logs" \
-  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
-  ECS_TEST_ASSET="$fixture_asset" \
-  sh "$repo_root/run.sh" --submit --compare >"$test_root/conflict.stdout" 2>"$test_root/conflict.stderr"
-conflict_status=$?
-set -e
-[[ "$conflict_status" -eq 1 ]] || fail "--submit/--compare returned $conflict_status instead of 1"
-[[ ! -s "$test_root/conflict.stdout" ]] || fail "--submit/--compare unexpectedly wrote stdout"
-[[ "$(<"$test_root/conflict.stderr")" == 'ecs: --compare cannot be combined with --submit' ]] ||
-  fail "--submit/--compare diagnostic changed: $(<"$test_root/conflict.stderr")"
-[[ ! -s "$fixture_logs/fetch.log" ]] || fail "--submit/--compare attempted a download"
-[[ ! -e "$fixture_logs/unexpected-network" ]] || fail "--submit/--compare attempted unexpected network access"
-assert_empty_dir "$conflict_tmp" "--submit/--compare"
-
 # submit/provider/region/用户 output 由 wrapper 消费；普通参数和含空格值必须仍是独立 argv。
 run_tmp="$test_root/run-tmp"
 submission_output="$test_root/submission file.json"

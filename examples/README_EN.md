@@ -114,13 +114,14 @@ ecs --reveal
 ecs --color always
 ```
 
-Outputs are `<prefix>.{json,txt,md,html}`. JSON is canonical and can be rendered later:
+Outputs are `<prefix>.{json,md,html}`. JSON is canonical and can be rendered later:
 
 ```sh
 ecs render --input reports/ecs-report-20260813-075451.json --format html,md
 ecs render --input report.json --output /tmp/out --name renamed --lang en
 ecs compare yesterday.json today.json
-ecs compare a.json b.json c.json --reference 2 --format json,txt,md,html --output ./compare
+ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./compare
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
 
 Across schemas, `compare` uses only matching metric signatures and marks the result as partially comparable; it never probes again. See [../docs/schema.md](../docs/schema.md) for fields.
