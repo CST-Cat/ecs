@@ -126,6 +126,9 @@ func JoinList(items []string) string {
 
 func translate(lang Lang, key string) string {
 	if lang == LangEN {
+		if value, ok := compareFlagEnglish[key]; ok && value != "" {
+			return value
+		}
 		if value, ok := errorEnglish[key]; ok && value != "" {
 			return value
 		}
@@ -135,6 +138,9 @@ func translate(lang Lang, key string) string {
 		if value, ok := cliEnglish[key]; ok && value != "" {
 			return value
 		}
+	}
+	if value, ok := compareFlagChinese[key]; ok && value != "" {
+		return value
 	}
 	if value, ok := errorChinese[key]; ok && value != "" {
 		return value
@@ -160,6 +166,9 @@ func translate(lang Lang, key string) string {
 // Has 报告某个 key 是否有当前语言的译文，供测试核对覆盖率。
 func Has(lang Lang, key string) bool {
 	if lang == LangEN {
+		if value, ok := compareFlagEnglish[key]; ok && value != "" {
+			return true
+		}
 		if value, ok := errorEnglish[key]; ok && value != "" {
 			return true
 		}
@@ -170,6 +179,9 @@ func Has(lang Lang, key string) bool {
 			return true
 		}
 	} else {
+		if value, ok := compareFlagChinese[key]; ok && value != "" {
+			return true
+		}
 		if value, ok := errorChinese[key]; ok && value != "" {
 			return true
 		}
