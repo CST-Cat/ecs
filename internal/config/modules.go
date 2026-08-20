@@ -67,10 +67,10 @@ type ModuleDescriptor struct {
 
 	TitleKey       string
 	DescriptionKey string
-	// PrivacyNotice is an optional report-level notice for modules whose
+	// PrivacyNoticeKey is an optional stable presentation key for modules whose
 	// external client or service has an independent privacy/data-processing
-	// policy.  Empty means that the module needs no additional notice.
-	PrivacyNotice string
+	// policy. Empty means that the module needs no additional notice.
+	PrivacyNoticeKey string
 	// WizardGroup and WizardQuestionKey describe the optional interactive
 	// switch for costly/privacy-sensitive modules. Empty means the module is
 	// always included by the wizard and is not individually asked about.
@@ -141,7 +141,7 @@ var moduleDescriptors = []ModuleDescriptor{
 	moduleDescriptorWithPrivacyNotice("ookla", false, ExposureThirdParty, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "official Ookla Speedtest CLI", ComparisonScope: "外部服务测量；Ookla 的条款与数据处理独立于 ecs"},
 		"", []string{"speedtest"}, 90*time.Second,
-		"Ookla 调用外部测速客户端；Ookla 可能独立处理测量元数据，这不属于 ecs 的本地零上传保证。"),
+		"message.notice.ooklaPrivacy"),
 	moduleDescriptor("media", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"},
 		"", nil, 10*time.Second, "media", "wizard.askMedia"),
@@ -160,9 +160,9 @@ func moduleDescriptor(id string, standard bool, exposure Exposure, needsEgress b
 // moduleDescriptorWithPrivacyNotice keeps the common descriptor constructor
 // convenient while allowing modules with an independent external privacy
 // policy to opt into a report-level notice.
-func moduleDescriptorWithPrivacyNotice(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, notice string, wizard ...string) ModuleDescriptor {
+func moduleDescriptorWithPrivacyNotice(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, noticeKey string, wizard ...string) ModuleDescriptor {
 	descriptor := moduleDescriptor(id, standard, exposure, needsEgress, concurrency, methodology, scoreKey, tools, estimate, wizard...)
-	descriptor.PrivacyNotice = notice
+	descriptor.PrivacyNoticeKey = noticeKey
 	return descriptor
 }
 
