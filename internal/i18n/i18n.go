@@ -115,9 +115,9 @@ func JoinList(items []string) string {
 func catalogsFor(lang Lang) []map[string]string {
 	switch lang {
 	case LangEN:
-		return []map[string]string{compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+		return []map[string]string{modelMessageEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
 	default:
-		return []map[string]string{compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
+		return []map[string]string{modelMessageChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
 }
 
