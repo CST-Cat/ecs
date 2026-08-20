@@ -44,7 +44,7 @@ func TestDefaultsAndProfiles(t *testing.T) {
 		{input: ProfileFull, want: ProfileFull},
 	} {
 		runtime, err := Defaults(test.input)
-		if err != nil || runtime.Profile != test.want || len(runtime.Modules) == 0 {
+		if err != nil || runtime.Profile != test.want || len(runtime.Modules) == 0 || !reflect.DeepEqual(runtime.Formats, []string{"json", "md", "html"}) {
 			t.Fatalf("%s defaults = %+v, %v", test.input, runtime, err)
 		}
 	}
@@ -98,7 +98,7 @@ func TestLoadFileDiagnostics(t *testing.T) {
 func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 	useEnglish(t)
 	example := ExampleFile()
-	if example.Profile != ProfileStandard || example.Output == "" || example.Reveal == nil {
+	if example.Profile != ProfileStandard || example.Output == "" || example.Reveal == nil || !reflect.DeepEqual(example.Formats, []string{"json", "md", "html"}) {
 		t.Fatalf("ExampleFile = %+v", example)
 	}
 	runtime := validRuntime(t)
@@ -202,7 +202,7 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		{name: "attempt range", mutate: func(r *Runtime) { r.DNSAttempts = 0 }, marker: "sample counts"},
 		{name: "thread range", mutate: func(r *Runtime) { r.SpeedThreads = 0 }, marker: "speed test concurrency"},
 		{name: "no formats", mutate: func(r *Runtime) { r.Formats = nil }, marker: "at least one output format"},
-		{name: "unknown format", mutate: func(r *Runtime) { r.Formats = []string{"xml"} }, marker: "unknown output format"},
+		{name: "unknown format", mutate: func(r *Runtime) { r.Formats = []string{"txt"} }, marker: `unknown output format "txt"`},
 		{name: "IP source empty", mutate: func(r *Runtime) { r.IPQualitySources = nil }, marker: "IP quality sources must not be empty"},
 		{name: "IP source unknown", mutate: func(r *Runtime) { r.IPQualitySources = []string{"vendor"} }, marker: "unknown IP quality source"},
 		{name: "IP source combination", mutate: func(r *Runtime) { r.IPQualitySources = []string{"all", "ipinfo"} }, marker: "all/none cannot"},

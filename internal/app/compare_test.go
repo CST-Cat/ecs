@@ -53,11 +53,11 @@ func TestCompareCommandWritesReadableJSONAndPreservesCanonicalValues(t *testing.
 	output := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	if status := Main(context.Background(), []string{
-		"compare", first, second, "--lang", "en", "--format", "json,txt,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
+		"compare", first, second, "--lang", "en", "--format", "json,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
 	}, &stdout, &stderr); status != 0 {
 		t.Fatalf("compare failed: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	for _, format := range []string{"json", "txt", "md", "html"} {
+	for _, format := range []string{"json", "md", "html"} {
 		if _, err := os.Stat(filepath.Join(output, "fleet."+format)); err != nil {
 			t.Fatalf("compare did not write %s: %v", format, err)
 		}
@@ -135,8 +135,8 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 		},
 		{
 			name:   "unsupported format",
-			args:   []string{"compare", first, second, "--lang", "en", "--format", "xml"},
-			marker: `unknown output format "xml"`,
+			args:   []string{"compare", first, second, "--lang", "en", "--format", "txt"},
+			marker: `unknown output format "txt"`,
 		},
 		{
 			name:   "no formats",
@@ -175,5 +175,62 @@ func TestCompareCommandReportsHelpAndUnknownFlag(t *testing.T) {
 	status, stdout, stderr = invokeAppMain("compare", "--lang", "en", "--unknown")
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
 		t.Fatalf("compare unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
+func TestCompareCommandRejectsEmptyOutputPath(t *testing.T) {
+	root := t.TempDir()
+	first := writeLocalizedObservationInput(t, root, "first", "系统", "系统")
+	second := writeLocalizedObservationInput(t, root, "second", "完成", "完成")
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workingDirectory := t.TempDir()
+	if err := os.Chdir(workingDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	status, stdout, stderr := invokeAppMain(
+		"compare", first, second, "--lang", "en", "--format", "json", "--output=",
+	)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "comparison output path must not be empty") {
+		t.Fatalf("empty output status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(workingDirectory, "reports")); !os.IsNotExist(err) {
+		t.Fatalf("empty output created ./reports: %v", err)
+	}
+	entries, err := os.ReadDir(workingDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("empty output created comparison artifacts: %v", entries)
+	}
+}
+
+func TestCompareCommandPreservesDoubleDashForOptionLikeReports(t *testing.T) {
+	root := t.TempDir()
+	writeLocalizedObservationInput(t, root, "--first", "系统", "系统")
+	writeLocalizedObservationInput(t, root, "--second", "完成", "完成")
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	output := t.TempDir()
+	status, stdout, stderr := invokeAppMain(
+		"compare", "--lang", "en", "--format", "json", "--output", output, "--name", "boundary", "--", "--first.json", "--second.json",
+	)
+	if status != 0 || stdout == "" || stderr != "" {
+		t.Fatalf("double-dash option-like reports status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(output, "boundary.json")); err != nil {
+		t.Fatalf("double-dash option-like reports did not write comparison: %v", err)
 	}
 }

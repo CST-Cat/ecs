@@ -9,6 +9,11 @@
 
 ## Unreleased
 
+- 精简一次性 Shell 入口：`compare.sh` 成为唯一 Shell 报告对比入口，`run.sh` 删除 `--compare` 转发；`compare.sh` 删除二进制缓存、`--no-cache`、`--install` 以及 `install.sh` 调用，每次仅下载并校验当前 Release 主程序，在临时目录执行后清理。
+- 删除 TXT 报告文件格式：`run`、`render`、`compare` 持久化输出统一为 JSON、Markdown、HTML；终端文本显示继续保留，且不属于 TXT 文件格式。
+- 工具链策略调整：根 `go.mod` 继续声明 Go 1.22 最低源码兼容线；CI 仅 `compat` job 显式使用 Go 1.22.x；新增根 `.go-version`，作为普通 CI、`leaderboard` 和 Release 共用的人工固定工具链；删除 workflow 中重复的 `ECS_GO`/`ECS_RELEASE_GO` pin；不引入自动升级或版本同步门禁。
+- 收紧 compare 参数边界：Shell wrapper 与 Go compare 尊重精确 `--`，边界后的 option-like 报告路径按 positional 透传；显式空 `--output=` 在写文件前失败，不再回退到 `./reports`。
+
 ## 0.7.7 — 2026-08-19
 
 - 简化维护流程：移除发布前与发布后的 `govulncheck` 漏洞扫描，以及围绕扫描结果自动提出 Go 升级 PR 的状态机；同时移除 Dependabot 自动维护 PR。Go 工具链改由维护者人工固定：CI 与 Release 当前使用 Go 1.26.5，最低源码兼容线仍为 Go 1.22。

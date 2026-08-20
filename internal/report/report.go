@@ -11,7 +11,6 @@ import (
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
-	"ecs/internal/termcolor"
 )
 
 // reportSchemaFamily 是报告 schema 标识的家族前缀。
@@ -22,10 +21,6 @@ const reportSchemaFamily = "ecs.report/"
 
 // Options 控制报告生成。
 type Options struct {
-	// TextColor 是纯文本报告的颜色档位。写入文件默认无色：文件会被 diff、
-	// 贴进不解析转义序列的地方，转义码在那里就是可见垃圾。需要彩色文件时
-	// 由调用方显式指定。
-	TextColor termcolor.Level
 	// Score 是可选的综合评分。
 	Score *score.Report
 }
@@ -72,12 +67,6 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 				localizedReady = true
 			}
 			content, err = htmlLocalized(localized, options.Score)
-		case "txt":
-			if !localizedReady {
-				localized = Localize(data)
-				localizedReady = true
-			}
-			content = []byte(textLocalized(localized, TextOptions{Color: options.TextColor, Score: options.Score}))
 		default:
 			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}

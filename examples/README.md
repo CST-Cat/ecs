@@ -114,13 +114,14 @@ ecs --reveal
 ecs --color always
 ```
 
-输出为 `<prefix>.{json,txt,md,html}`。JSON 是 canonical 数据，可在之后重新渲染：
+输出为 `<prefix>.{json,md,html}`。JSON 是 canonical 数据，可在之后重新渲染：
 
 ```sh
 ecs render --input reports/ecs-report-20260813-075451.json --format html,md
 ecs render --input 报告.json --output /tmp/out --name 改个名 --lang en
 ecs compare 昨天.json 今天.json
-ecs compare a.json b.json c.json --reference 2 --format json,txt,md,html --output ./compare
+ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./compare
+curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
 
 跨 schema 只比较签名一致的指标，并标记部分可比；不会重新运行探针。字段定义见 [../docs/schema.md](../docs/schema.md)。

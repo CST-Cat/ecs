@@ -309,11 +309,8 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
-	// 写进文件的 txt 默认不着色：报告会被 diff、贴进不解析转义序列的地方。
-	// --color always 才把颜色写进文件，auto 只影响终端直出。
-	textColor := resolveFileTextColor(*colorFlag, cfg.NoColor)
 	files, writeErr := reporter.WriteFilesWithOptions(data, cfg.Output, *nameFlag, cfg.Formats,
-		reporter.Options{TextColor: textColor, Score: scored})
+		reporter.Options{Score: scored})
 	if writeErr != nil {
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
@@ -353,25 +350,6 @@ func resolveTerminalColor(raw string, noColor bool, out io.Writer) termcolor.Lev
 	return termcolor.LevelNone
 }
 
-// resolveFileTextColor 保留 --color 对 TXT 文件的既有语义：auto 默认无色，
-// 只有显式 always 或具体能力档位才把 ANSI 写入文件。
-func resolveFileTextColor(raw string, noColor bool) termcolor.Level {
-	if noColor {
-		return termcolor.LevelNone
-	}
-	if level, ok := termcolor.ParseLevel(raw); ok {
-		return level
-	}
-	if strings.EqualFold(strings.TrimSpace(raw), "always") {
-		level := termcolor.Detect(true)
-		if level == termcolor.LevelNone {
-			level = termcolor.LevelANSI256
-		}
-		return level
-	}
-	return termcolor.LevelNone
-}
-
 func writerIsTerminal(writer io.Writer) bool {
 	file, ok := writer.(*os.File)
 	if !ok {
@@ -392,10 +370,9 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 	// 语言已由 Main 扫描原始参数设置，这里定义只为让 --lang 通过解析。
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
-	formats := flags.String("format", "json,txt,md,html", i18n.T("flag.format"))
+	formats := flags.String("format", "json,md,html", i18n.T("flag.format"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))
 	name := flags.String("name", "", i18n.T("flag.name"))
-	renderColor := flags.String("color", "auto", i18n.T("flag.color"))
 	renderBaseline := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -429,16 +406,8 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		baseline = loaded
 	}
-	textColor := termcolor.LevelNone
-	if requested, ok := termcolor.ParseLevel(*renderColor); ok {
-		textColor = requested
-	} else if strings.EqualFold(*renderColor, "always") {
-		if textColor = termcolor.Detect(true); textColor == termcolor.LevelNone {
-			textColor = termcolor.LevelANSI256
-		}
-	}
 	written, err := reporter.WriteFilesWithOptions(data, *output, *name, config.ParseList(*formats),
-		reporter.Options{TextColor: textColor, Score: score.Compute(data, baseline)})
+		reporter.Options{Score: score.Compute(data, baseline)})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
@@ -806,7 +775,7 @@ func printHelp(writer io.Writer) {
 Usage:
   ecs [run] [options]         run tests (standard by default)
   ecs list                    show profiles and modules
-  ecs render --input FILE     re-export JSON/txt/md/html from JSON
+  ecs render --input FILE     re-export JSON/Markdown/HTML from JSON
   ecs compare REPORTS...      compare 2 or more JSON reports safely
   ecs config example          print a sample configuration
   ecs doctor                  check standard benchmark tools
@@ -821,7 +790,7 @@ Examples:
   ecs --profile full --exposure public
   ecs --profile full --skip media --output ./reports
   ecs --only system,cpu,memory,disk --format json,html
-  ecs compare old.json new.json --format json,txt,md,html --output ./compare
+  ecs compare old.json new.json --format json,md,html --output ./compare
 
 Run ecs run --help for all test options or ecs compare --help for comparison options.`)
 		return
@@ -831,7 +800,7 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
 用法:
   ecs [run] [选项]            运行测试（默认 standard）
   ecs list                    查看配置档与模块
-  ecs render --input FILE     从 JSON 重新导出 JSON/txt/md/html 四种格式
+  ecs render --input FILE     从 JSON 重新导出 JSON/Markdown/HTML 三种格式
   ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
@@ -846,7 +815,7 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
   ecs --profile full --exposure public
   ecs --profile full --skip media --output ./reports
   ecs --only system,cpu,memory,disk --format json,html
-  ecs compare old.json new.json --format json,txt,md,html --output ./compare
+  ecs compare old.json new.json --format json,md,html --output ./compare
 
 运行 ecs run --help 查看测试参数，或运行 ecs compare --help 查看对比参数。`)
 }

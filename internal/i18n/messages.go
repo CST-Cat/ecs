@@ -16,7 +16,7 @@ var chinese = map[string]string{
 	"cli.usage":          "用法",
 	"cli.usage.run":      "运行测试（默认 standard）",
 	"cli.usage.list":     "查看配置档与模块",
-	"cli.usage.render":   "从 JSON 重新导出 JSON/txt/Markdown/HTML 四种格式",
+	"cli.usage.render":   "从 JSON 重新导出 JSON/Markdown/HTML 三种格式",
 	"cli.usage.config":   "输出配置文件示例",
 	"cli.usage.doctor":   "检查标准基准工具",
 	"cli.usage.version":  "显示版本",
@@ -242,7 +242,7 @@ var chinese = map[string]string{
 	"compare.written":             "已生成对比报告",
 
 	// ── 终端界面 ────────────────────────────────────────────
-	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/txt/Markdown/HTML",
+	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML",
 	"term.profileLine":  "配置档",
 	"term.moduleCount":  "模块",
 	"term.estimate":     "预计",
@@ -302,7 +302,7 @@ var english = map[string]string{
 	"cli.usage":          "Usage",
 	"cli.usage.run":      "Run tests (standard profile by default)",
 	"cli.usage.list":     "Show profiles and modules",
-	"cli.usage.render":   "Re-export JSON/txt/Markdown/HTML from a JSON report",
+	"cli.usage.render":   "Re-export JSON/Markdown/HTML from a JSON report",
 	"cli.usage.config":   "Print a sample configuration file",
 	"cli.usage.doctor":   "Check the standard benchmark tools",
 	"cli.usage.version":  "Show version",
@@ -528,7 +528,7 @@ var english = map[string]string{
 	"compare.written":             "Comparison reports written",
 
 	// ── Terminal ────────────────────────────────────────────
-	"term.subtitle":     "No ads · No auto-upload · Local JSON/txt/Markdown/HTML",
+	"term.subtitle":     "No ads · No auto-upload · Local JSON/Markdown/HTML",
 	"term.profileLine":  "Profile",
 	"term.moduleCount":  "Modules",
 	"term.estimate":     "ETA",

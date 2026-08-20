@@ -7,8 +7,8 @@ name: ci
 # 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
 # compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
-# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 使用
-# 下方人工固定的版本，不跟随 stable/latest 漂移；compat 只验证最低支持版本。
+# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 从仓库根
+# .go-version 读取，不跟随 stable/latest 漂移；compat 只验证最低支持版本。
 
 on:
   push:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  ECS_GO: "1.26.5"
+  GOTOOLCHAIN: local
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
       - name: Unit and parser tests
@@ -42,7 +42,7 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 最低支持版本与当前稳定版本的源码、解析器测试。
+  # 最低源码兼容版本测试。
   compat:
     name: compat (${{ matrix.go-version }})
     runs-on: ubuntu-latest
@@ -51,8 +51,6 @@ jobs:
       fail-fast: false
       matrix:
         go-version: ["1.22.x"]
-    env:
-      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -72,7 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       - run: ./scripts/ci/check.sh
 
@@ -84,7 +82,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       - run: ./scripts/ci/integration.sh
 
@@ -96,7 +94,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       - run: go test -race ./...
 
@@ -108,7 +106,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       - run: ./scripts/cross.sh
 
@@ -121,7 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_GO }}
+          go-version-file: .go-version
           cache: false
       - name: Validate submissions
         env:

@@ -20,11 +20,14 @@
 
 本地检查：
 
-Go 版本按职责分开并由维护者人工固定：根 `go.mod` 的 `go 1.22` 是源码最低兼容版本；
-`.github/workflows/ci.yml` 的 `compat` job 使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`，确保验证的确是最低版本。
-其余日常 CI job 使用 `ECS_GO` 固定的 Go 1.26.5，正式 Release 使用 `ECS_RELEASE_GO` 固定的 Go 1.26.5；
-两者都不追随 `stable` 或 `latest`。`devtools/go.mod` 使用 Go 1.26.5 构建并固定 `staticcheck` 依赖，
-主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release 二进制不需要 Go。
+Go 版本按三层职责管理：
+
+1. 根 `go.mod` 的 `go 1.22` 是源码最低兼容版本，不代表当前开发工具链版本。
+2. `.github/workflows/ci.yml` 的 `compat` job 显式使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`；它是唯一的最低版本验证入口。
+3. 根 `.go-version` 是当前开发、普通 CI、leaderboard 和正式 Release 共用的人工 pin；未来升级当前工具链时只修改该文件。当前工具链不追随 `stable` 或 `latest`。
+
+`devtools/go.mod` 是独立工具 module 的 module requirement 与依赖清单（用于构建 `staticcheck`），不是当前工具链版本源。
+主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release binary 不需要 Go。
 
 Go 编译器、GitHub Actions、`staticcheck` 及其他工具的升级均由维护者手工审查后决定；升级提案只由维护者发起，
 仓库不会为版本升级生成拉取请求。

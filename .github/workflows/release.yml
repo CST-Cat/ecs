@@ -30,11 +30,11 @@ on:
 permissions:
   contents: read
 
-# 正式发布统一使用这条明确的 Go 工具链，不从主模块 go.mod 自动漂移。
+# 正式发布统一使用仓库根目录 .go-version 人工固定的 Go 编译器版本，不从主模块
+# go.mod 自动漂移；升级正式 Go 版本时只需修改仓库根目录 .go-version 文件。
 # 所有 release job（包括被脚本间接调用的 go build/go test/go run）都禁止
-# go 命令根据 go.mod 自动切换工具链；正式编译器只由 ECS_RELEASE_GO 选择。
+# go 命令根据 go.mod 自动切换工具链；编译器版本只由仓库根目录 .go-version 选择。
 env:
-  ECS_RELEASE_GO: "1.26.5"
   GOTOOLCHAIN: local
 
 concurrency:
@@ -62,7 +62,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_RELEASE_GO }}
+          go-version-file: .go-version
           cache: false
 
       - name: Freeze the release candidate
@@ -122,7 +122,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_RELEASE_GO }}
+          go-version-file: .go-version
           cache: false
 
       # 交叉构建把宿主当成构建机，跑错架构的宿主会得到错误的产物。
@@ -166,10 +166,10 @@ jobs:
 
   # 组装全部发布物，并记录**实测**的工具链版本。
   #
-  # 编译器版本由 workflow 级 ECS_RELEASE_GO 固定，不另写
+  # 编译器版本由仓库根目录 .go-version 人工固定，不另写
   # expected_go=... 这种可能分叉的期望值。这里记录的是 setup-go 后本次构建
   # 实际使用的 go env GOVERSION，verify 原样传入 --build-go-version，去对二进制
-  # 里的元数据。升级正式 Go 版本时只需更新本 workflow 的 ECS_RELEASE_GO。
+  # 里的元数据。升级正式 Go 版本时只需更新仓库根目录 .go-version。
   assemble:
     needs: [preflight, tools]
     runs-on: ubuntu-latest
@@ -183,7 +183,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_RELEASE_GO }}
+          go-version-file: .go-version
           cache: false
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -231,7 +231,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.ECS_RELEASE_GO }}
+          go-version-file: .go-version
           cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

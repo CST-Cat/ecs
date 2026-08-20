@@ -4,7 +4,7 @@ set -euo pipefail
 # 发布前校验：这组制品是不是真的由这次提交、这条工具链产出的。
 #
 # 根 go.mod 只声明源码最低兼容版本，devtools/go.mod 只管理 staticcheck。
-# 正式 Release 工具链由 release.yml 的 ECS_RELEASE_GO 固定；构建阶段记录
+# 正式 Release 工具链由仓库根 .go-version 固定；构建阶段记录
 # 实际的 go env GOVERSION，再作为 --build-go-version 传给本脚本。
 #
 # 校验对象是**解包出来的实际二进制**，不是构建日志。它检查
@@ -24,7 +24,7 @@ usage() {
 usage: scripts/release/verify.sh --dist DIR --build-go-version GOVERSION --revision SHA [--no-tools]
        scripts/release/verify.sh --dist DIR --dry-run
 
-  --build-go-version  本次构建实测的工具链，如 go1.26.5（由构建方给出）
+  --build-go-version  本次构建实测的工具链，如 go1.x.y（由构建方给出）
   --revision          冻结的发布提交 SHA
   --no-tools          只校验主程序与语料
   --dry-run           本地演练：隐含 --no-tools，自行取工具链与 HEAD，并跳过
@@ -95,7 +95,7 @@ else
 fi
 [[ "$dist" == /* ]] || dist="$ECS_REPO_ROOT/$dist"
 [[ -d "$dist" ]] || die "no such dist directory: $dist"
-[[ "$build_go_version" == go* ]] || die "--build-go-version must look like go1.26.5, got $build_go_version"
+[[ "$build_go_version" == go* ]] || die "--build-go-version must look like go1.x.y, got $build_go_version"
 
 verify_root=$(mktemp -d)
 trap 'rm -rf -- "$verify_root"' EXIT

@@ -319,7 +319,7 @@ func Defaults(profile string) (Runtime, error) {
 		Reveal:           false,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
-		Formats:          []string{"json", "txt", "md", "html"},
+		Formats:          []string{"json", "md", "html"},
 		DiskPath:         ".",
 		DiskMatrixMode:   DiskMatrixTime,
 		HTTPTimeout:      10 * time.Second,
@@ -624,7 +624,7 @@ func Validate(runtime Runtime) error {
 	if runtime.SpeedThreads < 1 || runtime.SpeedThreads > 32 {
 		return i18n.Errorf("err.threadsRange")
 	}
-	allowedFormats := map[string]bool{"json": true, "md": true, "html": true, "txt": true}
+	allowedFormats := map[string]bool{"json": true, "md": true, "html": true}
 	if len(runtime.Formats) == 0 {
 		return i18n.Errorf("err.noFormats")
 	}
@@ -762,7 +762,7 @@ func ExampleFile() File {
 		Reveal:           &reveal,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},
-		Formats:          []string{"json", "txt", "md", "html"},
+		Formats:          []string{"json", "md", "html"},
 		Output:           "./reports",
 		DiskPath:         ".",
 		IPerfDuration:    "5s",

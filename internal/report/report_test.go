@@ -12,7 +12,6 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
-	"ecs/internal/termcolor"
 )
 
 func sampleReport() model.Report {
@@ -25,7 +24,7 @@ func sampleReport() model.Report {
 		Run: model.RunInfo{
 			ID: "run-1", Profile: "standard", StartedAt: start, CompletedAt: start.Add(time.Second),
 			DurationMS: 1000, Exposure: "local", Offline: true, IPVersion: "6", Redacted: true,
-			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json", "txt"},
+			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json", "md"},
 		},
 		Summary:      model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项测试完成"},
 		Notices:      []string{"probe.memory.stream_missing", "系统"},
@@ -92,14 +91,14 @@ func TestWriteFilesCanonicalAndLocalizedOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
-	written, err := WriteFilesWithOptions(data, directory, " report/unsafe ", []string{"json", "txt", "md", "html"}, Options{TextColor: termcolor.LevelNone})
+	written, err := WriteFilesWithOptions(data, directory, " report/unsafe ", []string{"json", "md", "html"}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(written) != 4 {
+	if len(written) != 3 {
 		t.Fatalf("written files = %v", written)
 	}
-	for _, format := range []string{"json", "txt", "md", "html"} {
+	for _, format := range []string{"json", "md", "html"} {
 		path := written[format]
 		if filepath.Base(path) != "report-unsafe."+format {
 			t.Fatalf("sanitized %s path = %q", format, path)
