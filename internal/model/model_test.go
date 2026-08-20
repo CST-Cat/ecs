@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -33,7 +34,7 @@ func TestResultLifecycleFailuresAndSummaries(t *testing.T) {
 	}
 	failed := NewResult("fail", "Fail")
 	failed.Fail(errors.New("broken"))
-	if failed.Status != StatusError || failed.Error != "broken" || failed.Summary != "测试失败" {
+	if failed.Status != StatusError || failed.Error != "broken" || failed.Summary != "" || !reflect.DeepEqual(failed.SummaryMessages, []Message{{Key: "message.result.failed"}}) {
 		t.Fatalf("failed result = %+v", failed)
 	}
 
@@ -42,21 +43,36 @@ func TestResultLifecycleFailuresAndSummaries(t *testing.T) {
 		results                       []Result
 		status                        Status
 		ok, warnings, skipped, errors int
-		headline                      string
+		messages                      []Message
 	}{
-		{name: "empty", status: StatusOK, headline: "0 项测试完成"},
-		{name: "ok", results: []Result{{Status: StatusOK}, {Status: StatusOK}}, status: StatusOK, ok: 2, headline: "2 项测试完成"},
-		{name: "warning and skipped", results: []Result{{Status: StatusWarning}, {Status: StatusSkipped}}, status: StatusWarning, warnings: 1, skipped: 1, headline: "0 项成功，1 项需留意，1 项跳过"},
-		{name: "error takes precedence", results: []Result{{Status: StatusOK}, {Status: StatusWarning}, {Status: StatusSkipped}, {Status: StatusError}}, status: StatusError, ok: 1, warnings: 1, skipped: 1, errors: 1, headline: "1 项成功，1 项异常，1 项跳过"},
+		{name: "empty", status: StatusOK, messages: []Message{{Key: "message.summary.allOK", Args: []string{"0"}}}},
+		{name: "ok", results: []Result{{Status: StatusOK}, {Status: StatusOK}}, status: StatusOK, ok: 2, messages: []Message{{Key: "message.summary.allOK", Args: []string{"2"}}}},
+		{name: "warning and skipped", results: []Result{{Status: StatusWarning}, {Status: StatusSkipped}}, status: StatusWarning, warnings: 1, skipped: 1, messages: []Message{{Key: "message.summary.withWarnings", Args: []string{"0", "1"}}, {Key: "message.summary.skipped", Args: []string{"1"}}}},
+		{name: "error takes precedence", results: []Result{{Status: StatusOK}, {Status: StatusWarning}, {Status: StatusSkipped}, {Status: StatusError}}, status: StatusError, ok: 1, warnings: 1, skipped: 1, errors: 1, messages: []Message{{Key: "message.summary.withErrors", Args: []string{"1", "1"}}, {Key: "message.summary.skipped", Args: []string{"1"}}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			report := Report{Results: test.results}
 			Summarize(&report)
 			got := report.Summary
-			if got.Status != test.status || got.OK != test.ok || got.Warnings != test.warnings || got.Skipped != test.skipped || got.Errors != test.errors || got.Headline != test.headline {
+			if got.Status != test.status || got.OK != test.ok || got.Warnings != test.warnings || got.Skipped != test.skipped || got.Errors != test.errors || got.Headline != "" || !reflect.DeepEqual(got.Messages, test.messages) {
 				t.Fatalf("summary = %+v", got)
 			}
 		})
+	}
+}
+
+func TestMessageJSONRoundTrip(t *testing.T) {
+	original := NewMessage("message.test", "ipv6", 2)
+	content, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, original) {
+		t.Fatalf("Message round trip = %#v, want %#v", decoded, original)
 	}
 }
 
@@ -96,11 +112,13 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 		Notices:      []string{local4},
 		SensitiveIPs: []string{local4},
 		Run:          RunInfo{Requested: []string{"system", "network"}, OutputFormats: []string{"json", "txt"}},
+		Summary:      Summary{Messages: []Message{NewMessage("message.test", local4)}},
 		Results: []Result{{
-			Evidence:     &Evidence{Valid: 1, Expected: 2},
-			Fields:       []Field{{Key: "secret", Value: "secret-token", Sensitive: true}, {Key: "remote", Value: "198.51.100.2"}},
-			Measurements: []Measurement{{Key: "local", Label: local4, Display: local4}},
-			Methodology:  Methodology{Parameters: map[string]string{"local": local4}},
+			SummaryMessages: []Message{NewMessage("message.test", local4)},
+			Evidence:        &Evidence{Valid: 1, Expected: 2},
+			Fields:          []Field{{Key: "secret", Value: "secret-token", Sensitive: true}, {Key: "remote", Value: "198.51.100.2"}},
+			Measurements:    []Measurement{{Key: "local", Label: local4, Display: local4}},
+			Methodology:     Methodology{Parameters: map[string]string{"local": local4}},
 			Tables: []Table{{
 				Columns:               []string{"id", "address"},
 				ColumnKeys:            []string{"id", "address"},
@@ -134,11 +152,13 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	hidden := RedactedCopy(report, false)
 	masked4, maskedTextIP, maskedTableIP := Mask(local4), Mask(textIP), Mask(tableIP)
 	result := hidden.Results[0]
-	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0] != masked4 || result.Evidence == nil || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.TriggerReasons[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
+	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.TriggerReasons[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
 		t.Fatalf("redacted containers = %+v", result)
 	}
 	hidden.Notices[0] = "changed"
+	hidden.Summary.Messages[0].Args[0] = "changed"
 	hidden.Run.Requested[0], hidden.Run.OutputFormats[0] = "changed", "changed"
+	hidden.Results[0].SummaryMessages[0].Args[0] = "changed"
 	hidden.Results[0].Evidence.Valid = 99
 	hidden.Results[0].Fields[0].Value = "changed"
 	hidden.Results[0].Measurements[0].Display = "changed"
@@ -168,7 +188,7 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	}
 
 	revealed := RedactedCopy(report, true)
-	if revealed.Run.Redacted || revealed.SensitiveIPs != nil || revealed.Notices[0] != local4 || revealed.Results[0].Fields[0].Value != "secret-token" || revealed.Results[0].Tables[0].Rows[0][1] != tableIP || revealed.Results[0].TextBlocks[0].Content != "trace "+textIP {
+	if revealed.Run.Redacted || revealed.SensitiveIPs != nil || revealed.Notices[0] != local4 || revealed.Summary.Messages[0].Args[0] != local4 || revealed.Results[0].SummaryMessages[0].Args[0] != local4 || revealed.Results[0].Fields[0].Value != "secret-token" || revealed.Results[0].Tables[0].Rows[0][1] != tableIP || revealed.Results[0].TextBlocks[0].Content != "trace "+textIP {
 		t.Fatalf("revealed copy = %+v", revealed.Results[0])
 	}
 }
