@@ -21,6 +21,11 @@ type resolvedRunConfig struct {
 	Version       bool
 }
 
+type runFlagParseError struct{ err error }
+
+func (e runFlagParseError) Error() string { return e.err.Error() }
+func (e runFlagParseError) Unwrap() error { return e.err }
+
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
@@ -93,7 +98,12 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	versionFlag := flags.Bool("version", false, i18n.T("flag.version"))
 	flags.Usage = func() { printRunHelp(stderr, flags) }
 	if err := flags.Parse(args); err != nil {
-		return resolvedRunConfig{}, err
+		return resolvedRunConfig{}, runFlagParseError{err: err}
+	}
+	// Preserve the historical CLI contract: --version short-circuits before
+	// positional-argument and run-specific override validation.
+	if *versionFlag {
+		return resolvedRunConfig{Runtime: cfg, Version: true}, nil
 	}
 	if flags.NArg() != 0 {
 		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
@@ -203,7 +213,7 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		Interactive:   *interactiveFlag,
 		Yes:           *yesFlag,
 		Strict:        *strictFlag,
-		Version:       *versionFlag,
+		Version:       false,
 	}, nil
 }
 
