@@ -72,6 +72,7 @@ ZH
 
 # --help 是 wrapper 自身的帮助，必须在平台检查、建目录和下载前处理。
 for arg in "$@"; do
+  [ "$arg" = "--" ] && break
   case "$arg" in
     -h|--help) usage; exit 0 ;;
   esac
@@ -80,6 +81,7 @@ done
 # 这里只识别输出选项是否出现，不解析或校验它的取值；其余参数保持原样。
 OUTPUT_GIVEN=0
 for arg in "$@"; do
+  [ "$arg" = "--" ] && break
   case "$arg" in
     --output|-output|--output=*|-output=*) OUTPUT_GIVEN=1 ;;
   esac

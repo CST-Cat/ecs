@@ -177,3 +177,60 @@ func TestCompareCommandReportsHelpAndUnknownFlag(t *testing.T) {
 		t.Fatalf("compare unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }
+
+func TestCompareCommandRejectsEmptyOutputPath(t *testing.T) {
+	root := t.TempDir()
+	first := writeLocalizedObservationInput(t, root, "first", "系统", "系统")
+	second := writeLocalizedObservationInput(t, root, "second", "完成", "完成")
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workingDirectory := t.TempDir()
+	if err := os.Chdir(workingDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	status, stdout, stderr := invokeAppMain(
+		"compare", first, second, "--lang", "en", "--format", "json", "--output=",
+	)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "comparison output path must not be empty") {
+		t.Fatalf("empty output status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(workingDirectory, "reports")); !os.IsNotExist(err) {
+		t.Fatalf("empty output created ./reports: %v", err)
+	}
+	entries, err := os.ReadDir(workingDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("empty output created comparison artifacts: %v", entries)
+	}
+}
+
+func TestCompareCommandPreservesDoubleDashForOptionLikeReports(t *testing.T) {
+	root := t.TempDir()
+	writeLocalizedObservationInput(t, root, "--first", "系统", "系统")
+	writeLocalizedObservationInput(t, root, "--second", "完成", "完成")
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	output := t.TempDir()
+	status, stdout, stderr := invokeAppMain(
+		"compare", "--lang", "en", "--format", "json", "--output", output, "--name", "boundary", "--", "--first.json", "--second.json",
+	)
+	if status != 0 || stdout == "" || stderr != "" {
+		t.Fatalf("double-dash option-like reports status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(output, "boundary.json")); err != nil {
+		t.Fatalf("double-dash option-like reports did not write comparison: %v", err)
+	}
+}

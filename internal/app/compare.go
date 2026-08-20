@@ -43,6 +43,10 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
+	if *outputFlag == "" {
+		fmt.Fprintf(stderr, "%s: comparison output path must not be empty\n", i18n.T("cli.error"))
+		return 1
+	}
 	paths := flags.Args()
 	if len(paths) < 2 {
 		fmt.Fprintln(stderr, i18n.T("compare.help.inputs"))
@@ -169,6 +173,10 @@ func normalizeCompareArgs(args []string) ([]string, error) {
 			continue
 		}
 		paths = append(paths, argument)
+	}
+	if positionalOnly {
+		// Keep the delimiter after reordered flags so option-like paths stay positional.
+		flagArgs = append(flagArgs, "--")
 	}
 	return append(flagArgs, paths...), nil
 }

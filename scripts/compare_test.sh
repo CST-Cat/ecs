@@ -49,8 +49,14 @@ done
 [ "${1:-}" = compare ] || exit 64
 shift
 output=""
+positional_only=0
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output ]; then
+  if [ "$1" = -- ]; then
+    positional_only=1
+    shift
+    continue
+  fi
+  if [ "$positional_only" -eq 0 ] && [ "$1" = --output ]; then
     shift
     [ "$#" -gt 0 ] || exit 65
     output=$1
@@ -262,5 +268,84 @@ esac
 if find "$auto_tmp" -mindepth 1 -maxdepth 1 -type d -name 'ecs-compare.*' -print -quit | grep -q .; then
   fail "automatic output left an ecs-compare WORK directory"
 fi
+
+# -- 后面的 --output 必须保持 positional：wrapper 仍然注入自己的 OUT。
+boundary_output_tmp="$test_root/boundary-output-tmp"
+boundary_output_logs="$fixture_logs/boundary-output"
+mkdir -p "$boundary_output_tmp" "$boundary_output_logs"
+if ! ECS_LANG=en TMPDIR="$boundary_output_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$boundary_output_logs" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    sh "$repo_root/compare.sh" -- --output "$report_one" "$report_two" \
+    >"$test_root/boundary-output.stdout" 2>"$test_root/boundary-output.stderr"; then
+  fail "boundary --output fixture returned a failure: $(<"$test_root/boundary-output.stderr")"
+fi
+
+[[ -s "$test_root/boundary-output.stdout" ]] || fail "boundary --output path was empty"
+mapfile -t boundary_output_lines <"$test_root/boundary-output.stdout"
+[[ "${#boundary_output_lines[@]}" -eq 1 ]] ||
+  fail "boundary --output stdout contained ${#boundary_output_lines[@]} lines instead of one path"
+boundary_output="${boundary_output_lines[0]}"
+case "$boundary_output" in
+  "$boundary_output_tmp"/ecs-comparison.*) ;;
+  *) fail "boundary --output path was not under TMPDIR: $boundary_output" ;;
+esac
+[[ -f "$boundary_output/comparison.json" ]] ||
+  fail "boundary --output path did not contain comparison.json: $boundary_output"
+[[ "$(find "$boundary_output_tmp" -mindepth 1 -maxdepth 1 -print | wc -l)" -eq 1 ]] ||
+  fail "boundary --output TMPDIR contained entries other than the retained output"
+if find "$boundary_output_tmp" -mindepth 1 -maxdepth 1 -type d -name 'ecs-compare.*' -print -quit | grep -q .; then
+  fail "boundary --output left an ecs-compare WORK directory"
+fi
+mapfile -d '' -t boundary_output_argv <"$boundary_output_logs/compare.argv"
+expected_boundary_output_argv=(compare --output "$boundary_output" -- --output "$report_one" "$report_two")
+[[ "${#boundary_output_argv[@]}" -eq "${#expected_boundary_output_argv[@]}" ]] ||
+  fail "boundary --output changed the argument count"
+for i in "${!expected_boundary_output_argv[@]}"; do
+  [[ "${boundary_output_argv[$i]}" == "${expected_boundary_output_argv[$i]}" ]] ||
+    fail "boundary --output argument $i changed: ${boundary_output_argv[$i]}"
+done
+
+# -- 后面的 --help 必须透传给 ecs，不得触发 wrapper 帮助。
+boundary_help_tmp="$test_root/boundary-help-tmp"
+boundary_help_logs="$fixture_logs/boundary-help"
+mkdir -p "$boundary_help_tmp" "$boundary_help_logs"
+if ! ECS_LANG=en TMPDIR="$boundary_help_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$boundary_help_logs" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    sh "$repo_root/compare.sh" -- --help "$report_one" "$report_two" \
+    >"$test_root/boundary-help.stdout" 2>"$test_root/boundary-help.stderr"; then
+  fail "boundary --help fixture returned a failure: $(<"$test_root/boundary-help.stderr")"
+fi
+
+grep -F 'starting comparison' "$test_root/boundary-help.stderr" >/dev/null ||
+  fail "boundary --help did not reach ecs comparison"
+if grep -F 'Usage:' "$test_root/boundary-help.stderr" >/dev/null; then
+  fail "boundary --help unexpectedly printed wrapper help"
+fi
+[[ -s "$test_root/boundary-help.stdout" ]] || fail "boundary --help path was empty"
+mapfile -t boundary_help_lines <"$test_root/boundary-help.stdout"
+[[ "${#boundary_help_lines[@]}" -eq 1 ]] ||
+  fail "boundary --help stdout contained ${#boundary_help_lines[@]} lines instead of one path"
+boundary_help_output="${boundary_help_lines[0]}"
+case "$boundary_help_output" in
+  "$boundary_help_tmp"/ecs-comparison.*) ;;
+  *) fail "boundary --help path was not under TMPDIR: $boundary_help_output" ;;
+esac
+[[ -f "$boundary_help_output/comparison.json" ]] ||
+  fail "boundary --help path did not contain comparison.json: $boundary_help_output"
+[[ "$(find "$boundary_help_tmp" -mindepth 1 -maxdepth 1 -print | wc -l)" -eq 1 ]] ||
+  fail "boundary --help TMPDIR contained entries other than the retained output"
+if find "$boundary_help_tmp" -mindepth 1 -maxdepth 1 -type d -name 'ecs-compare.*' -print -quit | grep -q .; then
+  fail "boundary --help left an ecs-compare WORK directory"
+fi
+mapfile -d '' -t boundary_help_argv <"$boundary_help_logs/compare.argv"
+expected_boundary_help_argv=(compare --output "$boundary_help_output" -- --help "$report_one" "$report_two")
+[[ "${#boundary_help_argv[@]}" -eq "${#expected_boundary_help_argv[@]}" ]] ||
+  fail "boundary --help changed the argument count"
+for i in "${!expected_boundary_help_argv[@]}"; do
+  [[ "${boundary_help_argv[$i]}" == "${expected_boundary_help_argv[$i]}" ]] ||
+    fail "boundary --help argument $i changed: ${boundary_help_argv[$i]}"
+done
 
 echo "compare.sh behavior tests passed"
