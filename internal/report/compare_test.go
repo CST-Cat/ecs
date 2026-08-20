@@ -92,7 +92,7 @@ func sparseComparisonFixture() comparison.Report {
 		Inputs:  []comparison.Input{{Index: 0, Label: "empty-1"}, {Index: 1, Label: "empty-2"}},
 		Summary: comparison.Summary{Comparability: comparison.NotComparable, Reports: 2, Modules: 1},
 		Modules: []comparison.Module{{ID: "empty", Title: "Empty", Comparability: comparison.NotComparable, Statuses: []comparison.StatusValue{{Report: 0}, {Report: 1}}, Evidence: []comparison.EvidenceValue{{Report: 0}, {Report: 1}}}},
-		Notices: []string{"compare.notice.scope"},
+		Notices: []comparison.Notice{{Key: "compare.notice.scope"}},
 		Tool:    model.ToolInfo{Name: "ecs", Version: "test"},
 	}
 }
@@ -105,7 +105,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 	payload := "<payload>|[unsafe]\x1b[31m"
 	pair.Inputs[0].Label = payload
 	pair.Modules[0].Metrics[0].Label = payload
-	pair.Notices = append(pair.Notices, payload)
+	pair.Notices = append(pair.Notices, comparison.Notice{Key: "compare.notice.schemaMixed", Args: []string{payload}})
 	pairBefore, err := ComparisonJSON(pair)
 	if err != nil {
 		t.Fatal(err)
