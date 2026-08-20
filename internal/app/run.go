@@ -24,8 +24,13 @@ import (
 func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, err := resolveRunConfig(args, stderr)
 	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
+		var parseErr runFlagParseError
+		if errors.As(err, &parseErr) {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			// flag.FlagSet already emitted the parse error to stderr.
+			return 1
 		}
 		fmt.Fprintln(stderr, err)
 		return 1
