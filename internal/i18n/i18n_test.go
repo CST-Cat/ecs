@@ -15,6 +15,7 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 		{name: "errors", zh: errorChinese, en: errorEnglish},
 		{name: "cli", zh: cliChinese, en: cliEnglish},
 		{name: "score", zh: scoreChinese, en: scoreEnglish},
+		{name: "compare flags", zh: compareFlagChinese, en: compareFlagEnglish},
 	}
 	for _, table := range tables {
 		for key, zh := range table.zh {
@@ -104,7 +105,7 @@ func TestLanguageParsingAndEnvironmentSelection(t *testing.T) {
 	}
 }
 
-func TestTranslationHelpersAndFallbacks(t *testing.T) {
+func TestTranslationHelpersExposeMissingKeysWithoutCrossLanguageFallback(t *testing.T) {
 	original := Current()
 	t.Cleanup(func() { Set(original) })
 	Set(LangEN)
@@ -124,11 +125,17 @@ func TestTranslationHelpersAndFallbacks(t *testing.T) {
 	const key = "test.only.chinese"
 	chinese[key] = "只有中文"
 	t.Cleanup(func() { delete(chinese, key) })
-	if got := TL(LangEN, key); got != "只有中文" {
-		t.Fatalf("missing English translation fallback = %q", got)
+	if got := TL(LangEN, key); got != key {
+		t.Fatalf("missing English translation must expose key, got %q", got)
+	}
+	if Has(LangEN, key) {
+		t.Fatal("English catalog must not claim a Chinese-only key")
+	}
+	if got := TL(LangZH, key); got != "只有中文" || !Has(LangZH, key) {
+		t.Fatalf("Chinese catalog lookup = %q, Has=%v", got, Has(LangZH, key))
 	}
 	if got := TL(LangEN, "missing.test.key"); got != "missing.test.key" {
-		t.Fatalf("missing key fallback = %q", got)
+		t.Fatalf("missing key = %q", got)
 	}
 }
 
