@@ -4,214 +4,41 @@
 
 工作 Branch：`codex/architecture-machine-facts-cleanup`
 
-状态标记：`TODO` / `IN PROGRESS` / `DONE` / `BLOCKED` / `REOPENED`。
+状态：`TODO` / `IN PROGRESS` / `DONE` / `BLOCKED` / `REOPENED`。
 
-> 环境说明：当前无 `exec`/Sol High Worker Subagent 能力，无法满足对应 Worker 分发要求；不得冒充。其余阶段按本计划严格串行，由主 Agent 实际读取仓库、修改、审查 diff，并尽可能以 GitHub Actions 取得真实测试证据。当前容器无法解析 `github.com`，不能 clone 仓库；Draft PR #6 的 Actions run 通过现有连接器暂未取得，因此已完成阶段的运行测试统一记为“未验证（执行环境限制）”，不冒充测试通过。
+> 环境限制：当前没有 `exec`/Sol High Worker Subagent 接口，不能真实执行该项要求，也不得用其他能力冒充。当前容器无法解析 `github.com`，不能 clone 仓库；Draft PR #6 暂未通过连接器取得 Actions run。因此已完成阶段若无外部 CI 证据，运行测试统一标记为“未验证（执行环境限制）”。所有阶段仍串行推进，并由主 Agent 查看实际文件与阶段 diff。
 
-## 0. 基线与仓库规范建立 — DONE
+## 当前状态与阶段记录
 
-- 目标：确认基准、读取仓库约束、建立工作 Branch 与任务文档。
-- 输入：用户规范、`main`、README、CONTRIBUTING、CI。
-- 范围：仅工作流程和任务 Markdown。
-- 产出：`AGENTS.md`、`REQUIREMENTS.md`、本 `PLAN.md`；记录基准 commit。
-- 验收：已确认基准 `main@6e85039301fc817e8c4a290ffb9b111fc37e55a8`；已建立独立 Branch；`AGENTS.md` 未混入本次业务需求。
+- **0 基线与仓库规范 — DONE**。目标：建立安全工作边界；输入：用户规范、main、README/CONTRIBUTING/CI；范围：任务文档；产出：`AGENTS.md`、`REQUIREMENTS.md`、Branch 与基准记录；验收：`AGENTS.md` 只含稳定纪律，基准固定为 `main@6e850393...`。
+- **1 仓库搜索与事实固化 — DONE**。目标：把 18 项需求映射到真实实现；输入：仓库文件树/代码；范围：只读搜索；产出：`SEARCH_SUMMARY.md`；验收：已确认 app/config/model 大文件、report Localize、source-text i18n、runner retry 白名单、run.sh plan-file、leaderboard trigger 等真实现状。
+- **2 `app.go` 行为保持式拆分 — DONE**。目标：命令职责显式化；输入：原 `internal/app/app.go`；范围：同一 `package app`，禁 Cobra/Command/DI；产出：run/render/list/config/doctor 等职责文件；验收：阶段 diff 基本是等量移动，未触碰其他 package。运行验证：未验证。
+- **3 唯一 `resolveRunConfig` — DONE**。目标：CLI+file+defaults 只有一个 resolver；输入：阶段 2；范围：run 配置解析；产出：`resolveRunConfig`，run 仅负责编排；验收：主审发现并返工 `--version` 早退顺序和 flag stderr 重复输出两项行为差异。运行验证：未验证。
+- **4 Compare JSON-only 契约 — DONE**。目标：输入固定 ECS JSON，`--format` 只表示 comparison output formats；输入：compare app/loader/tests；范围：help/命名/契约测试；产出：`outputFormats` 命名、JSON-only 测试；验收：MD/HTML 输入失败，合法 ECS JSON 不要求 `.json` 扩展，不存在 autodetect/parser。运行验证：未验证。
+- **5 Structured comparison Notice — DONE**。目标：删除 key+args 字符串编码/`ParseNotice`；输入：compare model/build/report；范围：comparison notice；产出：`Notice{Key,Args}`、renderer 直接渲染、schema 升 `ecs.compare/v2`、schema 文档同步；验收：阶段仅 8 个相关文件，`build.go` 仅 3 增 3 删，无无关重写。运行验证：未验证。
+- **6 i18n 单向 lookup + parity — DONE**。目标：zh/en 并列 catalog；输入：i18n maps/tests；范围：静态 key lookup；产出：英文缺 key 返回 key，不回退中文；compare key 纳入 parity；验收：`lookup` 以 catalog membership 判断存在性，旧 fallback 测试反转。旧 probe source-text 层明确暂留到阶段 9。运行验证：未验证。
+- **7 `model.Message` 基础设施 — DONE**。目标：动态 ECS 文本具有语言无关机器语义；输入：model summary/fail、report Localize；范围：先迁 model 自生成 summary/failure，不迁 probe；产出：`Message{Key,Args}`、model message catalog、report `renderMessage`；`model.go` 不再 import i18n；验收：Message JSON round-trip、RedactedCopy 深拷贝及 Args IP 遮盖测试已写，阶段 diff 小而集中。运行验证：未验证。
+- **8 Runner 动态文本迁移 — IN PROGRESS**。目标：runner 自生成 notices、skip/panic/retry 等不再写 canonical Chinese；输入：阶段 7 Message；范围：runner→model；产出：结构化 messages，外部错误/raw evidence 保持原样；验收：runner 无 i18n import 或源文本生成，相关 tests 更新。
+- **9 Probe 动态文本迁移与删除 source-text translation — TODO**。目标：probe ECS 自生成文案改 stable key/Message；输入：`probe_text.go`、probe results；范围：不改第三方 stdout/stderr/raw evidence；产出：删除 exact/regex/template source-text translation；验收：无 `i18n.Text` 反向识别入口，关键 probe 双语从同一 JSON 渲染。
+- **10 删除 report Localize clone — TODO**。目标：终结 canonical Chinese→localized copy；输入：阶段 7–9；范围：report localization；产出：renderer 直接读 machine fields/message；验收：同一 JSON 可 `render --lang zh|en`，不存在 `report.Localize`。
+- **11 Report render-all-before-write — TODO**。目标：多格式输出原子成组；输入：writer；范围：render/write 顺序；产出：先全部 render bytes 后写文件；验收：任一 renderer 失败时不留下部分文件。
+- **12 `ecs plan --json` — TODO**。目标：Go 成为 run planning 唯一控制面；输入：`resolveRunConfig` + ModuleDescriptor；范围：app plan/schema/tests/docs；产出：modules、required tools、Ookla/staging 等机器计划；验收：与 run 同 resolver、同选择结果，无第二 planner。
+- **13 `run.sh` 消除第二套 planner — TODO**。目标：Shell 仅 bootstrap/checksum/plan consumer/tool staging/run；输入：阶段 12；范围：`run.sh`；产出：删除 shell 对 profile/only/skip/config/exposure/module manifest 的业务解释，保留 staging/Ookla；验收：相关 shell contract/syntax 覆盖。
+- **14 Retry policy 收回 ModuleDescriptor — TODO**。目标：删除 runner 模块 ID 白名单；输入：descriptor+runner；范围：最小 metadata；产出：优先 `RetryOnInterference bool`；验收：retry 模块集合行为不变，descriptor 成为唯一事实源。
+- **15 拆分 `config.go` — TODO**。目标：职责稳定后物理模块化；输入：阶段 12/14 后 config；范围：同 package；产出：types/defaults/file/validate/catalog/endpoints/exposure/modules 等真实边界；验收：行为不变、ModuleDescriptor 单一事实源。
+- **16 拆分 `model.go` — TODO**。目标：Message 模型稳定后物理拆分；输入：阶段 7–10；范围：同 package；产出：report/result/message/evidence/failure/summary/redact 等文件；验收：model 无 i18n，JSON round-trip/现有行为保持。
+- **17 `tools/lock.json` — TODO**。目标：统一内部供应链机器事实；输入：common/build/release 固定值；范围：内部构建链；产出：architectures/tools/version/source/corpus SHA/bytes；验收：值均可追溯，不让公网 bootstrap 依赖 lock。
+- **18 Staticcheck cache 绑定 devtools lock — TODO**。目标：go.mod/go.sum 变化自动重建；输入：check/devtools；范围：缓存判定；产出：module lock hash；验收：binary 存在但 lock 变化仍重建，未变化可复用。
+- **19 拆 `build_tools.sh` — TODO**。目标：按工具拆 shell，不造框架；输入：阶段 17；范围：`scripts/tools/*.sh` + 顶层编排；产出：工具独立脚本；验收：无 ToolBuilder/provider/plugin，架构/产物布局保持。
+- **20 CI/Security 边界 — TODO**。目标：quality 语义准确，security 独立；输入：workflows/check；范围：CI；产出：移除“源码安全”错误注释，`security.yml` schedule+manual，非 required；验收：不接 `ci.required`，不自动升级 `.go-version`。
+- **21 Leaderboard trigger — TODO**。目标：消除写回 baseline 自触发并覆盖真实算法入口；输入：workflow/score；范围：paths；产出：精确 trigger；验收：输出文件不自触发，submissions 与算法入口仍触发。
+- **22 Installer/docs parity — TODO**。目标：保留显式 `--with-benchmarks` 并修陈旧文案；输入：install/README/README_EN/docs；范围：脚本与文档；产出：中英文行为一致；验收：persistent install 仍 opt-in，不误删功能。
+- **23 Probe 小范围去重 — TODO**。目标：只抽真实重复；输入：route/backtrace/external commands；范围：NextTrace adapter/有限 command helper；产出：小型 helper；验收：无 GenericBenchmarkRunner、无过度抽象。
+- **24 完整 Branch diff 与总审查 — TODO**。目标：全任务回归；输入：Branch vs baseline、CI/docs；范围：全仓；产出：`REVIEW.md`、`VALIDATION.md`、必要返工与临时文档清理；验收：每项实质 diff 可追溯，无意外框架/兼容层/无关重写，测试证据真实，无法验证明确标注。
+- **25 PR 最终交付 — TODO**。目标：用阶段 24 完全相同状态交付；输入：通过总审查的 HEAD；范围：PR metadata；产出：更新 Draft PR #6 或最终 PR；验收：PR diff 与总审查一致，后续若再改代码必须重开阶段 24。
 
-## 1. 仓库搜索与现状证据固化 — DONE
+## 计划调整记录
 
-- 目标：定位 app/i18n/model/report/config/runner/scripts/workflows 的真实实现与依赖，避免按设想盲改。
-- 输入：当前 Branch 文件树与代码搜索结果。
-- 范围：只读搜索；维护 `SEARCH_SUMMARY.md`。
-- 产出：关键文件、符号、重复事实源、删除候选和风险清单。
-- 验收：18 项需求均已映射到真实文件；确认 app/config/model 大文件、report Localize、source-text i18n、runner retry 白名单、run.sh plan-file、leaderboard trigger 等现状。证据写入 `SEARCH_SUMMARY.md`。
-
-## 2. `app.go` 行为保持式拆分 — DONE
-
-- 目标：让 command 与 run orchestration 显式化，不改变 CLI 行为。
-- 输入：`internal/app/app.go` 与现有 app tests。
-- 范围：`internal/app`；保持单 package，不引 Cobra/Command/DI。
-- 产出：`run.go`、`run_config.go`、`render.go`、`list.go`、`config.go`、`doctor.go`；`app.go` 仅保留语言 bootstrap、dispatch 与 global help。
-- 验收：阶段 diff 显示原 `app.go` 大量代码等量移入职责文件，没有触碰其他 package；未引入框架或新依赖。运行测试：未验证（执行环境限制）。
-
-## 3. 唯一 `resolveRunConfig` 边界 — DONE
-
-- 目标：把 CLI + file + defaults → final runtime config 固定为可复用 resolver。
-- 输入：阶段 2 结果。
-- 范围：run config 解析与调用边界。
-- 产出：`resolveRunConfig(args, stderr)`；`runCommand` 只消费 resolver 结果并负责 wizard/validate/execution/report orchestration。
-- 验收：主审发现并返工两处 CLI 行为差异：`--version` 必须保持旧有早退顺序；`flag.FlagSet` 已输出的解析错误不得重复打印。返工后静态审查通过。运行测试：未验证（执行环境限制）。
-
-## 4. Compare JSON-only 契约与 outputFormats 命名 — DONE
-
-- 目标：明确 compare 只读 ECS JSON，同时消除输入/输出 format 歧义。
-- 输入：`internal/app/compare.go`、report comparison loader、docs/tests。
-- 范围：compare CLI/help/tests/docs 和必要内部命名；不按扩展名硬判。
-- 产出：`outputFormatsFlag`/`outputFormats` 命名；compare-specific help key；契约测试锁定 MD/HTML 拒绝、无 `.json` 扩展的合法 ECS JSON 仍可比较。
-- 验收：仍以 `LoadJSONForComparison` 为唯一数据入口；没有 input autodetect/Markdown/HTML parser；阶段 diff 仅涉及 compare 契约、help/i18n key 与测试。运行测试：未验证（执行环境限制）。
-
-## 5. Structured comparison Notice — DONE
-
-- 目标：消除 notice 的字符串编码→ParseNotice→再拆解翻译路径。
-- 输入：compare model/report renderer/i18n。
-- 范围：comparison notice 数据模型与渲染。
-- 产出：`Notice{Key, Args}`；builder 直接生成结构化 notice；renderer 直接渲染字段；删除 `ParseNotice` 与 `key::json` 编码。因 JSON 字段类型发生不兼容变化，comparison schema 正式升为 `ecs.compare/v2`，并同步 `docs/schema.md`。
-- 验收：阶段 diff 只有 8 个相关文件；`build.go` 仅 3 增 3 删，未夹带无关重写；新增 JSON round-trip/schema 测试；docs 明确 JSON-only 输入和 `{key,args}` notices。运行测试：未验证（执行环境限制）。
-
-## 6. i18n 单向 key lookup 与 key parity — IN PROGRESS
-
-- 目标：静态 UI 文案彻底变成 key → 当前语言。
-- 输入：`internal/i18n`、Main language bootstrap、相关测试。
-- 范围：i18n 核心，不迁移全部动态 model 文本。
-- 产出：zh/en key parity 检查；英文缺失显式暴露，不偷偷中文 fallback；保留早期 Set language。
-- 验收：zh/en key set 相等；缺 key 测试失败或返回 key；无 source-text 翻译参与静态 UI。
-
-## 7. `Message{Key,Args}` 数据模型 — TODO
-
-- 目标：为 ECS 自生成动态文本建立语言无关机器语义。
-- 输入：model、runner、report schema 与 render 需求。
-- 范围：model 新 message 类型及 JSON contract；model 不 import i18n。
-- 产出：Message 类型与渲染 helper；必要 schema/testdata 更新。
-- 验收：Message 可 JSON round-trip；同一 JSON 可按 zh/en 渲染；外部 raw evidence 不变化。
-
-## 8. 迁移 runner 动态文本 — TODO
-
-- 目标：先迁 runner 生成的 retry/failure/summary 等动态 ECS 文本。
-- 输入：阶段 7 Message。
-- 范围：runner → model 消息；不改 probe raw output。
-- 产出：runner 不写死 canonical Chinese 作为可翻译语义。
-- 验收：runner tests、report render tests 覆盖两种语言；外部证据原样保留。
-
-## 9. 迁移 probe 动态文本并删除 source-text translation — TODO
-
-- 目标：完成 probe 自生成文本迁移，删除逆向文本识别系统。
-- 输入：`probe_text.go`、probe/result 建模、阶段 7/8。
-- 范围：ECS 自生成文本；不翻译第三方 stdout/stderr/raw evidence。
-- 产出：删除 `probe_text.go`、regex/source-text template translation 及相关死代码/tests。
-- 验收：搜索无 source-text translation 入口；关键 probe 渲染 zh/en 正确；raw evidence bytes/strings 语义不变。
-
-## 10. 删除 report Localize clone 路线并收薄 report — TODO
-
-- 目标：终结 canonical Chinese → localized copy。
-- 输入：`report/localize.go`、copy tests、renderers。
-- 范围：report localization pipeline。
-- 产出：删除 localize 深拷贝；renderer 在需要人类文案时直接从 Message/i18n 渲染。
-- 验收：`ecs render report.json --lang zh|en` 都从同一 JSON 工作；无 report.Localize 依赖。
-
-## 11. Report render-all-before-write — TODO
-
-- 目标：避免多格式输出部分成功后留下半套文件。
-- 输入：report writer。
-- 范围：多格式 render/write 顺序。
-- 产出：先全部 render bytes，全部成功后才 atomic write。
-- 验收：任一 renderer 失败时不产生本批次部分文件；成功路径不回归。
-
-## 12. 新增 `ecs plan --json` — TODO
-
-- 目标：让 Go 成为 run planning 唯一控制面。
-- 输入：阶段 3 resolver、ModuleDescriptor/tool metadata。
-- 范围：app plan command、JSON plan schema/tests/docs。
-- 产出：最终 modules、tool requirements、Ookla/staging 决策等机器计划；复用 resolver。
-- 验收：plan 与 run 对同一参数产生一致选择；无第二 resolver；JSON 稳定可由 shell 消费。
-
-## 13. `run.sh` 消除第二套 CLI/planner — TODO
-
-- 目标：Shell 只做 bootstrap、checksum、plan 消费、tool staging、run。
-- 输入：阶段 12 `ecs plan --json`。
-- 范围：`run.sh` 及 shell contract tests/docs。
-- 产出：删除 shell 对 profile/only/skip/config/exposure/module manifest 的业务解释；保留 staging/Ookla。
-- 验收：shell 不再拥有模块选择事实；常用参数透传；`sh -n run.sh` 与相关 contract tests 通过。
-
-## 14. Retry policy 收回 `ModuleDescriptor` — TODO
-
-- 目标：消除 runner 模块 ID retry 白名单。
-- 输入：config ModuleDescriptor、runner retry logic。
-- 范围：最小 metadata 字段与 runner 读取。
-- 产出：优先 `RetryOnInterference bool`；删除 runner 白名单。
-- 验收：retry 模块集合与现有行为一致；新增 descriptor test 防止副本回归。
-
-## 15. 拆分 `config.go` — TODO
-
-- 目标：职责稳定后物理模块化 config。
-- 输入：阶段 12/14 稳定后的 config API。
-- 范围：`internal/config` 文件拆分；不新建 package。
-- 产出：types/defaults/file/validate/catalog/endpoints/exposure/modules 等按真实职责整理。
-- 验收：公开/包内行为不变；ModuleDescriptor 仍为单一模块事实源；config tests 通过。
-
-## 16. 拆分 `model.go` — TODO
-
-- 目标：Message 模型稳定后按领域物理拆分。
-- 输入：阶段 7–10 后 model。
-- 范围：`internal/model` 文件组织；不改变 schema 除前述 Message 必要变化。
-- 产出：report/result/message/evidence/failure/summary/redact 等合理文件。
-- 验收：model 不依赖 i18n；JSON round-trip 与 report tests 通过；无机械重复定义。
-
-## 17. 建立 `tools/lock.json` — TODO
-
-- 目标：统一构建链供应链机器事实。
-- 输入：`common.sh`、build scripts、release metadata、上游固定信息。
-- 范围：内部构建链；公网 bootstrap 不依赖 lock。
-- 产出：architectures/tools/version/source/corpus SHA/bytes 等 JSON lock；消费方改为读 lock。
-- 验收：所有 lock 值能追溯现有仓库/上游证据；不存在新增猜测值；bootstrap 自包含 arch mapping 保留。
-
-## 18. Staticcheck cache 绑定 devtools lock — TODO
-
-- 目标：`devtools/go.mod/go.sum` 变化时自动重建 staticcheck。
-- 输入：`scripts/ci/check.sh` 或相关 helper。
-- 范围：devtool cache key/build decision。
-- 产出：module lock hash 参与缓存判定。
-- 验收：binary 存在但 lock 变化会重建；lock 不变可复用；quality contract test/脚本静态检查通过。
-
-## 19. 拆 `build_tools.sh`，不造框架 — TODO
-
-- 目标：按工具拆 shell 实现，顶层只编排。
-- 输入：阶段 17 lock 与现有 `build_tools.sh`。
-- 范围：`scripts/tools/*.sh` 与顶层 builder。
-- 产出：每工具独立脚本，顶层顺序调用与 stage assemble。
-- 验收：无 ToolBuilder/provider/plugin 抽象；七架构定义与产物布局保持；shell syntax/check tests 通过。
-
-## 20. CI / Security 边界清理 — TODO
-
-- 目标：修正 quality 语义并建立非 required 的独立安全扫描。
-- 输入：ci/release/check.sh、Go toolchain约束。
-- 范围：workflow 与必要 docs。
-- 产出：quality 注释不再称“源码安全”；`security.yml` schedule + workflow_dispatch；不接 `ci.required`；不自动改 `.go-version`。
-- 验收：workflow YAML 有效；security 独立；普通 CI DAG 不增加安全 required 依赖。
-
-## 21. Leaderboard trigger 修复 — TODO
-
-- 目标：消除 workflow 写回 baseline 后的自触发，并覆盖真实 baseline algorithm 入口。
-- 输入：`leaderboard.yml`、score/baseline 入口文件。
-- 范围：workflow paths/paths-ignore 或等价 trigger。
-- 产出：baseline 输出路径不触发自身；算法入口变化能触发。
-- 验收：静态 trigger 逻辑与真实写回/入口一一对应；不误删 submissions 触发。
-
-## 22. Installer/docs parity 与陈旧文案 — TODO
-
-- 目标：保留 `--with-benchmarks`，修正与 repository/行为不一致的文案。
-- 输入：install.sh、README/README_EN/docs。
-- 范围：不删 persistent benchmark install。
-- 产出：中英文文档与脚本 help 一致。
-- 验收：`--with-benchmarks` 仍可见且 opt-in；无本任务引入的旧架构描述。
-
-## 23. Probe 小范围高收益去重 — TODO
-
-- 目标：只处理明确重复的 NextTrace adapter / external command helper，不扩大架构。
-- 输入：route/backtrace 与外部命令适配代码。
-- 范围：仅真实重复；禁止 GenericBenchmarkRunner。
-- 产出：最小共享 helper，保持各 probe 语义独立。
-- 验收：diff 小且可解释；probe tests/集成 contract 不回归；无泛型构建框架。
-
-## 24. 全仓一致性、完整 diff 与回归总审查 — TODO
-
-- 目标：从完整任务视角验收所有需求和非目标。
-- 输入：工作 Branch 相对基准的全部 diff、CI、docs。
-- 范围：全仓只读审查；必要返工则重新打开对应阶段。
-- 产出：`REVIEW.md`、`VALIDATION.md`；清理无长期价值临时 Markdown。
-- 验收：每个实质 diff 可追溯到 REQUIREMENTS；无意外兼容层/框架/无关重写；能运行的测试有真实证据，不能运行的明确未验证。
-
-## 25. PR 交付 — TODO
-
-- 目标：以经总审查的完全相同状态交付 PR。
-- 输入：阶段 24 通过的 Branch HEAD。
-- 范围：PR metadata，不再做代码修改。
-- 产出：PR，描述需求映射、阶段结果、测试、限制。
-- 验收：当前 Draft PR #6 只是提前建立的 CI/审查载体；最终交付前必须更新其内容并确保 PR diff 与阶段 24 总审查状态一致；若总审查后再改代码则重新打开阶段 24。
+- 为取得可能的 PR CI 证据，提前创建 Draft PR #6；它不是“已交付”状态，最终仍由阶段 24/25 验收。
+- Compare notices 从 JSON string 改 object 属于不兼容 schema 变化，因此阶段 5 将 comparison schema 从 `ecs.compare/v1` 升至 `ecs.compare/v2`，而不是在同版本下偷偷变更字段类型。
+- 阶段 7 采用渐进迁移：新增 `Summary.Messages` / `Result.SummaryMessages`，旧 presentation string 暂作迁移兼容字段；只有结构化字段完成后才在阶段 10 删除 Localize，避免一次把全部 probe 与 renderer 混成不可审查的大 diff。
