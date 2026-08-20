@@ -38,7 +38,15 @@ type Report struct {
 	Inputs        []Input        `json:"inputs"`
 	Summary       Summary        `json:"summary"`
 	Modules       []Module       `json:"modules"`
-	Notices       []string       `json:"notices"`
+	Notices       []Notice       `json:"notices"`
+}
+
+// Notice is a language-independent comparison message. Key identifies the
+// semantic message and Args carries its machine arguments; no renderer needs
+// to parse a source-language sentence or decode an ad-hoc string format.
+type Notice struct {
+	Key  string   `json:"key"`
+	Args []string `json:"args,omitempty"`
 }
 
 type Input struct {
