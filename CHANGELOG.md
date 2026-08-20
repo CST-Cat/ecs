@@ -9,6 +9,12 @@
 
 ## Unreleased
 
+## 0.7.7 — 2026-08-19
+
+- 简化维护流程：移除发布前与发布后的 `govulncheck` 漏洞扫描，以及围绕扫描结果自动提出 Go 升级 PR 的状态机；同时移除 Dependabot 自动维护 PR。Go 工具链改由维护者人工固定：CI 与 Release 当前使用 Go 1.26.5，最低源码兼容线仍为 Go 1.22。
+- Release 主链收缩为 `preflight → tools × 7 → assemble → verify → attest → publish`，其中 `verify` 针对实际解包产物；继续保留 checksum 校验、冻结候选提交 SHA、干净工作区、VCS metadata 校验、工具 digest 校验、GitHub Action 完整 SHA 固定和 artifact attestation 等供应链不变量。
+- 测试布局同步收缩并聚焦高价值行为：由 `integration` build tag 下的真实工具覆盖承接集成验证，删除没有测试内容的定时 `live` 层，落实 submission corpus 校验，并增加 `run`、`compare` 与安装流程的行为回归。
+
 ## 0.7.6 — 2026-08-19
 
 - 修复 Release 后扫描回归测试对 Go 版本间非 Go 制品诊断差异的兼容性：接受 `no valid Go build metadata` 与 `go version -m failed` 两种合理错误；正式 Release pin 保持为 `1.26.5`。

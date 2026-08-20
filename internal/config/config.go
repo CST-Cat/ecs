@@ -63,7 +63,7 @@ func ParseDiskMatrixMode(raw string) (string, error) {
 // 此时备用地址等于自身、测不了映射行为，故不收录。
 // stun.l.google.com 与 stun.cloudflare.com 可用但不提供备用地址，且会忽略
 // CHANGE-REQUEST 直接回包，只能做基础映射发现，排在后面兜底。
-// 清单照抄实测结果，不凭记忆填写；用 `go test -tags=live -run TestLiveSTUNServers` 复核。
+// 清单照抄实测结果，不凭记忆填写。
 func stunServerPool() []Endpoint {
 	return []Endpoint{
 		{Name: "Xiaomi", Address: "stun.miwifi.com:3478", Kind: "双 IP"},
@@ -105,12 +105,11 @@ type OoklaServer struct {
 //
 // 主机名、端口范围、友好名与位置逐条抄自 YABS v2026-07-24 的 IPERF_LOCS 数组，
 // 不凭记忆填写——此前编造的 ams.speedtest.eranium.net 与 speedtest.tyo1.jp.leaseweb.net
-// 在三个独立 DNS 上都无记录，是实网测试才发现的。
+// 在三个独立 DNS 上都无记录，是此前实测发现的。
 // Region 是 ecs 自己加的分区，用于按地区裁剪节点集；YABS 本身不分区。
 //
 // 这些节点由第三方免费提供，随时可能繁忙、限速、换端口或下线；ecs 只复用清单，
 // 不保证可用性。默认所有配置档按地区各取三个，以保持选中 speed 模块的口径一致。
-// 可用性用 `go test -tags=live -run TestLiveIPerfNodeReachability` 复核。
 func iperfNodePool() []IPerfEndpoint {
 	return []IPerfEndpoint{
 		{Name: "Clouvider", Host: "lon.speedtest.clouvider.net", PortStart: 5200, PortEnd: 5209, Location: "London, UK (10G)", Networks: "IPv4|IPv6", Region: "europe"},

@@ -77,7 +77,7 @@ submissions/
 
 必须满足：
 
-1. JSON 位于恰好一层子目录中；校验只收集 `submissions/*/*.json`，根目录或更深层文件不会进入样本。
+1. JSON 位于恰好一层非隐藏子目录中；校验只收集 `submissions/*/*.json`。根目录只允许本目录的两份 README 和 CI 生成的 `baseline.json`；后者是唯一的根 JSON 例外且不作为提交读取。其他根文件、隐藏目录、子目录内的非 JSON 和更深层条目都会使校验失败。
 2. 文件名与 `ecs submit` 输出一致：`<id>[-<provider>][-<region>].json`。`id` 来自内容指纹，后两个部分来自自报字段并转为小写连字符。
 3. `baseline.json` 是聚合产物，不是输入，聚合时会跳过。
 
@@ -86,7 +86,7 @@ submissions/
 CI 使用同一套 Go 测试检查提交；本地提交前运行：
 
 ```sh
-ECS_SUBMISSION_DIR=submissions go test ./internal/score/ -run TestSubmissionCorpus -v
+ECS_SUBMISSION_DIR=submissions go test ./internal/score -run '^TestSubmissionCorpus$' -count=1 -v
 ecs leaderboard --strict --output /tmp/check.json submissions
 ```
 

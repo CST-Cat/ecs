@@ -257,8 +257,8 @@ for tool in fio sysbench iperf3 ping stream; do
   printf '%-10s %s\n' "$tool" "$(command -v "$tool" || echo '未安装')"
 done
 
-ecs_step "go test -tags=integration"
-go test -tags=integration ./... -timeout 30m
+ecs_step "go test -tags=integration ./... -timeout 30m -count=1"
+go test -tags=integration ./... -timeout 30m -count=1
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

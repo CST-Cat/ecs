@@ -2,16 +2,13 @@ name: ci
 
 # 这个 commit 能不能进 main？
 #
-# 只回答这一个问题。定时外网监控在 live.yml，排行榜写回在 leaderboard.yml，
-# 发布后安全复审在 security.yml，发布在 release.yml。把它们混在一起的后果是
-# 第三方接口限流会让普通代码检查变红，而红灯一旦常态化就没人再看。
-# 红灯语义：ci 红表示代码或构建问题，应阻断合并；live 红可能只是第三方服务
-# 变化，不阻断合并；security 红表示已发布二进制发现漏洞，应该保持红；release
-# 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
+# 只回答这一个问题。排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
+# 红灯语义：ci 红表示代码或构建问题，应阻断合并；leaderboard 红表示排行榜
+# 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
 # compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
-# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余 CI job 显式使用
-# stable；unit 已经覆盖 stable，不再把 stable 重复放进 compat 矩阵。
+# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 使用
+# 下方人工固定的版本，不跟随 stable/latest 漂移；compat 只验证最低支持版本。
 
 on:
   push:
@@ -20,6 +17,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  ECS_GO: "1.26.5"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
       - name: Unit and parser tests
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       - run: ./scripts/ci/check.sh
 
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       - run: ./scripts/ci/integration.sh
 
@@ -96,7 +96,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       - run: go test -race ./...
 
@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       - run: ./scripts/cross.sh
 
@@ -121,12 +121,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: stable
+          go-version: ${{ env.ECS_GO }}
           cache: false
       - name: Validate submissions
         env:
           ECS_SUBMISSION_DIR: submissions
-        run: go test ./internal/score/ -run TestSubmissionCorpus -v
+        run: go test ./internal/score -run '^TestSubmissionCorpus$' -count=1 -v
 
       # 离群检测只标记不阻断：可能是新硬件或特殊配置，由维护者判断。
       # --annotate 把结果转成 GitHub 检查注解，直接显示在检查页面上。

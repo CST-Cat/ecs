@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 静态质量门禁：格式、静态规则、数据契约、脚本语法、工具清单/构建定义、triage。
+# 静态质量门禁：格式、静态规则、数据契约、脚本语法、仓库约束与构建定义。
 #
 # CI 的 quality job 与 release 的 preflight 调用的是同一个文件。发布前检查
 # 与合并前检查一旦是两份实现，就一定会在某次改动后悄悄分叉，而分叉的那一侧
 # 通常是发布路径——因为它跑得少。
 #
-# 这里的检查版本固定、且无 live 外部服务依赖，但首次构建 staticcheck 仍可能
-# 联网。源码漏洞扫描不在这里执行，由 security workflow/release security 负责。
-# 需要真实工具的归 integration，需要第三方服务的归 live。
+# 这里的检查版本固定，但首次构建 staticcheck 仍可能联网。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
 
-# 三种 build tag 组合都要过：tagged 代码的接口变动不能等到定时任务才暴露，
+# 两种 build tag 组合都要过：tagged 代码的接口变动不能等到集成测试才暴露，
 # 只被 tagged 测试使用的辅助函数也不能在默认构建里变成死代码。
-ECS_BUILD_TAGS=("" integration live)
+ECS_BUILD_TAGS=("" integration)
 
-# 对三种 tag 组合各跑一次某个检查器。空 tag 不传 -tags，否则 go 会把空字符串
+# 对两种 tag 组合各跑一次某个检查器。空 tag 不传 -tags，否则 go 会把空字符串
 # 当成一个真实的 tag 名。
 for_each_build_tag() {
   local label=$1 tags
@@ -49,16 +47,6 @@ for_each_build_tag "go vet" go vet
 staticcheck=$(ecs_devtool staticcheck)
 for_each_build_tag staticcheck "$staticcheck"
 
-# 源码漏洞扫描不属于普通 quality hard gate，不在这里调用 govulncheck；security
-# workflow 负责持续扫描，release security 负责发布前安全门禁。其他检查仍然失败即阻断。
-
-ecs_step "workflow policy wiring"
-bash scripts/ci/workflow_policy_test.sh
-
-ecs_step "security script wiring"
-bash scripts/security/propose_go_upgrade_test.sh
-bash scripts/security/scan_released_test.sh
-
 ecs_step "ecs-tools manifest 与示例"
 go run ./cmd/tools-manifest-check --architecture amd64 tools/manifest.example.json
 
@@ -70,6 +58,15 @@ for script in scripts/*.sh scripts/*/*.sh; do
   [[ -e "$script" ]] || continue
   bash -n "$script"
 done
+
+ecs_step "install.sh shell 行为回归"
+bash scripts/install_test.sh
+
+ecs_step "run.sh shell 行为回归"
+bash scripts/run_test.sh
+
+ecs_step "compare.sh shell 行为回归"
+bash scripts/compare_test.sh
 
 # 发布过程的中间目录一旦入库，就会把 CI 产物混进正在审核的代码变更，
 # 也会让"发布源码必须洁净"的检查永远失败。
@@ -84,14 +81,10 @@ done
 ecs_step "工具包布局回归"
 bash scripts/package_tools_test.sh
 
-# 这段逻辑决定要不要自动开一个升级 Go 的 PR，判错的两个方向都很糟。
-ecs_step "安全 triage 判定表"
-bash scripts/security/triage_test.sh
-
 ecs_step "构建定义可解析"
 for arch in "${ECS_ARCHES[@]}"; do
   scripts/build_tools_container.sh --arch "$arch" --print-params >/dev/null
 done
 
 echo
-echo "check: 全部确定性检查通过（漏洞扫描由 security workflow/release security 负责）"
+echo "check: 全部确定性检查通过"

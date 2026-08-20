@@ -3,20 +3,19 @@ set -euo pipefail
 
 # 发布前校验：这组制品是不是真的由这次提交、这条工具链产出的。
 #
-# 校验对象是**解包出来的实际二进制**，不是构建日志。构建日志说了什么不重要，
-# 二进制里 go version -m 记的东西才是用户拿到的东西：
+# 根 go.mod 只声明源码最低兼容版本，devtools/go.mod 只管理 staticcheck。
+# 正式 Release 工具链由 release.yml 的 ECS_RELEASE_GO 固定；构建阶段记录
+# 实际的 go env GOVERSION，再作为 --build-go-version 传给本脚本。
 #
-#   - Go 工具链必须等于本次构建实测的版本（--build-go-version），而不是某个
-#     写死的期望值。这个值只能由构建方给出：让校验方自己去问 go env 就等于
-#     用同一个假设验证它自己。正式 Release 编译器由 release.yml 的
-#     ECS_RELEASE_GO 选择；根 go.mod 只声明源码最低兼容版本，devtools/go.mod
-#     只管理 staticcheck/govulncheck 等开发工具自身的构建环境。安全升级只改
-#     Release compiler pin，不提高源码最低兼容版本。
+# 校验对象是**解包出来的实际二进制**，不是构建日志。它检查
+# go version -m 记录的 Go build metadata：
+#
+#   - Go 工具链必须等于构建阶段传入的实测版本；
 #   - vcs.revision 必须等于冻结的发布 SHA；
 #   - vcs.modified 必须为 false，否则构建时工作区是脏的。
 #
-# 此外校验语料的尺寸与摘要、发布物齐全性、checksums 与实际文件一一对应，
-# 以及工具包里没有混进语料。
+# 此外校验固定语料的尺寸与摘要、主程序归档数量、预期发布物是否齐全、
+# checksums 行数/条目/摘要与发布物是否一一对应，以及工具包里没有混进语料。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 

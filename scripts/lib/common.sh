@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # 全部构建、检查与发布脚本的共享定义。
 #
-# 只有这一个 lib。曾经拆成 lib/targets.sh 与 ci/lib.sh 两个文件，结果是
-# release/security.sh 必须同时 source 两份，而且一个"发布"脚本要去依赖一个
-# 叫"ci"的库——分层是假的，只是文件多了一个。
+# 所有脚本共用这一个 lib，避免发布目标、供应链校验与通用辅助逻辑
+# 在多份库之间漂移。
 #
 # 每个脚本用一行把它引进来：
 #
@@ -85,8 +84,8 @@ ecs_retry() {
 # 从 dist 目录里解出全部主程序二进制，每行输出 "归档名<TAB>二进制路径"。
 # 归档数不等于发布架构数时失败——少一个架构就发布是这套流程最该挡住的事。
 #
-# verify 与 security 是两道独立的门禁，但"把七个归档解开"对两者是同一件事，
-# 所以它只写在这里。
+# verify 的归档校验需要统一解开全部七个主程序归档，所以该逻辑
+# 作为共享辅助函数保留在这里。
 ecs_release_binaries() {
   local dist=$1 out=$2
   local archive name directory
@@ -109,9 +108,9 @@ ecs_release_binaries() {
 
 # ---- 分析工具 ----
 #
-# staticcheck 与 govulncheck 的版本由 devtools/go.mod 锁定（含 go.sum 哈希），
-# 不在 workflow YAML 里各写一份。主模块 go.mod 保持零依赖：从源码构建 ecs
-# 不需要下载任何模块，那是发布物的一项属性，不该为了跑分析工具而放弃。
+# staticcheck 的版本由 devtools/go.mod + go.sum 固定，不在 workflow YAML
+# 里再写一份。主模块 go.mod 保持零依赖：从源码构建 ecs 不需要
+# 下载任何模块，那是发布物的一项属性，不该为了跑分析工具而放弃。
 
 # ecs_devtool NAME 构建（若尚未构建）并回显分析工具的路径。
 #
@@ -123,7 +122,6 @@ ecs_devtool() {
 
   case "$name" in
     staticcheck) package=honnef.co/go/tools/cmd/staticcheck ;;
-    govulncheck) package=golang.org/x/vuln/cmd/govulncheck ;;
     *)
       echo "ecs_devtool: unknown tool: $name" >&2
       return 1

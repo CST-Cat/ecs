@@ -10,46 +10,44 @@
 4. 新增第三方服务时在 README 列出会发送的数据及其用途；
 5. 外部二进制只能做可关闭的本地适配器，记录参数、可安全读取的版本与程序摘要，自动下载必须校验来源；
 6. 不加入赞助商、推广、返利、遥测或默认上传；
-7. 解析、遮盖、报告与协议逻辑要有**不依赖公网的确定性测试**。这条是为了让默认 `go test` 快、稳、可重复，**不是**禁止联网测试——曾经有人（包括本项目自己）拿它当理由不做真实调用，那是误读。
+7. 解析、遮盖、报告与协议逻辑要有**不依赖公网的确定性测试**，让默认 `go test` 快、稳、可重复。
 8. IP 风险源必须保留供应商原始语义、通道、失败状态和耗时；不得把不同模型的分值直接平均。
 9. 从 GPL/AGPL 上游适配代码或规则时，必须在 `NOTICE` 和 `THIRD_PARTY.md` 标明项目、版本、许可证和改动；不要移除上游归属。
 10. 性能成绩必须直接来自公开维护、可审计的标准工具；不得加入自研 CPU、内存、磁盘或网络吞吐工作负载、替代分数、跨样本聚合分或综合跑分。
 11. 项目只面向 Linux。不要引入 `runtime.GOOS` 分支、其他操作系统的采集函数或发布目标；测试断言真实 Linux 行为，不放宽到"哪个平台都成立"。架构维度（`GOARCH`）仍需保留。
-12. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、iperf3、ping 或 NextTrace：替身只能证明解析器认得自己造出来的输出。需要隔离时用回环（iperf3 起本地服务端、ping/NextTrace 打 `127.0.0.1`）。
-13. 凡是依赖第三方服务或公共节点的能力，除确定性测试外**还必须有真实调用的实网测试**，放在 `//go:build live` 文件里。固定样本只能证明解析器认得历史格式，证明不了上游没变——`ipinfo.check.place` 全线 403、iperf3 节点池里两个域名根本不存在，都是实网测试才发现的。
-    实网测试不挂在普通主分支检查上：第三方限流或改版不应让每次代码检查都变红。由定时任务与手动触发运行，并遵守"个别源失败只记录、全部失败才判失败"。
-14. 数据源清单、节点地址、端口范围一律照抄上游并注明版本，**不得凭记忆填写**；改动后用实网测试复核每一条。
+12. 外部工具的适配器测试必须调用**真实工具**，不得用脚本替身冒充 fio、sysbench、iperf3、ping、STREAM 或 NextTrace：替身只能证明解析器认得自己造出来的输出。需要隔离时用回环（iperf3 起本地服务端、ping/NextTrace 打 `127.0.0.1`）。
+13. 数据源清单、节点地址、端口范围一律照抄上游并注明版本，**不得凭记忆填写**；第三方服务和公共节点可能限流、改版或下线，不得从固定样本推断当前可用性，无法确认时要明确记录。
 
 本地检查：
 
-Go 版本按职责分开维护：根 `go.mod` 的 `go 1.22` 是源码最低兼容版本；正式 Release 编译器由
-`.github/workflows/release.yml` 的唯一 `ECS_RELEASE_GO` pin 选择；`devtools/go.mod` 只管理
-`staticcheck`、`govulncheck` 等分析工具自身的构建环境。安全自动升级只修改 Release compiler pin，
-不提高源码最低兼容版本。运行 Release 二进制不需要 Go。
+Go 版本按职责分开并由维护者人工固定：根 `go.mod` 的 `go 1.22` 是源码最低兼容版本；
+`.github/workflows/ci.yml` 的 `compat` job 使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`，确保验证的确是最低版本。
+其余日常 CI job 使用 `ECS_GO` 固定的 Go 1.26.5，正式 Release 使用 `ECS_RELEASE_GO` 固定的 Go 1.26.5；
+两者都不追随 `stable` 或 `latest`。`devtools/go.mod` 使用 Go 1.26.5 构建并固定 `staticcheck` 依赖，
+主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release 二进制不需要 Go。
 
-`staticcheck` 与 `govulncheck` 的版本锁在 `devtools/go.mod`（含 `go.sum` 哈希）。主模块 `go.mod` 保持零依赖：从源码构建 ecs 不下载任何模块，这是发布物的一项属性，不为了跑分析工具而放弃。
+Go 编译器、GitHub Actions、`staticcheck` 及其他工具的升级均由维护者手工审查后决定；升级提案只由维护者发起，
+仓库不会为版本升级生成拉取请求。
 
 ```bash
 gofmt -w $(git ls-files '*.go')
 make test            # go test ./...，不需要任何外部工具
-make check           # 格式、vet、staticcheck、manifest、脚本与 workflow wiring
-make integration     # 需要真实 fio / sysbench / iperf3
+make check           # 普通 quality 门禁；具体范围见下文
+make integration     # 需要真实 fio / sysbench / iperf3 / ping / STREAM
 go test -race ./...
 ```
 
-测试按"需要什么"分三类，分类写在源码的 build tag 里，不写在 CI 配置里：
+`make check` 与 CI 的 `quality` job、Release 的 preflight 共用 `scripts/ci/check.sh`。它检查 Go 格式，
+在默认、`integration` 两种 build tag 组合下运行 `go vet` 与固定版本的 `staticcheck`，并检查工具 manifest 示例、
+shell 语法、发布中间目录忽略规则、工具包布局回归和各架构构建定义。首次构建 `staticcheck` 时可能下载
+`devtools/go.mod` 与 `devtools/go.sum` 固定的依赖。
+
+测试按"需要什么"分两类；集成测试的分类写在源码的 build tag 里，不写在 CI 配置里：
 
 | 类别 | 命令 | 需要 |
 |---|---|---|
 | 单元与解析 | `go test ./...` | 无 |
-| 集成 | `go test -tags=integration ./...` | 宿主装有真实基准工具 |
-| 实网 | `go test -tags=live ./...` | 公网，会把出口 IP 发给表内数据源 |
-
-实网测试（按需运行）：
-
-```bash
-make live
-```
+| 集成 | `go test -tags=integration ./...` | 宿主装有真实 fio / sysbench / iperf3 / ping / STREAM |
 
 性能工作负载一旦进入稳定版本，不应原地改变语义。需要调整块大小、并发、算法或计时方式时，请升级 `measurement.method`。
 

@@ -2,20 +2,19 @@ name: release
 
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
-# 按"权限和制品交接"拆 job：
+# 发布链按"权限和制品交接"拆 job：
+# preflight → tools×7 → assemble → verify → attest → publish。
 #
 #   preflight  contents: read    冻结 SHA，跑确定性源码检查
 #   tools × 7  contents: read    七架构完整构建工具包
 #   assemble   contents: read    组装全部发布物，记录实测工具链版本
 #   verify     contents: read    校验解包出来的实际二进制
-#   security   contents: read    对实际二进制跑 govulncheck
 #   attest     id-token: write   为最终制品生成 provenance
 #   publish    contents: write   唯一持有写权限的 job
 #
-# 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release；它
-# 不等同于 ci、live 或发布后 security 的红灯。
+# 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release。
 #
-# 编译器、Docker、tar、govulncheck、构建脚本、全部第三方工具都跑在没有仓库
+# 编译器、Docker、tar、构建脚本、全部第三方工具都跑在没有仓库
 # 写权限的 job 里。真正拿到 contents: write 的只有最后那个上传步骤。
 #
 # 构建实现全部在 scripts/ 下。这里只决定 when / where / permission / dependency。
@@ -23,8 +22,8 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 preflight → tools×7 → assemble → verify/security
-  # → attest 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
+  # 手动触发是发布演练：走完 preflight → tools×7 → assemble → verify → attest
+  # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
   # 没有 rebuild_tools 之类的开关——每次都完整构建七架构，没有可跳过的选项。
   workflow_dispatch:
 
@@ -248,34 +247,13 @@ jobs:
             --build-go-version "$BUILD_GO_VERSION" \
             --revision "$REVISION"
 
-  # 发布前安全门禁：候选制品现在安全吗？
-  # 发布后的持续复审是 security.yml 的职责。
-  security:
-    needs: [preflight, assemble]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.preflight.outputs.sha }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: ${{ env.ECS_RELEASE_GO }}
-          cache: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: release-dist
-          path: dist
-      - name: Scan release candidates
-        run: ./scripts/release/security.sh --dist dist
-
   # provenance：这些字节由哪个仓库、哪个 workflow、哪个提交产出。
   #
   # checksums.txt 本来就是发给用户校验的清单，这里直接把它当作 attestation 的
   # subject 列表——同一份事实只写一次。attestation 按摘要绑定，因此 job 之间
   # 传递制品不影响绑定关系。
   attest:
-    needs: [preflight, assemble, verify, security]
+    needs: [preflight, assemble, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -292,10 +270,10 @@ jobs:
           subject-checksums: dist/checksums.txt
 
   # 唯一持有 contents: write 的 job。它只做上传：到这一步为止，制品已经被
-  # verify、security 和 attest 检查过了。
+  # verify 校验并由 attest 生成 provenance。
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [preflight, assemble, verify, security, attest]
+    needs: [preflight, assemble, verify, attest]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

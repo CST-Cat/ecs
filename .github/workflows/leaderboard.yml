@@ -39,7 +39,7 @@ jobs:
       - name: Validate submissions before rebuilding
         env:
           ECS_SUBMISSION_DIR: submissions
-        run: go test ./internal/score/ -run TestSubmissionCorpus
+        run: go test ./internal/score -run '^TestSubmissionCorpus$' -count=1
 
       - name: Rebuild and commit the leaderboard reference
         run: ./scripts/leaderboard.sh

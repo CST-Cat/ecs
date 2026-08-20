@@ -77,7 +77,7 @@ submissions/
 
 Requirements:
 
-1. The JSON must be exactly one directory deep. Validation collects `submissions/*/*.json`; files at the root or deeper are not samples.
+1. JSON files must be exactly one non-hidden directory deep. Validation collects `submissions/*/*.json`. The root permits only this directory's two README files and CI-generated `baseline.json`; the latter is the sole root-JSON exception and is not loaded as a submission. Any other root file, hidden directory, non-JSON file inside a submission directory, or deeper entry fails validation.
 2. The filename must match `ecs submit`: `<id>[-<provider>][-<region>].json`. The `id` is a content fingerprint; the other components come from self-reported fields in lowercase hyphenated form.
 3. `baseline.json` is an aggregation output, not input, and is skipped during aggregation.
 
@@ -86,7 +86,7 @@ Requirements:
 CI uses the same Go test for every submission. Run it locally before adding a file:
 
 ```sh
-ECS_SUBMISSION_DIR=submissions go test ./internal/score/ -run TestSubmissionCorpus -v
+ECS_SUBMISSION_DIR=submissions go test ./internal/score -run '^TestSubmissionCorpus$' -count=1 -v
 ecs leaderboard --strict --output /tmp/check.json submissions
 ```
 
