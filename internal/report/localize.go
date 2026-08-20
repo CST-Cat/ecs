@@ -7,22 +7,23 @@ import (
 
 // Localize 按当前语言翻译整份报告的可见文本，并返回独立的展示副本。
 //
-// 翻译放在渲染层而不是探针里：已迁移的 ecs 自生成提示由稳定 message key
-// 映射到当前语言，尚未迁移的探针说明仍按原文查表；外部工具原始输出不翻译。
-// 原文查表的代价是句子改字会丢译文，因此有测试遍历真实运行产出的文本核对覆盖率。
+// 新迁移的 ECS 自生成动态文本从 model.Message 直接按当前语言渲染；尚未迁移的
+// 探针字段仍暂时经过历史 source-text 兼容层。外部工具原始输出不翻译。
 //
-// 返回值与 data 不共享可变的 slice、map 或 pointer。调用方可以把返回值交给
-// TXT/MD/HTML 渲染器，或在渲染过程中修改它，而不会回写保存用的 canonical
-// Report。JSON 的写入方应继续使用原始 data；Localize 只负责展示副本。
-// 机器标识符不在翻译范围内——模块 id、measurement.key/method/unit、status、
-// methodology.kind 都保持原样，因此下游按这些字段解析不受语言影响。
+// 返回值与 data 不共享可变的 slice、map 或 pointer。JSON 的写入方继续使用原始
+// machine report；Localize 只是迁移期间的人类展示边界，后续会在全部字段结构化后删除。
 func Localize(data model.Report) model.Report {
 	out := data
 	out.Run.Requested = cloneStrings(data.Run.Requested)
 	out.Run.OutputFormats = cloneStrings(data.Run.OutputFormats)
 	out.Notices = localizeStrings(data.Notices)
 	out.SensitiveIPs = cloneStrings(data.SensitiveIPs)
-	out.Summary.Headline = i18n.Text(data.Summary.Headline)
+	out.Summary.Messages = cloneModelMessages(data.Summary.Messages)
+	if len(data.Summary.Messages) > 0 {
+		out.Summary.Headline = renderMessages(data.Summary.Messages)
+	} else {
+		out.Summary.Headline = i18n.Text(data.Summary.Headline)
+	}
 	if data.Results == nil {
 		out.Results = nil
 	} else {
@@ -48,7 +49,12 @@ func localizeResult(result model.Result) model.Result {
 	}
 	out.Title = i18n.Text(result.Title)
 	out.Description = i18n.Text(result.Description)
-	out.Summary = i18n.Text(result.Summary)
+	out.SummaryMessages = cloneModelMessages(result.SummaryMessages)
+	if len(result.SummaryMessages) > 0 {
+		out.Summary = renderMessages(result.SummaryMessages)
+	} else {
+		out.Summary = i18n.Text(result.Summary)
+	}
 	out.Error = i18n.Text(result.Error)
 	out.Methodology.Label = i18n.Text(result.Methodology.Label)
 	// Engine and profile are human-facing methodology text. Stable machine
@@ -85,7 +91,6 @@ func localizeResult(result model.Result) model.Result {
 			localized.Title = i18n.Text(table.Title)
 			localized.Columns = localizeStrings(table.Columns)
 			// ColumnKeys and RowIdentity are machine schema, never display text.
-			// Clone ColumnKeys so a renderer cannot mutate the canonical report.
 			localized.ColumnKeys = cloneStrings(table.ColumnKeys)
 			localized.NumericColumns = cloneInts(table.NumericColumns)
 			localized.NumericHigherIsBetter = cloneBools(table.NumericHigherIsBetter)
@@ -180,7 +185,7 @@ func localizeMeasurement(measurement model.Measurement) model.Measurement {
 }
 
 // localizeStrings always allocates for a non-nil slice and resolves each item
-// in both languages, including stable probe message keys in Chinese mode.
+// through the temporary probe source-text compatibility path.
 func localizeStrings(items []string) []string {
 	if items == nil {
 		return nil
@@ -188,6 +193,18 @@ func localizeStrings(items []string) []string {
 	out := make([]string, len(items))
 	for index, item := range items {
 		out[index] = i18n.Text(item)
+	}
+	return out
+}
+
+func cloneModelMessages(items []model.Message) []model.Message {
+	if items == nil {
+		return nil
+	}
+	out := make([]model.Message, len(items))
+	for index, message := range items {
+		out[index] = message
+		out[index].Args = cloneStrings(message.Args)
 	}
 	return out
 }
