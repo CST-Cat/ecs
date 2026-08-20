@@ -9,14 +9,12 @@ import (
 
 // 轻量国际化。
 //
-// 不引入第三方依赖：一个 key → 各语言译文的映射加一个当前语言变量就够了。
-// 之所以用 key 而不是"中文原文当 key"，是因为原文一旦改字就会静默丢译文，
-// 而 key 改名编译期就能发现。
+// 静态界面文本只走稳定 key → 当前语言文案这一条路径。中文和英文是并列的
+// presentation catalog：选择英文时只查英文表，不会先生成中文，也不会在缺译文时
+// 偷偷回退中文。缺 key 直接返回 key 本身，让遗漏在测试和界面上都显式可见。
 //
-// 覆盖范围是分层的：命令行、模块名称、状态、表头、报告框架这些**结构性文本**
-// 必须全部有译文——它们决定英文用户能不能看懂这份报告的骨架。探针内部那些
-// 长篇技术说明（notes）尚未全部翻译，未登记的 key 会原样回退到中文，
-// 不会变成空白或 key 名。这是有意的取舍：宁可中英混排，也不能丢信息。
+// probe 历史上仍存在一套 source-text 翻译兼容层；它不属于静态 key lookup，后续会在
+//动态 Message 迁移完成后删除。这里刻意不让那条兼容路径参与 T/TL。
 
 // Lang 是支持的界面语言。
 type Lang string
@@ -83,10 +81,7 @@ func Current() Lang {
 	return current
 }
 
-// T 按当前语言取译文。
-//
-// 找不到译文时原样返回中文，绝不返回空串或 key 名——缺译文只该表现为
-// 那一句没翻译，不该表现为信息消失。
+// T 按当前语言取译文。缺失时返回稳定 key，不跨语言 fallback。
 func T(key string) string {
 	mutex.RLock()
 	lang := current
@@ -94,17 +89,13 @@ func T(key string) string {
 	return translate(lang, key)
 }
 
-// TL 按指定语言取译文，用于同时输出多语言的场景。
+// TL 按指定语言取译文，用于同时输出多语言的场景。缺失时返回稳定 key。
 func TL(lang Lang, key string) string { return translate(lang, key) }
 
 // Errorf 构造一个按当前语言渲染的错误。
 //
-// 校验错误在命令行上立即打印，没有报告渲染层可以挂翻译（探针文案走的是
-// probe_text.go 的原文查表）。因此这里让错误在构造时就取译文：key 决定语义，
-// 译文本身是格式串，参数按位置填入。
-//
-// 用独立函数而不是 fmt.Errorf(T(key), ...) 直接写在调用点，是为了避免 vet 的
-// printf 检查对非常量格式串报警，同时给测试一个统一的入口去核对 key 覆盖。
+// 校验错误在命令行上立即打印，因此在 CLI presentation 边界直接用稳定 key 选取
+// 当前语言格式串并填充参数。动态报告消息不会复用这条错误路径。
 func Errorf(key string, args ...any) error {
 	return fmt.Errorf(T(key), args...)
 }
@@ -113,9 +104,6 @@ func Errorf(key string, args ...any) error {
 const ErrorKeyPrefix = "err."
 
 // JoinList 按当前语言的习惯连接一组枚举值。
-//
-// 中文用顿号，英文用逗号加空格。硬编码任一种都会让另一种语言的句子读起来别扭：
-// `choose local、public、any` 和 `可选 local, public, any` 都不对。
 func JoinList(items []string) string {
 	separator := "、"
 	if Current() == LangEN {
@@ -125,77 +113,22 @@ func JoinList(items []string) string {
 }
 
 func translate(lang Lang, key string) string {
-	if lang == LangEN {
-		if value, ok := compareFlagEnglish[key]; ok && value != "" {
-			return value
-		}
-		if value, ok := errorEnglish[key]; ok && value != "" {
-			return value
-		}
-		if value, ok := scoreEnglish[key]; ok && value != "" {
-			return value
-		}
-		if value, ok := cliEnglish[key]; ok && value != "" {
-			return value
-		}
+	var catalogs []map[string]string
+	switch lang {
+	case LangEN:
+		catalogs = []map[string]string{compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+	default:
+		catalogs = []map[string]string{compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
-	if value, ok := compareFlagChinese[key]; ok && value != "" {
-		return value
-	}
-	if value, ok := errorChinese[key]; ok && value != "" {
-		return value
-	}
-	if value, ok := scoreChinese[key]; ok && value != "" {
-		return value
-	}
-	if value, ok := cliChinese[key]; ok && value != "" {
-		return value
-	}
-	if lang == LangEN {
-		if value, ok := english[key]; ok && value != "" {
+	for _, catalog := range catalogs {
+		if value, ok := catalog[key]; ok && value != "" {
 			return value
 		}
 	}
-	if value, ok := chinese[key]; ok && value != "" {
-		return value
-	}
-	// key 未登记：返回 key 本身，让缺失在界面上可见而不是静默变空。
 	return key
 }
 
-// Has 报告某个 key 是否有当前语言的译文，供测试核对覆盖率。
+// Has 报告某个 key 是否在指定语言中有非空译文。它只检查该语言，不跨语言 fallback。
 func Has(lang Lang, key string) bool {
-	if lang == LangEN {
-		if value, ok := compareFlagEnglish[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := errorEnglish[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := scoreEnglish[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := cliEnglish[key]; ok && value != "" {
-			return true
-		}
-	} else {
-		if value, ok := compareFlagChinese[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := errorChinese[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := scoreChinese[key]; ok && value != "" {
-			return true
-		}
-		if value, ok := cliChinese[key]; ok && value != "" {
-			return true
-		}
-	}
-	if lang == LangEN {
-		value, ok := english[key]
-		return ok && value != ""
-	}
-	value, ok := chinese[key]
-	return ok && value != ""
+	return translate(lang, key) != key
 }
