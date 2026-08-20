@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"ecs/internal/i18n"
 )
 
 type Status string
@@ -65,7 +63,11 @@ type Summary struct {
 	Warnings int    `json:"warnings"`
 	Skipped  int    `json:"skipped"`
 	Errors   int    `json:"errors"`
-	Headline string `json:"headline"`
+	// Headline is a legacy presentation field retained while report renderers
+	// migrate to Messages. New ECS-generated summaries leave it empty.
+	Headline string `json:"headline,omitempty"`
+	// Messages is the canonical language-independent summary presentation.
+	Messages []Message `json:"messages,omitempty"`
 }
 
 type Result struct {
@@ -75,18 +77,21 @@ type Result struct {
 	Methodology  Methodology   `json:"methodology,omitempty"`
 	Status       Status        `json:"status"`
 	Summary      string        `json:"summary,omitempty"`
-	StartedAt    time.Time     `json:"started_at"`
-	DurationMS   int64         `json:"duration_ms"`
-	Fields       []Field       `json:"fields,omitempty"`
-	Measurements []Measurement `json:"measurements,omitempty"`
-	Tables       []Table       `json:"tables,omitempty"`
-	TextBlocks   []TextBlock   `json:"text_blocks,omitempty"`
-	Notes        []string      `json:"notes,omitempty"`
-	Sources      []Source      `json:"sources,omitempty"`
-	Evidence     *Evidence     `json:"evidence,omitempty"`
-	Failures     []Failure     `json:"failures,omitempty"`
-	Retry        *RetryInfo    `json:"retry,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	// SummaryMessages carries ECS-generated summary semantics. Summary remains
+	// as a temporary legacy/raw field while producers are migrated in stages.
+	SummaryMessages []Message     `json:"summary_messages,omitempty"`
+	StartedAt       time.Time     `json:"started_at"`
+	DurationMS      int64         `json:"duration_ms"`
+	Fields          []Field       `json:"fields,omitempty"`
+	Measurements    []Measurement `json:"measurements,omitempty"`
+	Tables          []Table       `json:"tables,omitempty"`
+	TextBlocks      []TextBlock   `json:"text_blocks,omitempty"`
+	Notes           []string      `json:"notes,omitempty"`
+	Sources         []Source      `json:"sources,omitempty"`
+	Evidence        *Evidence     `json:"evidence,omitempty"`
+	Failures        []Failure     `json:"failures,omitempty"`
+	Retry           *RetryInfo    `json:"retry,omitempty"`
+	Error           string        `json:"error,omitempty"`
 }
 
 // RetryInfo records a single interference-triggered benchmark retry. The
@@ -120,7 +125,7 @@ type Interference struct {
 }
 
 // FailureCategory is a stable machine-readable explanation for an operation
-// that did not produce usable evidence.  Human-readable command output stays
+// that did not produce usable evidence. Human-readable command output stays
 // in Message; consumers should branch on Category rather than parsing it.
 type FailureCategory string
 
@@ -175,7 +180,7 @@ func (r *Result) AddFailure(failure Failure) {
 }
 
 // Evidence records how much of a module's planned observation set produced a
-// usable verdict.  It is deliberately separate from Status: a module may
+// usable verdict. It is deliberately separate from Status: a module may
 // finish with a warning while still returning every planned sample, or may be
 // marked OK with only part of an optional observation set available.
 type Evidence struct {
@@ -302,7 +307,7 @@ type Table struct {
 	RowIdentity string `json:"row_identity,omitempty"`
 	// NumericColumns lists columns whose cells contain comparable numeric values.
 	// Renderers may add a data-proportional relative bar without having to guess
-	// from localized labels or display strings.  The optional direction slice is
+	// from localized labels or display strings. The optional direction slice is
 	// aligned with NumericColumns; absent entries default to higher-is-better.
 	NumericColumns        []int  `json:"numeric_columns,omitempty"`
 	NumericHigherIsBetter []bool `json:"numeric_higher_is_better,omitempty"`
@@ -343,12 +348,14 @@ func (r *Result) Finish(start time.Time) {
 func (r *Result) Skip(reason string) {
 	r.Status = StatusSkipped
 	r.Summary = reason
+	r.SummaryMessages = nil
 }
 
 func (r *Result) Fail(err error) {
 	r.Status = StatusError
 	r.Error = err.Error()
-	r.Summary = "测试失败"
+	r.Summary = ""
+	r.SummaryMessages = []Message{NewMessage("message.result.failed")}
 }
 
 func Summarize(report *Report) {
@@ -368,16 +375,16 @@ func Summarize(report *Report) {
 	switch {
 	case summary.Errors > 0:
 		summary.Status = StatusError
-		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.withErrors"), summary.OK, summary.Errors)
+		summary.Messages = append(summary.Messages, NewMessage("message.summary.withErrors", summary.OK, summary.Errors))
 	case summary.Warnings > 0:
 		summary.Status = StatusWarning
-		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.withWarnings"), summary.OK, summary.Warnings)
+		summary.Messages = append(summary.Messages, NewMessage("message.summary.withWarnings", summary.OK, summary.Warnings))
 	default:
 		summary.Status = StatusOK
-		summary.Headline = fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.allOK"), summary.OK)
+		summary.Messages = append(summary.Messages, NewMessage("message.summary.allOK", summary.OK))
 	}
 	if summary.Skipped > 0 {
-		summary.Headline += fmt.Sprintf(i18n.TL(i18n.LangZH, "summary.skipped"), summary.Skipped)
+		summary.Messages = append(summary.Messages, NewMessage("message.summary.skipped", summary.Skipped))
 	}
 	report.Summary = summary
 }
@@ -388,9 +395,11 @@ func RedactedCopy(in Report, reveal bool) Report {
 	out.SensitiveIPs = append([]string(nil), in.SensitiveIPs...)
 	out.Run.Requested = append([]string(nil), in.Run.Requested...)
 	out.Run.OutputFormats = append([]string(nil), in.Run.OutputFormats...)
+	out.Summary.Messages = cloneMessages(in.Summary.Messages)
 	out.Results = make([]Result, len(in.Results))
 	for i, result := range in.Results {
 		out.Results[i] = result
+		out.Results[i].SummaryMessages = cloneMessages(result.SummaryMessages)
 		out.Results[i].Methodology.Parameters = cloneStringMap(result.Methodology.Parameters)
 		if result.Evidence != nil {
 			evidence := *result.Evidence
@@ -452,7 +461,7 @@ func RedactedCopy(in Report, reveal bool) Report {
 var (
 	textIPv4Pattern = regexp.MustCompile(`(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,3})?`)
 	// Match a broad IPv6 token and let net.ParseIP/ParseCIDR decide whether it
-	// is really an address.  This also covers compressed forms (including ::1)
+	// is really an address. This also covers compressed forms (including ::1)
 	// and prefixes, while ordinary words containing a colon are left alone.
 	textIPv6Pattern = regexp.MustCompile(`(?i)[0-9a-f:]{2,}(?:/\d{1,3})?`)
 )
