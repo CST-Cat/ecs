@@ -14,7 +14,7 @@ import (
 // 偷偷回退中文。缺 key 直接返回 key 本身，让遗漏在测试和界面上都显式可见。
 //
 // probe 历史上仍存在一套 source-text 翻译兼容层；它不属于静态 key lookup，后续会在
-//动态 Message 迁移完成后删除。这里刻意不让那条兼容路径参与 T/TL。
+// 动态 Message 迁移完成后删除。这里刻意不让那条兼容路径参与 T/TL。
 
 // Lang 是支持的界面语言。
 type Lang string
@@ -112,23 +112,33 @@ func JoinList(items []string) string {
 	return strings.Join(items, separator)
 }
 
-func translate(lang Lang, key string) string {
-	var catalogs []map[string]string
+func catalogsFor(lang Lang) []map[string]string {
 	switch lang {
 	case LangEN:
-		catalogs = []map[string]string{compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+		return []map[string]string{compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
 	default:
-		catalogs = []map[string]string{compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
+		return []map[string]string{compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
-	for _, catalog := range catalogs {
+}
+
+func lookup(lang Lang, key string) (string, bool) {
+	for _, catalog := range catalogsFor(lang) {
 		if value, ok := catalog[key]; ok && value != "" {
-			return value
+			return value, true
 		}
+	}
+	return "", false
+}
+
+func translate(lang Lang, key string) string {
+	if value, ok := lookup(lang, key); ok {
+		return value
 	}
 	return key
 }
 
 // Has 报告某个 key 是否在指定语言中有非空译文。它只检查该语言，不跨语言 fallback。
 func Has(lang Lang, key string) bool {
-	return translate(lang, key) != key
+	_, ok := lookup(lang, key)
+	return ok
 }
