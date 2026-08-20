@@ -16,6 +16,7 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 		{name: "cli", zh: cliChinese, en: cliEnglish},
 		{name: "score", zh: scoreChinese, en: scoreEnglish},
 		{name: "compare flags", zh: compareFlagChinese, en: compareFlagEnglish},
+		{name: "model messages", zh: modelMessageChinese, en: modelMessageEnglish},
 	}
 	for _, table := range tables {
 		for key, zh := range table.zh {
