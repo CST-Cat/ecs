@@ -26,7 +26,7 @@ func TestSystemStage9BoundaryUsesMachineSemantics(t *testing.T) {
 		MemoryUsage: 25, DiskTotal: 100 << 30, DiskUsed: 20 << 30, DiskFree: 80 << 30, DiskUsage: 20,
 		DiskDevice: "/dev/vda", DiskMount: "/", Load: "0.10 0.20 0.30", Congestion: "bbr", QDisc: "fq",
 		Allowance: cpuAllowance{Visible: 8, Quota: 2, Threads: 2, Source: "fixture-quota"},
-		Hardware: hardwareInventory{SystemVendor: "fixture-vendor", ProductName: "fixture-product", BoardName: "fixture-board", BIOSVersion: "fixture-bios"},
+		Hardware:  hardwareInventory{SystemVendor: "fixture-vendor", ProductName: "fixture-product", BoardName: "fixture-board", BIOSVersion: "fixture-bios"},
 	}
 	resources := EnvironmentSnapshot{Limits: resourceLimits{CPU: snapshot.Allowance, CPUSet: "0-1", CPUSetCount: 2, CPUSetSource: "/fixture/cpuset"}}
 	stabilizeSystemResult(&result, snapshot, resources)
