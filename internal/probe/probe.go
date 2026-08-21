@@ -187,7 +187,7 @@ func Builtins() []Probe {
 		networkProbe{},
 		bgpProbe{},
 		cpuProbe{},
-		zstdProbe{},
+		zstdSemanticProbe{},
 		npbSemanticProbe{},
 		memoryProbe{},
 		cryptoProbe{},
