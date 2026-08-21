@@ -24,7 +24,7 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	allowance := detectCPUAllowance()
 
 	if path := officialStreamPath(); path != "" {
-		result := runStreamMemoryWithAllowance(ctx, env, path, allowance)
+		result := runStreamMemory(ctx, env, path)
 		stabilizeStreamMemoryResult(&result, allowance)
 		appendMemoryInventory(&result, memory, balloon, ksm)
 		return result
