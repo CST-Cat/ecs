@@ -28,8 +28,8 @@ func TestStructuredNoticeJSONContract(t *testing.T) {
 	}
 }
 
-func TestComparisonSchemaVersionReflectsStructuredNotices(t *testing.T) {
-	if SchemaVersion != "ecs.compare/v2" {
-		t.Fatalf("comparison schema version = %q, want ecs.compare/v2", SchemaVersion)
+func TestComparisonSchemaVersionStaysV1DuringBeta(t *testing.T) {
+	if SchemaVersion != "ecs.compare/v1" {
+		t.Fatalf("comparison schema version = %q, want ecs.compare/v1", SchemaVersion)
 	}
 }
