@@ -21,12 +21,12 @@ const (
 )
 
 type Report struct {
-	SchemaVersion string   `json:"schema_version"`
-	Tool          ToolInfo `json:"tool"`
-	Run           RunInfo  `json:"run"`
-	Results       []Result `json:"results"`
-	Summary       Summary  `json:"summary"`
-	Notices       []string `json:"notices,omitempty"`
+	SchemaVersion string    `json:"schema_version"`
+	Tool          ToolInfo  `json:"tool"`
+	Run           RunInfo   `json:"run"`
+	Results       []Result  `json:"results"`
+	Summary       Summary   `json:"summary"`
+	Notices       []Message `json:"notices,omitempty"`
 	// SensitiveIPs is an in-memory allow-list of this machine's addresses. It is
 	// never serialized; RedactedCopy uses it to remove exact local-IP occurrences
 	// from otherwise non-sensitive raw output without hiding remote route hops.
@@ -71,12 +71,12 @@ type Summary struct {
 }
 
 type Result struct {
-	ID           string        `json:"id"`
-	Title        string        `json:"title"`
-	Description  string        `json:"description,omitempty"`
-	Methodology  Methodology   `json:"methodology,omitempty"`
-	Status       Status        `json:"status"`
-	Summary      string        `json:"summary,omitempty"`
+	ID          string      `json:"id"`
+	Title       string      `json:"title"`
+	Description string      `json:"description,omitempty"`
+	Methodology Methodology `json:"methodology,omitempty"`
+	Status      Status      `json:"status"`
+	Summary     string      `json:"summary,omitempty"`
 	// SummaryMessages carries ECS-generated summary semantics. Summary remains
 	// as a temporary legacy/raw field while producers are migrated in stages.
 	SummaryMessages []Message     `json:"summary_messages,omitempty"`
@@ -391,7 +391,7 @@ func Summarize(report *Report) {
 
 func RedactedCopy(in Report, reveal bool) Report {
 	out := in
-	out.Notices = append([]string(nil), in.Notices...)
+	out.Notices = cloneMessages(in.Notices)
 	out.SensitiveIPs = append([]string(nil), in.SensitiveIPs...)
 	out.Run.Requested = append([]string(nil), in.Run.Requested...)
 	out.Run.OutputFormats = append([]string(nil), in.Run.OutputFormats...)
