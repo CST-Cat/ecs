@@ -109,7 +109,7 @@ func TestEvidenceNormalizationAndCoverageGrades(t *testing.T) {
 func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	local4, textIP, tableIP := "192.0.2.10", "2001:db8::10", "203.0.113.77"
 	report := Report{
-		Notices:      []string{local4},
+		Notices:      []Message{NewMessage("message.test", local4)},
 		SensitiveIPs: []string{local4},
 		Run:          RunInfo{Requested: []string{"system", "network"}, OutputFormats: []string{"json", "txt"}},
 		Summary:      Summary{Messages: []Message{NewMessage("message.test", local4)}},
@@ -152,10 +152,10 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	hidden := RedactedCopy(report, false)
 	masked4, maskedTextIP, maskedTableIP := Mask(local4), Mask(textIP), Mask(tableIP)
 	result := hidden.Results[0]
-	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.TriggerReasons[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
+	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0].Args[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.TriggerReasons[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
 		t.Fatalf("redacted containers = %+v", result)
 	}
-	hidden.Notices[0] = "changed"
+	hidden.Notices[0].Args[0] = "changed"
 	hidden.Summary.Messages[0].Args[0] = "changed"
 	hidden.Run.Requested[0], hidden.Run.OutputFormats[0] = "changed", "changed"
 	hidden.Results[0].SummaryMessages[0].Args[0] = "changed"
@@ -188,7 +188,7 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	}
 
 	revealed := RedactedCopy(report, true)
-	if revealed.Run.Redacted || revealed.SensitiveIPs != nil || revealed.Notices[0] != local4 || revealed.Summary.Messages[0].Args[0] != local4 || revealed.Results[0].SummaryMessages[0].Args[0] != local4 || revealed.Results[0].Fields[0].Value != "secret-token" || revealed.Results[0].Tables[0].Rows[0][1] != tableIP || revealed.Results[0].TextBlocks[0].Content != "trace "+textIP {
+	if revealed.Run.Redacted || revealed.SensitiveIPs != nil || revealed.Notices[0].Args[0] != local4 || revealed.Summary.Messages[0].Args[0] != local4 || revealed.Results[0].SummaryMessages[0].Args[0] != local4 || revealed.Results[0].Fields[0].Value != "secret-token" || revealed.Results[0].Tables[0].Rows[0][1] != tableIP || revealed.Results[0].TextBlocks[0].Content != "trace "+textIP {
 		t.Fatalf("revealed copy = %+v", revealed.Results[0])
 	}
 }
