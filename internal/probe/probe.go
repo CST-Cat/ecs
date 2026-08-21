@@ -188,7 +188,7 @@ func Builtins() []Probe {
 		bgpProbe{},
 		cpuProbe{},
 		zstdProbe{},
-		npbProbe{},
+		npbSemanticProbe{},
 		memoryProbe{},
 		cryptoProbe{},
 		diskProbe{},

@@ -115,9 +115,9 @@ func JoinList(items []string) string {
 func catalogsFor(lang Lang) []map[string]string {
 	switch lang {
 	case LangEN:
-		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
 	default:
-		return []map[string]string{modelMessageChinese, probeMessageChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
+		return []map[string]string{modelMessageChinese, probeMessageChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
 }
 
