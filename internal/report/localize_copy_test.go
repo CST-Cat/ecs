@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"ecs/internal/i18n"
@@ -15,8 +16,8 @@ func TestLocalizeEnglishKeepsMachineFieldsAndRawEvidence(t *testing.T) {
 	data := sampleReport()
 	localized := Localize(data)
 	result := localized.Results[0]
-	if localized.Summary.Headline != "1 checks completed" || localized.Notices[0] != "The official STREAM executable was not found; the memory benchmark did not run." || localized.Notices[1] != "OS" {
-		t.Fatalf("localized report frame = summary=%q notices=%q", localized.Summary.Headline, localized.Notices)
+	if localized.Summary.Headline != "1 checks completed" || !reflect.DeepEqual(localized.Notices, data.Notices) || renderMessage(localized.Notices[0]) != "The official STREAM executable was not found; the memory benchmark did not run." || renderMessage(localized.Notices[1]) != "OS" {
+		t.Fatalf("localized report frame = summary=%q notices=%+v", localized.Summary.Headline, localized.Notices)
 	}
 	if localized.Summary.Status != data.Summary.Status || localized.Summary.OK != data.Summary.OK || result.Title != "OS" || result.Description != "Resource snapshot; not a performance benchmark" || result.Summary != "Done" || result.Error != "Failed" || result.Methodology.Label != "Inventory" || result.Methodology.Engine != "Inventory" || result.Methodology.Profile != "OS" || result.Methodology.Parameters["workload"] != "standard" || result.Methodology.ComparisonScope != "Resource snapshot; not a performance benchmark" {
 		t.Fatalf("localized result text = %+v", result)
@@ -53,7 +54,7 @@ func TestLocalizeReturnsIndependentDisplayCopy(t *testing.T) {
 	}
 	localized.Run.Requested[0] = "changed"
 	localized.Run.OutputFormats[0] = "changed"
-	localized.Notices[0] = "changed"
+	localized.Notices[0].Key = "changed"
 	localized.SensitiveIPs[0] = "changed"
 	result.Methodology.Parameters["scope_revision"] = "changed"
 	result.Fields[0].Value = "changed"
