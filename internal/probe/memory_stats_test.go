@@ -73,10 +73,10 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 		labels[field.Key] = field.Label
 	}
 	for key, wantLabel := range map[string]string{
-		"memory_total":    "probe.memory.field.total",
+		"memory_total":     "probe.memory.field.total",
 		"memory_available": "probe.memory.field.available",
-		"balloon_reclaim": "probe.memory.field.balloon_reclaim",
-		"ksm_merging":     "probe.memory.field.ksm_merging",
+		"balloon_reclaim":  "probe.memory.field.balloon_reclaim",
+		"ksm_merging":      "probe.memory.field.ksm_merging",
 	} {
 		if got := labels[key]; got != wantLabel {
 			t.Fatalf("memory inventory field %q label = %q, want %q; fields=%+v", key, got, wantLabel, result.Fields)
