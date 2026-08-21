@@ -183,7 +183,7 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 // implementation list. There is no runtime registration or mutable index.
 func Builtins() []Probe {
 	return []Probe{
-		systemProbe{},
+		systemSemanticProbe{},
 		networkProbe{},
 		bgpProbe{},
 		cpuProbe{},
