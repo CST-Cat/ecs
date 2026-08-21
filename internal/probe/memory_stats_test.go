@@ -68,18 +68,21 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 
 	result := model.NewResult("memory", "memory")
 	appendMemoryInventory(&result, memory, balloon, ksm)
-	for _, key := range []string{"memory_total", "memory_available", "balloon_reclaim", "ksm_merging"} {
-		found := false
-		for _, field := range result.Fields {
-			if field.Key == key {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("memory inventory field %q missing: %+v", key, result.Fields)
+	labels := make(map[string]string)
+	for _, field := range result.Fields {
+		labels[field.Key] = field.Label
+	}
+	for key, wantLabel := range map[string]string{
+		"memory_total":    "probe.memory.field.total",
+		"memory_available": "probe.memory.field.available",
+		"balloon_reclaim": "probe.memory.field.balloon_reclaim",
+		"ksm_merging":     "probe.memory.field.ksm_merging",
+	} {
+		if got := labels[key]; got != wantLabel {
+			t.Fatalf("memory inventory field %q label = %q, want %q; fields=%+v", key, got, wantLabel, result.Fields)
 		}
 	}
+
 	limitedFallback := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 1024, "MemFree": 100, "Buffers": 100, "Cached": 100}, 512*1024)
 	limitedFallback.EffectiveCurrentKnown = true
 	degraded := model.NewResult("memory", "memory")
@@ -88,7 +91,18 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 	for _, field := range degraded.Fields {
 		values[field.Key] = field.Value
 	}
-	if values["balloon_reclaim"] != "unavailable" || values["ksm_merging"] != "unavailable" || !strings.Contains(strings.Join(degraded.Notes, " "), "MemAvailable unavailable") || !strings.Contains(strings.Join(degraded.Notes, " "), "memory.current") || !strings.Contains(strings.Join(degraded.Notes, " "), "Balloon reclaim unavailable") || !strings.Contains(strings.Join(degraded.Notes, " "), "KSM merging unavailable") {
-		t.Fatalf("degraded memory inventory = fields:%v notes:%v", values, degraded.Notes)
+	if values["balloon_reclaim"] != "unavailable" || values["ksm_merging"] != "unavailable" {
+		t.Fatalf("degraded memory inventory values = %v", values)
+	}
+	for _, want := range []string{
+		"probe.memory.note.cgroup_limit",
+		"probe.memory.note.cgroup_current",
+		"probe.memory.note.memavailable_legacy_fallback",
+		"probe.memory.note.balloon_reclaim_unavailable",
+		"probe.memory.note.ksm_unavailable",
+	} {
+		if !containsString(degraded.Notes, want) {
+			t.Fatalf("degraded memory inventory missing note %q: %v", want, degraded.Notes)
+		}
 	}
 }
