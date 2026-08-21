@@ -37,7 +37,7 @@ type sysbenchCPUResult struct {
 type cpuProbe struct{}
 
 func (cpuProbe) ID() string         { return "cpu" }
-func (cpuProbe) Title() string      { return "CPU 性能" }
+func (cpuProbe) Title() string      { return "module.cpu.title" }
 func (cpuProbe) NeedsNetwork() bool { return false }
 
 func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -45,17 +45,18 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 		return runSysbenchCPU(ctx, env, path)
 	}
 	start := time.Now()
-	result := model.NewResult("cpu", "CPU 性能")
+	result := model.NewResult("cpu", "module.cpu.title")
 	result.Methodology = model.Methodology{
 		Kind:            "standard-benchmark",
-		Label:           "标准基准",
+		Label:           "methodology.standard-benchmark",
 		Engine:          "sysbench",
 		Profile:         "cpu prime=20000",
-		ComparisonScope: "相同 sysbench 版本、prime、线程数与时长",
+		ComparisonScope: "probe.cpu.comparison_scope.tool_missing",
 	}
 	result.Status = model.StatusWarning
-	result.Summary = "未找到 sysbench，标准 CPU 基准未运行"
-	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "sysbench", Count: 1, Message: result.Summary})
+	result.Summary = ""
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.tool_missing")}
+	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "sysbench", Count: 1, Message: "executable not found"})
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes, "probe.cpu.tool_missing")
 	result.Finish(start)
@@ -68,14 +69,14 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 
 func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path string, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("cpu", "CPU 性能")
-	result.Description = "sysbench CPU 素数计算的单线程与多线程标准化工作负载"
+	result := model.NewResult("cpu", "module.cpu.title")
+	result.Description = "probe.cpu.description"
 	result.Methodology = model.Methodology{
 		Kind:            "standard-benchmark",
-		Label:           "标准基准",
+		Label:           "methodology.standard-benchmark",
 		Engine:          "sysbench",
 		Profile:         "cpu prime=20000",
-		ComparisonScope: "相同 sysbench 版本、prime=20000、线程数与时长",
+		ComparisonScope: "probe.cpu.comparison_scope",
 	}
 
 	seconds := int((env.Config.CPUTime + time.Second - 1) / time.Second)
@@ -93,7 +94,7 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 
 	single, err := executeSysbenchCPU(ctx, path, 1, seconds)
 	if err != nil {
-		result.Fail(fmt.Errorf("sysbench 单线程 CPU 基准: %w", err))
+		result.Fail(err)
 		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
 		result.Finish(start)
 		return result
@@ -104,7 +105,8 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 		multi, err = executeSysbenchCPU(ctx, path, workers, seconds)
 		if err != nil {
 			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, "sysbench 多线程 CPU 基准失败: "+err.Error())
+			result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "multi_thread_run", Target: "sysbench", Count: 1, Message: err.Error()})
+			result.Notes = append(result.Notes, "probe.cpu.note.multi_failed")
 		} else {
 			validRuns++
 		}
@@ -120,82 +122,74 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	appendSysbenchCPUMeasurements(&result, single, multi, workers)
 	if stealOK {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "cpu_steal_percent_during_test", Label: "测试期间 CPU steal",
+			Key: "cpu_steal_percent_during_test", Label: "probe.cpu.metric.steal",
 			Value: steal, Unit: "%", Display: fmt.Sprintf("%.2f %%", steal),
 			Method: "proc-stat-steal-delta-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
 	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "标准工具", Value: "sysbench"},
-		{Key: "version", Label: "sysbench 版本", Value: version},
-		{Key: "binary_sha256", Label: "sysbench SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
-		{Key: "threads", Label: "测试线程", Value: benchmarkThreadField(workers)},
-		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
-		{Key: "duration", Label: "每轮时长", Value: fmt.Sprintf("%ds", seconds)},
-		{Key: "prime", Label: "最大素数", Value: "20000"},
-		{Key: "single_events", Label: "单线程总事件", Value: formatSysbenchEvents(single)},
-		{Key: "multi_events", Label: "多线程总事件", Value: formatSysbenchEvents(multi)},
+		{Key: "engine", Label: "probe.cpu.field.engine", Value: "sysbench"},
+		{Key: "version", Label: "probe.cpu.field.version", Value: version},
+		{Key: "binary_sha256", Label: "probe.cpu.field.binary_sha256", Value: fallback(binarySHA256(path), "unavailable")},
+		{Key: "threads", Label: "probe.cpu.field.threads", Value: benchmarkThreadField(workers)},
+		{Key: "cpu_allowance", Label: "probe.cpu.field.cpu_allowance", Value: cpuAllowanceMachineValue(allowance)},
+		{Key: "duration", Label: "probe.cpu.field.duration", Value: fmt.Sprintf("%ds", seconds)},
+		{Key: "prime", Label: "probe.cpu.field.prime", Value: "20000"},
+		{Key: "single_events", Label: "probe.cpu.field.single_events", Value: formatSysbenchEvents(single)},
+		{Key: "multi_events", Label: "probe.cpu.field.multi_events", Value: formatSysbenchEvents(multi)},
 	}
-	validity := "有效"
+	validity := "probe.cpu.validity.valid"
 	if allowance.Limited() {
-		validity = "按 CPU 配额有效"
+		validity = "probe.cpu.validity.quota"
 	}
 	if multi.Rate <= 0 {
-		validity = "部分有效"
+		validity = "probe.cpu.validity.partial"
 	}
 	if (stealOK && steal >= stealNoticeThreshold) || (loadKnown && load1 > float64(workers)*1.5) {
-		validity = "受干扰，建议复测"
+		validity = "probe.cpu.validity.interfered"
 	}
-	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "成绩有效性", Value: validity})
+	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "probe.cpu.field.result_validity", Value: validity})
 	if loadKnown {
 		result.Fields = append(result.Fields, model.Field{
-			Key: "pretest_load_1m", Label: "测试前 1 分钟负载", Value: fmt.Sprintf("%.2f", load1),
+			Key: "pretest_load_1m", Label: "probe.cpu.field.pretest_load_1m", Value: fmt.Sprintf("%.2f", load1),
 		})
 	}
 	result.TextBlocks = []model.TextBlock{
-		{Title: "sysbench 单线程原始输出", Language: "text", Content: single.Output},
+		{Title: "probe.cpu.raw.single", Language: "text", Content: single.Output},
 	}
 	if !singleCore && multi.Output != "" {
-		result.TextBlocks = append(result.TextBlocks, model.TextBlock{Title: "sysbench 多线程原始输出", Language: "text", Content: multi.Output})
+		result.TextBlocks = append(result.TextBlocks, model.TextBlock{Title: "probe.cpu.raw.multi", Language: "text", Content: multi.Output})
 	}
 	result.Sources = []model.Source{
-		{Name: "sysbench", URL: "https://github.com/akopytov/sysbench", Purpose: "CPU 标准化工作负载与统计"},
+		{Name: "sysbench", URL: "https://github.com/akopytov/sysbench", Purpose: "probe.cpu.source.purpose"},
 	}
 	result.Notes = append(result.Notes,
-		"成绩不与不同 sysbench 版本、prime 值、线程数或测试时长混算。",
-		"sysbench CPU 是素数计算微基准，不等同于 Geekbench/SPEC 的综合应用负载。",
+		"probe.cpu.note.comparability",
+		"probe.cpu.note.scope",
 	)
 	if singleCore {
-		result.Notes = append(result.Notes, "CPU allowance 为 1 核：单线程与多线程逻辑指标复用同一次 1T 实测；未执行第二次相同命令，扩展倍率与每线程效率不适用。")
+		result.Notes = append(result.Notes, "probe.cpu.note.single_core")
 	}
 	if allowance.Limited() && !singleCore {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"检测到 CPU 配额 %.2f 核（%s），低于可见的 %d 个逻辑核；多线程测试按配额使用 %d 线程，避免超开导致成绩失真。",
-			allowance.Quota, allowance.Source, allowance.Visible, allowance.Threads,
-		))
+		result.Notes = append(result.Notes, "probe.cpu.note.quota_limited")
 	}
 	if stealOK && steal >= stealNoticeThreshold {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"测试期间 CPU steal 约 %.2f%%，宿主机存在争抢；本轮成绩会被压低，建议错峰复测。", steal,
-		))
+		result.Notes = append(result.Notes, "probe.cpu.note.steal")
 	}
 	if loadKnown && load1 > float64(workers)*1.5 {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"测试前 1 分钟负载为 %.2f，超过本轮 %d 线程 allowance 的 1.5 倍；后台任务可能压低成绩，建议空闲时复测。", load1, workers,
-		))
+		result.Notes = append(result.Notes, "probe.cpu.note.load")
 	}
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
+	result.Summary = ""
 	if singleCore && multi.Rate > 0 {
-		result.Summary = fmt.Sprintf("sysbench 1T/NT（同一次实测）%s · 扩展不适用",
-			model.FormatRate(single.Rate, "events/s"))
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.single_core", model.FormatRate(single.Rate, "events/s"))}
 	} else if multi.Rate > 0 {
-		result.Summary = fmt.Sprintf("sysbench 单线程 %s · %d 线程 %s",
-			model.FormatRate(single.Rate, "events/s"), workers, model.FormatRate(multi.Rate, "events/s"))
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.multi", model.FormatRate(single.Rate, "events/s"), workers, model.FormatRate(multi.Rate, "events/s"))}
 	} else {
-		result.Summary = "sysbench 单线程 " + model.FormatRate(single.Rate, "events/s")
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.single", model.FormatRate(single.Rate, "events/s"))}
 	}
 	result.Finish(start)
 	return result
@@ -203,20 +197,20 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 
 func appendSysbenchCPUMeasurements(result *model.Result, single, multi sysbenchCPUResult, workers int) {
 	result.Measurements = append(result.Measurements, model.Measurement{
-		Key: "sysbench_cpu_single_events_s", Label: "单线程事件率",
+		Key: "sysbench_cpu_single_events_s", Label: "probe.cpu.metric.single_events_s",
 		Value: single.Rate, Unit: "events/s", Display: model.FormatRate(single.Rate, "events/s"),
 		Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(true),
 	})
 	if single.P95MS > 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "sysbench_cpu_single_p95_ms", Label: "单线程事件延迟 P95",
+			Key: "sysbench_cpu_single_p95_ms", Label: "probe.cpu.metric.single_p95_ms",
 			Value: single.P95MS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", single.P95MS),
 			Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
 	if multi.Rate > 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "sysbench_cpu_multi_events_s", Label: fmt.Sprintf("%d 线程事件率", workers),
+			Key: "sysbench_cpu_multi_events_s", Label: "probe.cpu.metric.multi_events_s",
 			Value: multi.Rate, Unit: "events/s", Display: model.FormatRate(multi.Rate, "events/s"),
 			Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(true),
 		})
@@ -224,18 +218,18 @@ func appendSysbenchCPUMeasurements(result *model.Result, single, multi sysbenchC
 			scaling := multi.Rate / single.Rate
 			efficiency := scaling / float64(workers) * 100
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "sysbench_cpu_scaling_ratio", Label: "多线程扩展倍率",
+				Key: "sysbench_cpu_scaling_ratio", Label: "probe.cpu.metric.scaling_ratio",
 				Value: scaling, Unit: "x", Display: fmt.Sprintf("%.2f×", scaling),
 				Method: "sysbench-cpu-scaling-v1", HigherIsBetter: model.BoolPtr(true),
 			}, model.Measurement{
-				Key: "sysbench_cpu_per_thread_efficiency_percent", Label: "每线程扩展效率",
+				Key: "sysbench_cpu_per_thread_efficiency_percent", Label: "probe.cpu.metric.per_thread_efficiency_percent",
 				Value: efficiency, Unit: "%", Display: fmt.Sprintf("%.1f %%", efficiency),
 				Method: "sysbench-cpu-scaling-v1", HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 		if multi.P95MS > 0 {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "sysbench_cpu_multi_p95_ms", Label: fmt.Sprintf("%d 线程事件延迟 P95", workers),
+				Key: "sysbench_cpu_multi_p95_ms", Label: "probe.cpu.metric.multi_p95_ms",
 				Value: multi.P95MS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", multi.P95MS),
 				Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(false),
 			})
@@ -245,9 +239,16 @@ func appendSysbenchCPUMeasurements(result *model.Result, single, multi sysbenchC
 
 func benchmarkThreadField(workers int) string {
 	if workers <= 1 {
-		return "1 / 1（单核，同一次实测）"
+		return "1 / 1"
 	}
 	return fmt.Sprintf("1 / %d", workers)
+}
+
+func cpuAllowanceMachineValue(allowance cpuAllowance) string {
+	if !allowance.Limited() {
+		return fmt.Sprintf("visible=%d;quota=unlimited", allowance.Visible)
+	}
+	return fmt.Sprintf("visible=%d;quota=%.2f;threads=%d;source=%s", allowance.Visible, allowance.Quota, allowance.Threads, allowance.Source)
 }
 
 func readLoadAverage1() (float64, bool) {
@@ -294,12 +295,12 @@ func executeSysbenchCPU(ctx context.Context, path string, threads, seconds int) 
 	}
 	rate, ok := parseFirstFloat(sysbenchEventsRatePattern, text)
 	if !ok || rate <= 0 {
-		return sysbenchCPUResult{Output: text, Args: args}, fmt.Errorf("未解析到 events per second")
+		return sysbenchCPUResult{Output: text, Args: args}, fmt.Errorf("events per second not found")
 	}
 	events, _ := parseFirstUint(sysbenchEventsPattern, text)
 	p95, ok := parseFirstFloat(sysbenchP95Pattern, text)
 	if !ok || p95 <= 0 {
-		return sysbenchCPUResult{Rate: rate, Events: events, Output: text, Args: args}, fmt.Errorf("未解析到有效的 95th percentile 延迟")
+		return sysbenchCPUResult{Rate: rate, Events: events, Output: text, Args: args}, fmt.Errorf("valid 95th percentile latency not found")
 	}
 	return sysbenchCPUResult{Rate: rate, Events: events, P95MS: p95, Output: text, Args: args}, nil
 }
