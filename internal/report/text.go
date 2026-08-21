@@ -1904,7 +1904,7 @@ func (r *textRenderer) footer(data model.Report) {
 	if !r.compact && len(data.Notices) > 0 {
 		r.sectionTitle(i18n.T("report.notices"), "")
 		for _, notice := range data.Notices {
-			r.note(notice)
+			r.note(renderMessage(notice))
 		}
 		r.blank()
 	}
