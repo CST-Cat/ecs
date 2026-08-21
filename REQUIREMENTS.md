@@ -117,6 +117,13 @@
 - 不在本任务内立即升级 Go 1.26.7。
 - `govulncheck` 不立即成为 required gate。
 
+## 19. Beta 阶段版本纪律
+
+- 本项目当前处于 beta 阶段，代码、JSON schema、内部 API 或其他契约发生 breaking change 时，允许直接修改当前 `v1` 契约。
+- 不因为代码结构、字段类型或语义发生 breaking change 就把 `ecs.report/v1`、`ecs.compare/v1` 等版本号升级为 `v2`。
+- 不为旧结构保留兼容层、双 schema、迁移适配器或 fallback；本任务优先直接删除旧设计并让当前 `v1` 表示最新 beta 契约。
+- 除非用户以后明确要求，Agent 不得自行升级这些版本标识。
+
 ## 目标架构原则
 
 - JSON 是机器事实；compare 只相信 JSON。
