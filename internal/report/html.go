@@ -37,6 +37,7 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 func htmlLocalized(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"t":           i18n.T,
+		"message":     renderMessage,
 		"htmlLang":    reportHTMLLanguage,
 		"methodology": localizedMethodology,
 		"statusLabel": statusLabel,
@@ -392,7 +393,7 @@ const htmlTemplate = `<!doctype html>
   {{end}}
 
   <footer>
-    <p>{{range .Notices}}{{.}} · {{end}}</p>
+    <p>{{range .Notices}}{{message .}} · {{end}}</p>
     <p>{{t "report.schema"}}: {{.SchemaVersion}} · {{t "report.generator"}}: {{.Tool.Name}} {{.Tool.Version}}{{if .Tool.Commit}} · {{t "report.commit"}}: {{.Tool.Commit}}{{end}}</p>
   </footer>
 </main>
