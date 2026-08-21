@@ -11,7 +11,7 @@ import (
 	"ecs/internal/model"
 )
 
-const SchemaVersion = "ecs.compare/v2"
+const SchemaVersion = "ecs.compare/v1"
 
 type Comparability string
 
