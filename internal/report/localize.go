@@ -16,7 +16,7 @@ func Localize(data model.Report) model.Report {
 	out := data
 	out.Run.Requested = cloneStrings(data.Run.Requested)
 	out.Run.OutputFormats = cloneStrings(data.Run.OutputFormats)
-	out.Notices = localizeStrings(data.Notices)
+	out.Notices = cloneModelMessages(data.Notices)
 	out.SensitiveIPs = cloneStrings(data.SensitiveIPs)
 	out.Summary.Messages = cloneModelMessages(data.Summary.Messages)
 	if len(data.Summary.Messages) > 0 {
