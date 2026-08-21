@@ -73,7 +73,14 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	progress := terminal.BeginProgress(len(cfg.Modules))
 	raw := func() model.Report {
 		defer progress.EndProgress()
-		return runner.Run(ctx, cfg, progress.Update)
+		return runner.Run(ctx, cfg, func(event runner.Progress) {
+			if event.TitleKey != "" {
+				if title := i18n.T(event.TitleKey); title != event.TitleKey {
+					event.Title = title
+				}
+			}
+			progress.Update(event)
+		})
 	}()
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
