@@ -27,7 +27,7 @@ func sampleReport() model.Report {
 			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json", "md"},
 		},
 		Summary:      model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项测试完成"},
-		Notices:      []string{"probe.memory.stream_missing", "系统"},
+		Notices:      []model.Message{model.NewMessage("probe.memory.stream_missing"), model.NewMessage("module.system.title")},
 		SensitiveIPs: []string{"192.0.2.10"},
 		Results: []model.Result{{
 			ID: "system", Title: "系统", Description: "资源快照；不是性能基准", Status: model.StatusOK,
