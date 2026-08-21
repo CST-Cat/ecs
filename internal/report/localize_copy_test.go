@@ -16,7 +16,7 @@ func TestLocalizeEnglishKeepsMachineFieldsAndRawEvidence(t *testing.T) {
 	data := sampleReport()
 	localized := Localize(data)
 	result := localized.Results[0]
-	if localized.Summary.Headline != "1 checks completed" || !reflect.DeepEqual(localized.Notices, data.Notices) || renderMessage(localized.Notices[0]) != "The official STREAM executable was not found; the memory benchmark did not run." || renderMessage(localized.Notices[1]) != "OS" {
+	if localized.Summary.Headline != "1 checks completed" || !reflect.DeepEqual(localized.Notices, data.Notices) || renderMessage(localized.Notices[0]) != "The official STREAM executable was not found; the memory benchmark did not run." || renderMessage(localized.Notices[1]) != "System & Resources" {
 		t.Fatalf("localized report frame = summary=%q notices=%+v", localized.Summary.Headline, localized.Notices)
 	}
 	if localized.Summary.Status != data.Summary.Status || localized.Summary.OK != data.Summary.OK || result.Title != "OS" || result.Description != "Resource snapshot; not a performance benchmark" || result.Summary != "Done" || result.Error != "Failed" || result.Methodology.Label != "Inventory" || result.Methodology.Engine != "Inventory" || result.Methodology.Profile != "OS" || result.Methodology.Parameters["workload"] != "standard" || result.Methodology.ComparisonScope != "Resource snapshot; not a performance benchmark" {
