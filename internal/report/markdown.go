@@ -220,7 +220,7 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 	out.WriteString("## " + i18n.T("report.notices") + "\n\n")
 	for _, notice := range data.Notices {
 		out.WriteString("- ")
-		out.WriteString(markdownEscape(notice))
+		out.WriteString(markdownEscape(renderMessage(notice)))
 		out.WriteString("\n")
 	}
 	out.WriteString("\n")
