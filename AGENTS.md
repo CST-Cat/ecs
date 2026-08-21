@@ -61,3 +61,9 @@
 - 文档边界：稳定工作纪律写入 `AGENTS.md`；具体任务只写入任务文档。
 - 核心流程：读取约束 → 写入 `AGENTS.md` → 建立 `REQUIREMENTS.md` → 制定并动态维护 `PLAN.md` → 串行执行阶段 → 实际 diff/测试审查 → 不合格返工 → 完成后检查完整 Branch diff → 最终回归与总审查 → 清理无价值临时文档 → 交付。
 - 禁止并发 Worker、禁止未经审查跨阶段推进、禁止冒充模型或 effort、禁止绕过实际 diff 与实际验证进行验收。
+
+## Beta 版本纪律
+
+- 当前项目处于 beta 阶段。代码、JSON schema、内部 API 或其他契约发生 breaking change 时，默认**直接修改当前 v1 契约**，不因为兼容性考虑自动升级为 `v2`。
+- 除非用户以后明确要求，否则禁止为了保留旧行为新增兼容层、双 schema、迁移适配器或旧版本 fallback；旧设计可以直接删除或原地替换。
+- `ecs.report/v1`、`ecs.compare/v1` 等当前版本标识应保持不变；版本号变化必须来自用户明确要求，而不是 Agent 自行依据 breaking change 推断。
