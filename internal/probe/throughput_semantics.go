@@ -4,13 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
 // The throughput probes deliberately keep their command runners and parsers
-// unchanged. These adapters only replace presentation-owned values after the
-// measurement is complete; command output and failure messages remain raw
-// evidence.
+// unchanged. These adapters replace presentation-owned values only from
+// structured failures, config, measurement presence and machine identities;
+// they never infer semantics from localized ECS display text.
 
 type speedSemanticProbe struct{}
 
@@ -49,28 +50,19 @@ func stabilizeSpeedResult(result *model.Result) {
 				"probe.speed.column.upload", "probe.speed.column.download", "probe.speed.column.udp_loss",
 				"probe.speed.column.udp_jitter", "probe.speed.column.port", "probe.speed.column.status",
 			}
+			for rowIndex := range table.Rows {
+				row := table.Rows[rowIndex]
+				if len(row) < 5 {
+					continue
+				}
+				row[len(row)-1] = speedResultStatusKey(row)
+			}
 		case "network.iperf3.stability":
 			table.Title = "probe.speed.table.stability"
 			table.Columns = []string{
 				"probe.speed.column.provider", "probe.speed.column.protocol", "probe.speed.column.direction",
 				"probe.speed.column.minimum", "probe.speed.column.p50", "probe.speed.column.cv",
 				"probe.speed.column.retransmits", "probe.speed.column.interval",
-			}
-		default:
-			continue
-		}
-		for rowIndex := range table.Rows {
-			row := table.Rows[rowIndex]
-			if len(row) == 0 {
-				continue
-			}
-			switch row[len(row)-1] {
-			case "完成":
-				row[len(row)-1] = "probe.speed.status.complete"
-			case "失败":
-				row[len(row)-1] = "probe.speed.status.failed"
-			case "部分":
-				row[len(row)-1] = "probe.speed.status.partial"
 			}
 		}
 	}
@@ -96,6 +88,24 @@ func stabilizeSpeedResult(result *model.Result) {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.none")}
 	default:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.values", speedMachineSummary(*result))}
+	}
+}
+
+func machineMetricPresent(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && value != "—" && !strings.EqualFold(value, "n/a")
+}
+
+func speedResultStatusKey(row []string) string {
+	upload := len(row) > 3 && machineMetricPresent(row[3])
+	download := len(row) > 4 && machineMetricPresent(row[4])
+	switch {
+	case upload && download:
+		return "probe.speed.status.complete"
+	case upload || download:
+		return "probe.speed.status.partial"
+	default:
+		return "probe.speed.status.failed"
 	}
 }
 
@@ -185,11 +195,13 @@ func stabilizeCNSpeedResult(result *model.Result) {
 		}
 		for rowIndex := range table.Rows {
 			row := table.Rows[rowIndex]
-			if len(row) == 0 {
+			if len(row) < 5 {
 				continue
 			}
+			// Carrier is a normalized value from the audited external CSV schema,
+			// not an ECS presentation sentence.
 			row[0] = carrierMachineKey(row[0])
-			if row[len(row)-1] == "完成" {
+			if machineMetricPresent(row[4]) {
 				row[len(row)-1] = "probe.cnspeed.status.complete"
 			} else {
 				row[len(row)-1] = "probe.cnspeed.status.failed"
@@ -245,11 +257,11 @@ func (ooklaSemanticProbe) NeedsNetwork() bool { return true }
 
 func (ooklaSemanticProbe) Run(ctx context.Context, env Environment) model.Result {
 	result := (ooklaProbe{}).Run(ctx, env)
-	stabilizeOoklaResult(&result)
+	stabilizeOoklaResult(&result, env.Config)
 	return result
 }
 
-func stabilizeOoklaResult(result *model.Result) {
+func stabilizeOoklaResult(result *model.Result, runtime config.Runtime) {
 	if result == nil {
 		return
 	}
@@ -259,6 +271,8 @@ func stabilizeOoklaResult(result *model.Result) {
 	result.Methodology.Engine = "ookla-speedtest-cli"
 	result.Methodology.Profile = "probe.ookla.profile"
 	result.Methodology.ComparisonScope = "probe.ookla.comparison_scope"
+	exposureDenied := !config.AllowsModule(runtime.Exposure, "ookla")
+	toolMissing := firstFailureAt(result, "tool_lookup") != nil
 	for index := range result.Fields {
 		field := &result.Fields[index]
 		switch {
@@ -271,22 +285,24 @@ func stabilizeOoklaResult(result *model.Result) {
 		default:
 			field.Label = "probe.ookla.field." + field.Key
 		}
-		if field.Key == "server_selection" {
-			if strings.Contains(field.Value, "自动") {
+		switch field.Key {
+		case "server_selection":
+			if len(runtime.OoklaServers) == 0 {
 				field.Value = "automatic"
 			} else {
 				field.Value = "configured"
 			}
-		}
-		if field.Key == "skip_reason" {
-			if strings.Contains(field.Value, "外联") {
+		case "skip_reason":
+			switch {
+			case exposureDenied:
 				field.Value = "exposure_denied"
-			} else {
+			case toolMissing:
 				field.Value = "tool_unavailable"
+			default:
+				field.Value = "unknown"
 			}
-		}
-		if field.Key == "next_step" {
-			if field.Value == "请提高 --exposure 后重跑模块。" {
+		case "next_step":
+			if exposureDenied {
 				field.Value = "rerun_with_more_exposure"
 			} else {
 				field.Value = "install_official_client"
@@ -308,18 +324,12 @@ func stabilizeOoklaResult(result *model.Result) {
 		}
 		for rowIndex := range table.Rows {
 			row := table.Rows[rowIndex]
-			if len(row) == 0 {
+			if len(row) < 7 {
 				continue
 			}
-			row[0] = carrierMachineKey(row[0])
-			switch row[len(row)-1] {
-			case "完成":
-				row[len(row)-1] = "probe.ookla.status.complete"
-			case "部分完成":
-				row[len(row)-1] = "probe.ookla.status.partial"
-			case "未解析":
-				row[len(row)-1] = "probe.ookla.status.unparsed"
-			}
+			rawCarrier := row[0]
+			row[0] = carrierMachineKey(rawCarrier)
+			row[len(row)-1] = ooklaRowStatusKey(row, rawCarrier, result.Failures)
 		}
 	}
 	for index := range result.Sources {
@@ -341,6 +351,24 @@ func stabilizeOoklaResult(result *model.Result) {
 	default:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.ookla.summary.values", ooklaMachineSummary(*result))}
 	}
+}
+
+func ooklaRowStatusKey(row []string, target string, failures []model.Failure) string {
+	for _, failure := range failures {
+		if failure.Target != target {
+			continue
+		}
+		if failure.Stage == "parse" {
+			return "probe.ookla.status.unparsed"
+		}
+		if failure.Stage == "execute" {
+			return "probe.ookla.status.partial"
+		}
+	}
+	if len(row) > 4 && machineMetricPresent(row[2]) && machineMetricPresent(row[3]) && machineMetricPresent(row[4]) {
+		return "probe.ookla.status.complete"
+	}
+	return "probe.ookla.status.partial"
 }
 
 func ooklaMeasurementLabelKey(key string) string {

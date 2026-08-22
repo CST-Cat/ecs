@@ -3,21 +3,22 @@ package probe
 import (
 	"testing"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
-func TestStabilizeSpeedResultUsesMachinePresentationKeys(t *testing.T) {
+func TestStabilizeSpeedResultUsesMetricPresenceNotLegacyStatusText(t *testing.T) {
 	result := model.Result{
 		ID:     "speed",
 		Status: model.StatusOK,
-		Fields: []model.Field{{Key: "threads", Label: "并发流", Value: "4"}},
+		Fields: []model.Field{{Key: "threads", Label: "legacy", Value: "4"}},
 		Measurements: []model.Measurement{{
 			Key: "iperf3_target_01_4_upload_mbps", Value: 10, Display: "10 Mbps",
 		}},
 		Tables: []model.Table{{
 			Key:     "network.iperf3.results",
-			Columns: []string{"旧"},
-			Rows:    [][]string{{"target", "完成"}},
+			Columns: []string{"old"},
+			Rows:    [][]string{{"target", "location", "IPv4", "10 Mbps", "20 Mbps", "0%", "1 ms", "5201", "legacy-status-text"}},
 		}},
 	}
 
@@ -28,7 +29,7 @@ func TestStabilizeSpeedResultUsesMachinePresentationKeys(t *testing.T) {
 	if result.Measurements[0].Label != "probe.speed.metric.upload" {
 		t.Fatalf("measurement label = %q", result.Measurements[0].Label)
 	}
-	if got := result.Tables[0].Rows[0][1]; got != "probe.speed.status.complete" {
+	if got := result.Tables[0].Rows[0][8]; got != "probe.speed.status.complete" {
 		t.Fatalf("status = %q", got)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.speed.summary.values" {
@@ -36,18 +37,18 @@ func TestStabilizeSpeedResultUsesMachinePresentationKeys(t *testing.T) {
 	}
 }
 
-func TestStabilizeCNSpeedResultNormalizesCarrierAndFailureStatus(t *testing.T) {
+func TestStabilizeCNSpeedResultUsesDownloadEvidenceForStatus(t *testing.T) {
 	result := model.Result{
 		ID:     "cnspeed",
 		Status: model.StatusWarning,
-		Fields: []model.Field{{Key: "node_list", Label: "节点清单来源", Value: "中文来源"}},
+		Fields: []model.Field{{Key: "node_list", Label: "legacy", Value: "legacy-source"}},
 		Measurements: []model.Measurement{{
 			Key: "cnspeed_telecom_download_mbps", Value: 20, Display: "20 Mbps",
 		}},
 		Tables: []model.Table{{
 			Key:     "network.cnspeed.nodes",
-			Columns: []string{"旧"},
-			Rows:    [][]string{{"电信", "node", "上海", "3 ms", "20 Mbps", "1 MiB", "下载失败：fixture"}},
+			Columns: []string{"old"},
+			Rows:    [][]string{{"电信", "node", "上海", "3 ms", "—", "—", "arbitrary-external-error"}},
 		}},
 	}
 
@@ -64,32 +65,49 @@ func TestStabilizeCNSpeedResultNormalizesCarrierAndFailureStatus(t *testing.T) {
 	}
 }
 
-func TestStabilizeOoklaResultNormalizesDynamicFields(t *testing.T) {
+func TestStabilizeOoklaResultUsesConfigFailuresAndMetrics(t *testing.T) {
+	runtime := config.Runtime{Exposure: config.ExposureThirdParty}
 	result := model.Result{
 		ID:     "ookla",
-		Status: model.StatusOK,
+		Status: model.StatusWarning,
 		Fields: []model.Field{
-			{Key: "server_selection", Label: "服务器选择", Value: "Ookla 自动选择（未配置三网服务器 ID）"},
-			{Key: "isp_auto", Label: "自动 ISP", Value: "fixture"},
+			{Key: "server_selection", Label: "legacy", Value: "arbitrary-display-text"},
+			{Key: "isp_auto", Label: "legacy", Value: "fixture"},
 		},
 		Measurements: []model.Measurement{{
 			Key: "auto_download_mbps", Value: 100, Display: "100 Mbps",
 		}},
+		Failures: []model.Failure{{Stage: "execute", Target: "自动", Category: model.FailureUnknown}},
 		Tables: []model.Table{{
 			Key:     "network.ookla.results",
-			Columns: []string{"旧"},
-			Rows:    [][]string{{"自动", "fixture", "5 ms", "100 Mbps", "20 Mbps", "0%", "部分完成"}},
+			Columns: []string{"old"},
+			Rows:    [][]string{{"自动", "fixture", "5 ms", "100 Mbps", "20 Mbps", "0%", "arbitrary-status-text"}},
 		}},
 	}
 
-	stabilizeOoklaResult(&result)
+	stabilizeOoklaResult(&result, runtime)
 	if result.Fields[0].Value != "automatic" || result.Fields[1].Label != "probe.ookla.field.isp" {
 		t.Fatalf("fields = %#v", result.Fields)
 	}
-	if got := result.Tables[0].Rows[0][len(result.Tables[0].Rows[0])-1]; got != "probe.ookla.status.partial" {
+	if got := result.Tables[0].Rows[0][6]; got != "probe.ookla.status.partial" {
 		t.Fatalf("status = %q", got)
 	}
 	if result.SummaryMessages[0].Key != "probe.ookla.summary.values" {
 		t.Fatalf("summary messages = %#v", result.SummaryMessages)
+	}
+}
+
+func TestStabilizeOoklaSkipFieldsUseRuntimeAndFailureFacts(t *testing.T) {
+	result := model.Result{
+		ID:     "ookla",
+		Status: model.StatusSkipped,
+		Fields: []model.Field{
+			{Key: "skip_reason", Value: "arbitrary-display-text"},
+			{Key: "next_step", Value: "arbitrary-display-text"},
+		},
+	}
+	stabilizeOoklaResult(&result, config.Runtime{Exposure: config.ExposureLocal})
+	if result.Fields[0].Value != "exposure_denied" || result.Fields[1].Value != "rerun_with_more_exposure" {
+		t.Fatalf("skip fields = %#v", result.Fields)
 	}
 }

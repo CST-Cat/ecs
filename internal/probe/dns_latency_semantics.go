@@ -2,8 +2,10 @@ package probe
 
 import (
 	"context"
+	"net"
 	"strings"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -55,11 +57,11 @@ func stabilizeDNSResult(result *model.Result) {
 				continue
 			}
 			switch row[len(row)-1] {
-			case "正常":
+			case dnsStatusOK:
 				row[len(row)-1] = "probe.dns.status.ok"
-			case "失败":
+			case dnsStatusFailed:
 				row[len(row)-1] = "probe.dns.status.failed"
-			case "部分失败":
+			case dnsStatusPartial:
 				row[len(row)-1] = "probe.dns.status.partial"
 			}
 		}
@@ -94,11 +96,11 @@ func (latencySemanticProbe) NeedsNetwork() bool { return true }
 
 func (latencySemanticProbe) Run(ctx context.Context, env Environment) model.Result {
 	result := (latencyProbe{}).Run(ctx, env)
-	stabilizeLatencyResult(&result)
+	stabilizeLatencyResult(&result, env.Config.LatencyTargets)
 	return result
 }
 
-func stabilizeLatencyResult(result *model.Result) {
+func stabilizeLatencyResult(result *model.Result, targets []config.Endpoint) {
 	if result == nil {
 		return
 	}
@@ -139,11 +141,8 @@ func stabilizeLatencyResult(result *model.Result) {
 			if len(row) == 0 {
 				continue
 			}
-			switch row[len(row)-1] {
-			case "解析失败":
-				row[len(row)-1] = "probe.latency.status.resolve_failed"
-			case "无需解析":
-				row[len(row)-1] = "probe.latency.status.no_resolution"
+			if key := latencyResolutionKey(row, targets, result.Failures); key != "" {
+				row[len(row)-1] = key
 			}
 		}
 	}
@@ -174,6 +173,32 @@ func stabilizeLatencyResult(result *model.Result) {
 	} else {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.latency.summary.values", latencyMachineSummary(*result))}
 	}
+}
+
+func latencyResolutionKey(row []string, targets []config.Endpoint, failures []model.Failure) string {
+	if len(row) < 2 {
+		return ""
+	}
+	name := row[0]
+	for _, target := range targets {
+		if target.Name != name {
+			continue
+		}
+		for _, failure := range failures {
+			if failure.Stage == "resolve" && failure.Target == target.Address {
+				return "probe.latency.status.resolve_failed"
+			}
+		}
+		host := target.Address
+		if parsedHost, _, err := net.SplitHostPort(target.Address); err == nil {
+			host = parsedHost
+		}
+		if net.ParseIP(strings.Trim(host, "[]")) != nil {
+			return "probe.latency.status.no_resolution"
+		}
+		return ""
+	}
+	return ""
 }
 
 func fieldByKey(result model.Result, key string) (model.Field, bool) {

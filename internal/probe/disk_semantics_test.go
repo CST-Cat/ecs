@@ -6,12 +6,12 @@ import (
 	"ecs/internal/model"
 )
 
-func TestStabilizeDiskResultUsesMachineSemantics(t *testing.T) {
-	result := model.NewResult("disk", "磁盘性能")
+func TestStabilizeDiskResultUsesStructuredCellsNotLegacyStatusText(t *testing.T) {
+	result := model.NewResult("disk", "legacy-title")
 	result.Description = "legacy"
-	result.Fields = []model.Field{{Key: "engine", Label: "引擎", Value: "fio"}}
-	result.Measurements = []model.Measurement{{Key: "fio_sequential_write_mib_s", Label: "fio 顺序写入", Value: 12, Display: "12 MiB/s"}}
-	result.Tables = []model.Table{{Key: "disk.fio.crystal", Title: "Crystal", Columns: []string{"old"}, Rows: [][]string{{"RND4K/Q1", "", "", "", "", "", "完成"}}}}
+	result.Fields = []model.Field{{Key: "engine", Label: "legacy-label", Value: "fio"}}
+	result.Measurements = []model.Measurement{{Key: "fio_sequential_write_mib_s", Label: "legacy-label", Value: 12, Display: "12 MiB/s"}}
+	result.Tables = []model.Table{{Key: "disk.fio.crystal", Title: "legacy-table", Columns: []string{"old"}, Rows: [][]string{{"RND4K/Q1", "1 MiB/s", "100 IOPS", "1 MiB/s", "100 IOPS", "0 s", "legacy-status-text"}}}}
 	result.TextBlocks = []model.TextBlock{{Title: "legacy", Content: "fio output"}}
 	result.Sources = []model.Source{{Name: "fio", Purpose: "legacy"}}
 	result.Summary = "legacy"
@@ -31,5 +31,14 @@ func TestStabilizeDiskResultUsesMachineSemantics(t *testing.T) {
 	}
 	if result.TextBlocks[0].Title != "probe.disk.raw_output" || result.Sources[0].Purpose != "probe.disk.source.fio" {
 		t.Fatalf("disk evidence metadata = %+v/%+v", result.TextBlocks, result.Sources)
+	}
+}
+
+func TestStabilizeDiskResultMarksMissingFromStructuredCells(t *testing.T) {
+	result := model.NewResult("disk", "legacy-title")
+	result.Tables = []model.Table{{Key: "disk.fio.atto", Rows: [][]string{{"4K", "—", "—", "—", "—", "3 s", "0 s", "legacy-status-text"}}}}
+	stabilizeDiskResult(&result)
+	if got := result.Tables[0].Rows[0][7]; got != "probe.disk.status.missing" {
+		t.Fatalf("disk missing status = %q", got)
 	}
 }

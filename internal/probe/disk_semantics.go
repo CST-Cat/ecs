@@ -80,6 +80,7 @@ func stabilizeDiskTable(table *model.Table) {
 	if table == nil {
 		return
 	}
+	hasStatus := false
 	switch table.Key {
 	case "disk.fio.mixed":
 		table.Title = "probe.disk.table.mixed"
@@ -88,12 +89,14 @@ func stabilizeDiskTable(table *model.Table) {
 			"probe.disk.column.write", "probe.disk.column.write_iops", "probe.disk.column.total",
 		}
 	case "disk.fio.crystal":
+		hasStatus = true
 		table.Title = "probe.disk.table.crystal"
 		table.Columns = []string{
 			"probe.disk.column.workload", "probe.disk.column.read", "probe.disk.column.read_iops",
 			"probe.disk.column.write", "probe.disk.column.write_iops", "probe.disk.column.offset", "probe.disk.column.status",
 		}
 	case "disk.fio.atto":
+		hasStatus = true
 		table.Title = "probe.disk.table.atto"
 		table.Columns = []string{
 			"probe.disk.column.block_size", "probe.disk.column.read", "probe.disk.column.read_iops",
@@ -101,6 +104,7 @@ func stabilizeDiskTable(table *model.Table) {
 			"probe.disk.column.offset", "probe.disk.column.status",
 		}
 	case "disk.fio.mounts":
+		hasStatus = true
 		table.Title = "probe.disk.table.mounts"
 		table.Columns = []string{
 			"probe.disk.column.mount", "probe.disk.column.device", "probe.disk.column.filesystem",
@@ -109,18 +113,36 @@ func stabilizeDiskTable(table *model.Table) {
 	default:
 		return
 	}
+	if !hasStatus {
+		return
+	}
 	for rowIndex := range table.Rows {
 		row := table.Rows[rowIndex]
 		if len(row) == 0 {
 			continue
 		}
-		last := len(row) - 1
-		switch row[last] {
-		case "完成":
-			row[last] = "probe.disk.status.complete"
-		case "未返回":
-			row[last] = "probe.disk.status.missing"
+		row[len(row)-1] = diskRowStatusKey(table.Key, row)
+	}
+}
+
+func diskRowStatusKey(tableKey string, row []string) string {
+	present := func(value string) bool {
+		value = strings.TrimSpace(value)
+		return value != "" && value != "—" && !strings.EqualFold(value, "n/a")
+	}
+	switch tableKey {
+	case "disk.fio.crystal", "disk.fio.atto":
+		if len(row) >= 5 && present(row[1]) && present(row[2]) && present(row[3]) && present(row[4]) {
+			return "probe.disk.status.complete"
 		}
+		return "probe.disk.status.missing"
+	case "disk.fio.mounts":
+		if len(row) >= 5 && (present(row[3]) || present(row[4])) {
+			return "probe.disk.status.complete"
+		}
+		return "probe.disk.status.missing"
+	default:
+		return ""
 	}
 }
 

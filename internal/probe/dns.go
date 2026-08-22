@@ -26,6 +26,12 @@ const dnsQueryName = "www.cloudflare.com"
 // DNSQueryName 是 dns 模块实际查询的域名，供比较签名引用。
 const DNSQueryName = dnsQueryName
 
+const (
+	dnsStatusOK      = "ok"
+	dnsStatusFailed  = "failed"
+	dnsStatusPartial = "partial"
+)
+
 type dnsResult struct {
 	Endpoint config.Endpoint
 	Values   []time.Duration
@@ -117,9 +123,9 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		jitter := stddevFloat(floatValues)
 		validQueries += len(item.Values)
-		status := "正常"
+		status := dnsStatusOK
 		if len(item.Values) == 0 {
-			status = "失败"
+			status = dnsStatusFailed
 		} else {
 			allFailed = false
 			if best == 0 || median < best {
@@ -127,7 +133,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 				bestName = item.Endpoint.Name
 			}
 			if item.Failures > 0 {
-				status = "部分失败"
+				status = dnsStatusPartial
 			}
 		}
 		if item.Failures > 0 && item.LastErr != nil {
