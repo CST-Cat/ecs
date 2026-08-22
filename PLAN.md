@@ -35,11 +35,11 @@
 - **22 Installer/docs parity — DONE**。目标：保留显式 `--with-benchmarks` 并修陈旧文案；输入：install/README/README_EN/docs；范围：脚本与文档；产出：安装器默认使用 `CST-Cat/ecs`，镜像/派生仓库仍可用 `ECS_REPOSITORY` 覆盖，中英文安装说明与 examples 同步；验收：persistent install 仍仅在显式 `--with-benchmarks` 时安装 sysbench/fio/iperf3，`sh -n install.sh` 与安装行为回归通过。
 - **23 Probe 小范围去重 — DONE**。目标：只抽真实重复；输入：route/backtrace/external commands；范围：NextTrace adapter/有限 command helper；产出：保留 route/backtrace 共用的 NextTrace adapter，并将多个探针实际共用的版本读取、binary SHA-256、ANSI/NUL 输出清洗和错误尾部截断集中到 `tool_execution.go`；验收：无 GenericBenchmarkRunner/provider/plugin，`go test ./internal/probe` 通过。
 - **24 完整 Branch diff 与总审查 — DONE**。目标：全任务回归；输入：Branch vs baseline、CI/docs；范围：全仓；产出：`REVIEW.md`、`VALIDATION.md`、必要返工与临时文档清理；验收：每项实质 diff 可追溯，无意外框架/兼容层/无关重写，测试证据真实，无法验证明确标注。
-- **25 分支交付 — IN PROGRESS（已获用户授权）**。目标：用阶段 24 完全相同状态交付；输入：通过总审查的 HEAD；范围：当前 tracking 分支；产出：准确提交并推送当前分支，不创建或更新 PR；验收：远端分支包含该最终提交，工作区干净，推送前后差异一致。
+- **25 分支交付 — DONE**。目标：用阶段 24 完全相同状态交付；输入：通过总审查的 HEAD；范围：当前 tracking 分支；产出：提交 `a938385` 已直接推送到当前分支，不创建或更新 PR；验收：远端分支已包含该提交，推送前后差异一致，工作区干净。
 
 ## 计划调整记录
 
-- 早期计划曾记录 Draft PR #6；按当前仓库规则不创建或更新 PR，阶段 25 改为 N/A。
+- 早期计划曾记录 Draft PR #6；本次按用户授权改为直接提交并推送当前 tracking 分支，仍不创建或更新 PR。
 - 阶段 5 最初因 structured notices 改变 JSON 字段类型而自行将 comparison schema 升到 `ecs.compare/v2`。用户随后明确 beta 阶段不以兼容性驱动版本升级；**结构化 Notice 设计不回滚，只把版本标识恢复并固定为 `ecs.compare/v1`，直接原地更新 v1 契约。**
 - 同一规则适用于阶段 8 的主报告 Message/notices 变化：保留新结构，`ecs.report/v1` 不升 v2，不为旧结构保留兼容 schema。
 - 阶段 7 采用渐进迁移：新增 `Summary.Messages` / `Result.SummaryMessages`，旧 presentation string 暂作任务内迁移字段；完成结构化迁移后阶段 10 直接删除 Localize/旧 presentation 路线，不以兼容性为理由长期保留。

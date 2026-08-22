@@ -38,3 +38,6 @@ scripts/build_tools_container.sh --arch amd64 --print-params
 - GitHub Actions security workflow 在 1.26.5 runner 上的实际结果。
 
 这些项目没有被压缩成“已通过”；它们保留给相应外部环境执行。
+## 交付确认
+
+提交 a938385 已通过非强制 push 推送到 origin/codex/architecture-machine-facts-cleanup。推送前远端与本地的提交关系为 ahead 1，推送后工作区保持干净。

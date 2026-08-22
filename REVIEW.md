@@ -31,3 +31,4 @@
 本机 Go 为 1.22.2。govulncheck v1.6.0 可以成功构建和运行，但本地扫描输出的是该旧标准库/工具链的已知 finding，因此不能把它表述为 clean security scan。security workflow 使用仓库固定的 .go-version（1.26.5），应由 GitHub Actions 单独提供该环境下的证据。
 
 交付方式：用户已授权将本轮审查通过的修改直接提交并推送到当前 tracking 分支；不创建或更新 Pull Request。
+推送结果：a938385 已由非强制 push 写入 origin/codex/architecture-machine-facts-cleanup；本地工作区保持干净。
