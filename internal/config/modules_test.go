@@ -46,3 +46,20 @@ func TestModuleDescriptorCopiesAreSafe(t *testing.T) {
 		t.Fatal("descriptor metadata leaked through a returned slice")
 	}
 }
+
+func TestModuleDescriptorsDeclareInterferenceRetryPolicy(t *testing.T) {
+	wantRetry := map[string]bool{
+		"cpu":    true,
+		"zstd":   true,
+		"npb":    true,
+		"memory": true,
+		"crypto": true,
+		"disk":   true,
+	}
+	for _, descriptor := range ModuleDescriptors() {
+		want := wantRetry[descriptor.ID]
+		if descriptor.RetryOnInterference != want {
+			t.Errorf("module %q RetryOnInterference=%v, want %v", descriptor.ID, descriptor.RetryOnInterference, want)
+		}
+	}
+}

@@ -14,6 +14,6 @@ func resultTitle(result model.Result) string {
 	case "disk":
 		return i18n.T("report.diskBenchmark")
 	default:
-		return result.Title
+		return displayReportText(result.Title)
 	}
 }

@@ -2,7 +2,7 @@
 set -eu
 
 program="ecs"
-repository="${ECS_REPOSITORY:-}"
+repository="${ECS_REPOSITORY:-CST-Cat/ecs}"
 version="${ECS_VERSION:-latest}"
 release_base="${ECS_RELEASE_BASE:-}"
 install_dir="${ECS_INSTALL_DIR:-}"
@@ -18,7 +18,7 @@ usage() {
     "Usage: ./install.sh [--from /path/to/ecs] [--install-dir DIR] [--version VERSION] [--with-benchmarks]" \
     "" \
     "Environment:" \
-    "  ECS_REPOSITORY   GitHub owner/repo. Required for remote installation." \
+    "  ECS_REPOSITORY   GitHub owner/repo override (default: CST-Cat/ecs)." \
     "  ECS_RELEASE_BASE Custom release directory URL; overrides ECS_REPOSITORY." \
     "  ECS_INSTALL_DIR  Destination directory." \
     "  ECS_VERSION      Release tag, or latest (default)." \
@@ -150,11 +150,6 @@ esac
 asset="${program}_${os_name}_${arch}.tar.gz"
 
 if [ -z "$release_base" ]; then
-  if [ -z "$repository" ]; then
-    printf '%s\n' "ECS_REPOSITORY is required until this checkout is connected to its final GitHub repository." >&2
-    printf '%s\n' "Example: ECS_REPOSITORY=owner/ecs ./install.sh" >&2
-    exit 1
-  fi
   owner=${repository%%/*}
   repo=${repository#*/}
   [ "$owner" != "$repository" ] || { printf '%s\n' "ECS_REPOSITORY must use owner/repo form" >&2; exit 1; }

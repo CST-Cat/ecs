@@ -123,12 +123,12 @@ while IFS=$'\t' read -r name binary; do
 done <<<"$listing"
 
 # ---- 语料 ----
-corpus_archive="$dist/ecs-corpus_silesia-v1.tar.gz"
+corpus_archive="$dist/$ECS_CORPUS_ARCHIVE"
 [[ -s "$corpus_archive" ]] || die "缺少语料发布物"
 corpus_listing=$(tar -tzf "$corpus_archive")
-[[ "$corpus_listing" == ecs-silesia-v1.corpus ]] || die "语料归档内容异常：$corpus_listing"
+[[ "$corpus_listing" == "$ECS_CORPUS_NAME" ]] || die "语料归档内容异常：$corpus_listing"
 tar -xzf "$corpus_archive" -C "$verify_root"
-corpus="$verify_root/ecs-silesia-v1.corpus"
+corpus="$verify_root/$ECS_CORPUS_NAME"
 [[ "$(stat -c %s "$corpus")" -eq "$ECS_CORPUS_BYTES" ]] || die "语料尺寸不符"
 [[ "$(sha256sum "$corpus" | awk '{print $1}')" == "$ECS_CORPUS_SHA256" ]] || die "语料摘要不符"
 echo "release-verify: 语料尺寸与摘要一致" >&2
@@ -143,7 +143,7 @@ if [[ "$with_tools" -eq 1 ]]; then
     assets+=("ecs-tools_linux_${arch}.tar.gz")
   done
 fi
-assets+=(ecs-corpus_silesia-v1.tar.gz)
+assets+=("$ECS_CORPUS_ARCHIVE")
 
 for asset in "${assets[@]}"; do
   [[ -s "$dist/$asset" ]] || die "缺少发布物 $asset"

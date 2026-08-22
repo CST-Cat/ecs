@@ -16,17 +16,19 @@ import (
 
 // Markdown 渲染独立调用方传入的报告，会先做一次本地化。
 func Markdown(data model.Report, scored *score.Report) string {
-	return markdownLocalized(Localize(data), scored)
+	return markdownReport(data, scored)
 }
 
-// markdownLocalized 渲染一份**已经本地化过**的报告，见 htmlLocalized 的说明。
-func markdownLocalized(data model.Report, scored *score.Report) string {
+// markdownReport renders the machine report directly. Stable presentation
+// keys are resolved at the individual output boundary; raw evidence is not
+// copied through a localized report tree.
+func markdownReport(data model.Report, scored *score.Report) string {
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")
 	out.WriteString(statusIcon(data.Summary.Status))
 	out.WriteByte(' ')
-	out.WriteString(data.Summary.Headline)
+	out.WriteString(reportHeadline(data.Summary))
 	out.WriteString(i18n.T("punct.sentenceEnd") + i18n.T("report.local") + "\n\n")
 
 	out.WriteString("## " + i18n.T("report.overview") + "\n\n")
@@ -60,7 +62,7 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 		out.WriteString(" | ")
 		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
 		out.WriteString(" | ")
-		out.WriteString(markdownEscape(result.Summary))
+		out.WriteString(markdownEscape(resultSummary(result)))
 		out.WriteString(" | ")
 		out.WriteString(formatDurationMS(result.DurationMS))
 		out.WriteString(" |\n")
@@ -72,34 +74,35 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 		out.WriteString(markdownEscape(resultTitle(result)))
 		out.WriteString("\n\n")
 		if result.Description != "" {
-			out.WriteString(markdownEscape(result.Description))
+			out.WriteString(markdownEscape(displayReportText(result.Description)))
 			out.WriteString("\n\n")
 		}
-		if result.Methodology.Label != "" {
+		methodology := displayMethodology(result.Methodology)
+		if methodology.Label != "" {
 			out.WriteString("**" + i18n.T("report.methodologyLabel") + "**" + i18n.T("punct.colon"))
-			out.WriteString(markdownEscape(result.Methodology.Label))
-			if result.Methodology.Engine != "" {
+			out.WriteString(markdownEscape(localizedMethodology(methodology)))
+			if methodology.Engine != "" {
 				out.WriteString(" · ")
-				out.WriteString(markdownEscape(result.Methodology.Engine))
+				out.WriteString(markdownEscape(methodology.Engine))
 			}
-			if result.Methodology.Profile != "" {
+			if methodology.Profile != "" {
 				out.WriteString(" · `")
-				out.WriteString(strings.ReplaceAll(result.Methodology.Profile, "`", "\\`"))
+				out.WriteString(strings.ReplaceAll(methodology.Profile, "`", "\\`"))
 				out.WriteString("`")
 			}
 			out.WriteString("\n\n")
-			if result.Methodology.ComparisonScope != "" {
+			if methodology.ComparisonScope != "" {
 				out.WriteString("> " + i18n.T("report.comparability") + i18n.T("punct.colon"))
-				out.WriteString(markdownEscape(result.Methodology.ComparisonScope))
+				out.WriteString(markdownEscape(methodology.ComparisonScope))
 				out.WriteString("\n\n")
 			}
 		}
 		out.WriteString("**")
 		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
 		out.WriteString("**")
-		if result.Summary != "" {
+		if summary := resultSummary(result); summary != "" {
 			out.WriteString(" · ")
-			out.WriteString(markdownEscape(result.Summary))
+			out.WriteString(markdownEscape(summary))
 		}
 		out.WriteString(" · ")
 		out.WriteString(formatDurationMS(result.DurationMS))
@@ -141,7 +144,8 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 			out.WriteString("### " + i18n.T("report.metrics") + "\n\n")
 			out.WriteString("| " + i18n.T("report.metric") + " | " + i18n.T("report.value") + " | " +
 				i18n.T("report.rating") + " | " + i18n.T("report.method") + " |\n| --- | ---: | --- | --- |\n")
-			for _, metric := range result.Measurements {
+			for _, rawMetric := range result.Measurements {
+				metric := displayMeasurement(rawMetric)
 				out.WriteString("| ")
 				out.WriteString(markdownEscape(metric.Label))
 				out.WriteString(" | ")
@@ -157,12 +161,14 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 		if len(result.Fields) > 0 {
 			out.WriteString("### " + i18n.T("report.details") + "\n\n")
 			out.WriteString("| " + i18n.T("report.field") + " | " + i18n.T("report.content") + " |\n| --- | --- |\n")
-			for _, field := range result.Fields {
+			for _, rawField := range result.Fields {
+				field := displayField(rawField)
 				writeMarkdownRow(&out, field.Label, field.Value)
 			}
 			out.WriteString("\n")
 		}
-		for _, table := range result.Tables {
+		for _, rawTable := range result.Tables {
+			table := displayTable(rawTable)
 			if table.Title != "" {
 				out.WriteString("### ")
 				out.WriteString(markdownEscape(table.Title))
@@ -171,7 +177,9 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 			writeMarkdownTable(&out, table)
 			out.WriteString("\n")
 		}
-		for _, block := range result.TextBlocks {
+		for _, rawBlock := range result.TextBlocks {
+			block := rawBlock
+			block.Title = displayReportText(block.Title)
 			out.WriteString("<details>\n<summary>")
 			out.WriteString(markdownEscape(block.Title))
 			out.WriteString("</summary>\n\n")
@@ -185,14 +193,16 @@ func markdownLocalized(data model.Report, scored *score.Report) string {
 			out.WriteString("### " + i18n.T("report.notes") + "\n\n")
 			for _, note := range result.Notes {
 				out.WriteString("- ")
-				out.WriteString(markdownEscape(note))
+				out.WriteString(markdownEscape(displayReportText(note)))
 				out.WriteString("\n")
 			}
 			out.WriteString("\n")
 		}
 		if len(result.Sources) > 0 {
 			out.WriteString("### " + i18n.T("report.sources") + "\n\n")
-			for _, source := range result.Sources {
+			for _, rawSource := range result.Sources {
+				source := rawSource
+				source.Purpose = displayReportText(source.Purpose)
 				out.WriteString("- ")
 				if safeURL := safeMarkdownURL(source.URL); safeURL != "" {
 					out.WriteString("[")
@@ -323,13 +333,14 @@ func statusLabel(status model.Status) string {
 // 报告里的 Label 是探针写死的中文，英文界面下改用 kind 查译文——
 // kind 是稳定的机器标识，正适合做 i18n 的 key。
 func localizedMethodology(m model.Methodology) string {
+	m = displayMethodology(m)
 	if m.Kind != "" {
 		if key := "methodology." + m.Kind; i18n.Has(i18n.Current(), key) {
 			return i18n.T(key)
 		}
 	}
 	if m.Label != "" {
-		return m.Label
+		return displayReportText(m.Label)
 	}
 	return i18n.T("methodology.unlabeled")
 }

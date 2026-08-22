@@ -53,6 +53,11 @@ type ModuleDescriptor struct {
 	Exposure      Exposure
 	NeedsEgressIP bool
 	Concurrency   ModuleConcurrency
+	// RetryOnInterference marks benchmark modules whose result may be retried
+	// once when the host snapshot shows concurrent-load interference. The
+	// runner consumes this descriptor field rather than maintaining a module
+	// ID policy of its own.
+	RetryOnInterference bool
 
 	Methodology model.Methodology
 
@@ -88,73 +93,78 @@ type ModuleDescriptor struct {
 // it is both the full-profile order and the order shown by the CLI/report.
 var moduleDescriptors = []ModuleDescriptor{
 	moduleDescriptor("system", true, ExposureLocal, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "inventory", Label: "事实采集", Engine: "OS/runtime inspection", ComparisonScope: "资源快照；不是性能基准"},
+		model.Methodology{Kind: "inventory", Label: "methodology.inventory", Engine: "OS/runtime inspection", Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope"},
 		"", nil, time.Second),
 	moduleDescriptor("network", false, ExposureThirdParty, true, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "provider-assessment", Label: "第三方评估", Engine: "multi-provider IP intelligence", ComparisonScope: "不同供应商分数不可直接混算"},
+		model.Methodology{Kind: "provider-assessment", Label: "methodology.provider-assessment", Engine: "multi-provider IP intelligence", Profile: "probe.network.profile", ComparisonScope: "probe.network.comparison_scope"},
 		"", nil, 5*time.Second, "ipquality", "wizard.askIPQuality"),
 	moduleDescriptor("bgp", true, ExposurePublic, true, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "provider-assessment", Label: "第三方评估", Engine: "RouteViews current RIB API", ComparisonScope: "当前公共观测；不是私有互联全图或历史 BGP 分析"},
+		model.Methodology{Kind: "provider-assessment", Label: "methodology.provider-assessment", Engine: "RouteViews current RIB API", Profile: "probe.bgp.profile", ComparisonScope: "probe.bgp.comparison_scope"},
 		"", nil, 4*time.Second),
-	moduleDescriptorWithEstimateMode("cpu", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "sysbench", Profile: "cpu prime=20000"},
-		"cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU),
-	moduleDescriptor("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "zstd", Profile: "Silesia v1 · level=3 · 1T/NT"},
-		"", []string{"zstd"}, 25*time.Second),
-	moduleDescriptor("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "NASA NPB-OMP", Profile: "NPB 3.4.4 · EP + FT · Class A · 1T/NT"},
-		"", []string{"npb-ep", "npb-ft"}, 60*time.Second),
-	moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "STREAM", Profile: "Copy/Scale/Add/Triad × 1T/NT"},
-		"memory", []string{"stream"}, 5*time.Second, EstimateModeMemory),
-	moduleDescriptor("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "OpenSSL speed", Profile: "OpenSSL 3.5.7 · AES-256-GCM/ChaCha20-Poly1305/SHA-256 · 16 KiB · 1W/NW"},
-		"", []string{"openssl"}, 45*time.Second),
-	moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio", Profile: "Direct I/O"},
-		"disk", []string{"fio"}, 8*time.Second, EstimateModeDisk),
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("cpu", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "sysbench", Profile: "probe.cpu.profile", ComparisonScope: "probe.cpu.comparison_scope"},
+		"cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU)),
+	withRetryOnInterference(moduleDescriptor("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "zstd", Profile: "probe.zstd.profile", ComparisonScope: "probe.zstd.comparison_scope"},
+		"", []string{"zstd"}, 25*time.Second)),
+	withRetryOnInterference(moduleDescriptor("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "NASA NPB-OMP", Profile: "probe.npb.profile", ComparisonScope: "probe.npb.comparison_scope"},
+		"", []string{"npb-ep", "npb-ft"}, 60*time.Second)),
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "STREAM", Profile: "probe.memory.stream.profile", ComparisonScope: "probe.memory.comparison_scope"},
+		"memory", []string{"stream"}, 5*time.Second, EstimateModeMemory)),
+	withRetryOnInterference(moduleDescriptor("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "OpenSSL speed", Profile: "probe.crypto.profile", ComparisonScope: "probe.crypto.comparison_scope"},
+		"", []string{"openssl"}, 45*time.Second)),
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "fio", Profile: "probe.disk.profile", ComparisonScope: "probe.disk.comparison_scope"},
+		"disk", []string{"fio"}, 8*time.Second, EstimateModeDisk)),
 	moduleDescriptorWithEstimateMode("dns", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNS/UDP", ComparisonScope: "现场诊断；不是基准分"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "DNS/UDP", Profile: "probe.dns.profile", ComparisonScope: "probe.dns.comparison_scope"},
 		"", nil, 8*time.Second, EstimateModeDNS),
 	moduleDescriptorWithEstimateMode("latency", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "现场诊断；不是 ICMP ping"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "TCP connect", Profile: "probe.latency.profile", ComparisonScope: "probe.latency.comparison_scope"},
 		"", []string{"ping"}, 15*time.Second, EstimateModeLatency),
 	moduleDescriptorWithEstimateMode("speed", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "iperf3", Profile: "TCP multi-stream forward/reverse + UDP 50M/5s"},
+		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "iperf3", Profile: "probe.speed.profile", ComparisonScope: "probe.speed.comparison_scope"},
 		"bandwidth", []string{"iperf3"}, 30*time.Second, EstimateModeSpeed, "throughput", "wizard.askThroughput"),
 	moduleDescriptor("ports", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "TCP connect", ComparisonScope: "可达性诊断；不是性能基准"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "TCP connect", Profile: "probe.ports.profile", ComparisonScope: "probe.ports.comparison_scope"},
 		"", nil, 4*time.Second),
 	moduleDescriptor("nat", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "STUN (RFC 5389/5780)", ComparisonScope: "当次 UDP 路径上的 NAT 行为；不代表 TCP"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "STUN (RFC 5389/5780)", Profile: "probe.nat.profile", ComparisonScope: "probe.nat.comparison_scope"},
 		"", nil, 12*time.Second),
 	moduleDescriptor("blacklist", true, ExposurePublic, true, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "DNSBL over DNS A lookup", ComparisonScope: "各名单收录标准不同，不可合并计分"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "DNSBL over DNS A lookup", Profile: "probe.blacklist.profile", ComparisonScope: "probe.blacklist.comparison_scope"},
 		"", nil, 10*time.Second, "blacklist", "wizard.askBlacklist"),
 	moduleDescriptor("apps", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "native TCP connect", ComparisonScope: "网络可达性诊断；不代表服务本身可用"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "native TCP connect", Profile: "probe.apps.profile", ComparisonScope: "probe.apps.comparison_scope"},
 		"", nil, 8*time.Second),
 	moduleDescriptor("cnspeed", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "HTTP download against speedtest.cn nodes", ComparisonScope: "到具体节点的 HTTP 带宽；不代表到该运营商全网"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "HTTP download against speedtest.cn nodes", Profile: "probe.cnspeed.profile", ComparisonScope: "probe.cnspeed.comparison_scope"},
 		"", nil, 40*time.Second, "throughput", "wizard.askThroughput"),
 	moduleDescriptorWithPrivacyNotice("ookla", false, ExposureThirdParty, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议测量", Engine: "official Ookla Speedtest CLI", ComparisonScope: "外部服务测量；Ookla 的条款与数据处理独立于 ecs"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "official Ookla Speedtest CLI", Profile: "probe.ookla.profile", ComparisonScope: "probe.ookla.comparison_scope"},
 		"", []string{"speedtest"}, 90*time.Second,
 		"message.notice.ooklaPrivacy"),
 	moduleDescriptor("media", true, ExposurePublic, false, ModuleConcurrencyProbe,
-		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "public HTTP evidence", ComparisonScope: "不等同账号播放、注册或支付能力"},
+		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "public HTTP evidence", Profile: "probe.media.profile", ComparisonScope: "probe.media.comparison_scope"},
 		"", nil, 10*time.Second, "media", "wizard.askMedia"),
 	moduleDescriptorWithEstimateMode("route", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "protocol-measurement", Label: "协议诊断", Engine: "NextTrace Tiny", ComparisonScope: "正向路径快照；不是性能基准"},
+		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "NextTrace Tiny", Profile: "probe.route.profile", ComparisonScope: "probe.route.comparison_scope"},
 		"", []string{"nexttrace-tiny"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
 	moduleDescriptor("backtrace", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "heuristic", Label: "启发式判断", Engine: "NextTrace Tiny + 骨干网段特征表", ComparisonScope: "路径特征推断；不是反向抓包"},
+		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "NextTrace Tiny + backbone-prefix signatures", Profile: "probe.backtrace.profile", ComparisonScope: "probe.backtrace.comparison_scope"},
 		"", []string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"),
 }
 
 func moduleDescriptor(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, wizard ...string) ModuleDescriptor {
 	return moduleDescriptorWithEstimateMode(id, standard, exposure, needsEgress, concurrency, methodology, scoreKey, tools, estimate, EstimateModeFixed, wizard...)
+}
+
+func withRetryOnInterference(descriptor ModuleDescriptor) ModuleDescriptor {
+	descriptor.RetryOnInterference = true
+	return descriptor
 }
 
 // moduleDescriptorWithPrivacyNotice keeps the common descriptor constructor

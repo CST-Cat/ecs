@@ -231,9 +231,13 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 		t.Fatalf("comparison empty-directory output = %v, %v", currentDirectoryWritten, err)
 	}
 
-	partial, err := WriteComparisonFiles(data, t.TempDir(), "partial", []string{"json", "unknown"})
-	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(partial) != 1 {
-		t.Fatalf("comparison partial unknown-format result = %v, %v", partial, err)
+	partialDirectory := t.TempDir()
+	partial, err := WriteComparisonFiles(data, partialDirectory, "partial", []string{"json", "unknown"})
+	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(partial) != 0 {
+		t.Fatalf("comparison atomic unknown-format result = %v, %v", partial, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(partialDirectory, "partial.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("comparison renderer failure left a partial file: %v", statErr)
 	}
 	invalid := comparisonReportFixture(t, 2, 0)
 	invalid.Modules[0].Metrics[0].Values[0].Value = math.NaN()

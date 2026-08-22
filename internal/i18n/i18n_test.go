@@ -17,6 +17,22 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 		{name: "score", zh: scoreChinese, en: scoreEnglish},
 		{name: "compare flags", zh: compareFlagChinese, en: compareFlagEnglish},
 		{name: "model messages", zh: modelMessageChinese, en: modelMessageEnglish},
+		{name: "memory inventory", zh: probeMemoryInventoryChinese, en: probeMemoryInventoryEnglish},
+		{name: "stage 9", zh: probeStage9Chinese, en: probeStage9English},
+		{name: "kernel", zh: probeKernelChinese, en: probeKernelEnglish},
+		{name: "system", zh: probeSystemChinese, en: probeSystemEnglish},
+		{name: "npb", zh: probeNPBChinese, en: probeNPBEnglish},
+		{name: "zstd", zh: probeZstdChinese, en: probeZstdEnglish},
+		{name: "crypto", zh: probeCryptoChinese, en: probeCryptoEnglish},
+		{name: "disk", zh: probeDiskChinese, en: probeDiskEnglish},
+		{name: "dns", zh: probeDNSChinese, en: probeDNSEnglish},
+		{name: "latency", zh: probeLatencyChinese, en: probeLatencyEnglish},
+		{name: "nat", zh: probeNATChinese, en: probeNATEnglish},
+		{name: "apps", zh: probeAppsChinese, en: probeAppsEnglish},
+		{name: "blacklist", zh: probeBlacklistChinese, en: probeBlacklistEnglish},
+		{name: "bgp", zh: probeBGPChinese, en: probeBGPEnglish},
+		{name: "throughput", zh: probeThroughputChinese, en: probeThroughputEnglish},
+		{name: "remaining probes", zh: probeRemainingChinese, en: probeRemainingEnglish},
 	}
 	for _, table := range tables {
 		for key, zh := range table.zh {
@@ -140,7 +156,7 @@ func TestTranslationHelpersExposeMissingKeysWithoutCrossLanguageFallback(t *test
 	}
 }
 
-func TestProbeTextMechanismsAndLanguageBoundary(t *testing.T) {
+func TestProbeKeysUseOneWayLookup(t *testing.T) {
 	original := Current()
 	t.Cleanup(func() { Set(original) })
 	Set(LangEN)
@@ -148,30 +164,23 @@ func TestProbeTextMechanismsAndLanguageBoundary(t *testing.T) {
 		name, input, want string
 	}{
 		{name: "stable key", input: "probe.memory.stream_missing", want: "The official STREAM executable was not found; the memory benchmark did not run."},
-		{name: "legacy exact", input: "未找到官方 STREAM 可执行文件", want: "The official STREAM executable was not found"},
-		{name: "number template", input: "8 线程事件率", want: "8-thread event rate"},
-		{name: "token template", input: "上海电信 (example.com) 原始路径", want: "Shanghai Telecom (example.com) raw path"},
-		{name: "unknown Chinese", input: "未登记的中文说明", want: "未登记的中文说明"},
+		{name: "legacy text", input: "未找到官方 STREAM 可执行文件", want: "未找到官方 STREAM 可执行文件"},
+		{name: "unknown text", input: "未登记的中文说明", want: "未登记的中文说明"},
 		{name: "external output", input: "external output 123", want: "external output 123"},
 	}
 	for _, test := range cases {
-		if got := Text(test.input); got != test.want {
-			t.Errorf("Text(%s) = %q, want %q", test.name, got, test.want)
+		if got := T(test.input); got != test.want {
+			t.Errorf("T(%s) = %q, want %q", test.name, got, test.want)
 		}
 	}
-	for _, text := range []string{"probe.memory.stream_missing", "未找到官方 STREAM 可执行文件", "8 线程事件率", "上海电信 (example.com) 原始路径"} {
-		if !HasProbeText(text) {
-			t.Errorf("HasProbeText(%q) = false", text)
-		}
-	}
-	if HasProbeText("unregistered output") {
-		t.Fatal("unknown external output should not claim a translation")
+	if Has(LangEN, "未找到官方 STREAM 可执行文件") {
+		t.Fatal("source text must not be registered as a translation key")
 	}
 	Set(LangZH)
-	if got := Text("probe.memory.stream_missing"); got != "未找到官方 STREAM 可执行文件；内存基准未运行。" {
+	if got := T("probe.memory.stream_missing"); got != "未找到官方 STREAM 可执行文件；内存基准未运行。" {
 		t.Fatalf("Chinese stable key translation = %q", got)
 	}
-	if got := Text("未找到官方 STREAM 可执行文件"); got != "未找到官方 STREAM 可执行文件" {
-		t.Fatalf("Chinese legacy text changed: %q", got)
+	if got := T("未找到官方 STREAM 可执行文件"); got != "未找到官方 STREAM 可执行文件" {
+		t.Fatalf("Chinese source text changed: %q", got)
 	}
 }

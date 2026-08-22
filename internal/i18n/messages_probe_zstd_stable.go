@@ -33,8 +33,8 @@ var probeZstdChinese = map[string]string{
 	"probe.zstd.metric.zstd_decompress_scaling_ratio":                 "zstd 解压两轮比值",
 	"probe.zstd.metric.zstd_decompress_per_worker_efficiency_percent": "zstd 解压每 worker 比值",
 
-	"probe.zstd.raw_output":                  "zstd benchmark 原始输出",
-	"probe.zstd.source.zstandard":            "官方 zstd CLI 内存 benchmark 模式",
+	"probe.zstd.raw_output":                   "zstd benchmark 原始输出",
+	"probe.zstd.source.zstandard":             "官方 zstd CLI 内存 benchmark 模式",
 	"probe.zstd.source.silesia":               "固定的多类型无损压缩测试数据",
 	"probe.zstd.table.title":                  "zstd 压缩与解压吞吐",
 	"probe.zstd.column.context":               "线程上下文",
@@ -92,8 +92,8 @@ var probeZstdEnglish = map[string]string{
 	"probe.zstd.metric.zstd_decompress_scaling_ratio":                 "zstd decompression run-to-run ratio",
 	"probe.zstd.metric.zstd_decompress_per_worker_efficiency_percent": "zstd decompression per-worker ratio",
 
-	"probe.zstd.raw_output":                  "zstd benchmark raw output",
-	"probe.zstd.source.zstandard":            "Official zstd CLI in-memory benchmark mode",
+	"probe.zstd.raw_output":                   "zstd benchmark raw output",
+	"probe.zstd.source.zstandard":             "Official zstd CLI in-memory benchmark mode",
 	"probe.zstd.source.silesia":               "Fixed multi-type lossless-compression test data",
 	"probe.zstd.table.title":                  "zstd compression and decompression throughput",
 	"probe.zstd.column.context":               "Thread context",

@@ -49,14 +49,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	if planPath := os.Getenv("ECS_PLAN_FILE"); planPath != "" {
-		if err := writeOneShotPlan(planPath, cfg); err != nil {
-			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
-			return 1
-		}
-		return 0
-	}
-
 	baseline := score.EmbeddedBaseline()
 	if resolved.ScoreBaseline != "" {
 		loaded, err := score.LoadBaseline(resolved.ScoreBaseline)
@@ -91,7 +83,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
 	}
-	terminal.FullReport(reporter.Localize(data), files, scored, terminalColor)
+	terminal.FullReport(data, files, scored, terminalColor)
 	if data.Run.Canceled {
 		return 130
 	}
@@ -128,9 +120,4 @@ func writerIsTerminal(writer io.Writer) bool {
 	}
 	info, err := file.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func writeOneShotPlan(path string, cfg config.Runtime) error {
-	content := cfg.Profile + "\n" + strings.Join(cfg.Modules, ",") + "\n"
-	return os.WriteFile(path, []byte(content), 0o600)
 }

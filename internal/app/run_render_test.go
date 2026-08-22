@@ -166,8 +166,6 @@ func TestRunCommandReportsPreExecutionFailures(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
-			planPath := filepath.Join(directory, "plan")
-			t.Setenv("ECS_PLAN_FILE", planPath)
 			configPath := filepath.Join(directory, "missing.json")
 			if test.setup != nil {
 				configPath = test.setup(t, directory)
@@ -175,9 +173,6 @@ func TestRunCommandReportsPreExecutionFailures(t *testing.T) {
 			status, stdout, stderr := invokeAppMain(test.args(configPath)...)
 			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
-			}
-			if _, err := os.Stat(planPath); !os.IsNotExist(err) {
-				t.Fatalf("pre-execution failure wrote plan: %v", err)
 			}
 		})
 	}

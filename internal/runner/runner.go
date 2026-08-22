@@ -232,7 +232,7 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
 	} else {
-		result = runWithConditionalRetry(ctx, item, env)
+		result = runWithConditionalRetry(ctx, item, descriptor.RetryOnInterference, env)
 	}
 	if result.Methodology.Label == "" {
 		if hasDescriptor {
@@ -278,18 +278,19 @@ func hasNetworkModules(selected []moduleBinding) bool {
 	return false
 }
 
-func runWithConditionalRetry(ctx context.Context, item probe.Probe, env probe.Environment) model.Result {
-	return runWithConditionalRetryHooks(ctx, item, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
+func runWithConditionalRetry(ctx context.Context, item probe.Probe, retryOnInterference bool, env probe.Environment) model.Result {
+	return runWithConditionalRetryHooks(ctx, item, retryOnInterference, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
 }
 
 func runWithConditionalRetryHooks(
 	ctx context.Context,
 	item probe.Probe,
+	retryOnInterference bool,
 	env probe.Environment,
 	capture func() probe.EnvironmentSnapshot,
 	assess func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference,
 ) model.Result {
-	if item.ID() != "cpu" && item.ID() != "zstd" && item.ID() != "npb" && item.ID() != "memory" && item.ID() != "crypto" && item.ID() != "disk" {
+	if !retryOnInterference {
 		return safeRun(ctx, item, env)
 	}
 	firstBefore := capture()

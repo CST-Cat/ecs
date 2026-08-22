@@ -319,11 +319,11 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
 
 ## 多报告比较 schema
 
-`ecs compare` 接受 2 份到任意多份 `ecs.report/` 家族 JSON，生成独立的 `ecs.compare/v2` 对象；它不会把比较结果伪装成一次探针运行。Compare 的**输入格式永久固定为 ECS JSON report**：Markdown 和 HTML 只是展示产物，不会被重新解析进入比较；文件扩展名也不是可信依据，实际内容由 JSON loader 校验。
+`ecs compare` 接受 2 份到任意多份 `ecs.report/` 家族 JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。Compare 的**输入格式永久固定为 ECS JSON report**：Markdown 和 HTML 只是展示产物，不会被重新解析进入比较；文件扩展名也不是可信依据，实际内容由 JSON loader 校验。
 
 ```json
 {
-  "schema_version": "ecs.compare/v2",
+  "schema_version": "ecs.compare/v1",
   "tool": {},
   "generated_at": "2026-08-09T12:00:00Z",
   "reference_report": 0,
@@ -349,7 +349,7 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
 }
 ```
 
-`ecs.compare/v2` 相比 v1 的不兼容变化是 `notices[]`：它不再保存编码后的最终字符串，而保存稳定的机器语义 `{key,args}`。比较核心只生成 key 与参数，Markdown、HTML 和终端 renderer 在展示边界直接按当前语言渲染；不存在“先生成中文、再反向识别原句”的路线，也不需要把 key 与 args 编码成字符串后再 `ParseNotice`。
+当前 `ecs.compare/v1` 的 `notices[]` 保存稳定的机器语义 `{key,args}`，不保存编码后的最终字符串。比较核心只生成 key 与参数，Markdown、HTML 和终端 renderer 在展示边界直接按当前语言渲染；不存在“先生成中文、再反向识别原句”的路线，也不需要把 key 与 args 编码成字符串后再 `ParseNotice`。
 
 CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `report` 索引从 0 开始。`inputs[]` 按命令行输入顺序保留标签、原报告 ID、ecs 版本、配置档、开始时间、协议族与遮盖状态。
 
@@ -389,7 +389,7 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v2` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时独立升级版本。
+- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时再按版本纪律处理。
 
 ### 为什么只有 `compare` 放宽 schema 版本
 

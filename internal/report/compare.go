@@ -30,8 +30,12 @@ func WriteComparisonFiles(data comparison.Report, directory, baseName string, fo
 		baseName = "ecs-compare-" + data.GeneratedAt.Format("20060102-150405")
 	}
 	baseName = sanitizeBaseName(baseName)
-	written := make(map[string]string)
+	contents := make(map[string][]byte, len(formats))
+	orderedFormats := make([]string, 0, len(formats))
 	for _, format := range formats {
+		if _, seen := contents[format]; seen {
+			continue
+		}
 		var content []byte
 		switch format {
 		case "json":
@@ -44,8 +48,14 @@ func WriteComparisonFiles(data comparison.Report, directory, baseName string, fo
 			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}
 		if err != nil {
-			return written, i18n.Errorf("err.reportGenerate", format, err)
+			return nil, i18n.Errorf("err.reportGenerate", format, err)
 		}
+		contents[format] = content
+		orderedFormats = append(orderedFormats, format)
+	}
+	written := make(map[string]string, len(orderedFormats))
+	for _, format := range orderedFormats {
+		content := contents[format]
 		path := filepath.Join(absolute, baseName+"."+format)
 		if err := atomicWrite(path, content, 0o600); err != nil {
 			return written, i18n.Errorf("err.reportWrite", format, err)

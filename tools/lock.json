@@ -1,0 +1,104 @@
+{
+  "schema_version": "ecs.tools.lock/v1",
+  "architectures": [
+    {"goos": "linux", "goarch": "amd64", "package": "amd64", "openssl_target": "linux-x86_64"},
+    {"goos": "linux", "goarch": "arm64", "package": "arm64", "openssl_target": "linux-aarch64"},
+    {"goos": "linux", "goarch": "arm", "goarm": 7, "package": "armv7", "openssl_target": "linux-armv4"},
+    {"goos": "linux", "goarch": "386", "package": "386", "openssl_target": "linux-x86"},
+    {"goos": "linux", "goarch": "s390x", "package": "s390x", "openssl_target": "linux64-s390x"},
+    {"goos": "linux", "goarch": "riscv64", "package": "riscv64", "openssl_target": "linux64-riscv64"},
+    {"goos": "linux", "goarch": "ppc64le", "package": "ppc64le", "openssl_target": "linux-ppc64le"}
+  ],
+  "tools": [
+    {
+      "name": "sysbench",
+      "upstream": "https://github.com/akopytov/sysbench",
+      "repository": "akopytov/sysbench",
+      "version": "1.0.20",
+      "tag": "1.0.20",
+      "commit": "ebf1c90da05dea94648165e4f149abc20c979557"
+    },
+    {
+      "name": "zstd",
+      "upstream": "https://github.com/facebook/zstd",
+      "repository": "facebook/zstd",
+      "version": "1.5.7",
+      "tag": "v1.5.7",
+      "commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99"
+    },
+    {
+      "name": "npb-ep",
+      "upstream": "https://www.nas.nasa.gov/software/npb.html",
+      "source_url": "https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz",
+      "version": "3.4.4",
+      "tag": "NPB3.4.4",
+      "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549"
+    },
+    {
+      "name": "npb-ft",
+      "upstream": "https://www.nas.nasa.gov/software/npb.html",
+      "source_url": "https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz",
+      "version": "3.4.4",
+      "tag": "NPB3.4.4",
+      "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549"
+    },
+    {
+      "name": "openssl",
+      "upstream": "https://github.com/openssl/openssl",
+      "repository": "openssl/openssl",
+      "version": "3.5.7",
+      "tag": "openssl-3.5.7",
+      "commit": "8cf17aaeb4599f8af87fefd810b5b5fee90fe69e"
+    },
+    {
+      "name": "stream",
+      "upstream": "https://www.cs.virginia.edu/stream/",
+      "source_url": "https://www.cs.virginia.edu/stream/FTP/Code/stream.c",
+      "source_sha256": "a52bae5e175bea3f7832112af9c085adab47117f7d2ce219165379849231692b",
+      "array_size": 10000000,
+      "ntimes": 10
+    },
+    {
+      "name": "fio",
+      "upstream": "https://github.com/axboe/fio",
+      "repository": "axboe/fio",
+      "version": "3.42",
+      "tag": "fio-3.42",
+      "commit": "ab77643023f5d7e3c1b71a7576a564f368bf577a"
+    },
+    {
+      "name": "iperf3",
+      "upstream": "https://github.com/esnet/iperf",
+      "repository": "esnet/iperf",
+      "version": "3.21",
+      "tag": "3.21",
+      "commit": "d39cf41526626b4e5a130f115d931cd6cbdffc19"
+    },
+    {
+      "name": "nexttrace-tiny",
+      "upstream": "https://github.com/nxtrace/NTrace-core",
+      "repository": "nxtrace/NTrace-core",
+      "version": "1.7.1",
+      "tag": "v1.7.1",
+      "commit": "c9919828fcd8c3103827d08bb26d69e9bf538299",
+      "asset_pattern": "nexttrace-tiny_linux_<architecture>"
+    },
+    {
+      "name": "ping",
+      "upstream": "https://github.com/iputils/iputils",
+      "repository": "iputils/iputils",
+      "version": "20250605",
+      "tag": "20250605",
+      "commit": "6e1cb146547eb6fbb127ffc8397a9241be0d33c2"
+    }
+  ],
+  "corpus": {
+    "name": "ecs-silesia-v1.corpus",
+    "archive": "ecs-corpus_silesia-v1.tar.gz",
+    "source_url": "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip",
+    "source_sha256": "0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af",
+    "sha256": "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0",
+    "bytes": 211938580,
+    "order": ["dickens", "mozilla", "mr", "nci", "ooffice", "osdb", "reymont", "samba", "sao", "webster", "x-ray", "xml"]
+  }
+}

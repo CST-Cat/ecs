@@ -98,10 +98,12 @@ var errorChinese = map[string]string{
 	"err.baselineLoad":         "读取排行榜参考 %s: %w",
 
 	// ── 配置文件 ────────────────────────────────────────────
-	"err.configRead":     "读取配置文件: %w",
-	"err.configParse":    "解析配置文件: %w",
-	"err.configSingle":   "配置文件只能包含一个 JSON 对象",
-	"err.configTrailing": "配置文件尾部存在无效内容: %w",
+	"err.configRead":       "读取配置文件: %w",
+	"err.configParse":      "解析配置文件: %w",
+	"err.configSingle":     "配置文件只能包含一个 JSON 对象",
+	"err.configTrailing":   "配置文件尾部存在无效内容: %w",
+	"err.planJSONRequired": "plan requires --json",
+	"err.planInteractive":  "plan --json cannot use the interactive wizard",
 }
 
 var errorEnglish = map[string]string{
@@ -194,8 +196,10 @@ var errorEnglish = map[string]string{
 	"err.baselineLoad":         "read scoring leaderboard reference %s: %w",
 
 	// ── Config file ─────────────────────────────────────────
-	"err.configRead":     "read config file: %w",
-	"err.configParse":    "parse config file: %w",
-	"err.configSingle":   "the config file must contain exactly one JSON object",
-	"err.configTrailing": "invalid trailing content in the config file: %w",
+	"err.configRead":       "read config file: %w",
+	"err.configParse":      "parse config file: %w",
+	"err.configSingle":     "the config file must contain exactly one JSON object",
+	"err.configTrailing":   "invalid trailing content in the config file: %w",
+	"err.planJSONRequired": "plan requires --json",
+	"err.planInteractive":  "plan --json cannot use the interactive wizard",
 }

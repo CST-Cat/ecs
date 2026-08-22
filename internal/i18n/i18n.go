@@ -13,8 +13,8 @@ import (
 // presentation catalog：选择英文时只查英文表，不会先生成中文，也不会在缺译文时
 // 偷偷回退中文。缺 key 直接返回 key 本身，让遗漏在测试和界面上都显式可见。
 //
-// probe 历史上仍存在一套 source-text 翻译兼容层；它不属于静态 key lookup，后续会在
-// 动态 Message 迁移完成后删除。这里刻意不让那条兼容路径参与 T/TL。
+// probe 的动态 ECS 文案也只写入 stable key/Message；原始工具输出、供应商字段和
+// 诊断文本不经过反向识别。这里刻意不提供 source-text 翻译兼容路径。
 
 // Lang 是支持的界面语言。
 type Lang string
@@ -115,9 +115,9 @@ func JoinList(items []string) string {
 func catalogsFor(lang Lang) []map[string]string {
 	switch lang {
 	case LangEN:
-		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, probeZstdEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, probeZstdEnglish, probeCryptoEnglish, probeDiskEnglish, probeDNSEnglish, probeLatencyEnglish, probeNATEnglish, probeAppsEnglish, probeBlacklistEnglish, probeBGPEnglish, probeThroughputEnglish, probeRemainingEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
 	default:
-		return []map[string]string{modelMessageChinese, probeMessageChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, probeZstdChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
+		return []map[string]string{modelMessageChinese, probeMessageChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, probeZstdChinese, probeCryptoChinese, probeDiskChinese, probeDNSChinese, probeLatencyChinese, probeNATChinese, probeAppsChinese, probeBlacklistChinese, probeBGPChinese, probeThroughputChinese, probeRemainingChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
 }
 

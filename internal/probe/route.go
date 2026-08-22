@@ -3,12 +3,9 @@ package probe
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -32,10 +29,6 @@ type routeEngine struct {
 
 const (
 	routeEngineTiny = "nexttrace-tiny"
-)
-
-var (
-	ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
 
 func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
@@ -241,24 +234,4 @@ func routeHopSummary(engineName, output string) (slots, visible, timeouts int, o
 
 func isNextTraceEngine(name string) bool {
 	return name == routeEngineTiny
-}
-
-func binarySHA256(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%x", hash.Sum(nil))
-}
-
-func sanitizeCommandOutput(output []byte) string {
-	text := strings.ReplaceAll(string(output), "\x00", "")
-	text = ansiPattern.ReplaceAllString(text, "")
-	text = strings.TrimSpace(text)
-	return text
 }

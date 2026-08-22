@@ -23,6 +23,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch command {
 	case "run":
 		return runCommand(ctx, args, stdout, stderr)
+	case "plan":
+		return planCommand(args, stdout, stderr)
 	case "render":
 		return renderCommand(args, stdout, stderr)
 	case "compare":
@@ -83,6 +85,7 @@ func printHelp(writer io.Writer) {
 
 Usage:
   ecs [run] [options]         run tests (standard by default)
+  ecs plan --json [options]   print the resolved machine execution plan
   ecs list                    show profiles and modules
   ecs render --input FILE     re-export JSON/Markdown/HTML from JSON
   ecs compare REPORTS...      compare 2 or more JSON reports safely
@@ -108,6 +111,7 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
 
 用法:
   ecs [run] [选项]            运行测试（默认 standard）
+  ecs plan --json [选项]      输出解析后的机器执行计划
   ecs list                    查看配置档与模块
   ecs render --input FILE     从 JSON 重新导出 JSON/Markdown/HTML 三种格式
   ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告

@@ -167,7 +167,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	nonBenchmarkCaptures := 0
 	nonBenchmarkAssesses := 0
 	nonBenchmark := &runnerTestProbe{id: "network", runs: &nonBenchmarkRuns, result: baseResult}
-	_ = runWithConditionalRetryHooks(context.Background(), nonBenchmark, probe.Environment{}, func() probe.EnvironmentSnapshot {
+	_ = runWithConditionalRetryHooks(context.Background(), nonBenchmark, false, probe.Environment{}, func() probe.EnvironmentSnapshot {
 		nonBenchmarkCaptures++
 		return probe.EnvironmentSnapshot{}
 	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -179,8 +179,8 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	}
 
 	noInterferenceRuns, captures, assesses := 0, 0, 0
-	noInterference := &runnerTestProbe{id: "cpu", runs: &noInterferenceRuns, result: baseResult}
-	noInterferenceResult := runWithConditionalRetryHooks(context.Background(), noInterference, probe.Environment{}, func() probe.EnvironmentSnapshot {
+	noInterference := &runnerTestProbe{id: "fixture", runs: &noInterferenceRuns, result: baseResult}
+	noInterferenceResult := runWithConditionalRetryHooks(context.Background(), noInterference, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 		captures++
 		return probe.EnvironmentSnapshot{}
 	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -213,7 +213,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 			runs := 0
 			item := &runnerTestProbe{id: "cpu", runs: &runs, result: model.Result{Status: test.status, Evidence: test.evidence}}
 			captures, assesses := 0, 0
-			got := runWithConditionalRetryHooks(ctx, item, probe.Environment{}, func() probe.EnvironmentSnapshot {
+			got := runWithConditionalRetryHooks(ctx, item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 				captures++
 				return probe.EnvironmentSnapshot{}
 			}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -232,7 +232,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	}{{5, 1, 2, "second load"}, {1, 5, 1, "first load"}} {
 		runs, captures, assesses := 0, 0, 0
 		item := &runnerTestProbe{id: "cpu", runs: &runs, result: baseResult}
-		got := runWithConditionalRetryHooks(context.Background(), item, probe.Environment{}, func() probe.EnvironmentSnapshot {
+		got := runWithConditionalRetryHooks(context.Background(), item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 			captures++
 			return probe.EnvironmentSnapshot{}
 		}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {

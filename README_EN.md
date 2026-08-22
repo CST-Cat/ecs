@@ -32,8 +32,10 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s
 Install a release binary:
 
 ```sh
-ECS_REPOSITORY=CST-Cat/ecs ./install.sh
-ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks
+./install.sh
+./install.sh --with-benchmarks
+# Override the default repository for a mirror or fork
+ECS_REPOSITORY=owner/ecs ./install.sh
 ./install.sh --from ./bin/ecs
 ```
 

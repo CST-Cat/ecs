@@ -99,7 +99,7 @@ for tool in "${ECS_TOOL_NAMES[@]}"; do
 done
 [[ -d "$stage_dir/LICENSES" ]] || die "$arch stage is missing LICENSES"
 
-corpus="$stage_dir/share/ecs/corpus/ecs-silesia-v1.corpus"
+corpus="$stage_dir/share/ecs/corpus/$ECS_CORPUS_NAME"
 if [[ "$keep_corpus" -eq 1 ]]; then
   echo "verify-tools-stage: $arch verified, corpus kept" >&2
   exit 0

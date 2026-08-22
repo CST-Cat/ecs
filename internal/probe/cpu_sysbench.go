@@ -305,23 +305,6 @@ func executeSysbenchCPU(ctx context.Context, path string, threads, seconds int) 
 	return sysbenchCPUResult{Rate: rate, Events: events, P95MS: p95, Output: text, Args: args}, nil
 }
 
-func commandVersion(ctx context.Context, path string) string {
-	for _, argument := range []string{"--version", "-V"} {
-		versionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		output, err := exec.CommandContext(versionCtx, path, argument).CombinedOutput()
-		cancel()
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				return line
-			}
-		}
-	}
-	return "unknown"
-}
-
 func parseFirstFloat(pattern *regexp.Regexp, text string) (float64, bool) {
 	match := pattern.FindStringSubmatch(text)
 	if len(match) != 2 {
@@ -338,12 +321,4 @@ func parseFirstUint(pattern *regexp.Regexp, text string) (uint64, bool) {
 	}
 	value, err := strconv.ParseUint(match[1], 10, 64)
 	return value, err == nil
-}
-
-func tailText(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= limit {
-		return text
-	}
-	return text[len(text)-limit:]
 }

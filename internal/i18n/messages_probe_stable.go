@@ -5,6 +5,7 @@ package i18n
 // migration. Keys, never source-language sentences, are the lookup boundary.
 var probeMessageChinese = map[string]string{
 	"probe.cpu.description":                          "sysbench CPU 素数计算的单线程与多线程标准化工作负载",
+	"probe.cpu.profile":                              "prime=20000；单线程/多线程",
 	"probe.cpu.comparison_scope":                     "相同 sysbench 版本、prime=20000、线程数与时长",
 	"probe.cpu.comparison_scope.tool_missing":        "相同 sysbench 版本、prime、线程数与时长",
 	"probe.cpu.field.engine":                         "标准工具",
@@ -114,6 +115,7 @@ var probeMessageChinese = map[string]string{
 
 var probeMessageEnglish = map[string]string{
 	"probe.cpu.description":                          "Standardized single-thread and multi-thread sysbench CPU prime workload",
+	"probe.cpu.profile":                              "prime=20000; single-thread/multi-thread",
 	"probe.cpu.comparison_scope":                     "Same sysbench version, prime=20000, thread count, and duration",
 	"probe.cpu.comparison_scope.tool_missing":        "Same sysbench version, prime value, thread count, and duration",
 	"probe.cpu.field.engine":                         "Standard tool",

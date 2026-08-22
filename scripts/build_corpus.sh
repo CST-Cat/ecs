@@ -15,6 +15,8 @@ die() {
   exit 1
 }
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 output=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -45,12 +47,12 @@ for command_name in curl sha256sum stat tar unzip; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
-source_url='https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip'
-source_sha='0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af'
-corpus_sha='8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0'
-corpus_bytes=211938580
-corpus_name='ecs-silesia-v1.corpus'
-corpus_order=(dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml)
+source_url=$(ecs_lock_corpus_field source_url)
+source_sha=$(ecs_lock_corpus_field source_sha256)
+corpus_sha=$(ecs_lock_corpus_field sha256)
+corpus_bytes=$(ecs_lock_corpus_field bytes)
+corpus_name=$(ecs_lock_corpus_field name)
+mapfile -t corpus_order < <(ecs_lock_corpus_order) || die 'could not read corpus order from tools lock'
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-corpus.XXXXXX")
 cleanup() {

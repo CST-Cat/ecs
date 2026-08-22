@@ -15,7 +15,7 @@ import (
 
 // reportSchemaFamily 是报告 schema 标识的家族前缀。
 //
-// 比较路径放宽的是版本号，不是格式：ecs.report/v2 可以和 v1 放在一起尽力比较，
+// 比较路径放宽的是版本号，不是格式：不同 ecs.report/ 版本可以放在一起尽力比较，
 // 但一个完全陌生的 schema 说明这份 JSON 根本不是 ecs 报告，仍然拒绝。
 const reportSchemaFamily = "ecs.report/"
 
@@ -44,35 +44,36 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 		baseName = "ecs-report-" + data.Run.StartedAt.Format("20060102-150405")
 	}
 	baseName = sanitizeBaseName(baseName)
-	// JSON 是 canonical machine data，必须保留调用方传入的、已完成 redaction
-	// 的报告。只有面向人的格式才使用独立的本地化展示副本；不能把已经
-	// Localize 的对象同时当作 JSON 数据。
-	var localized model.Report
-	localizedReady := false
-	written := make(map[string]string)
+	// Render every requested format before touching the filesystem. JSON is the
+	// canonical machine artifact; human formats resolve stable keys directly
+	// from the same input report. This keeps renderer failures from leaving a
+	// partially generated set of new files.
+	contents := make(map[string][]byte, len(formats))
+	orderedFormats := make([]string, 0, len(formats))
 	for _, format := range formats {
+		if _, seen := contents[format]; seen {
+			continue
+		}
 		var content []byte
 		switch format {
 		case "json":
 			content, err = JSON(data)
 		case "md":
-			if !localizedReady {
-				localized = Localize(data)
-				localizedReady = true
-			}
-			content = []byte(markdownLocalized(localized, options.Score))
+			content = []byte(markdownReport(data, options.Score))
 		case "html":
-			if !localizedReady {
-				localized = Localize(data)
-				localizedReady = true
-			}
-			content, err = htmlLocalized(localized, options.Score)
+			content, err = htmlReport(data, options.Score)
 		default:
 			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}
 		if err != nil {
-			return written, i18n.Errorf("err.reportGenerate", format, err)
+			return nil, i18n.Errorf("err.reportGenerate", format, err)
 		}
+		contents[format] = content
+		orderedFormats = append(orderedFormats, format)
+	}
+	written := make(map[string]string, len(orderedFormats))
+	for _, format := range orderedFormats {
+		content := contents[format]
 		path := filepath.Join(absolute, baseName+"."+format)
 		if err := atomicWrite(path, content, 0o600); err != nil {
 			return written, i18n.Errorf("err.reportWrite", format, err)
