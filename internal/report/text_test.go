@@ -76,7 +76,7 @@ func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	scoreReport.TopPercent = 10.5
 	output := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scoreReport})
 	for _, marker := range []string{
-		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "单线程事件率", "复制", "采样", "raw output 192.0.2.10",
+		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "逻辑 CPU", "复制", "采样", "raw output 192.0.2.10",
 		"api.example", "permission denied", "mystery", "证据完整度", "100% · 完整", "50% · 部分", "0% · 证据不足", "0/0 样本 · 本轮无计划样本", "评分", "排行榜参考", "排行榜前", "报告说明",
 	} {
 		if !strings.Contains(output, marker) {

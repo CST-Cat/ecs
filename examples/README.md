@@ -165,7 +165,7 @@ ecs --config ecs.json --only cpu,memory
 
 | 变量 | 作用 |
 | --- | --- |
-| `ECS_REPOSITORY` | 发行仓库 |
+| `ECS_REPOSITORY` | 发行仓库覆盖值（默认 `CST-Cat/ecs`） |
 | `ECS_VERSION` | 版本 tag |
 | `ECS_AUTO_DEPS=0` | 关闭临时工具准备 |
 | `ECS_KEEP=1` | 保留临时工作目录排障 |

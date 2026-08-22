@@ -7,6 +7,7 @@ var (
 )
 
 const (
-	Name          = "ecs"
-	SchemaVersion = "ecs.report/v1"
+	Name              = "ecs"
+	SchemaVersion     = "ecs.report/v1"
+	PlanSchemaVersion = "ecs.plan/v1"
 )

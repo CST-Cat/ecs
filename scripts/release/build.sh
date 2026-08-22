@@ -106,16 +106,16 @@ else
   scripts/package.sh "$version"
 fi
 
-echo "release-build: 构建独立语料发布物" >&2
-scripts/build_corpus.sh --output "$dist/ecs-corpus_silesia-v1.tar.gz"
+echo "release-build: 构建独立语料发布物 $ECS_CORPUS_ARCHIVE" >&2
+scripts/build_corpus.sh --output "$dist/$ECS_CORPUS_ARCHIVE"
 
 echo "release-build: 生成 checksums.txt" >&2
 (
   cd "$dist"
   if [[ -n "$tools_stage" ]]; then
-    sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz ecs-corpus_silesia-v1.tar.gz >checksums.txt
+    sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz "$ECS_CORPUS_ARCHIVE" >checksums.txt
   else
-    sha256sum ecs_*.tar.gz ecs-corpus_silesia-v1.tar.gz >checksums.txt
+    sha256sum ecs_*.tar.gz "$ECS_CORPUS_ARCHIVE" >checksums.txt
   fi
 )
 

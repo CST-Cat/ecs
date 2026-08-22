@@ -1,0 +1,32 @@
+name: security
+
+# 安全扫描是独立的周期性/手动检查，不混入 ci.required：漏洞数据库和扫描器
+# 可能在代码未变化时改变结果，不能让一次外部数据库更新直接阻断合并。
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Run govulncheck
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          govulncheck=$(ecs_devtool govulncheck)
+          "$govulncheck" ./...

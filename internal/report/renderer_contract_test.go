@@ -14,6 +14,7 @@ func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	data := textSampleReport()
+	data.Results[0].SummaryMessages = nil
 	data.Results[0].Summary = "<script>alert(1)</script>"
 	data.Results[0].Sources = append(data.Results[0].Sources, model.Source{Name: "unsafe", URL: "javascript:alert(1)"})
 
@@ -40,6 +41,7 @@ func TestMarkdownRendersRichReportAndSafeLinks(t *testing.T) {
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	data := textSampleReport()
+	data.Results[0].SummaryMessages = nil
 	data.Results[0].Summary = "<script>alert(1)</script>"
 	data.Results[0].TextBlocks[0].Content = "raw output 192.0.2.10\n``` <payload>unsafe</payload>"
 	data.Results[0].Sources = append(data.Results[0].Sources, model.Source{Name: "unsafe", URL: "javascript:alert(1)"})

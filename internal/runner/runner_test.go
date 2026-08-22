@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"ecs/internal/config"
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/probe"
 )
@@ -54,7 +53,7 @@ func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 	return result
 }
 
-func TestRunBindingKeepsCanonicalMetadataAcrossLanguages(t *testing.T) {
+func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
@@ -72,20 +71,16 @@ func TestRunBindingKeepsCanonicalMetadataAcrossLanguages(t *testing.T) {
 			Evidence:    model.NewEvidence(1, 2, "sample"),
 		},
 	}
-	originalLanguage := i18n.Current()
-	t.Cleanup(func() { i18n.Set(originalLanguage) })
-	i18n.Set(i18n.LangZH)
-	zh := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
-	i18n.Set(i18n.LangEN)
-	en := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
-	if !reflect.DeepEqual(zh, en) {
-		t.Fatalf("runner result changed with UI language:\nzh=%+v\nen=%+v", zh, en)
+	first := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	second := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("runner result changed between identical machine runs:\nfirst=%+v\nsecond=%+v", first, second)
 	}
-	if zh.Title != i18n.TL(i18n.LangZH, descriptor.TitleKey) || zh.Methodology.Label != "probe methodology" || zh.Evidence == nil || zh.Evidence.Valid != 1 || zh.Evidence.Expected != 2 {
-		t.Fatalf("canonical result metadata = %+v", zh)
+	if first.Title != "probe title" || first.Methodology.Label != "probe methodology" || first.Evidence == nil || first.Evidence.Valid != 1 || first.Evidence.Expected != 2 {
+		t.Fatalf("canonical result metadata = %+v", first)
 	}
-	if zh.Methodology.Parameters["scope_revision"] == "" || runs != 2 {
-		t.Fatalf("runner parameters/runs = %v/%d", zh.Methodology.Parameters, runs)
+	if first.Methodology.Parameters["scope_revision"] == "" || runs != 2 {
+		t.Fatalf("runner parameters/runs = %v/%d", first.Methodology.Parameters, runs)
 	}
 }
 
@@ -103,13 +98,14 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 		networkRunnable bool
 		status          model.Status
 		wantStatus      model.Status
+		wantSummaryKey  string
 		wantValid       int
 		wantRuns        int
 		wantMethodology bool
 		wantFailure     bool
 	}{
-		{name: "offline network", descriptor: descriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantValid: 0},
-		{name: "unavailable family", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantValid: 0},
+		{name: "offline network", descriptor: descriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
+		{name: "unavailable family", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
 		{name: "network executes", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
 		{name: "ok fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
 		{name: "warning fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
@@ -127,6 +123,11 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 			got := runBinding(context.Background(), moduleBinding{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
 			if got.Status != test.wantStatus || got.Evidence == nil || got.Evidence.Valid != test.wantValid || got.Evidence.Expected != 1 || runs != test.wantRuns {
 				t.Fatalf("result = %+v, want status=%s evidence=%d/1", got, test.wantStatus, test.wantValid)
+			}
+			if test.wantSummaryKey != "" {
+				if got.Summary != "" || len(got.SummaryMessages) != 1 || got.SummaryMessages[0].Key != test.wantSummaryKey {
+					t.Fatalf("structured skip summary = summary %q messages %+v, want %q", got.Summary, got.SummaryMessages, test.wantSummaryKey)
+				}
 			}
 			if test.wantMethodology && got.Methodology.Label != test.descriptor.Methodology.Label {
 				t.Fatalf("methodology = %+v, want descriptor metadata", got.Methodology)
@@ -152,10 +153,10 @@ func TestRunOneAndSafeRunIsolatePanic(t *testing.T) {
 
 	panicItem := &runnerTestProbe{id: "panic-probe", title: "panic probe", panicValue: "fixture panic"}
 	panicResult := safeRun(context.Background(), panicItem, probe.Environment{})
-	if panicResult.Status != model.StatusError || !strings.Contains(panicResult.Error, "fixture panic") || !strings.Contains(panicResult.Summary, "异常") {
+	if panicResult.Status != model.StatusError || panicResult.Error != "fixture panic" || panicResult.Summary != "" || !reflect.DeepEqual(panicResult.SummaryMessages, []model.Message{model.NewMessage("message.runner.panic")}) {
 		t.Fatalf("panic result = %+v", panicResult)
 	}
-	if len(panicResult.Failures) != 1 || panicResult.Failures[0].Stage != "panic" || panicResult.Failures[0].Target != "panic-probe" || panicResult.Failures[0].Category != model.FailureUnknown {
+	if len(panicResult.Failures) != 1 || panicResult.Failures[0].Stage != "panic" || panicResult.Failures[0].Target != "panic-probe" || panicResult.Failures[0].Category != model.FailureUnknown || panicResult.Failures[0].Message != "fixture panic" {
 		t.Fatalf("panic failure = %+v", panicResult.Failures)
 	}
 }
@@ -166,7 +167,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	nonBenchmarkCaptures := 0
 	nonBenchmarkAssesses := 0
 	nonBenchmark := &runnerTestProbe{id: "network", runs: &nonBenchmarkRuns, result: baseResult}
-	_ = runWithConditionalRetryHooks(context.Background(), nonBenchmark, probe.Environment{}, func() probe.EnvironmentSnapshot {
+	_ = runWithConditionalRetryHooks(context.Background(), nonBenchmark, false, probe.Environment{}, func() probe.EnvironmentSnapshot {
 		nonBenchmarkCaptures++
 		return probe.EnvironmentSnapshot{}
 	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -178,8 +179,8 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	}
 
 	noInterferenceRuns, captures, assesses := 0, 0, 0
-	noInterference := &runnerTestProbe{id: "cpu", runs: &noInterferenceRuns, result: baseResult}
-	noInterferenceResult := runWithConditionalRetryHooks(context.Background(), noInterference, probe.Environment{}, func() probe.EnvironmentSnapshot {
+	noInterference := &runnerTestProbe{id: "fixture", runs: &noInterferenceRuns, result: baseResult}
+	noInterferenceResult := runWithConditionalRetryHooks(context.Background(), noInterference, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 		captures++
 		return probe.EnvironmentSnapshot{}
 	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -212,7 +213,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 			runs := 0
 			item := &runnerTestProbe{id: "cpu", runs: &runs, result: model.Result{Status: test.status, Evidence: test.evidence}}
 			captures, assesses := 0, 0
-			got := runWithConditionalRetryHooks(ctx, item, probe.Environment{}, func() probe.EnvironmentSnapshot {
+			got := runWithConditionalRetryHooks(ctx, item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 				captures++
 				return probe.EnvironmentSnapshot{}
 			}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
@@ -231,7 +232,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 	}{{5, 1, 2, "second load"}, {1, 5, 1, "first load"}} {
 		runs, captures, assesses := 0, 0, 0
 		item := &runnerTestProbe{id: "cpu", runs: &runs, result: baseResult}
-		got := runWithConditionalRetryHooks(context.Background(), item, probe.Environment{}, func() probe.EnvironmentSnapshot {
+		got := runWithConditionalRetryHooks(context.Background(), item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
 			captures++
 			return probe.EnvironmentSnapshot{}
 		}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {

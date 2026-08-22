@@ -223,14 +223,12 @@ manifest 的 `corpus_path` 表示运行时路径；选中 zstd 时，`run.sh` �
 - `50/50 混合读写`：4K、64K、512K、1M，读写吞吐保存为
   `fio_mixed_{4k,64k,512k,1m}_{read,write}_mib_s`；提交与基线沿用同一组键名，
   这些单元与其它磁盘工作负载一样进入独立的等权评分子组。
-
 - `Crystal`：`RND4K/Q1`、`RND4K/Q32`、`SEQ1M/Q1`、`SEQ1M/Q8`，读写各保存
   `crystal_{rnd4k_q1,rnd4k_q32,seq1m_q1,seq1m_q8}_{read,write}_{mib_s,iops}`；
 - `ATTO`：512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、
   8M、16M、32M、64M，读写各保存
   `atto_{512b,1k,2k,4k,8k,16k,32k,64k,128k,256k,512k,1m,2m,4m,8m,16m,32m,64m}_{read,write}_{mib_s,iops}`。
   5M 不属于本 schema 的 ATTO 清单。缺失单元仍在表中显示为 `—`/`未返回`，不会补零。
-
 - `fio_random_read_4k_qd1_latency_avg_ms`、`_p95_ms`、`_p99_ms`、`_max_ms`：同一
   Direct I/O、4 KiB、randread、iodepth=1、numjobs=1 的 fio JSON `clat` 统计；四项
   分别表示均值、P95、P99 和最大值，缺失项保持未返回，不以 0 填充。它们是当前 fio
@@ -321,7 +319,7 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
 
 ## 多报告比较 schema
 
-`ecs compare` 接受 2 份到任意多份 `ecs.report/v1` JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。
+`ecs compare` 接受 2 份到任意多份 `ecs.report/` 家族 JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。Compare 的**输入格式永久固定为 ECS JSON report**：Markdown 和 HTML 只是展示产物，不会被重新解析进入比较；文件扩展名也不是可信依据，实际内容由 JSON loader 校验。
 
 ```json
 {
@@ -344,9 +342,14 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
     "evidence_changes": 3
   },
   "modules": [],
-  "notices": []
+  "notices": [
+    {"key": "compare.notice.scope"},
+    {"key": "compare.notice.schemaMixed", "args": ["ecs.report/v1, ecs.report/v2"]}
+  ]
 }
 ```
+
+当前 `ecs.compare/v1` 的 `notices[]` 保存稳定的机器语义 `{key,args}`，不保存编码后的最终字符串。比较核心只生成 key 与参数，Markdown、HTML 和终端 renderer 在展示边界直接按当前语言渲染；不存在“先生成中文、再反向识别原句”的路线，也不需要把 key 与 args 编码成字符串后再 `ParseNotice`。
 
 CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `report` 索引从 0 开始。`inputs[]` 按命令行输入顺序保留标签、原报告 ID、ecs 版本、配置档、开始时间、协议族与遮盖状态。
 
@@ -386,7 +389,7 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时独立升级版本。
+- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时再按版本纪律处理。
 
 ### 为什么只有 `compare` 放宽 schema 版本
 

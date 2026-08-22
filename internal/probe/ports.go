@@ -15,13 +15,13 @@ import (
 type portsProbe struct{}
 
 func (portsProbe) ID() string         { return "ports" }
-func (portsProbe) Title() string      { return "出站端口" }
+func (portsProbe) Title() string      { return "module.ports.title" }
 func (portsProbe) NeedsNetwork() bool { return true }
 
 type portTarget struct {
 	Service string
 	Address string
-	Note    string
+	TypeKey string
 }
 
 type portResult struct {
@@ -33,14 +33,14 @@ type portResult struct {
 
 func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("ports", "出站端口")
-	result.Description = "常用 Web、SSH、DNS 与邮件端口的 TCP 出站建连"
+	result := model.NewResult("ports", "module.ports.title")
+	result.Description = "probe.ports.description"
 	result.Methodology = model.Methodology{
 		Kind:            "protocol-measurement",
-		Label:           "协议测量",
+		Label:           "methodology.protocol-measurement",
 		Engine:          "native TCP connect",
-		Profile:         "fixed public endpoints",
-		ComparisonScope: "可达性诊断；单目标失败不能等同于端口被封",
+		Profile:         "probe.ports.profile",
+		ComparisonScope: "probe.ports.comparison_scope",
 	}
 
 	dnsTarget := "1.1.1.1:53"
@@ -48,14 +48,14 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		dnsTarget = "[2606:4700:4700::1111]:53"
 	}
 	targets := []portTarget{
-		{Service: "HTTP", Address: "example.com:80", Note: "Web"},
-		{Service: "HTTPS", Address: "example.com:443", Note: "Web"},
-		{Service: "SSH", Address: "github.com:22", Note: "Git"},
-		{Service: "DNS TCP", Address: dnsTarget, Note: "DNS"},
-		{Service: "SMTP", Address: "smtp.gmail.com:25", Note: "邮件"},
-		{Service: "SMTPS", Address: "smtp.gmail.com:465", Note: "邮件"},
-		{Service: "Submission", Address: "smtp.gmail.com:587", Note: "邮件"},
-		{Service: "IMAPS", Address: "imap.gmail.com:993", Note: "邮件"},
+		{Service: "HTTP", Address: "example.com:80", TypeKey: "probe.ports.target_type.web"},
+		{Service: "HTTPS", Address: "example.com:443", TypeKey: "probe.ports.target_type.web"},
+		{Service: "SSH", Address: "github.com:22", TypeKey: "probe.ports.target_type.git"},
+		{Service: "DNS TCP", Address: dnsTarget, TypeKey: "probe.ports.target_type.dns"},
+		{Service: "SMTP", Address: "smtp.gmail.com:25", TypeKey: "probe.ports.target_type.mail"},
+		{Service: "SMTPS", Address: "smtp.gmail.com:465", TypeKey: "probe.ports.target_type.mail"},
+		{Service: "Submission", Address: "smtp.gmail.com:587", TypeKey: "probe.ports.target_type.mail"},
+		{Service: "IMAPS", Address: "imap.gmail.com:993", TypeKey: "probe.ports.target_type.mail"},
 	}
 	results := make(chan portResult, len(targets))
 	var wg sync.WaitGroup
@@ -92,9 +92,15 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Key:         "network.ports.tcp",
-		Title:       "TCP 出站能力",
-		Columns:     []string{"服务", "目标", "类型", "结果", "延迟/原因"},
+		Key:   "network.ports.tcp",
+		Title: "probe.ports.table.title",
+		Columns: []string{
+			"probe.ports.column.service",
+			"probe.ports.column.target",
+			"probe.ports.column.type",
+			"probe.ports.column.status",
+			"probe.ports.column.detail",
+		},
 		ColumnKeys:  []string{"service", "target", "target_type", "status", "detail"},
 		RowIdentity: "target",
 	}
@@ -102,13 +108,13 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	emailOpen := 0
 	validAttempts := 0
 	for _, item := range collected {
-		status := "阻断/不可达"
+		status := "probe.ports.status.unreachable"
 		detail := item.Error
 		if item.Open {
-			status = "可达"
+			status = "probe.ports.status.reachable"
 			detail = formatMilliseconds(item.Latency)
 			openCount++
-			if item.Target.Note == "邮件" {
+			if item.Target.TypeKey == "probe.ports.target_type.mail" {
 				emailOpen++
 			}
 		}
@@ -118,19 +124,20 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		if !item.Open && item.Error != "" {
 			addFailureMessage(&result, "connect", item.Target.Address, item.Error)
 		}
-		table.Rows = append(table.Rows, []string{item.Target.Service, item.Target.Address, item.Target.Note, status, detail})
+		table.Rows = append(table.Rows, []string{item.Target.Service, item.Target.Address, item.Target.TypeKey, status, detail})
 	}
 	result.Tables = []model.Table{table}
 	result.Measurements = []model.Measurement{
-		{Key: "reachable_ports", Label: "可达端口", Value: float64(openCount), Unit: "项", Display: fmt.Sprintf("%d/%d", openCount, len(targets)), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
-		{Key: "reachable_mail_ports", Label: "可达邮件端口", Value: float64(emailOpen), Unit: "项", Display: fmt.Sprintf("%d/4", emailOpen), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "reachable_ports", Label: "probe.ports.metric.reachable", Value: float64(openCount), Unit: "count", Display: fmt.Sprintf("%d/%d", openCount, len(targets)), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "reachable_mail_ports", Label: "probe.ports.metric.reachable_mail", Value: float64(emailOpen), Unit: "count", Display: fmt.Sprintf("%d/4", emailOpen), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
 	}
 	result.Evidence = model.NewEvidence(validAttempts, len(targets), "target")
 	result.Notes = append(result.Notes,
-		"只完成 TCP 握手，不发送邮件、认证信息或应用层命令。",
-		"失败可能来自本机防火墙、上游封锁、DNS、目标服务或地区限制；单一目标失败不能证明端口被运营商封锁。",
+		"probe.ports.note.handshake_only",
+		"probe.ports.note.failure_scope",
 	)
-	result.Summary = fmt.Sprintf("%d/%d 可达 · 邮件 %d/4", openCount, len(targets), emailOpen)
+	result.Summary = ""
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.ports.summary", openCount, len(targets), emailOpen)}
 	result.Finish(start)
 	return result
 }

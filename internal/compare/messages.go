@@ -1,47 +1,14 @@
 package compare
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-// canonicalNotice stores a stable message key and, when needed, JSON encoded
-// string arguments. Notices are part of the machine comparison result, so
-// their value is independent of presentation language. The separator cannot
-// occur in a message key and remains intact through terminal sanitization.
-func canonicalNotice(key string, args ...string) string {
-	if len(args) == 0 {
-		return key
-	}
-	encoded, err := json.Marshal(args)
-	if err != nil {
-		// []string is always JSON encodable. Keep the key as the safest
-		// canonical fallback if this ever changes.
-		return key
-	}
-	return key + "::" + string(encoded)
-}
-
-// ParseNotice decodes the stable key and optional arguments carried by a
-// comparison notice. It deliberately knows nothing about translations;
-// presentation packages decide whether the returned key is displayable.
-func ParseNotice(value string) (string, []string, bool) {
-	key, encoded, hasArgs := strings.Cut(value, "::")
-	if !hasArgs {
-		if key == "" {
-			return "", nil, false
-		}
-		return key, nil, true
-	}
-	if key == "" {
-		return "", nil, false
-	}
-	var args []string
-	if err := json.Unmarshal([]byte(encoded), &args); err != nil {
-		return "", nil, false
-	}
-	return key, args, true
+// canonicalNotice preserves machine message semantics without encoding them
+// into a presentation string. Renderers consume Key and Args directly.
+func canonicalNotice(key string, args ...string) Notice {
+	return Notice{Key: key, Args: append([]string(nil), args...)}
 }
 
 // ValidationError is the language-independent error returned by Build for

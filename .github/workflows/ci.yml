@@ -62,7 +62,8 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 静态规则、源码安全、格式、数据契约。与 release preflight 是同一个脚本。
+  # 静态规则、格式、数据契约。与 release preflight 是同一个脚本；安全扫描在
+  # 独立的 security workflow 中运行，不改变本 workflow 的 required gate。
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -50,11 +50,18 @@ record_argv() {
   done
 }
 
-if [ "${1:-}" = list ] && [ "${2:-}" = --machine ]; then
-  printf 'ecs-module-manifest\t1\n'
-  printf 'profile\tstandard\tnoop\n'
-  printf 'profile\tfull\tnoop\n'
-  printf 'module\tnoop\tlocal\t\n'
+if [ "${1:-}" = plan ] && [ "${2:-}" = --json ]; then
+  cat <<'JSON'
+{
+  "schema_version": "ecs.plan/v1",
+  "profile": "standard",
+  "modules": [
+    {"id": "noop"}
+  ],
+  "required_tools": [],
+  "staging": {"mode": "temporary-prefix"}
+}
+JSON
   exit 0
 fi
 

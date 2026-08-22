@@ -12,7 +12,6 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
 	"ecs/internal/failure"
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/probe"
 )
@@ -25,12 +24,13 @@ const (
 )
 
 type Progress struct {
-	Phase  Phase
-	Index  int
-	Total  int
-	ID     string
-	Title  string
-	Result model.Result
+	Phase    Phase
+	Index    int
+	Total    int
+	ID       string
+	Title    string
+	TitleKey string
+	Result   model.Result
 }
 
 // ProgressFunc receives lifecycle events without probe result details. Callers
@@ -72,9 +72,9 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			Requested:     append([]string(nil), cfg.Modules...),
 			OutputFormats: append([]string(nil), cfg.Formats...),
 		},
-		Notices: []string{
-			"ecs 报告只写入本地，不会自动上传；网络探针仍会按模块访问必要的公开目标。",
-			"性能结果只应在相同测试方法、版本和资源参数下比较。",
+		Notices: []model.Message{
+			model.NewMessage("message.notice.localOnly"),
+			model.NewMessage("message.notice.compareScope"),
 		},
 		SensitiveIPs: localInterfaceIPs(),
 	}
@@ -82,12 +82,12 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	for _, id := range cfg.Modules {
 		requested[id] = true
 	}
-	// Keep optional privacy/external-policy notices in descriptor order.  The
+	// Keep optional privacy/external-policy notices in descriptor order. The
 	// runner deliberately does not special-case a module ID here: adding an
 	// external client only requires metadata in config's registry.
 	for _, descriptor := range config.ModuleDescriptors() {
-		if requested[descriptor.ID] && descriptor.PrivacyNotice != "" {
-			report.Notices = append(report.Notices, descriptor.PrivacyNotice)
+		if requested[descriptor.ID] && descriptor.PrivacyNoticeKey != "" {
+			report.Notices = append(report.Notices, model.NewMessage(descriptor.PrivacyNoticeKey))
 		}
 	}
 
@@ -109,8 +109,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		UserAgent:  fmt.Sprintf("ecs/%s", buildinfo.Version),
 		Network:    capabilities,
 	}
-	// 出口 IP 只发现一次，供 network、blacklist、bgp 共用：这既省掉重复请求，
-	// 也让"连了哪个外部服务"在报告里只出现一处。
+	// 出口 IP 只发现一次，供 network、blacklist、bgp 共用。
 	if networkModules && networkRunnable {
 		env.Egress = discoverEgress(ctx, env)
 	}
@@ -120,13 +119,14 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 		}
 	}
 	if env.Egress.Attempted {
-		report.Notices = append(report.Notices,
-			fmt.Sprintf("出口 IP 由 %s 统一发现一次，供需要它的模块共用。", env.Egress.SourceName))
+		report.Notices = append(report.Notices, model.NewMessage("message.notice.egressShared", env.Egress.SourceName))
 	}
 
 	titles := make([]string, len(selected))
+	titleKeys := make([]string, len(selected))
 	for index, binding := range selected {
-		titles[index] = localizedDescriptorTitle(binding.Descriptor, binding.Probe.Title())
+		titles[index] = binding.Probe.Title()
+		titleKeys[index] = binding.Descriptor.TitleKey
 	}
 	results := make([]model.Result, len(selected))
 	completed := 0
@@ -143,7 +143,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			if progress != nil {
 				for _, index := range group.Indices {
 					binding := selected[index]
-					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index]})
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
 				}
 			}
 			var wg sync.WaitGroup
@@ -159,7 +159,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			index := group.Indices[0]
 			binding := selected[index]
 			if progress != nil {
-				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index]})
+				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
 			}
 			results[index] = runBinding(ctx, binding, effectiveCfg, env, networkRunnable)
 		}
@@ -167,7 +167,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			binding := selected[index]
 			completed++
 			if progress != nil {
-				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], Result: results[index]})
+				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index], Result: results[index]})
 			}
 		}
 		if ctx.Err() != nil {
@@ -214,26 +214,25 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	canonicalTitle := item.Title()
 	needsNetwork := item.NeedsNetwork()
 	if hasDescriptor {
-		// Descriptor metadata is authoritative for cross-cutting runner policy;
-		// keep the report title in the canonical source language. The terminal
-		// progress title is localized separately at the Run display boundary, and
-		// report renderers localize this canonical title only for human-facing output.
-		canonicalTitle = canonicalDescriptorTitle(descriptor, canonicalTitle)
 		needsNetwork = descriptor.Exposure > config.ExposureLocal
 	}
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
-		result.Skip("离线模式")
+		result.Status = model.StatusSkipped
+		result.Summary = ""
+		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.offline")}
 		result.Finish(start)
 	} else if !networkRunnable && needsNetwork {
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
-		result.Skip("未检测到用户请求的可用 IPv4/IPv6 出站能力")
+		result.Status = model.StatusSkipped
+		result.Summary = ""
+		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
 	} else {
-		result = runWithConditionalRetry(ctx, item, env)
+		result = runWithConditionalRetry(ctx, item, descriptor.RetryOnInterference, env)
 	}
 	if result.Methodology.Label == "" {
 		if hasDescriptor {
@@ -244,7 +243,7 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	}
 	result.Methodology.Parameters = comparisonParameters(item.ID(), cfg, result)
 	if result.Evidence == nil {
-		// Probes normally report their real sample denominator.  This fallback
+		// Probes normally report their real sample denominator. This fallback
 		// keeps panic, offline and legacy/custom probe results explicit without
 		// pretending that their fields are independent observations.
 		valid := 1
@@ -279,18 +278,19 @@ func hasNetworkModules(selected []moduleBinding) bool {
 	return false
 }
 
-func runWithConditionalRetry(ctx context.Context, item probe.Probe, env probe.Environment) model.Result {
-	return runWithConditionalRetryHooks(ctx, item, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
+func runWithConditionalRetry(ctx context.Context, item probe.Probe, retryOnInterference bool, env probe.Environment) model.Result {
+	return runWithConditionalRetryHooks(ctx, item, retryOnInterference, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
 }
 
 func runWithConditionalRetryHooks(
 	ctx context.Context,
 	item probe.Probe,
+	retryOnInterference bool,
 	env probe.Environment,
 	capture func() probe.EnvironmentSnapshot,
 	assess func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference,
 ) model.Result {
-	if item.ID() != "cpu" && item.ID() != "zstd" && item.ID() != "npb" && item.ID() != "memory" && item.ID() != "crypto" && item.ID() != "disk" {
+	if !retryOnInterference {
 		return safeRun(ctx, item, env)
 	}
 	firstBefore := capture()
@@ -318,31 +318,15 @@ func runWithConditionalRetryHooks(
 	return selected
 }
 
-func localizedDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {
-	if descriptor.TitleKey != "" && i18n.Has(i18n.Current(), descriptor.TitleKey) {
-		return i18n.T(descriptor.TitleKey)
-	}
-	return fallback
-}
-
-// canonicalDescriptorTitle returns the stable source-language title stored in
-// a Report. Human-facing renderers apply Localize later, so collection must not
-// depend on the current UI language.
-func canonicalDescriptorTitle(descriptor config.ModuleDescriptor, fallback string) string {
-	if descriptor.TitleKey != "" && i18n.Has(i18n.LangZH, descriptor.TitleKey) {
-		return i18n.TL(i18n.LangZH, descriptor.TitleKey)
-	}
-	return fallback
-}
-
 func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (result model.Result) {
 	start := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = model.NewResult(item.ID(), item.Title())
 			result.Status = model.StatusError
-			result.Error = fmt.Sprintf("探针发生 panic: %v", recovered)
-			result.Summary = "探针异常，已隔离并继续"
+			result.Error = fmt.Sprint(recovered)
+			result.Summary = ""
+			result.SummaryMessages = []model.Message{model.NewMessage("message.runner.panic")}
 			result.AddFailure(model.Failure{
 				Category: model.FailureUnknown, Stage: "panic", Target: item.ID(),
 				Count: 1, Message: result.Error,

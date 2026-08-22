@@ -59,16 +59,12 @@ type TextOptions struct {
 	Width int
 }
 
-// Text 渲染纯文本报告，会先做一次本地化。
-//
-// 终端外观（ui.Terminal）与独立调用方可能直接传入探针产出的原始语言报告，
-// 因此这里保留 Localize；它返回副本，不会改动仍用于机器可读产物的那一份。
+// Text 渲染纯文本报告。渲染器在各字段边界解析稳定 key，不复制或改写整份报告。
 func Text(data model.Report, options TextOptions) string {
-	return textLocalized(Localize(data), options)
+	return textReport(data, options)
 }
 
-// textLocalized 渲染一份**已经本地化过**的报告，见 htmlLocalized 的说明。
-func textLocalized(data model.Report, options TextOptions) string {
+func textReport(data model.Report, options TextOptions) string {
 	data = terminalSafeCopy(data)
 	options.Score = terminalSafeCopy(options.Score)
 	renderer := &textRenderer{
@@ -125,7 +121,7 @@ func adaptiveBarWidth(reportWidth, preferred int) int {
 
 func (r *textRenderer) render(data model.Report) string {
 	r.version = data.Tool.Version
-	r.headline = data.Summary.Headline
+	r.headline = reportHeadline(data.Summary)
 	r.moduleNavigation(data)
 	r.header(data)
 	for _, result := range data.Results {
@@ -170,8 +166,8 @@ func (r *textRenderer) header(data model.Report) {
 	r.centeredStyled(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")), r.palette.Dim)
 	r.centeredStyled(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")), r.palette.Info)
 	r.centeredStyled(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")), r.palette.Info)
-	if data.Summary.Headline != "" {
-		r.centeredStyled(metaLabel("报告状态", data.Summary.Headline, "Report status", data.Summary.Headline), r.statusStyle(data.Summary.Status))
+	if headline := reportHeadline(data.Summary); headline != "" {
+		r.centeredStyled(metaLabel("报告状态", headline, "Report status", headline), r.statusStyle(data.Summary.Status))
 	}
 	exposure := fallbackReport(data.Run.Exposure, "local")
 	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
@@ -585,19 +581,19 @@ func (r *textRenderer) result(result model.Result) {
 	r.subsectionNo = 0
 	r.moduleBanner(result)
 	if result.Status != model.StatusOK && result.Description != "" {
-		r.indented(result.Description)
+		r.indented(displayReportText(result.Description))
 	}
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
 	status := statusIcon(result.Status) + " " + statusLabel(result.Status)
-	if result.Summary != "" && strings.TrimSpace(result.Summary) != strings.TrimSpace(r.headline) {
-		status += " · " + result.Summary
+	if summary := resultSummary(result); summary != "" && strings.TrimSpace(summary) != strings.TrimSpace(r.headline) {
+		status += " · " + summary
 	}
 	if result.Status != model.StatusOK || result.Error != "" {
 		r.indentedStyled(status, r.statusStyle(result.Status))
 	}
 	if result.Error != "" {
-		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, maxInt(1, r.width-10)), r.palette.ErrorBold)
+		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(displayReportText(result.Error), maxInt(1, r.width-10)), r.palette.ErrorBold)
 	}
 	r.resultEvidenceCoverage(result.Evidence)
 	r.resultFailures(result.Failures)
@@ -690,9 +686,9 @@ func evidenceText(evidence model.Evidence) string {
 func (r *textRenderer) resultEvidence(result model.Result) {
 	if result.Description != "" && result.Status == model.StatusOK {
 		r.subsection(i18n.T("report.description"))
-		r.indented(result.Description)
+		r.indented(displayReportText(result.Description))
 	}
-	methodology := result.Methodology
+	methodology := displayMethodology(result.Methodology)
 	if methodology.Kind != "" || methodology.Label != "" || methodology.Engine != "" || methodology.Profile != "" || methodology.ComparisonScope != "" {
 		r.subsection(i18n.T("report.methodologyLabel"))
 		if label := localizedMethodology(methodology); label != "" {
@@ -717,20 +713,24 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 	if len(result.Notes) > 0 {
 		r.subsection(i18n.T("report.notes"))
 		for _, note := range result.Notes {
-			r.note(note)
+			r.note(displayReportText(note))
 		}
 		r.blank()
 	}
 	if len(result.Sources) > 0 {
 		r.subsection(i18n.T("report.sources"))
 		bannerSource := -1
-		for index, source := range result.Sources {
+		for index, rawSource := range result.Sources {
+			source := rawSource
+			source.Purpose = displayReportText(source.Purpose)
 			if strings.TrimSpace(source.URL) != "" {
 				bannerSource = index
 				break
 			}
 		}
-		for index, source := range result.Sources {
+		for index, rawSource := range result.Sources {
+			source := rawSource
+			source.Purpose = displayReportText(source.Purpose)
 			if index == bannerSource {
 				// The banner already carries this source URL. Keep its name and
 				// purpose in the evidence section without printing the URL twice.
@@ -966,7 +966,7 @@ func measurementGroupTitle(id, key, label, resultTitle string) string {
 }
 
 func tableGroupTitle(id, title, resultTitle string) string {
-	lower := strings.ToLower(title)
+	lower := strings.ToLower(displayReportText(title))
 	if id == "system" {
 		return localizedGroup("内核网络", "Kernel networking")
 	}
@@ -1013,13 +1013,15 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 	labelLimit := minInt(30, maxInt(6, r.width*3/10))
 	valueLimit := minInt(26, maxInt(6, r.width/4))
 	labelWidth, valueWidth := 0, 0
-	for _, item := range items {
+	for _, rawItem := range items {
+		item := displayMeasurement(rawItem)
 		labelWidth = maxInt(labelWidth, textwidth.Width(item.Label))
 		valueWidth = maxInt(valueWidth, textwidth.Width(item.Display))
 	}
 	labelWidth = minInt(labelWidth, labelLimit)
 	valueWidth = minInt(valueWidth, valueLimit)
-	for _, item := range items {
+	for _, rawItem := range items {
+		item := displayMeasurement(rawItem)
 		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), labelWidth) + i18n.T("punct.colon")
 		valueLines := wrapText(item.Display, valueWidth)
 		if len(valueLines) == 0 {
@@ -1291,11 +1293,13 @@ func boolKey(value bool) string {
 func (r *textRenderer) fields(items []model.Field) {
 	labelLimit := minInt(28, maxInt(6, r.width/3))
 	width := 0
-	for _, item := range items {
+	for _, rawItem := range items {
+		item := displayField(rawItem)
 		width = maxInt(width, textwidth.Width(item.Label))
 	}
 	width = minInt(width, labelLimit)
-	for _, item := range items {
+	for _, rawItem := range items {
+		item := displayField(rawItem)
 		value := item.Value
 		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), width) + i18n.T("punct.colon")
 		prefix := "  " + r.palette.Label(label) + "  "
@@ -1327,6 +1331,7 @@ func (r *textRenderer) fields(items []model.Field) {
 
 // resultTable 渲染带边框的表格。
 func (r *textRenderer) resultTable(table model.Table) {
+	table = displayTable(table)
 	table = normalizeMatrixTable(table)
 	table = visibleTableColumns(table)
 	if table.Title != "" {
@@ -1478,7 +1483,7 @@ func matrixKindForTable(title string) diskMatrixKind {
 func visibleMeasurements(result model.Result) []model.Measurement {
 	tables := make(map[diskMatrixKind]bool)
 	for _, table := range result.Tables {
-		if kind := matrixKindForTable(table.Title); kind != "" && len(table.Rows) > 0 {
+		if kind := matrixKindForTable(displayReportText(table.Title)); kind != "" && len(table.Rows) > 0 {
 			tables[kind] = true
 		}
 	}
@@ -1904,7 +1909,7 @@ func (r *textRenderer) footer(data model.Report) {
 	if !r.compact && len(data.Notices) > 0 {
 		r.sectionTitle(i18n.T("report.notices"), "")
 		for _, notice := range data.Notices {
-			r.note(notice)
+			r.note(renderMessage(notice))
 		}
 		r.blank()
 	}

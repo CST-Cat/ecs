@@ -6,10 +6,10 @@
 # 个官方 C 文件，不触发完整十工具构建；两条路径仍然共享同一个 SHA、数组大小
 # 和迭代次数，避免测试与发布物悄悄使用不同口径。
 
-ECS_STREAM_URL='https://www.cs.virginia.edu/stream/FTP/Code/stream.c'
-ECS_STREAM_SOURCE_SHA256='a52bae5e175bea3f7832112af9c085adab47117f7d2ce219165379849231692b'
-ECS_STREAM_ARRAY_SIZE=10000000
-ECS_STREAM_NTIMES=10
+ECS_STREAM_URL=$(ecs_lock_stream_field source_url)
+ECS_STREAM_SOURCE_SHA256=$(ecs_lock_stream_field source_sha256)
+ECS_STREAM_ARRAY_SIZE=$(ecs_lock_stream_field array_size)
+ECS_STREAM_NTIMES=$(ecs_lock_stream_field ntimes)
 ECS_STREAM_COMPILE_FLAGS=(
   -O3
   -fopenmp

@@ -28,7 +28,7 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	}
 	out := Report{
 		SchemaVersion: SchemaVersion, Tool: options.Tool, GeneratedAt: time.Now().UTC(), Reference: reference,
-		Notices: []string{
+		Notices: []Notice{
 			canonicalNotice("compare.notice.scope"),
 			canonicalNotice("compare.notice.relative"),
 			canonicalNotice("compare.notice.observation"),
@@ -111,7 +111,7 @@ func prependVersionNotices(out *Report) bool {
 	schemas := distinctInputValues(out.Inputs, func(input Input) string { return input.SchemaVersion })
 	tools := distinctInputValues(out.Inputs, func(input Input) string { return input.ToolVersion })
 
-	var leading []string
+	var leading []Notice
 	if len(schemas) > 1 {
 		leading = append(leading,
 			canonicalNotice("compare.notice.schemaMixed", strings.Join(schemas, ", ")))
@@ -365,7 +365,7 @@ type signatureComponent struct {
 	value string
 }
 
-// signatureComponents 是签名的唯一来源：metricSignature 由它拼成，��异归因也读它。
+// signatureComponents 是签名的唯一来源：metricSignature 由它拼成，差异归因也读它。
 //
 // 两者共用同一组分量是刻意的。如果各写一份，迟早会出现"明细说没有差异、判定却
 // 说不可比"这种自相矛盾的输出——那比现在只给一个原因码更糟。

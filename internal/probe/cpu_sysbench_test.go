@@ -37,7 +37,7 @@ func TestSysbenchParserAndMeasurements(t *testing.T) {
 	}
 	single := model.NewResult("cpu", "cpu")
 	appendSysbenchCPUMeasurements(&single, sysbenchCPUResult{Rate: 1, Events: 2, P95MS: 3}, sysbenchCPUResult{}, 1)
-	if hasMeasurement(single, "sysbench_cpu_multi_events_s") || hasMeasurement(single, "sysbench_cpu_scaling_ratio") || benchmarkThreadField(1) != "1 / 1（单核，同一次实测）" || !strings.Contains(benchmarkThreadField(4), "1 / 4") {
+	if hasMeasurement(single, "sysbench_cpu_multi_events_s") || hasMeasurement(single, "sysbench_cpu_scaling_ratio") || benchmarkThreadField(1) != "1 / 1" || !strings.Contains(benchmarkThreadField(4), "1 / 4") {
 		t.Fatalf("single/multi thread assembly = %+v", single.Measurements)
 	}
 }

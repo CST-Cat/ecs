@@ -165,7 +165,7 @@ Common one-shot script variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `ECS_REPOSITORY` | Release repository |
+| `ECS_REPOSITORY` | Release repository override (default: `CST-Cat/ecs`) |
 | `ECS_VERSION` | Release tag |
 | `ECS_AUTO_DEPS=0` | Disable temporary tool staging |
 | `ECS_KEEP=1` | Keep the temporary work directory for debugging |

@@ -6,14 +6,25 @@ name: leaderboard
 # 当前的提交重算基线并写回。代码检查不在这里跑——检查阶段不改工作区，避免把
 # 生成文件混进正在审核的代码变更，也避免写权限出现在任意分支的 push 上。
 #
-# paths 限定真正影响排行榜的输入。无关改动不该触发一次写回。
+# paths 限定真正影响排行榜的输入。两个 baseline 是本 workflow 的输出，必须排除，
+# 否则写回提交会再次触发自己；算法入口则显式列出，不依赖“整个目录看起来像相关”。
 
 on:
   push:
     branches: [main]
     paths:
       - "submissions/**"
-      - "internal/score/**"
+      - "!submissions/baseline.json"
+      - "scripts/leaderboard.sh"
+      - "internal/app/baseline.go"
+      - "internal/config/modules.go"
+      - "internal/model/**"
+      - "internal/score/baseline.go"
+      - "internal/score/outlier.go"
+      - "internal/score/score.go"
+      - "internal/score/submission.go"
+      - "internal/score/tier.go"
+      - "!internal/score/embedded/baseline.json"
   workflow_dispatch:
 
 permissions:

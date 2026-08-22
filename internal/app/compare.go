@@ -21,7 +21,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs compare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
-	formatsFlag := flags.String("format", "json,md,html", i18n.T("flag.format"))
+	outputFormatsFlag := flags.String("format", "json,md,html", i18n.T("compare.flag.format"))
 	outputFlag := flags.String("output", "./reports", i18n.T("compare.flag.output"))
 	nameFlag := flags.String("name", "", i18n.T("flag.name"))
 	referenceFlag := flags.Int("reference", 1, i18n.T("compare.flag.reference"))
@@ -56,8 +56,8 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, i18n.Errorf("compare.help.referenceRange", len(paths)))
 		return 1
 	}
-	formats := config.ParseList(*formatsFlag)
-	if err := validateComparisonFormats(formats); err != nil {
+	outputFormats := config.ParseList(*outputFormatsFlag)
+	if err := validateComparisonFormats(outputFormats); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
@@ -65,6 +65,9 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 	reports := make([]model.Report, 0, len(paths))
 	labels := make([]string, 0, len(paths))
 	for _, path := range paths {
+		// Compare has exactly one input contract: an ECS JSON report. The file
+		// extension is only a label; validity is decided by the JSON report
+		// loader, and Markdown/HTML presentation artifacts are never parsed back.
 		data, loadErr := reporter.LoadJSONForComparison(path)
 		if loadErr != nil {
 			fmt.Fprintf(stderr, "%s: %s: %v\n", i18n.T("cli.error"), path, loadErr)
@@ -89,7 +92,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	written, err := reporter.WriteComparisonFiles(data, *outputFlag, *nameFlag, formats)
+	written, err := reporter.WriteComparisonFiles(data, *outputFlag, *nameFlag, outputFormats)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1

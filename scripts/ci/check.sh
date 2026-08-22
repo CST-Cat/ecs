@@ -50,6 +50,12 @@ for_each_build_tag staticcheck "$staticcheck"
 ecs_step "ecs-tools manifest 与示例"
 go run ./cmd/tools-manifest-check --architecture amd64 tools/manifest.example.json
 
+ecs_step "工具锁定事实"
+bash scripts/lock_test.sh
+
+ecs_step "分析工具缓存锁"
+bash scripts/devtools_cache_test.sh
+
 ecs_step "shell 语法"
 sh -n install.sh
 sh -n run.sh
