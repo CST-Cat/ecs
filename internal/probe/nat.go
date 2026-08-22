@@ -28,20 +28,20 @@ func (natProbe) ID() string         { return "nat" }
 func (natProbe) Title() string      { return "NAT 类型" }
 func (natProbe) NeedsNetwork() bool { return true }
 
-// NAT 映射行为（RFC 5780 §4.3）。
+// NAT 映射行为（RFC 5780 §4.3）。这些值是机器枚举，不是展示文案。
 const (
-	mappingUnknown              = "未知"
-	mappingEndpointIndependent  = "端点无关"
-	mappingAddressDependent     = "地址相关"
-	mappingAddressPortDependent = "地址与端口相关"
+	mappingUnknown              = "unknown"
+	mappingEndpointIndependent  = "endpoint_independent"
+	mappingAddressDependent     = "address_dependent"
+	mappingAddressPortDependent = "address_port_dependent"
 )
 
-// NAT 过滤行为（RFC 5780 §4.4）。
+// NAT 过滤行为（RFC 5780 §4.4）。这些值与映射枚举保持同一机器词汇。
 const (
-	filteringUnknown              = "未知"
-	filteringEndpointIndependent  = "端点无关"
-	filteringAddressDependent     = "地址相关"
-	filteringAddressPortDependent = "地址与端口相关"
+	filteringUnknown              = "unknown"
+	filteringEndpointIndependent  = "endpoint_independent"
+	filteringAddressDependent     = "address_dependent"
+	filteringAddressPortDependent = "address_port_dependent"
 )
 
 // natFinding 是对一台 STUN 服务器完成的检测结果。
@@ -126,20 +126,22 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	var best *natFinding
 	for index := range findings {
 		finding := &findings[index]
-		status := "完成"
+		status := "complete"
 		switch {
 		case finding.UDPBlocked:
-			status = "UDP 无响应"
-			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: status})
+			status = "udp_blocked"
+			message := ""
+			if finding.Err != nil {
+				message = compactError(finding.Err)
+			}
+			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: message})
 		case finding.Err != nil:
-			status = "失败：" + compactError(finding.Err)
+			status = "failed"
 			addFailure(&result, "stun_binding", finding.Server.Address, finding.Err)
 		}
 		other := finding.Other.String()
 		if other == "" {
 			other = "—"
-		} else if !finding.DualStackServer {
-			other += "（同 IP）"
 		}
 		table.Rows = append(table.Rows, []string{
 			"IPv" + family,
@@ -170,13 +172,18 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	behind := best.Mapped.IP != best.LocalAddr.IP
 	category, categoryNote := natCategory(*best, behind)
+	categoryCode := natCategoryCode(*best, behind)
+	behindValue := "no"
+	if behind {
+		behindValue = "yes"
+	}
 
 	result.Fields = []model.Field{
 		{Key: "ip_version", Label: "协议族", Value: "IPv" + family},
-		{Key: "nat_category", Label: "NAT 类型", Value: category},
+		{Key: "nat_category", Label: "NAT 类型", Value: categoryCode},
 		{Key: "mapped_address", Label: "公网映射地址", Value: best.Mapped.String(), Sensitive: true},
 		{Key: "local_address", Label: "本地出口地址", Value: best.LocalAddr.String(), Sensitive: true},
-		{Key: "behind_nat", Label: "位于 NAT 之后", Value: yesNo(behind)},
+		{Key: "behind_nat", Label: "位于 NAT 之后", Value: behindValue},
 		{Key: "mapping_behaviour", Label: "映射行为", Value: best.Mapping},
 		{Key: "filtering_behaviour", Label: "过滤行为", Value: best.Filtering},
 		{Key: "stun_server", Label: "判定所用服务器", Value: best.Server.Name},
@@ -185,7 +192,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Measurements = []model.Measurement{
 		{
 			Key: "udp_stun_reachable", Label: "STUN 可达",
-			Value: 1, Unit: "项", Display: "是",
+			Value: 1, Unit: "项", Display: "probe.nat.boolean.yes",
 			Method: "stun-binding-rfc5389-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
@@ -222,12 +229,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 	}
 	result.Summary = category
-	if best.Mapping != mappingUnknown {
-		result.Summary += " · 映射" + best.Mapping
-	}
-	if best.FilteringTested {
-		result.Summary += " · 过滤" + best.Filtering
-	}
 	result.Finish(start)
 	return result
 }
@@ -372,6 +373,30 @@ func natCategory(finding natFinding, behind bool) (string, string) {
 		return "位于 NAT 之后（类型未判定）",
 			"确认存在 NAT，但本次 STUN 服务器不具备判定映射行为所需的第二个 IP，" +
 				"无法给出 NAT 等级。"
+	}
+}
+
+// natCategoryCode is the language-independent classification stored in fields.
+func natCategoryCode(finding natFinding, behind bool) string {
+	if !behind {
+		return "public"
+	}
+	switch finding.Mapping {
+	case mappingAddressDependent, mappingAddressPortDependent:
+		return "symmetric"
+	case mappingEndpointIndependent:
+		switch finding.Filtering {
+		case filteringEndpointIndependent:
+			return "full_cone"
+		case filteringAddressDependent:
+			return "restricted_cone"
+		case filteringAddressPortDependent:
+			return "port_restricted"
+		default:
+			return "cone_unknown_filtering"
+		}
+	default:
+		return "unknown"
 	}
 }
 

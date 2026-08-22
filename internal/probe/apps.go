@@ -143,10 +143,10 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			if item.Reachable || item.Detail != "" {
 				validAttempts++
 			}
-			status := "不可达"
+			status := "unreachable"
 			detail := item.Detail
 			if item.Reachable {
-				status = "可达"
+				status = "reachable"
 				detail = formatMilliseconds(item.Latency)
 				reachable++
 				if category.Key == appCategoryTelegram.Key && (telegramBest == 0 || item.Latency < telegramBest) {

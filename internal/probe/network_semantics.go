@@ -39,9 +39,10 @@ func stabilizeNATResult(result *model.Result) {
 		case "filtering_behaviour":
 			field.Value = natBehaviorKey(field.Value, true)
 		case "behind_nat":
-			if field.Value == "是" {
+			switch field.Value {
+			case "yes":
 				field.Value = "probe.nat.boolean.yes"
-			} else if field.Value == "否" {
+			case "no":
 				field.Value = "probe.nat.boolean.no"
 			}
 		}
@@ -66,13 +67,13 @@ func stabilizeNATResult(result *model.Result) {
 			}
 			row[3] = natBehaviorKey(row[3], false)
 			row[4] = natBehaviorKey(row[4], true)
-			switch {
-			case row[6] == "完成":
+			switch row[6] {
+			case "complete":
 				row[6] = "probe.nat.status.complete"
-			case row[6] == "UDP 无响应":
+			case "udp_blocked":
 				row[6] = "probe.nat.status.udp_blocked"
-			case strings.HasPrefix(row[6], "失败："):
-				row[6] = "probe.nat.status.failed " + strings.TrimPrefix(row[6], "失败：")
+			case "failed":
+				row[6] = "probe.nat.status.failed"
 			}
 		}
 	}
@@ -115,20 +116,20 @@ func natBehaviorKey(value string, filtering bool) string {
 }
 
 func natCategoryKey(value string) string {
-	switch {
-	case strings.HasPrefix(value, "公网直连"):
+	switch value {
+	case "public":
 		return "probe.nat.category.public"
-	case strings.HasPrefix(value, "对称型 NAT"):
+	case "symmetric":
 		return "probe.nat.category.symmetric"
-	case strings.HasPrefix(value, "全锥型 NAT"):
+	case "full_cone":
 		return "probe.nat.category.full_cone"
-	case strings.HasPrefix(value, "受限锥型 NAT"):
+	case "restricted_cone":
 		return "probe.nat.category.restricted_cone"
-	case strings.HasPrefix(value, "端口受限锥型 NAT"):
+	case "port_restricted":
 		return "probe.nat.category.port_restricted"
-	case strings.HasPrefix(value, "锥型 NAT"):
+	case "cone_unknown_filtering":
 		return "probe.nat.category.cone_unknown_filtering"
-	case strings.HasPrefix(value, "位于 NAT 之后"):
+	case "unknown":
 		return "probe.nat.category.unknown"
 	default:
 		return value
@@ -209,9 +210,9 @@ func stabilizeAppsResult(result *model.Result) {
 				continue
 			}
 			switch row[3] {
-			case "可达":
+			case "reachable":
 				row[3] = "probe.apps.status.reachable"
-			case "不可达":
+			case "unreachable":
 				row[3] = "probe.apps.status.unreachable"
 			}
 		}
