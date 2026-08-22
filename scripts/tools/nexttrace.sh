@@ -12,5 +12,12 @@ ecs_tool_smoke_nexttrace() {
 }
 
 ecs_tool_build_nexttrace() {
+	local expected_sha actual_sha
+	expected_sha=$(jq -er --arg arch "$arch" '
+		.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256[$arch] // empty
+	' "$ECS_LOCK_FILE") || die "tools lock has no NextTrace Tiny digest for $arch"
+	actual_sha=$(sha256sum "$nexttrace_download" | awk '{print $1}')
+	[[ "$actual_sha" == "$expected_sha" ]] ||
+		die "NextTrace Tiny $arch digest disagrees with tools lock: expected $expected_sha, got $actual_sha"
 	cp "$nexttrace_download" "$stage/bin/nexttrace-tiny"
 }

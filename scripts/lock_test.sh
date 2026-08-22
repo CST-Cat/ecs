@@ -24,6 +24,10 @@ jq -e '
   ([.tools[].name] | length == 10 and length == (unique | length)) and
   (all(.tools[]; (.name | length > 0) and (.upstream | startswith("http")))) and
   (all(.tools[] | select(.repository != null); (.tag | length > 0) and (.commit | test("^[0-9a-f]{40}$")))) and
+  ((.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256) as $digests |
+    ($digests | type == "object") and
+    (($digests | keys | sort) == ([.architectures[].package] | sort)) and
+    (all($digests[]; test("^[0-9a-f]{64}$")))) and
   (.corpus.name == "ecs-silesia-v1.corpus") and
   (.corpus.bytes == 211938580) and
   (.corpus.sha256 | test("^[0-9a-f]{64}$")) and

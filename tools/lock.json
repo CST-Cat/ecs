@@ -81,7 +81,16 @@
       "version": "1.7.1",
       "tag": "v1.7.1",
       "commit": "c9919828fcd8c3103827d08bb26d69e9bf538299",
-      "asset_pattern": "nexttrace-tiny_linux_<architecture>"
+      "asset_pattern": "nexttrace-tiny_linux_<architecture>",
+      "asset_sha256": {
+        "amd64": "093849f1012b065c29d307b8e47fedec667206829c14e105f83a852f60c628d1",
+        "arm64": "8b134f6c6a7864b1ecc98b1f7cfae1d058ef6dcf8f0da862e3260752ce1858bd",
+        "armv7": "71014f2707372cee22ab80f546aa6cff79d869faab0fb516005e8bb0e2d2f000",
+        "386": "ae188b8f4fb3f5fec70ddf4cf5adc4391d9536698ed29c0d4f25b3b4dd29ca34",
+        "s390x": "64c80d850b06d09bfc1b154fabef90a7fdcf6856f5d0236877ab47ed12d359fb",
+        "riscv64": "0bd74a31f399c799446670716d0a2c372dbc0909bc591af72961e6afde415912",
+        "ppc64le": "a09d7a689ac53a6aac50378e9bbd0cac8dc16bfcdfa98941a14780417a2513d2"
+      }
     },
     {
       "name": "ping",
