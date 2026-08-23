@@ -28,13 +28,21 @@ func TestResultLifecycleFailuresAndSummaries(t *testing.T) {
 	}
 
 	skipped := NewResult("skip", "Skip")
-	skipped.Skip("offline")
-	if skipped.Status != StatusSkipped || skipped.Summary != "offline" {
+	skipMessage := NewMessage("message.runner.skip.offline")
+	skipped.Skip(skipMessage)
+	if skipped.Status != StatusSkipped || !reflect.DeepEqual(skipped.SummaryMessages, []Message{skipMessage}) {
 		t.Fatalf("skipped result = %+v", skipped)
+	}
+	argResult := NewResult("skip-args", "Skip args")
+	argMessage := NewMessage("message.notice.egressShared", "shared discovery")
+	argResult.Skip(argMessage)
+	argMessage.Args[0] = "mutated"
+	if argResult.SummaryMessages[0].Args[0] != "shared discovery" {
+		t.Fatal("Skip retained a shared Message argument slice")
 	}
 	failed := NewResult("fail", "Fail")
 	failed.Fail(errors.New("broken"))
-	if failed.Status != StatusError || failed.Error != "broken" || failed.Summary != "" || !reflect.DeepEqual(failed.SummaryMessages, []Message{{Key: "message.result.failed"}}) {
+	if failed.Status != StatusError || failed.Error != "broken" || !reflect.DeepEqual(failed.SummaryMessages, []Message{{Key: "message.result.failed"}}) {
 		t.Fatalf("failed result = %+v", failed)
 	}
 
@@ -54,10 +62,59 @@ func TestResultLifecycleFailuresAndSummaries(t *testing.T) {
 			report := Report{Results: test.results}
 			Summarize(&report)
 			got := report.Summary
-			if got.Status != test.status || got.OK != test.ok || got.Warnings != test.warnings || got.Skipped != test.skipped || got.Errors != test.errors || got.Headline != "" || !reflect.DeepEqual(got.Messages, test.messages) {
+			if got.Status != test.status || got.OK != test.ok || got.Warnings != test.warnings || got.Skipped != test.skipped || got.Errors != test.errors || !reflect.DeepEqual(got.Messages, test.messages) {
 				t.Fatalf("summary = %+v", got)
 			}
 		})
+	}
+}
+
+func TestReportJSONUsesOnlyStructuredSummaryMessages(t *testing.T) {
+	report := Report{
+		Summary: Summary{Status: StatusWarning, Messages: []Message{NewMessage("message.summary.withWarnings", 1, 1)}},
+		Results: []Result{{ID: "demo", Status: StatusWarning, SummaryMessages: []Message{NewMessage("message.test", "value")}}},
+	}
+	content, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(content, &object); err != nil {
+		t.Fatal(err)
+	}
+	summaryObject, ok := object["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("report summary object missing: %s", content)
+	}
+	if _, ok := summaryObject["messages"]; !ok {
+		t.Fatalf("structured global summary messages missing: %s", content)
+	}
+	if _, ok := summaryObject["headline"]; ok {
+		t.Fatalf("legacy headline serialized: %s", content)
+	}
+	results, ok := object["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results missing: %s", content)
+	}
+	resultObject, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("result object missing: %s", content)
+	}
+	if _, ok := resultObject["summary"]; ok {
+		t.Fatalf("legacy result summary serialized: %s", content)
+	}
+	if _, ok := resultObject["summary_messages"]; !ok {
+		t.Fatalf("structured result summary missing: %s", content)
+	}
+}
+
+func TestLegacySummaryInputIsIgnoredWithoutCompatibilityFields(t *testing.T) {
+	var report Report
+	if err := json.Unmarshal([]byte(`{"summary":{"headline":"legacy"},"results":[{"id":"demo","summary":"legacy"}]}`), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Summary.Messages) != 0 || len(report.Results) != 1 || len(report.Results[0].SummaryMessages) != 0 {
+		t.Fatalf("legacy summary input affected structured state: %+v", report)
 	}
 }
 

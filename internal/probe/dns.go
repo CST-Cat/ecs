@@ -56,7 +56,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	attempts := env.Config.DNSAttempts
 	resolvers := endpointsForIPVersion(env.Config.DNSResolvers, env.Config.IPVersion)
 	if len(resolvers) == 0 {
-		result.Skip("没有匹配当前协议族的 DNS 解析器")
+		result.Skip(model.NewMessage("probe.dns.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, 0, "query")
 		result.Notes = append(result.Notes, "当前协议族没有可用的字面量 DNS 解析器；请用 --dns-resolvers 提供对应协议族的 host:port。")
 		result.Finish(start)
@@ -110,7 +110,6 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		NumericColumns:        []int{3, 4, 5},
 		NumericHigherIsBetter: []bool{false, false, false},
 	}
-	var bestName string
 	var best time.Duration
 	allFailed := true
 	validQueries := 0
@@ -130,7 +129,6 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 			allFailed = false
 			if best == 0 || median < best {
 				best = median
-				bestName = item.Endpoint.Name
 			}
 			if item.Failures > 0 {
 				status = dnsStatusPartial
@@ -182,7 +180,6 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Evidence = model.NewEvidence(validQueries, len(collected)*attempts, "query")
 	if allFailed {
 		result.Status = model.StatusWarning
-		result.Summary = "所有公共 DNS 查询均失败"
 		result.Notes = append(result.Notes, "UDP/53 可能被防火墙拦截；系统 DNS 仍可能通过其他协议工作。")
 	} else {
 		result.Measurements = append(result.Measurements, model.Measurement{
@@ -190,7 +187,6 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
 			Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 		})
-		result.Summary = fmt.Sprintf("%s 最快 · P50 %s", bestName, formatMilliseconds(best))
 	}
 	result.Notes = append(result.Notes, "查询域名固定为 "+dnsQueryName+"；每个解析器先发一次不计入统计的预热查询，随后的样本反映缓存命中后的稳态 UDP/53 往返，不等同于系统解析器体验。")
 	result.Finish(start)

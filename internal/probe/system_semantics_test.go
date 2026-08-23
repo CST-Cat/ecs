@@ -119,8 +119,8 @@ func TestSystemDirectBuilderUsesSingleStableShape(t *testing.T) {
 		result.Methodology.ComparisonScope != "probe.system.comparison_scope" {
 		t.Fatalf("system identity = %+v", result)
 	}
-	if result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.system.summary" {
-		t.Fatalf("system summary = %q/%+v", result.Summary, result.SummaryMessages)
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.system.summary" {
+		t.Fatalf("system summary = %+v", result.SummaryMessages)
 	}
 	for _, key := range []string{
 		result.Title, result.Description, result.Methodology.Label, result.Methodology.Engine,
@@ -271,7 +271,7 @@ func TestSystemBuiltinUsesDirectProbeAndLiveResultHasNoDuplicateFacts(t *testing
 		t.Fatalf("systemProbe builtin count = %d", systemCount)
 	}
 	result := (systemProbe{}).Run(context.Background(), Environment{})
-	if result.Title != "module.system.title" || result.Summary != "" || len(result.SummaryMessages) != 1 {
+	if result.Title != "module.system.title" || len(result.SummaryMessages) != 1 {
 		t.Fatalf("live direct system result = %+v", result)
 	}
 	fields := make(map[string]bool, len(result.Fields))

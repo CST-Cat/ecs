@@ -85,7 +85,7 @@ type textRenderer struct {
 	section      int
 	subsectionNo int
 	version      string
-	headline     string
+	summaryText  string
 }
 
 func normalizeTextWidth(width int) int {
@@ -121,7 +121,7 @@ func adaptiveBarWidth(reportWidth, preferred int) int {
 
 func (r *textRenderer) render(data model.Report) string {
 	r.version = data.Tool.Version
-	r.headline = reportHeadline(data.Summary)
+	r.summaryText = reportSummaryText(data.Summary)
 	r.moduleNavigation(data)
 	r.header(data)
 	for _, result := range data.Results {
@@ -166,8 +166,8 @@ func (r *textRenderer) header(data model.Report) {
 	r.centeredStyled(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")), r.palette.Dim)
 	r.centeredStyled(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")), r.palette.Info)
 	r.centeredStyled(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")), r.palette.Info)
-	if headline := reportHeadline(data.Summary); headline != "" {
-		r.centeredStyled(metaLabel("报告状态", headline, "Report status", headline), r.statusStyle(data.Summary.Status))
+	if summaryText := reportSummaryText(data.Summary); summaryText != "" {
+		r.centeredStyled(metaLabel("报告状态", summaryText, "Report status", summaryText), r.statusStyle(data.Summary.Status))
 	}
 	exposure := fallbackReport(data.Run.Exposure, "local")
 	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
@@ -586,7 +586,7 @@ func (r *textRenderer) result(result model.Result) {
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
 	status := statusIcon(result.Status) + " " + statusLabel(result.Status)
-	if summary := resultSummary(result); summary != "" && strings.TrimSpace(summary) != strings.TrimSpace(r.headline) {
+	if summary := resultSummary(result); summary != "" && strings.TrimSpace(summary) != strings.TrimSpace(r.summaryText) {
 		status += " · " + summary
 	}
 	if result.Status != model.StatusOK || result.Error != "" {

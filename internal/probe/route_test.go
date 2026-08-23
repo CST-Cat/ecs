@@ -59,7 +59,7 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 	}
 	result := (routeProbe{}).Run(context.Background(), routeTestEnvironment(targets, config.IPVersionAuto))
 
-	if result.Title != "module.route.title" || result.Description != "probe.route.description" || result.Summary != "" {
+	if result.Title != "module.route.title" || result.Description != "probe.route.description" {
 		t.Fatalf("route presentation fields = %#v", result)
 	}
 	if result.Methodology.Kind != "protocol-measurement" || result.Methodology.Label != "methodology.protocol-measurement" ||
@@ -175,7 +175,7 @@ func TestRouteProducerSkipReasonsAreStructured(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		targets := []config.Endpoint{{Name: "One", Address: "203.0.113.1"}, {Name: "Two", Address: "198.51.100.1"}}
 		result := (routeProbe{}).Run(context.Background(), routeTestEnvironment(targets, config.IPVersionAuto))
-		if result.Status != model.StatusSkipped || result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.route.summary.tool_missing" {
+		if result.Status != model.StatusSkipped || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.route.summary.tool_missing" {
 			t.Fatalf("tool-missing route = %#v", result)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 2 {
@@ -191,7 +191,7 @@ func TestRouteProducerSkipReasonsAreStructured(t *testing.T) {
 		writeRouteFixtureBinary(t)
 		targets := []config.Endpoint{{Name: "IPv4", Address: "203.0.113.1"}}
 		result := (routeProbe{}).Run(context.Background(), routeTestEnvironment(targets, config.IPVersion6))
-		if result.Status != model.StatusSkipped || result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.route.summary.no_targets" {
+		if result.Status != model.StatusSkipped || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.route.summary.no_targets" {
 			t.Fatalf("no-target route = %#v", result)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 0 || len(result.Failures) != 0 {

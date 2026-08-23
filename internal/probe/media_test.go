@@ -274,7 +274,7 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 		UserAgent:  "media-fixture",
 	}
 	result := (mediaProbe{}).Run(context.Background(), env)
-	if result.Title != "module.media.title" || result.Description != "probe.media.description" || result.Summary != "" || len(result.SummaryMessages) != 1 {
+	if result.Title != "module.media.title" || result.Description != "probe.media.description" || len(result.SummaryMessages) != 1 {
 		t.Fatalf("media result presentation contract = %+v", result)
 	}
 	if result.SummaryMessages[0].Key != "probe.media.summary.values" || len(result.SummaryMessages[0].Args) != 4 {

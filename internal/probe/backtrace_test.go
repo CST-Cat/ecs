@@ -211,7 +211,7 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 	}
 	runtime.BacktraceTargets = backtraceFixtureTargets()
 	result := (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime})
-	if result.Title != "module.backtrace.title" || result.Description != "probe.backtrace.description" || result.Summary != "" || len(result.SummaryMessages) != 1 {
+	if result.Title != "module.backtrace.title" || result.Description != "probe.backtrace.description" || len(result.SummaryMessages) != 1 {
 		t.Fatalf("direct result shape = %+v", result)
 	}
 	if result.SummaryMessages[0].Key != "probe.backtrace.summary.values" || !reflect.DeepEqual(result.SummaryMessages[0].Args, []string{"2", "9"}) {
@@ -357,8 +357,8 @@ func TestBacktraceProducerDirectShapeContract(t *testing.T) {
 		t.Fatalf("sources = %#v", result.Sources)
 	}
 	wantNotes := []string{"probe.backtrace.note.active_path", "probe.backtrace.note.signature_scope", "probe.backtrace.note.cn2_variant_inference", "probe.backtrace.note.ipv6_targets", "probe.backtrace.note.unidentified", "probe.backtrace.note.parse_failed"}
-	if !reflect.DeepEqual(result.Notes, wantNotes) || result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.backtrace.summary.values" || !reflect.DeepEqual(result.SummaryMessages[0].Args, []string{"2", "9"}) {
-		t.Fatalf("notes/summary = %#v/%#v/%q", result.Notes, result.SummaryMessages, result.Summary)
+	if !reflect.DeepEqual(result.Notes, wantNotes) || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.backtrace.summary.values" || !reflect.DeepEqual(result.SummaryMessages[0].Args, []string{"2", "9"}) {
+		t.Fatalf("notes/summary = %#v/%#v", result.Notes, result.SummaryMessages)
 	}
 	wantRawOutputs := backtraceFixtureRawOutputs()
 	if len(result.TextBlocks) != len(wantRawOutputs) {

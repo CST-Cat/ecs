@@ -80,7 +80,6 @@ func stabilizeSpeedResult(result *model.Result) {
 		"probe.speed.note.raw_values",
 		"probe.speed.note.udp_scope",
 	}
-	result.Summary = ""
 	switch {
 	case firstFailureAt(result, "tool_lookup") != nil:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.tool_missing")}
@@ -218,7 +217,6 @@ func stabilizeCNSpeedResult(result *model.Result) {
 		"probe.cnspeed.note.scope",
 		"probe.cnspeed.note.ookla_registry",
 	}
-	result.Summary = ""
 	if result.Status == model.StatusSkipped {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.cnspeed.summary.skipped")}
 	} else if len(result.Measurements) == 0 {
@@ -340,7 +338,6 @@ func stabilizeOoklaResult(result *model.Result, runtime config.Runtime) {
 		"probe.ookla.note.no_raw_json",
 		"probe.ookla.note.traffic",
 	}
-	result.Summary = ""
 	switch {
 	case result.Status == model.StatusSkipped:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.ookla.summary.skipped")}

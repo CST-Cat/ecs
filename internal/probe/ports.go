@@ -136,7 +136,6 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		"probe.ports.note.handshake_only",
 		"probe.ports.note.failure_scope",
 	)
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.ports.summary", openCount, len(targets), emailOpen)}
 	result.Finish(start)
 	return result

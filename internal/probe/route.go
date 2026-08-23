@@ -51,7 +51,6 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.tool_missing")}
 		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: routeEngineTiny, Count: 1})
 		result.Evidence = model.NewEvidence(0, len(env.Config.RouteTargets), "target")
@@ -62,7 +61,6 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	targets := endpointsForIPVersion(env.Config.RouteTargets, env.Config.IPVersion)
 	if len(targets) == 0 {
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.no_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Notes = []string{"probe.route.note.no_targets"}
@@ -167,7 +165,6 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	if parseFailed {
 		result.Notes = append(result.Notes, "probe.route.note.parse_failed")
 	}
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.values", validTraces, len(targets))}
 	result.Finish(start)
 	return result

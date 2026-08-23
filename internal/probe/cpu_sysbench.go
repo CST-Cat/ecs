@@ -54,7 +54,6 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "probe.cpu.comparison_scope.tool_missing",
 	}
 	result.Status = model.StatusWarning
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.tool_missing")}
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "sysbench", Count: 1, Message: "executable not found"})
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
@@ -183,7 +182,6 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 		result.Notes = append(result.Notes, "probe.cpu.note.load")
 	}
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
-	result.Summary = ""
 	if singleCore && multi.Rate > 0 {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.single_core", model.FormatRate(single.Rate, "events/s"))}
 	} else if multi.Rate > 0 {

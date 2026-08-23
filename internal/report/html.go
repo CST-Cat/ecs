@@ -34,7 +34,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"t":             i18n.T,
 		"display":       displayReportText,
-		"headline":      reportHeadline,
+		"summaryText":   reportSummaryText,
 		"resultSummary": resultSummary,
 		"message":       renderMessage,
 		"htmlLang":      reportHTMLLanguage,
@@ -216,7 +216,7 @@ const htmlTemplate = `<!doctype html>
     .methodology { margin: 14px 0 0; padding: 11px 13px; border-left: 3px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--panel) 93%, var(--accent)); }
     .methodology strong { color: var(--accent); }
     .ok { color: var(--ok); } .warning { color: var(--warn); } .error { color: var(--error); } .skipped { color: var(--skip); }
-    .headline { margin: 16px 0 0; font-size: 17px; font-weight: 650; }
+    .summary-text { margin: 16px 0 0; font-size: 17px; font-weight: 650; }
     .evidence { display: grid; grid-template-columns: minmax(130px,auto) minmax(120px,320px); align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 13px; }
 		.failure-kind { font-weight: 750; color: var(--error); }
 		.retryable { color: var(--warn); font-weight: 650; }
@@ -279,7 +279,7 @@ const htmlTemplate = `<!doctype html>
 <main>
   <header class="hero">
     <h1>{{t "report.title"}}</h1>
-    <p>{{statusIcon .Summary.Status}} {{headline .Summary}} · {{t "report.local"}}</p>
+    <p>{{statusIcon .Summary.Status}} {{summaryText .Summary}} · {{t "report.local"}}</p>
     <div class="hero-meta">
       <span class="pill">{{t "report.reportID"}} {{.Run.ID}}</span>
       <span class="pill">{{t "report.profile"}}: {{.Run.Profile}}</span>
@@ -314,7 +314,7 @@ const htmlTemplate = `<!doctype html>
       {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{display .Methodology.ComparisonScope}}</div>{{end}}
     </div>
     {{end}}
-    {{if resultSummary .}}<p class="headline">{{resultSummary .}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
+    {{if resultSummary .}}<p class="summary-text">{{resultSummary .}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
     {{if .Error}}<p class="error">{{t "report.errorPrefix"}}{{t "punct.colon"}}{{.Error}}</p>{{end}}
     {{if .Evidence}}<div class="evidence"><strong style="color:{{evidenceLabelColor .Evidence}}">{{t "report.evidence"}}{{t "punct.colon"}}{{evidenceText .Evidence}}</strong><div class="bar"><i style="width:{{barWidth (evidenceRatio .Evidence)}}%;background:{{evidenceColor .Evidence}}"></i></div></div>{{end}}
 		{{if .Failures}}

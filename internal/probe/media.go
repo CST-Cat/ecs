@@ -130,7 +130,6 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		},
 	}
 	result.Evidence = model.NewEvidence(total-unknown, total, "target")
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{
 		model.NewMessage("probe.media.summary.values", unlocked, total, locked, unknown),
 	}

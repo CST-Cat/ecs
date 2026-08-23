@@ -102,7 +102,6 @@ func stabilizeNATResult(result *model.Result) {
 		result.Sources[index].Purpose = "probe.nat.source.rfc"
 	}
 	result.Notes = stableNATNotes(*result)
-	result.Summary = ""
 	switch {
 	case result.Status == model.StatusSkipped:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.nat.summary.skipped")}
@@ -243,7 +242,6 @@ func stabilizeAppsResult(result *model.Result) {
 		"probe.apps.note.service_scope",
 		"probe.apps.note.telegram_targets",
 	}
-	result.Summary = ""
 	if result.Status == model.StatusSkipped {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.apps.summary.skipped")}
 	} else {
@@ -331,7 +329,6 @@ func stabilizeBlacklistResult(result *model.Result) {
 			result.Notes = append(result.Notes, note)
 		}
 	}
-	result.Summary = ""
 	if result.Status == model.StatusSkipped {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.skipped")}
 	} else {
@@ -414,7 +411,6 @@ func stabilizeBGPResult(result *model.Result) {
 		"probe.bgp.note.as_path_scope",
 		"probe.bgp.note.no_observation",
 	}
-	result.Summary = ""
 	observed := 0
 	if len(result.Measurements) > 0 {
 		observed = int(result.Measurements[0].Value)

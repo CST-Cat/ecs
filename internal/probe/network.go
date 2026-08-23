@@ -393,7 +393,6 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	if proxyEnvironmentEnabled() {
 		result.Notes = append(result.Notes, "probe.network.note.proxy_fallback")
 	}
-	result.Summary = ""
 	result.SummaryMessages = summaryMessages
 	result.Finish(start)
 	return result

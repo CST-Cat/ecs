@@ -74,7 +74,6 @@ func buildSystemResult(start time.Time, snapshot systemSnapshot, resources Envir
 	result.Tables = append(result.Tables, systemPressureTable(resources))
 
 	result.Notes = stableSystemNotes(snapshot, hardware)
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage(
 		"probe.system.summary",
 		strconv.Itoa(snapshot.LogicalCPUs),

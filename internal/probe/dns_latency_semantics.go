@@ -67,7 +67,6 @@ func stabilizeDNSResult(result *model.Result) {
 		}
 	}
 	result.Notes = []string{"probe.dns.note.warmup", "probe.dns.note.udp_scope"}
-	result.Summary = ""
 	switch {
 	case result.Status == model.StatusSkipped:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.dns.summary.skipped")}
@@ -165,7 +164,6 @@ func stabilizeLatencyResult(result *model.Result, targets []config.Endpoint) {
 	if _, ok := fieldByKey(*result, "tcp_intercepted_targets"); ok {
 		result.Notes = append(result.Notes, "probe.latency.note.intercepted")
 	}
-	result.Summary = ""
 	if result.Status == model.StatusSkipped {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.latency.summary.skipped")}
 	} else if result.Evidence != nil && result.Evidence.Valid == 0 && result.Evidence.Expected > 0 {

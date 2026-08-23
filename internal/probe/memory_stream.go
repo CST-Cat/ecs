@@ -422,30 +422,6 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 
 	result.Tables = append(result.Tables, streamMemoryTable(runs), streamStabilityTable(runs))
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
-	summary := make([]string, 0, 4)
-	if singleCore {
-		for _, kernel := range []string{"Copy", "Triad"} {
-			if sample, ok := runs[0].Sample.Samples[kernel]; ok && sample.RateMiBS > 0 {
-				summary = append(summary, fmt.Sprintf("%s 1T/NT（同一次实测）%s", kernel, model.FormatRate(sample.RateMiBS, "MiB/s")))
-			}
-		}
-	} else {
-		for _, item := range measurementOrder[:4] {
-			run := runs[item.run]
-			if sample, ok := run.Sample.Samples[item.kernel]; ok && sample.RateMiBS > 0 {
-				threadLabel := "1T"
-				if run.Context == "nt" {
-					threadLabel = fmt.Sprintf("NT(%dT)", run.Threads)
-				}
-				summary = append(summary, fmt.Sprintf("%s %s %s", item.kernel, threadLabel, model.FormatRate(sample.RateMiBS, "MiB/s")))
-			}
-		}
-	}
-	if len(summary) == 0 {
-		result.Summary = "STREAM 未产出有效带宽"
-	} else {
-		result.Summary = "STREAM " + strings.Join(summary, " · ")
-	}
 	result.Finish(start)
 	return result
 }

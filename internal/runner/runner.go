@@ -221,14 +221,12 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.offline")}
 		result.Finish(start)
 	} else if !networkRunnable && needsNetwork {
 		start := time.Now()
 		result = model.NewResult(item.ID(), item.Title())
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
 	} else {
@@ -325,7 +323,6 @@ func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (resu
 			result = model.NewResult(item.ID(), item.Title())
 			result.Status = model.StatusError
 			result.Error = fmt.Sprint(recovered)
-			result.Summary = ""
 			result.SummaryMessages = []model.Message{model.NewMessage("message.runner.panic")}
 			result.AddFailure(model.Failure{
 				Category: model.FailureUnknown, Stage: "panic", Target: item.ID(),

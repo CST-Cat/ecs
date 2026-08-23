@@ -106,8 +106,8 @@ func TestFailureConstructorsAndEnsureResult(t *testing.T) {
 	}{
 		{name: "error summary", result: model.Result{ID: "system", Status: model.StatusError, Error: "connection refused"}, wantCount: 1, wantClass: model.FailureConnectionRefused},
 		{name: "warning note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}, wantCount: 1, wantClass: model.FailureParse},
-		{name: "warning summary", result: model.Result{ID: "latency", Status: model.StatusWarning, Summary: "timeout waiting for service"}, wantCount: 1, wantClass: model.FailureTimeout},
-		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning, Summary: "behind NAT"}, wantNoAdd: true},
+		{name: "warning without error or note", result: model.Result{ID: "latency", Status: model.StatusWarning}, wantNoAdd: true},
+		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}, wantNoAdd: true},
 		{name: "existing failure", result: model.Result{ID: "disk", Status: model.StatusError, Error: "permission denied", Failures: []model.Failure{{Category: model.FailurePermissionDenied, Count: 2}}}, wantCount: 1, wantClass: model.FailurePermissionDenied},
 	}
 	for _, test := range cases {

@@ -179,9 +179,6 @@ func EnsureResult(result *model.Result) {
 		return
 	}
 	message := strings.TrimSpace(result.Error)
-	if message == "" {
-		message = strings.TrimSpace(result.Summary)
-	}
 	if result.Status == model.StatusError {
 		result.AddFailure(FromMessage("module", result.ID, message))
 		return

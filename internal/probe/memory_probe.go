@@ -41,7 +41,6 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	appendMemoryInventory(&result, memory, balloon, ksm)
 	result.Status = model.StatusWarning
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.memory.stream_missing")}
 	result.AddFailure(model.Failure{
 		Category: model.FailureToolMissing,

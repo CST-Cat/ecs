@@ -19,18 +19,12 @@ func displayReportText(value string) string {
 	return value
 }
 
-func reportHeadline(summary model.Summary) string {
-	if len(summary.Messages) > 0 {
-		return renderMessages(summary.Messages)
-	}
-	return displayReportText(summary.Headline)
+func reportSummaryText(summary model.Summary) string {
+	return renderMessages(summary.Messages)
 }
 
 func resultSummary(result model.Result) string {
-	if len(result.SummaryMessages) > 0 {
-		return renderMessages(result.SummaryMessages)
-	}
-	return displayReportText(result.Summary)
+	return renderMessages(result.SummaryMessages)
 }
 
 func displayMeasurement(measurement model.Measurement) model.Measurement {

@@ -192,10 +192,6 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	if reachable < total {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = fmt.Sprintf("%d/%d 可达", reachable, total)
-	if telegramBestName != "" {
-		result.Summary += " · Telegram 最近 " + telegramBestName
-	}
 	result.Finish(start)
 	return result
 }

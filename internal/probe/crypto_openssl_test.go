@@ -50,7 +50,7 @@ func TestParseOpenSSLOutputAndErrors(t *testing.T) {
 	}
 }
 
-func TestOpenSSLMeasurementsTablesAndSummary(t *testing.T) {
+func TestOpenSSLMeasurementsAndTable(t *testing.T) {
 	spec := openSSLAlgorithmSpecs[0]
 	first := openSSLSpeedSample{Algorithm: spec.Key, Workers: 1, Duration: 5, BlockBytes: 16384, ThroughputBPS: 4_000_000_000, ThroughputMBPS: 4000}
 	second := openSSLSpeedSample{Algorithm: spec.Key, Workers: 2, Duration: 5, BlockBytes: 16384, ThroughputBPS: 8_000_000_000, ThroughputMBPS: 8000}
@@ -66,13 +66,10 @@ func TestOpenSSLMeasurementsTablesAndSummary(t *testing.T) {
 	if table.Key != "benchmark.openssl.results" || len(table.ColumnKeys) != len(table.Columns) || len(table.Rows) != 2 || table.Rows[1][5] == "—" {
 		t.Fatalf("OpenSSL result table = %+v", table)
 	}
-	if summary := openSSLSummary([]openSSLAlgorithmSpec{spec}, runs, 2); !strings.Contains(summary, "AES-256-GCM") || !strings.Contains(summary, "×") {
-		t.Fatalf("OpenSSL summary = %q", summary)
-	}
 	singleRuns := map[string][]openSSLSpeedSample{spec.Key: {first, first}}
 	single := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, singleRuns, 1)
-	if single.Rows[0][5] != "不适用" || !strings.Contains(openSSLSummary([]openSSLAlgorithmSpec{spec}, singleRuns, 1), "1W/NW") {
-		t.Fatalf("single-core OpenSSL output = table:%v summary:%q", single.Rows[0], openSSLSummary([]openSSLAlgorithmSpec{spec}, singleRuns, 1))
+	if single.Rows[0][5] != "不适用" {
+		t.Fatalf("single-core OpenSSL output = table:%v", single.Rows[0])
 	}
 	partialRuns := map[string][]openSSLSpeedSample{spec.Key: {first, {}}}
 	partialResult := model.NewResult("crypto", "crypto")
@@ -83,8 +80,5 @@ func TestOpenSSLMeasurementsTablesAndSummary(t *testing.T) {
 	partial := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, partialRuns, 2)
 	if partial.Rows[1][4] != "—" {
 		t.Fatalf("partial OpenSSL output = %+v", partial.Rows[1])
-	}
-	if got := openSSLSummary([]openSSLAlgorithmSpec{spec}, nil, 2); got != "OpenSSL speed 未产出有效密码学吞吐" {
-		t.Fatalf("empty OpenSSL summary = %q", got)
 	}
 }

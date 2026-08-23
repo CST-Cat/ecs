@@ -180,7 +180,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "当次查询结果；各名单收录标准与解除流程不同，不可合并计分",
 	}
 	if env.Config.IPVersion == config.IPVersion6 {
-		result.Skip("当前仅测试 IPv6；主流 DNSBL 仍以 IPv4 为主")
+		result.Skip(model.NewMessage("probe.blacklist.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
 		result.Notes = append(result.Notes,
 			"本次运行显式限制为 IPv6。绝大多数 DNS 黑名单只支持 IPv4，因此不会把 IPv6 强行映射成无意义的反向查询。")
@@ -191,7 +191,6 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	egressIP, err := env.Egress.IPFor(config.IPVersion4)
 	if err != nil {
 		result.Status = model.StatusWarning
-		result.Summary = "无法确定 IPv4 出口，未执行黑名单查询"
 		result.Notes = append(result.Notes, "黑名单查询需要先知道出口 IPv4；本次出口发现失败。")
 		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
 		result.Finish(start)
@@ -201,7 +200,6 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	prefix, ok := reverseIPv4(ip)
 	if !ok {
 		result.Status = model.StatusWarning
-		result.Summary = "出口不是 IPv4，主流 DNSBL 不支持"
 		result.Notes = append(result.Notes,
 			"绝大多数 DNS 黑名单只收录 IPv4；本机出口为 IPv6，本项无法给出结论。")
 		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
@@ -236,12 +234,10 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 		NumericHigherIsBetter: []bool{false},
 	}
 	listed, refused, failed := 0, 0, 0
-	var listedNames []string
 	for _, finding := range findings {
 		switch finding.Outcome {
 		case dnsblListed:
 			listed++
-			listedNames = append(listedNames, finding.Zone.Name)
 		case dnsblRefused:
 			refused++
 			result.AddFailure(model.Failure{
@@ -304,15 +300,11 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	switch {
 	case listed > 0:
 		result.Status = model.StatusWarning
-		result.Summary = fmt.Sprintf("被 %d/%d 个黑名单收录：%s", listed, len(zones), strings.Join(listedNames, "、"))
 		result.Notes = append(result.Notes,
 			"被主流黑名单收录会显著影响发信送达率；多数名单提供自助解除入口，"+
 				"但若该 IP 是被回收再分配的，解除后仍可能被再次收录。")
 	case refused == len(zones):
 		result.Status = model.StatusWarning
-		result.Summary = "全部名单拒绝查询，结论不可用"
-	default:
-		result.Summary = fmt.Sprintf("未被收录（%d/%d 个名单确认干净）", clean, len(zones))
 	}
 	result.Finish(start)
 	return result

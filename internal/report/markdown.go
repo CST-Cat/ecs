@@ -28,7 +28,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 	out.WriteString("> ")
 	out.WriteString(statusIcon(data.Summary.Status))
 	out.WriteByte(' ')
-	out.WriteString(reportHeadline(data.Summary))
+	out.WriteString(reportSummaryText(data.Summary))
 	out.WriteString(i18n.T("punct.sentenceEnd") + i18n.T("report.local") + "\n\n")
 
 	out.WriteString("## " + i18n.T("report.overview") + "\n\n")

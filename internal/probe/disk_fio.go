@@ -381,12 +381,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "未能通过 fio --enghelp 确认可用 ioengine，已退回 psync；成绩仍然有效但队列深度受限。")
 	}
-	result.Summary = fmt.Sprintf("fio 写 %s · 读 %s · 4K 读/写 %s/%s",
-		formatMatrixRate(seqWrite, "MiB/s"),
-		formatMatrixRate(seqRead, "MiB/s"),
-		formatMatrixRate(randomRead, "IOPS"),
-		formatMatrixRate(randomWrite, "IOPS"),
-	)
 	result.Finish(start)
 	return result
 }

@@ -192,7 +192,8 @@ func (speedProbe) Title() string      { return "网络吞吐" }
 func (speedProbe) NeedsNetwork() bool { return true }
 
 func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
-	if path, err := exec.LookPath("iperf3"); err == nil {
+	path, err := exec.LookPath("iperf3")
+	if err == nil {
 		return runIPerfSpeed(ctx, env, path)
 	}
 	start := time.Now()
@@ -205,8 +206,7 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 		ComparisonScope: "相同 iperf3 版本、节点、方向、并发流与时长",
 	}
 	result.Status = model.StatusWarning
-	result.Summary = "未找到 iperf3，标准网络吞吐基准未运行"
-	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "iperf3", Count: 1, Message: result.Summary})
+	addFailure(&result, "tool_lookup", "iperf3", err)
 	result.Evidence = model.NewEvidence(0, len(env.Config.IPerfTargets)*3, "operation")
 	result.Notes = append(result.Notes, "probe.speed.tool_missing")
 	result.Finish(start)
@@ -227,7 +227,6 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 
 	if len(env.Config.IPerfTargets) == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "未配置 iperf3 节点，标准网络吞吐基准未运行"
 		result.Evidence = model.NewEvidence(0, 0, "operation")
 		result.Finish(start)
 		return result
@@ -412,12 +411,6 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	)
 	result.Notes = append(result.Notes,
 		"UDP 列用 50 Mbps 固定码率跑 5 秒，测的是常态丢包与抖动而不是压满带宽后的拥塞表现；实时音视频与游戏体验主要取决于这两项。",
-	)
-	result.Summary = fmt.Sprintf(
-		"iperf3 完成 %d/%d 个节点方向 · 实际传输 %s",
-		completedDirections,
-		len(rows)*2,
-		model.FormatBytes(uint64(max64(transferred, 0))),
 	)
 	result.Finish(start)
 	return result

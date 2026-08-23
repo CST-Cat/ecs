@@ -16,15 +16,13 @@ func (r *Result) Finish(start time.Time) {
 	r.DurationMS = time.Since(start).Milliseconds()
 }
 
-func (r *Result) Skip(reason string) {
+func (r *Result) Skip(reason Message) {
 	r.Status = StatusSkipped
-	r.Summary = reason
-	r.SummaryMessages = nil
+	r.SummaryMessages = []Message{cloneMessage(reason)}
 }
 
 func (r *Result) Fail(err error) {
 	r.Status = StatusError
 	r.Error = err.Error()
-	r.Summary = ""
 	r.SummaryMessages = []Message{NewMessage("message.result.failed")}
 }

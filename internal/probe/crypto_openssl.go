@@ -65,7 +65,7 @@ func (cryptoProbe) NeedsNetwork() bool { return false }
 func (cryptoProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("openssl")
 	if err != nil {
-		return missingOpenSSLResult("未找到固定版本 OpenSSL，密码学基准未运行")
+		return missingOpenSSLResult(err)
 	}
 	return runOpenSSLSpeed(ctx, env, path, openSSLAlgorithmSpecs)
 }
@@ -80,17 +80,17 @@ func cryptoMethodology() model.Methodology {
 	}
 }
 
-func missingOpenSSLResult(summary string) model.Result {
+func missingOpenSSLResult(err error) model.Result {
 	start := time.Now()
 	result := model.NewResult("crypto", "服务器密码学性能")
 	result.Description = "独立的服务器密码学吞吐：AES-256-GCM、ChaCha20-Poly1305 与 SHA-256"
 	result.Methodology = cryptoMethodology()
 	result.Status = model.StatusWarning
-	result.Summary = summary
-	result.AddFailure(model.Failure{
-		Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl",
-		Count: 1, Message: summary,
-	})
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl", Count: 1, Message: message})
 	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
 		"probe.crypto.tool_missing",
@@ -113,10 +113,13 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 	versionOutput, version, versionErr := queryOpenSSLVersion(ctx, path)
 	if versionErr != nil || version != openSSLExpectedVersion {
 		result.Status = model.StatusWarning
-		result.Summary = fmt.Sprintf("OpenSSL 版本不符合固定口径：检测到 %s，要求 %s", fallback(version, "unknown"), openSSLExpectedVersion)
+		message := versionOutput
+		if versionErr != nil {
+			message = versionErr.Error()
+		}
 		result.AddFailure(model.Failure{
 			Category: model.FailureUnsupported, Stage: "version_check", Target: path,
-			Count: 1, Message: result.Summary,
+			Count: 1, Message: message,
 		})
 		result.Fields = []model.Field{
 			{Key: "engine", Label: "标准工具", Value: "OpenSSL speed"},
@@ -219,7 +222,6 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 	if validRuns < expectedRuns {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = openSSLSummary(specs, runs, workers)
 	result.Finish(start)
 	return result
 }
@@ -409,25 +411,6 @@ func openSSLResultsTable(specs []openSSLAlgorithmSpec, runs map[string][]openSSL
 	return table
 }
 
-func openSSLSummary(specs []openSSLAlgorithmSpec, runs map[string][]openSSLSpeedSample, workers int) string {
-	parts := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		samples := runs[spec.Key]
-		if workers <= 1 && len(samples) >= 1 && samples[0].ThroughputBPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1W/NW（同一次实测）%s · 扩展不适用",
-				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s")))
-		} else if len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1W %s · %dW %s · %.2f×",
-				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s"), workers,
-				model.FormatRate(samples[1].ThroughputMBPS, "MB/s"), samples[1].ThroughputBPS/samples[0].ThroughputBPS))
-		}
-	}
-	if len(parts) == 0 {
-		return "OpenSSL speed 未产出有效密码学吞吐"
-	}
-	return strings.Join(parts, " · ")
-}
-
 // cryptoSemanticProbe keeps the OpenSSL executor/parser focused on benchmark
 // facts while normalizing ECS-owned presentation metadata at the probe
 // boundary. Raw OpenSSL output and failure diagnostics remain untouched.
@@ -485,7 +468,6 @@ func stabilizeCryptoResult(result *model.Result, allowance cpuAllowance) {
 		stabilizeCryptoTable(&result.Tables[index], allowance.Threads)
 	}
 	result.Notes = stableCryptoNotes(*result, allowance)
-	result.Summary = ""
 	if failure := firstFailureAt(result, "version_check"); failure != nil {
 		detected, required := cryptoVersionValues(*result)
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.version_mismatch", detected, required)}

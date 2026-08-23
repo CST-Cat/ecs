@@ -90,7 +90,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	servers := env.Config.STUNServers
 	if len(servers) == 0 {
-		result.Skip("未配置 STUN 服务器")
+		result.Skip(model.NewMessage("probe.nat.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, 1, "target")
 		result.Finish(start)
 		return result
@@ -158,7 +158,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	if best == nil {
 		result.Status = model.StatusWarning
-		result.Summary = "全部 STUN 服务器无响应，无法判定 NAT 类型"
 		result.Notes = append(result.Notes,
 			"所有 STUN 服务器都没有返回映射地址。常见原因是出站 UDP 被封锁、"+
 				"防火墙只放行 TCP，或本次选用的服务器全部不可用；这本身也说明 UDP 类应用会受影响。",
@@ -169,7 +168,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	behind := best.Mapped.IP != best.LocalAddr.IP
-	category, categoryNote := natCategory(*best, behind)
+	_, categoryNote := natCategory(*best, behind)
 	categoryCode := natCategoryCode(*best, behind)
 	behindValue := "no"
 	if behind {
@@ -225,7 +224,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	if behind {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = category
 	result.Finish(start)
 	return result
 }

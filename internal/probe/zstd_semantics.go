@@ -61,7 +61,6 @@ func stabilizeZstdResult(result *model.Result, allowance cpuAllowance) {
 		stabilizeZstdTable(&result.Tables[index], allowance.Threads)
 	}
 	result.Notes = stableZstdNotes(*result, allowance)
-	result.Summary = ""
 	if summary := zstdMachineSummary(*result, allowance.Threads); summary != "" {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.zstd.summary.values", summary)}
 	} else {

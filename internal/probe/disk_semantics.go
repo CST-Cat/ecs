@@ -66,7 +66,6 @@ func stabilizeDiskResult(result *model.Result) {
 		stabilizeDiskTable(&result.Tables[index])
 	}
 	result.Notes = stableDiskNotes(*result)
-	result.Summary = ""
 	if diskSummary := diskMachineSummary(*result); diskSummary != "" {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.disk.summary.values", diskSummary)}
 	} else if firstFailureAt(result, "tool_lookup") != nil {

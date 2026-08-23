@@ -95,7 +95,7 @@ func TestSTUNMessageParsesMappingAndClassifiesUnknownFiltering(t *testing.T) {
 
 func TestNATWithoutServersSkipsWithoutNetwork(t *testing.T) {
 	result := (natSemanticProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
-	if result.Status != model.StatusSkipped || result.Summary != "" || len(result.SummaryMessages) != 1 ||
+	if result.Status != model.StatusSkipped || len(result.SummaryMessages) != 1 ||
 		result.SummaryMessages[0].Key != "probe.nat.summary.skipped" || result.Evidence == nil || result.Evidence.Valid != 0 {
 		t.Fatalf("NAT no-server result = %+v", result)
 	}

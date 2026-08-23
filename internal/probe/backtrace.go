@@ -171,7 +171,6 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.tool_missing")}
 		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: routeEngineTiny, Count: 1})
 		result.Evidence = model.NewEvidence(0, len(env.Config.BacktraceTargets), "target")
@@ -183,7 +182,6 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	targets := env.Config.BacktraceTargets
 	if len(targets) == 0 {
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.no_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Notes = []string{"probe.backtrace.note.no_targets"}
@@ -193,7 +191,6 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	targets = endpointsForIPVersion(targets, env.Config.IPVersion)
 	if len(targets) == 0 {
 		result.Status = model.StatusSkipped
-		result.Summary = ""
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.no_family_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
 		result.Notes = []string{"probe.backtrace.note.no_family_targets"}
@@ -316,7 +313,6 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	if identified == 0 {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.values", identified, len(targets))}
 	result.Sources = []model.Source{
 		{Name: "probe.backtrace.source.method.name", URL: "https://github.com/zhanghanyun/backtrace", Purpose: "probe.backtrace.source.method"},

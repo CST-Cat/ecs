@@ -39,8 +39,8 @@ func TestZstdStage9BoundaryUsesMachineSemantics(t *testing.T) {
 	if result.Title != "module.zstd.title" || result.Description != "probe.zstd.description" || result.Methodology.Label != "methodology.standard-benchmark" {
 		t.Fatalf("zstd presentation identity not stabilized: %+v", result)
 	}
-	if result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.zstd.summary.values" {
-		t.Fatalf("zstd summary is not a stable message: summary=%q messages=%+v", result.Summary, result.SummaryMessages)
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.zstd.summary.values" {
+		t.Fatalf("zstd summary is not a stable message: messages=%+v", result.SummaryMessages)
 	}
 	if result.Fields[0].Value != "visible=8;quota=2.00;threads=2;source=fixture-quota" || strings.Contains(result.Fields[1].Value, "拼接") {
 		t.Fatalf("zstd machine fields not stabilized: %+v", result.Fields)

@@ -137,17 +137,14 @@ func TestNPBAssemblyAndEnvironment(t *testing.T) {
 	if table.Key != "benchmark.npb.results" || len(table.ColumnKeys) != len(table.Columns) || len(table.Rows) != 4 || table.Rows[0][7] != "SUCCESSFUL" {
 		t.Fatalf("NPB result table = %+v", table)
 	}
-	if summary := npbSummary(npbBenchmarkSpecs, runs, 2); !strings.Contains(summary, "EP") || !strings.Contains(summary, "FT") {
-		t.Fatalf("NPB summary = %q", summary)
-	}
 	singleRuns := map[string][]npbBenchmarkSample{}
 	for _, spec := range npbBenchmarkSpecs {
 		first := runs[spec.Name][0]
 		singleRuns[spec.Name] = []npbBenchmarkSample{first, first}
 	}
 	single := npbResultsTable(npbBenchmarkSpecs, singleRuns, 1)
-	if single.Rows[0][6] != "不适用" || strings.Contains(npbSummary(npbBenchmarkSpecs, singleRuns, 1), "扩展倍率") && strings.Contains(npbSummary(npbBenchmarkSpecs, singleRuns, 1), "×") {
-		t.Fatalf("single-core NPB output = table:%v summary:%q", single.Rows[0], npbSummary(npbBenchmarkSpecs, singleRuns, 1))
+	if single.Rows[0][6] != "不适用" {
+		t.Fatalf("single-core NPB output = table:%v", single.Rows[0])
 	}
 	partialRuns := map[string][]npbBenchmarkSample{"EP": {runs["EP"][0], {}}}
 	partialResult := model.NewResult("npb", "npb")
@@ -158,11 +155,5 @@ func TestNPBAssemblyAndEnvironment(t *testing.T) {
 	partial := npbResultsTable([]npbBenchmarkSpec{npbBenchmarkSpecs[0]}, partialRuns, 2)
 	if len(partial.Rows) != 2 || partial.Rows[1][7] != "失败" {
 		t.Fatalf("partial NPB output = %+v", partial.Rows)
-	}
-	if got := npbSummary([]npbBenchmarkSpec{npbBenchmarkSpecs[0]}, partialRuns, 2); !strings.Contains(got, "EP 1T") {
-		t.Fatalf("partial NPB summary = %q", got)
-	}
-	if got := npbSummary(npbBenchmarkSpecs, nil, 2); got != "NPB EP/FT 未产出有效 Class A Mop/s" {
-		t.Fatalf("empty NPB summary = %q", got)
 	}
 }

@@ -46,14 +46,17 @@ func TestProgressViewIsSilentOnSuccessAndReportsErrorsOnce(t *testing.T) {
 }
 
 func TestTerminalGlueAndProgressPolicy(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
 	var output bytes.Buffer
 	terminal := NewWithColor(&output, termcolor.LevelNone)
 	terminal.Header(config.Runtime{Profile: "standard", IPVersion: config.IPVersionAuto, Modules: []string{"system"}}, config.Estimate{DurationText: "1s", DiskMiB: 2, NetworkMiB: -1})
-	report := model.Report{Summary: model.Summary{Headline: "finished"}}
+	report := model.Report{Summary: model.Summary{Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}}}
 	terminal.FullReport(report, map[string]string{"md": "/tmp/z-report.md", "json": "/tmp/a-report.json"}, nil, termcolor.LevelNone)
 	terminal.Error("failed: %s", "fixture")
 	text := output.String()
-	for _, marker := range []string{"standard", "1s", "finished", "a-report.json", "z-report.md", "fixture", i18n.T("term.noUpload")} {
+	for _, marker := range []string{"standard", "1s", "1 tests completed", "a-report.json", "z-report.md", "fixture", i18n.T("term.noUpload")} {
 		if !strings.Contains(text, marker) {
 			t.Errorf("terminal output missing %q: %q", marker, text)
 		}

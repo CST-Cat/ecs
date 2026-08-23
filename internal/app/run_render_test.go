@@ -22,7 +22,7 @@ func writeAppRenderReport(t *testing.T, directory string) string {
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{ID: "sample", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
-		Summary:       model.Summary{Status: model.StatusOK, Headline: "完成"},
+		Summary:       model.Summary{Status: model.StatusOK, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
 		Results: []model.Result{{
 			ID: "system", Title: "系统", Status: model.StatusOK,
 			Fields: []model.Field{{Key: "state", Label: "状态", Value: "系统"}},

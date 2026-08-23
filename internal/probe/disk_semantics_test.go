@@ -14,10 +14,9 @@ func TestStabilizeDiskResultUsesStructuredCellsNotLegacyStatusText(t *testing.T)
 	result.Tables = []model.Table{{Key: "disk.fio.crystal", Title: "legacy-table", Columns: []string{"old"}, Rows: [][]string{{"RND4K/Q1", "1 MiB/s", "100 IOPS", "1 MiB/s", "100 IOPS", "0 s", "legacy-status-text"}}}}
 	result.TextBlocks = []model.TextBlock{{Title: "legacy", Content: "fio output"}}
 	result.Sources = []model.Source{{Name: "fio", Purpose: "legacy"}}
-	result.Summary = "legacy"
 	result.Evidence = model.NewEvidence(1, 2, "job")
 	stabilizeDiskResult(&result)
-	if result.Title != "module.disk.title" || result.Description != "probe.disk.description" || result.Summary != "" {
+	if result.Title != "module.disk.title" || result.Description != "probe.disk.description" {
 		t.Fatalf("disk header = %+v", result)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.disk.summary.values" {

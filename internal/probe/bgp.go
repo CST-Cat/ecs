@@ -146,9 +146,6 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Evidence = model.NewEvidence(successes, len(versions), "target")
 	if successes == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "没有取得当前公共 BGP 观测"
-	} else {
-		result.Summary = fmt.Sprintf("%d/%d 个协议族取得公共 RIB 观测", successes, len(versions))
 	}
 	result.Notes = append(result.Notes,
 		"该模块最多每个启用协议族查询一次 RouteViews 当前 RIB，不下载历史 MRT，不向 ecs 服务器上传报告。",

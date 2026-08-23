@@ -48,26 +48,20 @@ type RunInfo struct {
 }
 
 type Summary struct {
-	Status   Status `json:"status"`
-	OK       int    `json:"ok"`
-	Warnings int    `json:"warnings"`
-	Skipped  int    `json:"skipped"`
-	Errors   int    `json:"errors"`
-	// Headline is a legacy presentation field retained during renderer
-	// migration. New ECS-generated summaries leave it empty.
-	Headline string    `json:"headline,omitempty"`
+	Status   Status    `json:"status"`
+	OK       int       `json:"ok"`
+	Warnings int       `json:"warnings"`
+	Skipped  int       `json:"skipped"`
+	Errors   int       `json:"errors"`
 	Messages []Message `json:"messages,omitempty"`
 }
 
 type Result struct {
-	ID          string      `json:"id"`
-	Title       string      `json:"title"`
-	Description string      `json:"description,omitempty"`
-	Methodology Methodology `json:"methodology,omitempty"`
-	Status      Status      `json:"status"`
-	Summary     string      `json:"summary,omitempty"`
-	// SummaryMessages carries ECS-generated summary semantics. Summary remains
-	// as a temporary legacy/raw field while producers are migrated.
+	ID              string        `json:"id"`
+	Title           string        `json:"title"`
+	Description     string        `json:"description,omitempty"`
+	Methodology     Methodology   `json:"methodology,omitempty"`
+	Status          Status        `json:"status"`
 	SummaryMessages []Message     `json:"summary_messages,omitempty"`
 	StartedAt       time.Time     `json:"started_at"`
 	DurationMS      int64         `json:"duration_ms"`

@@ -13,9 +13,8 @@ func TestStabilizeDNSResultUsesMachineSemantics(t *testing.T) {
 	result.Measurements = []model.Measurement{{Key: "best_dns_median_ms", Label: "legacy-label", Display: "10 ms", Value: 10}}
 	result.Tables = []model.Table{{Key: "network.dns.resolvers", Title: "legacy-table", Columns: []string{"old"}, Rows: [][]string{{"r", "a", "1/1", "10", "11", "1", dnsStatusOK}}}}
 	result.Evidence = model.NewEvidence(1, 1, "query")
-	result.Summary = "legacy"
 	stabilizeDNSResult(&result)
-	if result.Title != "module.dns.title" || result.Description != "probe.dns.description" || result.Summary != "" {
+	if result.Title != "module.dns.title" || result.Description != "probe.dns.description" {
 		t.Fatalf("dns header = %+v", result)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.dns.summary.values" {
@@ -35,7 +34,7 @@ func TestStabilizeLatencyResultUsesStructuredResolutionFailure(t *testing.T) {
 	result.Evidence = model.NewEvidence(1, 1, "sample")
 	targets := []config.Endpoint{{Name: "target", Address: "example.com:443"}}
 	stabilizeLatencyResult(&result, targets)
-	if result.Title != "module.latency.title" || result.Description != "probe.latency.description" || result.Summary != "" {
+	if result.Title != "module.latency.title" || result.Description != "probe.latency.description" {
 		t.Fatalf("latency header = %+v", result)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.values" {

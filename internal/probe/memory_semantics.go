@@ -64,7 +64,6 @@ func stabilizeStreamMemoryResult(result *model.Result, allowance cpuAllowance) {
 	}
 
 	result.Notes = streamMemoryStableNotes(*result, allowance)
-	result.Summary = ""
 	summary := streamMemorySummaryTokens(*result, allowance.Threads)
 	if len(summary) == 0 {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.memory.stream.summary.none")}

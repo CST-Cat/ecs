@@ -21,9 +21,8 @@ func TestStabilizeCryptoResultUsesMachineSemantics(t *testing.T) {
 	result.TextBlocks = []model.TextBlock{{Title: "legacy", Content: "OpenSSL raw"}}
 	result.Sources = []model.Source{{Name: "OpenSSL speed", Purpose: "legacy"}}
 	result.Notes = []string{"legacy"}
-	result.Summary = "legacy summary"
 	stabilizeCryptoResult(&result, cpuAllowance{Threads: 2, Visible: 2})
-	if result.Title != "module.crypto.title" || result.Description != "probe.crypto.description" || result.Summary != "" {
+	if result.Title != "module.crypto.title" || result.Description != "probe.crypto.description" {
 		t.Fatalf("unstable crypto header: %+v", result)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.crypto.summary.values" {

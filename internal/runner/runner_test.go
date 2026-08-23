@@ -125,8 +125,8 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 				t.Fatalf("result = %+v, want status=%s evidence=%d/1", got, test.wantStatus, test.wantValid)
 			}
 			if test.wantSummaryKey != "" {
-				if got.Summary != "" || len(got.SummaryMessages) != 1 || got.SummaryMessages[0].Key != test.wantSummaryKey {
-					t.Fatalf("structured skip summary = summary %q messages %+v, want %q", got.Summary, got.SummaryMessages, test.wantSummaryKey)
+				if len(got.SummaryMessages) != 1 || got.SummaryMessages[0].Key != test.wantSummaryKey {
+					t.Fatalf("structured skip summary = messages %+v, want %q", got.SummaryMessages, test.wantSummaryKey)
 				}
 			}
 			if test.wantMethodology && got.Methodology.Label != test.descriptor.Methodology.Label {
@@ -145,15 +145,15 @@ func TestRunOneAndSafeRunIsolatePanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	runs := 0
-	item := &runnerTestProbe{id: "custom", title: "custom probe", runs: &runs, result: model.Result{Status: model.StatusOK, Summary: "ok"}}
+	item := &runnerTestProbe{id: "custom", title: "custom probe", runs: &runs, result: model.Result{Status: model.StatusOK}}
 	result := runOne(context.Background(), item, cfg, probe.Environment{}, true)
-	if runs != 1 || result.ID != "custom" || result.Status != model.StatusOK || result.Summary != "ok" || result.Evidence == nil || result.Evidence.Valid != 1 {
+	if runs != 1 || result.ID != "custom" || result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 1 {
 		t.Fatalf("runOne result = %+v, runs=%d", result, runs)
 	}
 
 	panicItem := &runnerTestProbe{id: "panic-probe", title: "panic probe", panicValue: "fixture panic"}
 	panicResult := safeRun(context.Background(), panicItem, probe.Environment{})
-	if panicResult.Status != model.StatusError || panicResult.Error != "fixture panic" || panicResult.Summary != "" || !reflect.DeepEqual(panicResult.SummaryMessages, []model.Message{model.NewMessage("message.runner.panic")}) {
+	if panicResult.Status != model.StatusError || panicResult.Error != "fixture panic" || !reflect.DeepEqual(panicResult.SummaryMessages, []model.Message{model.NewMessage("message.runner.panic")}) {
 		t.Fatalf("panic result = %+v", panicResult)
 	}
 	if len(panicResult.Failures) != 1 || panicResult.Failures[0].Stage != "panic" || panicResult.Failures[0].Target != "panic-probe" || panicResult.Failures[0].Category != model.FailureUnknown || panicResult.Failures[0].Message != "fixture panic" {

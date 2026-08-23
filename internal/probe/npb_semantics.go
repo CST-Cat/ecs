@@ -58,7 +58,6 @@ func stabilizeNPBResult(result *model.Result, allowance cpuAllowance) {
 	}
 
 	result.Notes = stableNPBNotes(*result, allowance)
-	result.Summary = ""
 	if summary := npbMachineSummary(*result, allowance.Threads); summary != "" {
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.npb.summary.values", summary)}
 	} else {

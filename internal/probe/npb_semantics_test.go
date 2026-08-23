@@ -40,8 +40,8 @@ func TestNPBStage9BoundaryUsesMachineSemantics(t *testing.T) {
 	if result.Title != "module.npb.title" || result.Description != "probe.npb.description" || result.Methodology.Label != "methodology.standard-benchmark" {
 		t.Fatalf("NPB presentation identity not stabilized: %+v", result)
 	}
-	if result.Summary != "" || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.npb.summary.values" {
-		t.Fatalf("NPB summary is not a stable message: summary=%q messages=%+v", result.Summary, result.SummaryMessages)
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.npb.summary.values" {
+		t.Fatalf("NPB summary is not a stable message: messages=%+v", result.SummaryMessages)
 	}
 	if result.Fields[0].Label != "probe.npb.field.engine" || result.Fields[1].Label != "probe.npb.field.cpu_allowance" || result.Fields[1].Value != "visible=8;quota=2.00;threads=2;source=fixture-quota" {
 		t.Fatalf("NPB fields not stabilized: %+v", result.Fields)
