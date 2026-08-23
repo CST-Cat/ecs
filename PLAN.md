@@ -6,7 +6,35 @@
 
 状态：`TODO` / `IN PROGRESS` / `DONE` / `BLOCKED` / `REOPENED`。
 
-> 本计划在当前工作区串行执行；按仓库协作规则直接在当前分支工作，不创建 Pull Request。远端分支已通过 fetch 建立并继续，验证证据集中记录在 `VALIDATION.md`，未执行的外部集成项明确列在 `REVIEW.md`。
+> 本计划在当前工作区严格串行执行；本轮目标是更新现有 Draft PR #6，不创建新 Pull Request。远端分支必须先核对后以 fast-forward 同步，验证证据集中记录在 `VALIDATION.md`，未执行的外部集成项明确列在 `REVIEW.md`。
+
+## 本轮复审状态（2026-08-23）
+
+本文件前面的 0–25 阶段是截至历史提交 `a938385` 的执行记录，不代表本轮复审后的当前通过状态。复审目标为
+`c6a59b37d2e61708bd3487dc13a8881fd718efaf`，发现 4 个 P1、3 个 P2 和 1 个 P3；相关历史 DONE 结论已由下列 remediation 阶段重新打开。任何历史“已完成”描述只能作为背景，不能替代本轮验收。
+
+当前任务：更新 Draft PR #6；PR 现状保持 Draft，远端 target/base 当前分别为
+`c6a59b37d2e61708bd3487dc13a8881fd718efaf` / `6e85039301fc817e8c4a290ffb9b111fc37e55a8`。
+
+本轮只允许一名 Luna Worker 按顺序执行下列阶段。每阶段必须由主 Agent 独立审查实际 diff、文件范围和测试结果；不合格时由同一 Worker 返工并重新完整审查，未通过不得推进。
+
+## Remediation 阶段记录
+
+1. **基线与任务记录 — DONE**。目标：同步精确 target 并记录本轮范围。输入：远端 base/target、AGENTS/README/CONTRIBUTING/CI 和任务文档。产出：fast-forward、REQUIREMENTS.md addendum、当前 PLAN 记录。验收：主 Agent 已复核 HEAD=`c6a59b37d2e61708bd3487dc13a8881fd718efaf`、merge-base=`6e85039301fc817e8c4a290ffb9b111fc37e55a8`，diff 仅含 `REQUIREMENTS.md`/`PLAN.md`，`git diff --check` 通过；不修改 AGENTS/生产代码。
+2. **Message 格式契约 — TODO**。目标：消除 `%!d(string=...)`。输入：Message 模型、生产模板和双语 catalog。产出：兼容模板及参数消息测试。验收：受影响模块中英文渲染无 `%!`。
+3. **retry/interference 结构化模型 — TODO**。目标：canonical JSON 不写展示散文。输入：RetryInfo、Interference、TextBlock 和 pressure 后处理。产出：稳定 Message、attempt 和干扰字段。验收：序列化、脱敏和复制测试覆盖新结构。
+4. **retry/interference renderer — TODO**。目标：展示边界本地化。输入：阶段 3 模型、terminal/Markdown/HTML renderer。产出：统一渲染辅助。验收：同一 JSON 中英文正确重渲染，英文 CPU 报告不含 ECS 生成中文。
+5. **plan/run exposure/reveal — TODO**。目标：向导最终选择完整传入 run。输入：execution plan、wizard 和 run.sh。产出：reveal 字段、严格解析和最终参数追加。验收：全部 exposure/reveal 组合及冲突优先级测试通过。
+6. **network 直接机器语义 — TODO**。目标：删除 network 展示文案逆向识别并修复 DB-IP。输入：source/provider/score/status producer。产出：直接 stable keys；DB-IP 使用 `dbip`。验收：所有 source key 在中英文存在且无 display-text 推导。
+7. **media 直接机器语义 — TODO**。目标：删除 media 文案逆向识别。输入：媒体 verdict/evidence/strength 和原始错误。产出：stable producer fields/messages。验收：有限状态、未知、HTTP 和反机器人场景双语测试通过。
+8. **route 直接机器语义 — TODO**。目标：删除 route 状态逆向扫描。输入：路由探测结果、计数和失败。产出：producer 直接写稳定状态/摘要。验收：状态和计数无需解析展示行即可获得。
+9. **backtrace 直接机器语义 — TODO**。目标：删除回程状态逆向识别。输入：NextTrace raw result、hop/carrier facts。产出：stable status/reason/hop fields。验收：原始证据不变，中英文由同一 JSON 渲染。
+10. **NAT 结构化 — TODO**。目标：删除中文顿号 canonical 字段。输入：STUN server 列表。产出：数组或结构化 table。验收：JSON 不依赖语言分隔符。
+11. **system 单次采集 — TODO**。目标：删除 system 二次 collector/semantic bridge。输入：collectSystem、环境快照及 discovery facts。产出：一次采集直接生成稳定 Result。验收：无重复采集入口，system 回归通过。
+12. **摘要迁移收尾 — TODO**。目标：删除旧 Summary 双表示、renderer fallback 和临时 bridge。输入：全部 producer、failure classifier 和 renderer。产出：唯一结构化 Message 摘要。验收：生产代码不写旧字段、不新增兼容层。
+13. **schema 与任务文档 — TODO**。目标：修复契约和复审记录失真。输入：通过的代码、测试和最终 SHA。产出：docs/schema.md、PLAN.md、REVIEW.md、VALIDATION.md 更新。验收：不再声称旧 SHA、无 PR 或提前完成。
+14. **完整本地回归 — TODO**。目标：验证八项修复及回归风险。输入：最终候选 commit。产出：Go/race/CI、shell、二进制双语和 plan/run 验证证据。验收：所有实际执行命令结果可复核，未验证项明确列出。
+15. **最终总审查与 PR 更新 — TODO**。目标：确认完整 diff 可交付。输入：base 到最终 HEAD 的完整 diff、需求映射和 CI。产出：主 Agent 总审查、PR #6 说明更新、远端同步。验收：八项问题关闭，最终 SHA 与审查 SHA 一致，PR 保持 Draft。
 
 ## 当前状态与阶段记录
 
@@ -34,12 +62,13 @@
 - **21 Leaderboard trigger — DONE**。目标：消除写回 baseline 自触发并覆盖真实算法入口；输入：workflow/score；范围：paths；产出：排除 `submissions/baseline.json` 与 `internal/score/embedded/baseline.json` 两个生成输出，同时显式监听 leaderboard 脚本、baseline/score/submission/tier 算法、模块评分元数据和模型入口；验收：输出文件不自触发，提交目录与真实算法入口仍触发。
 - **22 Installer/docs parity — DONE**。目标：保留显式 `--with-benchmarks` 并修陈旧文案；输入：install/README/README_EN/docs；范围：脚本与文档；产出：安装器默认使用 `CST-Cat/ecs`，镜像/派生仓库仍可用 `ECS_REPOSITORY` 覆盖，中英文安装说明与 examples 同步；验收：persistent install 仍仅在显式 `--with-benchmarks` 时安装 sysbench/fio/iperf3，`sh -n install.sh` 与安装行为回归通过。
 - **23 Probe 小范围去重 — DONE**。目标：只抽真实重复；输入：route/backtrace/external commands；范围：NextTrace adapter/有限 command helper；产出：保留 route/backtrace 共用的 NextTrace adapter，并将多个探针实际共用的版本读取、binary SHA-256、ANSI/NUL 输出清洗和错误尾部截断集中到 `tool_execution.go`；验收：无 GenericBenchmarkRunner/provider/plugin，`go test ./internal/probe` 通过。
-- **24 完整 Branch diff 与总审查 — DONE**。目标：全任务回归；输入：Branch vs baseline、CI/docs；范围：全仓；产出：`REVIEW.md`、`VALIDATION.md`、必要返工与临时文档清理；验收：每项实质 diff 可追溯，无意外框架/兼容层/无关重写，测试证据真实，无法验证明确标注。
-- **25 分支交付 — DONE**。目标：用阶段 24 完全相同状态交付；输入：通过总审查的 HEAD；范围：当前 tracking 分支；产出：提交 `a938385` 已直接推送到当前分支，不创建或更新 PR；验收：远端分支已包含该提交，推送前后差异一致，工作区干净。
+- **24 完整 Branch diff 与总审查 — 历史记录（本轮已重新打开）**。目标：全任务回归；输入：历史 Branch vs baseline、CI/docs；范围：全仓；产出：历史 `REVIEW.md`、`VALIDATION.md` 和阶段记录；说明：本轮复审发现阻断问题，历史结论不作为当前验收。
+- **25 分支交付 — 历史记录（本轮尚未交付）**。目标：历史提交 `a938385` 曾推送到 tracking 分支；说明：本轮交付目标已改为修复后更新 Draft PR #6，不能使用该历史交付记录宣称当前完成。
 
 ## 计划调整记录
 
-- 早期计划曾记录 Draft PR #6；本次按用户授权改为直接提交并推送当前 tracking 分支，仍不创建或更新 PR。
+- 早期计划曾记录直接推送且不创建 PR；该结论仅属于历史阶段记录。本轮按当前任务要求修复并更新现有 Draft PR #6，不创建新 PR。
+- 复审目标从历史交付状态重新打开 8 项问题；remediation 阶段 1–15 的状态以本文件“Remediation 阶段记录”为准，历史 0–25 的 DONE 标记不构成本轮通过证据。
 - 阶段 5 最初因 structured notices 改变 JSON 字段类型而自行将 comparison schema 升到 `ecs.compare/v2`。用户随后明确 beta 阶段不以兼容性驱动版本升级；**结构化 Notice 设计不回滚，只把版本标识恢复并固定为 `ecs.compare/v1`，直接原地更新 v1 契约。**
 - 同一规则适用于阶段 8 的主报告 Message/notices 变化：保留新结构，`ecs.report/v1` 不升 v2，不为旧结构保留兼容 schema。
 - 阶段 7 采用渐进迁移：新增 `Summary.Messages` / `Result.SummaryMessages`，旧 presentation string 暂作任务内迁移字段；完成结构化迁移后阶段 10 直接删除 Localize/旧 presentation 路线，不以兼容性为理由长期保留。

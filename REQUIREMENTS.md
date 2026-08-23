@@ -135,3 +135,50 @@
 ## 环境限制
 
 当前可用 GitHub 连接器没有 `exec`/Sol High Worker Subagent 接口，因此无法真实执行“每阶段由唯一 Sol High Worker Subagent 通过 exec 完成”的要求。主 Agent 不得冒充该能力；其余阶段仍严格串行、实际查看仓库状态和 diff，并通过 GitHub Actions 等可获得的真实证据进行验证。
+
+## 本轮复审修复补充要求（2026-08-23）
+
+本补充要求针对目标分支的复审结果，作为当前任务的执行范围；不覆盖或删除上文原始需求。基准仍为
+`main@6e85039301fc817e8c4a290ffb9b111fc37e55a8`，本轮 remediation 起点必须为
+`codex/architecture-machine-facts-cleanup@c6a59b37d2e61708bd3487dc13a8881fd718efaf`。
+
+交付目标是更新现有 Draft PR #6，不创建新 PR；PR 在本轮修复完成前保持 Draft。目标分支远端发生未知变化时必须停止，不得 force-push、reset 或 rebase。
+
+### 必须修复的 8 项问题
+
+1. **P1 Message 格式损坏**：Message 参数统一为字符串后，所有生产 `%d` 模板必须改为兼容格式；system、ports、blacklist、BGP、route、backtrace 等带参数消息在中英文渲染中不得出现 `%!`。
+2. **P1 probe 逆向识别展示文案**：network、media、route、backtrace 必须由 producer 直接产生 stable key/enum/Message；删除基于中文、英文或 exact sentence 的语义恢复。
+3. **P1 retry canonical 污染**：retry/interference 的原因、标签、表格和选择规则必须保持结构化机器事实；report renderer 在展示边界本地化，canonical JSON 不得追加中文或英文展示句。
+4. **P1 wizard 参数丢失**：`ecs.plan/v1` 保存 reveal；`run.sh` 必须把 plan 的 exposure/reveal 传给最终 `ecs run`，向导最终选择不得被原始参数覆盖或丢失。
+5. **P2 DB-IP key 错误**：DB-IP 使用注册 source ID `dbip`，不得生成 `db-ip` i18n key。
+6. **P2 Message 双表示/临时 bridge**：完成摘要迁移，删除旧 Summary 字符串、renderer fallback、二次采集及无必要兼容桥；不得长期双写。
+7. **P2 NAT 本地化 canonical 字段**：NAT/STUN server 信息不得使用中文顿号或其他语言相关拼接；改为结构化 machine data。
+8. **P3 任务文档失真**：PLAN/REVIEW/VALIDATION/schema 等相关文档必须反映最终 target SHA、Draft PR #6、实际完成状态和未验证项目；不得保留当前有效的“无 PR”或过期 SHA 结论。
+
+### 15 个串行执行阶段
+
+每个阶段都必须由本任务唯一 Luna Worker 执行，主 Agent 必须查看实际 diff 和验证结果；不通过时只能交回同一 Worker，给出具体问题清单并完整复审。未通过前不得进入下一阶段。
+
+1. **基线与任务记录**：目标是同步精确 target；输入为远端 base/target 和现有任务文档；产出为 fast-forward 及本轮 REQUIREMENTS/PLAN 记录；验收为 HEAD 精确为 `c6a59b37`、仅任务文档有改动。
+2. **Message 格式契约**：目标是消除 `%!d(string=...)`；输入为 Message 模型和生产模板；产出为兼容模板及覆盖测试；验收为中英文所有参数消息无损渲染。
+3. **retry/interference 模型**：目标是结构化 retry 事实；输入为 RetryInfo/Interference/TextBlock；产出为稳定 Message、attempt 和干扰字段；验收为 canonical JSON 无展示散文。
+4. **retry renderer**：目标是展示边界本地化；输入为结构化 retry 数据和 renderer；产出为终端/Markdown/HTML 辅助；验收为同一 JSON 可正确中英文重渲染。
+5. **plan/run exposure/reveal**：目标是保持向导最终选择；输入为 plan schema、wizard 和 run.sh；产出为 reveal 字段与最终参数传递；验收为所有 exposure/reveal 组合和冲突优先级测试通过。
+6. **network 直接语义**：目标是删除 network 逆向识别并修复 DB-IP；输入为 provider/source/score producer；产出为 stable source/status key；验收为所有 source key（含 `dbip`）中英文存在且无 display-text 推导。
+7. **media 直接语义**：目标是删除 media 文案推导；输入为媒体状态和证据；产出为 stable verdict/evidence/strength；验收为有限状态、未知和错误场景均可双语渲染。
+8. **route 直接语义**：目标是删除 route 状态逆向扫描；输入为路由探测结果；产出为 producer 直接写入 stable 状态和 Message；验收为状态、计数和失败语义结构化。
+9. **backtrace 直接语义**：目标是删除回程文案逆向识别；输入为 NextTrace 结果；产出为 stable status/reason/hop facts；验收为原始证据不改写且双语渲染一致。
+10. **NAT 结构化**：目标是移除中文分隔符；输入为 STUN server 列表；产出为数组或结构化 table；验收为 canonical JSON 与语言无关。
+11. **system 单次采集**：目标是删除 system 二次采集 bridge；输入为 collectSystem 和环境快照；产出为一次采集直接构造的稳定 Result；验收为无重复采集入口。
+12. **摘要迁移收尾**：目标是删除旧 Summary 双表示和 fallback；输入为所有 producer、failure classifier、renderer；产出为唯一结构化 Message 摘要；验收为生产代码不再写旧字段且无兼容层。
+13. **schema/任务文档**：目标是修正契约和审查记录；输入为已通过的代码与测试；产出为 schema、PLAN、REVIEW、VALIDATION 更新；验收为文档与最终状态一致。
+14. **完整回归**：目标是覆盖实际影响范围；输入为最终候选 commit；产出为 Go、race、CI、脚本和二进制双语验证记录；验收为命令结果有实际证据。
+15. **最终总审查与 PR 更新**：目标是确认可交付；输入为完整 branch diff、需求映射、CI；产出为最终审查、PR #6 说明和远端同步；验收为 8 项问题关闭、最终 SHA 与审查 SHA 一致、PR 保持 Draft。
+
+### 契约与范围边界
+
+- `ecs.report/v1`、`ecs.compare/v1`、`ecs.plan/v1` 原地更新；禁止因 breaking change 升级到 v2。
+- 不添加旧 schema、双写、迁移适配器或旧行为 fallback；不引入完整 presentation framework。
+- 外部 stdout/stderr/raw evidence 保持原样；只有 ECS 自生成动态文本必须结构化。
+- 不移除不属于本轮八项问题的既有 `RunInfo.Offline`，也不顺带处理无关架构债务。
+- 本轮明确采用唯一 Luna Worker 及其等价 Subagent 编排接口；不声称使用不可用的 Sol/high Worker 或 literal `exec`。
