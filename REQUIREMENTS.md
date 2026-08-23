@@ -132,9 +132,13 @@
 - Shell 不拥有业务决策权。
 - 继续 Less is more：删除补偿层，不用新框架替代旧复杂度。
 
-## 环境限制
+## 初始实施环境限制（历史记录，2026-08-20）
 
-当前可用 GitHub 连接器没有 `exec`/Sol High Worker Subagent 接口，因此无法真实执行“每阶段由唯一 Sol High Worker Subagent 通过 exec 完成”的要求。主 Agent 不得冒充该能力；其余阶段仍严格串行、实际查看仓库状态和 diff，并通过 GitHub Actions 等可获得的真实证据进行验证。
+初始实施环境中的 GitHub 连接器没有 `exec`/Sol High Worker Subagent 接口，因此当时无法真实执行
+“每阶段由唯一 Sol High Worker Subagent 通过 exec 完成”的要求。该段保留为原始需求记录，不代表
+2026-08-23 remediation 的实际执行能力或当前状态；后续 remediation 补充要求已取代这段限制的执行编排，
+由唯一 Luna Worker 按 15 个阶段串行执行，并由主 Agent 独立审查、返工和验证。当前证据与限制以
+`PLAN.md`、`REVIEW.md` 和 `VALIDATION.md` 为准，不删除原始环境背景，也不冒充不可用的 Sol/high 能力。
 
 ## 本轮复审修复补充要求（2026-08-23）
 

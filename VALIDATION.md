@@ -4,7 +4,7 @@
 分支：`codex/architecture-machine-facts-cleanup`
 基准：`main@6e85039301fc817e8c4a290ffb9b111fc37e55a8`
 远端审查目标：`origin/codex/architecture-machine-facts-cleanup@c6a59b37d2e61708bd3487dc13a8881fd718efaf`
-本地代码候选：`2ac564aaf361d763d8a0941a8d2a240387cf92a7`（阶段 12 提交）
+本地阶段 15 审计候选：`c6ee5ba17ca6d902f88d549b87335c67e622db7f`（未 push，不是远端 target，也不是最终交付 SHA）
 PR：#6，OPEN、Draft；本阶段没有 push。
 仓库声明工具链：`.go-version` 为 `1.26.5`；本机实际 `go version` 为 `go1.22.2 linux/arm64`，因此不能把本机 Go 1.22 结果表述为 Go 1.26 的最终验证。
 
@@ -250,16 +250,125 @@ perl -MJSON::PP -0777 -ne 'my @blocks = /\x60\x60\x60json\s*\n(.*?)\n\x60\x60\x6
 JSON::PP blocks: 11/11
 ```
 
-所有临时目录均已用 `find ... -delete` 清理并确认不存在；本次 diff 精确限定为 `internal/probe/network.go`、`internal/probe/network_semantics_test.go`、`PLAN.md`、`REVIEW.md`、`VALIDATION.md` 五个允许文件。主 Agent 已完成阶段 14 完整复审并通过；阶段 15 仍为 TODO。本地 govulncheck 仍为 exit 3 的安全限制，不能称 security clean；GitHub security、最终 PR/远端同步和发布未验证，未推送。
+所有临时目录均已用 `find ... -delete` 清理并确认不存在；本次 diff 精确限定为 `internal/probe/network.go`、`internal/probe/network_semantics_test.go`、`PLAN.md`、`REVIEW.md`、`VALIDATION.md` 五个允许文件。主 Agent 已完成阶段 14 完整复审并通过；阶段 15 第一轮因相关任务文档未重标历史状态而返工，第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工，两轮返工均由同一 Worker 完成，第三轮预推送主审已通过，当前等待推送和远端 CI。本地 govulncheck 仍为 exit 3 的安全限制，不能称 security clean；GitHub security、最终 PR/远端同步和发布未验证，未推送。
 
-## 阶段 15 待验证项
+## 阶段 15 最终总审查（IN PROGRESS，待推送/远端 CI）
 
-以下项目不能由阶段 14 本地证据替代，留待最终总审查和 PR 更新：
+阶段 15 时序记录：第一轮因相关任务文档未重标历史状态而返工；第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工；两轮返工均由同一 Worker 完成。第三轮预推送主审已通过，当前等待推送和远端 CI，仍未 push 或调用 `gh pr edit`。
 
-- GitHub Actions security workflow 在声明的 Go 1.26.5 runner 上的真实结果；
-- 七架构工具的完整源码构建、归档、签名/attestation、Release 和 publish 流程；
-- 公网第三方 live probes、真实第二轮 retry，以及完整交互式下载/安装/执行链；
-- Go1.26.5 本地 quality gate 已通过；本地 govulncheck 仍 exit 3，5 个可达标准库漏洞均 fixed in Go 1.26.6，且 GitHub security workflow 尚未验证，因此不能称 security clean；安装器、工具布局 fixture、主程序 cross、integration 和双语二进制证据见上文。
-- 阶段 15 的 base-to-candidate 全量 diff、远端 target/PR 同步、最终 SHA 一致性和 Draft PR 更新。
+### A. 基线、完整 diff 与远端核验
 
-因此当前没有最终候选 SHA、最终 CI 全绿或已 push 的结论；PR #6 仍为 OPEN、Draft。
+本轮只读命令与结果：
+
+```text
+git status --short                         # 初始为空
+git rev-parse HEAD                         # c6ee5ba17ca6d902f88d549b87335c67e622db7f
+git rev-parse 6e85039301fc817e8c4a290ffb9b111fc37e55a8
+git merge-base 6e85039301fc817e8c4a290ffb9b111fc37e55a8 HEAD
+                                            # 两者均为 6e85039301fc817e8c4a290ffb9b111fc37e55a8
+git ls-remote origin refs/heads/main refs/heads/codex/architecture-machine-facts-cleanup
+                                            # main=6e850393...，target=c6a59b37...
+git diff --stat 6e850393..c6ee5ba            # 207 files, 16252 insertions(+), 7115 deletions(-)
+git rev-list --count 6e850393..c6ee5ba       # 103
+git diff --check 6e850393..c6ee5ba          # exit=0
+git diff --summary 6e850393..c6ee5ba       # 仅文本 create/delete/modify
+git diff --numstat 6e850393..c6ee5ba | awk '$1=="-" || $2=="-" {print}'
+                                            # 无二进制差异行
+```
+
+主 Agent 返工复核另执行：
+
+```text
+git fetch --no-tags origin refs/heads/main refs/heads/codex/architecture-machine-facts-cleanup
+                                            # fetch 成功，base/remote refs 未变化
+git diff --diff-filter=ACMR --name-only 6e850393..c6ee5ba -- '*.go' | xargs -r gofmt -l
+                                            # 无输出
+jq -e 'type == "object" and (.schema_version | type == "string") and (.architectures | type == "array") and (.tools | type == "array") and (.corpus | type == "object")' tools/lock.json
+                                            # true
+GOTOOLCHAIN=go1.26.5 ECS_I18N_SAMPLES="$PWD/internal/report/testdata" go test -count=1 ./internal/app ./internal/config ./internal/model ./internal/i18n ./internal/probe ./internal/report ./internal/runner ./internal/compare
+                                            # exit=0，聚焦包全部通过
+```
+
+`gh pr view 6 --repo CST-Cat/ecs` 只读结果：PR #6 为 `OPEN`、`Draft`、`CLEAN`、`MERGEABLE`，
+base 为 `main`，head 为 `codex/architecture-machine-facts-cleanup`，head OID 仍为远端
+`c6a59b37d2e61708bd3487dc13a8881fd718efaf`。远端 checks 全部针对该旧 target，不能冒充本地
+`c6ee5ba` 的 CI。当前 PR body 仍是早期草案（含已过时的环境/阶段说明）；本轮未调用 `gh pr edit`、未 push、未触发 workflow。
+
+### B. 八项 blocker 与 19 项需求闭环
+
+八项 blocker 的源码/测试证据已在 `REVIEW.md` 阶段 15 小节逐项列出：Message contract、四个
+probe direct producer/reverse-bridge 搜索、retry canonical/renderer、plan exposure/reveal、DB-IP
+`dbip`、summary/system 单采集、NAT ordered table 均已闭环；P3 文档候选已修复。`SEARCH_SUMMARY.md`
+已重标为原始任务历史阶段 1/2026-08-20 初始调查快照，不作为当前验收证据；当前没有新的生产阻断。
+
+| 原始需求 | 状态 | 本轮证据/限制 |
+| --- | --- | --- |
+| 1 Compare JSON-only | 满足 | compare JSON-only 契约与 structured notices 测试通过。 |
+| 2 app 拆分/resolver | 满足 | app 职责文件与唯一 resolver，阶段测试/全仓测试通过。 |
+| 3 i18n 单向 key→语言 | 满足 | zh/en parity、缺 key 不回退及生产 Message 审计通过。 |
+| 4 动态文本结构化/raw 保留 | 满足 | Message/renderer 契约、raw stdout/stderr/error 保留测试通过。 |
+| 5 不引完整 presentation package | 满足 | 仅 renderer helper，无新完整 presentation framework。 |
+| 6 `ecs plan --json` | 满足 | resolver 复用、v1 schema、8 组 exposure/reveal 二进制计划通过。 |
+| 7 `run.sh` 单一控制面 | 满足 | shell fixture、last-wins、fail-closed 与真实 binary plan/run 路径通过。 |
+| 8 retry policy descriptor | 满足 | ModuleDescriptor 策略和计划输出/runner 测试通过。 |
+| 9 config 拆分 | 满足 | types/defaults/file/validate/catalog 等职责拆分，config 测试通过。 |
+| 10 model 拆分 | 满足 | model 子文件、Message/Result/summary/redaction 契约及测试通过。 |
+| 11 report 变薄/先 render 后写 | 满足 | 删除 Localize clone，三格式 renderer 与原子写入回归通过。 |
+| 12 tools lock/cache | 满足 | `tools/lock.json`、devtools lock/cache 和 CI fixture 通过。 |
+| 13 build tools 拆分 | 满足 | scripts/tools 分拆、package-tools/layout/build-definition 检查通过。 |
+| 14 CI/security 边界 | 实现满足；验证受限 | 独立 security workflow、非-required 边界和人工 Go pin 已实现；Go1.26.5 quality/full/race 本地通过，但 govulncheck exit 3，GitHub security workflow 未运行。 |
+| 15 leaderboard trigger | 实现满足；验证受限 | trigger 已排除生成输出并覆盖真实入口；静态/CI 检查通过，但真实 trigger/writeback 未执行。 |
+| 16 installer/docs parity | 满足 | install/run fixture、`--with-benchmarks` 语义与文档检查通过；完整发布流程未验证。 |
+| 17 probe 有限去重 | 满足 | NextTrace/tool execution 等有限共享 helper，未引 generic runner；live probes 未验证。 |
+| 18 明确降级/撤回旧建议 | 满足 | 无完整 presentation framework、保留 staging/install opt-in、不升级 Go、govulncheck 非 required。 |
+| 19 beta v1/no compat | 满足 | report/compare/plan 均保持 v1，删除旧字段/bridge/fallback，不发 v2。 |
+
+“实现满足；验证受限”是验证边界而非已发现实现错误；阶段 15 不把未运行的外部流程包装成通过。
+
+### C. 待交付限制
+
+- Go1.26.5 本地 `govulncheck` exit 3，5 个 reachable 标准库漏洞均标记 fixed in Go1.26.6；按 REQUIREMENTS 不升级工具链，不能称 security clean。
+- GitHub security workflow、PR 对本地候选的新 checks、七架构工具源码构建/Release、public live probes、真实第二轮 retry 和完整交互下载链未验证。
+- `SEARCH_SUMMARY.md` 已重标为原始任务历史阶段 1/2026-08-20 初始调查快照，明确旧实现只用于追溯，不作为当前验收证据；当前状态以 REQUIREMENTS/PLAN/REVIEW/VALIDATION 为准。
+
+### D. 拟议 Draft PR body（仅草案，未调用 `gh pr edit`）
+
+~~~markdown
+## Summary
+
+- Remediate the eight review blockers while keeping `ecs.report/v1`, `ecs.compare/v1`, and `ecs.plan/v1` in place.
+- Emit machine facts directly from network/media/route/backtrace/system producers; keep ECS-generated dynamic text as structured messages and raw external evidence unchanged.
+- Structure retry/interference and NAT STUN-pool facts so one canonical JSON can be rendered in Chinese or English.
+
+## Review mapping
+
+- Message string-argument format contracts: closed; production-callsite zh/en contract tests prevent `%!` diagnostics.
+- Probe reverse semantic bridges: closed for network/media/route/backtrace; direct producer tests and source audit cover stable IDs/enums.
+- Retry canonical pollution: closed; interference/retry/attempt facts stay structured and are localized only by renderers.
+- Plan wizard privacy: closed; v1 plans require `exposure` and boolean `reveal`, and ordinary run appends both authoritatively.
+- DB-IP and NAT: closed; source ID is `dbip`, and STUN candidates are an ordered machine table.
+- Summary/system: closed; legacy summary strings/fallbacks and duplicate system collection were removed.
+- Documentation: schema/PLAN/REVIEW/VALIDATION are synchronized and `SEARCH_SUMMARY.md` is explicitly historical; final PR body and remote sync remain pending.
+
+## Requirements 1–19
+
+All 19 implementation requirements are satisfied in code/config/docs. Requirement 14 is implemented but verification is limited: the independent security workflow, non-required boundary, and manual Go pin are present; local Go1.26.5 quality/full/race passed, while local govulncheck reports five reachable standard-library vulnerabilities fixed in Go1.26.6 and the GitHub security workflow is not yet verified. Requirement 15 is implemented but verification is limited: the trigger excludes generated outputs and covers the real algorithm entry points; real leaderboard trigger/writeback was not run. External live probes, real second-round retry, full tool Release, and the complete interactive download chain remain unverified.
+
+## Validation
+
+- Default Go1.22.2 and Go1.26.5: full tests/race passed.
+- Go1.26.5 `scripts/ci/check.sh`, shell fixtures, integration, seven-architecture ecs cross, submission corpus, and real local-only bilingual system render passed.
+- Canonical JSON hashes remain unchanged across zh/en render; no `%!`, stable-key leakage, or legacy summary fields.
+
+## Delivery state
+
+- Local audit candidate: `c6ee5ba17ca6d902f88d549b87335c67e622db7f` (not the remote head and not a final delivery SHA).
+- Remote PR #6 remains OPEN and Draft at target `c6a59b37d2e61708bd3487dc13a8881fd718efaf`; these existing checks do not validate the local candidate.
+- No push or PR edit has been performed. Keep the PR Draft as required; the security red item and external-validation limits require a later independent scan/run or maintainer decision. This task does not implicitly upgrade Go.
+~~~
+
+### 阶段 15 待验证项
+
+- 推送后的远端 CI、GitHub security workflow 和 PR 更新仍待执行；前两轮返工原因、同一 Worker 执行记录及第三轮预推送主审结果已如上保留，随后才可决定是否完成 Draft PR 更新。
+
+因此当前没有最终候选 SHA、最终 CI 全绿或已 push 的结论；本地审计候选为 `c6ee5ba`，PR #6 仍为 OPEN、Draft。
