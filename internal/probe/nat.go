@@ -3,11 +3,9 @@ package probe
 import (
 	"context"
 	"net"
-	"strings"
 	"time"
 
 	"ecs/internal/config"
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -187,7 +185,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Key: "mapping_behaviour", Label: "映射行为", Value: best.Mapping},
 		{Key: "filtering_behaviour", Label: "过滤行为", Value: best.Filtering},
 		{Key: "stun_server", Label: "判定所用服务器", Value: best.Server.Name},
-		{Key: "stun_pool", Label: "候选服务器", Value: describeNATServers(servers)},
 	}
 	result.Measurements = []model.Measurement{
 		{
@@ -416,16 +413,4 @@ func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {
 		return net.IPv6zero
 	}
 	return net.IPv4zero
-}
-
-// describeNATServers 给出参与检测的服务器列表，用于报告披露。
-func describeNATServers(servers []config.Endpoint) string {
-	names := make([]string, 0, len(servers))
-	for _, server := range servers {
-		names = append(names, server.Address)
-	}
-	// This value is persisted in the canonical report. Keep collection
-	// independent of the current UI language; human renderers may localize the
-	// surrounding display copy later.
-	return strings.Join(names, i18n.TL(i18n.LangZH, "punct.listSep"))
 }

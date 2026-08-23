@@ -1,14 +1,20 @@
 package probe
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/report"
+	"ecs/internal/termcolor"
 )
 
 func buildTestSTUNResponse(transaction [12]byte, mapped netAddr) []byte {
@@ -88,8 +94,173 @@ func TestSTUNMessageParsesMappingAndClassifiesUnknownFiltering(t *testing.T) {
 }
 
 func TestNATWithoutServersSkipsWithoutNetwork(t *testing.T) {
-	result := (natProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
-	if result.Status != model.StatusSkipped || result.Summary != "未配置 STUN 服务器" || result.Evidence == nil || result.Evidence.Valid != 0 {
+	result := (natSemanticProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
+	if result.Status != model.StatusSkipped || result.Summary != "" || len(result.SummaryMessages) != 1 ||
+		result.SummaryMessages[0].Key != "probe.nat.summary.skipped" || result.Evidence == nil || result.Evidence.Valid != 0 {
 		t.Fatalf("NAT no-server result = %+v", result)
+	}
+	if len(result.Tables) != 0 {
+		t.Fatalf("NAT no-server result unexpectedly has tables: %+v", result.Tables)
+	}
+}
+
+func startTestSTUNServer(t *testing.T) string {
+	t.Helper()
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	go func() {
+		packet := make([]byte, stunMaxResponse)
+		for {
+			count, source, err := connection.ReadFromUDP(packet)
+			if err != nil {
+				return
+			}
+			if count < 20 {
+				continue
+			}
+			var transaction [12]byte
+			copy(transaction[:], packet[8:20])
+			response := buildTestSTUNResponse(transaction, netAddr{IP: "127.0.0.1", Port: source.Port})
+			_, _ = connection.WriteToUDP(response, source)
+		}
+	}()
+	return connection.LocalAddr().String()
+}
+
+func natCandidateFixture(t *testing.T, servers []config.Endpoint) model.Report {
+	t.Helper()
+	result := (natSemanticProbe{}).Run(context.Background(), Environment{Config: config.Runtime{STUNServers: servers}})
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
+		Run: model.RunInfo{
+			ID: "nat-fixture", Profile: "standard", StartedAt: time.Unix(0, 0).UTC(),
+			Exposure: "local", Offline: false,
+		},
+		Summary: model.Summary{Status: result.Status, Warnings: 1},
+		Results: []model.Result{result},
+	}
+	return data
+}
+
+func natPoolTable(t *testing.T, result model.Result) model.Table {
+	t.Helper()
+	for _, table := range result.Tables {
+		if table.Key == "network.nat.stun_pool" {
+			return table
+		}
+	}
+	t.Fatalf("NAT result has no candidate pool table: %+v", result.Tables)
+	return model.Table{}
+}
+
+func TestNATSemanticPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
+	servers := []config.Endpoint{
+		{Name: "Alpha STUN", Address: startTestSTUNServer(t)},
+		{Name: "Beta STUN", Address: "beta.example:bad"},
+	}
+	data := natCandidateFixture(t, servers)
+	result := data.Results[0]
+	pool := natPoolTable(t, result)
+	if pool.Title != "probe.nat.table.stun_pool" ||
+		!reflect.DeepEqual(pool.Columns, []string{"probe.nat.column.server_name", "probe.nat.column.server_address"}) ||
+		!reflect.DeepEqual(pool.ColumnKeys, []string{"server_name", "server_address"}) ||
+		pool.RowIdentity != "" || len(pool.SensitiveColumns) != 0 {
+		t.Fatalf("candidate pool shape = %+v", pool)
+	}
+	wantRows := [][]string{{servers[0].Name, servers[0].Address}, {servers[1].Name, servers[1].Address}}
+	if !reflect.DeepEqual(pool.Rows, wantRows) {
+		t.Fatalf("candidate pool rows = %v, want %v", pool.Rows, wantRows)
+	}
+	if len(result.Tables) != 2 || len(result.Tables[0].Rows) != 1 {
+		t.Fatalf("early-stop probe details = %+v", result.Tables)
+	}
+	for _, field := range result.Fields {
+		if field.Key == "stun_pool" {
+			t.Fatalf("legacy scalar stun_pool field remains: %+v", result.Fields)
+		}
+	}
+}
+
+func TestNATSemanticPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
+	servers := []config.Endpoint{
+		{Name: "Alpha STUN", Address: "alpha.example:bad"},
+		{Name: "Beta STUN", Address: "beta.example:bad"},
+	}
+	data := natCandidateFixture(t, servers)
+	result := data.Results[0]
+	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 {
+		t.Fatalf("all-failed NAT result = %+v", result)
+	}
+	pool := natPoolTable(t, result)
+	if len(pool.Rows) != len(servers) {
+		t.Fatalf("all-failed candidate pool = %v, want %d rows", pool.Rows, len(servers))
+	}
+	for index, server := range servers {
+		if got := pool.Rows[index]; len(got) != 2 || got[0] != server.Name || got[1] != server.Address {
+			t.Fatalf("all-failed pool row %d = %v", index, got)
+		}
+	}
+}
+
+func TestNATCandidatePoolRendersLocalizedWithoutMutatingCanonical(t *testing.T) {
+	servers := []config.Endpoint{
+		{Name: "Alpha STUN", Address: "alpha.example:bad"},
+		{Name: "Beta STUN", Address: "beta.example:bad"},
+	}
+	data := natCandidateFixture(t, servers)
+	before, err := report.JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	for _, language := range []struct {
+		lang    i18n.Lang
+		markers []string
+	}{
+		{lang: i18n.LangZH, markers: []string{"STUN 候选服务器", "服务器名称", "服务器地址"}},
+		{lang: i18n.LangEN, markers: []string{"STUN candidate servers", "Server name", "Server address"}},
+	} {
+		i18n.Set(language.lang)
+		text := report.Text(data, report.TextOptions{Color: termcolor.LevelNone, Width: 120})
+		markdown := report.Markdown(data, nil)
+		html, err := report.HTML(data, nil)
+		if err != nil {
+			t.Fatalf("HTML %s: %v", language.lang, err)
+		}
+		outputs := []string{text, markdown, string(html)}
+		for format, output := range outputs {
+			for _, marker := range append(append([]string{}, language.markers...), servers[0].Name, servers[0].Address, servers[1].Name, servers[1].Address) {
+				if !strings.Contains(output, marker) {
+					t.Fatalf("%s format %d output missing %q:\n%s", language.lang, format, marker, output)
+				}
+			}
+			for _, forbidden := range []string{"network.nat.stun_pool", "probe.nat.column.server_name", "%!"} {
+				if strings.Contains(output, forbidden) {
+					t.Fatalf("%s format %d output contains forbidden %q:\n%s", language.lang, format, forbidden, output)
+				}
+			}
+			if language.lang == i18n.LangEN {
+				if strings.Contains(output, "、") {
+					t.Fatalf("English format %d output contains Chinese list punctuation:\n%s", format, output)
+				}
+				for _, runeValue := range output {
+					if runeValue >= '\u3400' && runeValue <= '\u9fff' {
+						t.Fatalf("English format %d output contains ECS Han text %q:\n%s", format, runeValue, output)
+					}
+				}
+			}
+		}
+		after, err := report.JSON(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("%s rendering mutated canonical report", language.lang)
+		}
 	}
 }

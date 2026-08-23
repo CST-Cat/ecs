@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -16,7 +17,27 @@ func (natSemanticProbe) NeedsNetwork() bool { return true }
 func (natSemanticProbe) Run(ctx context.Context, env Environment) model.Result {
 	result := (natProbe{}).Run(ctx, env)
 	stabilizeNATResult(&result)
+	if len(env.Config.STUNServers) > 0 {
+		result.Tables = append(result.Tables, natSTUNPoolTable(env.Config.STUNServers))
+	}
 	return result
+}
+
+// natSTUNPoolTable discloses the configured candidate pool as machine rows.
+// It is intentionally built from configuration rather than findings so that
+// early stop, failed probes, and partial execution never hide candidates.
+func natSTUNPoolTable(servers []config.Endpoint) model.Table {
+	table := model.Table{
+		Key:        "network.nat.stun_pool",
+		Title:      "probe.nat.table.stun_pool",
+		Columns:    []string{"probe.nat.column.server_name", "probe.nat.column.server_address"},
+		ColumnKeys: []string{"server_name", "server_address"},
+		Rows:       make([][]string, 0, len(servers)),
+	}
+	for _, server := range servers {
+		table.Rows = append(table.Rows, []string{server.Name, server.Address})
+	}
+	return table
 }
 
 func stabilizeNATResult(result *model.Result) {
