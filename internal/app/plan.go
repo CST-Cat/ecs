@@ -22,6 +22,7 @@ type executionPlan struct {
 	Tool             planTool        `json:"tool"`
 	Profile          string          `json:"profile"`
 	Exposure         string          `json:"exposure"`
+	Reveal           bool            `json:"reveal"`
 	IPVersion        string          `json:"ip_version"`
 	Modules          []plannedModule `json:"modules"`
 	RequiredTools    []string        `json:"required_tools"`
@@ -128,6 +129,7 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 		Tool:          planTool{Name: buildinfo.Name, Version: buildinfo.Version},
 		Profile:       runtime.Profile,
 		Exposure:      runtime.Exposure.String(),
+		Reveal:        runtime.Reveal,
 		IPVersion:     runtime.IPVersion,
 		Modules:       make([]plannedModule, 0, len(runtime.Modules)),
 		Staging:       planStaging{Mode: "temporary-prefix"},

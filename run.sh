@@ -954,6 +954,8 @@ PLAN_FILE="$WORK/execution.plan.json"
 PLAN_SCHEMA=""
 PLAN_PROFILE=""
 PLAN_MODULES=""
+PLAN_EXPOSURE=""
+PLAN_REVEAL=""
 PLAN_TOOLS=""
 
 # Read only the machine plan emitted by the downloaded binary. The JSON is
@@ -979,6 +981,22 @@ load_execution_plan() {
   PLAN_SCHEMA=$(sed -n 's/^[[:space:]]*"schema_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLAN_FILE" | sed -n '1p')
   [ "$PLAN_SCHEMA" = "ecs.plan/v1" ] ||
     die "下载的 ecs 返回了不支持的执行计划 schema" "the downloaded ecs returned an unsupported execution-plan schema"
+  PLAN_EXPOSURE_COUNT=$(awk '/^  "exposure"[[:space:]]*:/ {count++} END {print count + 0}' "$PLAN_FILE")
+  [ "$PLAN_EXPOSURE_COUNT" -eq 1 ] ||
+    die "执行计划缺少或重复 exposure" "the execution plan has a missing or duplicate exposure"
+  PLAN_EXPOSURE=$(sed -n 's/^  "exposure"[[:space:]]*:[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*$/\1/p' "$PLAN_FILE")
+  case "$PLAN_EXPOSURE" in
+    local|public|thirdparty|any) ;;
+    *) die "执行计划的 exposure 非法（可选 local、public、thirdparty、any）" "the execution plan has an invalid exposure (choose local, public, thirdparty, or any)" ;;
+  esac
+  PLAN_REVEAL_COUNT=$(awk '/^  "reveal"[[:space:]]*:/ {count++} END {print count + 0}' "$PLAN_FILE")
+  [ "$PLAN_REVEAL_COUNT" -eq 1 ] ||
+    die "执行计划缺少或重复 reveal" "the execution plan has a missing or duplicate reveal"
+  PLAN_REVEAL=$(sed -n 's/^  "reveal"[[:space:]]*:[[:space:]]*\([^,[:space:]]*\)[[:space:]]*,\{0,1\}[[:space:]]*$/\1/p' "$PLAN_FILE")
+  case "$PLAN_REVEAL" in
+    true|false) ;;
+    *) die "执行计划的 reveal 非法（必须是 true 或 false）" "the execution plan has an invalid reveal (it must be true or false)" ;;
+  esac
   PLAN_PROFILE=$(sed -n 's/^[[:space:]]*"profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLAN_FILE" | sed -n '1p')
   PLAN_MODULES=$(awk '
     /"modules"[[:space:]]*:/ {inside=1; next}
@@ -1338,18 +1356,21 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
 elif [ -n "$PLAN_FILE" ]; then
   if [ -n "$REPORT_DIR" ]; then
     if [ "$NAME_GIVEN" -eq 1 ]; then
-      if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR"; then
+      if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" \
+          --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
         RUN_STATUS=0
       else
         RUN_STATUS=$?
       fi
-    elif "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" --name "$REPORT_NAME"; then
+    elif "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" --name "$REPORT_NAME" \
+        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
       RUN_STATUS=0
     else
       RUN_STATUS=$?
     fi
   else
-    if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes; then
+    if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes \
+        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
       RUN_STATUS=0
     else
       RUN_STATUS=$?
