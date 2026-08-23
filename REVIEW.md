@@ -1,34 +1,57 @@
 # Branch review
 
-日期：2026-08-22
-基准：main@6e85039301fc817e8c4a290ffb9b111fc37e55a8
-当前分支：codex/architecture-machine-facts-cleanup
-审查基线：08bd29f；本记录覆盖其后的完整工作区差异。
+日期：2026-08-23
+基准：`main@6e85039301fc817e8c4a290ffb9b111fc37e55a8`
+远端审查目标：`origin/codex/architecture-machine-facts-cleanup@c6a59b37d2e61708bd3487dc13a8881fd718efaf`
+本地代码候选：`2ac564aaf361d763d8a0941a8d2a240387cf92a7`（阶段 12 提交）
+分支：`codex/architecture-machine-facts-cleanup`
+PR：#6，OPEN、Draft；本轮修复尚未 push
 
-本记录用于阶段 24 的总审查，区分已经验证的代码路径和当前环境无法执行的外部路径。
+本记录是 2026-08-23 remediation 的阶段性复审记录，不是最终合并结论。阶段 1–12 已由主 Agent
+逐阶段审查并通过；阶段 13 文档同步已完成，阶段 14 完整回归和阶段 15 最终审查/PR 更新尚未完成。
+因此当前不能宣称最终可合并、最终 SHA、远端已同步或最终 CI 全绿。
 
-## 实质变更追踪
+## 八项问题与当前状态
 
-| 范围 | 审查结论 |
-| --- | --- |
-| Probe 与 i18n | 内建探针输出改为 stable key/Message；报告在展示边界渲染；旧 source-text translation 与 report Localize 路径已删除。 |
-| Report 与 compare | 主报告和 comparison 都先完成全部格式渲染再写文件；compare 契约和文档统一为 ecs.compare/v1。 |
-| Plan、run 与 retry | ecs plan --json 复用唯一 resolver；run.sh 只消费计划；干扰重试策略来自 ModuleDescriptor，不再由 runner ID 白名单决定。 |
-| Config、model 与 probe helper | 大文件按职责拆分；模型、配置和工具执行辅助保持同 package/既有边界，没有引入新框架。 |
-| 工具供应链 | tools/lock.json 成为构建、语料和发布校验的固定事实源；构建脚本按工具拆分；devtools 缓存绑定 go.mod/go.sum。 |
-| CI、安装器与文档 | security 独立为定时/手动 workflow；leaderboard 排除生成 baseline；安装器和中英文文档同步默认仓库及 benchmark opt-in 语义。 |
+| 原始级别/问题 | 当前状态 | 关闭证据或剩余工作 |
+| --- | --- | --- |
+| P1：Message 参数序列化为 string，但生产模板仍使用 `%d`，导致 `%!d(string=...)` | 已修复 | 阶段 2 审计全部生产带参 Message key；模板统一按 string args；zh/en 契约测试和全仓测试通过。 |
+| P1：network、media、route、backtrace 从展示文本反推机器语义 | 已修复 | 阶段 6–9 分别改为 producer 直接写 stable ID/enum/Message；删除对应 reverse bridge；覆盖 DB-IP、媒体 verdict、route/backtrace 状态与 raw evidence。 |
+| P1：retry/interference 在 canonical JSON 写入中文 measurement/reason/table/selection prose | 已修复 | 阶段 3 仅保存结构化 `Interference`/`Retry`/`TextBlock.attempt`；阶段 4 在 Text/Markdown/HTML 临时本地化渲染，不回写 canonical。 |
+| P1：wizard 修改的 exposure/reveal 未完整进入最终 run | 已修复 | 阶段 5 的 `ecs.plan/v1` 顶层必需 `reveal` 与严格 run.sh 消费已通过 8 组 Go、4 类 exposure shell、冲突 last-wins 和 fail-closed 测试。 |
+| P2：DB-IP 生成 `probe.network.score_band.db-ip` | 已修复 | 阶段 6 直接从 source ID 生成 `.dbip`，并覆盖所有质量来源身份和双语注册。 |
+| P2：Headline/Summary 与 Message 双表示、renderer fallback、临时 bridge | 已修复 | 阶段 12 删除 `Summary.Headline`、`Result.Summary` 和 fallback；全局仍保留 `Status`/计数，且人类可读摘要的唯一表示为 `Summary.Messages`，Result 只保留 `SummaryMessages`；`Skip(Message)` 显式接收结构化消息。 |
+| P2：NAT `stun_pool` 使用中文顿号拼接候选地址 | 已修复 | 阶段 10 改为 `network.nat.stun_pool` table，按配置顺序逐项保存 Name/Address。 |
+| P3：任务文档和 SHA/PR 状态失真 | 已修复/阶段 13 已完成 | 阶段 13 已同步 schema、PLAN、REVIEW、VALIDATION，并核对本地候选、远端 target 与 PR 状态；仍需阶段 14/15 做完整回归和最终 PR 更新。 |
 
-## 负向审查
+## 返工与阶段状态
 
-针对活动实现代码的搜索未发现以下旧入口仍被调用：report.Localize、i18n.Text、ECS_PLAN_FILE、GenericBenchmarkRunner，以及 ToolBuilder/provider/plugin 式新框架。run.sh 没有读取 tools/lock.json；锁文件由本地构建链消费。
+主 Agent 按“执行—独立审查—同 Worker 返工—复审”串行处理。已记录的关键返工包括：
 
-没有发现将外部工具 stdout/stderr 重新翻译成 ECS canonical 文案的新增路径。原始证据仍按原样保存，稳定语义只覆盖 ECS 自己生成的标题、字段、状态和摘要。
+- 阶段 2 收紧 Message 契约测试，避免把普通 `probe.*` presentation key 当 fmt 模板，并对动态 NAT Message key 做显式审计；
+- 阶段 3–4 将 retry/interference 事实与展示边界彻底分开，并补齐三格式双语/英文无 Han/HTML 安全测试；
+- 阶段 5 补齐全部 exposure/reveal 组合、重复字段、argv 尾部权威参数和 fail-closed 测试；
+- 阶段 6–9 先后修复 warning/source disclosure、双栈摘要粘连、media raw error、backtrace partial/all-no-response 和自定义 carrier 语法等问题；
+- 阶段 11 删除 system 死代码和测试专用 wrapper，增加包级唯一采集入口与 uptime 边界约束；
+- 阶段 12 首次主审指出摘要 AST 误报合法 `Report.Summary`、JSON 检查错层级、legacy fallback/structured render 覆盖不足、Message Args 安全测试不足、Skip 语义误用和 iperf3 raw error 丢失；同一 Worker 返工后第二轮通过。
+- 阶段 13 第一至第二轮主审修正 schema 版本纪律、stable key/Message/summary 计数区分、retry/disk 示例与 LoadJSON/plan/run 事实，并补齐 JSON/工具链记录；同一 Worker 完成返工。
+- 阶段 13 第三轮主审指出 Message 零参数、retry evidence/status、network Field、NAT protocol/缺失值、backtrace TextBlock 敏感标记和 `staging` 必需性事实偏差；同一 Worker 修正并补齐验证。
+- 阶段 13 第四轮主审进一步指出 backtrace 不属于 retry-enabled 模块，不能用 `attempt:2` 标记其 raw block，且远端 hop 示例不应使用遮盖值；同一 Worker 改为 retry-enabled CPU raw block 示例，第四轮完整复审通过。
 
-## 未执行项
+当前状态：阶段 1–13 DONE；阶段 14、15 TODO。
 
-当前工作区没有把真实公网服务、完整 benchmark 工具构建、七架构发布归档和 release publish 当作本地已通过项。已执行的是源码测试、静态检查、脚本契约、工具锁校验、安装/run/compare/package fixture，以及 build-tools 的参数打印。
+## 验证边界
 
-本机 Go 为 1.22.2。govulncheck v1.6.0 可以成功构建和运行，但本地扫描输出的是该旧标准库/工具链的已知 finding，因此不能把它表述为 clean security scan。security workflow 使用仓库固定的 .go-version（1.26.5），应由 GitHub Actions 单独提供该环境下的证据。
+阶段记录中已实际通过的 Go 包测试、race 测试、shell fixture、`git diff --check` 和各阶段专项
+静态约束，分别保留在 `PLAN.md` 与 `VALIDATION.md`。本地候选 `2ac564a` 是阶段 12 代码提交，
+不是远端 target 的同义替代；远端 `c6a59b37` 在阶段 1–12 审查期间保持为目标 SHA。
 
-交付方式：用户已授权将本轮审查通过的修改直接提交并推送到当前 tracking 分支；不创建或更新 Pull Request。
-推送结果：a938385 已由非强制 push 写入 origin/codex/architecture-machine-facts-cleanup；本地工作区保持干净。
+仍不能在本地记录为已验证：
+
+- GitHub security workflow 的真实运行结果；
+- 七架构工具的完整构建、归档、签名/attestation 和 Release 流程；
+- 公网第三方 live probes、真实第二轮 retry 和完整交互下载执行链；
+- 阶段 14 规定的完整 shell/CI/构建回归；
+- 阶段 15 的最终 base-to-candidate 总 diff 审查、远端同步和 Draft PR 更新。
+
+历史记录中的 `08bd29f`、`a938385` 仅用于说明旧审查/旧交付背景，不代表当前审查基线、最终候选或交付状态。

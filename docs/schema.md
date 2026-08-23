@@ -21,8 +21,12 @@
   - `offline`：`exposure == "local"` 的派生布尔值，保留给既有的报告消费方。
   - `redacted`：只有在写文件前已完成全 schema 本机 IP 遮盖的副本才为 `true`；Runner 内部的原始对象为 `false`。
 - `results`：按实际执行顺序排列的探针结果。
-- `summary`：`ok`、`warning`、`skipped`、`error` 数量与人类可读摘要。
+- `summary`：`status`、`ok`、`warnings`、`skipped`、`errors` 计数，以及可选的结构化 `messages` 摘要；顶层没有旧的 `headline` 字符串。
 - `notices`：适用于整份报告的方法或隐私说明。
+
+每个 `Result` 使用 `summary_messages: Message[]` 保存模块摘要；Result 不再有旧的字符串
+`summary` 字段。顶层 `summary` 对象与 Result 的 `summary_messages` 是两个不同层级：两层的人类可读
+摘要都只用结构化 Message 表示；顶层对象另外保留 `status`、`ok`、`warnings`、`skipped`、`errors`。
 
 `ecs render` 从同一份 JSON 可重新导出 `json`、`md`、`html` 三种文件格式；渲染器
 不重新执行探针，也不把某种文件格式当成唯一输出。
@@ -32,6 +36,26 @@
 基线来源与样本数随分数一起呈现。基线文件本身是独立的 `ecs.baseline/v1` 格式，
 由 `ecs leaderboard` 或 `ecs baseline` 生成。
 
+## Message
+
+ECS 自己生成的静态展示身份（`Title`、`Description`、字段/measurement label、表格标题与列名、
+source purpose、notes）在 canonical JSON 中保存为稳定 i18n key string；有限状态、类型和表格单元
+保存为稳定 machine enum/key。ECS 自己生成的动态摘要、notices、重试选择规则和重试原因都使用
+`Message{Key,Args}`，即使消息没有参数也不例外；只有需要参数时才填 `Args`，在终端文本、Markdown
+或 HTML 边界按当前语言渲染：
+
+```json
+{
+  "key": "message.summary.withWarnings",
+  "args": ["3", "1"]
+}
+```
+
+`Message` 的 JSON 形状固定为 `{"key": string, "args": string[]}`；`args` 省略时表示空数组。
+生产者不得把已经本地化的句子写进 canonical JSON，也不得从句子反推机器语义。供应商返回的
+原始错误、命令 stdout/stderr、主机名、地址和其他外部证据保留在各自的 raw 字符串字段中，展示时
+不翻译、不把它们冒充成稳定 key 或 `Message`。
+
 ## Result
 
 每个探针返回一个 `Result`：
@@ -39,26 +63,31 @@
 ```json
 {
   "id": "disk",
-  "title": "磁盘性能",
+  "title": "module.disk.title",
   "methodology": {
     "kind": "standard-benchmark",
-    "label": "标准基准",
+    "label": "methodology.standard-benchmark",
     "engine": "fio",
-    "profile": "Direct I/O seq 1 MiB QD1 + rand 4 KiB QD32 + randrw 50/50 QD64",
-    "comparison_scope": "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
+    "profile": "probe.disk.profile",
+    "comparison_scope": "probe.disk.comparison_scope",
     "parameters": {
       "scope_revision": "1",
+      "configured_file_mib": "2048",
+      "multi_mount": "false",
       "tool_version": "fio-3.39",
       "tool_sha256": "…",
       "actual_file_size": "2.00 GiB",
+      "direct_io": "1",
       "ioengine": "io_uring",
-      "job_duration": "15s"
+      "jobs": "53"
     }
   },
   "status": "ok",
-  "summary": "写 500 MiB/s · 读 1.2 GiB/s",
+  "summary_messages": [
+    {"key": "probe.disk.summary.values", "args": ["write=500 MiB/s;read=1.2 GiB/s"]}
+  ],
   "started_at": "2026-07-31T12:00:00Z",
-  "duration_ms": 4200,
+  "duration_ms": 260000,
   "fields": [],
   "measurements": [],
   "tables": [],
@@ -70,6 +99,9 @@
 }
 ```
 
+示例中的 `tool_sha256` 值 `…` 仅是说明性占位，不代表真实工具摘要；该代码块仍是语法有效的 JSON，字段名、JSON tag
+和类型与当前模型一致。
+
 `status` 只有四种：
 
 - `ok`：探针按计划完成；
@@ -77,7 +109,7 @@
 - `skipped`：被配置、离线模式、能力缺失或资源保护跳过；
 - `error`：探针自身失败。Runner 会隔离 panic 并继续后续模块。
 
-`methodology.kind` 明确结果证据等级：
+`methodology.kind` 明确方法类型与口径类别，不是 `evidence.grade`：
 
 - `standard-benchmark`：由 sysbench、zstd、NASA NPB-OMP、官方 STREAM、OpenSSL speed、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
 - `protocol-measurement`：DNS、TCP、NextTrace 等协议级现场测量，不是基准分；
@@ -142,35 +174,60 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
 - 工作负载自身产生的 PSI 增量仍被报告，但不会单独触发复测；
 - 只有首轮含有效证据且命中干扰条件时才再运行一次，最多两轮。
 
-触发时 `Result.retry` 保存完整审计轨迹：
+触发时 `Result.retry` 保存完整审计轨迹。`selection_rule` 是 `Message`，`trigger_reasons` 和
+每轮干扰 `reasons` 是 `Message[]`；`measurements` 保持结构化指标。发生复测时，选中与未选中
+轮次的原始 `text_blocks` 都通过 `attempt` 机器字段标记，展示层生成本地化轮次前缀，不改写
+`TextBlock.title`，也不把重试文案注入普通 Fields、Table 或 Notes：
 
 ```json
 {
   "triggered": true,
   "selected_attempt": 2,
-  "selection_rule": "...",
-  "trigger_reasons": ["..."],
+  "selection_rule": {"key": "probe.retry.selection_rule.interference_score"},
+  "trigger_reasons": [
+    {"key": "probe.pressure.reason.cpu_steal_high", "args": ["6.20"]},
+    {"key": "probe.pressure.reason.pretest_cpu_psi_high", "args": ["21.00"]}
+  ],
   "attempts": [
     {
       "number": 1,
       "status": "ok",
-      "duration_ms": 10000,
-      "evidence": {"valid": 2, "expected": 2, "unit": "run", "grade": "complete"},
-      "interference": {"detected": true, "score": 3, "reasons": [], "measurements": []},
-      "measurements": []
+      "duration_ms": 260000,
+      "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+      "interference": {
+        "detected": true,
+        "score": 5,
+        "reasons": [
+          {"key": "probe.pressure.reason.cpu_steal_high", "args": ["6.20"]},
+          {"key": "probe.pressure.reason.pretest_cpu_psi_high", "args": ["21.00"]}
+        ],
+        "measurements": [
+          {"key": "cpu_steal_percent_window", "label": "probe.pressure.metric.cpu_steal_percent_window", "value": 6.2, "unit": "%", "display": "6.20 %", "method": "proc-stat-steal-window-v1", "higher_is_better": false},
+          {"key": "cpu_psi_some_avg10_pretest", "label": "probe.pressure.metric.cpu_psi_some_avg10_pretest", "value": 21, "unit": "%", "display": "21.00 %", "method": "linux-psi-avg10-v1", "higher_is_better": false}
+        ]
+      },
+      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 500, "unit": "MiB/s", "display": "500.0 MiB/s", "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
+    },
+    {
+      "number": 2,
+      "status": "ok",
+      "duration_ms": 260000,
+      "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+      "interference": {"detected": false, "score": 0, "measurements": []},
+      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 510, "unit": "MiB/s", "display": "510.0 MiB/s", "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
     }
   ]
 }
 ```
 
-选择规则先排除没有有效证据的轮次，再选干扰评分较低的一轮；同分保留首轮。性能数值本身不参与选择，避免自动挑选偶然更高的成绩。普通 Fields/Table/Notes 也会显示复测原因、两轮干扰评分和采用轮次，因此终端文本、Markdown 与 HTML 无需读取隐藏 JSON 就能发现复测。
+选择规则先排除没有有效证据的轮次，再选干扰评分较低的一轮；同分保留首轮。性能数值本身不参与选择，避免自动挑选偶然更高的成绩。三种 renderer 直接读取这些结构化 retry/interference 数据，显示复测原因、两轮干扰评分和采用轮次。
 
 ## Field
 
 `fields` 适合离散信息：
 
 ```json
-{"key":"ipv4","label":"IPv4 出口","value":"203.0.x.x","sensitive":true}
+{"key":"ipv4","label":"probe.network.field.egress","value":"203.0.x.x","sensitive":true}
 ```
 
 `sensitive` 表示该值是本机 IP，写报告前应进入遮盖流程。默认 JSON 本身已经遮盖，而不是只在 HTML 上隐藏。主机名、远端 IP 和网络前缀不应设置该标记。
@@ -182,7 +239,7 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
 ```json
 {
   "key": "fio_sequential_write_mib_s",
-  "label": "fio 顺序写入",
+  "label": "probe.disk.metric.fio_sequential_write_mib_s",
   "value": 512.34,
   "unit": "MiB/s",
   "display": "512.3 MiB/s",
@@ -285,19 +342,21 @@ IP 质量指标尤其需要保留 `method`：
 
 ```json
 {
-  "title": "STUN 探测明细",
-  "columns": ["协议", "服务器", "映射地址", "状态"],
-  "rows": [["IPv4", "example-stun", "203.0.x.x:54321", "完成"]],
+  "key": "network.nat.stun",
+  "title": "probe.nat.table.stun",
+  "columns": ["probe.nat.column.protocol", "probe.nat.column.server", "probe.nat.column.mapped_address", "probe.nat.column.mapping", "probe.nat.column.filtering", "probe.nat.column.alternate_address", "probe.nat.column.status"],
+  "column_keys": ["protocol", "server", "mapped_address", "mapping_behavior", "filtering_behavior", "alternate_address", "status"],
+  "rows": [["IPv4", "example-stun", "203.0.x.x:54321", "probe.nat.mapping.endpoint_independent", "probe.nat.filtering.endpoint_independent", "—", "probe.nat.status.complete"]],
   "sensitive_columns": [2]
 }
 ```
 
-`network` 结果固定保留 IP 类型属性、风险评分、风险因子和数据源状态表。即使供应商未配置、被限流或解析失败，对应行也不能静默删除；使用 `未启用`、`失败`、`未返回` 或 `—` 区分状态。这样 Markdown/HTML 和下游程序能看到证据缺口，而不是把缺失误判成低风险。
+`network` 结果固定保留 IP 类型属性、风险评分、风险因子和数据源状态表。即使供应商未配置、被限流或解析失败，对应行也不能静默删除；canonical 表格保存有限的 machine status key，渲染器再将其本地化并区分缺口，不能把缺失误判成低风险。
 
 `text_blocks` 保存路由等需要原文复核的结果。JSON 按 JSON 规则编码控制字符，HTML 使用转义后的 `<pre>` 展示；终端渲染在排版前对整份报告的字符串值做副本净化，将 C0、DEL、C1（包括 OSC/CSI）替换为普通空格并合并连续控制符。净化之后只允许渲染器自己生成 SGR 颜色序列，输入 JSON 不会被改写。
 
 ```json
-{"title":"本机绑定信息","language":"text","content":"local 203.0.x.x:443","sensitive":true}
+{"title":"probe.cpu.raw.single","language":"text","content":"events per second: 1234.56","attempt":2}
 ```
 
 本机 IP 的遮盖规则为：IPv4 隐藏后两段（保留 /16），IPv6 隐藏后六组（保留 /32），`IP:port` 中的端口号保留。
@@ -309,7 +368,42 @@ IP 质量指标尤其需要保留 `method`：
 IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被解析成 IPv4。
 `ookla_servers` 只控制外部 Ookla 适配器的服务器选择，不代表 Ookla 客户端本身不发送测量数据。
 
-`backtrace` 只会从与当前参考目标同运营商的骨干特征中选择结论；异网骨干命中仍保留在路径证据中，但表格结论为“未识别”，不用其代替目标运营商的线路类型。
+`backtrace` 只会从与当前参考目标同运营商的骨干特征中选择结论；异网骨干命中仍保留在路径证据中，但表格直接保存有限的 `probe.backtrace.status.unidentified`/reason key，不用其代替目标运营商的线路类型。
+
+NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存在候选服务器时，Result 追加一个
+按配置顺序排列的机器表；每个候选一行，Name 与 Address 原样保存：
+
+```json
+{
+  "key": "network.nat.stun_pool",
+  "title": "probe.nat.table.stun_pool",
+  "columns": ["probe.nat.column.server_name", "probe.nat.column.server_address"],
+  "column_keys": ["server_name", "server_address"],
+  "rows": [
+    ["edge-a", "stun-a.example:3478"],
+    ["edge-b", "stun-b.example:3478"]
+  ]
+}
+```
+
+该候选池表即使探测提前成功或所有候选失败也保留完整列表；没有配置服务器时不生成空表。
+
+## Execution plan
+
+`ecs plan --json` 输出固定的 `ecs.plan/v1` 机器计划。顶层 `executionPlan` 的字段为
+`schema_version`、`tool`、`profile`、`exposure`、`reveal`、`ip_version`、`modules`、
+`required_tools`、`needs_egress_ip`、`staging`（必需）以及可省略的 `external_services`。其中：
+
+- `exposure` 必须是 `local`、`public`、`thirdparty` 或 `any`；
+- `reveal` 是必需 JSON boolean，不是字符串，也不由本地化文案表达；
+- `modules[]` 保存 `id`、`title_key`、`description_key`、模块 exposure、外联需求、并发、
+  干扰重试策略、所需工具和估算字段；
+- `staging` 必须存在，保存工具归档、NextTrace、Ookla 和 zstd corpus 的准备事实；只有
+  `external_services` 可以省略。
+
+`run.sh` 将计划的顶层 exposure/reveal 严格解析并追加到每个普通 run 的最终 CLI 参数之后，
+因此向导生成的计划状态权威覆盖原始参数；缺失、重复或非法字段 fail closed。submit 路径不运行
+向导，保持自己的独立参数和隐私边界。计划 schema 原地保持 v1，不增加兼容层或 v2。
 
 ## 排行榜提交与基线 schema
 
@@ -344,7 +438,7 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
   "modules": [],
   "notices": [
     {"key": "compare.notice.scope"},
-    {"key": "compare.notice.schemaMixed", "args": ["ecs.report/v1, ecs.report/v2"]}
+    {"key": "compare.notice.schemaMixed", "args": ["ecs.report/v1, ecs.report/other"]}
   ]
 }
 ```
@@ -384,24 +478,26 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 
 ## 当前 schema 规则
 
-- `ecs.report/v1` 只接收当前字段与当前单位；旧版报告不参与新参数口径比较；
-- 删除、重命名、改变单位或状态语义时升级 schema 版本；
+- `ecs.report/v1` 的当前契约由当前字段与当前单位定义；beta 阶段不承诺旧 payload 在同一 v1 下继续保留语义。未知字段可被当前 JSON loader 忽略，已删除字段不会恢复语义或 fallback；缺少当前机器口径时由 compare 规则产生 issue/不可比，而不是靠版本号自动兼容。字段、单位或状态语义的 breaking change 直接原地更新 v1，不因兼容性自动升到 v2 或保留旧字段适配层；只有用户明确要求版本化时才另行改变版本标识；
+- `ecs.compare/v1` 与 `ecs.plan/v1` 同样遵循 beta 原地更新纪律；结构变化不自动新增版本或兼容层；
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；比较 schema 的字段语义发生不兼容变化时再按版本纪律处理。
+- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；这只描述比较输入策略，不暗示当前 compare schema 自动升 v2，当前结构仍固定为 `ecs.compare/v1`。
 
 ### 为什么只有 `compare` 放宽 schema 版本
 
-`run`、`submit`、`render` 都要求输入的 `schema_version` 与本二进制完全一致：它们把报告当作当前 schema 的实例去解释，版本不符意味着字段语义可能已经变了，继续下去只会得到看似合理的错误结论。
+使用严格 `LoadJSON` 的非 compare 命令（`render`、`submit`、`baseline`、`leaderboard`）要求输入的
+`schema_version` 与本二进制完全一致：它们把报告当作当前 schema 的实例去解释，版本不符意味着字段语义
+可能已经变了，继续下去只会得到看似合理的错误结论。`run` 只生成当前 `ecs.report/v1`，不读取报告输入。
 
-`compare` 不同。真正防止「拿不可比的数字作比较」的是**指标签名**——`key` + `method` + `unit` + 优劣方向 + 逐个 `methodology.parameters`——而不是顶层版本号。由于本项目约定工作负载语义变了就升 `measurement.method`（见上一条），跨版本的语义变化**必然**表现为签名不一致，会落进 `metric_issues` 并由 `differences` 逐分量指出是 method 变了、某个参数变了还是单位换了。这比拒绝加载信息量严格更大。
+`compare` 不同。真正防止「拿不可比的数字作比较」的是**指标签名**——`key` + `method` + `unit` + 优劣方向 + 逐个 `methodology.parameters`——而不是顶层版本号。由于本项目约定工作负载语义变化通过 `measurement.method` 表达（见上一条），跨版本输入的语义差异会表现为签名不一致，落进 `metric_issues` 并由 `differences` 逐分量指出是 method、参数还是单位变化。这比拒绝加载信息量严格更大。
 
-硬拒绝的代价则是实打实的：schema 每升一次版，用户手里所有旧报告立刻永久不可比，而「比较不同时期的报告」正是 `compare` 存在的理由。
+硬拒绝的代价则是实打实的：若未经用户明确要求就频繁改变 schema 版本，用户手里所有旧报告会立刻失去可比性；「比较不同时期的报告」正是 `compare` 存在的理由。
 
 放宽的是版本，不是格式：`schema_version` 为空或不属于 `ecs.report/` 家族仍然直接拒绝。
 
-**残留风险**：签名覆盖不到的字段——`status` 枚举语义、`evidence` 的 `grade` 与比例口径——理论上可以在升版时改变含义而没有任何信号。因此各输入 schema 版本不一致时：
+**残留风险**：签名覆盖不到的字段——`status` 枚举语义、`evidence` 的 `grade` 与比例口径——即使在明确版本化后也可能改变含义而没有单项信号。因此各输入 schema 版本不一致时：
 
 - `summary.comparability` 封顶为 `partially_comparable`，不会给出 `comparable`；
 - `notices` 首条列出涉及的全部 schema 版本；
