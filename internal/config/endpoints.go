@@ -59,6 +59,46 @@ func ParseEndpointList(raw string, requirePort bool) ([]Endpoint, error) {
 	return endpoints, nil
 }
 
+// ParseBacktraceTargetList parses the backtrace-specific machine syntax
+// `carrier:Name=host`. Carrier is deliberately explicit: the producer cannot
+// infer it from a localized or user-defined target name.
+func ParseBacktraceTargetList(raw string) ([]Endpoint, error) {
+	items := splitTrimmed(raw)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	targets := make([]Endpoint, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		carrier, specification, ok := strings.Cut(item, ":")
+		carrier = strings.TrimSpace(carrier)
+		specification = strings.TrimSpace(specification)
+		if !ok || carrier == "" || specification == "" {
+			return nil, i18n.Errorf("err.backtraceFormat", item)
+		}
+		if !ValidBacktraceCarrier(carrier) {
+			return nil, i18n.Errorf("err.backtraceCarrier", item, carrier)
+		}
+		name, address, ok := strings.Cut(specification, "=")
+		name, address = strings.TrimSpace(name), strings.TrimSpace(address)
+		if !ok || name == "" || address == "" {
+			return nil, i18n.Errorf("err.backtraceFormat", item)
+		}
+		if !validRouteTarget(address) {
+			return nil, i18n.Errorf("err.backtraceUnsafe", address)
+		}
+		if seen[address] {
+			return nil, i18n.Errorf("err.endpointDuplicate", address)
+		}
+		seen[address] = true
+		targets = append(targets, Endpoint{
+			Name: name, Address: address, Kind: carrier,
+			Family: inferEndpointFamily(address, false),
+		})
+	}
+	return targets, nil
+}
+
 // inferEndpointFamily records facts that can be established without DNS.  A
 // literal is unambiguous; the backtrace target list also uses a -v6 hostname
 // convention so an IPv6-only hostname is not accidentally routed over IPv4.

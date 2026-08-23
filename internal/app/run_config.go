@@ -185,7 +185,7 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 	}
 	if *backtraceTargetsFlag != "" {
-		targets, err := config.ParseEndpointList(*backtraceTargetsFlag, false)
+		targets, err := config.ParseBacktraceTargetList(*backtraceTargetsFlag)
 		if err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: --backtrace-targets: %v", i18n.T("cli.error"), err)
 		}

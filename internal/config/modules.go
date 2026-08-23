@@ -154,7 +154,7 @@ var moduleDescriptors = []ModuleDescriptor{
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "NextTrace Tiny", Profile: "probe.route.profile", ComparisonScope: "probe.route.comparison_scope"},
 		"", []string{"nexttrace-tiny"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
 	moduleDescriptor("backtrace", true, ExposurePublic, false, ModuleConcurrencyExclusive,
-		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "NextTrace Tiny + backbone-prefix signatures", Profile: "probe.backtrace.profile", ComparisonScope: "probe.backtrace.comparison_scope"},
+		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "probe.backtrace.methodology.engine", Profile: "probe.backtrace.profile", ComparisonScope: "probe.backtrace.comparison_scope"},
 		"", []string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"),
 }
 

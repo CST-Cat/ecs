@@ -48,10 +48,19 @@ type Endpoint struct {
 }
 
 // Route target kinds are machine identities owned by the route configuration
-// contract. Custom endpoint kinds remain user-provided values.
+// contract. Custom route endpoint kinds remain user-provided values.
 const (
 	RouteTargetKindGlobal        = "global"
 	RouteTargetKindMainlandChina = "mainland_china"
+)
+
+// Backtrace carrier kinds are the only machine identities accepted for
+// backtrace targets. They are configuration-owned so producer matching and
+// validation share the same contract.
+const (
+	BacktraceCarrierTelecom = "telecom"
+	BacktraceCarrierUnicom  = "unicom"
+	BacktraceCarrierMobile  = "mobile"
 )
 
 type IPerfEndpoint struct {

@@ -120,6 +120,9 @@ func Validate(runtime Runtime) error {
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.backtraceFamily", endpoint.Name)
 		}
+		if !ValidBacktraceCarrier(endpoint.Kind) {
+			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
+		}
 	}
 	seenOoklaCarriers := make(map[string]bool)
 	for _, server := range runtime.OoklaServers {

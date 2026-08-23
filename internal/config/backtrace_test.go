@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"ecs/internal/i18n"
 )
 
 func TestBacktraceCitySelectionAndTargets(t *testing.T) {
@@ -36,6 +38,88 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 	wantTargets := append(append([]Endpoint(nil), backtraceCityTargets["beijing"]...), backtraceCityTargets["chengdu"]...)
 	if !reflect.DeepEqual(targets, wantTargets) {
 		t.Fatalf("BacktraceTargetsFor reverse selection = %+v, want canonical %v", targets, wantTargets)
+	}
+	all := BacktraceTargetsFor(BacktraceCityOrder)
+	if len(all) != 24 {
+		t.Fatalf("built-in backtrace target count = %d, want 24", len(all))
+	}
+	for _, target := range all {
+		if !strings.HasPrefix(target.Name, "probe.backtrace.target.") || !ValidBacktraceCarrier(target.Kind) {
+			t.Fatalf("built-in target is not machine-shaped: %+v", target)
+		}
+		for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+			if !i18n.Has(language, target.Name) {
+				t.Fatalf("%s target catalog key missing: %s", language, target.Name)
+			}
+		}
+	}
+}
+
+func TestBacktraceCarrierValidationAndCustomNames(t *testing.T) {
+	original := i18n.Current()
+	t.Cleanup(func() { i18n.Set(original) })
+	for _, test := range []struct {
+		language i18n.Lang
+		marker   string
+	}{
+		{language: i18n.LangZH, marker: "kind"},
+		{language: i18n.LangEN, marker: "backtrace target kind"},
+	} {
+		i18n.Set(test.language)
+		for _, kind := range []string{"", "carrier"} {
+			runtime := validRuntime(t)
+			runtime.BacktraceTargets = []Endpoint{{Name: "custom 汉字", Address: "1.1.1.1", Kind: kind}}
+			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("%s kind %q validation error = %v", test.language, kind, err)
+			}
+		}
+		runtime := validRuntime(t)
+		runtime.BacktraceTargets = []Endpoint{{Name: "custom 汉字", Address: "1.1.1.1", Kind: BacktraceCarrierTelecom}}
+		if err := Validate(runtime); err != nil {
+			t.Fatalf("%s custom target with valid carrier rejected: %v", test.language, err)
+		}
+	}
+}
+
+func TestParseBacktraceTargetListRequiresExplicitMachineCarrier(t *testing.T) {
+	original := i18n.Current()
+	t.Cleanup(func() { i18n.Set(original) })
+	i18n.Set(i18n.LangEN)
+	targets, err := ParseBacktraceTargetList("telecom:Shanghai Telecom=202.96.209.133,unicom:IPv6 target=[2001:db8::1],mobile:Mobile=mobile.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Endpoint{
+		{Name: "Shanghai Telecom", Address: "202.96.209.133", Kind: BacktraceCarrierTelecom, Family: IPVersion4},
+		{Name: "IPv6 target", Address: "[2001:db8::1]", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+		{Name: "Mobile", Address: "mobile.example", Kind: BacktraceCarrierMobile},
+	}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("ParseBacktraceTargetList = %+v, want %+v", targets, want)
+	}
+
+	cases := []struct {
+		name   string
+		raw    string
+		marker string
+	}{
+		{name: "legacy carrierless", raw: "Shanghai Telecom=202.96.209.133", marker: "carrier:Name=host"},
+		{name: "invalid carrier", raw: "china:Shanghai Telecom=202.96.209.133", marker: "invalid carrier"},
+		{name: "missing name", raw: "telecom:=202.96.209.133", marker: "carrier:Name=host"},
+		{name: "missing address", raw: "telecom:Shanghai Telecom=", marker: "carrier:Name=host"},
+		{name: "unsafe address", raw: "telecom:Shanghai Telecom=bad host", marker: "not a safe IP or hostname"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := ParseBacktraceTargetList(test.raw); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("ParseBacktraceTargetList(%q) = %v, want %q", test.raw, err, test.marker)
+			}
+		})
+	}
+
+	i18n.Set(i18n.LangZH)
+	if _, err := ParseBacktraceTargetList("Shanghai Telecom=202.96.209.133"); err == nil || !strings.Contains(err.Error(), "carrier:名称=主机") {
+		t.Fatalf("Chinese carrierless error = %v", err)
 	}
 }
 

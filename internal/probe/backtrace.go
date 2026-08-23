@@ -29,8 +29,36 @@ import (
 type backtraceProbe struct{}
 
 func (backtraceProbe) ID() string         { return "backtrace" }
-func (backtraceProbe) Title() string      { return "三网回程" }
+func (backtraceProbe) Title() string      { return "module.backtrace.title" }
 func (backtraceProbe) NeedsNetwork() bool { return true }
+
+const (
+	backtraceStatusIdentified   = "probe.backtrace.status.identified"
+	backtraceStatusUnidentified = "probe.backtrace.status.unidentified"
+	backtraceStatusFailed       = "probe.backtrace.status.failed"
+
+	backtraceReasonSignatureMatch    = "probe.backtrace.reason.signature_match"
+	backtraceReasonForeignOnly       = "probe.backtrace.reason.foreign_carrier_only"
+	backtraceReasonNoKnownSignature  = "probe.backtrace.reason.no_known_signature"
+	backtraceReasonLimitedOrFiltered = "probe.backtrace.reason.limited_or_filtered"
+	backtraceReasonTraceError        = "probe.backtrace.reason.trace_error"
+	backtraceReasonParseFailed       = "probe.backtrace.reason.parse_failed"
+	backtraceReasonNoResponsiveHops  = "probe.backtrace.reason.no_responsive_hops"
+
+	backtraceLineTelecomCN2      = "probe.backtrace.line.telecom.cn2"
+	backtraceLineTelecomCN2GIA   = "probe.backtrace.line.telecom.cn2.gia"
+	backtraceLineTelecomCN2GT    = "probe.backtrace.line.telecom.cn2.gt"
+	backtraceLineTelecom163      = "probe.backtrace.line.telecom.163"
+	backtraceLineUnicomCUII      = "probe.backtrace.line.unicom.cuii"
+	backtraceLineUnicom169       = "probe.backtrace.line.unicom.169"
+	backtraceLineMobileCMI       = "probe.backtrace.line.mobile.cmi"
+	backtraceLineMobileCMNET     = "probe.backtrace.line.mobile.cmnet"
+	backtraceLineTelecomIPv6     = "probe.backtrace.line.telecom.ipv6"
+	backtraceLineUnicomCUIIIPv6  = "probe.backtrace.line.unicom.cuii_ipv6"
+	backtraceLineUnicom169IPv6   = "probe.backtrace.line.unicom.169_ipv6"
+	backtraceLineMobileCMNETIPv6 = "probe.backtrace.line.mobile.cmnet_ipv6"
+	backtraceMissingValue        = "probe.backtrace.value.missing"
+)
 
 // routeSignature 是一条中国骨干网线路的识别特征。
 type routeSignature struct {
@@ -38,9 +66,9 @@ type routeSignature struct {
 	Prefix string
 	// Code 是线路简称，用于表格。
 	Code string
-	// Label 是完整线路名。
-	Label string
-	// Carrier 是所属运营商。
+	// LineKey is the stable catalog key for the complete line identity.
+	LineKey string
+	// Carrier 是所属运营商的稳定 machine identity。
 	Carrier string
 	// Quality 越大代表线路越优质，用于在多个命中之间挑选结论。
 	Quality int
@@ -52,25 +80,25 @@ type routeSignature struct {
 // NextTrace 返回的 hop 元数据，不能由静态前缀签名推断。
 var chinaRouteSignatures = []routeSignature{
 	// 中国电信：CN2 优于 163。
-	{Prefix: "59.43.", Code: "CN2", Label: "电信 CN2", Carrier: "电信", Quality: 30},
-	{Prefix: "202.97.", Code: "163", Label: "电信 163 骨干", Carrier: "电信", Quality: 10},
+	{Prefix: "59.43.", Code: "CN2", LineKey: backtraceLineTelecomCN2, Carrier: config.BacktraceCarrierTelecom, Quality: 30},
+	{Prefix: "202.97.", Code: "163", LineKey: backtraceLineTelecom163, Carrier: config.BacktraceCarrierTelecom, Quality: 10},
 
 	// 中国联通：CUII/A 网优于 169。
-	{Prefix: "218.105.", Code: "CUII", Label: "联通 CUII / A 网", Carrier: "联通", Quality: 30},
-	{Prefix: "210.51.", Code: "CUII", Label: "联通 CUII / A 网", Carrier: "联通", Quality: 30},
-	{Prefix: "219.158.", Code: "169", Label: "联通 169 骨干", Carrier: "联通", Quality: 10},
+	{Prefix: "218.105.", Code: "CUII", LineKey: backtraceLineUnicomCUII, Carrier: config.BacktraceCarrierUnicom, Quality: 30},
+	{Prefix: "210.51.", Code: "CUII", LineKey: backtraceLineUnicomCUII, Carrier: config.BacktraceCarrierUnicom, Quality: 30},
+	{Prefix: "219.158.", Code: "169", LineKey: backtraceLineUnicom169, Carrier: config.BacktraceCarrierUnicom, Quality: 10},
 
 	// 中国移动：CMI 国际优于普通 CMNET。
-	{Prefix: "223.120.", Code: "CMI", Label: "移动 CMI 国际", Carrier: "移动", Quality: 30},
-	{Prefix: "221.183.", Code: "CMNET", Label: "移动 CMNET 骨干", Carrier: "移动", Quality: 10},
+	{Prefix: "223.120.", Code: "CMI", LineKey: backtraceLineMobileCMI, Carrier: config.BacktraceCarrierMobile, Quality: 30},
+	{Prefix: "221.183.", Code: "CMNET", LineKey: backtraceLineMobileCMNET, Carrier: config.BacktraceCarrierMobile, Quality: 10},
 
 	// IPv6 目标的地址来自运营商前缀；IPv6 的末端目标由地区节点域名
 	// 提供，实际命中的骨干仍以路径中的跳为证据。前缀规则故意保持粗粒度，
 	// 只做“看到了哪家骨干/线路分类”的线索，不推断逐跳 ASN。
-	{Prefix: "240e:", Code: "CT-v6", Label: "电信 IPv6 骨干（240e）", Carrier: "电信", Quality: 10},
-	{Prefix: "2408:8120:", Code: "CUII-v6", Label: "联通 CUII IPv6（2408:8120）", Carrier: "联通", Quality: 30},
-	{Prefix: "2408:8000:", Code: "169-v6", Label: "联通 169 IPv6（2408:8000）", Carrier: "联通", Quality: 10},
-	{Prefix: "2409:", Code: "CMNET-v6", Label: "移动 CMNET IPv6（2409）", Carrier: "移动", Quality: 10},
+	{Prefix: "240e:", Code: "CT-v6", LineKey: backtraceLineTelecomIPv6, Carrier: config.BacktraceCarrierTelecom, Quality: 10},
+	{Prefix: "2408:8120:", Code: "CUII-v6", LineKey: backtraceLineUnicomCUIIIPv6, Carrier: config.BacktraceCarrierUnicom, Quality: 30},
+	{Prefix: "2408:8000:", Code: "169-v6", LineKey: backtraceLineUnicom169IPv6, Carrier: config.BacktraceCarrierUnicom, Quality: 10},
+	{Prefix: "2409:", Code: "CMNET-v6", LineKey: backtraceLineMobileCMNETIPv6, Carrier: config.BacktraceCarrierMobile, Quality: 10},
 }
 
 // backtraceMaxHops 是回程识别的跳数上限。
@@ -98,8 +126,8 @@ type backtraceHit struct {
 }
 
 // backtraceHop is the structured, bounded view of one NextTrace hop used by
-// the terminal report.  Unknown fields stay as an em dash; they are never
-// inferred from a hostname or filled with fabricated geolocation.
+// the terminal report. Unknown fields stay empty in canonical JSON; the
+// renderer supplies the localized missing-value label at the display edge.
 type backtraceHop struct {
 	Hop      int
 	IP       string
@@ -112,12 +140,14 @@ type backtraceHop struct {
 
 // backtraceRow 是一个参考目标的追踪结论。
 type backtraceRow struct {
-	Target  config.Endpoint
-	Hits    []backtraceHit
-	Hops    []string
-	Details []backtraceHop
-	Raw     string
-	Err     error
+	Target           config.Endpoint
+	Hits             []backtraceHit
+	Hops             []string
+	Details          []backtraceHop
+	Raw              string
+	Err              error
+	ParseFailed      bool
+	NoResponsiveHops bool
 }
 
 // latencyPattern extracts latency values from the structured NextTrace hop
@@ -128,45 +158,53 @@ var (
 
 func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("backtrace", "三网回程")
-	result.Description = "使用官方 NextTrace Tiny 向北京、上海、广州、成都的三网 IPv4/IPv6 参考目标追踪路径，识别中国骨干线路"
+	result := model.NewResult("backtrace", "module.backtrace.title")
+	result.Description = "probe.backtrace.description"
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
-		Label:           "启发式判断",
-		Engine:          "NextTrace Tiny + 骨干网段特征表",
-		Profile:         "china backbone signatures v2, max 20 hops, IPv4+IPv6 targets",
-		ComparisonScope: "当次探测的路径特征；不是性能基准，也不等同于反向抓包",
+		Label:           "methodology.heuristic",
+		Engine:          "probe.backtrace.methodology.engine",
+		Profile:         "probe.backtrace.profile",
+		ComparisonScope: "probe.backtrace.comparison_scope",
 	}
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 NextTrace Tiny")
-		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "nexttrace", Count: 1, Message: result.Summary})
+		result.Status = model.StatusSkipped
+		result.Summary = ""
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.tool_missing")}
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: routeEngineTiny, Count: 1})
 		result.Evidence = model.NewEvidence(0, len(env.Config.BacktraceTargets), "target")
-		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过回程探测。")
+		result.Notes = []string{"probe.backtrace.note.tool_missing"}
 		result.Finish(start)
 		return result
 	}
 
 	targets := env.Config.BacktraceTargets
 	if len(targets) == 0 {
-		result.Skip("未配置三网回程参考目标")
+		result.Status = model.StatusSkipped
+		result.Summary = ""
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.no_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
+		result.Notes = []string{"probe.backtrace.note.no_targets"}
 		result.Finish(start)
 		return result
 	}
 	targets = endpointsForIPVersion(targets, env.Config.IPVersion)
 	if len(targets) == 0 {
-		result.Skip("没有匹配当前协议族的三网回程目标")
+		result.Status = model.StatusSkipped
+		result.Summary = ""
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.no_family_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
-		result.Notes = append(result.Notes, "当前协议族没有匹配的回程目标；IPv6 目标使用地区节点域名，需 DNS 与 IPv6 出口可用。")
+		result.Notes = []string{"probe.backtrace.note.no_family_targets"}
 		result.Finish(start)
 		return result
 	}
 	result.Fields = []model.Field{
-		{Key: "nexttrace_binary", Label: "NextTrace Tiny 二进制", Value: engine.Name},
-		{Key: "nexttrace_version", Label: "NextTrace Tiny 版本", Value: fallback(engine.Version, "unknown")},
-		{Key: "nexttrace_binary_sha256", Label: "NextTrace Tiny SHA-256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: engine.Name},
+		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: fallback(engine.Version, "unknown")},
+		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", backtraceMaxHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")},
 	}
 
 	rows := make([]backtraceRow, len(targets))
@@ -185,83 +223,91 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	table := model.Table{
 		Key:        "network.backtrace.summary",
-		Title:      "三网回程线路",
-		Columns:    []string{"运营商", "参考目标", "线路", "命中跳", "命中 IP", "状态"},
-		ColumnKeys: []string{"provider", "reference_target", "line", "hit_hop", "hit_ip", "status"},
+		Title:      "probe.backtrace.table.summary",
+		Columns:    []string{"probe.backtrace.column.provider", "probe.backtrace.column.target", "probe.backtrace.column.line", "probe.backtrace.column.hit_hop", "probe.backtrace.column.hit_ip", "probe.backtrace.column.status", "probe.backtrace.column.reason"},
+		ColumnKeys: []string{"provider", "reference_target", "line", "hit_hop", "hit_ip", "status", "reason"},
 	}
 	identified := 0
 	validTraces := 0
-	var summaries []string
+	parseFailed := false
 	for _, row := range rows {
 		// 原始路径无论识别成功与否都要保留：未识别时它恰恰是判断"线路确实没走
 		// 已知骨干"还是"探测被限速打断"的唯一依据。
 		if row.Raw != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:    fmt.Sprintf("%s (%s) 原始路径", row.Target.Name, row.Target.Address),
+				Title:    "probe.backtrace.raw_output",
 				Language: "text",
 				Content:  row.Raw,
 			})
 		}
 		if row.Err != nil {
 			addFailure(&result, "trace", row.Target.Address, row.Err)
-			table.Rows = append(table.Rows, []string{
-				row.Target.Kind, row.Target.Name, "—", "—", "—", "追踪失败",
-			})
-			result.Notes = append(result.Notes, fmt.Sprintf("%s 追踪失败：%s", row.Target.Name, compactError(row.Err)))
+			if countValidTraceHops(row.Details) == 0 {
+				table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonTraceError})
+				continue
+			}
+			validTraces++
+		} else if row.ParseFailed {
+			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: row.Target.Address, Count: 1})
+			parseFailed = true
+			table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonParseFailed})
 			continue
+		} else if row.NoResponsiveHops {
+			result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "trace", Target: row.Target.Address, Count: 1})
+			table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonNoResponsiveHops})
+			continue
+		} else {
+			validTraces++
 		}
-		validTraces++
 		best, ok := bestBacktraceHit(row.Hits, row.Target.Kind)
-		if !ok {
-			table.Rows = append(table.Rows, []string{
-				row.Target.Kind, row.Target.Name, "未识别", "—", "—", unidentifiedBacktraceStatus(row),
-			})
-			continue
+		status := backtraceStatusUnidentified
+		reason := backtraceUnidentifiedReason(row)
+		line, hitHop, hitIP := backtraceMissingValue, backtraceMissingValue, backtraceMissingValue
+		if ok {
+			identified++
+			line = backtraceLineKey(best, row.Hits)
+			hitHop = strconv.Itoa(best.Hop)
+			hitIP = best.IP
+			status = backtraceStatusIdentified
+			reason = backtraceReasonSignatureMatch
 		}
-		identified++
 		table.Rows = append(table.Rows, []string{
-			row.Target.Kind,
-			row.Target.Name,
-			describeBacktraceLine(best, row.Hits),
-			fmt.Sprintf("%d", best.Hop),
-			best.IP,
-			"已识别",
+			backtraceCarrierKey(row.Target.Kind), row.Target.Name, line, hitHop, hitIP, status, reason,
 		})
-		summaries = append(summaries, row.Target.Kind+" "+best.Signature.Code)
 	}
 	detailTable := model.Table{
 		Key:        "network.backtrace.hops",
-		Title:      "逐跳明细",
-		Columns:    []string{"参考目标", "运营商", "跳数", "延迟", "IP", "ASN", "网络/线路", "地理位置", "状态"},
+		Title:      "probe.backtrace.table.hops",
+		Columns:    []string{"probe.backtrace.column.target", "probe.backtrace.column.provider", "probe.backtrace.column.hop", "probe.backtrace.column.latency", "probe.backtrace.column.ip", "probe.backtrace.column.asn", "probe.backtrace.column.network", "probe.backtrace.column.location", "probe.backtrace.column.status"},
 		ColumnKeys: []string{"reference_target", "provider", "hop", "latency_ms", "ip", "asn", "network", "location", "status"},
 		// 回程跳点是远端路径信息；按要求只脱敏本机出口 IP。
 	}
 	for _, row := range rows {
-		if row.Err != nil || len(row.Details) == 0 {
+		if len(row.Details) == 0 {
 			detailTable.Rows = append(detailTable.Rows, []string{
-				row.Target.Name, row.Target.Kind, "—", "—", "—", "—", "—", "—", "追踪失败",
+				row.Target.Name, backtraceCarrierKey(row.Target.Kind), backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed,
 			})
 			continue
 		}
 		for _, hop := range row.Details {
 			detailTable.Rows = append(detailTable.Rows, []string{
 				row.Target.Name,
-				row.Target.Kind,
+				backtraceCarrierKey(row.Target.Kind),
 				strconv.Itoa(hop.Hop),
-				fallbackBacktraceValue(hop.Latency),
-				fallbackBacktraceValue(hop.IP),
-				fallbackBacktraceValue(hop.ASN),
-				fallbackBacktraceValue(hop.Network),
-				fallbackBacktraceValue(hop.Location),
-				fallbackBacktraceValue(hop.Status),
+				backtraceCellValue(hop.Latency),
+				backtraceCellValue(hop.IP),
+				backtraceCellValue(hop.ASN),
+				backtraceCellValue(hop.Network),
+				backtraceCellValue(hop.Location),
+				backtraceCellValue(hop.Status),
 			})
 		}
 	}
 	result.Tables = []model.Table{table, detailTable}
 	result.Measurements = []model.Measurement{
 		{
-			Key: "backtrace_identified", Label: "已识别线路",
-			Value: float64(identified), Unit: "项",
+			Key: "backtrace_identified", Label: "probe.backtrace.metric.identified",
+			Value: float64(identified), Unit: "count",
 			Display: fmt.Sprintf("%d/%d", identified, len(targets)),
 			Method:  "china-backbone-signature-v1", HigherIsBetter: model.BoolPtr(true),
 		},
@@ -269,22 +315,16 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Evidence = model.NewEvidence(validTraces, len(targets), "target")
 	if identified == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "未识别到任何已知中国骨干线路"
-	} else {
-		result.Summary = strings.Join(summaries, " · ")
 	}
+	result.Summary = ""
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.values", identified, len(targets))}
 	result.Sources = []model.Source{
-		{Name: "backtrace", URL: "https://github.com/zhanghanyun/backtrace", Purpose: "三网回程识别思路与参考目标选择"},
+		{Name: "probe.backtrace.source.method.name", URL: "https://github.com/zhanghanyun/backtrace", Purpose: "probe.backtrace.source.method"},
 	}
-	result.Notes = append(result.Notes,
-		"这是从 VPS 主动发出的路径探测，不是反向抓包；路由不对称或运营商调度会让结论失真。",
-		"使用官方 NextTrace Tiny；报告保留实际 binary 名称、版本与 SHA-256。",
-		"线路判定只依据路径上出现的骨干网段前缀，报告保留命中跳号、IP 等结构化信息供复核，完整 NextTrace JSON 同时保留在原始证据块中；默认展示按敏感列脱敏。",
-		"CN2 的 GIA 与 GT 依据 59.43 段出现位置推断，带“推测”标注；精确区分需要更细的入口段表。",
-		"IPv6 目标采用各省三网 TCP-Ping 节点域名，地址可能随 CDN 调度变化；报告保留目标名与结构化路径信息，完整原始路径同时保留在原始证据块中，默认展示按敏感列脱敏。",
-		"未命中任何已知特征时返回“未识别”，不会猜测线路类型。",
-		"只命中其他运营商骨干时仍返回“未识别”；异网命中仅作为路径证据，不会替目标运营商下结论。",
-	)
+	result.Notes = []string{"probe.backtrace.note.active_path", "probe.backtrace.note.signature_scope", "probe.backtrace.note.cn2_variant_inference", "probe.backtrace.note.ipv6_targets", "probe.backtrace.note.unidentified"}
+	if parseFailed {
+		result.Notes = append(result.Notes, "probe.backtrace.note.parse_failed")
+	}
 	result.Finish(start)
 	return result
 }
@@ -296,23 +336,28 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 	defer cancel()
 	output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, backtraceMaxHops, family)
 	row.Raw = sanitizeCommandOutput(output)
-	row.Details = extractTraceDetails(engine.Name, row.Raw)
+	var parsed bool
+	row.Details, parsed = extractNextTraceDetails(row.Raw)
 	row.Hops = make([]string, len(row.Details))
 	for index, detail := range row.Details {
-		if detail.IP != "—" {
+		if detail.IP != "" {
 			row.Hops[index] = detail.IP
 		}
 	}
 	// NextTrace 到国内 IP 时末段被丢弃是常态，只要拿到一个有效跳就继续分析；
-	// malformed JSON、空 Hops、或所有探针都无响应都算失败。
+	// malformed JSON 或空 Hops 才是解析失败；合法但全部无响应的路径保留为
+	// 独立 machine fact，不能把 hop.no_response 误报成 parse_failed。
 	if countValidTraceHops(row.Details) == 0 {
 		if err != nil {
 			row.Err = err
+		} else if !parsed || len(row.Details) == 0 {
+			row.ParseFailed = true
 		} else {
-			row.Err = fmt.Errorf("NextTrace JSON 解析失败或未解析到任何有效跳")
+			row.NoResponsiveHops = true
 		}
 		return row
 	}
+	row.Err = err
 	row.Hits = matchRouteSignatures(row.Hops)
 	annotateBacktraceDetails(row.Details)
 	return row
@@ -323,7 +368,7 @@ func extractTraceHops(engineName, output string) []string {
 	details := extractTraceDetails(engineName, output)
 	hops := make([]string, len(details))
 	for index, detail := range details {
-		if detail.IP != "—" {
+		if detail.IP != "" {
 			hops[index] = detail.IP
 		}
 	}
@@ -349,8 +394,7 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 	details := make([]backtraceHop, 0, len(payload.Hops))
 	for index, probes := range payload.Hops {
 		detail := backtraceHop{
-			Hop: index + 1, IP: "—", Latency: "—", ASN: "—",
-			Network: "—", Location: "—", Status: "无响应",
+			Hop: index + 1, Status: "probe.backtrace.hop.no_response",
 		}
 		for _, rawProbe := range probes {
 			probe := map[string]json.RawMessage{}
@@ -368,9 +412,9 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 			detail.IP = address
 			detail.Latency = normalizeTraceLatency(jsonMapString(probe, "RTT", "Latency", "Delay", "Time", "AvgRTT"))
 			detail.ASN = normalizeTraceASN(traceProbeValue(probe, "ASN", "ASNumber", "AS", "ASNO", "Asnumber"))
-			detail.Network = firstNonEmptyTraceValue(traceNetworkValue(probe), "—")
+			detail.Network = firstNonEmptyTraceValue(traceNetworkValue(probe), "")
 			detail.Location = traceLocation(probe)
-			detail.Status = "已响应"
+			detail.Status = "probe.backtrace.hop.responded"
 			break
 		}
 		details = append(details, detail)
@@ -381,7 +425,7 @@ func extractNextTraceDetails(output string) ([]backtraceHop, bool) {
 func countValidTraceHops(details []backtraceHop) int {
 	count := 0
 	for _, detail := range details {
-		if detail.IP != "" && detail.IP != "—" {
+		if detail.IP != "" {
 			count++
 		}
 	}
@@ -505,7 +549,7 @@ func normalizeTraceAddress(value string) string {
 func normalizeTraceLatency(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "—"
+		return ""
 	}
 	if match := latencyPattern.FindStringSubmatch(value); len(match) > 1 {
 		return match[1] + " ms"
@@ -524,7 +568,7 @@ func normalizeTraceLatency(value string) string {
 func normalizeTraceASN(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "—"
+		return ""
 	}
 	if strings.HasPrefix(strings.ToUpper(value), "AS") {
 		return value
@@ -567,7 +611,7 @@ func traceLocation(values map[string]json.RawMessage) string {
 	if lat != "" && lng != "" {
 		return lat + ", " + lng
 	}
-	return "—"
+	return ""
 }
 
 func traceLocationParts(values map[string]json.RawMessage) []string {
@@ -589,16 +633,29 @@ func traceLocationParts(values map[string]json.RawMessage) []string {
 	return parts
 }
 
-func fallbackBacktraceValue(value string) string {
+func backtraceCellValue(value string) string {
 	if strings.TrimSpace(value) == "" {
-		return "—"
+		return backtraceMissingValue
 	}
 	return value
 }
 
+func backtraceCarrierKey(carrier string) string {
+	switch carrier {
+	case config.BacktraceCarrierTelecom:
+		return "probe.backtrace.carrier.telecom"
+	case config.BacktraceCarrierUnicom:
+		return "probe.backtrace.carrier.unicom"
+	case config.BacktraceCarrierMobile:
+		return "probe.backtrace.carrier.mobile"
+	default:
+		return carrier
+	}
+}
+
 func annotateBacktraceDetails(details []backtraceHop) {
 	for index := range details {
-		if details[index].IP == "" || details[index].IP == "—" {
+		if details[index].IP == "" {
 			continue
 		}
 		for _, signature := range chinaRouteSignatures {
@@ -609,8 +666,8 @@ func annotateBacktraceDetails(details []backtraceHop) {
 			// ASN of this hop.  Keep ASN unknown unless the probe supplied it;
 			// otherwise the inferred signature would look like fabricated
 			// metadata in the hop table.
-			if details[index].Network == "" || details[index].Network == "—" {
-				details[index].Network = signature.Label
+			if details[index].Network == "" {
+				details[index].Network = signature.LineKey
 			}
 			break
 		}
@@ -659,7 +716,7 @@ func bestBacktraceHit(hits []backtraceHit, targetCarrier string) (backtraceHit, 
 	return sorted[0], true
 }
 
-func unidentifiedBacktraceStatus(row backtraceRow) string {
+func backtraceUnidentifiedReason(row backtraceRow) string {
 	foreign := make(map[string]bool)
 	for _, hit := range row.Hits {
 		if hit.Signature.Carrier != "" && hit.Signature.Carrier != row.Target.Kind {
@@ -667,14 +724,7 @@ func unidentifiedBacktraceStatus(row backtraceRow) string {
 		}
 	}
 	if len(foreign) > 0 {
-		carriers := make([]string, 0, len(foreign))
-		for carrier := range foreign {
-			carriers = append(carriers, carrier)
-		}
-		sort.Slice(carriers, func(left, right int) bool {
-			return backtraceCarrierOrder(carriers[left]) < backtraceCarrierOrder(carriers[right])
-		})
-		return fmt.Sprintf("仅命中异网骨干（%s），不作为%s结论", strings.Join(carriers, "/"), row.Target.Kind)
+		return backtraceReasonForeignOnly
 	}
 
 	responded := 0
@@ -683,35 +733,20 @@ func unidentifiedBacktraceStatus(row backtraceRow) string {
 			responded++
 		}
 	}
-	status := fmt.Sprintf("%d 跳无已知特征", len(row.Hops))
 	// 绝大多数跳都没响应时，更可能是探测被限速或过滤，而不是线路真的陌生。
 	if len(row.Hops) > 0 && responded*2 < len(row.Hops) {
-		status = fmt.Sprintf("%d/%d 跳无响应，可能被限速", len(row.Hops)-responded, len(row.Hops))
+		return backtraceReasonLimitedOrFiltered
 	}
-	return status
+	return backtraceReasonNoKnownSignature
 }
 
-func backtraceCarrierOrder(carrier string) int {
-	switch carrier {
-	case "电信":
-		return 0
-	case "联通":
-		return 1
-	case "移动":
-		return 2
-	default:
-		return 3
-	}
-}
-
-// describeBacktraceLine 给出线路名称，并在可判断时补充 CN2 的 GIA/GT 推测。
-//
-// 业界常用的启发式：路径先进 59.43 说明从海外直接接入 CN2，多为 GIA；先经过
-// 202.97 再进 59.43 则多为 GT。这个规律有例外，因此结论一律带“推测”。
-func describeBacktraceLine(best backtraceHit, hits []backtraceHit) string {
-	label := best.Signature.Label
+// backtraceLineKey returns a finite line key. For CN2, the order of the 163
+// and CN2 signatures distinguishes the two documented variants; the result
+// remains a machine key and never embeds presentation prose.
+func backtraceLineKey(best backtraceHit, hits []backtraceHit) string {
+	lineKey := best.Signature.LineKey
 	if best.Signature.Code != "CN2" {
-		return label
+		return lineKey
 	}
 	firstCN2, first163 := -1, -1
 	for _, hit := range hits {
@@ -727,8 +762,8 @@ func describeBacktraceLine(best backtraceHit, hits []backtraceHit) string {
 	}
 	switch {
 	case first163 < 0 || firstCN2 < first163:
-		return label + " · GIA（推测）"
+		return backtraceLineTelecomCN2GIA
 	default:
-		return label + " · GT（推测）"
+		return backtraceLineTelecomCN2GT
 	}
 }

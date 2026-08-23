@@ -121,6 +121,64 @@ func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	}
 }
 
+func TestBacktraceCLIUsesExplicitCarrierSyntax(t *testing.T) {
+	var stderr bytes.Buffer
+	resolved, err := resolveRunConfig([]string{
+		"--lang", "en", "--only", "backtrace", "--exposure", "public",
+		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133,unicom:IPv6 target=[2001:db8::1]",
+	}, &stderr)
+	if err != nil {
+		t.Fatalf("resolve explicit backtrace targets: %v (stderr=%q)", err, stderr.String())
+	}
+	if len(resolved.Runtime.BacktraceTargets) != 2 || resolved.Runtime.BacktraceTargets[0].Kind != config.BacktraceCarrierTelecom || resolved.Runtime.BacktraceTargets[1].Kind != config.BacktraceCarrierUnicom || resolved.Runtime.BacktraceTargets[1].Family != config.IPVersion6 {
+		t.Fatalf("resolved backtrace targets = %+v", resolved.Runtime.BacktraceTargets)
+	}
+
+	var stdout, planStderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"plan", "--json", "--lang", "en", "--only", "backtrace", "--exposure", "public",
+		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133",
+	}, &stdout, &planStderr)
+	if status != 0 || planStderr.Len() != 0 {
+		t.Fatalf("explicit backtrace plan status=%d stdout=%q stderr=%q", status, stdout.String(), planStderr.String())
+	}
+}
+
+func TestBacktraceCLIFailsClosedWithoutExplicitCarrier(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "legacy carrierless", args: []string{"--backtrace-targets", "Shanghai Telecom=202.96.209.133"}},
+		{name: "invalid carrier", args: []string{"--backtrace-targets", "china:Shanghai Telecom=202.96.209.133"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			if _, err := resolveRunConfig(append([]string{"--lang", "en", "--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
+				t.Fatalf("resolve invalid backtrace target = %v (stderr=%q)", err, stderr.String())
+			}
+		})
+	}
+}
+
+func TestBacktraceCLIHelpDocumentsExplicitCarrierSyntax(t *testing.T) {
+	for _, test := range []struct {
+		language string
+		marker   string
+	}{
+		{language: "en", marker: "carrier:Name=IP/hostname"},
+		{language: "zh", marker: "carrier:名称=IP/域名"},
+	} {
+		t.Run(test.language, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			status := Main(context.Background(), []string{"run", "--lang", test.language, "--help"}, &stdout, &stderr)
+			if status != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), test.marker) {
+				t.Fatalf("help status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestPlanRequiresJSON(t *testing.T) {
 	for _, test := range []struct {
 		name   string

@@ -48,37 +48,41 @@ func selectIPerfTargets(perRegion int) []IPerfEndpoint {
 // classification. The target set is configuration data, not probe logic.
 var backtraceCityTargets = map[string][]Endpoint{
 	"beijing": {
-		{Name: "北京电信", Address: "219.141.136.12", Kind: "电信"},
-		{Name: "北京联通", Address: "202.106.50.1", Kind: "联通"},
-		{Name: "北京移动", Address: "221.179.155.161", Kind: "移动"},
-		{Name: "北京电信 IPv6", Address: "bj-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
-		{Name: "北京联通 IPv6", Address: "bj-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
-		{Name: "北京移动 IPv6", Address: "bj-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierTelecom, "ipv4"), Address: "219.141.136.12", Kind: BacktraceCarrierTelecom},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierUnicom, "ipv4"), Address: "202.106.50.1", Kind: BacktraceCarrierUnicom},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierMobile, "ipv4"), Address: "221.179.155.161", Kind: BacktraceCarrierMobile},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierTelecom, "ipv6"), Address: "bj-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierUnicom, "ipv6"), Address: "bj-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierMobile, "ipv6"), Address: "bj-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
 	},
 	"guangzhou": {
-		{Name: "广州电信", Address: "58.60.188.222", Kind: "电信"},
-		{Name: "广州联通", Address: "210.21.196.6", Kind: "联通"},
-		{Name: "广州移动", Address: "120.196.165.24", Kind: "移动"},
-		{Name: "广州电信 IPv6", Address: "gd-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
-		{Name: "广州联通 IPv6", Address: "gd-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
-		{Name: "广州移动 IPv6", Address: "gd-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierTelecom, "ipv4"), Address: "58.60.188.222", Kind: BacktraceCarrierTelecom},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierUnicom, "ipv4"), Address: "210.21.196.6", Kind: BacktraceCarrierUnicom},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierMobile, "ipv4"), Address: "120.196.165.24", Kind: BacktraceCarrierMobile},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierTelecom, "ipv6"), Address: "gd-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierUnicom, "ipv6"), Address: "gd-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierMobile, "ipv6"), Address: "gd-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
 	},
 	"shanghai": {
-		{Name: "上海电信", Address: "202.96.209.133", Kind: "电信"},
-		{Name: "上海联通", Address: "210.22.97.1", Kind: "联通"},
-		{Name: "上海移动", Address: "211.136.112.200", Kind: "移动"},
-		{Name: "上海电信 IPv6", Address: "sh-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
-		{Name: "上海联通 IPv6", Address: "sh-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
-		{Name: "上海移动 IPv6", Address: "sh-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierTelecom, "ipv4"), Address: "202.96.209.133", Kind: BacktraceCarrierTelecom},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierUnicom, "ipv4"), Address: "210.22.97.1", Kind: BacktraceCarrierUnicom},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierMobile, "ipv4"), Address: "211.136.112.200", Kind: BacktraceCarrierMobile},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierTelecom, "ipv6"), Address: "sh-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierUnicom, "ipv6"), Address: "sh-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierMobile, "ipv6"), Address: "sh-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
 	},
 	"chengdu": {
-		{Name: "成都电信", Address: "61.139.2.69", Kind: "电信"},
-		{Name: "成都联通", Address: "119.6.6.6", Kind: "联通"},
-		{Name: "成都移动", Address: "211.137.96.205", Kind: "移动"},
-		{Name: "成都电信 IPv6", Address: "sc-ct-v6.ip.zstaticcdn.com", Kind: "电信", Family: IPVersion6},
-		{Name: "成都联通 IPv6", Address: "sc-cu-v6.ip.zstaticcdn.com", Kind: "联通", Family: IPVersion6},
-		{Name: "成都移动 IPv6", Address: "sc-cm-v6.ip.zstaticcdn.com", Kind: "移动", Family: IPVersion6},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierTelecom, "ipv4"), Address: "61.139.2.69", Kind: BacktraceCarrierTelecom},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierUnicom, "ipv4"), Address: "119.6.6.6", Kind: BacktraceCarrierUnicom},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierMobile, "ipv4"), Address: "211.137.96.205", Kind: BacktraceCarrierMobile},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierTelecom, "ipv6"), Address: "sc-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierUnicom, "ipv6"), Address: "sc-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierMobile, "ipv6"), Address: "sc-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
 	},
+}
+
+func backtraceTargetNameKey(city, carrier, family string) string {
+	return "probe.backtrace.target." + city + "." + carrier + "." + family
 }
 
 // BacktraceCityOrder fixes display and selection order.
@@ -96,6 +100,17 @@ func BacktraceTargetsFor(cities []string) []Endpoint {
 		targets = append(targets, backtraceCityTargets[city]...)
 	}
 	return targets
+}
+
+// ValidBacktraceCarrier reports whether a backtrace target has one of the
+// machine carrier identities understood by the probe.
+func ValidBacktraceCarrier(carrier string) bool {
+	switch carrier {
+	case BacktraceCarrierTelecom, BacktraceCarrierUnicom, BacktraceCarrierMobile:
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateMediaRegions validates the media region selection.
