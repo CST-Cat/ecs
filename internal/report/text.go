@@ -597,6 +597,7 @@ func (r *textRenderer) result(result model.Result) {
 	}
 	r.resultEvidenceCoverage(result.Evidence)
 	r.resultFailures(result.Failures)
+	r.renderRetryInterference(result)
 	for _, group := range textGroups(result) {
 		r.renderGroup(group)
 	}
@@ -1865,8 +1866,8 @@ func shrinkColumns(widths []int, budget int) {
 
 // textBlock 渲染原文块，逐行缩进以免与正文混淆。
 func (r *textRenderer) textBlock(block model.TextBlock) {
-	if block.Title != "" {
-		r.indented(block.Title, true)
+	if title := displayTextBlockTitle(block); title != "" {
+		r.indented(title, true)
 	}
 	for _, line := range strings.Split(strings.TrimRight(block.Content, "\n"), "\n") {
 		for _, wrapped := range wrapText(line, maxInt(1, r.width-6)) {

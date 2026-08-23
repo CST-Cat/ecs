@@ -115,9 +115,9 @@ func JoinList(items []string) string {
 func catalogsFor(lang Lang) []map[string]string {
 	switch lang {
 	case LangEN:
-		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probePressureEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, probeZstdEnglish, probeCryptoEnglish, probeDiskEnglish, probeDNSEnglish, probeLatencyEnglish, probeNATEnglish, probeAppsEnglish, probeBlacklistEnglish, probeBGPEnglish, probeThroughputEnglish, probeRemainingEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
+		return []map[string]string{modelMessageEnglish, probeMessageEnglish, probePressureEnglish, reportRetryEnglish, probeMemoryInventoryEnglish, probeStage9English, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, probeZstdEnglish, probeCryptoEnglish, probeDiskEnglish, probeDNSEnglish, probeLatencyEnglish, probeNATEnglish, probeAppsEnglish, probeBlacklistEnglish, probeBGPEnglish, probeThroughputEnglish, probeRemainingEnglish, compareFlagEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
 	default:
-		return []map[string]string{modelMessageChinese, probeMessageChinese, probePressureChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, probeZstdChinese, probeCryptoChinese, probeDiskChinese, probeDNSChinese, probeLatencyChinese, probeNATChinese, probeAppsChinese, probeBlacklistChinese, probeBGPChinese, probeThroughputChinese, probeRemainingChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
+		return []map[string]string{modelMessageChinese, probeMessageChinese, probePressureChinese, reportRetryChinese, probeMemoryInventoryChinese, probeStage9Chinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, probeZstdChinese, probeCryptoChinese, probeDiskChinese, probeDNSChinese, probeLatencyChinese, probeNATChinese, probeAppsChinese, probeBlacklistChinese, probeBGPChinese, probeThroughputChinese, probeRemainingChinese, compareFlagChinese, errorChinese, scoreChinese, cliChinese, chinese}
 	}
 }
 
