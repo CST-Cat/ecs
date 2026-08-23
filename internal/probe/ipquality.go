@@ -54,21 +54,6 @@ var (
 		"dbip",
 		"ipapicom",
 	}
-	qualitySourceLabels = map[string]string{
-		"maxmind":     "MaxMind",
-		"ipinfo":      "IPinfo",
-		"ipregistry":  "ipregistry",
-		"ipapi":       "ipapi",
-		"ip2location": "IP2Location",
-		"abuseipdb":   "AbuseIPDB",
-		"scamalytics": "Scamalytics",
-		"ipqs":        "IPQS",
-		"dbip":        "DB-IP",
-		"ipdata":      "ipdata",
-		"ipwhois":     "IPWHOIS",
-		"ipapicom":    "ip-api",
-		"ipsb":        "ip.sb",
-	}
 )
 
 type qualitySignal struct {
@@ -78,7 +63,6 @@ type qualitySignal struct {
 
 type qualityFinding struct {
 	ID        string
-	Name      string
 	Enabled   bool
 	Access    string
 	Country   string
@@ -125,7 +109,6 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 		}
 		bundle.Findings[id] = qualityFinding{
 			ID:      id,
-			Name:    qualitySourceLabels[id],
 			Enabled: qualitySourceEnabled(env.Config.IPQualitySources, id),
 		}
 	}
@@ -138,7 +121,7 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 				finding.Err = errors.New("ipapi 响应缺少所需字段")
 			}
 		} else {
-			finding.Access = "官方免密直连"
+			finding.Access = networkChannelDirect
 			finding.Latency = lookup.Latency
 			if lookup.IntelErr != nil {
 				finding.Err = lookup.IntelErr
@@ -265,13 +248,12 @@ func newProxyFallbackHTTPClient(timeout time.Duration) *http.Client {
 func findingFromIPAPI(data ipAPIResponse, latency time.Duration) qualityFinding {
 	finding := qualityFinding{
 		ID:        "ipapi",
-		Name:      qualitySourceLabels["ipapi"],
 		Enabled:   true,
-		Access:    "官方免密直连",
+		Access:    networkChannelDirect,
 		Country:   strings.ToUpper(data.Location.CountryCode),
 		Usage:     normalizeNetworkType(data.ASN.Type),
 		Company:   normalizeNetworkType(data.Company.Type),
-		ScoreKind: "公司滥用概率",
+		ScoreKind: networkScoreKindCompanyAbuse,
 		Risk:      translateRiskLabel(scoreLabel(data.Company.AbuserScore)),
 		Proxy:     knownIPAPISignal(data.IsProxy, data.BooleanPresence.IsProxy),
 		Tor:       knownIPAPISignal(data.IsTor, data.BooleanPresence.IsTor),
@@ -284,7 +266,7 @@ func findingFromIPAPI(data ipAPIResponse, latency time.Duration) qualityFinding 
 	finding.Score = parseProbabilityScore(data.Company.AbuserScore)
 	if finding.Score == nil {
 		finding.Score = parseProbabilityScore(data.ASN.AbuserScore)
-		finding.ScoreKind = "ASN 滥用概率"
+		finding.ScoreKind = networkScoreKindASNAbuse
 		finding.Risk = translateRiskLabel(scoreLabel(data.ASN.AbuserScore))
 	}
 	return finding
@@ -300,7 +282,8 @@ func knownIPAPISignal(value, present bool) qualitySignal {
 func fetchMaxMindOrigin(ctx context.Context, client *http.Client, userAgent, ip string) originAssessment {
 	assessment := originAssessment{
 		Enabled: true,
-		Access:  "IPQuality/check.place 中转",
+		Label:   "probe.network.ip_type.unknown",
+		Access:  networkChannelCommunity,
 	}
 	endpoint := communityURL(ip, "")
 	body, latency, err := requestBytes(ctx, client, userAgent, endpoint, nil, 1024*1024)
@@ -330,12 +313,12 @@ func fetchMaxMindOrigin(ctx context.Context, client *http.Client, userAgent, ip 
 	assessment.RegisteredCountry = strings.ToUpper(response.Country.RegisteredCountry.ISOCode)
 	switch {
 	case assessment.UsageCountry == "" || assessment.RegisteredCountry == "":
-		assessment.Label = "无法判定"
+		assessment.Label = "probe.network.ip_type.unknown"
 		assessment.Err = errors.New("缺少使用地或注册地")
 	case assessment.UsageCountry == assessment.RegisteredCountry:
-		assessment.Label = "原生 IP"
+		assessment.Label = "probe.network.ip_type.native"
 	default:
-		assessment.Label = "广播 IP"
+		assessment.Label = "probe.network.ip_type.broadcast"
 	}
 	return assessment
 }
@@ -347,9 +330,9 @@ func fetchIPinfo(ctx context.Context, env Environment, _ *http.Client, ip string
 	if token != "" {
 		values := url.Values{"token": []string{token}}
 		endpoint = "https://api.ipinfo.io/lookup/" + url.PathEscape(ip) + "?" + values.Encode()
-		finding.Access = "官方 API（用户密钥）"
+		finding.Access = networkChannelAPIKey
 	} else {
-		finding.Access = "官方公开演示接口"
+		finding.Access = networkChannelPublicDemo
 	}
 	body, latency, err := requestBytes(ctx, env.HTTPClient, env.UserAgent, endpoint, nil, 1024*1024)
 	finding.Latency = latency
@@ -398,7 +381,7 @@ func fetchIPinfo(ctx context.Context, env Environment, _ *http.Client, ip string
 		return finding
 	}
 	if !anyKnownSignal(finding.Proxy, finding.Tor, finding.VPN, finding.Server) {
-		finding.Partial = "套餐未返回细分隐私字段"
+		finding.Partial = networkPartialPrivacy
 	}
 	return finding
 }
@@ -406,10 +389,10 @@ func fetchIPinfo(ctx context.Context, env Environment, _ *http.Client, ip string
 func fetchIPregistry(ctx context.Context, env Environment, communityClient *http.Client, ip string) qualityFinding {
 	apiKey := strings.TrimSpace(os.Getenv("IPREGISTRY_API_KEY"))
 	key := apiKey
-	access := "官方 API（用户密钥）"
+	access := networkChannelAPIKey
 	if key == "" {
 		key = "tryout"
-		access = "官方 tryout 免密接口"
+		access = networkChannelTryout
 	}
 	values := url.Values{
 		"key":    []string{key},
@@ -437,18 +420,18 @@ func fetchIPregistry(ctx context.Context, env Environment, communityClient *http
 	latency += fallbackLatency
 	if fallbackErr == nil {
 		finding := parseIPregistryJSON(body)
-		finding.Access = "IPQuality/check.place 中转"
+		finding.Access = networkChannelCommunity
 		finding.Latency = latency
 		if finding.Err == nil {
 			if apiKey != "" {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用社区兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
 	}
 
 	finding := newFinding("ipregistry")
-	finding.Access = access + "与社区兜底"
+	finding.Access = networkChannelMixedFallback
 	finding.Latency = latency
 	if apiKey == "" {
 		finding.Err = errors.New("官方 tryout 和社区查询均不可用")
@@ -512,7 +495,7 @@ func fetchIP2Location(ctx context.Context, env Environment, communityClient *htt
 		totalLatency += latency
 		if err == nil {
 			finding := parseIP2LocationJSON(body)
-			finding.Access = "官方 API（用户密钥）"
+			finding.Access = networkChannelAPIKey
 			finding.Latency = totalLatency
 			if finding.Err == nil {
 				return finding
@@ -529,7 +512,7 @@ func fetchIP2Location(ctx context.Context, env Environment, communityClient *htt
 	keylessAvailable := false
 	if err == nil {
 		keylessFinding = parseIP2LocationJSON(body)
-		keylessFinding.Access = "官方免密接口"
+		keylessFinding.Access = networkChannelOfficialFree
 		keylessFinding.Latency = totalLatency
 		keylessAvailable = keylessFinding.Err == nil
 	}
@@ -545,11 +528,11 @@ func fetchIP2Location(ctx context.Context, env Environment, communityClient *htt
 	totalLatency += latency
 	if err == nil {
 		finding := parseIP2LocationJSON(body)
-		finding.Access = "IPQuality/check.place 中转"
+		finding.Access = networkChannelCommunity
 		finding.Latency = totalLatency
 		if finding.Err == nil {
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
@@ -557,15 +540,15 @@ func fetchIP2Location(ctx context.Context, env Environment, communityClient *htt
 
 	if keylessAvailable {
 		keylessFinding.Latency = totalLatency
-		keylessFinding.Partial = appendPartial(keylessFinding.Partial, "社区增强不可用")
+		keylessFinding.Partial = appendPartial(keylessFinding.Partial, networkPartialFallback)
 		if keyedAttemptFailed {
-			keylessFinding.Partial = appendPartial(keylessFinding.Partial, "用户密钥直连失败，已使用免密兜底")
+			keylessFinding.Partial = appendPartial(keylessFinding.Partial, networkPartialFallback)
 		}
 		return keylessFinding
 	}
 
 	finding := newFinding("ip2location")
-	finding.Access = "官方免密接口与社区兜底"
+	finding.Access = networkChannelMixedFallback
 	finding.Latency = totalLatency
 	finding.Err = errors.New("官方免密接口和社区查询均不可用")
 	return finding
@@ -602,7 +585,7 @@ func parseIP2LocationJSON(body []byte) qualityFinding {
 	finding.Usage = normalizeIP2LocationType(response.UsageType)
 	finding.Company = normalizeIP2LocationType(response.ASInfo.UsageType)
 	finding.Score = validScore(response.FraudScore)
-	finding.ScoreKind = "IP2Proxy 欺诈分"
+	finding.ScoreKind = networkScoreKindIP2Proxy
 	finding.Risk = riskIP2Location(finding.Score)
 	finding.Proxy = anyPointerSignal(response.IsProxy, response.Proxy.IsPublicProxy, response.Proxy.IsWebProxy)
 	finding.Tor = pointerSignal(response.Proxy.IsTor)
@@ -615,7 +598,7 @@ func parseIP2LocationJSON(body []byte) qualityFinding {
 		return finding
 	}
 	if finding.Score == nil {
-		finding.Partial = "套餐未返回 IP2Proxy 欺诈分"
+		finding.Partial = networkPartialScore
 	}
 	return finding
 }
@@ -631,9 +614,9 @@ func fetchAbuseIPDB(ctx context.Context, env Environment, communityClient *http.
 		endpoint = "https://api.abuseipdb.com/api/v2/check?" + values.Encode()
 		headers = map[string]string{"Key": apiKey, "Accept": "application/json"}
 		client = env.HTTPClient
-		finding.Access = "官方 API（用户密钥）"
+		finding.Access = networkChannelAPIKey
 	} else {
-		finding.Access = "IPQuality/check.place 中转"
+		finding.Access = networkChannelCommunity
 	}
 	body, latency, err := requestBytes(ctx, client, env.UserAgent, endpoint, headers, 1024*1024)
 	finding.Latency = latency
@@ -655,7 +638,7 @@ func fetchAbuseIPDB(ctx context.Context, env Environment, communityClient *http.
 	finding.Country = strings.ToUpper(response.Data.CountryCode)
 	finding.Usage = normalizeAbuseIPDBType(response.Data.UsageType)
 	finding.Score = validScore(response.Data.AbuseConfidenceScore)
-	finding.ScoreKind = "90 天滥用置信度"
+	finding.ScoreKind = networkScoreKindAbuse
 	finding.Risk = riskAbuseIPDB(finding.Score)
 	if finding.Score != nil {
 		value := *finding.Score >= 25
@@ -677,9 +660,9 @@ func fetchScamalytics(ctx context.Context, env Environment, communityClient *htt
 		values := url.Values{"key": []string{apiKey}, "ip": []string{ip}}
 		endpoint = "https://api11.scamalytics.com/" + url.PathEscape(username) + "/?" + values.Encode()
 		client = env.HTTPClient
-		finding.Access = "官方 API（用户密钥）"
+		finding.Access = networkChannelAPIKey
 	} else {
-		finding.Access = "IPQuality/check.place 中转"
+		finding.Access = networkChannelCommunity
 	}
 	body, latency, err := requestBytes(ctx, client, env.UserAgent, endpoint, nil, 1024*1024)
 	finding.Latency = latency
@@ -717,7 +700,7 @@ func fetchScamalytics(ctx context.Context, env Environment, communityClient *htt
 	}
 	finding.Country = strings.ToUpper(response.External.MaxMind.CountryCode)
 	finding.Score = validScore(response.Scamalytics.Score)
-	finding.ScoreKind = "Web 流量欺诈分"
+	finding.ScoreKind = networkScoreKindWebFraud
 	finding.Risk = riskScamalytics(finding.Score)
 	finding.Proxy = pointerSignal(response.External.FireHOL.IsProxy)
 	finding.Tor = pointerSignal(response.External.X4BNet.IsTor)
@@ -747,7 +730,7 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 		totalLatency += latency
 		if err == nil {
 			finding := parseIPQSJSON(body)
-			finding.Access = "官方 API（用户密钥）"
+			finding.Access = networkChannelAPIKey
 			finding.Latency = totalLatency
 			if finding.Err == nil {
 				return finding
@@ -771,11 +754,11 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 	totalLatency += latency
 	if err == nil {
 		finding := parseIPQSJSON(body)
-		finding.Access = "IPQuality/check.place 中转"
+		finding.Access = networkChannelCommunity
 		finding.Latency = totalLatency
 		if finding.Err == nil {
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
@@ -787,12 +770,12 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 	if err == nil {
 		finding := parseIPQSPublicPage(body, ip)
 		// 通道披露到底：这一级用浏览器 UA 读官方公开页，而不是 ecs 自己的 UA。
-		finding.Access = "官方公开查询页（浏览器 UA）"
+		finding.Access = networkChannelPublicPage
 		finding.Latency = totalLatency
 		if finding.Err == nil {
-			finding.Partial = appendPartial(finding.Partial, "公开页只提供部分 API 字段")
+			finding.Partial = appendPartial(finding.Partial, networkPartialPublicFields)
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
@@ -807,11 +790,11 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 		"X-Cache-Tolerance": "3600",
 	}
 	readerClient := env.HTTPClient
-	readerAccess := "官方公开页（Jina Reader 只读兜底）"
+	readerAccess := networkChannelJina
 	if proxyEnvironmentEnabled() {
 		readerClient = newProxyFallbackHTTPClient(maxDuration(env.Config.HTTPTimeout, 25*time.Second))
 		defer readerClient.CloseIdleConnections()
-		readerAccess = "官方公开页（Jina Reader，经系统代理兜底）"
+		readerAccess = networkChannelJinaProxy
 	}
 	body, latency, err = requestBytes(ctx, readerClient, env.UserAgent, readerEndpoint, readerHeaders, 2*1024*1024)
 	totalLatency += latency
@@ -820,16 +803,16 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 		finding.Access = readerAccess
 		finding.Latency = totalLatency
 		if finding.Err == nil {
-			finding.Partial = appendPartial(finding.Partial, "公开页字段不完整，且结果可能来自 1 小时缓存")
+			finding.Partial = appendPartial(finding.Partial, networkPartialCachedFields)
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
 	}
 
 	finding := newFinding("ipqs")
-	finding.Access = "官方与免密兜底链路"
+	finding.Access = networkChannelMixedFallback
 	finding.Latency = totalLatency
 	finding.Err = errors.New("官方 API、社区额度和公开查询页均不可用")
 	return finding
@@ -859,7 +842,7 @@ func parseIPQSJSON(body []byte) qualityFinding {
 	finding.Country = strings.ToUpper(response.CountryCode)
 	finding.Usage = normalizeNetworkType(response.ConnectionType)
 	finding.Score = validScore(response.FraudScore)
-	finding.ScoreKind = "IP 欺诈分"
+	finding.ScoreKind = networkScoreKindIPFraud
 	finding.Risk = riskIPQS(finding.Score)
 	finding.Proxy = pointerSignal(response.Proxy)
 	finding.Tor = pointerSignal(response.Tor)
@@ -871,7 +854,7 @@ func parseIPQSJSON(body []byte) qualityFinding {
 		return finding
 	}
 	if finding.Score == nil {
-		finding.Partial = "未返回欺诈分"
+		finding.Partial = networkPartialScore
 	}
 	return finding
 }
@@ -905,7 +888,7 @@ func parseIPQSPublicPage(body []byte, ip string) qualityFinding {
 		finding.Err = errors.New("公开页欺诈分超出范围")
 		return finding
 	}
-	finding.ScoreKind = "IP 欺诈分"
+	finding.ScoreKind = networkScoreKindIPFraud
 	finding.Risk = riskIPQS(finding.Score)
 	finding.Country = strings.ToUpper(firstMatch(ipqsPublicCountryPattern, plain))
 
@@ -949,7 +932,7 @@ func fetchDBIP(ctx context.Context, env Environment, _ *http.Client, ip string) 
 		totalLatency += latency
 		if err == nil {
 			finding := parseDBIPExtendedJSON(body)
-			finding.Access = "官方 Extended API（用户密钥）"
+			finding.Access = networkChannelExtendedAPIKey
 			finding.Latency = totalLatency
 			if finding.Err == nil {
 				return finding
@@ -964,11 +947,11 @@ func fetchDBIP(ctx context.Context, env Environment, _ *http.Client, ip string) 
 	if err == nil {
 		finding := parseDBIPPublicPage(body)
 		// 同上：公开页只接受浏览器 UA，报告如实标出这一点。
-		finding.Access = "官方公开查询页（浏览器 UA）"
+		finding.Access = networkChannelPublicPage
 		finding.Latency = totalLatency
 		if finding.Err == nil {
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
@@ -982,19 +965,19 @@ func fetchDBIP(ctx context.Context, env Environment, _ *http.Client, ip string) 
 	totalLatency += latency
 	if err == nil {
 		finding := parseDBIPFreeJSON(body)
-		finding.Access = "官方 free API（免密保底）"
+		finding.Access = networkChannelFreeFallback
 		finding.Latency = totalLatency
 		if finding.Err == nil {
-			finding.Partial = appendPartial(finding.Partial, "免费 API 不提供威胁等级，公开风险页不可用")
+			finding.Partial = appendPartial(finding.Partial, networkPartialThreat)
 			if keyedAttemptFailed {
-				finding.Partial = appendPartial(finding.Partial, "用户密钥直连失败，已使用免密兜底")
+				finding.Partial = appendPartial(finding.Partial, networkPartialFallback)
 			}
 			return finding
 		}
 	}
 
 	finding := newFinding("dbip")
-	finding.Access = "官方公开页与 free API"
+	finding.Access = networkChannelFreeFallback
 	finding.Latency = totalLatency
 	finding.Err = errors.New("公开风险页和官方 free API 均不可用")
 	return finding
@@ -1032,7 +1015,7 @@ func parseDBIPExtendedJSON(body []byte) qualityFinding {
 	if !findingHasEvidence(finding) {
 		finding.Err = errors.New("响应缺少所需字段")
 	} else if finding.Score == nil {
-		finding.Partial = "套餐未返回威胁等级"
+		finding.Partial = networkPartialThreat
 	}
 	return finding
 }
@@ -1046,7 +1029,7 @@ func parseDBIPPublicPage(body []byte) qualityFinding {
 	if finding.Score == nil && finding.Country == "" {
 		finding.Err = errors.New("公开页未返回可解析的风险字段")
 	} else if finding.Score == nil {
-		finding.Partial = "公开页未返回威胁等级"
+		finding.Partial = networkPartialThreat
 	}
 	return finding
 }
@@ -1074,7 +1057,7 @@ func parseDBIPFreeJSON(body []byte) qualityFinding {
 
 func fetchIPdata(ctx context.Context, env Environment, communityClient *http.Client, ip string) qualityFinding {
 	finding := newFinding("ipdata")
-	finding.Access = "IPQuality/check.place 中转"
+	finding.Access = networkChannelCommunity
 	body, latency, err := requestBytes(ctx, communityClient, env.UserAgent, communityURL(ip, "ipdata"), nil, 1024*1024)
 	finding.Latency = latency
 	if err != nil {
@@ -1116,11 +1099,11 @@ func fetchIPWhois(ctx context.Context, env Environment, _ *http.Client, ip strin
 	apiKey := strings.TrimSpace(os.Getenv("IPWHOIS_API_KEY"))
 	values := url.Values{"security": []string{"1"}}
 	endpoint := "https://ipwho.is/" + url.PathEscape(ip) + "?" + values.Encode()
-	finding.Access = "官方免密直连"
+	finding.Access = networkChannelDirect
 	if apiKey != "" {
 		values.Set("key", apiKey)
 		endpoint = "https://ipwhois.pro/" + url.PathEscape(ip) + "?" + values.Encode()
-		finding.Access = "官方 API（用户密钥）"
+		finding.Access = networkChannelAPIKey
 	}
 	body, latency, err := requestBytes(ctx, env.HTTPClient, env.UserAgent, endpoint, nil, 1024*1024)
 	finding.Latency = latency
@@ -1157,7 +1140,7 @@ func fetchIPWhois(ctx context.Context, env Environment, _ *http.Client, ip strin
 		return finding
 	}
 	if !anyKnownSignal(finding.Proxy, finding.Tor, finding.VPN, finding.Server) {
-		finding.Partial = "套餐未返回安全字段"
+		finding.Partial = networkPartialSecurity
 	}
 	return finding
 }
@@ -1165,7 +1148,6 @@ func fetchIPWhois(ctx context.Context, env Environment, _ *http.Client, ip strin
 func newFinding(id string) qualityFinding {
 	return qualityFinding{
 		ID:      id,
-		Name:    qualitySourceLabels[id],
 		Enabled: true,
 	}
 }
@@ -1256,7 +1238,7 @@ func requestBytesAllowingRedirectHosts(
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, latency, context.DeadlineExceeded
 		}
-		return nil, latency, errors.New("网络请求失败")
+		return nil, latency, fmt.Errorf("网络请求失败: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -1297,15 +1279,15 @@ func ipQualityTableKey(version, kind string) string {
 func (bundle ipQualityBundle) typeTable() model.Table {
 	table := model.Table{
 		Key:         ipQualityTableKey(bundle.Version, "types"),
-		Title:       "IPv" + bundle.Version + " · IP 类型属性",
-		Columns:     []string{"数据库", "使用类型", "公司类型", "国家/地区", "通道"},
+		Title:       "probe.network.table.ipquality.types",
+		Columns:     []string{"probe.network.column.source", "probe.network.column.usage", "probe.network.column.company", "probe.network.column.country", "probe.network.column.channel"},
 		ColumnKeys:  []string{"source", "usage_type", "company_type", "country", "channel"},
 		RowIdentity: "source",
 	}
 	for _, id := range typeSourceOrder {
 		finding := bundle.Findings[id]
 		table.Rows = append(table.Rows, []string{
-			qualitySourceLabels[id],
+			networkSourceNameKey(id),
 			findingValue(finding, finding.Usage),
 			findingValue(finding, finding.Company),
 			findingValue(finding, finding.Country),
@@ -1318,24 +1300,24 @@ func (bundle ipQualityBundle) typeTable() model.Table {
 func (bundle ipQualityBundle) scoreTable() model.Table {
 	table := model.Table{
 		Key:         ipQualityTableKey(bundle.Version, "scores"),
-		Title:       "IPv" + bundle.Version + " · 风险评分",
-		Columns:     []string{"数据库", "原始/等效值", "风险等级", "可视化", "指标口径", "分段规则", "通道"},
+		Title:       "probe.network.table.ipquality.scores",
+		Columns:     []string{"probe.network.column.source", "probe.network.column.raw_value", "probe.network.column.risk", "probe.network.column.visualization", "probe.network.column.definition", "probe.network.column.bucket", "probe.network.column.channel"},
 		ColumnKeys:  []string{"source", "raw_or_equivalent_value", "risk_level", "visualization", "metric_definition", "bucket_rule", "channel"},
 		RowIdentity: "source",
 	}
 	for _, id := range scoreSourceOrder {
 		finding := bundle.Findings[id]
 		value := scoreText(finding)
-		bar := "────────────"
+		bar := networkMissingValue
 		if finding.Score != nil {
 			bar = scoreBar(*finding.Score)
 		}
 		table.Rows = append(table.Rows, []string{
-			qualitySourceLabels[id],
+			networkSourceNameKey(id),
 			value,
-			fallback(finding.Risk, "—"),
+			firstNonEmpty(finding.Risk, networkMissingValue),
 			bar,
-			fallback(finding.ScoreKind, "—"),
+			firstNonEmpty(finding.ScoreKind, networkMissingValue),
 			scoreBands(id),
 			findingAccess(finding),
 		})
@@ -1344,34 +1326,19 @@ func (bundle ipQualityBundle) scoreTable() model.Table {
 }
 
 func scoreBands(id string) string {
-	switch id {
-	case "ip2location":
-		return "<33 低 / 33–65 中 / ≥66 高"
-	case "scamalytics":
-		return "<20 低 / 20–59 中 / 60–89 高 / ≥90 极高"
-	case "ipapi":
-		return "采用上游 Very Low–Very High 标签"
-	case "abuseipdb":
-		return "<25 低 / 25–74 注意 / ≥75 高"
-	case "ipqs":
-		return "<75 低 / 75–84 可疑 / 85–89 高 / ≥90 极高"
-	case "dbip":
-		return "low/medium/high → 0/50/100*"
-	default:
-		return "—"
-	}
+	return networkScoreBandKey(id)
 }
 
 func (bundle ipQualityBundle) factorTable() model.Table {
-	columns := []string{"因子"}
+	columns := []string{"probe.network.column.factor"}
 	columnKeys := []string{"factor"}
 	for _, id := range factorSourceOrder {
-		columns = append(columns, qualitySourceLabels[id])
+		columns = append(columns, networkSourceNameKey(id))
 		columnKeys = append(columnKeys, id)
 	}
 	table := model.Table{
 		Key:         ipQualityTableKey(bundle.Version, "factors"),
-		Title:       "IPv" + bundle.Version + " · 风险因子矩阵",
+		Title:       "probe.network.table.ipquality.factors",
 		Columns:     columns,
 		ColumnKeys:  columnKeys,
 		RowIdentity: "factor",
@@ -1381,13 +1348,13 @@ func (bundle ipQualityBundle) factorTable() model.Table {
 		value func(qualityFinding) string
 	}
 	factors := []factor{
-		{"国家/地区", func(f qualityFinding) string { return factorCountry(f) }},
-		{"代理", func(f qualityFinding) string { return factorSignal(f, f.Proxy) }},
-		{"Tor", func(f qualityFinding) string { return factorSignal(f, f.Tor) }},
-		{"VPN", func(f qualityFinding) string { return factorSignal(f, f.VPN) }},
-		{"机房", func(f qualityFinding) string { return factorSignal(f, f.Server) }},
-		{"滥用", func(f qualityFinding) string { return factorSignal(f, f.Abuser) }},
-		{"机器人", func(f qualityFinding) string { return factorSignal(f, f.Robot) }},
+		{"probe.network.factor.country", func(f qualityFinding) string { return factorCountry(f) }},
+		{"probe.network.factor.proxy", func(f qualityFinding) string { return factorSignal(f, f.Proxy) }},
+		{"probe.network.factor.tor", func(f qualityFinding) string { return factorSignal(f, f.Tor) }},
+		{"probe.network.factor.vpn", func(f qualityFinding) string { return factorSignal(f, f.VPN) }},
+		{"probe.network.factor.datacenter", func(f qualityFinding) string { return factorSignal(f, f.Server) }},
+		{"probe.network.factor.abuse", func(f qualityFinding) string { return factorSignal(f, f.Abuser) }},
+		{"probe.network.factor.robot", func(f qualityFinding) string { return factorSignal(f, f.Robot) }},
 	}
 	for _, item := range factors {
 		row := []string{item.label}
@@ -1402,26 +1369,24 @@ func (bundle ipQualityBundle) factorTable() model.Table {
 func (bundle ipQualityBundle) statusTable() model.Table {
 	table := model.Table{
 		Key:         ipQualityTableKey(bundle.Version, "sources"),
-		Title:       "IPv" + bundle.Version + " · 数据源状态",
-		Columns:     []string{"数据源", "状态", "通道", "耗时"},
+		Title:       "probe.network.table.ipquality.sources",
+		Columns:     []string{"probe.network.column.source", "probe.network.column.status", "probe.network.column.channel", "probe.network.column.duration"},
 		ColumnKeys:  []string{"source", "status", "channel", "duration_ms"},
 		RowIdentity: "source",
 	}
-	if bundle.Origin.Enabled {
-		table.Rows = append(table.Rows, []string{
-			qualitySourceLabels["maxmind"],
-			originStatus(bundle.Origin),
-			bundle.Origin.Access,
-			durationText(bundle.Origin.Latency),
-		})
-	}
+	table.Rows = append(table.Rows, []string{
+		networkSourceNameKey("maxmind"),
+		originStatus(bundle.Origin),
+		originAccess(bundle.Origin),
+		durationText(bundle.Origin.Latency),
+	})
 	for _, id := range qualitySourceOrder {
 		if id == "maxmind" {
 			continue
 		}
 		finding := bundle.Findings[id]
 		table.Rows = append(table.Rows, []string{
-			qualitySourceLabels[id],
+			networkSourceNameKey(id),
 			findingStatus(finding),
 			findingAccess(finding),
 			durationText(finding.Latency),
@@ -1438,14 +1403,10 @@ func (bundle ipQualityBundle) measurements() []model.Measurement {
 			continue
 		}
 		value := *finding.Score
-		method := finding.ScoreKind + "；" + finding.Access
-		if id == "dbip" {
-			method += "；low/medium/high 映射为 0/50/100，仅用于展示"
-		}
-		label := "IPv" + bundle.Version + " " + qualitySourceLabels[id] + " 风险值"
+		method := networkScoreMethodKey(id)
+		label := "probe.network.metric.risk_score"
 		display := formatScore(value) + "/100"
 		if id == "dbip" {
-			label = "IPv" + bundle.Version + " " + qualitySourceLabels[id] + " 等效风险值"
 			display = formatScore(value) + "*/100"
 		}
 		measurements = append(measurements, model.Measurement{
@@ -1481,10 +1442,10 @@ func (bundle ipQualityBundle) successfulSources() (successful, enabled int) {
 	return successful, enabled
 }
 
-func (bundle ipQualityBundle) failedSourceNames() []string {
+func (bundle ipQualityBundle) failedSourceIDs() []string {
 	var names []string
 	if bundle.Origin.Enabled && bundle.Origin.Err != nil {
-		names = append(names, qualitySourceLabels["maxmind"])
+		names = append(names, "maxmind")
 	}
 	for _, id := range qualitySourceOrder {
 		if id == "maxmind" {
@@ -1492,13 +1453,13 @@ func (bundle ipQualityBundle) failedSourceNames() []string {
 		}
 		finding := bundle.Findings[id]
 		if finding.Enabled && finding.Err != nil {
-			names = append(names, finding.Name)
+			names = append(names, id)
 		}
 	}
 	return names
 }
 
-func (bundle ipQualityBundle) partialSourceNames() []string {
+func (bundle ipQualityBundle) partialSourceIDs() []string {
 	var names []string
 	for _, id := range qualitySourceOrder {
 		if id == "maxmind" {
@@ -1506,20 +1467,24 @@ func (bundle ipQualityBundle) partialSourceNames() []string {
 		}
 		finding := bundle.Findings[id]
 		if finding.Enabled && finding.Err == nil && finding.Partial != "" {
-			names = append(names, finding.Name)
+			names = append(names, id)
 		}
 	}
 	return names
 }
 
+func (bundle ipQualityBundle) needsWarning() bool {
+	return len(bundle.failedSourceIDs()) > 0 || len(bundle.partialSourceIDs()) > 0
+}
+
 func findingValue(finding qualityFinding, value string) string {
 	switch {
 	case !finding.Enabled:
-		return "未启用"
+		return "probe.network.status.disabled"
 	case finding.Err != nil:
-		return "失败"
+		return "probe.network.status.failed"
 	case strings.TrimSpace(value) == "":
-		return "—"
+		return networkMissingValue
 	default:
 		return value
 	}
@@ -1528,59 +1493,63 @@ func findingValue(finding qualityFinding, value string) string {
 func findingAccess(finding qualityFinding) string {
 	switch {
 	case !finding.Enabled:
-		return "未启用"
+		return "probe.network.status.disabled"
 	case finding.Access != "":
 		return finding.Access
 	default:
-		return "—"
+		return networkMissingValue
 	}
 }
 
 func findingStatus(finding qualityFinding) string {
-	switch {
-	case !finding.Enabled:
-		return "未启用"
-	case finding.Err != nil:
-		return "失败：" + finding.Err.Error()
-	case finding.Partial != "":
-		return "部分：" + finding.Partial
-	default:
-		return "成功"
-	}
+	return networkStatusKey(finding.Enabled, finding.Err != nil, finding.Partial != "")
 }
 
 func originStatus(origin originAssessment) string {
-	if origin.Err != nil {
-		return "失败：" + origin.Err.Error()
+	return networkStatusKey(origin.Enabled, origin.Err != nil, false)
+}
+
+func originAccess(origin originAssessment) string {
+	if !origin.Enabled {
+		return "probe.network.status.disabled"
 	}
-	return "成功"
+	return firstNonEmpty(origin.Access, networkMissingValue)
 }
 
 func factorCountry(finding qualityFinding) string {
 	if !finding.Enabled || finding.Err != nil || finding.Country == "" {
-		return "—"
+		if !finding.Enabled {
+			return "probe.network.status.disabled"
+		}
+		if finding.Err != nil {
+			return "probe.network.status.failed"
+		}
+		return networkMissingValue
 	}
 	return finding.Country
 }
 
 func factorSignal(finding qualityFinding, signal qualitySignal) string {
-	if !finding.Enabled || finding.Err != nil || !signal.Known {
-		return "—"
+	if !finding.Enabled {
+		return "probe.network.status.disabled"
 	}
-	if signal.Value {
-		return "是"
+	if finding.Err != nil {
+		return "probe.network.status.failed"
 	}
-	return "否"
+	if !signal.Known {
+		return networkMissingValue
+	}
+	return networkSignalKey(signal)
 }
 
 func scoreText(finding qualityFinding) string {
 	switch {
 	case !finding.Enabled:
-		return "未启用"
+		return "probe.network.status.disabled"
 	case finding.Err != nil:
-		return "失败"
+		return "probe.network.status.failed"
 	case finding.Score == nil:
-		return "未返回"
+		return networkMissingValue
 	case finding.ID == "dbip":
 		return formatScore(*finding.Score) + "*/100"
 	default:
@@ -1604,7 +1573,7 @@ func formatScore(value float64) string {
 
 func durationText(value time.Duration) string {
 	if value <= 0 {
-		return "—"
+		return networkMissingValue
 	}
 	return fmt.Sprintf("%.0f ms", float64(value)/float64(time.Millisecond))
 }
@@ -1612,35 +1581,35 @@ func durationText(value time.Duration) string {
 func normalizeNetworkType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "isp", "line isp", "fixed line isp", "consumer":
-		return "家宽"
+		return "probe.network.network_type.residential"
 	case "hosting", "data center", "datacenter", "data center/web hosting/transit":
-		return "机房"
+		return "probe.network.network_type.datacenter"
 	case "business", "commercial":
-		return "商业"
+		return "probe.network.network_type.business"
 	case "education", "university/college/school":
-		return "教育"
+		return "probe.network.network_type.education"
 	case "government":
-		return "政府"
+		return "probe.network.network_type.government"
 	case "banking":
-		return "银行"
+		return "probe.network.network_type.banking"
 	case "organization":
-		return "组织"
+		return "probe.network.network_type.organization"
 	case "military":
-		return "军队"
+		return "probe.network.network_type.military"
 	case "library":
-		return "图书馆"
+		return "probe.network.network_type.library"
 	case "content delivery network", "cdn":
-		return "CDN"
+		return "probe.network.network_type.cdn"
 	case "mobile", "mobile isp":
-		return "移动网络"
+		return "probe.network.network_type.mobile"
 	case "search engine spider", "spider":
-		return "搜索引擎"
+		return "probe.network.network_type.search_engine"
 	case "reserved":
-		return "保留地址"
+		return "probe.network.network_type.reserved"
 	case "", "unknown", "null":
 		return ""
 	default:
-		return "其他"
+		return "probe.network.network_type.other"
 	}
 }
 
@@ -1648,29 +1617,29 @@ func normalizeIP2LocationType(value string) string {
 	code := strings.ToUpper(strings.TrimSpace(strings.Split(value, "/")[0]))
 	switch code {
 	case "COM":
-		return "商业"
+		return "probe.network.network_type.business"
 	case "DCH":
-		return "机房"
+		return "probe.network.network_type.datacenter"
 	case "EDU":
-		return "教育"
+		return "probe.network.network_type.education"
 	case "GOV":
-		return "政府"
+		return "probe.network.network_type.government"
 	case "ORG":
-		return "组织"
+		return "probe.network.network_type.organization"
 	case "MIL":
-		return "军队"
+		return "probe.network.network_type.military"
 	case "LIB":
-		return "图书馆"
+		return "probe.network.network_type.library"
 	case "CDN":
-		return "CDN"
+		return "probe.network.network_type.cdn"
 	case "ISP":
-		return "家宽"
+		return "probe.network.network_type.residential"
 	case "MOB":
-		return "移动网络"
+		return "probe.network.network_type.mobile"
 	case "SES":
-		return "搜索引擎"
+		return "probe.network.network_type.search_engine"
 	case "RSV":
-		return "保留地址"
+		return "probe.network.network_type.reserved"
 	case "":
 		return ""
 	default:
@@ -1859,8 +1828,10 @@ func appendPartial(existing, addition string) string {
 		return addition
 	case addition == "":
 		return existing
+	case existing == addition:
+		return existing
 	default:
-		return existing + "；" + addition
+		return networkPartialMultiple
 	}
 }
 
@@ -1892,17 +1863,21 @@ func scoreLabel(value string) string {
 func translateRiskLabel(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "very low":
-		return "极低"
+		return "probe.network.risk.very_low"
 	case "low":
-		return "低"
-	case "elevated":
-		return "中等"
+		return "probe.network.risk.low"
+	case "elevated", "medium":
+		return "probe.network.risk.medium"
+	case "suspicious":
+		return "probe.network.risk.suspicious"
 	case "high":
-		return "高"
+		return "probe.network.risk.high"
 	case "very high":
-		return "极高"
+		return "probe.network.risk.very_high"
+	case "":
+		return ""
 	default:
-		return value
+		return networkRiskUnknown
 	}
 }
 
@@ -1920,11 +1895,11 @@ func riskIP2Location(score *float64) string {
 	}
 	switch {
 	case *score < 33:
-		return "低"
+		return "probe.network.risk.low"
 	case *score < 66:
-		return "中等"
+		return "probe.network.risk.medium"
 	default:
-		return "高"
+		return "probe.network.risk.high"
 	}
 }
 
@@ -1934,13 +1909,13 @@ func riskScamalytics(score *float64) string {
 	}
 	switch {
 	case *score < 20:
-		return "低"
+		return "probe.network.risk.low"
 	case *score < 60:
-		return "中等"
+		return "probe.network.risk.medium"
 	case *score < 90:
-		return "高"
+		return "probe.network.risk.high"
 	default:
-		return "极高"
+		return "probe.network.risk.very_high"
 	}
 }
 
@@ -1950,11 +1925,11 @@ func riskAbuseIPDB(score *float64) string {
 	}
 	switch {
 	case *score < 25:
-		return "低"
+		return "probe.network.risk.low"
 	case *score < 75:
-		return "需留意"
+		return "probe.network.risk.suspicious"
 	default:
-		return "高"
+		return "probe.network.risk.high"
 	}
 }
 
@@ -1964,13 +1939,13 @@ func riskIPQS(score *float64) string {
 	}
 	switch {
 	case *score < 75:
-		return "低"
+		return "probe.network.risk.low"
 	case *score < 85:
-		return "可疑"
+		return "probe.network.risk.suspicious"
 	case *score < 90:
-		return "高"
+		return "probe.network.risk.high"
 	default:
-		return "极高"
+		return "probe.network.risk.very_high"
 	}
 }
 
@@ -1980,18 +1955,18 @@ func setDBIPRisk(finding *qualityFinding, level string) {
 	switch level {
 	case "low":
 		score = 0
-		finding.Risk = "低"
+		finding.Risk = "probe.network.risk.low"
 	case "medium":
 		score = 50
-		finding.Risk = "中等"
+		finding.Risk = "probe.network.risk.medium"
 	case "high":
 		score = 100
-		finding.Risk = "高"
+		finding.Risk = "probe.network.risk.high"
 	default:
 		return
 	}
 	finding.Score = &score
-	finding.ScoreKind = "威胁等级（0/50/100 映射*）"
+	finding.ScoreKind = networkScoreKindThreat
 }
 
 func firstNonEmpty(values ...string) string {

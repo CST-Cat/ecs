@@ -16,10 +16,10 @@ func TestIPQualityJSONParsersAndProviderFailures(t *testing.T) {
 		wantScore                                  *float64
 		wantProxy, wantServer, wantVPN, wantAbuser bool
 	}{
-		{name: "ipregistry", parse: parseIPregistryJSON, body: `{"location":{"country":{"code":"us"}},"connection":{"type":"hosting"},"company":{"type":"business"},"security":{"is_proxy":true,"is_cloud_provider":true}}`, country: "US", usage: "机房", wantProxy: true, wantServer: true},
-		{name: "ip2location", parse: parseIP2LocationJSON, body: `{"country_code":"us","usage_type":"DCH","fraud_score":42,"is_proxy":true}`, country: "US", usage: "机房", wantScore: floatPtr(42), wantProxy: true},
-		{name: "ipqs", parse: parseIPQSJSON, body: `{"success":true,"fraud_score":88,"country_code":"us","proxy":true,"connection_type":"hosting"}`, country: "US", usage: "机房", wantScore: floatPtr(88), wantProxy: true},
-		{name: "dbip extended", parse: parseDBIPExtendedJSON, body: `{"countryCode":"us","usageType":"hosting","isProxy":true,"proxyType":"vpn","threatLevel":"medium","threatDetails":["attack-source"]}`, country: "US", usage: "机房", wantScore: floatPtr(50), wantProxy: true, wantServer: true, wantVPN: true, wantAbuser: true},
+		{name: "ipregistry", parse: parseIPregistryJSON, body: `{"location":{"country":{"code":"us"}},"connection":{"type":"hosting"},"company":{"type":"business"},"security":{"is_proxy":true,"is_cloud_provider":true}}`, country: "US", usage: "probe.network.network_type.datacenter", wantProxy: true, wantServer: true},
+		{name: "ip2location", parse: parseIP2LocationJSON, body: `{"country_code":"us","usage_type":"DCH","fraud_score":42,"is_proxy":true}`, country: "US", usage: "probe.network.network_type.datacenter", wantScore: floatPtr(42), wantProxy: true},
+		{name: "ipqs", parse: parseIPQSJSON, body: `{"success":true,"fraud_score":88,"country_code":"us","proxy":true,"connection_type":"hosting"}`, country: "US", usage: "probe.network.network_type.datacenter", wantScore: floatPtr(88), wantProxy: true},
+		{name: "dbip extended", parse: parseDBIPExtendedJSON, body: `{"countryCode":"us","usageType":"hosting","isProxy":true,"proxyType":"vpn","threatLevel":"medium","threatDetails":["attack-source"]}`, country: "US", usage: "probe.network.network_type.datacenter", wantScore: floatPtr(50), wantProxy: true, wantServer: true, wantVPN: true, wantAbuser: true},
 		{name: "dbip free", parse: parseDBIPFreeJSON, body: `{"countryCode":"us"}`, country: "US"},
 	}
 	for _, test := range cases {
@@ -41,7 +41,7 @@ func TestIPQualityJSONParsersAndProviderFailures(t *testing.T) {
 		t.Fatalf("IP2Location partial finding = %+v", partial)
 	}
 	partial = parseIPQSJSON([]byte(`{"success":true,"country_code":"US","proxy":false}`))
-	if partial.Err != nil || partial.Partial != "未返回欺诈分" || !partial.Proxy.Known || partial.Proxy.Value {
+	if partial.Err != nil || partial.Partial != networkPartialScore || !partial.Proxy.Known || partial.Proxy.Value {
 		t.Fatalf("IPQS partial finding = %+v", partial)
 	}
 
@@ -75,7 +75,7 @@ func TestIPQualityPublicPagesScoresAndSignals(t *testing.T) {
 		t.Fatalf("IPQS public page = %+v", finding)
 	}
 	dbip := parseDBIPPublicPage([]byte(`{"countryCode":"US"} Estimated threat level for this IP address is <span>high</span>`))
-	if dbip.Err != nil || dbip.Country != "US" || dbip.Score == nil || *dbip.Score != 100 || dbip.Risk != "高" {
+	if dbip.Err != nil || dbip.Country != "US" || dbip.Score == nil || *dbip.Score != 100 || dbip.Risk != "probe.network.risk.high" {
 		t.Fatalf("DB-IP public page = %+v", dbip)
 	}
 	for _, test := range []struct {
@@ -93,7 +93,7 @@ func TestIPQualityPublicPagesScoresAndSignals(t *testing.T) {
 			}
 		})
 	}
-	if scoreBar(42) == "────────────" || formatScore(42.5) != "42.50" || durationText(0) != "—" || durationText(time.Second) != "1000 ms" {
+	if scoreBar(42) == "────────────" || formatScore(42.5) != "42.50" || durationText(0) != networkMissingValue || durationText(time.Second) != "1000 ms" {
 		t.Fatal("IP quality display helpers failed")
 	}
 }
@@ -124,10 +124,10 @@ func TestIPQualitySignalsAndScoreBuckets(t *testing.T) {
 		fn         func(*float64) string
 		values     []float64
 	}{
-		{name: "IP2Location", fn: riskIP2Location, values: []float64{20, 50, 80}, want: "低,中等,高"},
-		{name: "Scamalytics", fn: riskScamalytics, values: []float64{10, 30, 70, 95}, want: "低,中等,高,极高"},
-		{name: "AbuseIPDB", fn: riskAbuseIPDB, values: []float64{10, 50, 80}, want: "低,需留意,高"},
-		{name: "IPQS", fn: riskIPQS, values: []float64{70, 80, 88, 95}, want: "低,可疑,高,极高"},
+		{name: "IP2Location", fn: riskIP2Location, values: []float64{20, 50, 80}, want: "probe.network.risk.low,probe.network.risk.medium,probe.network.risk.high"},
+		{name: "Scamalytics", fn: riskScamalytics, values: []float64{10, 30, 70, 95}, want: "probe.network.risk.low,probe.network.risk.medium,probe.network.risk.high,probe.network.risk.very_high"},
+		{name: "AbuseIPDB", fn: riskAbuseIPDB, values: []float64{10, 50, 80}, want: "probe.network.risk.low,probe.network.risk.suspicious,probe.network.risk.high"},
+		{name: "IPQS", fn: riskIPQS, values: []float64{70, 80, 88, 95}, want: "probe.network.risk.low,probe.network.risk.suspicious,probe.network.risk.high,probe.network.risk.very_high"},
 	} {
 		labels := make([]string, 0, len(test.values))
 		for _, value := range test.values {
@@ -140,7 +140,7 @@ func TestIPQualitySignalsAndScoreBuckets(t *testing.T) {
 	for _, test := range []struct {
 		level, want string
 	}{
-		{"low", "低"}, {"medium", "中等"}, {"high", "高"}, {"unknown", ""},
+		{"low", "probe.network.risk.low"}, {"medium", "probe.network.risk.medium"}, {"high", "probe.network.risk.high"}, {"unknown", ""},
 	} {
 		var finding qualityFinding
 		setDBIPRisk(&finding, test.level)
@@ -155,23 +155,23 @@ func TestIPQualitySignalsAndScoreBuckets(t *testing.T) {
 	if parseProbabilityScore("42%") == nil || *parseProbabilityScore("42%") != 42 || parseProbabilityScore("not-a-score") != nil || validScore(floatPtr(101)) != nil {
 		t.Fatal("score parsing/range states failed")
 	}
-	if scoreLabel("0.42 (Low)") != "Low" || translateRiskLabel("Very High") != "极高" || translateRiskLabel("custom") != "custom" {
+	if scoreLabel("0.42 (Low)") != "Low" || translateRiskLabel("Very High") != "probe.network.risk.very_high" || translateRiskLabel("custom") != networkRiskUnknown {
 		t.Fatal("risk label translation failed")
 	}
 }
 
 func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
-	bundle := ipQualityBundle{Version: "4", Origin: originAssessment{Enabled: true, Label: "原生 IP", UsageCountry: "US", RegisteredCountry: "US"}, Findings: map[string]qualityFinding{}}
+	bundle := ipQualityBundle{Version: "4", Origin: originAssessment{Enabled: true, Label: "probe.network.ip_type.native", UsageCountry: "US", RegisteredCountry: "US"}, Findings: map[string]qualityFinding{}}
 	for _, id := range qualitySourceOrder {
 		if id != "maxmind" {
-			bundle.Findings[id] = qualityFinding{ID: id, Name: qualitySourceLabels[id]}
+			bundle.Findings[id] = qualityFinding{ID: id}
 		}
 	}
-	bundle.Findings["ipapi"] = qualityFinding{ID: "ipapi", Name: "ipapi", Enabled: true, Access: "fixture", Country: "US", Usage: "机房", Score: floatPtr(42), ScoreKind: "IP 欺诈分", Risk: "低", Proxy: knownSignal(false)}
-	bundle.Findings["ip2location"] = qualityFinding{ID: "ip2location", Name: "IP2Location", Enabled: true, Access: "fixture", Country: "US", Score: floatPtr(20), ScoreKind: "IP2Proxy 欺诈分", Risk: "低", Partial: "套餐未返回其他字段"}
-	bundle.Findings["dbip"] = qualityFinding{ID: "dbip", Name: "DB-IP", Enabled: true, Access: "fixture", Country: "US", Score: floatPtr(50), ScoreKind: "威胁等级", Risk: "中等"}
-	bundle.Findings["ipinfo"] = qualityFinding{ID: "ipinfo", Name: "IPinfo", Enabled: true, Access: "fixture", Country: "US", Usage: "家宽"}
-	bundle.Findings["ipqs"] = qualityFinding{ID: "ipqs", Name: "IPQS", Enabled: true, Access: "fixture", Err: errors.New("fixture provider failure")}
+	bundle.Findings["ipapi"] = qualityFinding{ID: "ipapi", Enabled: true, Access: "fixture", Country: "US", Usage: "probe.network.network_type.datacenter", Score: floatPtr(42), ScoreKind: networkScoreKindIPFraud, Risk: "probe.network.risk.low", Proxy: knownSignal(false)}
+	bundle.Findings["ip2location"] = qualityFinding{ID: "ip2location", Enabled: true, Access: "fixture", Country: "US", Score: floatPtr(20), ScoreKind: networkScoreKindIP2Proxy, Risk: "probe.network.risk.low", Partial: networkPartialMultiple}
+	bundle.Findings["dbip"] = qualityFinding{ID: "dbip", Enabled: true, Access: "fixture", Country: "US", Score: floatPtr(50), ScoreKind: networkScoreKindThreat, Risk: "probe.network.risk.medium"}
+	bundle.Findings["ipinfo"] = qualityFinding{ID: "ipinfo", Enabled: true, Access: "fixture", Country: "US", Usage: "probe.network.network_type.residential"}
+	bundle.Findings["ipqs"] = qualityFinding{ID: "ipqs", Enabled: true, Access: "fixture", Err: errors.New("fixture provider failure")}
 	tables := []model.Table{bundle.typeTable(), bundle.scoreTable(), bundle.factorTable(), bundle.statusTable()}
 	for _, table := range tables {
 		if table.Key == "" || len(table.Columns) != len(table.ColumnKeys) || table.RowIdentity == "" || len(table.Rows) == 0 {
@@ -191,12 +191,12 @@ func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
 	if successful != 5 || enabled != 6 {
 		t.Fatalf("source counts = %d/%d", successful, enabled)
 	}
-	failed := bundle.failedSourceNames()
-	partial := bundle.partialSourceNames()
-	if len(failed) != 1 || failed[0] != "IPQS" || len(partial) != 1 || partial[0] != "IP2Location" {
+	failed := bundle.failedSourceIDs()
+	partial := bundle.partialSourceIDs()
+	if len(failed) != 1 || failed[0] != "ipqs" || len(partial) != 1 || partial[0] != "ip2location" {
 		t.Fatalf("source summaries = failed:%v partial:%v", failed, partial)
 	}
-	if findingValue(bundle.Findings["ipqs"], "x") != "失败" || findingValue(bundle.Findings["ipsb"], "") != "未启用" || findingStatus(bundle.Findings["ip2location"]) == "成功" {
+	if findingValue(bundle.Findings["ipqs"], "x") != "probe.network.status.failed" || findingValue(bundle.Findings["ipsb"], "") != "probe.network.status.disabled" || findingStatus(bundle.Findings["ip2location"]) != "probe.network.status.partial" {
 		t.Fatal("finding status/value states failed")
 	}
 }

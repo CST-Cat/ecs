@@ -184,7 +184,7 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 func Builtins() []Probe {
 	return []Probe{
 		systemSemanticProbe{},
-		networkSemanticProbe{},
+		networkProbe{},
 		bgpSemanticProbe{},
 		cpuProbe{},
 		zstdSemanticProbe{},

@@ -28,7 +28,7 @@ import (
 // 数据源里字段最实用的一家。免费版限制为 HTTP 且有频率限制（约 45 次/分钟）。
 func fetchIPAPICom(ctx context.Context, env Environment, _ *http.Client, ip string) qualityFinding {
 	finding := newFinding("ipapicom")
-	finding.Access = "官方免密接口（HTTP）"
+	finding.Access = networkChannelOfficialFree
 	// 免费端点只支持 HTTP；付费的 pro 端点才提供 HTTPS。这里如实披露而不是假装加密。
 	values := url.Values{"fields": []string{
 		"status,message,countryCode,isp,org,as,asname,reverse,mobile,proxy,hosting,query",
@@ -63,18 +63,18 @@ func fetchIPAPICom(ctx context.Context, env Environment, _ *http.Client, ip stri
 	finding.Proxy = pointerSignal(response.Proxy)
 	finding.Server = pointerSignal(response.Hosting)
 	if response.Mobile != nil && *response.Mobile {
-		finding.Usage = "移动网络"
+		finding.Usage = "probe.network.network_type.mobile"
 	} else if response.Hosting != nil && *response.Hosting {
-		finding.Usage = "机房"
+		finding.Usage = "probe.network.network_type.datacenter"
 	} else if response.ISP != "" {
-		finding.Usage = "家宽"
+		finding.Usage = "probe.network.network_type.residential"
 	}
 	finding.Company = normalizeNetworkType(response.Org)
 	if !findingHasEvidence(finding) {
 		finding.Err = errors.New("响应缺少所需字段")
 		return finding
 	}
-	finding.Partial = "免费端点仅 HTTP，且不提供欺诈分"
+	finding.Partial = networkPartialScore
 	return finding
 }
 
@@ -84,7 +84,7 @@ func fetchIPAPICom(ctx context.Context, env Environment, _ *http.Client, ip stri
 // 价值在于给国家与运营商归属提供一个独立的交叉验证来源。
 func fetchIPSB(ctx context.Context, env Environment, _ *http.Client, ip string) qualityFinding {
 	finding := newFinding("ipsb")
-	finding.Access = "官方免密接口"
+	finding.Access = networkChannelOfficialFree
 	endpoint := "https://api.ip.sb/geoip/" + url.PathEscape(ip)
 	body, latency, err := requestBytes(ctx, env.HTTPClient, env.UserAgent, endpoint, nil, 512*1024)
 	finding.Latency = latency
@@ -108,6 +108,6 @@ func fetchIPSB(ctx context.Context, env Environment, _ *http.Client, ip string) 
 		finding.Err = errors.New("响应缺少所需字段")
 		return finding
 	}
-	finding.Partial = "仅提供地理与运营商，无风险字段"
+	finding.Partial = networkPartialScore
 	return finding
 }

@@ -203,6 +203,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			out.WriteString("### " + i18n.T("report.sources") + "\n\n")
 			for _, rawSource := range result.Sources {
 				source := rawSource
+				source.Name = displayReportText(source.Name)
 				source.Purpose = displayReportText(source.Purpose)
 				out.WriteString("- ")
 				if safeURL := safeMarkdownURL(source.URL); safeURL != "" {

@@ -383,7 +383,7 @@ const htmlTemplate = `<!doctype html>
     {{end}}
 
     {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{display .}}</li>{{end}}</ul>{{end}}
-    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{display .Purpose}}{{end}}</li>{{end}}</ul>{{end}}
+    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{display .Name}}</a>{{else}}{{display .Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{display .Purpose}}{{end}}</li>{{end}}</ul>{{end}}
   </section>
   {{end}}
 

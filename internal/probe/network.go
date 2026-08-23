@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 type networkProbe struct{}
 
 func (networkProbe) ID() string         { return "network" }
-func (networkProbe) Title() string      { return "网络与 IP 质量" }
+func (networkProbe) Title() string      { return networkTitleKey }
 func (networkProbe) NeedsNetwork() bool { return true }
 
 type ipAPIResponse struct {
@@ -135,14 +136,14 @@ type ipLookup struct {
 
 func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("network", "网络与 IP 质量")
-	result.Description = "IPv4/IPv6 出口、原生/广播判定、五库类型、六库风险分与九库风险因子"
+	result := model.NewResult("network", networkTitleKey)
+	result.Description = networkDescriptionKey
 	result.Methodology = model.Methodology{
 		Kind:            "provider-assessment",
-		Label:           "第三方评估",
-		Engine:          "multi-provider IP intelligence",
-		Profile:         "source-preserving cross-check v1",
-		ComparisonScope: "同一数据源、字段口径与查询时间；不同供应商分数不可直接混算",
+		Label:           networkMethodologyLabel,
+		Engine:          "probe.network.methodology.engine",
+		Profile:         networkMethodologyProfile,
+		ComparisonScope: networkComparisonScope,
 	}
 
 	versions := config.IPVersions(env.Config.IPVersion)
@@ -173,15 +174,14 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		} else if !ok {
 			addFailureMessage(&result, "egress", "IPv"+version, reason)
 		}
-		// 错误原文（Go 的网络错误）拼进句子会让整句无法翻译也无法对照，
-		// 因此说明句保持固定，具体原因单独成字段。
-		result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 出口查询失败，详见下方失败原因。", version))
+		result.Notes = append(result.Notes, "probe.network.note.egress_lookup_failed")
 		result.Fields = append(result.Fields, model.Field{
-			Key: "ipv" + version + "_lookup_error", Label: "IPv" + version + " 失败原因", Value: reason,
+			Key: "ipv" + version + "_lookup_error", Label: networkFieldLabelKey("ipv" + version + "_lookup_error"), Value: "probe.network.value.lookup_failed",
 		})
 	}
 	if len(found) == 0 {
-		result.Fail(fmt.Errorf("IPv4 与 IPv6 出口信息均无法查询"))
+		result.Fail(fmt.Errorf("egress lookup unavailable"))
+		result.Notes = append(result.Notes, "probe.network.note.egress_unavailable")
 		result.Evidence = model.NewEvidence(0, len(versions)*plannedSources, "source")
 		result.Finish(start)
 		return result
@@ -216,14 +216,20 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	overview := model.Table{
-		Key:         "network.egress.overview",
-		Title:       "出口概览",
-		Columns:     []string{"协议", "网络类型", "机房", "代理", "VPN", "Tor", "滥用记录", "数据源耗时"},
+		Key:   "network.egress.overview",
+		Title: "probe.network.table.overview",
+		Columns: []string{
+			"probe.network.column.ip_family", "probe.network.column.network_type", "probe.network.column.datacenter",
+			"probe.network.column.proxy", "probe.network.column.vpn", "probe.network.column.tor",
+			"probe.network.column.abuse", "probe.network.column.duration",
+		},
 		ColumnKeys:  []string{"ip_family", "network_type", "datacenter", "proxy", "vpn", "tor", "abuse_record", "source_duration"},
 		RowIdentity: "ip_family",
 	}
-	var summaries []string
-	var providerNotes []string
+	var summaryMessages []model.Message
+	missingIntel := false
+	failedSources := false
+	partialSources := false
 	validSources := 0
 	expectedSources := len(versions) * plannedSources
 	for _, lookup := range found {
@@ -258,31 +264,27 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		if owner == "" {
 			owner = unavailableIPField(lookup, "unknown")
 		}
-		ipType := "未启用"
+		ipType := "probe.network.ip_type.unknown"
+		usageCountry := networkMissingValue
+		registeredCountry := networkMissingValue
 		if bundle.Origin.Enabled {
 			ipType = bundle.Origin.Label
-			if bundle.Origin.Err != nil {
-				ipType = "无法判定"
-			}
-			if bundle.Origin.UsageCountry != "" || bundle.Origin.RegisteredCountry != "" {
-				ipType += fmt.Sprintf(
-					"（使用地 %s / 注册地 %s）",
-					fallback(bundle.Origin.UsageCountry, "—"),
-					fallback(bundle.Origin.RegisteredCountry, "—"),
-				)
-			}
+			usageCountry = firstNonEmpty(bundle.Origin.UsageCountry, networkMissingValue)
+			registeredCountry = firstNonEmpty(bundle.Origin.RegisteredCountry, networkMissingValue)
 		}
 		result.Fields = append(result.Fields,
-			model.Field{Key: prefix, Label: "IPv" + lookup.Version + " 出口", Value: data.IP, Sensitive: true},
-			model.Field{Key: prefix + "_asn", Label: "IPv" + lookup.Version + " ASN", Value: asn},
-			model.Field{Key: prefix + "_route", Label: "IPv" + lookup.Version + " 路由段", Value: route},
-			model.Field{Key: prefix + "_location", Label: "IPv" + lookup.Version + " 地理", Value: location},
-			model.Field{Key: prefix + "_owner", Label: "IPv" + lookup.Version + " 所有者", Value: owner},
-			model.Field{Key: prefix + "_ip_type", Label: "IPv" + lookup.Version + " IP 类型", Value: ipType},
+			model.Field{Key: prefix, Label: networkFieldLabelKey(prefix), Value: data.IP, Sensitive: true},
+			model.Field{Key: prefix + "_asn", Label: networkFieldLabelKey(prefix + "_asn"), Value: asn},
+			model.Field{Key: prefix + "_route", Label: networkFieldLabelKey(prefix + "_route"), Value: route},
+			model.Field{Key: prefix + "_location", Label: networkFieldLabelKey(prefix + "_location"), Value: location},
+			model.Field{Key: prefix + "_owner", Label: networkFieldLabelKey(prefix + "_owner"), Value: owner},
+			model.Field{Key: prefix + "_ip_type", Label: networkFieldLabelKey(prefix + "_ip_type"), Value: ipType},
+			model.Field{Key: prefix + "_usage_country", Label: networkFieldLabelKey(prefix + "_usage_country"), Value: usageCountry},
+			model.Field{Key: prefix + "_registered_country", Label: networkFieldLabelKey(prefix + "_registered_country"), Value: registeredCountry},
 		)
 		overview.Rows = append(overview.Rows, []string{
-			"IPv" + lookup.Version,
-			fallback(normalizeNetworkType(firstNonEmpty(data.Company.Type, data.ASN.Type)), fallback(data.Company.Type, data.ASN.Type)),
+			networkIPFamilyKey(lookup.Version),
+			firstNonEmpty(normalizeNetworkType(firstNonEmpty(data.Company.Type, data.ASN.Type)), networkMissingValue),
 			ipAPIBooleanText(data.IsDatacenter, data.BooleanPresence.IsDatacenter),
 			ipAPIBooleanText(data.IsProxy, data.BooleanPresence.IsProxy),
 			ipAPIBooleanText(data.IsVPN, data.BooleanPresence.IsVPN),
@@ -291,8 +293,11 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			fmt.Sprintf("%.0f ms", float64(lookup.Latency)/float64(time.Millisecond)),
 		})
 		result.Measurements = append(result.Measurements, bundle.measurements()...)
+		if !lookup.HasIntel && lookup.IntelErr != nil && !qualitySourceEnabled(env.Config.IPQualitySources, "ipapi") {
+			addFailure(&result, "egress", prefix+"/ipapi", lookup.IntelErr)
+		}
 		if bundle.Origin.Enabled && bundle.Origin.Err != nil {
-			addFailure(&result, "provider", "IPv"+lookup.Version+" "+qualitySourceLabels["maxmind"], bundle.Origin.Err)
+			addFailure(&result, "provider", prefix+"/maxmind", bundle.Origin.Err)
 		}
 		for _, sourceID := range qualitySourceOrder {
 			if sourceID == "maxmind" {
@@ -300,7 +305,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			}
 			finding := bundle.Findings[sourceID]
 			if finding.Enabled && finding.Err != nil {
-				addFailure(&result, "provider", "IPv"+lookup.Version+" "+finding.Name, finding.Err)
+				addFailure(&result, "provider", prefix+"/"+sourceID, finding.Err)
 			}
 		}
 		result.Tables = append(
@@ -312,68 +317,84 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		)
 		successful, enabled := bundle.successfulSources()
 		validSources += successful
-		sourceSummary := "附加源未启用"
-		if enabled > 0 {
-			sourceSummary = fmt.Sprintf("数据源响应 %d/%d", successful, enabled)
-		}
-		summaries = append(
-			summaries,
-			fmt.Sprintf(
-				"IPv%s %s %s · %s · %s",
+		if len(summaryMessages) == 0 {
+			summaryMessages = append(summaryMessages, model.NewMessage(
+				"probe.network.summary.version",
 				lookup.Version,
-				firstNonEmpty(data.Location.CountryCode, data.Location.Country, "unknown"),
+				firstNonEmpty(data.Location.CountryCode, data.Location.Country, networkMissingValue),
 				formatASNWithOrganization(asnNumber, data.ASN.Organization),
-				fallback(bundle.Origin.Label, "类型未判定"),
-				sourceSummary,
-			),
-		)
+				firstNonEmpty(bundle.Origin.Label, "probe.network.ip_type.unknown"),
+				strconv.Itoa(successful), strconv.Itoa(enabled),
+			))
+		} else {
+			summaryMessages = append(summaryMessages, model.NewMessage(
+				"probe.network.summary.version.additional",
+				lookup.Version,
+				firstNonEmpty(data.Location.CountryCode, data.Location.Country, networkMissingValue),
+				formatASNWithOrganization(asnNumber, data.ASN.Organization),
+				firstNonEmpty(bundle.Origin.Label, "probe.network.ip_type.unknown"),
+				strconv.Itoa(successful), strconv.Itoa(enabled),
+			))
+		}
 		if !lookup.HasIntel {
 			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, fmt.Sprintf("IPv%s 未取得 ipapi 情报；ASN/路由段优先使用公共 BGP 观测，其余字段仅保留已取得的数据。", lookup.Version))
+			missingIntel = true
 		}
-		if failed := bundle.failedSourceNames(); len(failed) > 0 {
-			providerNotes = append(providerNotes, fmt.Sprintf("IPv%s 数据源失败：%s。详见数据源状态表。", lookup.Version, strings.Join(failed, "、")))
+		if bundle.needsWarning() {
+			result.Status = model.StatusWarning
 		}
-		if partial := bundle.partialSourceNames(); len(partial) > 0 {
-			providerNotes = append(providerNotes, fmt.Sprintf("IPv%s 数据源字段不完整：%s。通常由免费套餐字段限制导致。", lookup.Version, strings.Join(partial, "、")))
+		if len(bundle.failedSourceIDs()) > 0 {
+			failedSources = true
 		}
+		if len(bundle.partialSourceIDs()) > 0 {
+			partialSources = true
+		}
+	}
+	if missingIntel {
+		result.Notes = append(result.Notes, "probe.network.note.no_ipapi_intel")
+	}
+	if failedSources {
+		result.Notes = append(result.Notes, "probe.network.note.failed_sources")
+	}
+	if partialSources {
+		result.Notes = append(result.Notes, "probe.network.note.partial_sources")
 	}
 	result.Tables = append([]model.Table{overview}, result.Tables...)
 	result.Evidence = model.NewEvidence(validSources, expectedSources, "source")
 	result.Fields = append([]model.Field{{
-		Key: "ip_version_mode", Label: "协议族模式", Value: fallback(env.Config.IPVersion, config.IPVersionAuto),
+		Key: "ip_version_mode", Label: networkFieldLabelKey("ip_version_mode"), Value: fallback(env.Config.IPVersion, config.IPVersionAuto),
 	}}, result.Fields...)
 	result.Sources = []model.Source{
-		{Name: "ipapi.is", URL: "https://ipapi.is/", Purpose: "出口 IP、ASN、地理、网络类型与滥用概率"},
-		{Name: "RouteViews", URL: "https://api.routeviews.org/", Purpose: "ipapi 字段缺失时回填出口前缀与起源 ASN"},
-		{Name: "IPQuality", URL: "https://github.com/xykt/IPQuality", Purpose: "多源覆盖、字段映射与社区兼容通道（AGPL-3.0）"},
-		{Name: "check.place", URL: "https://check.place/", Purpose: "无用户密钥时的 MaxMind、ipregistry、IP2Location、AbuseIPDB、Scamalytics、IPQS、ipdata 社区中转"},
-		{Name: "IPinfo", URL: "https://ipinfo.io/developers", Purpose: "网络类型、公司类型与隐私信号"},
-		{Name: "ipregistry", URL: "https://ipregistry.co/docs/", Purpose: "网络类型与威胁信号"},
-		{Name: "IP2Location.io", URL: "https://www.ip2location.io/ip2location-documentation", Purpose: "IP 类型、代理因子与 IP2Proxy 欺诈分"},
-		{Name: "AbuseIPDB", URL: "https://docs.abuseipdb.com/", Purpose: "90 天滥用置信度与使用类型"},
-		{Name: "Scamalytics", URL: "https://scamalytics.com/", Purpose: "Web 流量欺诈分与匿名化信号"},
-		{Name: "IPQualityScore", URL: "https://www.ipqualityscore.com/documentation/proxy-detection-api/overview", Purpose: "IP 欺诈分、代理、VPN、Tor 与近期滥用"},
-		{Name: "DB-IP", URL: "https://db-ip.com/api/doc.php", Purpose: "威胁等级、代理、爬虫与网络属性"},
-		{Name: "ipdata", URL: "https://ipdata.co/", Purpose: "代理、Tor、机房与已知威胁因子"},
-		{Name: "IPWHOIS", URL: "https://ipwhois.io/documentation", Purpose: "国家、代理、VPN、Tor 与托管信号"},
-		{Name: "Jina Reader", URL: "https://github.com/jina-ai/reader", Purpose: "IPQS 官方公开页的最后一级免密只读兜底（可能读取 1 小时缓存）"},
+		{Name: networkSourceNameKey("ipapi"), URL: "https://ipapi.is/", Purpose: "probe.network.source.ipapi"},
+		{Name: networkSourceNameKey("ipapicom"), URL: "http://ip-api.com/json/", Purpose: "probe.network.source.ipapicom"},
+		{Name: networkSourceNameKey("ipsb"), URL: "https://api.ip.sb/geoip/", Purpose: "probe.network.source.ipsb"},
+		{Name: networkSourceNameKey("routeviews"), URL: "https://api.routeviews.org/", Purpose: "probe.network.source.routeviews"},
+		{Name: networkSourceNameKey("maxmind"), URL: "https://www.maxmind.com/", Purpose: "probe.network.source.maxmind"},
+		{Name: networkSourceNameKey("ipquality"), URL: "https://github.com/xykt/IPQuality", Purpose: "probe.network.source.ipquality"},
+		{Name: networkSourceNameKey("checkplace"), URL: "https://check.place/", Purpose: "probe.network.source.checkplace"},
+		{Name: networkSourceNameKey("ipinfo"), URL: "https://ipinfo.io/developers", Purpose: "probe.network.source.ipinfo"},
+		{Name: networkSourceNameKey("ipregistry"), URL: "https://ipregistry.co/docs/", Purpose: "probe.network.source.ipregistry"},
+		{Name: networkSourceNameKey("ip2location"), URL: "https://www.ip2location.io/ip2location-documentation", Purpose: "probe.network.source.ip2location"},
+		{Name: networkSourceNameKey("abuseipdb"), URL: "https://docs.abuseipdb.com/", Purpose: "probe.network.source.abuseipdb"},
+		{Name: networkSourceNameKey("scamalytics"), URL: "https://scamalytics.com/", Purpose: "probe.network.source.scamalytics"},
+		{Name: networkSourceNameKey("ipqs"), URL: "https://www.ipqualityscore.com/documentation/proxy-detection-api/overview", Purpose: "probe.network.source.ipqs"},
+		{Name: networkSourceNameKey("dbip"), URL: "https://db-ip.com/api/doc.php", Purpose: "probe.network.source.dbip"},
+		{Name: networkSourceNameKey("ipdata"), URL: "https://ipdata.co/", Purpose: "probe.network.source.ipdata"},
+		{Name: networkSourceNameKey("ipwhois"), URL: "https://ipwhois.io/documentation", Purpose: "probe.network.source.ipwhois"},
+		{Name: networkSourceNameKey("jina"), URL: "https://github.com/jina-ai/reader", Purpose: "probe.network.source.jina"},
 	}
 	result.Notes = append(result.Notes,
-		"本模块会把待查询的出口 IP 发送给表内数据源；不会上传 CPU、磁盘、路由等其他测试结果。",
-		"默认不要求 API 密钥；官方免密/公开接口优先，付费字段再由 IPQuality/check.place 或已披露的公开页读取链路补充，报告会逐行标明通道。",
-		"各家分值口径不同，ecs 不做无依据的平均总分；风险评分表保留原始语义，因子矩阵保留冲突。",
-		"“原生/广播 IP”仅按 MaxMind 使用地与注册地是否一致判定，是地理一致性线索，不等于住宅 IP、解锁能力或低欺诈风险。",
-		"DB-IP 公开风险页返回 low/medium/high 时，0/50/100 后带 * 的值仅用于画进度条；若只能访问官方 free API，则不填造威胁分。",
+		"probe.network.note.third_party",
+		"probe.network.note.no_upload",
+		"probe.network.note.source_semantics",
+		"probe.network.note.origin_scope",
+		"probe.network.note.dbip_mapping",
 	)
-	result.Notes = append(result.Notes, providerNotes...)
 	if proxyEnvironmentEnabled() {
-		result.Notes = append(result.Notes, "检测到 HTTP(S)_PROXY 环境变量；出口发现与性能探针仍直连，仅 IPQS 对明确目标 IP 的 Jina Reader 最后兜底可使用系统代理，并在通道列披露。")
+		result.Notes = append(result.Notes, "probe.network.note.proxy_fallback")
 	}
-	if len(providerNotes) > 0 {
-		result.Status = model.StatusWarning
-	}
-	result.Summary = strings.Join(summaries, " · ")
+	result.Summary = ""
+	result.SummaryMessages = summaryMessages
 	result.Finish(start)
 	return result
 }
@@ -410,7 +431,7 @@ func egressBGPIdentity(observations []routeViewsPrefix) (asn int, route string) 
 
 func formatASNWithOrganization(asn int, organization string) string {
 	if asn <= 0 {
-		return "unknown"
+		return networkMissingValue
 	}
 	if organization == "" {
 		return formatASN(asn)
@@ -435,12 +456,15 @@ func bundleCountry(bundle ipQualityBundle) string {
 
 func unavailableIPField(lookup ipLookup, normalFallback string) string {
 	if lookup.HasIntel {
+		if normalFallback == "" || normalFallback == "unknown" {
+			return networkMissingValue
+		}
 		return normalFallback
 	}
 	if lookup.IntelAttempted {
-		return "未查询（ipapi 不可用）"
+		return "probe.network.value.intel_unavailable"
 	}
-	return "未查询（未启用 ipapi）"
+	return "probe.network.value.intel_not_attempted"
 }
 
 func lookupIP(ctx context.Context, env Environment, version string) (ipAPIResponse, time.Duration, error) {
@@ -513,18 +537,14 @@ func normalizeIPAPIResponse(data ipAPIResponse) ipAPIResponse {
 	return data
 }
 
-func yesNo(value bool) string {
-	if value {
-		return "是"
-	}
-	return "否"
-}
-
 func ipAPIBooleanText(value, known bool) string {
 	if !known {
-		return "未返回"
+		return "probe.network.boolean.unknown"
 	}
-	return yesNo(value)
+	if value {
+		return "probe.network.boolean.yes"
+	}
+	return "probe.network.boolean.no"
 }
 
 func proxyEnvironmentEnabled() bool {

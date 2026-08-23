@@ -723,6 +723,7 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 		bannerSource := -1
 		for index, rawSource := range result.Sources {
 			source := rawSource
+			source.Name = displayReportText(source.Name)
 			source.Purpose = displayReportText(source.Purpose)
 			if strings.TrimSpace(source.URL) != "" {
 				bannerSource = index
@@ -731,6 +732,7 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 		}
 		for index, rawSource := range result.Sources {
 			source := rawSource
+			source.Name = displayReportText(source.Name)
 			source.Purpose = displayReportText(source.Purpose)
 			if index == bannerSource {
 				// The banner already carries this source URL. Keep its name and

@@ -20,7 +20,7 @@ func renderMessage(message model.Message) string {
 	}
 	args := make([]any, len(message.Args))
 	for index, arg := range message.Args {
-		args[index] = arg
+		args[index] = displayReportText(arg)
 	}
 	return fmt.Sprintf(format, args...)
 }
