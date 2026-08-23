@@ -49,9 +49,9 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "Amazon", Address: "www.amazon.com:443", Kind: "Global"},
 		},
 		RouteTargets: []Endpoint{
-			{Name: "Cloudflare", Address: "1.1.1.1", Kind: "Global"},
-			{Name: "Google", Address: "8.8.8.8", Kind: "Global"},
-			{Name: "AliDNS", Address: "223.5.5.5", Kind: "中国大陆"},
+			{Name: "Cloudflare", Address: "1.1.1.1", Kind: RouteTargetKindGlobal},
+			{Name: "Google", Address: "8.8.8.8", Kind: RouteTargetKindGlobal},
+			{Name: "AliDNS", Address: "223.5.5.5", Kind: RouteTargetKindMainlandChina},
 		},
 		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCities),
 	}

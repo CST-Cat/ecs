@@ -47,6 +47,13 @@ type Endpoint struct {
 	Family string `json:"family,omitempty"`
 }
 
+// Route target kinds are machine identities owned by the route configuration
+// contract. Custom endpoint kinds remain user-provided values.
+const (
+	RouteTargetKindGlobal        = "global"
+	RouteTargetKindMainlandChina = "mainland_china"
+)
+
 type IPerfEndpoint struct {
 	Name      string `json:"name"`
 	Host      string `json:"host"`

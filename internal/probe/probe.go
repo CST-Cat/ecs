@@ -202,7 +202,7 @@ func Builtins() []Probe {
 		cnSpeedSemanticProbe{},
 		ooklaSemanticProbe{},
 		mediaProbe{},
-		routeSemanticProbe{},
+		routeProbe{},
 		backtraceSemanticProbe{},
 	}
 }

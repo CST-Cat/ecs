@@ -6,17 +6,7 @@ import (
 	"ecs/internal/model"
 )
 
-func TestStabilizeRouteAndBacktraceResultsKeyStatuses(t *testing.T) {
-	route := model.Result{
-		ID:     "route",
-		Status: model.StatusWarning,
-		Tables: []model.Table{{Key: "network.route.summary", Columns: []string{"旧"}, Rows: [][]string{{"target", "host", "完成", "1", "1", "0", "1 ms"}}}},
-	}
-	stabilizeRouteResult(&route)
-	if route.Tables[0].Rows[0][2] != "probe.route.status.complete" || route.SummaryMessages[0].Key != "probe.route.summary.values" {
-		t.Fatalf("route = %#v", route)
-	}
-
+func TestStabilizeBacktraceResultKeyStatuses(t *testing.T) {
 	backtrace := model.Result{
 		ID:           "backtrace",
 		Status:       model.StatusOK,
