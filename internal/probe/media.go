@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 type mediaProbe struct{}
 
 func (mediaProbe) ID() string         { return "media" }
-func (mediaProbe) Title() string      { return "流媒体与 AI 服务" }
+func (mediaProbe) Title() string      { return "module.media.title" }
 func (mediaProbe) NeedsNetwork() bool { return true }
 
 // mediaResult 是一个平台的完整检测记录。
@@ -24,18 +25,25 @@ type mediaResult struct {
 	Latency time.Duration
 	// Statuses 保留每次请求的状态码，便于复核判定依据。
 	Statuses []int
+	// ResponseErrors preserves each typed request error for final assembly.
+	ResponseErrors []mediaResponseError
+}
+
+type mediaResponseError struct {
+	Index int
+	Err   error
 }
 
 func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("media", "流媒体与 AI 服务")
-	result.Description = "按平台规则检测区域可用性，结论区分解锁、仅自制剧、不解锁与未知"
+	result := model.NewResult("media", "module.media.title")
+	result.Description = "probe.media.description"
 	result.Methodology = model.Methodology{
 		Kind:            "heuristic",
-		Label:           "启发式判断",
-		Engine:          "public HTTP evidence + per-platform rules",
-		Profile:         "media rules " + mediaRulesVersion + describeMediaRegions(env.Config.MediaRegions),
-		ComparisonScope: "仅当次公开页证据；不等同于账号播放、注册或支付能力",
+		Label:           "methodology.heuristic",
+		Engine:          "probe.media.methodology.engine",
+		Profile:         "probe.media.profile",
+		ComparisonScope: "probe.media.comparison_scope",
 	}
 	client, closeClient := httpClientForMode(env)
 	defer closeClient()
@@ -72,31 +80,31 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		return categoryOrder(categories[i]) < categoryOrder(categories[j])
 	})
 
-	unlocked, unknown, locked := 0, 0, 0
+	unlocked, locked, unknown := mediaVerdictCounts(results)
 	for _, category := range categories {
 		table := model.Table{
-			Key:         "network.media." + category.Key,
-			Title:       category.Label,
-			Columns:     []string{"平台", "结论", "地区", "证据", "强度", "耗时"},
-			ColumnKeys:  []string{"platform", "verdict", "region", "evidence", "strength", "latency_ms"},
+			Key:   "network.media." + category.Key,
+			Title: "probe.media.table." + category.Key,
+			Columns: []string{
+				"probe.media.column.platform", "probe.media.column.verdict", "probe.media.column.region",
+				"probe.media.column.evidence", "probe.media.column.strength", "probe.media.column.http_status",
+				"probe.media.column.duration",
+			},
+			ColumnKeys:  []string{"platform", "verdict", "region", "evidence", "strength", "http_status", "latency_ms"},
 			RowIdentity: "platform",
 		}
 		for _, item := range grouped[category.Key] {
-			switch item.Verdict.State {
-			case stateUnlocked, stateOriginals:
-				unlocked++
-			case stateUnknown:
-				unknown++
-				addFailureMessage(&result, "platform_check", item.Check.Name, item.Verdict.Evidence)
-			case stateLocked, stateRestricted, stateUnreachable:
-				locked++
+			for _, responseError := range item.ResponseErrors {
+				target := fmt.Sprintf("%s/request_%d", item.Check.ID, responseError.Index+1)
+				addFailure(&result, "platform_check", target, responseError.Err)
 			}
 			table.Rows = append(table.Rows, []string{
-				item.Check.Name,
+				mediaPlatformNameKey(item.Check.ID),
 				item.Verdict.State,
-				fallback(item.Verdict.Region, "—"),
+				item.Verdict.Region,
 				item.Verdict.Evidence,
-				strengthLabel(item.Check.Strength),
+				string(item.Check.Strength),
+				mediaStatusDisplay(item.Statuses),
 				formatMilliseconds(item.Latency),
 			})
 		}
@@ -104,25 +112,33 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	total := len(checks)
-	if unknown == total {
+	if total > 0 && unknown == total {
 		result.Status = model.StatusWarning
 	}
 	result.Measurements = []model.Measurement{
 		{
-			Key: "media_unlocked", Label: "可用平台",
-			Value: float64(unlocked), Unit: "项",
+			Key: "media_unlocked", Label: "probe.media.metric.unlocked",
+			Value: float64(unlocked), Unit: "count",
 			Display: fmt.Sprintf("%d/%d", unlocked, total),
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(true),
 		},
 		{
-			Key: "media_unknown", Label: "无法判定",
-			Value: float64(unknown), Unit: "项",
+			Key: "media_unknown", Label: "probe.media.metric.unknown",
+			Value: float64(unknown), Unit: "count",
 			Display: fmt.Sprintf("%d/%d", unknown, total),
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(false),
 		},
 	}
 	result.Evidence = model.NewEvidence(total-unknown, total, "target")
-	result.Summary = fmt.Sprintf("%d/%d 可用 · %d 不可用 · %d 未知", unlocked, total, locked, unknown)
+	result.Summary = ""
+	result.SummaryMessages = []model.Message{
+		model.NewMessage("probe.media.summary.values", unlocked, total, locked, unknown),
+	}
+	result.Notes = []string{
+		"probe.media.note.public_evidence",
+		"probe.media.note.account_scope",
+		"probe.media.note.unknown_semantics",
+	}
 	result.Finish(start)
 	return result
 }
@@ -132,14 +148,17 @@ func runMediaCheck(ctx context.Context, env Environment, check mediaCheck) media
 	item := mediaResult{Check: check}
 	begin := time.Now()
 	responses := make([]mediaResponse, 0, len(check.Requests))
-	for _, request := range check.Requests {
+	for index, request := range check.Requests {
 		response := performMediaRequest(ctx, env, request)
 		responses = append(responses, response)
 		item.Statuses = append(item.Statuses, response.Status)
+		if response.Err != nil {
+			item.ResponseErrors = append(item.ResponseErrors, mediaResponseError{Index: index, Err: response.Err})
+		}
 	}
 	item.Latency = time.Since(begin)
 	if len(responses) == 0 {
-		item.Verdict = mediaVerdict{State: stateUnknown, Evidence: "规则未声明请求"}
+		item.Verdict = mediaVerdict{State: stateUnknown, Evidence: mediaEvidenceMissingRequests}
 		return item
 	}
 	item.Verdict = check.Decide(responses)
@@ -147,6 +166,22 @@ func runMediaCheck(ctx context.Context, env Environment, check mediaCheck) media
 		item.Verdict.State = stateUnknown
 	}
 	return item
+}
+
+func mediaVerdictCounts(results []mediaResult) (unlocked, locked, unknown int) {
+	for _, item := range results {
+		switch item.Verdict.State {
+		case stateUnlocked, stateOriginals:
+			unlocked++
+		case stateLocked, stateRestricted, stateUnreachable:
+			locked++
+		case stateUnknown, stateNeedLogin:
+			unknown++
+		default:
+			unknown++
+		}
+	}
+	return unlocked, locked, unknown
 }
 
 // categoryOrder 固定分类展示顺序。
@@ -173,18 +208,17 @@ func categoryOrder(category mediaCategory) int {
 	}
 }
 
-// strengthLabel 把证据强度翻译成表格用语。
-func strengthLabel(strength mediaEvidenceStrength) string {
-	if strength == strengthStrong {
-		return "强"
+func mediaStatusDisplay(statuses []int) string {
+	if len(statuses) == 0 {
+		return ""
 	}
-	return "弱"
+	values := make([]string, len(statuses))
+	for index, status := range statuses {
+		values[index] = strconv.Itoa(status)
+	}
+	return strings.Join(values, ",")
 }
 
-// describeMediaRegions 在方法学里注明本次跑了哪些地区，避免不同筛选的结果被混比。
-func describeMediaRegions(regions []string) string {
-	if len(regions) == 0 {
-		return " (all regions)"
-	}
-	return " (regions: " + strings.Join(regions, ",") + ")"
+func mediaPlatformNameKey(id string) string {
+	return "probe.media.platform." + id
 }
