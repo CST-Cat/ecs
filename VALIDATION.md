@@ -3,9 +3,10 @@
 日期：2026-08-23
 分支：`codex/architecture-machine-facts-cleanup`
 基准：`main@6e85039301fc817e8c4a290ffb9b111fc37e55a8`
-远端审查目标：`origin/codex/architecture-machine-facts-cleanup@c6a59b37d2e61708bd3487dc13a8881fd718efaf`
-本地阶段 15 审计候选：`c6ee5ba17ca6d902f88d549b87335c67e622db7f`（未 push，不是远端 target，也不是最终交付 SHA）
-PR：#6，OPEN、Draft；本阶段没有 push。
+远端当前审查 HEAD：`origin/codex/architecture-machine-facts-cleanup@2825994de43d9d44b0327c71943c3b7e10296411`
+本轮初始远端 target（推送前历史）：`c6a59b37d2e61708bd3487dc13a8881fd718efaf`
+阶段 15 预封存审计候选：`2825994de43d9d44b0327c71943c3b7e10296411`（已 push，但尚非承载最终封存文档的 SHA）
+PR：#6，OPEN、Draft、CLEAN、MERGEABLE；当前 head 为 `2825994de43d9d44b0327c71943c3b7e10296411`。
 仓库声明工具链：`.go-version` 为 `1.26.5`；本机实际 `go version` 为 `go1.22.2 linux/arm64`，因此不能把本机 Go 1.22 结果表述为 Go 1.26 的最终验证。
 
 ## 历史证据
@@ -250,11 +251,11 @@ perl -MJSON::PP -0777 -ne 'my @blocks = /\x60\x60\x60json\s*\n(.*?)\n\x60\x60\x6
 JSON::PP blocks: 11/11
 ```
 
-所有临时目录均已用 `find ... -delete` 清理并确认不存在；本次 diff 精确限定为 `internal/probe/network.go`、`internal/probe/network_semantics_test.go`、`PLAN.md`、`REVIEW.md`、`VALIDATION.md` 五个允许文件。主 Agent 已完成阶段 14 完整复审并通过；阶段 15 第一轮因相关任务文档未重标历史状态而返工，第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工，两轮返工均由同一 Worker 完成，第三轮预推送主审已通过，当前等待推送和远端 CI。本地 govulncheck 仍为 exit 3 的安全限制，不能称 security clean；GitHub security、最终 PR/远端同步和发布未验证，未推送。
+所有临时目录均已用 `find ... -delete` 清理并确认不存在；阶段 14 的代码回归 diff 曾精确限定为 `internal/probe/network.go`、`internal/probe/network_semantics_test.go`、`PLAN.md`、`REVIEW.md`、`VALIDATION.md` 五个允许文件。主 Agent 已完成阶段 14 完整复审并通过；阶段 15 第一轮因相关任务文档未重标历史状态而返工，第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工，两轮返工均由同一 Worker 完成，第三轮预推送主审已通过；`2825994de43d9d44b0327c71943c3b7e10296411` 已推送，PR body 已更新，push/pull_request 两套 CI 均成功。本地 govulncheck 仍为 exit 3 的安全限制，不能称 security clean；GitHub security workflow、最终封存提交和发布仍未验证。
 
-## 阶段 15 最终总审查（IN PROGRESS，待推送/远端 CI）
+## 阶段 15 最终总审查（条件式 DONE；条件满足前 IN PROGRESS）
 
-阶段 15 时序记录：第一轮因相关任务文档未重标历史状态而返工；第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工；两轮返工均由同一 Worker 完成。第三轮预推送主审已通过，当前等待推送和远端 CI，仍未 push 或调用 `gh pr edit`。
+阶段 15 时序记录：第一轮因相关任务文档未重标历史状态而返工；第二轮因 `SEARCH_SUMMARY.md` 对原始任务历史与 2026-08-23 remediation 的时间线归属仍有歧义而返工；两轮返工均由同一 Worker 完成。第三轮预推送主审已通过，`2825994de43d9d44b0327c71943c3b7e10296411` 已普通 fast-forward 推送，PR body 已更新，push/pull_request 两套 CI 均成功。下一提交只允许三份文档，主 Agent 审查其完整 diff 后普通 push，并等待该封存 SHA 两套 required checks；条件满足前阶段 15 按 IN PROGRESS 处理。
 
 ### A. 基线、完整 diff 与远端核验
 
@@ -262,17 +263,17 @@ JSON::PP blocks: 11/11
 
 ```text
 git status --short                         # 初始为空
-git rev-parse HEAD                         # c6ee5ba17ca6d902f88d549b87335c67e622db7f
+git rev-parse HEAD                         # 2825994de43d9d44b0327c71943c3b7e10296411
 git rev-parse 6e85039301fc817e8c4a290ffb9b111fc37e55a8
 git merge-base 6e85039301fc817e8c4a290ffb9b111fc37e55a8 HEAD
                                             # 两者均为 6e85039301fc817e8c4a290ffb9b111fc37e55a8
 git ls-remote origin refs/heads/main refs/heads/codex/architecture-machine-facts-cleanup
-                                            # main=6e850393...，target=c6a59b37...
-git diff --stat 6e850393..c6ee5ba            # 207 files, 16252 insertions(+), 7115 deletions(-)
-git rev-list --count 6e850393..c6ee5ba       # 103
-git diff --check 6e850393..c6ee5ba          # exit=0
-git diff --summary 6e850393..c6ee5ba       # 仅文本 create/delete/modify
-git diff --numstat 6e850393..c6ee5ba | awk '$1=="-" || $2=="-" {print}'
+                                            # main=6e850393...，target=2825994...
+git diff --stat 6e850393..2825994            # 207 files, 16417 insertions(+), 7115 deletions(-)
+git rev-list --count 6e850393..2825994       # 104
+git diff --check 6e850393..2825994          # exit=0
+git diff --summary 6e850393..2825994       # 仅文本 create/delete/modify
+git diff --numstat 6e850393..2825994 | awk '$1=="-" || $2=="-" {print}'
                                             # 无二进制差异行
 ```
 
@@ -290,9 +291,9 @@ GOTOOLCHAIN=go1.26.5 ECS_I18N_SAMPLES="$PWD/internal/report/testdata" go test -c
 ```
 
 `gh pr view 6 --repo CST-Cat/ecs` 只读结果：PR #6 为 `OPEN`、`Draft`、`CLEAN`、`MERGEABLE`，
-base 为 `main`，head 为 `codex/architecture-machine-facts-cleanup`，head OID 仍为远端
-`c6a59b37d2e61708bd3487dc13a8881fd718efaf`。远端 checks 全部针对该旧 target，不能冒充本地
-`c6ee5ba` 的 CI。当前 PR body 仍是早期草案（含已过时的环境/阶段说明）；本轮未调用 `gh pr edit`、未 push、未触发 workflow。
+base 为 `main`，head 为 `codex/architecture-machine-facts-cleanup`，head OID 为
+`2825994de43d9d44b0327c71943c3b7e10296411`。push run `32658438693`（event=push）与 pull request
+run `32658439797`（event=pull_request）均以该 SHA `success`；两套 unit/compat/quality/integration/race/cross/submissions/required 均成功。PR body 已更新为预封存候选状态；security workflow 未运行。
 
 ### B. 八项 blocker 与 19 项需求闭环
 
@@ -323,15 +324,15 @@ probe direct producer/reverse-bridge 搜索、retry canonical/renderer、plan ex
 | 18 明确降级/撤回旧建议 | 满足 | 无完整 presentation framework、保留 staging/install opt-in、不升级 Go、govulncheck 非 required。 |
 | 19 beta v1/no compat | 满足 | report/compare/plan 均保持 v1，删除旧字段/bridge/fallback，不发 v2。 |
 
-“实现满足；验证受限”是验证边界而非已发现实现错误；阶段 15 不把未运行的外部流程包装成通过。
+“实现满足；验证受限”是验证边界而非已发现实现错误；阶段 15 不把未运行的外部流程包装成通过。两套预封存 CI 已通过，但不能替代下一封存提交的 required checks。
 
 ### C. 待交付限制
 
 - Go1.26.5 本地 `govulncheck` exit 3，5 个 reachable 标准库漏洞均标记 fixed in Go1.26.6；按 REQUIREMENTS 不升级工具链，不能称 security clean。
-- GitHub security workflow、PR 对本地候选的新 checks、七架构工具源码构建/Release、public live probes、真实第二轮 retry 和完整交互下载链未验证。
+- GitHub security workflow、下一封存提交对应的 PR checks、七架构工具源码构建/Release、public live probes、真实第二轮 retry 和完整交互下载链未验证。
 - `SEARCH_SUMMARY.md` 已重标为原始任务历史阶段 1/2026-08-20 初始调查快照，明确旧实现只用于追溯，不作为当前验收证据；当前状态以 REQUIREMENTS/PLAN/REVIEW/VALIDATION 为准。
 
-### D. 拟议 Draft PR body（仅草案，未调用 `gh pr edit`）
+### D. Draft PR body（预封存候选草案；最终封存提交后替换）
 
 ~~~markdown
 ## Summary
@@ -348,7 +349,7 @@ probe direct producer/reverse-bridge 搜索、retry canonical/renderer、plan ex
 - Plan wizard privacy: closed; v1 plans require `exposure` and boolean `reveal`, and ordinary run appends both authoritatively.
 - DB-IP and NAT: closed; source ID is `dbip`, and STUN candidates are an ordered machine table.
 - Summary/system: closed; legacy summary strings/fallbacks and duplicate system collection were removed.
-- Documentation: schema/PLAN/REVIEW/VALIDATION are synchronized and `SEARCH_SUMMARY.md` is explicitly historical; final PR body and remote sync remain pending.
+- Documentation: schema/PLAN/REVIEW/VALIDATION are synchronized; `SEARCH_SUMMARY.md` is explicitly historical, and this body records the pushed pre-closure candidate while the PR remains Draft pending closure checks.
 
 ## Requirements 1–19
 
@@ -362,13 +363,13 @@ All 19 implementation requirements are satisfied in code/config/docs. Requiremen
 
 ## Delivery state
 
-- Local audit candidate: `c6ee5ba17ca6d902f88d549b87335c67e622db7f` (not the remote head and not a final delivery SHA).
-- Remote PR #6 remains OPEN and Draft at target `c6a59b37d2e61708bd3487dc13a8881fd718efaf`; these existing checks do not validate the local candidate.
-- No push or PR edit has been performed. Keep the PR Draft as required; the security red item and external-validation limits require a later independent scan/run or maintainer decision. This task does not implicitly upgrade Go.
+- Pre-closure candidate: `2825994de43d9d44b0327c71943c3b7e10296411`; it is the current remote/PR HEAD and both push/pull_request CI runs are green.
+- PR #6 remains OPEN and Draft; the next document-only closure commit will become the final delivery SHA only after ordinary push and its two required checks complete successfully.
+- Final delivery SHA is not assigned yet; it will be the exact SHA of that next three-document closure commit. Keep the PR Draft as required; the security red item and external-validation limits require a later independent scan/run or maintainer decision. This task does not implicitly upgrade Go.
 ~~~
 
 ### 阶段 15 待验证项
 
-- 推送后的远端 CI、GitHub security workflow 和 PR 更新仍待执行；前两轮返工原因、同一 Worker 执行记录及第三轮预推送主审结果已如上保留，随后才可决定是否完成 Draft PR 更新。
+- 主 Agent 审查这三份文档的完整 diff；提交后普通 push；等待最终封存 SHA 的两套 required checks；再核验 PR body 已写入最终封存 SHA、PR 仍为 OPEN/Draft/CLEAN/MERGEABLE。前两轮返工原因、同一 Worker 执行记录、第三轮预推送主审、预封存 push/PR body/CI 结果已如上保留。
 
-因此当前没有最终候选 SHA、最终 CI 全绿或已 push 的结论；本地审计候选为 `c6ee5ba`，PR #6 仍为 OPEN、Draft。
+因此当前已有预封存候选 `2825994de43d9d44b0327c71943c3b7e10296411`、远端 push 和两套 CI 全绿，但条件式封存尚未生效；PR #6 仍为 OPEN、Draft。
