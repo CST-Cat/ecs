@@ -3,7 +3,6 @@ package probe
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -17,7 +16,7 @@ import (
 type systemProbe struct{}
 
 func (systemProbe) ID() string         { return "system" }
-func (systemProbe) Title() string      { return "系统与资源" }
+func (systemProbe) Title() string      { return "module.system.title" }
 func (systemProbe) NeedsNetwork() bool { return false }
 
 type systemSnapshot struct {
@@ -45,7 +44,8 @@ type systemSnapshot struct {
 	DiskUsage      float64
 	DiskDevice     string
 	DiskMount      string
-	Uptime         string
+	UptimeSeconds  uint64
+	UptimeKnown    bool
 	Load           string
 	Congestion     string
 	QDisc          string
@@ -56,7 +56,6 @@ type systemSnapshot struct {
 	// MemoryLimit 是 cgroup 内存上限；非零且小于 MemoryTotal 时说明
 	// /proc/meminfo 报的是宿主机内存（没有 lxcfs 的 LXC/OpenVZ 常见）。
 	MemoryLimit    uint64
-	MemoryLimitVia string
 	BalloonReclaim memoryFacility
 	KSM            memoryFacility
 	// StealPercent 是自开机以来被虚拟化层偷走的 CPU 时间占比，
@@ -67,166 +66,14 @@ type systemSnapshot struct {
 
 func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("system", "系统与资源")
-	result.Description = "操作系统、虚拟化、CPU、内存、磁盘与内核网络栈"
-	result.Methodology = model.Methodology{
-		Kind:            "inventory",
-		Label:           "事实采集",
-		Engine:          "OS/runtime inspection",
-		Profile:         "host inventory v2 (DMI/sysfs/proc)",
-		ComparisonScope: "资源快照；不是性能基准",
-	}
-
 	snapshot := collectSystem(ctx, env.Config.DiskPath)
-	resourceSnapshot := CaptureEnvironmentSnapshot()
-	hardware := snapshot.Hardware
+	resources := CaptureEnvironmentSnapshot()
 	cloud := discoverLocalCloudIdentity()
-	memoryValue := fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率",
-		model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.MemoryUsed),
-		model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
-	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
-		memoryValue = fmt.Sprintf("%s 配额（%s 宿主可见；%s 已用 / %s 可用 / %.1f%%）",
-			model.FormatBytes(snapshot.MemoryLimit), model.FormatBytes(snapshot.MemoryTotal),
-			model.FormatBytes(snapshot.MemoryUsed), model.FormatBytes(snapshot.MemoryFree), snapshot.MemoryUsage)
-	}
-	result.Fields = []model.Field{
-		{Key: "hostname", Label: "主机名", Value: snapshot.Hostname},
-		{Key: "os", Label: "系统", Value: snapshot.OS},
-		{Key: "kernel", Label: "内核", Value: snapshot.Kernel},
-		{Key: "arch", Label: "架构", Value: snapshot.Arch},
-		{Key: "virtualization", Label: "虚拟化", Value: snapshot.Virtualization},
-		{Key: "cloud_provider", Label: "云厂商", Value: cloud.Provider},
-		{Key: "cloud_region", Label: "云区域", Value: cloud.Region},
-		{Key: "cpu_model", Label: "CPU", Value: snapshot.CPUModel},
-		{Key: "cpu_topology", Label: "CPU 拓扑", Value: fmt.Sprintf("%d 逻辑 / %d 物理核心", snapshot.LogicalCPUs, snapshot.PhysicalCores)},
-		{Key: "cpu_allowance", Label: "CPU 配额", Value: describeCPUAllowance(snapshot.Allowance)},
-		{Key: "cpu_frequency", Label: "CPU 频率", Value: snapshot.CPUFrequency},
-		{Key: "cpu_steal", Label: "CPU steal（累计）", Value: describeSteal(snapshot)},
-		{Key: "cpu_cache", Label: "CPU 缓存", Value: snapshot.CPUCache},
-		{Key: "aes", Label: "AES 指令", Value: snapshot.AES},
-		{Key: "virtualization_ext", Label: "硬件虚拟化", Value: snapshot.Nested},
-		{Key: "memory", Label: "内存", Value: memoryValue},
-		{Key: "memory_total", Label: "内存总量", Value: model.FormatBytes(snapshot.MemoryTotal)},
-		{Key: "memory_used", Label: "内存已用", Value: model.FormatBytes(snapshot.MemoryUsed)},
-		{Key: "memory_available", Label: "内存可用", Value: model.FormatBytes(snapshot.MemoryFree)},
-		{Key: "memory_usage_percent", Label: "内存使用率", Value: fmt.Sprintf("%.1f %%", snapshot.MemoryUsage)},
-		{Key: "balloon_reclaim", Label: "Balloon reclaim", Value: snapshot.BalloonReclaim.Status()},
-		{Key: "balloon_reclaim_available", Label: "Balloon reclaim 可用", Value: strconv.FormatBool(snapshot.BalloonReclaim.Available)},
-		{Key: "balloon_reclaim_evidence", Label: "Balloon reclaim 证据", Value: fallback(snapshot.BalloonReclaim.Evidence, "none found")},
-		{Key: "ksm_merging", Label: "KSM merging", Value: snapshot.KSM.Status()},
-		{Key: "ksm_merging_available", Label: "KSM merging 可用", Value: strconv.FormatBool(snapshot.KSM.Available)},
-		{Key: "ksm_merging_evidence", Label: "KSM merging 证据", Value: fallback(snapshot.KSM.Evidence, "none found")},
-		{Key: "swap", Label: "Swap", Value: model.FormatBytes(snapshot.SwapTotal)},
-		{Key: "disk", Label: "测试盘", Value: fmt.Sprintf("%s 总计 / %s 已用 / %s 可用 / %.1f%% 使用率 (%s -> %s)",
-			model.FormatBytes(snapshot.DiskTotal), model.FormatBytes(snapshot.DiskUsed),
-			model.FormatBytes(snapshot.DiskFree), snapshot.DiskUsage,
-			fallback(snapshot.DiskDevice, "unavailable"), fallback(snapshot.DiskMount, "unavailable"))},
-		{Key: "disk_device", Label: "测试设备", Value: fallback(snapshot.DiskDevice, "unavailable")},
-		{Key: "disk_total", Label: "磁盘总量", Value: model.FormatBytes(snapshot.DiskTotal)},
-		{Key: "disk_used", Label: "磁盘已用", Value: model.FormatBytes(snapshot.DiskUsed)},
-		{Key: "disk_available", Label: "磁盘可用", Value: model.FormatBytes(snapshot.DiskFree)},
-		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: fmt.Sprintf("%.1f %%", snapshot.DiskUsage)},
-		{Key: "uptime", Label: "运行时间", Value: snapshot.Uptime},
-		{Key: "load", Label: "负载", Value: snapshot.Load},
-		{Key: "tcp_congestion", Label: "TCP 拥塞控制", Value: snapshot.Congestion},
-		{Key: "qdisc", Label: "默认队列", Value: snapshot.QDisc},
-		{Key: "system_vendor", Label: "整机厂商", Value: hardware.SystemVendor},
-		{Key: "product_name", Label: "产品型号", Value: hardware.ProductName},
-		{Key: "product_version", Label: "产品版本", Value: hardware.ProductVersion},
-		{Key: "motherboard", Label: "主板", Value: joinHardwareValues(hardware.BoardVendor, hardware.BoardName, hardware.BoardVersion)},
-		{Key: "bios", Label: "BIOS", Value: joinHardwareValues(hardware.BIOSVendor, hardware.BIOSVersion, hardware.BIOSDate)},
-		{Key: "gpus", Label: "GPU", Value: joinHardwareList(hardware.GPUs)},
-		{Key: "network_adapters", Label: "网卡", Value: joinHardwareList(hardware.NICs)},
-		{Key: "block_devices", Label: "块设备", Value: joinHardwareList(hardware.BlockDevices)},
-	}
-	result.Measurements = []model.Measurement{
-		{Key: "logical_cpus", Label: "逻辑 CPU", Value: float64(snapshot.LogicalCPUs), Unit: "线程", Display: strconv.Itoa(snapshot.LogicalCPUs)},
-		{Key: "usable_cpus", Label: "可用 CPU", Value: float64(snapshot.Allowance.Threads), Unit: "线程", Display: strconv.Itoa(snapshot.Allowance.Threads)},
-		{Key: "memory_total_bytes", Label: "总内存", Value: float64(snapshot.MemoryTotal), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryTotal)},
-		{Key: "memory_used_bytes", Label: "已用内存", Value: float64(snapshot.MemoryUsed), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryUsed), HigherIsBetter: model.BoolPtr(false)},
-		{Key: "memory_available_bytes", Label: "可用内存", Value: float64(snapshot.MemoryFree), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryFree), HigherIsBetter: model.BoolPtr(true)},
-		{Key: "memory_usage_percent", Label: "内存使用率", Value: snapshot.MemoryUsage, Unit: "%", Display: fmt.Sprintf("%.1f %%", snapshot.MemoryUsage), HigherIsBetter: model.BoolPtr(false)},
-		{Key: "disk_total_bytes", Label: "磁盘总量", Value: float64(snapshot.DiskTotal), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskTotal)},
-		{Key: "disk_used_bytes", Label: "磁盘已用", Value: float64(snapshot.DiskUsed), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskUsed), HigherIsBetter: model.BoolPtr(false)},
-		{Key: "disk_free_bytes", Label: "磁盘可用", Value: float64(snapshot.DiskFree), Unit: "bytes", Display: model.FormatBytes(snapshot.DiskFree)},
-		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: snapshot.DiskUsage, Unit: "%", Display: fmt.Sprintf("%.1f %%", snapshot.DiskUsage), HigherIsBetter: model.BoolPtr(false)},
-	}
-	AppendSystemResourceDiagnostics(&result, resourceSnapshot)
-	if snapshot.StealKnown {
-		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "cpu_steal_percent_cumulative", Label: "CPU steal（自开机累计）",
-			Value: snapshot.StealPercent, Unit: "%", Display: fmt.Sprintf("%.2f %%", snapshot.StealPercent),
-			Method: "proc-stat-steal-cumulative-v1", HigherIsBetter: model.BoolPtr(false),
-		})
-	}
-	if snapshot.MemoryLimit > 0 {
-		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "memory_limit_bytes", Label: "内存配额",
-			Value: float64(snapshot.MemoryLimit), Unit: "bytes", Display: model.FormatBytes(snapshot.MemoryLimit),
-		})
-	}
-	if snapshot.BalloonReclaim.Available {
-		result.Notes = append(result.Notes, "检测到 Balloon reclaim 相关 Linux 证据："+snapshot.BalloonReclaim.Evidence)
-	} else {
-		result.Notes = append(result.Notes, "Balloon reclaim unavailable：未找到可验证的 sysfs/proc reclaim 证据。")
-	}
-	if snapshot.KSM.Available {
-		result.Notes = append(result.Notes, "检测到 KSM merging 相关 Linux 证据："+snapshot.KSM.Evidence)
-	} else {
-		result.Notes = append(result.Notes, "KSM merging unavailable：未找到可验证的 sysfs run/pages_sharing 证据。")
-	}
-
-	missing := 0
-	validFields := 0
-	for _, field := range result.Fields {
-		if field.Value == "" || field.Value == "unknown" || strings.Contains(field.Value, "0 B 总计") {
-			missing++
-		} else {
-			validFields++
-		}
-	}
-	result.Evidence = model.NewEvidence(validFields, len(result.Fields), "sample")
-	if missing > 3 {
-		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "部分 /proc、/sys 或 DMI 字段不可读（常见于容器与精简镜像）；缺失字段不会影响其余测试。")
-	}
-	if snapshot.Allowance.Limited() {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"cgroup 限制本机只能用 %.2f 个核（%s），但系统可见 %d 个逻辑核；CPU 与内存基准会按配额开 %d 个线程。",
-			snapshot.Allowance.Quota, snapshot.Allowance.Source, snapshot.Allowance.Visible, snapshot.Allowance.Threads,
-		))
-	}
-	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"/proc/meminfo 报告 %s，但 %s 只有 %s；容器没有挂载 lxcfs 时 meminfo 显示的是宿主机内存，配额才是真实可用值。",
-			model.FormatBytes(snapshot.MemoryTotal), snapshot.MemoryLimitVia, model.FormatBytes(snapshot.MemoryLimit),
-		))
-	}
-	if snapshot.StealKnown && snapshot.StealPercent >= 5 {
-		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"自开机以来 CPU steal 累计 %.2f%%，宿主机长期存在资源争抢，通常意味着超售；所有 CPU 成绩都应按此折价理解。",
-			snapshot.StealPercent,
-		))
-	}
-	if hardware.SystemVendor == "unknown" && hardware.ProductName == "unknown" &&
-		hardware.BoardName == "unknown" && hardware.BIOSVersion == "unknown" {
-		result.Notes = append(result.Notes, "DMI 在当前 VPS/容器中不可读；硬件型号与 BIOS 字段显示 unknown，不影响性能探针。")
-	}
-	result.Notes = append(result.Notes,
-		"硬件清单只读 /sys、/proc 与 DMI，刻意不采集序列号、MAC 地址或其他不影响验机结论的持久标识。")
+	result := buildSystemResult(start, snapshot, resources, cloud)
 	appendKernelNetworkParams(&result)
-	result.Summary = fmt.Sprintf("%d vCPU · %s 内存 · %s 可用盘 · %s", snapshot.LogicalCPUs, model.FormatBytes(snapshot.MemoryTotal), model.FormatBytes(snapshot.DiskFree), snapshot.Virtualization)
+	finalizeSystemResult(&result, snapshot)
 	result.Finish(start)
 	return result
-}
-
-// describeSteal 给出可读的 steal 描述。
-func describeSteal(s systemSnapshot) string {
-	if !s.StealKnown {
-		return "unavailable（/proc/stat 不可读）"
-	}
-	return fmt.Sprintf("%.2f %%", s.StealPercent)
 }
 
 func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
@@ -243,7 +90,6 @@ func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 		AES:            "unknown",
 		Nested:         "unknown",
 		Virtualization: "unknown",
-		Uptime:         "unknown",
 		Load:           "unknown",
 		Congestion:     "n/a",
 		QDisc:          "n/a",
@@ -350,9 +196,8 @@ func collectLinuxSystem(s *systemSnapshot) {
 	// Read the cgroup limit before computing the effective benchmark view.  The
 	// host-visible values remain in the current fields below; the memory
 	// probe uses the same helper and applies the limit to allocation decisions.
-	if limit, via, ok := cgroupMemoryLimit(); ok {
+	if limit, _, ok := cgroupMemoryLimit(); ok {
 		s.MemoryLimit = limit
-		s.MemoryLimitVia = via
 	}
 	usage := memoryUsageFromMemInfo(mem, s.MemoryLimit)
 	s.MemoryTotal = usage.HostTotalBytes
@@ -364,12 +209,8 @@ func collectLinuxSystem(s *systemSnapshot) {
 	s.KSM = detectKSM("/sys")
 
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
-		// 容器与沙箱里 /proc/uptime 可能存在但为空；直接取 Fields()[0]
-		// 会越界 panic，让整个 system 模块变成"探针发生 panic"。
-		if fields := strings.Fields(string(data)); len(fields) > 0 {
-			if seconds, err := strconv.ParseFloat(fields[0], 64); err == nil {
-				s.Uptime = formatDuration(time.Duration(seconds) * time.Second)
-			}
+		if seconds, ok := parseUptimeSeconds(data); ok {
+			s.UptimeSeconds, s.UptimeKnown = seconds, true
 		}
 	}
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
@@ -549,22 +390,39 @@ func parseUintDefault(value string, defaultValue uint64) uint64 {
 	return number
 }
 
+func parseUptimeSeconds(data []byte) (uint64, bool) {
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	token := fields[0]
+	integer := token
+	if dot := strings.IndexByte(token, '.'); dot >= 0 {
+		integer = token[:dot]
+		for _, char := range token[dot+1:] {
+			if char < '0' || char > '9' {
+				return 0, false
+			}
+		}
+	}
+	if integer == "" {
+		return 0, false
+	}
+	for _, char := range integer {
+		if char < '0' || char > '9' {
+			return 0, false
+		}
+	}
+	seconds, err := strconv.ParseUint(integer, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return seconds, true
+}
+
 func fallback(value, defaultValue string) string {
 	if strings.TrimSpace(value) == "" {
 		return defaultValue
 	}
 	return strings.TrimSpace(value)
-}
-
-func formatDuration(duration time.Duration) string {
-	if duration < 0 {
-		return "unknown"
-	}
-	days := int(duration.Hours()) / 24
-	hours := int(duration.Hours()) % 24
-	minutes := int(duration.Minutes()) % 60
-	if days > 0 {
-		return fmt.Sprintf("%d 天 %d 小时 %d 分", days, hours, minutes)
-	}
-	return fmt.Sprintf("%d 小时 %d 分", hours, minutes)
 }

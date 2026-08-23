@@ -61,6 +61,18 @@ func bbrMachineStatus(current, available string) string {
 }
 
 func appendKernelNetworkParams(result *model.Result) {
+	values := make(map[string]string)
+	for _, param := range kernelParams() {
+		value := readTrimmed("/proc/sys/"+param.Path, "")
+		if value == "" {
+			continue
+		}
+		values[param.Key] = strings.Join(strings.Fields(value), " ")
+	}
+	appendKernelNetworkFacts(result, values)
+}
+
+func appendKernelNetworkFacts(result *model.Result, values map[string]string) {
 	table := model.Table{
 		Key:         "system.kernel.network_parameters",
 		Title:       "probe.kernel.table.title",
@@ -68,14 +80,11 @@ func appendKernelNetworkParams(result *model.Result) {
 		ColumnKeys:  []string{"parameter", "current_value", "rationale"},
 		RowIdentity: "parameter",
 	}
-	values := make(map[string]string)
 	for _, param := range kernelParams() {
-		value := readTrimmed("/proc/sys/"+param.Path, "")
+		value := strings.TrimSpace(values[param.Key])
 		if value == "" {
 			continue
 		}
-		value = strings.Join(strings.Fields(value), " ")
-		values[param.Key] = value
 		table.Rows = append(table.Rows, []string{kernelParamLabelKey(param.Key), value, kernelParamWhyKey(param.Key)})
 	}
 	if len(table.Rows) == 0 {

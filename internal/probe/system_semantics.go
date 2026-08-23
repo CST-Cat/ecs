@@ -1,53 +1,22 @@
 package probe
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"ecs/internal/model"
 )
 
-// systemSemanticProbe is the stage-9 bridge for the system inventory. The
-// legacy collector still owns Linux/DMI discovery, but this wrapper guarantees
-// that only stable presentation identities and language-independent values
-// leave the probe boundary.
-type systemSemanticProbe struct{}
-
-func (systemSemanticProbe) ID() string         { return "system" }
-func (systemSemanticProbe) Title() string      { return "module.system.title" }
-func (systemSemanticProbe) NeedsNetwork() bool { return false }
-
-func (systemSemanticProbe) Run(ctx context.Context, env Environment) model.Result {
-	result := (systemProbe{}).Run(ctx, env)
-	// The legacy Run method does not expose its structured snapshot. Re-read the
-	// inexpensive local inventory instead of recognizing semantics from any
-	// source-language string produced above. Stage 9 can later delete the legacy
-	// presentation assembly without changing this machine contract.
-	snapshot := collectSystem(ctx, env.Config.DiskPath)
-	resources := CaptureEnvironmentSnapshot()
-	stabilizeSystemResult(&result, snapshot, resources)
-	return result
-}
-
-func stabilizeSystemResult(result *model.Result, snapshot systemSnapshot, resources EnvironmentSnapshot) {
-	if result == nil {
-		return
-	}
-	cloudProvider := systemExistingFieldValue(result.Fields, "cloud_provider")
-	cloudRegion := systemExistingFieldValue(result.Fields, "cloud_region")
-	kernelFields := systemKernelFields(result.Fields)
-	kernelMeasurements := systemKernelMeasurements(result.Measurements)
-	kernelNotes := systemKernelNotes(result.Notes)
-
-	result.Title = "module.system.title"
+func buildSystemResult(start time.Time, snapshot systemSnapshot, resources EnvironmentSnapshot, cloud cloudIdentity) model.Result {
+	result := model.NewResult("system", "module.system.title")
+	result.StartedAt = start.UTC()
 	result.Description = "probe.system.description"
 	result.Methodology = model.Methodology{
 		Kind:            "inventory",
 		Label:           "methodology.inventory",
-		Engine:          "OS/runtime inspection",
+		Engine:          "probe.system.methodology.engine",
 		Profile:         "probe.system.profile",
 		ComparisonScope: "probe.system.comparison_scope",
 	}
@@ -59,8 +28,8 @@ func stabilizeSystemResult(result *model.Result, snapshot systemSnapshot, resour
 		systemField("kernel", snapshot.Kernel),
 		systemField("arch", snapshot.Arch),
 		systemField("virtualization", snapshot.Virtualization),
-		systemField("cloud_provider", cloudProvider),
-		systemField("cloud_region", cloudRegion),
+		systemField("cloud_provider", cloud.Provider),
+		systemField("cloud_region", cloud.Region),
 		systemField("cpu_model", snapshot.CPUModel),
 		systemField("cpu_topology", fmt.Sprintf("logical=%d;physical=%d", snapshot.LogicalCPUs, snapshot.PhysicalCores)),
 		systemField("cpu_allowance", cpuAllowanceMachineValue(snapshot.Allowance)),
@@ -86,7 +55,7 @@ func stabilizeSystemResult(result *model.Result, snapshot systemSnapshot, resour
 		systemField("disk_used", model.FormatBytes(snapshot.DiskUsed)),
 		systemField("disk_available", model.FormatBytes(snapshot.DiskFree)),
 		systemField("disk_usage_percent", fmt.Sprintf("%.1f %%", snapshot.DiskUsage)),
-		systemField("uptime_seconds", systemUptimeSeconds()),
+		systemField("uptime_seconds", systemUptimeMachineValue(snapshot)),
 		systemField("load", snapshot.Load),
 		systemField("tcp_congestion", snapshot.Congestion),
 		systemField("qdisc", snapshot.QDisc),
@@ -100,23 +69,26 @@ func stabilizeSystemResult(result *model.Result, snapshot systemSnapshot, resour
 		systemField("block_devices", joinHardwareList(hardware.BlockDevices)),
 	}
 	appendSystemResourceFields(&result.Fields, resources.Limits)
-	result.Fields = append(result.Fields, kernelFields...)
 
 	result.Measurements = stableSystemMeasurements(snapshot, resources)
-	result.Measurements = append(result.Measurements, kernelMeasurements...)
-	stabilizeSystemTables(result.Tables)
+	result.Tables = append(result.Tables, systemPressureTable(resources))
 
 	result.Notes = stableSystemNotes(snapshot, hardware)
-	result.Notes = append(result.Notes, kernelNotes...)
 	result.Summary = ""
 	result.SummaryMessages = []model.Message{model.NewMessage(
 		"probe.system.summary",
-		snapshot.LogicalCPUs,
+		strconv.Itoa(snapshot.LogicalCPUs),
 		model.FormatBytes(snapshot.MemoryTotal),
 		model.FormatBytes(snapshot.DiskFree),
 		snapshot.Virtualization,
 	)}
+	return result
+}
 
+func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
+	if result == nil {
+		return
+	}
 	missing := 0
 	for _, field := range result.Fields {
 		if field.Value == "" || field.Value == "unknown" {
@@ -137,50 +109,6 @@ func systemField(key, value string) model.Field {
 	return model.Field{Key: key, Label: "probe.system.field." + key, Value: value}
 }
 
-func systemExistingFieldValue(fields []model.Field, key string) string {
-	for _, field := range fields {
-		if field.Key == key {
-			return field.Value
-		}
-	}
-	return "unknown"
-}
-
-func systemKernelFields(fields []model.Field) []model.Field {
-	keep := map[string]bool{
-		"bbr_status":               true,
-		"tcp_congestion_control":   true,
-		"tcp_available_congestion": true,
-	}
-	out := make([]model.Field, 0, len(keep))
-	for _, field := range fields {
-		if keep[field.Key] {
-			out = append(out, field)
-		}
-	}
-	return out
-}
-
-func systemKernelMeasurements(measurements []model.Measurement) []model.Measurement {
-	out := make([]model.Measurement, 0, 2)
-	for _, measurement := range measurements {
-		if strings.HasPrefix(measurement.Label, "probe.kernel.") {
-			out = append(out, measurement)
-		}
-	}
-	return out
-}
-
-func systemKernelNotes(notes []string) []string {
-	out := make([]string, 0, len(notes))
-	for _, note := range notes {
-		if strings.HasPrefix(note, "probe.kernel.") {
-			out = append(out, note)
-		}
-	}
-	return out
-}
-
 func systemStealMachineValue(snapshot systemSnapshot) string {
 	if !snapshot.StealKnown {
 		return "unavailable"
@@ -188,20 +116,11 @@ func systemStealMachineValue(snapshot systemSnapshot) string {
 	return fmt.Sprintf("%.2f %%", snapshot.StealPercent)
 }
 
-func systemUptimeSeconds() string {
-	data, err := os.ReadFile("/proc/uptime")
-	if err != nil {
+func systemUptimeMachineValue(snapshot systemSnapshot) string {
+	if !snapshot.UptimeKnown {
 		return "unavailable"
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return "unavailable"
-	}
-	seconds, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil || seconds < 0 {
-		return "unavailable"
-	}
-	return strconv.FormatUint(uint64(seconds), 10)
+	return strconv.FormatUint(snapshot.UptimeSeconds, 10)
 }
 
 func appendSystemResourceFields(fields *[]model.Field, limits resourceLimits) {
@@ -251,6 +170,12 @@ func stableSystemMeasurements(snapshot systemSnapshot, resources EnvironmentSnap
 	if snapshot.MemoryLimit > 0 {
 		measurements = append(measurements, systemMeasurement("memory_limit_bytes", float64(snapshot.MemoryLimit), "bytes", model.FormatBytes(snapshot.MemoryLimit), "cgroup-memory-limit-v1", nil))
 	}
+	measurements = append(measurements, systemResourceMeasurements(resources)...)
+	return measurements
+}
+
+func systemResourceMeasurements(resources EnvironmentSnapshot) []model.Measurement {
+	measurements := make([]model.Measurement, 0, 12)
 	limits := resources.Limits
 	if limits.CPU.Quota > 0 {
 		measurements = append(measurements, systemMeasurement("cgroup_cpu_quota_cores", limits.CPU.Quota, "cores", fmt.Sprintf("%.2f cores", limits.CPU.Quota), "cgroup-cpu-quota-v1", nil))
@@ -297,21 +222,39 @@ func systemMeasurement(key string, value float64, unit, display, method string, 
 	}
 }
 
-func stabilizeSystemTables(tables []model.Table) {
-	for index := range tables {
-		table := &tables[index]
-		if table.Key != "system.pressure.cgroup" {
-			continue
-		}
-		table.Title = "probe.system.pressure.table.title"
-		table.Columns = []string{
-			"probe.system.pressure.column.resource",
-			"probe.system.pressure.column.some_avg10",
-			"probe.system.pressure.column.full_avg10",
-			"probe.system.pressure.column.cumulative_events",
-			"probe.system.pressure.column.source",
-		}
+func systemPressureTable(snapshot EnvironmentSnapshot) model.Table {
+	table := model.Table{
+		Key:                   "system.pressure.cgroup",
+		Title:                 "probe.system.pressure.table.title",
+		Columns:               []string{"probe.system.pressure.column.resource", "probe.system.pressure.column.some_avg10", "probe.system.pressure.column.full_avg10", "probe.system.pressure.column.cumulative_events", "probe.system.pressure.column.source"},
+		ColumnKeys:            []string{"resource", "psi_some_avg10", "psi_full_avg10", "cumulative_events", "source"},
+		RowIdentity:           "resource",
+		NumericColumns:        []int{1, 2},
+		NumericHigherIsBetter: []bool{false, false},
 	}
+	for _, resource := range []string{"cpu", "memory", "io"} {
+		pressure := snapshot.PSI[resource]
+		some, full := "—", "—"
+		if pressure.Some.Present {
+			some = fmt.Sprintf("%.2f %%", pressure.Some.Avg10)
+		}
+		if pressure.Full.Present {
+			full = fmt.Sprintf("%.2f %%", pressure.Full.Avg10)
+		}
+		events := "—"
+		switch resource {
+		case "cpu":
+			if snapshot.CPUStat.Present {
+				events = fmt.Sprintf("throttle %d · %.3f s", snapshot.CPUStat.NrThrottled, float64(snapshot.CPUStat.ThrottledUS)/1e6)
+			}
+		case "memory":
+			if snapshot.Memory.Present {
+				events = fmt.Sprintf("high %d · max %d · OOM %d · kill %d", snapshot.Memory.High, snapshot.Memory.Max, snapshot.Memory.OOM, snapshot.Memory.OOMKill)
+			}
+		}
+		table.Rows = append(table.Rows, []string{strings.ToUpper(resource), some, full, events, fallback(pressure.Source, "unavailable")})
+	}
+	return table
 }
 
 func stableSystemNotes(snapshot systemSnapshot, hardware hardwareInventory) []string {

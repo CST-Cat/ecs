@@ -114,8 +114,14 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 		Memory:  cgroupMemoryEvents{High: 1, Max: 2, OOM: 0, OOMKill: 0, Present: true},
 	}
 	result := model.NewResult("system", "system")
-	AppendSystemResourceDiagnostics(&result, snapshot)
-	if len(result.Fields) < 5 || result.Fields[4].Key != "cgroup_memory_swap_limit" || !strings.Contains(result.Fields[4].Value, "unlimited") || len(result.Tables) != 1 || result.Tables[0].Key != "system.pressure.cgroup" {
+	appendSystemResourceFields(&result.Fields, snapshot.Limits)
+	result.Measurements = append(result.Measurements, systemResourceMeasurements(snapshot)...)
+	result.Tables = append(result.Tables, systemPressureTable(snapshot))
+	fieldValues := make(map[string]string, len(result.Fields))
+	for _, field := range result.Fields {
+		fieldValues[field.Key] = field.Value
+	}
+	if fieldValues["cgroup_memory_swap_limit_bytes"] != "unlimited" || len(result.Tables) != 1 || result.Tables[0].Key != "system.pressure.cgroup" {
 		t.Fatalf("system diagnostics = fields:%v tables:%v", result.Fields, result.Tables)
 	}
 	assessment := model.Interference{Detected: true, Score: 2, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.cpu_steal_high", "fixture")}, Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: "2", Method: "fixture"}}}
