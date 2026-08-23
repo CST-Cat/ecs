@@ -17,6 +17,7 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 		{name: "score", zh: scoreChinese, en: scoreEnglish},
 		{name: "compare flags", zh: compareFlagChinese, en: compareFlagEnglish},
 		{name: "model messages", zh: modelMessageChinese, en: modelMessageEnglish},
+		{name: "pressure", zh: probePressureChinese, en: probePressureEnglish},
 		{name: "memory inventory", zh: probeMemoryInventoryChinese, en: probeMemoryInventoryEnglish},
 		{name: "stage 9", zh: probeStage9Chinese, en: probeStage9English},
 		{name: "kernel", zh: probeKernelChinese, en: probeKernelEnglish},

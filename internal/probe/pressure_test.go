@@ -1,10 +1,12 @@
 package probe
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -59,10 +61,28 @@ func TestPressureParsersAndAssessment(t *testing.T) {
 	if !assessment.Detected || assessment.Score == 0 || len(assessment.Measurements) < 4 {
 		t.Fatalf("memory interference = %+v", assessment)
 	}
+	for _, measurement := range assessment.Measurements {
+		if !strings.HasPrefix(measurement.Label, "probe.pressure.metric.") {
+			t.Fatalf("pressure measurement label is not a stable key: %+v", measurement)
+		}
+		for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+			if !i18n.Has(language, measurement.Label) {
+				t.Fatalf("pressure measurement label %q is missing %s translation", measurement.Label, language)
+			}
+		}
+	}
 	for _, marker := range []string{"steal", "throttle", "PSI", "OOM"} {
 		found := false
 		for _, reason := range assessment.Reasons {
-			if strings.Contains(strings.ToLower(reason), strings.ToLower(marker)) {
+			if !strings.HasPrefix(reason.Key, "probe.pressure.reason.") {
+				t.Fatalf("pressure reason is not a stable Message key: %+v", reason)
+			}
+			for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+				if !i18n.Has(language, reason.Key) {
+					t.Fatalf("pressure reason %q is missing %s translation", reason.Key, language)
+				}
+			}
+			if strings.Contains(strings.ToLower(reason.Key), strings.ToLower(marker)) {
 				found = true
 				break
 			}
@@ -98,14 +118,20 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 	if len(result.Fields) < 5 || result.Fields[4].Key != "cgroup_memory_swap_limit" || !strings.Contains(result.Fields[4].Value, "unlimited") || len(result.Tables) != 1 || result.Tables[0].Key != "system.pressure.cgroup" {
 		t.Fatalf("system diagnostics = fields:%v tables:%v", result.Fields, result.Tables)
 	}
-	assessment := model.Interference{Detected: true, Score: 2, Reasons: []string{"fixture pressure"}, Measurements: []model.Measurement{{Key: "pressure", Label: "pressure", Display: "2", Method: "fixture"}}}
+	assessment := model.Interference{Detected: true, Score: 2, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.cpu_steal_high", "fixture")}, Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: "2", Method: "fixture"}}}
+	fieldCount, tableCount := len(result.Fields), len(result.Tables)
 	AppendInterferenceDiagnostics(&result, assessment)
-	if result.Status != model.StatusWarning || len(result.Notes) == 0 || len(result.Tables) != 2 {
+	if result.Status != model.StatusWarning || result.Interference == nil || result.Interference.Reasons[0].Key != assessment.Reasons[0].Key || len(result.Notes) != 0 || len(result.Fields) != fieldCount || len(result.Tables) != tableCount {
 		t.Fatalf("interference diagnostics = %+v", result)
 	}
+	assessment.Reasons[0].Args[0] = "changed"
+	assessment.Measurements[0].Display = "changed"
+	if result.Interference.Reasons[0].Args[0] == "changed" || result.Interference.Measurements[0].Display == "changed" || result.Measurements[len(result.Measurements)-1].Display == "changed" {
+		t.Fatal("interference diagnostics shared input slices")
+	}
 	cleanResult := model.NewResult("system", "system")
-	AppendInterferenceDiagnostics(&cleanResult, model.Interference{Measurements: []model.Measurement{{Key: "pressure", Label: "pressure", Display: "0", Method: "fixture"}}})
-	if cleanResult.Status != model.StatusOK || len(cleanResult.Tables) != 1 || len(cleanResult.Notes) != 0 {
+	AppendInterferenceDiagnostics(&cleanResult, model.Interference{Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: "0", Method: "fixture"}}})
+	if cleanResult.Status != model.StatusOK || cleanResult.Interference == nil || len(cleanResult.Tables) != 0 || len(cleanResult.Notes) != 0 || len(cleanResult.Fields) != 0 {
 		t.Fatalf("clean interference diagnostics = %+v", cleanResult)
 	}
 
@@ -128,17 +154,68 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 				first.Status = model.StatusError
 				first.Evidence = model.NewEvidence(0, 1, "run")
 			}
-			selected := FinalizeBenchmarkRetry(first, model.Interference{Score: test.firstScore}, second, model.Interference{Score: test.secondScore})
+			firstInterference := model.Interference{Score: test.firstScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "first")}, Measurements: []model.Measurement{{Key: "first-pressure", Display: "first"}}}
+			secondInterference := model.Interference{Score: test.secondScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "second")}, Measurements: []model.Measurement{{Key: "second-pressure", Display: "second"}}}
+			selected := FinalizeBenchmarkRetry(first, firstInterference, second, secondInterference)
 			if selected.Retry == nil || selected.Retry.SelectedAttempt != test.want || len(selected.Retry.Attempts) != 2 || selected.Status != model.StatusOK || selected.Evidence == nil || selected.Evidence.Valid != 1 || len(selected.TextBlocks) != 2 {
 				t.Fatalf("retry selection = %+v", selected.Retry)
 			}
-			if selected.Measurements[0].Value != test.wantValue || len(selected.Tables) == 0 || selected.Tables[len(selected.Tables)-1].RowIdentity != "attempt" || len(selected.Tables[len(selected.Tables)-1].ColumnKeys) != len(selected.Tables[len(selected.Tables)-1].Columns) {
+			if selected.Measurements[0].Value != test.wantValue || selected.Retry.SelectionRule.Key != "probe.retry.selection_rule.interference_score" || selected.Retry.TriggerReasons[0].Key != "probe.pressure.reason.pretest_cpu_psi_high" || len(selected.Tables) != 0 || len(selected.Fields) != 0 || len(selected.Notes) != 0 {
 				t.Fatalf("retry selected result = %+v", selected)
 			}
-			if !strings.Contains(selected.TextBlocks[1].Title, "自动复测第") {
-				t.Fatalf("retry preserved text block = %+v", selected.TextBlocks)
+			firstInterference.Reasons[0].Args[0] = "changed"
+			firstInterference.Measurements[0].Display = "changed"
+			if selected.Retry.TriggerReasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Reasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Measurements[0].Display == "changed" {
+				t.Fatal("retry facts shared input slices")
+			}
+			for _, block := range selected.TextBlocks {
+				wantAttempt := 1
+				if block.Title == "second" {
+					wantAttempt = 2
+				}
+				if block.Attempt != wantAttempt || strings.Contains(block.Title, "自动复测") {
+					t.Fatalf("retry text block attempt = %+v", selected.TextBlocks)
+				}
 			}
 		})
+	}
+
+	first := benchmarkRetryResult("first", 100)
+	second := benchmarkRetryResult("second", 50)
+	start := time.Unix(100, 0)
+	retryBefore := EnvironmentSnapshot{
+		CapturedAt: start,
+		PSI:        map[string]psiResource{"cpu": {Some: psiValues{Avg10: 25, TotalUS: 100, Present: true}}},
+	}
+	retryAfter := retryBefore
+	retryAfter.CapturedAt = start.Add(time.Second)
+	retryAfter.PSI = map[string]psiResource{"cpu": {Some: psiValues{Avg10: 1, TotalUS: 2_000_000, Present: true}}}
+	cleanRetryBefore := EnvironmentSnapshot{
+		CapturedAt: start,
+		PSI:        map[string]psiResource{"cpu": {Some: psiValues{Avg10: 1, TotalUS: 10, Present: true}}},
+	}
+	cleanRetryAfter := cleanRetryBefore
+	cleanRetryAfter.CapturedAt = start.Add(time.Second)
+	cleanRetryAfter.PSI = map[string]psiResource{"cpu": {Some: psiValues{Avg10: 1, TotalUS: 20, Present: true}}}
+	firstAssessment := AssessBenchmarkInterference("memory", retryBefore, retryAfter)
+	secondAssessment := AssessBenchmarkInterference("memory", cleanRetryBefore, cleanRetryAfter)
+	selected := FinalizeBenchmarkRetry(first, firstAssessment, second, secondAssessment)
+	if selected.Retry == nil || selected.Retry.SelectedAttempt != 2 {
+		t.Fatalf("actual retry selection = %+v", selected.Retry)
+	}
+	AppendInterferenceDiagnostics(&selected, secondAssessment)
+	canonical, err := json.Marshal(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalText := string(canonical)
+	for _, prose := range []string{"测试窗口资源干扰", "检测到测试干扰", "自动复测", "自动复测判定", "采用规则"} {
+		if strings.Contains(canonicalText, prose) {
+			t.Fatalf("canonical retry JSON contains presentation prose %q: %s", prose, canonicalText)
+		}
+	}
+	if !strings.Contains(canonicalText, `"attempt":1`) || !strings.Contains(canonicalText, `"attempt":2`) || !strings.Contains(canonicalText, `"interference"`) || !strings.Contains(canonicalText, `"selection_rule":{"key":"probe.retry.selection_rule.interference_score"}`) {
+		t.Fatalf("canonical retry JSON lost structured facts: %s", canonicalText)
 	}
 }
 

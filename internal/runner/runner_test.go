@@ -218,7 +218,7 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 				return probe.EnvironmentSnapshot{}
 			}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
 				assesses++
-				return model.Interference{Detected: true, Score: 4, Reasons: []string{"fixture interference"}}
+				return model.Interference{Detected: true, Score: 4, Reasons: []model.Message{model.NewMessage("fixture.interference")}}
 			})
 			if runs != 1 || captures != 2 || assesses != 1 || got.Retry != nil {
 				t.Fatalf("rejected retry = %+v/runs %d/captures %d/assesses %d", got, runs, captures, assesses)
@@ -228,8 +228,8 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 
 	for _, test := range []struct {
 		firstScore, secondScore, selected int
-		marker                            string
-	}{{5, 1, 2, "second load"}, {1, 5, 1, "first load"}} {
+		wantReasonKey                     string
+	}{{5, 1, 2, "fixture.second"}, {1, 5, 1, "fixture.first"}} {
 		runs, captures, assesses := 0, 0, 0
 		item := &runnerTestProbe{id: "cpu", runs: &runs, result: baseResult}
 		got := runWithConditionalRetryHooks(context.Background(), item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
@@ -238,11 +238,11 @@ func TestConditionalRetryOrchestration(t *testing.T) {
 		}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
 			assesses++
 			if assesses == 1 {
-				return model.Interference{Detected: true, Score: test.firstScore, Reasons: []string{"first load"}}
+				return model.Interference{Detected: true, Score: test.firstScore, Reasons: []model.Message{model.NewMessage("fixture.first")}}
 			}
-			return model.Interference{Detected: true, Score: test.secondScore, Reasons: []string{"second load"}}
+			return model.Interference{Detected: true, Score: test.secondScore, Reasons: []model.Message{model.NewMessage("fixture.second")}}
 		})
-		if runs != 2 || captures != 4 || assesses != 2 || got.Retry == nil || got.Retry.SelectedAttempt != test.selected || !strings.Contains(strings.Join(got.Notes, " "), test.marker) {
+		if runs != 2 || captures != 4 || assesses != 2 || got.Retry == nil || got.Retry.SelectedAttempt != test.selected || got.Retry.TriggerReasons[0].Key != "fixture.first" || got.Interference == nil || got.Interference.Score != map[int]int{1: test.firstScore, 2: test.secondScore}[test.selected] || len(got.Notes) != 0 || len(got.Fields) != 0 || len(got.Tables) != 0 || got.Interference.Reasons[0].Key != test.wantReasonKey {
 			t.Fatalf("retry result = %+v/runs %d/captures %d/assesses %d", got, runs, captures, assesses)
 		}
 	}

@@ -116,6 +116,7 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 		Results: []Result{{
 			SummaryMessages: []Message{NewMessage("message.test", local4)},
 			Evidence:        &Evidence{Valid: 1, Expected: 2},
+			Interference:    &Interference{Reasons: []Message{NewMessage("message.test", local4)}, Measurements: []Measurement{{Key: "result-interference", Display: local4}}},
 			Fields:          []Field{{Key: "secret", Value: "secret-token", Sensitive: true}, {Key: "remote", Value: "198.51.100.2"}},
 			Measurements:    []Measurement{{Key: "local", Label: local4, Display: local4}},
 			Methodology:     Methodology{Parameters: map[string]string{"local": local4}},
@@ -132,12 +133,13 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 			Sources:    []Source{{URL: "https://" + local4 + "/info"}},
 			Failures:   []Failure{{Message: local4}},
 			Retry: &RetryInfo{
-				TriggerReasons: []string{local4},
+				SelectionRule:  NewMessage("message.test", local4),
+				TriggerReasons: []Message{NewMessage("message.test", local4)},
 				Attempts: []RetryAttempt{{
 					Evidence:     &Evidence{Valid: 1, Expected: 1},
 					Measurements: []Measurement{{Key: "attempt", Display: local4}},
 					Interference: Interference{
-						Reasons:      []string{local4},
+						Reasons:      []Message{NewMessage("message.test", local4)},
 						Measurements: []Measurement{{Key: "interference", Display: local4}},
 					},
 				}},
@@ -152,7 +154,7 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	hidden := RedactedCopy(report, false)
 	masked4, maskedTextIP, maskedTableIP := Mask(local4), Mask(textIP), Mask(tableIP)
 	result := hidden.Results[0]
-	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0].Args[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.TriggerReasons[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
+	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || hidden.Notices[0].Args[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Interference == nil || result.Interference.Reasons[0].Args[0] != masked4 || result.Interference.Measurements[0].Display != masked4 || result.Fields[0].Value != "hidden" || result.Fields[1].Value != "198.51.100.2" || result.Measurements[0].Display != masked4 || result.Methodology.Parameters["local"] != masked4 || result.Tables[0].Rows[0][1] != maskedTableIP || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.SelectionRule.Args[0] != masked4 || result.Retry.TriggerReasons[0].Args[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display != masked4 || result.Retry.Attempts[0].Interference.Reasons[0].Args[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display != masked4 || result.Notes[0] != masked4 {
 		t.Fatalf("redacted containers = %+v", result)
 	}
 	hidden.Notices[0].Args[0] = "changed"
@@ -163,10 +165,13 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	hidden.Results[0].Fields[0].Value = "changed"
 	hidden.Results[0].Measurements[0].Display = "changed"
 	hidden.Results[0].Failures[0].Message = "changed"
-	hidden.Results[0].Retry.TriggerReasons[0] = "changed"
+	hidden.Results[0].Interference.Reasons[0].Args[0] = "changed"
+	hidden.Results[0].Interference.Measurements[0].Display = "changed"
+	hidden.Results[0].Retry.SelectionRule.Args[0] = "changed"
+	hidden.Results[0].Retry.TriggerReasons[0].Args[0] = "changed"
 	hidden.Results[0].Retry.Attempts[0].Evidence.Valid = 99
 	hidden.Results[0].Retry.Attempts[0].Measurements[0].Display = "changed"
-	hidden.Results[0].Retry.Attempts[0].Interference.Reasons[0] = "changed"
+	hidden.Results[0].Retry.Attempts[0].Interference.Reasons[0].Args[0] = "changed"
 	hidden.Results[0].Retry.Attempts[0].Interference.Measurements[0].Display = "changed"
 	hidden.Results[0].Notes[0] = "changed"
 	hidden.Results[0].Sources[0].URL = "changed"

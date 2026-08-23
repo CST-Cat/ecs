@@ -25,14 +25,18 @@ func NewMessage(key string, args ...any) Message {
 	return message
 }
 
+func cloneMessage(message Message) Message {
+	message.Args = append([]string(nil), message.Args...)
+	return message
+}
+
 func cloneMessages(messages []Message) []Message {
 	if messages == nil {
 		return nil
 	}
 	out := make([]Message, len(messages))
 	for index, message := range messages {
-		out[index] = message
-		out[index].Args = append([]string(nil), message.Args...)
+		out[index] = cloneMessage(message)
 	}
 	return out
 }

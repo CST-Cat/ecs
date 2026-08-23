@@ -21,22 +21,26 @@ func RedactedCopy(in Report, reveal bool) Report {
 		out.Results[i] = result
 		out.Results[i].SummaryMessages = cloneMessages(result.SummaryMessages)
 		out.Results[i].Methodology.Parameters = cloneStringMap(result.Methodology.Parameters)
+		out.Results[i].Interference = cloneInterference(result.Interference)
 		if result.Evidence != nil {
 			evidence := *result.Evidence
 			out.Results[i].Evidence = &evidence
 		}
 		out.Results[i].Fields = append([]Field(nil), result.Fields...)
-		out.Results[i].Measurements = append([]Measurement(nil), result.Measurements...)
+		out.Results[i].Measurements = cloneMeasurements(result.Measurements)
 		out.Results[i].Failures = append([]Failure(nil), result.Failures...)
 		if result.Retry != nil {
 			retry := *result.Retry
-			retry.TriggerReasons = append([]string(nil), result.Retry.TriggerReasons...)
+			retry.SelectionRule = cloneMessage(result.Retry.SelectionRule)
+			retry.TriggerReasons = cloneMessages(result.Retry.TriggerReasons)
 			retry.Attempts = make([]RetryAttempt, len(result.Retry.Attempts))
 			for attemptIndex, attempt := range result.Retry.Attempts {
 				retry.Attempts[attemptIndex] = attempt
-				retry.Attempts[attemptIndex].Measurements = append([]Measurement(nil), attempt.Measurements...)
-				retry.Attempts[attemptIndex].Interference.Reasons = append([]string(nil), attempt.Interference.Reasons...)
-				retry.Attempts[attemptIndex].Interference.Measurements = append([]Measurement(nil), attempt.Interference.Measurements...)
+				retry.Attempts[attemptIndex].Measurements = cloneMeasurements(attempt.Measurements)
+				attemptInterference := cloneInterference(&attempt.Interference)
+				if attemptInterference != nil {
+					retry.Attempts[attemptIndex].Interference = *attemptInterference
+				}
 				if attempt.Evidence != nil {
 					evidence := *attempt.Evidence
 					retry.Attempts[attemptIndex].Evidence = &evidence
@@ -75,6 +79,31 @@ func RedactedCopy(in Report, reveal bool) Report {
 	out.SensitiveIPs = nil
 	out.Run.Redacted = !reveal
 	return out
+}
+
+func cloneMeasurements(measurements []Measurement) []Measurement {
+	if measurements == nil {
+		return nil
+	}
+	out := make([]Measurement, len(measurements))
+	for index, measurement := range measurements {
+		out[index] = measurement
+		if measurement.HigherIsBetter != nil {
+			direction := *measurement.HigherIsBetter
+			out[index].HigherIsBetter = &direction
+		}
+	}
+	return out
+}
+
+func cloneInterference(interference *Interference) *Interference {
+	if interference == nil {
+		return nil
+	}
+	out := *interference
+	out.Reasons = cloneMessages(interference.Reasons)
+	out.Measurements = cloneMeasurements(interference.Measurements)
+	return &out
 }
 
 var (

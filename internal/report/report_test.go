@@ -59,12 +59,12 @@ func sampleReport() model.Report {
 				Count: 1, Message: "raw timeout",
 			}},
 			Retry: &model.RetryInfo{
-				Triggered: true, SelectedAttempt: 1, SelectionRule: "probe.memory.stream.note.separate_runs", TriggerReasons: []string{"probe.system.note.partial_inventory", "probe.network.status.ok"},
+				Triggered: true, SelectedAttempt: 1, SelectionRule: model.NewMessage("probe.retry.selection_rule.interference_score"), TriggerReasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory"), model.NewMessage("probe.network.status.ok")},
 				Attempts: []model.RetryAttempt{{
 					Number: 1, Status: model.StatusWarning, DurationMS: 5,
 					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt", Grade: model.EvidenceComplete},
 					Interference: model.Interference{
-						Detected: true, Score: 1, Reasons: []string{"probe.system.note.partial_inventory"},
+						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
 						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: "1", HigherIsBetter: &lower}},
 					},
 					Measurements: []model.Measurement{{Key: "events", Label: "probe.system.metric.logical_cpus", Value: 700, Unit: "events/s", Display: "700", HigherIsBetter: &higher}},
