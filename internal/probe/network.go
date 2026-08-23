@@ -167,12 +167,10 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			})
 			continue
 		}
-		reason := "unavailable"
 		if ok && address.Err != nil {
-			reason = address.Err.Error()
 			addFailure(&result, "egress", "IPv"+version, address.Err)
 		} else if !ok {
-			addFailureMessage(&result, "egress", "IPv"+version, reason)
+			addFailureMessage(&result, "egress", "IPv"+version, "unavailable")
 		}
 		result.Notes = append(result.Notes, "probe.network.note.egress_lookup_failed")
 		result.Fields = append(result.Fields, model.Field{

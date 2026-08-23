@@ -284,6 +284,55 @@ func TestNetworkFailureKeepsRawDiagnosticWithStableStatus(t *testing.T) {
 	}
 }
 
+func TestNetworkEgressLookupFailureKeepsRawErrorAndStableField(t *testing.T) {
+	env := networkFixtureEnvironment([]string{"none"}, nil)
+	rawErr := errors.New("fixture egress lookup failure")
+	env.Egress.ByVersion[config.IPVersion4] = EgressAddress{
+		Version: "4",
+		Err:     rawErr,
+	}
+
+	result := networkProbe{}.Run(context.Background(), env)
+	foundFailure := false
+	for _, failure := range result.Failures {
+		if failure.Stage != "egress" || failure.Target != "IPv4" {
+			continue
+		}
+		foundFailure = true
+		if failure.Message != rawErr.Error() {
+			t.Fatalf("egress failure message = %q, want %q", failure.Message, rawErr.Error())
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("egress failure was not retained: %+v", result.Failures)
+	}
+
+	foundField := false
+	for _, field := range result.Fields {
+		if field.Key != "ipv4_lookup_error" {
+			continue
+		}
+		foundField = true
+		if field.Label != "probe.network.field.lookup_error" {
+			t.Fatalf("egress lookup field label = %q", field.Label)
+		}
+		if field.Value != "probe.network.value.lookup_failed" {
+			t.Fatalf("egress lookup field value = %q", field.Value)
+		}
+		if strings.Contains(field.Value, rawErr.Error()) {
+			t.Fatalf("raw egress error leaked into field value: %q", field.Value)
+		}
+	}
+	if !foundField {
+		t.Fatalf("egress lookup field was not retained: %+v", result.Fields)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, rawErr.Error()) {
+			t.Fatalf("raw egress error leaked into note: %q", note)
+		}
+	}
+}
+
 func TestNetworkResultStatusTracksProviderMachineState(t *testing.T) {
 	failedClient := &http.Client{Transport: fixtureRoundTripper(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("fixture provider transport")

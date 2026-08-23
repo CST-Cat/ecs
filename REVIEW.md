@@ -8,7 +8,7 @@
 PR：#6，OPEN、Draft；本轮修复尚未 push
 
 本记录是 2026-08-23 remediation 的阶段性复审记录，不是最终合并结论。阶段 1–12 已由主 Agent
-逐阶段审查并通过；阶段 13 文档同步已完成，阶段 14 完整回归和阶段 15 最终审查/PR 更新尚未完成。
+逐阶段审查并通过；阶段 13 文档同步和阶段 14 完整本地回归已完成，阶段 15 最终审查/PR 更新尚未完成。
 因此当前不能宣称最终可合并、最终 SHA、远端已同步或最终 CI 全绿。
 
 ## 八项问题与当前状态
@@ -37,8 +37,9 @@ PR：#6，OPEN、Draft；本轮修复尚未 push
 - 阶段 13 第一至第二轮主审修正 schema 版本纪律、stable key/Message/summary 计数区分、retry/disk 示例与 LoadJSON/plan/run 事实，并补齐 JSON/工具链记录；同一 Worker 完成返工。
 - 阶段 13 第三轮主审指出 Message 零参数、retry evidence/status、network Field、NAT protocol/缺失值、backtrace TextBlock 敏感标记和 `staging` 必需性事实偏差；同一 Worker 修正并补齐验证。
 - 阶段 13 第四轮主审进一步指出 backtrace 不属于 retry-enabled 模块，不能用 `attempt:2` 标记其 raw block，且远端 hop 示例不应使用遮盖值；同一 Worker 改为 retry-enabled CPU raw block 示例，第四轮完整复审通过。
+- 阶段 14 首次回归在 `internal/probe/network.go:172` 发现 staticcheck SA4006：阶段 6 已将 egress field 改为 stable value，旧 `reason` 赋值只剩死代码；同一 Worker 按主审意见删除该变量/赋值，保留 `address.Err` 的 typed Failure，并新增确定性测试证明 raw error 保留且 lookup-error field/label/notes 不泄漏错误文本。返工后 Go1.22.2 与 Go1.26.5 全仓 Go/race、Go1.26.5 `scripts/ci/check.sh`、七架构主程序 cross、submission corpus、integration、真实二进制双语、canonical hash 不变、8 组 plan/run 均通过；gofmt、`git diff --check`、schema JSON 11/11、临时目录清理和五文件范围由主 Agent 独立确认。Go1.26.5 本地 govulncheck exit 3，仍有 5 个标准库可达漏洞（均 fixed in Go1.26.6），因此不能称 security clean。阶段 14 已由主 Agent 完整复审通过；GitHub security、最终 PR/远端同步和发布仍未验证。
 
-当前状态：阶段 1–13 DONE；阶段 14、15 TODO。
+当前状态：阶段 1–14 DONE；阶段 15 TODO。
 
 ## 验证边界
 
@@ -46,12 +47,11 @@ PR：#6，OPEN、Draft；本轮修复尚未 push
 静态约束，分别保留在 `PLAN.md` 与 `VALIDATION.md`。本地候选 `2ac564a` 是阶段 12 代码提交，
 不是远端 target 的同义替代；远端 `c6a59b37` 在阶段 1–12 审查期间保持为目标 SHA。
 
-仍不能在本地记录为已验证：
+阶段 14 的本地通过、失败和限制详见 `VALIDATION.md`。仍不能在本地记录为已验证：
 
 - GitHub security workflow 的真实运行结果；
-- 七架构工具的完整构建、归档、签名/attestation 和 Release 流程；
+- 七架构工具的完整工具源码构建、归档、签名/attestation 和 Release 流程（本阶段仅完成七架构 `ecs` 主程序 cross）；
 - 公网第三方 live probes、真实第二轮 retry 和完整交互下载执行链；
-- 阶段 14 规定的完整 shell/CI/构建回归；
 - 阶段 15 的最终 base-to-candidate 总 diff 审查、远端同步和 Draft PR 更新。
 
 历史记录中的 `08bd29f`、`a938385` 仅用于说明旧审查/旧交付背景，不代表当前审查基线、最终候选或交付状态。
