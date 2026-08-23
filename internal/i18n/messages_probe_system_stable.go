@@ -4,7 +4,7 @@ var probeSystemChinese = map[string]string{
 	"probe.system.description":      "操作系统、虚拟化、CPU、内存、磁盘与内核网络栈",
 	"probe.system.profile":          "主机清单 v2（DMI/sysfs/proc）",
 	"probe.system.comparison_scope": "资源快照；不是性能基准",
-	"probe.system.summary":          "%d vCPU · %s 内存 · %s 可用盘 · %s",
+	"probe.system.summary":          "%s vCPU · %s 内存 · %s 可用盘 · %s",
 
 	"probe.system.field.hostname":                        "主机名",
 	"probe.system.field.os":                              "系统",
@@ -110,7 +110,7 @@ var probeSystemEnglish = map[string]string{
 	"probe.system.description":      "Operating system, virtualization, CPU, memory, disk, and kernel network stack",
 	"probe.system.profile":          "Host inventory v2 (DMI/sysfs/proc)",
 	"probe.system.comparison_scope": "Resource snapshot; not a performance benchmark",
-	"probe.system.summary":          "%d vCPU · %s memory · %s disk free · %s",
+	"probe.system.summary":          "%s vCPU · %s memory · %s disk free · %s",
 
 	"probe.system.field.hostname":                        "Hostname",
 	"probe.system.field.os":                              "Operating system",

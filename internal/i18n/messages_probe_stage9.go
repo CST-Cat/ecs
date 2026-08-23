@@ -23,7 +23,7 @@ var probeStage9Chinese = map[string]string{
 	"probe.ports.metric.reachable_mail": "可达邮件端口",
 	"probe.ports.note.handshake_only":   "只完成 TCP 握手，不发送邮件、认证信息或应用层命令。",
 	"probe.ports.note.failure_scope":    "失败可能来自本机防火墙、上游封锁、DNS、目标服务或地区限制；单一目标失败不能证明端口被运营商封锁。",
-	"probe.ports.summary":               "%d/%d 可达 · 邮件 %d/4",
+	"probe.ports.summary":               "%s/%s 可达 · 邮件 %s/4",
 
 	"probe.rdns.table.title":                            "反向解析与 FCrDNS",
 	"probe.rdns.column.item":                            "项目",
@@ -75,7 +75,7 @@ var probeStage9English = map[string]string{
 	"probe.ports.metric.reachable_mail": "Reachable mail ports",
 	"probe.ports.note.handshake_only":   "Only the TCP handshake is completed; no mail, credentials, or application-layer commands are sent.",
 	"probe.ports.note.failure_scope":    "Failures may come from the local firewall, upstream filtering, DNS, the target service, or regional restrictions; one failed target does not prove carrier-level port blocking.",
-	"probe.ports.summary":               "%d/%d reachable · mail %d/4",
+	"probe.ports.summary":               "%s/%s reachable · mail %s/4",
 
 	"probe.rdns.table.title":                            "Reverse DNS and FCrDNS",
 	"probe.rdns.column.item":                            "Item",
