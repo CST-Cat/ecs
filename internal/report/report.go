@@ -93,8 +93,9 @@ func JSON(data model.Report) ([]byte, error) {
 
 // LoadJSON 读取一份报告，并要求它的 schema 版本与本二进制完全一致。
 //
-// run 与 submit 走这条路：它们要把报告当作当前 schema 的实例去解释，版本不符
-// 就意味着字段语义可能已经变了，继续下去只会得到看似合理的错误结论。
+// run 只生成当前 schema 的报告；render、submit、baseline 和 leaderboard 等读取报告的
+// 命令走这条路，把输入当作当前 schema 的实例解释。版本不符就意味着字段语义可能已经
+// 变了，继续下去只会得到看似合理的错误结论。
 func LoadJSON(path string) (model.Report, error) {
 	return loadJSON(path, true)
 }
