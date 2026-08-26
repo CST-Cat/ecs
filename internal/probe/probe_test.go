@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"strings"
 	"testing"
 
 	"ecs/internal/config"
@@ -29,5 +30,13 @@ func TestBuiltinsHaveUniqueIDs(t *testing.T) {
 	}
 	if method := MethodologyFor("missing"); method.Kind != "" || method.Label != "" || method.Engine != "" {
 		t.Fatalf("unknown methodology = %+v", method)
+	}
+}
+
+func TestBuiltinsExposeStableTitleKeys(t *testing.T) {
+	for _, item := range Builtins() {
+		if item.Title() == "" || !strings.HasPrefix(item.Title(), "module.") {
+			t.Fatalf("probe %q exposes non-key title %q", item.ID(), item.Title())
+		}
 	}
 }

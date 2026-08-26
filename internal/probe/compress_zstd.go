@@ -74,28 +74,28 @@ func (zstdProbe) NeedsNetwork() bool { return false }
 func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("zstd")
 	if err != nil {
-		return missingZstdResult("未找到固定版本 zstd，压缩基准未运行", "zstd")
+		return missingZstdResult("zstd", err)
 	}
 	corpus, err := findZstdCorpus(path, defaultZstdContract)
 	if err != nil {
-		result := missingZstdResult("未找到或无法验证固定 Silesia corpus，zstd 基准未运行", zstdCorpusName)
+		result := missingZstdResult(zstdCorpusName, err)
 		result.Notes = append(result.Notes, err.Error())
 		return result
 	}
 	return runZstdBenchmark(ctx, env, path, corpus, defaultZstdContract)
 }
 
-func missingZstdResult(summary, target string) model.Result {
+func missingZstdResult(target string, err error) model.Result {
 	start := time.Now()
 	result := model.NewResult("zstd", "zstd 压缩性能")
 	result.Description = "固定 Silesia corpus 上的 zstd 压缩与解压吞吐，分别运行 1 worker 与当前 CPU allowance 的全 worker"
 	result.Methodology = zstdMethodology(defaultZstdContract)
 	result.Status = model.StatusWarning
-	result.Summary = summary
-	result.AddFailure(model.Failure{
-		Category: model.FailureToolMissing, Stage: "tool_lookup", Target: target,
-		Count: 1, Message: summary,
-	})
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: target, Count: 1, Message: message})
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
 		"probe.zstd.tool_missing",
@@ -176,10 +176,9 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 	version, ok := parseZstdVersion(versionLine)
 	if !ok || version != contract.Version {
 		result.Status = model.StatusWarning
-		result.Summary = fmt.Sprintf("zstd 版本不符合固定口径：检测到 %s，要求 %s", fallback(version, "unknown"), contract.Version)
 		result.AddFailure(model.Failure{
 			Category: model.FailureUnsupported, Stage: "version_check", Target: path,
-			Count: 1, Message: result.Summary,
+			Count: 1, Message: versionLine,
 		})
 		result.Fields = []model.Field{
 			{Key: "engine", Label: "标准工具", Value: "zstd"},
@@ -195,7 +194,6 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 	}
 	if err := verifyZstdCorpus(corpus, contract); err != nil {
 		result.Status = model.StatusWarning
-		result.Summary = "固定 Silesia corpus 校验失败，zstd 基准未运行"
 		result.AddFailure(model.Failure{
 			Category: model.FailureUnsupported, Stage: "corpus_verify", Target: contract.CorpusName,
 			Count: 1, Message: err.Error(),
@@ -291,20 +289,6 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		))
 	}
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
-	if validRuns == 0 {
-		result.Summary = "zstd 未产出有效吞吐"
-	} else if singleCore && runs[0].CompressMBPS > 0 {
-		result.Summary = fmt.Sprintf("zstd 压缩 1T/NT（同一次实测）%s · 扩展不适用",
-			model.FormatRate(runs[0].CompressMBPS, "MB/s"))
-	} else if runs[0].CompressMBPS > 0 && runs[1].CompressMBPS > 0 {
-		result.Summary = fmt.Sprintf("zstd 压缩 1T %s · %dT %s · 扩展 %.2f×",
-			model.FormatRate(runs[0].CompressMBPS, "MB/s"), workers,
-			model.FormatRate(runs[1].CompressMBPS, "MB/s"), runs[1].CompressMBPS/runs[0].CompressMBPS)
-	} else if runs[0].CompressMBPS > 0 {
-		result.Summary = "zstd 压缩 1T " + model.FormatRate(runs[0].CompressMBPS, "MB/s")
-	} else {
-		result.Summary = fmt.Sprintf("zstd 压缩 %dT %s", workers, model.FormatRate(runs[1].CompressMBPS, "MB/s"))
-	}
 	result.Finish(start)
 	return result
 }

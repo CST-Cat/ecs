@@ -59,6 +59,9 @@ var errorChinese = map[string]string{
 	"err.backtraceNameAddress": "三网回程目标必须同时包含 name 和 address",
 	"err.backtraceUnsafe":      "三网回程目标 %q 不是安全的 IP 或主机名",
 	"err.backtraceFamily":      "三网回程目标 %q 的 family 必须是 4、6 或空值",
+	"err.backtraceKind":        "三网回程目标的 kind %q 无效，必须是 telecom、unicom 或 mobile",
+	"err.backtraceFormat":      "三网回程目标 %q 必须使用 carrier:名称=主机格式（carrier 只能是 telecom、unicom 或 mobile）",
+	"err.backtraceCarrier":     "三网回程目标 %q 的 carrier %q 无效，必须是 telecom、unicom 或 mobile",
 	"err.unknownCity":          "未知回程城市 %q，可选 beijing、guangzhou、shanghai、chengdu、all",
 	"err.cityAllCombo":         "回程城市 all 不能与其他城市组合",
 
@@ -98,10 +101,12 @@ var errorChinese = map[string]string{
 	"err.baselineLoad":         "读取排行榜参考 %s: %w",
 
 	// ── 配置文件 ────────────────────────────────────────────
-	"err.configRead":     "读取配置文件: %w",
-	"err.configParse":    "解析配置文件: %w",
-	"err.configSingle":   "配置文件只能包含一个 JSON 对象",
-	"err.configTrailing": "配置文件尾部存在无效内容: %w",
+	"err.configRead":       "读取配置文件: %w",
+	"err.configParse":      "解析配置文件: %w",
+	"err.configSingle":     "配置文件只能包含一个 JSON 对象",
+	"err.configTrailing":   "配置文件尾部存在无效内容: %w",
+	"err.planJSONRequired": "plan requires --json",
+	"err.planInteractive":  "plan --json cannot use the interactive wizard",
 }
 
 var errorEnglish = map[string]string{
@@ -155,6 +160,9 @@ var errorEnglish = map[string]string{
 	"err.backtraceNameAddress": "backtrace targets must have both name and address",
 	"err.backtraceUnsafe":      "backtrace target %q is not a safe IP or hostname",
 	"err.backtraceFamily":      "backtrace target %q family must be 4, 6, or empty",
+	"err.backtraceKind":        "backtrace target kind %q is invalid; use telecom, unicom, or mobile",
+	"err.backtraceFormat":      "backtrace target %q must use carrier:Name=host (carrier must be telecom, unicom, or mobile)",
+	"err.backtraceCarrier":     "backtrace target %q has invalid carrier %q; use telecom, unicom, or mobile",
 	"err.unknownCity":          "unknown backtrace city %q; choose beijing, guangzhou, shanghai, chengdu, or all",
 	"err.cityAllCombo":         "backtrace city all cannot be combined with other cities",
 
@@ -194,8 +202,10 @@ var errorEnglish = map[string]string{
 	"err.baselineLoad":         "read scoring leaderboard reference %s: %w",
 
 	// ── Config file ─────────────────────────────────────────
-	"err.configRead":     "read config file: %w",
-	"err.configParse":    "parse config file: %w",
-	"err.configSingle":   "the config file must contain exactly one JSON object",
-	"err.configTrailing": "invalid trailing content in the config file: %w",
+	"err.configRead":       "read config file: %w",
+	"err.configParse":      "parse config file: %w",
+	"err.configSingle":     "the config file must contain exactly one JSON object",
+	"err.configTrailing":   "invalid trailing content in the config file: %w",
+	"err.planJSONRequired": "plan requires --json",
+	"err.planInteractive":  "plan --json cannot use the interactive wizard",
 }

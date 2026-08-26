@@ -3,11 +3,9 @@ package probe
 import (
 	"context"
 	"net"
-	"strings"
 	"time"
 
 	"ecs/internal/config"
-	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -28,20 +26,20 @@ func (natProbe) ID() string         { return "nat" }
 func (natProbe) Title() string      { return "NAT 类型" }
 func (natProbe) NeedsNetwork() bool { return true }
 
-// NAT 映射行为（RFC 5780 §4.3）。
+// NAT 映射行为（RFC 5780 §4.3）。这些值是机器枚举，不是展示文案。
 const (
-	mappingUnknown              = "未知"
-	mappingEndpointIndependent  = "端点无关"
-	mappingAddressDependent     = "地址相关"
-	mappingAddressPortDependent = "地址与端口相关"
+	mappingUnknown              = "unknown"
+	mappingEndpointIndependent  = "endpoint_independent"
+	mappingAddressDependent     = "address_dependent"
+	mappingAddressPortDependent = "address_port_dependent"
 )
 
-// NAT 过滤行为（RFC 5780 §4.4）。
+// NAT 过滤行为（RFC 5780 §4.4）。这些值与映射枚举保持同一机器词汇。
 const (
-	filteringUnknown              = "未知"
-	filteringEndpointIndependent  = "端点无关"
-	filteringAddressDependent     = "地址相关"
-	filteringAddressPortDependent = "地址与端口相关"
+	filteringUnknown              = "unknown"
+	filteringEndpointIndependent  = "endpoint_independent"
+	filteringAddressDependent     = "address_dependent"
+	filteringAddressPortDependent = "address_port_dependent"
 )
 
 // natFinding 是对一台 STUN 服务器完成的检测结果。
@@ -92,7 +90,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	servers := env.Config.STUNServers
 	if len(servers) == 0 {
-		result.Skip("未配置 STUN 服务器")
+		result.Skip(model.NewMessage("probe.nat.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, 1, "target")
 		result.Finish(start)
 		return result
@@ -126,20 +124,22 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	var best *natFinding
 	for index := range findings {
 		finding := &findings[index]
-		status := "完成"
+		status := "complete"
 		switch {
 		case finding.UDPBlocked:
-			status = "UDP 无响应"
-			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: status})
+			status = "udp_blocked"
+			message := ""
+			if finding.Err != nil {
+				message = compactError(finding.Err)
+			}
+			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: message})
 		case finding.Err != nil:
-			status = "失败：" + compactError(finding.Err)
+			status = "failed"
 			addFailure(&result, "stun_binding", finding.Server.Address, finding.Err)
 		}
 		other := finding.Other.String()
 		if other == "" {
 			other = "—"
-		} else if !finding.DualStackServer {
-			other += "（同 IP）"
 		}
 		table.Rows = append(table.Rows, []string{
 			"IPv" + family,
@@ -158,7 +158,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	if best == nil {
 		result.Status = model.StatusWarning
-		result.Summary = "全部 STUN 服务器无响应，无法判定 NAT 类型"
 		result.Notes = append(result.Notes,
 			"所有 STUN 服务器都没有返回映射地址。常见原因是出站 UDP 被封锁、"+
 				"防火墙只放行 TCP，或本次选用的服务器全部不可用；这本身也说明 UDP 类应用会受影响。",
@@ -169,23 +168,27 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	behind := best.Mapped.IP != best.LocalAddr.IP
-	category, categoryNote := natCategory(*best, behind)
+	_, categoryNote := natCategory(*best, behind)
+	categoryCode := natCategoryCode(*best, behind)
+	behindValue := "no"
+	if behind {
+		behindValue = "yes"
+	}
 
 	result.Fields = []model.Field{
 		{Key: "ip_version", Label: "协议族", Value: "IPv" + family},
-		{Key: "nat_category", Label: "NAT 类型", Value: category},
+		{Key: "nat_category", Label: "NAT 类型", Value: categoryCode},
 		{Key: "mapped_address", Label: "公网映射地址", Value: best.Mapped.String(), Sensitive: true},
 		{Key: "local_address", Label: "本地出口地址", Value: best.LocalAddr.String(), Sensitive: true},
-		{Key: "behind_nat", Label: "位于 NAT 之后", Value: yesNo(behind)},
+		{Key: "behind_nat", Label: "位于 NAT 之后", Value: behindValue},
 		{Key: "mapping_behaviour", Label: "映射行为", Value: best.Mapping},
 		{Key: "filtering_behaviour", Label: "过滤行为", Value: best.Filtering},
 		{Key: "stun_server", Label: "判定所用服务器", Value: best.Server.Name},
-		{Key: "stun_pool", Label: "候选服务器", Value: describeNATServers(servers)},
 	}
 	result.Measurements = []model.Measurement{
 		{
 			Key: "udp_stun_reachable", Label: "STUN 可达",
-			Value: 1, Unit: "项", Display: "是",
+			Value: 1, Unit: "项", Display: "probe.nat.boolean.yes",
 			Method: "stun-binding-rfc5389-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
@@ -220,13 +223,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	if behind {
 		result.Status = model.StatusWarning
-	}
-	result.Summary = category
-	if best.Mapping != mappingUnknown {
-		result.Summary += " · 映射" + best.Mapping
-	}
-	if best.FilteringTested {
-		result.Summary += " · 过滤" + best.Filtering
 	}
 	result.Finish(start)
 	return result
@@ -375,6 +371,30 @@ func natCategory(finding natFinding, behind bool) (string, string) {
 	}
 }
 
+// natCategoryCode is the language-independent classification stored in fields.
+func natCategoryCode(finding natFinding, behind bool) string {
+	if !behind {
+		return "public"
+	}
+	switch finding.Mapping {
+	case mappingAddressDependent, mappingAddressPortDependent:
+		return "symmetric"
+	case mappingEndpointIndependent:
+		switch finding.Filtering {
+		case filteringEndpointIndependent:
+			return "full_cone"
+		case filteringAddressDependent:
+			return "restricted_cone"
+		case filteringAddressPortDependent:
+			return "port_restricted"
+		default:
+			return "cone_unknown_filtering"
+		}
+	default:
+		return "unknown"
+	}
+}
+
 func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {
 	connection, err := net.DialUDP(network, nil, target)
 	if err != nil {
@@ -391,16 +411,4 @@ func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {
 		return net.IPv6zero
 	}
 	return net.IPv4zero
-}
-
-// describeNATServers 给出参与检测的服务器列表，用于报告披露。
-func describeNATServers(servers []config.Endpoint) string {
-	names := make([]string, 0, len(servers))
-	for _, server := range servers {
-		names = append(names, server.Address)
-	}
-	// This value is persisted in the canonical report. Keep collection
-	// independent of the current UI language; human renderers may localize the
-	// surrounding display copy later.
-	return strings.Join(names, i18n.TL(i18n.LangZH, "punct.listSep"))
 }

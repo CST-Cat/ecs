@@ -3,7 +3,6 @@ package probe
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -21,7 +20,6 @@ import (
 // 这是主流邮件服务商的硬性要求：没有 PTR，或正反解对不上，发出的邮件大概率被
 // 直接拒收或判为垃圾邮件。它和 DNSBL 是同一个问题的两面，因此放在同一个模块。
 
-// rdnsResult 是一次反解校验的结果。
 type rdnsResult struct {
 	IP         string
 	Names      []string
@@ -37,17 +35,12 @@ type rdnsResolver interface {
 	LookupHost(context.Context, string) ([]string, error)
 }
 
-// residentialPTRHints 是家宽/动态地址在 PTR 里的常见特征词。
-//
-// 命中只能作为线索：机房也可能用这些词命名，家宽也可能没有 PTR。
-// 因此结论只写"疑似"，绝不据此断言线路类型。
 var residentialPTRHints = []string{
 	"dsl", "adsl", "pppoe", "ppp", "dynamic", "dyn", "dial",
 	"broadband", "cable", "pool", "dhcp", "client", "customer",
 	"res", "home", "user",
 }
 
-// checkReverseDNS 反查 IP 并做正向确认。
 func checkReverseDNS(ctx context.Context, resolver rdnsResolver, ip string) rdnsResult {
 	result := rdnsResult{IP: ip}
 	lookupCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -66,8 +59,6 @@ func checkReverseDNS(ctx context.Context, resolver rdnsResolver, ip string) rdns
 	}
 	result.Names = names
 
-	// 正向确认：PTR 指向的域名必须能解析回同一个 IP，否则任何人都能把 PTR
-	// 指向别人的域名来伪装身份。
 	var forwardErr error
 	forwardSucceeded := false
 	for _, name := range names {
@@ -95,11 +86,6 @@ func checkReverseDNS(ctx context.Context, resolver rdnsResolver, ip string) rdns
 	return result
 }
 
-// matchResidentialHints 在主机名里找家宽/动态地址的命名特征。
-//
-// 必须按分隔符切成 token 后精确匹配，不能用子串包含：实测 "server1.resources
-// .example.com" 会被 ".res" 命中而误判成家宽。宁可漏判也不能误判——
-// 这个结论会影响用户对线路类型的判断。
 func matchResidentialHints(names string) []string {
 	tokens := strings.FieldsFunc(strings.ToLower(names), func(r rune) bool {
 		return r == '.' || r == '-' || r == '_' || r == ' ' || r == ','
@@ -117,106 +103,99 @@ func matchResidentialHints(names string) []string {
 	return hits
 }
 
-// appendReverseDNS 在黑名单结果上追加反解与 FCrDNS 判定。
 func appendReverseDNS(ctx context.Context, result *model.Result, ip string) {
 	resolver := &net.Resolver{}
 	check := checkReverseDNS(ctx, resolver, ip)
 	appendReverseDNSResult(result, check)
 }
 
-// appendReverseDNSResult renders a checked result separately from resolver I/O.
-// The split keeps report semantics deterministic for callers with a fixture while
-// appendReverseDNS retains the normal resolver behavior.
+// appendReverseDNSResult records presentation identities as stable keys. Raw
+// resolver diagnostics remain in Failure.Message and are never translated.
 func appendReverseDNSResult(result *model.Result, check rdnsResult) {
-
 	table := model.Table{
-		Key:         "network.reverse_dns.checks",
-		Title:       "反向解析与 FCrDNS",
-		Columns:     []string{"项目", "结果", "说明"},
+		Key:   "network.reverse_dns.checks",
+		Title: "probe.rdns.table.title",
+		Columns: []string{
+			"probe.rdns.column.item",
+			"probe.rdns.column.result",
+			"probe.rdns.column.description",
+		},
 		ColumnKeys:  []string{"item", "result", "description"},
 		RowIdentity: "item",
 	}
-	ptrValue := "无 PTR 记录"
+
+	ptrValue := "probe.rdns.ptr.none"
 	if check.ReverseErr != nil {
-		ptrValue = "PTR 查询失败"
+		ptrValue = "probe.rdns.ptr.query_failed"
 	} else if len(check.Names) > 0 {
 		ptrValue = strings.Join(check.Names, ", ")
 	}
 	table.Rows = append(table.Rows, []string{
-		"PTR 记录", ptrValue, "邮件服务商普遍要求发信 IP 具备 PTR",
+		"probe.rdns.item.ptr", ptrValue, "probe.rdns.description.ptr",
 	})
 
-	fcrdns := "未通过"
-	fcrdnsWhy := "PTR 缺失或正向解析回不到本 IP"
+	fcrdns := "probe.rdns.status.failed"
+	fcrdnsWhy := "probe.rdns.description.fcrdns.missing_or_mismatch"
 	switch {
 	case check.Confirmed:
-		fcrdns = "通过"
-		fcrdnsWhy = "PTR 指向的域名能正向解析回本 IP"
+		fcrdns = "probe.rdns.status.passed"
+		fcrdnsWhy = "probe.rdns.description.fcrdns.confirmed"
 	case check.ReverseErr != nil:
-		fcrdnsWhy = "PTR 查询失败：" + compactError(check.ReverseErr)
+		fcrdnsWhy = "probe.rdns.description.fcrdns.reverse_failed"
 	case check.ForwardErr != nil:
-		fcrdnsWhy = "正向确认查询失败：" + compactError(check.ForwardErr)
+		fcrdnsWhy = "probe.rdns.description.fcrdns.forward_failed"
 	case len(check.Names) > 0:
-		fcrdnsWhy = "PTR 存在但正向解析对不上——任何人都能把 PTR 指向别人的域名，因此必须正向确认"
+		fcrdnsWhy = "probe.rdns.description.fcrdns.mismatch"
 	}
-	table.Rows = append(table.Rows, []string{"FCrDNS 正反一致", fcrdns, fcrdnsWhy})
+	table.Rows = append(table.Rows, []string{"probe.rdns.item.fcrdns", fcrdns, fcrdnsWhy})
 
 	if len(check.Hints) > 0 {
 		table.Rows = append(table.Rows, []string{
-			"命名特征", strings.Join(check.Hints, ", "),
-			"疑似家宽/动态地址的命名模式；仅为线索，机房也可能这样命名",
+			"probe.rdns.item.naming_hints", strings.Join(check.Hints, ", "), "probe.rdns.description.naming_hints",
 		})
 	}
 	result.Tables = append(result.Tables, table)
 
 	result.Fields = append(result.Fields,
-		model.Field{Key: "ptr_record", Label: "PTR 记录", Value: ptrValue},
-		model.Field{Key: "fcrdns", Label: "FCrDNS", Value: fcrdns},
+		model.Field{Key: "ptr_record", Label: "probe.rdns.field.ptr", Value: ptrValue},
+		model.Field{Key: "fcrdns", Label: "probe.rdns.field.fcrdns", Value: fcrdns},
 	)
+	if len(check.Hints) > 0 {
+		result.Fields = append(result.Fields, model.Field{Key: "ptr_naming_hints", Label: "probe.rdns.field.naming_hints", Value: strings.Join(check.Hints, ",")})
+	}
 	result.Measurements = append(result.Measurements, model.Measurement{
-		Key: "fcrdns_passed", Label: "FCrDNS 通过",
-		Value: boolValue(check.Confirmed), Unit: "项", Display: fcrdns,
+		Key: "fcrdns_passed", Label: "probe.rdns.metric.fcrdns_passed",
+		Value: boolValue(check.Confirmed), Unit: "boolean", Display: fcrdns,
 		Method: "reverse-dns-forward-confirm-v1", HigherIsBetter: model.BoolPtr(true),
 	})
 	if check.ReverseErr != nil {
-		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "reverse_lookup", Target: check.IP, Count: 1, Message: fcrdnsWhy})
+		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "reverse_lookup", Target: check.IP, Count: 1, Message: compactError(check.ReverseErr)})
 	}
 	if check.ForwardErr != nil {
-		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "forward_confirmation", Target: check.IP, Count: 1, Message: fcrdnsWhy})
+		result.AddFailure(model.Failure{Category: model.FailureDNS, Stage: "forward_confirmation", Target: check.IP, Count: 1, Message: compactError(check.ForwardErr)})
 	}
 
 	switch {
 	case check.ReverseErr != nil:
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fcrdnsWhy)
+		result.Notes = append(result.Notes, "probe.rdns.note.reverse_failed")
 	case len(check.Names) == 0:
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"该 IP 没有 PTR 记录。主流邮件服务商会因此直接拒收或判为垃圾邮件；"+
-				"若要用这台机器发信，需要让服务商为该 IP 配置反向解析。"+
-				"（注意：很多云厂商的默认出口都没有 PTR，这与 IP 是否干净无关。）")
+		result.Notes = append(result.Notes, "probe.rdns.note.no_ptr")
 	case check.ForwardErr != nil:
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fcrdnsWhy)
+		result.Notes = append(result.Notes, "probe.rdns.note.forward_failed")
 	case !check.Confirmed:
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"PTR 存在但正向解析回不到本 IP（FCrDNS 未通过）。PTR 由 IP 持有者单方面设置，"+
-				"不做正向确认就可以指向任意域名，因此邮件服务商普遍要求正反一致。")
+		result.Notes = append(result.Notes, "probe.rdns.note.mismatch")
 	default:
-		result.Notes = append(result.Notes,
-			"FCrDNS 正反一致，满足主流邮件服务商对发信 IP 的基本要求；"+
-				"能否送达还取决于黑名单收录情况、SPF/DKIM/DMARC 与发信内容。")
+		result.Notes = append(result.Notes, "probe.rdns.note.confirmed")
 	}
 	if len(check.Hints) > 0 {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"PTR 里出现 %s 等命名，是家宽或动态地址的常见特征；许多邮件服务商对这类地址段"+
-				"有额外限制。这只是线索——机房也可能这样命名，不能据此断定线路类型。",
-			strings.Join(check.Hints, "、")))
+		result.Notes = append(result.Notes, "probe.rdns.note.hints")
 	}
 }
 
-// boolValue 把布尔转成指标数值。
 func boolValue(value bool) float64 {
 	if value {
 		return 1

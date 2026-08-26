@@ -80,15 +80,15 @@ func TestIPQualityProviderAdaptersWithoutStandaloneParsers(t *testing.T) {
 	for _, test := range []struct {
 		name, body, label, registered string
 	}{
-		{name: "native", body: `{"City":{"Country":{"IsoCode":"US"}},"Country":{"IsoCode":"US","RegisteredCountry":{"IsoCode":"US"}}}`, label: "原生 IP", registered: "US"},
-		{name: "broadcast", body: `{"City":{"Country":{"IsoCode":"US"}},"Country":{"IsoCode":"US","RegisteredCountry":{"IsoCode":"CA"}}}`, label: "广播 IP", registered: "CA"},
+		{name: "native", body: `{"City":{"Country":{"IsoCode":"US"}},"Country":{"IsoCode":"US","RegisteredCountry":{"IsoCode":"US"}}}`, label: "probe.network.ip_type.native", registered: "US"},
+		{name: "broadcast", body: `{"City":{"Country":{"IsoCode":"US"}},"Country":{"IsoCode":"US","RegisteredCountry":{"IsoCode":"CA"}}}`, label: "probe.network.ip_type.broadcast", registered: "CA"},
 	} {
 		origin := fetchOrigin(test.body)
 		if origin.Err != nil || origin.Label != test.label || origin.UsageCountry != "US" || origin.RegisteredCountry != test.registered {
 			t.Fatalf("MaxMind %s = %+v", test.name, origin)
 		}
 	}
-	if got := fetchOrigin(`{"Country":{}}`); got.Err == nil || !strings.Contains(got.Err.Error(), "缺少使用地或注册地") {
+	if got := fetchOrigin(`{"Country":{}}`); got.Err == nil || got.Label != "probe.network.ip_type.unknown" || !strings.Contains(got.Err.Error(), "缺少使用地或注册地") {
 		t.Fatalf("MaxMind missing geography = %+v", got)
 	}
 
@@ -103,7 +103,7 @@ func TestIPQualityProviderAdaptersWithoutStandaloneParsers(t *testing.T) {
 			body: `{"data":{"country_code":"US","asn":{"type":"hosting"},"privacy":{"proxy":true,"hosting":true,"vpn":false}}}`,
 			run:  fetchIPinfo,
 			check: func(t *testing.T, got qualityFinding) {
-				if got.Country != "US" || got.Usage != "机房" || !got.Proxy.Value || !got.Server.Value || got.Access != "官方公开演示接口" {
+				if got.Country != "US" || got.Usage != "probe.network.network_type.datacenter" || !got.Proxy.Value || !got.Server.Value || got.Access != networkChannelPublicDemo {
 					t.Fatalf("IPinfo finding = %+v", got)
 				}
 			},
@@ -113,7 +113,7 @@ func TestIPQualityProviderAdaptersWithoutStandaloneParsers(t *testing.T) {
 			body: `{"data":{"countryCode":"US","usageType":"Data Center/Web Hosting/Transit","abuseConfidenceScore":75}}`,
 			run:  fetchAbuseIPDB,
 			check: func(t *testing.T, got qualityFinding) {
-				if got.Country != "US" || got.Usage != "机房" || got.Score == nil || *got.Score != 75 || !got.Abuser.Value || got.Risk != "高" {
+				if got.Country != "US" || got.Usage != "probe.network.network_type.datacenter" || got.Score == nil || *got.Score != 75 || !got.Abuser.Value || got.Risk != "probe.network.risk.high" {
 					t.Fatalf("AbuseIPDB finding = %+v", got)
 				}
 			},
@@ -143,7 +143,7 @@ func TestIPQualityProviderAdaptersWithoutStandaloneParsers(t *testing.T) {
 			body: `{"success":true,"country_code":"US","security":{"proxy":true,"vpn":false,"tor":false,"hosting":true}}`,
 			run:  fetchIPWhois,
 			check: func(t *testing.T, got qualityFinding) {
-				if got.Country != "US" || !got.Proxy.Value || !got.VPN.Known || got.VPN.Value || !got.Server.Value || got.Access != "官方免密直连" {
+				if got.Country != "US" || !got.Proxy.Value || !got.VPN.Known || got.VPN.Value || !got.Server.Value || got.Access != networkChannelDirect {
 					t.Fatalf("IPWHOIS finding = %+v", got)
 				}
 			},

@@ -3,12 +3,9 @@ package probe
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +17,7 @@ import (
 type routeProbe struct{}
 
 func (routeProbe) ID() string         { return "route" }
-func (routeProbe) Title() string      { return "路由追踪" }
+func (routeProbe) Title() string      { return "module.route.title" }
 func (routeProbe) NeedsNetwork() bool { return true }
 
 type routeEngine struct {
@@ -32,60 +29,67 @@ type routeEngine struct {
 
 const (
 	routeEngineTiny = "nexttrace-tiny"
-)
 
-var (
-	ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	routeStatusComplete    = "probe.route.status.complete"
+	routeStatusFailed      = "probe.route.status.failed"
+	routeStatusParseFailed = "probe.route.status.parse_failed"
+	routeStatusNoResponse  = "probe.route.status.no_response"
 )
 
 func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("route", "路由追踪")
-	result.Description = "使用官方 NextTrace Tiny 追踪多个参考目标"
+	result := model.NewResult("route", "module.route.title")
+	result.Description = "probe.route.description"
 	result.Methodology = model.Methodology{
 		Kind:            "protocol-measurement",
-		Label:           "协议诊断",
-		Engine:          "NextTrace Tiny",
-		Profile:         "max 12 hops, one query",
-		ComparisonScope: "当次正向路径快照；不是性能基准，也不代表回程",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "probe.route.methodology.engine",
+		Profile:         "probe.route.profile",
+		ComparisonScope: "probe.route.comparison_scope",
 	}
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
-		result.Skip("未发现 NextTrace Tiny")
-		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "nexttrace", Count: 1, Message: result.Summary})
+		result.Status = model.StatusSkipped
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.tool_missing")}
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: routeEngineTiny, Count: 1})
 		result.Evidence = model.NewEvidence(0, len(env.Config.RouteTargets), "target")
-		result.Notes = append(result.Notes, "当前运行环境没有官方 NextTrace Tiny；依赖准备失败时跳过路由探测。")
+		result.Notes = []string{"probe.route.note.tool_missing"}
 		result.Finish(start)
 		return result
 	}
 	targets := endpointsForIPVersion(env.Config.RouteTargets, env.Config.IPVersion)
 	if len(targets) == 0 {
-		result.Skip("没有匹配当前协议族的路由目标")
+		result.Status = model.StatusSkipped
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.no_targets")}
 		result.Evidence = model.NewEvidence(0, 0, "target")
-		result.Notes = append(result.Notes, "当前协议族没有可用的字面量路由目标；请用 --route-targets 提供对应协议族的目标地址。")
+		result.Notes = []string{"probe.route.note.no_targets"}
 		result.Finish(start)
 		return result
 	}
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "引擎", Value: engine.Name},
-		{Key: "version", Label: "NextTrace Tiny 版本", Value: fallback(engine.Version, "unknown")},
-		{Key: "binary_sha256", Label: "NextTrace Tiny SHA-256", Value: fallback(engine.SHA256, "unavailable")},
-		{Key: "arguments", Label: "命令参数", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ") + "（按目标协议族）"},
+		{Key: "engine", Label: "probe.route.field.engine", Value: engine.Name},
+		{Key: "version", Label: "probe.route.field.version", Value: fallback(engine.Version, "unknown")},
+		{Key: "binary_sha256", Label: "probe.route.field.binary_sha256", Value: fallback(engine.SHA256, "unavailable")},
+		{Key: "arguments", Label: "probe.route.field.arguments", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")},
 	}
 	result.Sources = append(result.Sources, model.Source{
-		Name: "NextTrace Tiny", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "以纯 JSON、无启动横幅模式执行官方 Tiny 路由追踪",
+		Name: "probe.route.source.nexttrace.name", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "probe.route.source.nexttrace",
 	})
 	table := model.Table{
 		Key:                   "network.route.summary",
-		Title:                 "追踪摘要",
-		Columns:               []string{"目标", "类型", "状态", "探测跳位", "可见跳点", "超时跳点", "耗时"},
+		Title:                 "probe.route.table.summary",
+		Columns:               []string{"probe.route.column.target", "probe.route.column.target_type", "probe.route.column.status", "probe.route.column.probed_hops", "probe.route.column.visible_hops", "probe.route.column.timeout_hops", "probe.route.column.duration"},
 		ColumnKeys:            []string{"target", "target_type", "status", "probed_hops", "visible_hops", "timeout_hops", "elapsed_ms"},
 		NumericColumns:        []int{3, 4, 5, 6},
 		NumericHigherIsBetter: []bool{false, true, false, false},
 	}
 	successes := 0
+	// validTraces is both usable evidence and the historical summary count:
+	// parsed no-response traces count here, while only visible successes affect
+	// the module warning status.
 	validTraces := 0
+	parseFailed := false
 	for targetIndex, target := range targets {
 		traceCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		traceStart := time.Now()
@@ -94,45 +98,45 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		cancel()
 		clean := sanitizeCommandOutput(output)
 		slots, visible, timeouts, parsed := routeHopSummary(engine.Name, clean)
-		status := "完成"
+		status := routeStatusComplete
 		switch {
 		case err != nil:
-			status = "部分/失败"
+			status = routeStatusFailed
 			addFailure(&result, "trace", target.Address, err)
 		case !parsed:
-			status = "NextTrace 解析失败"
-			addFailureMessage(&result, "parse", target.Address, "NextTrace JSON 解析失败或没有有效跳点")
-			result.Notes = append(result.Notes, fmt.Sprintf("%s 追踪失败：NextTrace JSON 解析失败或没有有效跳点", target.Name))
+			status = routeStatusParseFailed
+			parseFailed = true
+			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: target.Address, Count: 1})
 		case visible == 0:
-			status = "无响应"
+			status = routeStatusNoResponse
 			validTraces++
 		default:
 			successes++
 			validTraces++
 		}
 		table.Rows = append(table.Rows, []string{
-			target.Name, target.Kind, status, strconv.Itoa(slots), strconv.Itoa(visible), strconv.Itoa(timeouts), elapsed.Round(time.Millisecond).String(),
+			target.Name, routeTargetKindKey(target.Kind), status, strconv.Itoa(slots), strconv.Itoa(visible), strconv.Itoa(timeouts), elapsed.Round(time.Millisecond).String(),
 		})
 		if parsed {
 			prefix := fmt.Sprintf("route_target_%02d", targetIndex+1)
 			result.Measurements = append(result.Measurements,
 				model.Measurement{
-					Key: prefix + "_hop_slots", Label: target.Name + " 探测跳位",
+					Key: prefix + "_hop_slots", Label: "probe.route.metric.hop_slots",
 					Value: float64(slots), Unit: "hops", Display: strconv.Itoa(slots),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_visible_hops", Label: target.Name + " 可见跳点",
+					Key: prefix + "_visible_hops", Label: "probe.route.metric.visible_hops",
 					Value: float64(visible), Unit: "hops", Display: strconv.Itoa(visible),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(true),
 				},
 				model.Measurement{
-					Key: prefix + "_timeout_hops", Label: target.Name + " 超时跳点",
+					Key: prefix + "_timeout_hops", Label: "probe.route.metric.timeout_hops",
 					Value: float64(timeouts), Unit: "hops", Display: strconv.Itoa(timeouts),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_duration_ms", Label: target.Name + " 追踪耗时",
+					Key: prefix + "_duration_ms", Label: "probe.route.metric.duration",
 					Value: float64(elapsed) / float64(time.Millisecond), Unit: "ms", Display: elapsed.Round(time.Millisecond).String(),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
@@ -140,7 +144,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		if clean != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:    target.Name + " (" + target.Address + ")",
+				Title:    "probe.route.raw_output",
 				Language: "json",
 				Content:  clean,
 			})
@@ -152,16 +156,29 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 	}
 	result.Notes = append(result.Notes,
-		"这是从 VPS 到目标的正向路径，不等同于用户所在地到 VPS 的去程或三网回程。",
-		"外部程序通过参数数组启动，不经过 shell；ecs 记录可安全读取的版本和程序 SHA-256。一次性依赖由 run.sh 在探针外准备并在退出时清理。",
+		"probe.route.note.forward_path",
+		"probe.route.note.execution",
 	)
 	result.Notes = append(result.Notes,
-		"使用官方 NextTrace Tiny；报告保留实际 binary 名称、版本与 SHA-256。",
-		"NextTrace 使用 --json 并关闭地图 URL；不会调用会输出推广内容的版本界面。",
+		"probe.route.note.json",
 	)
-	result.Summary = fmt.Sprintf("%d/%d 个目标完成 · NextTrace Tiny", successes, len(targets))
+	if parseFailed {
+		result.Notes = append(result.Notes, "probe.route.note.parse_failed")
+	}
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.values", validTraces, len(targets))}
 	result.Finish(start)
 	return result
+}
+
+func routeTargetKindKey(kind string) string {
+	switch kind {
+	case config.RouteTargetKindGlobal:
+		return "probe.route.target_type.global"
+	case config.RouteTargetKindMainlandChina:
+		return "probe.route.target_type.mainland_china"
+	default:
+		return kind
+	}
 }
 
 func detectRouteEngine(ctx context.Context) routeEngine {
@@ -241,24 +258,4 @@ func routeHopSummary(engineName, output string) (slots, visible, timeouts int, o
 
 func isNextTraceEngine(name string) bool {
 	return name == routeEngineTiny
-}
-
-func binarySHA256(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%x", hash.Sum(nil))
-}
-
-func sanitizeCommandOutput(output []byte) string {
-	text := strings.ReplaceAll(string(output), "\x00", "")
-	text = ansiPattern.ReplaceAllString(text, "")
-	text = strings.TrimSpace(text)
-	return text
 }

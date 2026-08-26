@@ -75,7 +75,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	if !config.AllowsModule(env.Config.Exposure, "ookla") {
 		reason := "当前外联级别不允许 Ookla"
-		result.Skip(reason)
+		result.Skip(model.NewMessage("probe.ookla.summary.skipped"))
 		appendOoklaSkipDetails(&result, reason, "请提高 --exposure 后重跑模块。")
 		result.Notes = append(result.Notes, "Ookla 不是 ecs 的零上传探针；其客户端会按自身条款处理测量元数据。")
 		result.Evidence = model.NewEvidence(0, 1, "run")
@@ -85,7 +85,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("speedtest")
 	if err != nil {
 		reason := "未找到官方 speedtest 客户端"
-		result.Skip(reason)
+		result.Skip(model.NewMessage("probe.ookla.summary.skipped"))
 		addFailure(&result, "tool_lookup", "speedtest", err)
 		appendOoklaSkipDetails(&result, reason, "直接运行 ecs 请先从 Ookla 官方渠道安装；也可用 run.sh 按需准备后重跑。")
 		result.Notes = append(result.Notes, "直接运行 ecs 不会自动安装 Ookla 客户端；run.sh 会在选中 Ookla 且客户端缺失时，从 Ookla 官方签名包源按需准备（ECS_AUTO_DEPS=0 可关闭）。")
@@ -126,7 +126,6 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	successes := 0
 	validResults := 0
-	var summaries []string
 	for _, target := range servers {
 		targetArgs := append([]string(nil), args...)
 		if target.ID > 0 {
@@ -173,7 +172,6 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		table.Rows = append(table.Rows, []string{label, serverName, ooklaLatencyDisplay(parsed.Ping.Latency), ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth), ooklaPacketLossDisplay(parsed), status})
 		if hasMetric {
 			validResults++
-			summaries = append(summaries, fmt.Sprintf("%s 下载 %s / 上传 %s", label, ooklaBandwidthDisplay(parsed.Download.Bandwidth), ooklaBandwidthDisplay(parsed.Upload.Bandwidth)))
 			if complete && runErr == nil {
 				successes++
 			}
@@ -199,14 +197,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Tables = []model.Table{table}
 	result.Evidence = model.NewEvidence(validResults, len(servers), "run")
-	if successes == 0 && len(summaries) == 0 {
+	if successes == 0 && validResults == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "Ookla 没有返回可用测速结果"
 	} else if len(result.Measurements) == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "Ookla 返回 JSON，但没有可用测速指标"
-	} else {
-		result.Summary = strings.Join(summaries, " · ")
 	}
 	result.Sources = []model.Source{{
 		Name:    "Ookla Speedtest",

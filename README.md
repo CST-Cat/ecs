@@ -32,8 +32,10 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s
 安装发行二进制：
 
 ```sh
-ECS_REPOSITORY=CST-Cat/ecs ./install.sh
-ECS_REPOSITORY=CST-Cat/ecs ./install.sh --with-benchmarks
+./install.sh
+./install.sh --with-benchmarks
+# 使用镜像或派生仓库时覆盖默认仓库
+ECS_REPOSITORY=owner/ecs ./install.sh
 ./install.sh --from ./bin/ecs
 ```
 

@@ -26,48 +26,48 @@ func sampleReport() model.Report {
 			DurationMS: 1000, Exposure: "local", Offline: true, IPVersion: "6", Redacted: true,
 			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json", "md"},
 		},
-		Summary:      model.Summary{Status: model.StatusOK, OK: 1, Headline: "1 项测试完成"},
-		Notices:      []string{"probe.memory.stream_missing", "系统"},
+		Summary:      model.Summary{Status: model.StatusOK, OK: 1, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
+		Notices:      []model.Message{model.NewMessage("probe.memory.stream_missing"), model.NewMessage("module.system.title")},
 		SensitiveIPs: []string{"192.0.2.10"},
 		Results: []model.Result{{
-			ID: "system", Title: "系统", Description: "资源快照；不是性能基准", Status: model.StatusOK,
-			StartedAt: start, DurationMS: 20, Summary: "完成", Error: "失败",
+			ID: "system", Title: "module.system.title", Description: "probe.system.description", Status: model.StatusOK,
+			StartedAt: start, DurationMS: 20, SummaryMessages: []model.Message{model.NewMessage("probe.network.summary.values", "sample=ok")}, Error: "raw failure",
 			Methodology: model.Methodology{
-				Kind: "inventory", Label: "事实采集", Engine: "事实采集", Profile: "系统",
-				ComparisonScope: "资源快照；不是性能基准",
+				Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory", Profile: "probe.system.profile",
+				ComparisonScope: "probe.system.comparison_scope",
 				Parameters:      map[string]string{"scope_revision": "1", "workload": "standard"},
 			},
 			Fields: []model.Field{
-				{Key: "state", Label: "系统", Value: "完成"},
-				{Key: "secret", Label: "说明", Value: "token", Sensitive: true},
+				{Key: "state", Label: "probe.system.field.hostname", Value: "probe.network.status.ok"},
+				{Key: "secret", Label: "probe.system.field.os", Value: "token", Sensitive: true},
 			},
 			Measurements: []model.Measurement{{
-				Key: "events", Label: "单线程事件率", Value: 780, Unit: "events/s", Display: "完成",
-				Rating: "完成", Method: "sysbench-v1", HigherIsBetter: &higher,
+				Key: "events", Label: "probe.system.metric.logical_cpus", Value: 780, Unit: "events/s", Display: "780",
+				Rating: "probe.network.status.ok", Method: "sysbench-v1", HigherIsBetter: &higher,
 			}},
 			Tables: []model.Table{{
-				Key: "system.state", Title: "当前值", Columns: []string{"状态", "数值"},
-				ColumnKeys: []string{"state", "value"}, RowIdentity: "state", Rows: [][]string{{"完成", "780"}},
+				Key: "system.state", Title: "probe.system.pressure.table.title", Columns: []string{"probe.system.pressure.column.resource", "probe.system.pressure.column.cumulative_events"},
+				ColumnKeys: []string{"state", "value"}, RowIdentity: "state", Rows: [][]string{{"probe.network.status.ok", "780"}},
 				NumericColumns: []int{1}, NumericHigherIsBetter: []bool{true}, SensitiveColumns: []int{0},
 			}},
 			TextBlocks: []model.TextBlock{{Title: "说明", Language: "en", Content: "raw output 192.0.2.10", Sensitive: true}},
-			Notes:      []string{"系统"},
-			Sources:    []model.Source{{Name: "kernel", URL: "https://example.test/source", Purpose: "说明"}},
+			Notes:      []string{"probe.system.note.partial_inventory"},
+			Sources:    []model.Source{{Name: "kernel", URL: "https://example.test/source", Purpose: "probe.system.note.hardware_privacy"}},
 			Evidence:   &model.Evidence{Valid: 1, Expected: 2, Unit: "sample", Grade: model.EvidenceInsufficient},
 			Failures: []model.Failure{{
 				Category: model.FailureTimeout, Stage: "fetch", Target: "api.example", Retryable: true,
 				Count: 1, Message: "raw timeout",
 			}},
 			Retry: &model.RetryInfo{
-				Triggered: true, SelectedAttempt: 1, SelectionRule: "系统", TriggerReasons: []string{"系统", "完成"},
+				Triggered: true, SelectedAttempt: 1, SelectionRule: model.NewMessage("probe.retry.selection_rule.interference_score"), TriggerReasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory"), model.NewMessage("probe.network.status.ok")},
 				Attempts: []model.RetryAttempt{{
 					Number: 1, Status: model.StatusWarning, DurationMS: 5,
 					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt", Grade: model.EvidenceComplete},
 					Interference: model.Interference{
-						Detected: true, Score: 1, Reasons: []string{"系统"},
-						Measurements: []model.Measurement{{Key: "load", Label: "系统", Value: 1, Unit: "load", Display: "完成", HigherIsBetter: &lower}},
+						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
+						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: "1", HigherIsBetter: &lower}},
 					},
-					Measurements: []model.Measurement{{Key: "events", Label: "单线程事件率", Value: 700, Unit: "events/s", Display: "完成", HigherIsBetter: &higher}},
+					Measurements: []model.Measurement{{Key: "events", Label: "probe.system.metric.logical_cpus", Value: 700, Unit: "events/s", Display: "700", HigherIsBetter: &higher}},
 				}},
 			},
 		}},
@@ -81,7 +81,7 @@ func writeReportFile(t *testing.T, path string, content []byte) {
 	}
 }
 
-func TestWriteFilesCanonicalAndLocalizedOutputs(t *testing.T) {
+func TestWriteFilesCanonicalAndLanguageSpecificOutputs(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
@@ -121,11 +121,11 @@ func TestWriteFilesCanonicalAndLocalizedOutputs(t *testing.T) {
 			continue
 		}
 		output := string(content)
-		if !strings.Contains(output, "Done") || !strings.Contains(output, "raw output 192.0.2.10") || !strings.Contains(output, "raw timeout") {
+		if !strings.Contains(output, "Hostname") || !strings.Contains(output, "raw output 192.0.2.10") || !strings.Contains(output, "raw timeout") {
 			t.Fatalf("localized %s output lost translated display or raw evidence:\n%s", format, output)
 		}
 	}
-	if data.Results[0].Fields[0].Value != "完成" || data.Results[0].Tables[0].Rows[0][0] != "完成" {
+	if data.Results[0].Fields[0].Value != "probe.network.status.ok" || data.Results[0].Tables[0].Rows[0][0] != "probe.network.status.ok" {
 		t.Fatal("WriteFiles mutated the canonical report")
 	}
 	fallbackWritten, err := WriteFilesWithOptions(data, t.TempDir(), "...", []string{"json"}, Options{})
@@ -271,8 +271,11 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 
 	partialDirectory := t.TempDir()
 	written, err := WriteFiles(data, partialDirectory, "report", []string{"json", "bogus"})
-	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(written) != 1 || written["json"] == "" {
+	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(written) != 0 {
 		t.Fatalf("partial unknown-format result = %v, %v", written, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(partialDirectory, "report.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("renderer failure left a partial JSON file: %v", statErr)
 	}
 
 	invalid := sampleReport()

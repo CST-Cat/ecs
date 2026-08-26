@@ -1,0 +1,43 @@
+package probe
+
+import (
+	"testing"
+
+	"ecs/internal/model"
+)
+
+func TestStabilizeDiskResultUsesStructuredCellsNotLegacyStatusText(t *testing.T) {
+	result := model.NewResult("disk", "legacy-title")
+	result.Description = "legacy"
+	result.Fields = []model.Field{{Key: "engine", Label: "legacy-label", Value: "fio"}}
+	result.Measurements = []model.Measurement{{Key: "fio_sequential_write_mib_s", Label: "legacy-label", Value: 12, Display: "12 MiB/s"}}
+	result.Tables = []model.Table{{Key: "disk.fio.crystal", Title: "legacy-table", Columns: []string{"old"}, Rows: [][]string{{"RND4K/Q1", "1 MiB/s", "100 IOPS", "1 MiB/s", "100 IOPS", "0 s", "legacy-status-text"}}}}
+	result.TextBlocks = []model.TextBlock{{Title: "legacy", Content: "fio output"}}
+	result.Sources = []model.Source{{Name: "fio", Purpose: "legacy"}}
+	result.Evidence = model.NewEvidence(1, 2, "job")
+	stabilizeDiskResult(&result)
+	if result.Title != "module.disk.title" || result.Description != "probe.disk.description" {
+		t.Fatalf("disk header = %+v", result)
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.disk.summary.values" {
+		t.Fatalf("disk summary = %+v", result.SummaryMessages)
+	}
+	if result.Fields[0].Label != "probe.disk.field.engine" || result.Measurements[0].Label != "probe.disk.metric.fio_sequential_write_mib_s" {
+		t.Fatalf("disk metadata = fields:%+v measurements:%+v", result.Fields, result.Measurements)
+	}
+	if result.Tables[0].Title != "probe.disk.table.crystal" || result.Tables[0].Columns[0] != "probe.disk.column.workload" || result.Tables[0].Rows[0][6] != "probe.disk.status.complete" {
+		t.Fatalf("disk table = %+v", result.Tables[0])
+	}
+	if result.TextBlocks[0].Title != "probe.disk.raw_output" || result.Sources[0].Purpose != "probe.disk.source.fio" {
+		t.Fatalf("disk evidence metadata = %+v/%+v", result.TextBlocks, result.Sources)
+	}
+}
+
+func TestStabilizeDiskResultMarksMissingFromStructuredCells(t *testing.T) {
+	result := model.NewResult("disk", "legacy-title")
+	result.Tables = []model.Table{{Key: "disk.fio.atto", Rows: [][]string{{"4K", "—", "—", "—", "—", "3 s", "0 s", "legacy-status-text"}}}}
+	stabilizeDiskResult(&result)
+	if got := result.Tables[0].Rows[0][7]; got != "probe.disk.status.missing" {
+		t.Fatalf("disk missing status = %q", got)
+	}
+}

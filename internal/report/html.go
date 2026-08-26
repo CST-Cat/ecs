@@ -24,24 +24,24 @@ type htmlTableCell struct {
 	Class string
 }
 
-// HTML 渲染独立调用方传入的报告，会先做一次本地化。
+// HTML renders the machine report directly; stable keys are resolved by the
+// template functions at the individual presentation fields.
 func HTML(data model.Report, scored *score.Report) ([]byte, error) {
-	return htmlLocalized(Localize(data), scored)
+	return htmlReport(data, scored)
 }
 
-// htmlLocalized 渲染一份**已经本地化过**的报告。
-//
-// WriteFiles 已经在写文件前统一本地化过一次；英文模式下 Localize 要遍历整棵
-// 报告树、对每个字符串做多级正则模板匹配，重复三遍（html/markdown/text 各一次）
-// 是纯粹的浪费。
-func htmlLocalized(data model.Report, scored *score.Report) ([]byte, error) {
+func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
-		"t":           i18n.T,
-		"htmlLang":    reportHTMLLanguage,
-		"methodology": localizedMethodology,
-		"statusLabel": statusLabel,
-		"statusIcon":  statusIcon,
-		"duration":    formatDurationMS,
+		"t":             i18n.T,
+		"display":       displayReportText,
+		"summaryText":   reportSummaryText,
+		"resultSummary": resultSummary,
+		"message":       renderMessage,
+		"htmlLang":      reportHTMLLanguage,
+		"methodology":   localizedMethodology,
+		"statusLabel":   statusLabel,
+		"statusIcon":    statusIcon,
+		"duration":      formatDurationMS,
 		"time": func(value time.Time) string {
 			return value.Format("2006-01-02 15:04:05 MST")
 		},
@@ -102,7 +102,9 @@ func htmlLocalized(data model.Report, scored *score.Report) ([]byte, error) {
 		},
 		"dimensionName": func(key string) string { return i18n.T("score.dimension." + key) },
 		"resultTitle":   resultTitle,
-		"tableRows":     htmlTableRows,
+		"tableRows": func(table model.Table) [][]htmlTableCell {
+			return htmlTableRows(displayTable(table))
+		},
 		"metricName": func(metric score.MetricScore) string {
 			return metricLabel(metric)
 		},
@@ -143,7 +145,10 @@ func htmlLocalized(data model.Report, scored *score.Report) ([]byte, error) {
 			}
 			return fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", "))
 		},
-		"baselineSource": baselineSourceLabel,
+		"baselineSource":   baselineSourceLabel,
+		"interferenceView": interferencePresentation,
+		"retryView":        retryPresentation,
+		"textBlockTitle":   displayTextBlockTitle,
 	}
 	parsed, err := template.New("report").Funcs(functions).Parse(htmlTemplate)
 	if err != nil {
@@ -211,7 +216,7 @@ const htmlTemplate = `<!doctype html>
     .methodology { margin: 14px 0 0; padding: 11px 13px; border-left: 3px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--panel) 93%, var(--accent)); }
     .methodology strong { color: var(--accent); }
     .ok { color: var(--ok); } .warning { color: var(--warn); } .error { color: var(--error); } .skipped { color: var(--skip); }
-    .headline { margin: 16px 0 0; font-size: 17px; font-weight: 650; }
+    .summary-text { margin: 16px 0 0; font-size: 17px; font-weight: 650; }
     .evidence { display: grid; grid-template-columns: minmax(130px,auto) minmax(120px,320px); align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 13px; }
 		.failure-kind { font-weight: 750; color: var(--error); }
 		.retryable { color: var(--warn); font-weight: 650; }
@@ -274,7 +279,7 @@ const htmlTemplate = `<!doctype html>
 <main>
   <header class="hero">
     <h1>{{t "report.title"}}</h1>
-    <p>{{statusIcon .Summary.Status}} {{.Summary.Headline}} · {{t "report.local"}}</p>
+    <p>{{statusIcon .Summary.Status}} {{summaryText .Summary}} · {{t "report.local"}}</p>
     <div class="hero-meta">
       <span class="pill">{{t "report.reportID"}} {{.Run.ID}}</span>
       <span class="pill">{{t "report.profile"}}: {{.Run.Profile}}</span>
@@ -296,7 +301,7 @@ const htmlTemplate = `<!doctype html>
   {{range .Results}}
   <section id="{{.ID}}">
     <div class="section-head">
-      <div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{.Description}}</p>{{end}}</div>
+      <div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{display .Description}}</p>{{end}}</div>
       <div class="badges">
         {{if .Methodology.Label}}<span class="badge method-badge">{{methodology .Methodology}}</span>{{end}}
         <span class="badge {{.Status}}">{{statusIcon .Status}} {{statusLabel .Status}}</span>
@@ -304,12 +309,12 @@ const htmlTemplate = `<!doctype html>
     </div>
     {{if .Methodology.Label}}
     <div class="methodology"><strong>{{methodology .Methodology}}</strong>
-      {{if .Methodology.Engine}} · {{.Methodology.Engine}}{{end}}
-      {{if .Methodology.Profile}} · <code>{{.Methodology.Profile}}</code>{{end}}
-      {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{.Methodology.ComparisonScope}}</div>{{end}}
+      {{if .Methodology.Engine}} · {{display .Methodology.Engine}}{{end}}
+      {{if .Methodology.Profile}} · <code>{{display .Methodology.Profile}}</code>{{end}}
+      {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{display .Methodology.ComparisonScope}}</div>{{end}}
     </div>
     {{end}}
-    {{if .Summary}}<p class="headline">{{.Summary}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
+    {{if resultSummary .}}<p class="summary-text">{{resultSummary .}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
     {{if .Error}}<p class="error">{{t "report.errorPrefix"}}{{t "punct.colon"}}{{.Error}}</p>{{end}}
     {{if .Evidence}}<div class="evidence"><strong style="color:{{evidenceLabelColor .Evidence}}">{{t "report.evidence"}}{{t "punct.colon"}}{{evidenceText .Evidence}}</strong><div class="bar"><i style="width:{{barWidth (evidenceRatio .Evidence)}}%;background:{{evidenceColor .Evidence}}"></i></div></div>{{end}}
 		{{if .Failures}}
@@ -323,12 +328,38 @@ const htmlTemplate = `<!doctype html>
 		</tr>{{end}}</tbody></table></div>
 		{{end}}
 
+    {{with interferenceView .}}
+    <h3>{{.Title}}</h3>
+    <p><strong>{{.ScoreLabel}}{{t "punct.colon"}}</strong> {{.Score}}</p>
+    {{if .Measurements}}
+    <div class="table-wrap"><table><thead><tr>
+      <th>{{t "report.interference.metric"}}</th><th>{{t "report.interference.value"}}</th><th>{{t "report.interference.method"}}</th>
+    </tr></thead><tbody>{{range .Measurements}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Method}}</td></tr>{{end}}</tbody></table></div>
+    {{end}}
+    <h3>{{.ReasonsTitle}}</h3><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+
+    {{with retryView .}}
+    <h3>{{.Title}}</h3>
+    <p><strong>{{.SelectionRuleLabel}}{{t "punct.colon"}}</strong> {{.SelectionRule}}</p>
+    <p><strong>{{.TriggerReasonsLabel}}{{t "punct.colon"}}</strong></p>
+    <ul>{{range .TriggerReasons}}<li>{{.}}</li>{{end}}</ul>
+    <h3>{{.AttemptsLabel}}</h3>
+    <div class="table-wrap"><table><thead><tr>
+      <th>{{t "report.retry.attempt"}}</th><th>{{t "report.retry.status"}}</th><th>{{t "report.retry.evidence"}}</th>
+      <th>{{t "report.retry.score"}}</th><th>{{t "report.retry.reasons"}}</th><th>{{t "report.retry.selection"}}</th>
+    </tr></thead><tbody>{{range .Attempts}}<tr>
+      <td>{{.Number}}</td><td>{{.Status}}</td><td>{{.Evidence}}</td><td>{{.Score}}</td><td>{{.Reasons}}</td>
+      <td class="{{if .Selected}}ok{{else}}muted{{end}}">{{.Selection}}</td>
+    </tr>{{end}}</tbody></table></div>
+    {{end}}
+
     {{if .Measurements}}
     <div class="metrics">
       {{range .Measurements}}
       <div class="metric">
-        <div class="label">{{.Label}}{{if .Rating}} · {{.Rating}}{{end}}</div>
-        <div class="value">{{.Display}}</div>
+        <div class="label">{{display .Label}}{{if .Rating}} · {{display .Rating}}{{end}}</div>
+        <div class="value">{{display .Display}}</div>
         {{if .Method}}<div class="method">{{.Method}}</div>{{end}}
       </div>
       {{end}}
@@ -337,22 +368,22 @@ const htmlTemplate = `<!doctype html>
 
     {{if .Fields}}
     <h3>{{t "report.details"}}</h3>
-    <dl class="fields">{{range .Fields}}<div class="field"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+    <dl class="fields">{{range .Fields}}<div class="field"><dt>{{display .Label}}</dt><dd>{{display .Value}}</dd></div>{{end}}</dl>
     {{end}}
 
     {{range .Tables}}
-    {{if .Title}}<h3>{{.Title}}</h3>{{end}}
-    <div class="table-wrap"><table><thead><tr>{{range .Columns}}<th>{{.}}</th>{{end}}</tr></thead>
+    {{if .Title}}<h3>{{display .Title}}</h3>{{end}}
+    <div class="table-wrap"><table><thead><tr>{{range .Columns}}<th>{{display .}}</th>{{end}}</tr></thead>
       <tbody>{{range tableRows .}}<tr>{{range .}}<td class="{{.Class}}">{{.Value}}</td>{{end}}</tr>{{end}}</tbody>
     </table></div>
     {{end}}
 
     {{range .TextBlocks}}
-    <details><summary>{{if .Title}}{{.Title}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
+    <details><summary>{{if textBlockTitle .}}{{textBlockTitle .}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
     {{end}}
 
-    {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{.}}</li>{{end}}</ul>{{end}}
-    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{.Name}}</a>{{else}}{{.Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{.Purpose}}{{end}}</li>{{end}}</ul>{{end}}
+    {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{display .}}</li>{{end}}</ul>{{end}}
+    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{display .Name}}</a>{{else}}{{display .Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{display .Purpose}}{{end}}</li>{{end}}</ul>{{end}}
   </section>
   {{end}}
 
@@ -392,7 +423,7 @@ const htmlTemplate = `<!doctype html>
   {{end}}
 
   <footer>
-    <p>{{range .Notices}}{{.}} · {{end}}</p>
+    <p>{{range .Notices}}{{message .}} · {{end}}</p>
     <p>{{t "report.schema"}}: {{.SchemaVersion}} · {{t "report.generator"}}: {{.Tool.Name}} {{.Tool.Version}}{{if .Tool.Commit}} · {{t "report.commit"}}: {{.Tool.Commit}}{{end}}</p>
   </footer>
 </main>

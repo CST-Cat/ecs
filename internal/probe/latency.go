@@ -214,7 +214,6 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		NumericHigherIsBetter: []bool{false, false, false, false, false, false, false, false, false},
 	}
 	var best time.Duration
-	var bestName string
 	allFailed := true
 	var intercepted []string
 	validSamples := 0
@@ -230,7 +229,6 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			allFailed = false
 			if best == 0 || median < best {
 				best = median
-				bestName = item.Endpoint.Name
 			}
 		}
 		resolveText := formatMilliseconds(item.ResolveTime)
@@ -311,14 +309,12 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Evidence = model.NewEvidence(validSamples, len(collected)*attempts, "sample")
 	if allFailed {
 		result.Status = model.StatusWarning
-		result.Summary = "全部 TCP 延迟目标不可达"
 	} else {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "best_tcp_median_ms", Label: "最佳 TCP P50",
 			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
 			Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
 		})
-		result.Summary = fmt.Sprintf("%s 最快 · P50 %s", bestName, formatMilliseconds(best))
 	}
 	result.Notes = append(result.Notes,
 		"每个目标只解析一次 DNS，之后固定对该 IP 建连；表中的 TCP 延迟只包含三次握手，解析耗时单列。",

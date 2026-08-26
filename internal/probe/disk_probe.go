@@ -29,8 +29,7 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 			ComparisonScope: "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
 		}
 		result.Status = model.StatusWarning
-		result.Summary = "未找到 fio，标准磁盘基准未运行"
-		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "fio", Count: 1, Message: result.Summary})
+		addFailure(&result, "tool_lookup", "fio", err)
 		result.Evidence = model.NewEvidence(0, len(fioJobPlan()), "job")
 		result.Notes = append(result.Notes, "probe.disk.tool_missing")
 	}

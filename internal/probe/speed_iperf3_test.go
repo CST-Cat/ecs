@@ -4,11 +4,38 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"ecs/internal/config"
+	"ecs/internal/model"
 )
+
+func TestSpeedMissingToolPreservesRawLookPathError(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, expectedErr := exec.LookPath("iperf3")
+	if expectedErr == nil {
+		t.Fatal("fixture PATH unexpectedly contains iperf3")
+	}
+
+	direct := (speedProbe{}).Run(context.Background(), Environment{})
+	if len(direct.Failures) != 1 {
+		t.Fatalf("missing-tool failures = %#v", direct.Failures)
+	}
+	failure := direct.Failures[0]
+	if failure.Category != model.FailureToolMissing || failure.Stage != "tool_lookup" || failure.Target != "iperf3" || failure.Message != expectedErr.Error() {
+		t.Fatalf("missing-tool failure lost typed lookup error: %#v, want %q", failure, expectedErr.Error())
+	}
+
+	semantic := (speedSemanticProbe{}).Run(context.Background(), Environment{})
+	if len(semantic.SummaryMessages) != 1 || semantic.SummaryMessages[0].Key != "probe.speed.summary.tool_missing" {
+		t.Fatalf("missing-tool summary = %#v", semantic.SummaryMessages)
+	}
+	if len(semantic.Failures) != 1 || semantic.Failures[0].Message != expectedErr.Error() {
+		t.Fatalf("semantic adapter changed raw lookup error: %#v", semantic.Failures)
+	}
+}
 
 func TestIPerfJSONParsersAndDirectionDiagnostics(t *testing.T) {
 	forward := parseIPerfTCPJSON([]byte(`{

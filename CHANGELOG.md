@@ -1,7 +1,7 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.7.8` 及后续 `Unreleased` 的主要变化。
+`v0.1.0` 到 `v0.7.9` 及后续 `Unreleased` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -9,7 +9,14 @@
 
 ## Unreleased
 
-（暂无未发布变更；后续修改请先记录在此处，发布 tag 前移入对应版本章节。）
+后续变更记录将在这里补充。
+
+## 0.7.9 — 2026-08-26
+
+- Probe 与报告边界改为稳定机器语义：内建探针的标题、字段、表格、状态和摘要以 stable key/Message 保存，JSON 不再依赖中文原文；`render`、Markdown、HTML 和终端展示在输出边界直接按当前语言渲染，中英文重渲染不改变机器数据。
+- `ecs plan --json` 成为运行计划的机器接口，`run.sh` 只负责下载校验、按计划 staging 工具并执行；模块的干扰重试策略写入 descriptor/plan，报告多格式改为全部成功渲染后再写文件，避免留下半套输出。
+- 新增 `tools/lock.json` 统一架构、工具版本/tag/commit、STREAM、NPB 与 Silesia corpus 的固定事实；工具构建按工具拆分到 `scripts/tools/`，staticcheck 缓存绑定 `devtools/go.mod` 与 `go.sum` 摘要，发布/语料校验复用同一锁定事实。
+- 安装器默认使用 `CST-Cat/ecs`，仍可用 `ECS_REPOSITORY` 覆盖；`--with-benchmarks` 继续是安装 sysbench、fio、iperf3 的显式 opt-in。新增独立的定时/手动 `govulncheck` workflow，安全扫描不接入 `ci.required`；排行榜 workflow 排除自身生成的 baseline，改为监听实际聚合算法入口。
 
 ## 0.7.8 — 2026-08-20
 

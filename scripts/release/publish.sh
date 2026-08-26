@@ -96,7 +96,7 @@ printf '\n\n---\n完整版本历史：[CHANGELOG.md](%s)\n' \
 echo "release-publish: 已从 CHANGELOG.md 取出 $version 的发布说明" >&2
 
 # ---- 资产清单 ----
-assets=(checksums.txt ecs-corpus_silesia-v1.tar.gz)
+assets=(checksums.txt "$ECS_CORPUS_ARCHIVE")
 for arch in "${ECS_ARCHES[@]}"; do
   assets+=("ecs_linux_${arch}.tar.gz" "ecs-tools_linux_${arch}.tar.gz")
 done

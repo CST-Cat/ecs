@@ -207,7 +207,6 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	if validRuns < expectedRuns {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = npbSummary(specs, runs, workers)
 	result.Finish(start)
 	return result
 }
@@ -468,25 +467,4 @@ func npbResultsTable(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSam
 		}
 	}
 	return table
-}
-
-func npbSummary(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSample, workers int) string {
-	parts := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		samples := runs[spec.Name]
-		if workers <= 1 && len(samples) >= 1 && samples[0].MOPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1T/NT（同一次实测）%s · 扩展不适用",
-				spec.Name, model.FormatRate(samples[0].MOPS, "Mop/s")))
-		} else if len(samples) >= 2 && samples[0].MOPS > 0 && samples[1].MOPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1T %s · %dT %s · %.2f×",
-				spec.Name, model.FormatRate(samples[0].MOPS, "Mop/s"), workers,
-				model.FormatRate(samples[1].MOPS, "Mop/s"), samples[1].MOPS/samples[0].MOPS))
-		} else if len(samples) > 0 && samples[0].MOPS > 0 {
-			parts = append(parts, spec.Name+" 1T "+model.FormatRate(samples[0].MOPS, "Mop/s"))
-		}
-	}
-	if len(parts) == 0 {
-		return "NPB EP/FT 未产出有效 Class A Mop/s"
-	}
-	return strings.Join(parts, " · ")
 }

@@ -7,6 +7,7 @@ package i18n
 
 var cliChinese = map[string]string{
 	"flag.interactive":     "启动交互向导（无终端时自动跳过）",
+	"flag.planJSON":        "输出机器可读的执行计划 JSON",
 	"flag.yes":             "跳过交互向导，直接按当前参数运行",
 	"wizard.aborted":       "已取消。",
 	"wizard.askIPQuality":  "检测多源 IP 质量？会把出口 IP 发给 13 个数据源",
@@ -80,7 +81,7 @@ var cliChinese = map[string]string{
 	"baseline.strictFailure":     "严格模式拒绝 %s：%v",
 	"baseline.missingMetrics":    "这批报告未覆盖的指标：",
 	"flag.backtraceCity":         "三网回程测试城市：beijing、guangzhou、shanghai、chengdu 或 all（默认 beijing,guangzhou）",
-	"flag.backtraceTargets":      "覆盖三网回程目标：[名称=]IP/域名，逗号分隔",
+	"flag.backtraceTargets":      "覆盖三网回程目标：carrier:名称=IP/域名（carrier 只能是 telecom、unicom、mobile），逗号分隔",
 	"flag.config":                "JSON 配置文件",
 	"flag.cpuTime":               "每轮 CPU/内存测试时长",
 	"flag.diskMiB":               "磁盘临时文件 MiB",
@@ -123,6 +124,7 @@ var cliChinese = map[string]string{
 	"help.extraArgs":             "错误: 多余参数",
 	"help.renderInputRequired":   "错误: --input 必填",
 	"help.runUsage":              "用法: ecs [run] [选项]",
+	"help.planUsage":             "用法: ecs plan --json [run 选项]",
 	"help.usageConfig":           "ecs config example          输出配置文件示例",
 	"help.usageDoctor":           "ecs doctor                  检查标准基准工具",
 	"help.usageList":             "ecs list                    查看配置档与模块",
@@ -159,6 +161,7 @@ var cliChinese = map[string]string{
 }
 
 var cliEnglish = map[string]string{
+	"flag.planJSON":              "print the machine-readable execution plan as JSON",
 	"flag.baselineAnnotate":      "emit GitHub Actions check annotations so outliers show up in the check page",
 	"flag.baselineVerbose":       "also list tier/metric combinations with too few samples to judge",
 	"flag.baselineStrict":        "fail on invalid inputs without writing a baseline file",
@@ -233,7 +236,7 @@ var cliEnglish = map[string]string{
 	"doctor.ready":             "ready",
 	"doctor.unknownVersion":    "version unknown",
 	"flag.backtraceCity":       "China return-path cities: beijing, guangzhou, shanghai, chengdu or all (default beijing,guangzhou)",
-	"flag.backtraceTargets":    "override China return targets: [name=]IP/hostname, comma-separated",
+	"flag.backtraceTargets":    "override China return targets: carrier:Name=IP/hostname (carrier must be telecom, unicom, or mobile), comma-separated",
 	"flag.config":              "JSON configuration file",
 	"flag.cpuTime":             "duration of each CPU/memory run",
 	"flag.diskMiB":             "disk temp file size in MiB",
@@ -276,6 +279,7 @@ var cliEnglish = map[string]string{
 	"help.extraArgs":           "error: unexpected arguments",
 	"help.renderInputRequired": "error: --input is required",
 	"help.runUsage":            "Usage: ecs [run] [options]",
+	"help.planUsage":           "Usage: ecs plan --json [run options]",
 	"help.usageConfig":         "ecs config example          print a sample configuration",
 	"help.usageDoctor":         "ecs doctor                  check the standard benchmark tools",
 	"help.usageList":           "ecs list                    show profiles and modules",

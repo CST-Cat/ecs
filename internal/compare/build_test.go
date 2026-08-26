@@ -108,7 +108,7 @@ func TestBuildValidationAndReference(t *testing.T) {
 	}
 }
 
-func TestBuildInputsNoticesAndCanonicalParsing(t *testing.T) {
+func TestBuildInputsAndStructuredNotices(t *testing.T) {
 	reports := []model.Report{
 		comparisonTestReport("one", 10, "m-v1", "same", "rate", true),
 		comparisonTestReport("two", 10, "m-v1", "same", "rate", true),
@@ -140,29 +140,15 @@ func TestBuildInputsNoticesAndCanonicalParsing(t *testing.T) {
 	if !reflect.DeepEqual(data.SchemaVersions(), []string{"ecs.report/v1", "ecs.report/v2"}) || data.Summary.Comparability != PartiallyComparable {
 		t.Fatalf("schema handling = %v, %+v", data.SchemaVersions(), data.Summary)
 	}
-	expectedNotices := []struct {
-		key  string
-		args []string
-	}{
-		{key: "compare.notice.schemaMixed", args: []string{"ecs.report/v1, ecs.report/v2"}},
-		{key: "compare.notice.toolMixed", args: []string{"1, 2"}},
-		{key: "compare.notice.scope"},
-		{key: "compare.notice.relative"},
-		{key: "compare.notice.observation"},
+	expectedNotices := []Notice{
+		{Key: "compare.notice.schemaMixed", Args: []string{"ecs.report/v1, ecs.report/v2"}},
+		{Key: "compare.notice.toolMixed", Args: []string{"1, 2"}},
+		{Key: "compare.notice.scope"},
+		{Key: "compare.notice.relative"},
+		{Key: "compare.notice.observation"},
 	}
-	if len(data.Notices) != len(expectedNotices) {
-		t.Fatalf("canonical notices = %v, want %d entries", data.Notices, len(expectedNotices))
-	}
-	for index, want := range expectedNotices {
-		key, args, ok := ParseNotice(data.Notices[index])
-		if !ok || key != want.key || !reflect.DeepEqual(args, want.args) {
-			t.Fatalf("canonical notice[%d] = %q (%q, %#v, %v), want %q %#v", index, data.Notices[index], key, args, ok, want.key, want.args)
-		}
-	}
-	for _, value := range []string{"", "::[]", "key::not-json"} {
-		if _, _, ok := ParseNotice(value); ok {
-			t.Errorf("ParseNotice(%q) unexpectedly succeeded", value)
-		}
+	if !reflect.DeepEqual(data.Notices, expectedNotices) {
+		t.Fatalf("structured notices = %#v, want %#v", data.Notices, expectedNotices)
 	}
 
 	defaults, err := Build(reports, Options{})
@@ -177,10 +163,9 @@ func TestBuildInputsNoticesAndCanonicalParsing(t *testing.T) {
 	}
 }
 
-func hasNoticeKey(notices []string, want string) bool {
+func hasNoticeKey(notices []Notice, want string) bool {
 	for _, notice := range notices {
-		key, _, ok := ParseNotice(notice)
-		if ok && key == want {
+		if notice.Key == want {
 			return true
 		}
 	}

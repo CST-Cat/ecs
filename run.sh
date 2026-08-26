@@ -323,7 +323,7 @@ ZSTD_CORPUS_CHECKSUMS_FILE="$WORK/ecs-corpus-checksums.txt"
 ZSTD_CORPUS_EXTRACT_ROOT="$WORK/zstd-corpus"
 
 # Install the cleanup trap as soon as WORK exists.  This also covers argument
-# validation and manifest failures that happen before the test body starts.
+# validation and execution-plan failures that happen before the test body starts.
 cleanup() {
   exit_status=$?
   trap - EXIT INT TERM HUP
@@ -947,144 +947,80 @@ install_ookla() {
   esac
 }
 
-# 从命令行预读会影响依赖规划的选项。带 --config 时配置文件可能改写模块，
-# 因而按完整配置准备，避免先删掉用户实际需要的工具。
-PROFILE=standard
-ONLY=""
-SKIP=""
-# 只需要区分"完全不联网"：public 及以上的依赖集完全相同（network 与 standard
-# 默认包含的 cnspeed 都是纯 HTTP，不需要外部程序）。
-# full 或显式 --only ookla 时，speedtest 进入依赖规划。
-LOCAL_ONLY=0
-CONFIG_GIVEN=0
-EXPECT=""
-# The downloaded binary is the source of truth for module/profile membership
-# and tool metadata.  The manifest is required after download so a stale
-# wrapper can never silently prepare the wrong dependency set.
-MODULE_MANIFEST=0
-MODULE_STANDARD_MODULES=""
-MODULE_FULL_MODULES=""
-MODULE_ALL_MODULES=""
-MODULE_EXPOSURES=""
-MODULE_TOOLS=""
-for arg in "$@"; do
-  if [ -n "$EXPECT" ]; then
-    case "$EXPECT" in
-      profile) PROFILE="$arg" ;;
-      only) ONLY="$arg" ;;
-      skip) SKIP="$arg" ;;
-      config) CONFIG_GIVEN=1 ;;
-      exposure) [ "$arg" = "local" ] && LOCAL_ONLY=1 ;;
-    esac
-    EXPECT=""
-    continue
+# Module selection and required tools come from the downloaded binary's
+# `plan --json` output. The wrapper does not interpret profile, only, skip,
+# config, or exposure flags itself.
+PLAN_FILE="$WORK/execution.plan.json"
+PLAN_SCHEMA=""
+PLAN_PROFILE=""
+PLAN_MODULES=""
+PLAN_EXPOSURE=""
+PLAN_REVEAL=""
+PLAN_TOOLS=""
+
+# Read only the machine plan emitted by the downloaded binary. The JSON is
+# intentionally simple and stable: values extracted here are module/tool IDs,
+# not user-facing text.
+load_execution_plan() {
+  plan_status=0
+  if [ -n "$INTERACTIVE" ]; then
+    if "${WORK}/ecs" plan --json "$@" "$INTERACTIVE" >"$PLAN_FILE"; then
+      plan_status=0
+    else
+      plan_status=$?
+    fi
+  else
+    if "${WORK}/ecs" plan --json "$@" >"$PLAN_FILE"; then
+      plan_status=0
+    else
+      plan_status=$?
+    fi
   fi
-  case "$arg" in
-    --profile) EXPECT=profile ;;
-    --profile=*) PROFILE="${arg#--profile=}" ;;
-    --only) EXPECT=only ;;
-    --only=*) ONLY="${arg#--only=}" ;;
-    --skip) EXPECT=skip ;;
-    --skip=*) SKIP="${arg#--skip=}" ;;
-    --config) EXPECT=config ;;
-    --config=*) CONFIG_GIVEN=1 ;;
-    --exposure) EXPECT=exposure ;;
-    --exposure=local) LOCAL_ONLY=1 ;;
+  [ "$plan_status" -eq 0 ] || exit "$plan_status"
+  [ -s "$PLAN_FILE" ] || exit 0
+  PLAN_SCHEMA=$(sed -n 's/^[[:space:]]*"schema_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLAN_FILE" | sed -n '1p')
+  [ "$PLAN_SCHEMA" = "ecs.plan/v1" ] ||
+    die "下载的 ecs 返回了不支持的执行计划 schema" "the downloaded ecs returned an unsupported execution-plan schema"
+  PLAN_EXPOSURE_COUNT=$(awk '/^  "exposure"[[:space:]]*:/ {count++} END {print count + 0}' "$PLAN_FILE")
+  [ "$PLAN_EXPOSURE_COUNT" -eq 1 ] ||
+    die "执行计划缺少或重复 exposure" "the execution plan has a missing or duplicate exposure"
+  PLAN_EXPOSURE=$(sed -n 's/^  "exposure"[[:space:]]*:[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*$/\1/p' "$PLAN_FILE")
+  case "$PLAN_EXPOSURE" in
+    local|public|thirdparty|any) ;;
+    *) die "执行计划的 exposure 非法（可选 local、public、thirdparty、any）" "the execution plan has an invalid exposure (choose local, public, thirdparty, or any)" ;;
   esac
-done
-
-if [ "$CONFIG_GIVEN" -eq 0 ]; then
-  case "$PROFILE" in
-    standard|full) ;;
-    *) die "未知配置档：$PROFILE，可选 standard、full" "unknown profile: $PROFILE; choose standard or full" ;;
+  PLAN_REVEAL_COUNT=$(awk '/^  "reveal"[[:space:]]*:/ {count++} END {print count + 0}' "$PLAN_FILE")
+  [ "$PLAN_REVEAL_COUNT" -eq 1 ] ||
+    die "执行计划缺少或重复 reveal" "the execution plan has a missing or duplicate reveal"
+  PLAN_REVEAL=$(sed -n 's/^  "reveal"[[:space:]]*:[[:space:]]*\([^,[:space:]]*\)[[:space:]]*,\{0,1\}[[:space:]]*$/\1/p' "$PLAN_FILE")
+  case "$PLAN_REVEAL" in
+    true|false) ;;
+    *) die "执行计划的 reveal 非法（必须是 true 或 false）" "the execution plan has an invalid reveal (it must be true or false)" ;;
   esac
-fi
-
-# Read the locale-independent descriptor manifest emitted by the downloaded
-# ecs binary.  Any missing header, malformed field, or incomplete profile is a
-# hard failure: continuing with a copied module list could install the wrong
-# packages or skip a newly added dependency.
-load_module_manifest() {
-  MODULE_MANIFEST=0
-  MODULE_STANDARD_MODULES=""
-  MODULE_FULL_MODULES=""
-  MODULE_ALL_MODULES=""
-  MODULE_EXPOSURES=""
-  MODULE_TOOLS=""
-  MANIFEST_FILE="$WORK/modules.manifest"
-  if ! "${WORK}/ecs" list --machine >"$MANIFEST_FILE" 2>/dev/null; then
-    return 1
-  fi
-  MANIFEST_HEADER=$(sed -n '1p' "$MANIFEST_FILE" 2>/dev/null || true)
-  [ "$MANIFEST_HEADER" = "ecs-module-manifest$(printf '\t')1" ] || return 1
-
-  manifest_standard=""
-  manifest_full=""
-  manifest_all=""
-  manifest_exposures=""
-  manifest_tools=""
-  manifest_valid=1
-  manifest_modules=0
-  while IFS="$(printf '\t')" read -r manifest_kind manifest_id manifest_field manifest_extra; do
-    case "$manifest_kind" in
-      profile)
-        case "$manifest_id" in
-          standard) manifest_standard="$manifest_field" ;;
-          full) manifest_full="$manifest_field" ;;
-          *) manifest_valid=0 ;;
-        esac
-        ;;
-      module)
-        case "$manifest_id" in
-          ""|*[!A-Za-z0-9_-]*) manifest_valid=0; continue ;;
-        esac
-        if list_contains "$manifest_all" "$manifest_id"; then
-          manifest_valid=0
-          continue
-        fi
-        case "$manifest_field" in
-          local|public|thirdparty|any) ;;
-          *) manifest_valid=0; continue ;;
-        esac
-        manifest_modules=$((manifest_modules + 1))
-        manifest_all="${manifest_all}${manifest_all:+,}${manifest_id}"
-        manifest_exposures="${manifest_exposures}${manifest_exposures:+
-}${manifest_id}$(printf '\t')${manifest_field}"
-        manifest_tools="${manifest_tools}${manifest_tools:+
-}${manifest_id}$(printf '\t')${manifest_extra}"
-        ;;
-      "ecs-module-manifest"|"")
-        # Header is checked above; an empty line is harmless.
-        ;;
-      *) manifest_valid=0 ;;
-    esac
-  done <"$MANIFEST_FILE"
-
-  [ "$manifest_valid" -eq 1 ] || return 1
-  [ "$manifest_modules" -gt 0 ] || return 1
-  [ -n "$manifest_standard" ] && [ -n "$manifest_full" ] || return 1
-  for profile_modules in "$manifest_standard" "$manifest_full"; do
-    profile_words=$(printf '%s' "$profile_modules" | tr ',' ' ')
-    for profile_module in $profile_words; do
-      list_contains "$manifest_all" "$profile_module" || return 1
-    done
-  done
-  MODULE_STANDARD_MODULES="$manifest_standard"
-  MODULE_FULL_MODULES="$manifest_full"
-  MODULE_ALL_MODULES="$manifest_all"
-  MODULE_EXPOSURES="$manifest_exposures"
-  MODULE_TOOLS="$manifest_tools"
-  MODULE_MANIFEST=1
-}
-
-manifest_exposure() {
-  [ "$MODULE_MANIFEST" -eq 1 ] || return 1
-  printf '%s\n' "$MODULE_EXPOSURES" | awk -F '\t' -v wanted="$1" '$1 == wanted {print $2; exit}'
-}
-
-manifest_tools_for() {
-  [ "$MODULE_MANIFEST" -eq 1 ] || return 1
-  printf '%s\n' "$MODULE_TOOLS" | awk -F '\t' -v wanted="$1" '$1 == wanted {print $2; exit}'
+  PLAN_PROFILE=$(sed -n 's/^[[:space:]]*"profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLAN_FILE" | sed -n '1p')
+  PLAN_MODULES=$(awk '
+    /"modules"[[:space:]]*:/ {inside=1; next}
+    inside && /"id"[[:space:]]*:/ {
+      value=$0
+      sub(/.*"id"[[:space:]]*:[[:space:]]*"/, "", value)
+      sub(/\".*$/, "", value)
+      printf "%s%s", separator, value
+      separator=","
+    }
+    inside && /^[[:space:]]*\]/ {inside=0}
+  ' "$PLAN_FILE")
+  PLAN_TOOLS=$(awk '
+    /"required_tools"[[:space:]]*:[[:space:]]*\[/ {inside=1; next}
+    inside && /^[[:space:]]*\]/ {inside=0; next}
+    inside && /"[A-Za-z0-9_-]+"/ {
+      value=$0
+      sub(/^[^\"]*\"/, "", value)
+      sub(/\".*$/, "", value)
+      print value
+    }
+  ' "$PLAN_FILE" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+  [ -n "$PLAN_PROFILE" ] && [ -n "$PLAN_MODULES" ] ||
+    die "Go 执行计划缺少 profile/modules" "the Go execution plan has no profile/modules"
 }
 
 remove_missing_tool() {
@@ -1097,86 +1033,49 @@ remove_missing_tool() {
   MISSING_TOOLS=$remaining
 }
 
-module_enabled() {
-  module=$1
-  if [ "$CONFIG_GIVEN" -eq 1 ]; then
-    base_modules="$MODULE_FULL_MODULES"
-  elif [ -n "$ONLY" ]; then
-    base_modules="$ONLY"
-  else
-    case "$PROFILE" in
-      standard)
-        base_modules="$MODULE_STANDARD_MODULES"
-        ;;
-      full)
-        base_modules="$MODULE_FULL_MODULES"
-        ;;
-      *)
-        base_modules="$MODULE_FULL_MODULES"
-        ;;
-    esac
-  fi
-  list_contains "$base_modules" "$module" || return 1
-  list_contains "$SKIP" "$module" && return 1
-  if [ "$LOCAL_ONLY" -eq 1 ]; then
-    [ "$(manifest_exposure "$module")" = local ] || return 1
-  fi
-  return 0
-}
-
 collect_missing_tools() {
   MISSING_TOOLS=""
   TOOLS_REQUESTED=""
   NEXTTRACE_REQUESTED=0
-
-  # RequiredTools is metadata consumed as an execution contract.  Route and
-  # backtrace both require the one supported engine, NextTrace Tiny.
-  module_words=$(printf '%s' "$MODULE_ALL_MODULES" | tr ',' ' ')
-  for module in $module_words; do
-    module_enabled "$module" || continue
-    tools=$(manifest_tools_for "$module" || true)
-    [ -n "$tools" ] || continue
-    tool_words=$(printf '%s' "$tools" | tr ',' ' ')
-    for tool in $tool_words; do
-      case "$tool" in
-        zstd)
-          # The benchmark contract pins both executable and corpus. An
-          # arbitrary system command named zstd is not interchangeable.
-          add_missing_tool zstd
-          add_tools_request zstd
-          ;;
-        npb-ep|npb-ft)
-          # Class, OpenMP implementation and compiler flags are embedded in
-          # the release binaries and verified from every benchmark output.
+  # RequiredTools is metadata consumed as an execution contract. The Go plan
+  # is the only source of the selected module/tool set.
+  for tool in $PLAN_TOOLS; do
+    case "$tool" in
+      zstd)
+        # The benchmark contract pins both executable and corpus. An
+        # arbitrary system command named zstd is not interchangeable.
+        add_missing_tool zstd
+        add_tools_request zstd
+        ;;
+      npb-ep|npb-ft)
+        # Class, OpenMP implementation and compiler flags are embedded in
+        # the release binaries and verified from every benchmark output.
+        add_missing_tool "$tool"
+        add_tools_request "$tool"
+        ;;
+      openssl)
+        # Crypto results use the pinned LTS build rather than the host TLS
+        # utility, whose version and Configure options are distribution-specific.
+        add_missing_tool openssl
+        add_tools_request openssl
+        ;;
+      nexttrace-tiny)
+        NEXTTRACE_REQUESTED=1
+        if ! nexttrace_tool_exists; then
+          add_missing_tool nexttrace-tiny
+          add_tools_request nexttrace-tiny
+        fi
+        ;;
+      *)
+        if ! tool_available "$tool"; then
           add_missing_tool "$tool"
-          add_tools_request "$tool"
-          ;;
-        openssl)
-          # Crypto results use the pinned LTS build rather than the host TLS
-          # utility, whose version and Configure options are distribution-specific.
-          add_missing_tool openssl
-          add_tools_request openssl
-          ;;
-        nexttrace-tiny)
-          NEXTTRACE_REQUESTED=1
-          if ! nexttrace_tool_exists; then
-            add_missing_tool nexttrace-tiny
-            add_tools_request nexttrace-tiny
-          fi
-          ;;
-        *)
-          if ! tool_available "$tool"; then
-            add_missing_tool "$tool"
-            # Every non-Ookla RequiredTools entry is resolved from the
-            # checksummed architecture archive. The archive extraction below
-            # accepts only the exact requested bin/<name> member, so a future
-            # descriptor entry that is not shipped there fails closed instead
-            # of needing a second shell-side tool registry.
-            [ "$tool" = speedtest ] || add_tools_request "$tool"
-          fi
-          ;;
-      esac
-    done
+          # Every non-Ookla required tool is resolved from the checksummed
+          # architecture archive. The archive extraction below accepts only
+          # the exact requested bin/<name> member.
+          [ "$tool" = speedtest ] || add_tools_request "$tool"
+        fi
+        ;;
+    esac
   done
 }
 
@@ -1388,12 +1287,6 @@ tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
 [ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
 
-# The canonical module/profile registry is required for wrapper planning.  A
-# stale release fails clearly here instead of letting copied module IDs drive
-# package installation.
-load_module_manifest ||
-  die "下载的 ecs 不支持模块 manifest，请使用最新 Release" "the downloaded ecs does not provide a module manifest; use a current Release"
-
 if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Check the downloaded binary before dependencies or benchmarks.  This is a
   # side-effect-free command and gives old releases a clear error up front.
@@ -1404,7 +1297,6 @@ fi
 # 决定要不要进交互向导。
 # stdin 是 curl 管道，交互输入必须走 /dev/tty；无终端时直接按默认配置运行。
 INTERACTIVE=""
-PLAN_FILE=""
 if [ "$SUBMIT_MODE" -eq 0 ] && [ "$#" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
   INTERACTIVE="--interactive"
 fi
@@ -1414,23 +1306,10 @@ if [ "$SUBMIT_MODE" -eq 0 ] && [ "$#" -le 2 ] && [ -z "$INTERACTIVE" ] && [ -r /
   esac
 fi
 
-# 向导会改变档位和模块，先让 ecs 只写出临时计划，再据此准备最小组件集合。
-if [ -n "$INTERACTIVE" ]; then
-  PLAN_FILE="$WORK/modules.plan"
-  if ECS_PLAN_FILE="$PLAN_FILE" "${WORK}/ecs" "$@" "$INTERACTIVE"; then
-    PLAN_STATUS=0
-  else
-    PLAN_STATUS=$?
-  fi
-  [ "$PLAN_STATUS" -eq 0 ] || exit "$PLAN_STATUS"
-  # 用户在向导中取消或没有选中模块时，计划文件不存在；按成功取消退出。
-  [ -s "$PLAN_FILE" ] || exit 0
-  PLAN_PROFILE=$(sed -n '1p' "$PLAN_FILE")
-  PLAN_MODULES=$(sed -n '2p' "$PLAN_FILE")
-  [ -n "$PLAN_PROFILE" ] && [ -n "$PLAN_MODULES" ] || die "向导没有生成有效测试计划" "the wizard did not produce a valid test plan"
-  PROFILE="$PLAN_PROFILE"
-  ONLY="$PLAN_MODULES"
-fi
+# Go resolves profile/config/only/skip/exposure once into the machine plan.
+# The same selected IDs are passed to the final run only after the plan has
+# been consumed, so the wrapper never maintains a second selection algorithm.
+load_execution_plan "$@"
 
 prepare_dependencies
 
@@ -1469,7 +1348,7 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Force a JSON report in WORK.  Wrapper-only submit/provider/region/output
   # options were removed above, while every ordinary run option remains
   # quoted in "$@".
-  if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
+  if "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
     RUN_STATUS=0
   else
     RUN_STATUS=$?
@@ -1477,18 +1356,21 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
 elif [ -n "$PLAN_FILE" ]; then
   if [ -n "$REPORT_DIR" ]; then
     if [ "$NAME_GIVEN" -eq 1 ]; then
-      if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR"; then
+      if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" \
+          --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
         RUN_STATUS=0
       else
         RUN_STATUS=$?
       fi
-    elif ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" --name "$REPORT_NAME"; then
+    elif "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" --name "$REPORT_NAME" \
+        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
       RUN_STATUS=0
     else
       RUN_STATUS=$?
     fi
   else
-    if ECS_PLAN_FILE= "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes; then
+    if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes \
+        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
       RUN_STATUS=0
     else
       RUN_STATUS=$?
@@ -1536,27 +1418,27 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # non-existent path as a file target.  This preserves the CLI's file-or-
   # directory contract while keeping the default in TMPDIR.
   if [ "$SUBMIT_PROVIDER_GIVEN:$SUBMIT_REGION_GIVEN" = "1:1" ]; then
-    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
         --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
       SUBMIT_STATUS=0
     else
       SUBMIT_STATUS=$?
     fi
   elif [ "$SUBMIT_PROVIDER_GIVEN" -eq 1 ]; then
-    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
         --provider "$SUBMIT_PROVIDER"; then
       SUBMIT_STATUS=0
     else
       SUBMIT_STATUS=$?
     fi
   elif [ "$SUBMIT_REGION_GIVEN" -eq 1 ]; then
-    if ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
+    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
         --region "$SUBMIT_REGION"; then
       SUBMIT_STATUS=0
     else
       SUBMIT_STATUS=$?
     fi
-  elif ECS_PLAN_FILE= "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"; then
+  elif "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"; then
     SUBMIT_STATUS=0
   else
     SUBMIT_STATUS=$?

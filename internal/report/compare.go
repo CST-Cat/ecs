@@ -30,8 +30,12 @@ func WriteComparisonFiles(data comparison.Report, directory, baseName string, fo
 		baseName = "ecs-compare-" + data.GeneratedAt.Format("20060102-150405")
 	}
 	baseName = sanitizeBaseName(baseName)
-	written := make(map[string]string)
+	contents := make(map[string][]byte, len(formats))
+	orderedFormats := make([]string, 0, len(formats))
 	for _, format := range formats {
+		if _, seen := contents[format]; seen {
+			continue
+		}
 		var content []byte
 		switch format {
 		case "json":
@@ -44,8 +48,14 @@ func WriteComparisonFiles(data comparison.Report, directory, baseName string, fo
 			err = i18n.Errorf("err.reportUnknownFormat", format)
 		}
 		if err != nil {
-			return written, i18n.Errorf("err.reportGenerate", format, err)
+			return nil, i18n.Errorf("err.reportGenerate", format, err)
 		}
+		contents[format] = content
+		orderedFormats = append(orderedFormats, format)
+	}
+	written := make(map[string]string, len(orderedFormats))
+	for _, format := range orderedFormats {
+		content := contents[format]
 		path := filepath.Join(absolute, baseName+"."+format)
 		if err := atomicWrite(path, content, 0o600); err != nil {
 			return written, i18n.Errorf("err.reportWrite", format, err)
@@ -64,18 +74,17 @@ func ComparisonJSON(data comparison.Report) ([]byte, error) {
 }
 
 // localizeComparisonNotice is deliberately kept in the report package: the
-// comparison package only produces and parses canonical keys, while report
-// formats are the user-facing localization boundary.
-func localizeComparisonNotice(value string) string {
-	key, args, ok := comparison.ParseNotice(value)
-	if !ok || !i18n.Has(i18n.LangZH, key) || !i18n.Has(i18n.LangEN, key) {
-		return value
+// comparison package only carries stable machine message semantics, while
+// report formats are the user-facing localization boundary.
+func localizeComparisonNotice(notice comparison.Notice) string {
+	if notice.Key == "" || !i18n.Has(i18n.LangZH, notice.Key) || !i18n.Has(i18n.LangEN, notice.Key) {
+		return notice.Key
 	}
-	values := make([]any, len(args))
-	for index, arg := range args {
+	values := make([]any, len(notice.Args))
+	for index, arg := range notice.Args {
 		values[index] = arg
 	}
-	return fmt.Sprintf(i18n.T(key), values...)
+	return fmt.Sprintf(i18n.T(notice.Key), values...)
 }
 
 func comparisonInput(data comparison.Report, index int) comparison.Input {
@@ -161,7 +170,7 @@ type comparisonDifferenceGroup struct {
 	Differences []comparison.Difference
 }
 
-// comparisonDifferenceGroups 把带差异的 issue ���"差异集合是否完全相同"归并，
+// comparisonDifferenceGroups 把带差异的 issue 按"差异集合是否完全相同"归并，
 // 保持原有出现顺序。三种格式共用这一份，避免各自实现出不同的归并结果。
 func comparisonDifferenceGroups(issues []comparison.MetricIssue) []comparisonDifferenceGroup {
 	groups := make([]comparisonDifferenceGroup, 0)

@@ -17,12 +17,13 @@ func textSampleReport() model.Report {
 	data.Run.Canceled = true
 	data.Run.Requested = []string{"system", "memory", "disk", "skipped"}
 	data.Summary = model.Summary{
-		Status: model.StatusError, OK: 1, Warnings: 1, Skipped: 1, Errors: 1, Headline: "报告含异常",
+		Status: model.StatusError, OK: 1, Warnings: 1, Skipped: 1, Errors: 1,
+		Messages: []model.Message{model.NewMessage("message.summary.withErrors", 1, 1), model.NewMessage("message.summary.skipped", 1)},
 	}
 	start := data.Run.StartedAt
 	memory := model.Result{
 		ID: "memory", Title: "内存", Description: "内存带宽测量", Status: model.StatusWarning,
-		StartedAt: start, DurationMS: 1500, Summary: "需留意",
+		StartedAt: start, DurationMS: 1500, SummaryMessages: []model.Message{model.NewMessage("message.summary.withWarnings", 1, 1)},
 		Methodology: model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "stream", Profile: "standard"},
 		Fields:      []model.Field{{Key: "memory_state", Label: "状态", Value: "需留意"}},
 		Measurements: []model.Measurement{
@@ -44,7 +45,7 @@ func textSampleReport() model.Report {
 		Failures:     []model.Failure{{Category: model.FailurePermissionDenied, Stage: "open", Target: "/dev/test", Retryable: false, Message: "permission denied"}},
 	}
 	skipped := model.Result{
-		ID: "skipped", Title: "可选检查", Status: model.StatusSkipped, Summary: "未运行",
+		ID: "skipped", Title: "可选检查", Status: model.StatusSkipped, SummaryMessages: []model.Message{model.NewMessage("message.runner.skip.offline")},
 		StartedAt: start, Evidence: model.NewEvidence(0, 0, "sample"),
 	}
 	data.Results[0].Evidence = model.NewEvidence(1, 2, "sample")
@@ -76,7 +77,7 @@ func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	scoreReport.TopPercent = 10.5
 	output := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scoreReport})
 	for _, marker := range []string{
-		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "单线程事件率", "复制", "采样", "raw output 192.0.2.10",
+		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "逻辑 CPU", "复制", "采样", "raw output 192.0.2.10",
 		"api.example", "permission denied", "mystery", "证据完整度", "100% · 完整", "50% · 部分", "0% · 证据不足", "0/0 样本 · 本轮无计划样本", "评分", "排行榜参考", "排行榜前", "报告说明",
 	} {
 		if !strings.Contains(output, marker) {
@@ -111,7 +112,7 @@ func TestTextRendersSparseAndNarrowLayouts(t *testing.T) {
 	sparse := model.Report{
 		SchemaVersion: "ecs.report/v1", Tool: model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:     model.RunInfo{ID: "sparse", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
-		Summary: model.Summary{Status: model.StatusSkipped, Skipped: 1, Headline: "not run"},
+		Summary: model.Summary{Status: model.StatusSkipped, Skipped: 1, Messages: []model.Message{model.NewMessage("message.summary.skipped", 1)}},
 		Results: []model.Result{{ID: "optional", Title: "Optional", Status: model.StatusSkipped}},
 	}
 	output := Text(sparse, TextOptions{Color: termcolor.LevelNone, Compact: true, Width: 40})

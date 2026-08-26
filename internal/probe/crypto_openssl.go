@@ -65,7 +65,7 @@ func (cryptoProbe) NeedsNetwork() bool { return false }
 func (cryptoProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("openssl")
 	if err != nil {
-		return missingOpenSSLResult("未找到固定版本 OpenSSL，密码学基准未运行")
+		return missingOpenSSLResult(err)
 	}
 	return runOpenSSLSpeed(ctx, env, path, openSSLAlgorithmSpecs)
 }
@@ -80,17 +80,17 @@ func cryptoMethodology() model.Methodology {
 	}
 }
 
-func missingOpenSSLResult(summary string) model.Result {
+func missingOpenSSLResult(err error) model.Result {
 	start := time.Now()
 	result := model.NewResult("crypto", "服务器密码学性能")
 	result.Description = "独立的服务器密码学吞吐：AES-256-GCM、ChaCha20-Poly1305 与 SHA-256"
 	result.Methodology = cryptoMethodology()
 	result.Status = model.StatusWarning
-	result.Summary = summary
-	result.AddFailure(model.Failure{
-		Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl",
-		Count: 1, Message: summary,
-	})
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl", Count: 1, Message: message})
 	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
 	result.Notes = append(result.Notes,
 		"probe.crypto.tool_missing",
@@ -113,10 +113,13 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 	versionOutput, version, versionErr := queryOpenSSLVersion(ctx, path)
 	if versionErr != nil || version != openSSLExpectedVersion {
 		result.Status = model.StatusWarning
-		result.Summary = fmt.Sprintf("OpenSSL 版本不符合固定口径：检测到 %s，要求 %s", fallback(version, "unknown"), openSSLExpectedVersion)
+		message := versionOutput
+		if versionErr != nil {
+			message = versionErr.Error()
+		}
 		result.AddFailure(model.Failure{
 			Category: model.FailureUnsupported, Stage: "version_check", Target: path,
-			Count: 1, Message: result.Summary,
+			Count: 1, Message: message,
 		})
 		result.Fields = []model.Field{
 			{Key: "engine", Label: "标准工具", Value: "OpenSSL speed"},
@@ -219,7 +222,6 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 	if validRuns < expectedRuns {
 		result.Status = model.StatusWarning
 	}
-	result.Summary = openSSLSummary(specs, runs, workers)
 	result.Finish(start)
 	return result
 }
@@ -409,21 +411,203 @@ func openSSLResultsTable(specs []openSSLAlgorithmSpec, runs map[string][]openSSL
 	return table
 }
 
-func openSSLSummary(specs []openSSLAlgorithmSpec, runs map[string][]openSSLSpeedSample, workers int) string {
-	parts := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		samples := runs[spec.Key]
-		if workers <= 1 && len(samples) >= 1 && samples[0].ThroughputBPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1W/NW（同一次实测）%s · 扩展不适用",
-				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s")))
-		} else if len(samples) >= 2 && samples[0].ThroughputBPS > 0 && samples[1].ThroughputBPS > 0 {
-			parts = append(parts, fmt.Sprintf("%s 1W %s · %dW %s · %.2f×",
-				spec.Label, model.FormatRate(samples[0].ThroughputMBPS, "MB/s"), workers,
-				model.FormatRate(samples[1].ThroughputMBPS, "MB/s"), samples[1].ThroughputBPS/samples[0].ThroughputBPS))
+// cryptoSemanticProbe keeps the OpenSSL executor/parser focused on benchmark
+// facts while normalizing ECS-owned presentation metadata at the probe
+// boundary. Raw OpenSSL output and failure diagnostics remain untouched.
+type cryptoSemanticProbe struct{}
+
+func (cryptoSemanticProbe) ID() string         { return "crypto" }
+func (cryptoSemanticProbe) Title() string      { return "module.crypto.title" }
+func (cryptoSemanticProbe) NeedsNetwork() bool { return false }
+
+func (cryptoSemanticProbe) Run(ctx context.Context, env Environment) model.Result {
+	result := (cryptoProbe{}).Run(ctx, env)
+	stabilizeCryptoResult(&result, detectCPUAllowance())
+	return result
+}
+
+func stabilizeCryptoResult(result *model.Result, allowance cpuAllowance) {
+	if result == nil {
+		return
+	}
+	result.Title = "module.crypto.title"
+	result.Description = "probe.crypto.description"
+	result.Methodology = model.Methodology{
+		Kind:            "standard-benchmark",
+		Label:           "methodology.standard-benchmark",
+		Engine:          "OpenSSL speed",
+		Profile:         "probe.crypto.profile",
+		ComparisonScope: "probe.crypto.comparison_scope",
+	}
+	for index := range result.Fields {
+		field := &result.Fields[index]
+		if strings.HasPrefix(field.Key, "arguments_") {
+			field.Label = "probe.crypto.field.arguments"
+		} else {
+			field.Label = "probe.crypto.field." + field.Key
+		}
+		if field.Key == "cpu_allowance" {
+			field.Value = cpuAllowanceMachineValue(allowance)
 		}
 	}
-	if len(parts) == 0 {
-		return "OpenSSL speed 未产出有效密码学吞吐"
+	for index := range result.Measurements {
+		measurement := &result.Measurements[index]
+		measurement.Label = cryptoMeasurementLabelKey(measurement.Key)
 	}
-	return strings.Join(parts, " · ")
+	for index := range result.TextBlocks {
+		result.TextBlocks[index].Title = "probe.crypto.raw_output"
+	}
+	for index := range result.Sources {
+		if strings.Contains(strings.ToLower(result.Sources[index].Name), "openssl") {
+			result.Sources[index].Purpose = "probe.crypto.source.openssl"
+		} else {
+			result.Sources[index].Purpose = "probe.crypto.source.version"
+		}
+	}
+	for index := range result.Tables {
+		stabilizeCryptoTable(&result.Tables[index], allowance.Threads)
+	}
+	result.Notes = stableCryptoNotes(*result, allowance)
+	if failure := firstFailureAt(result, "version_check"); failure != nil {
+		detected, required := cryptoVersionValues(*result)
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.version_mismatch", detected, required)}
+	} else if summary := cryptoMachineSummary(*result, allowance.Threads); summary != "" {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.values", summary)}
+	} else {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.none")}
+	}
+}
+
+func cryptoMeasurementLabelKey(key string) string {
+	const prefix = "openssl_"
+	key = strings.TrimPrefix(key, prefix)
+	for _, algorithm := range []string{"aes_256_gcm", "chacha20_poly1305", "sha_256"} {
+		if strings.HasPrefix(key, algorithm+"_") {
+			suffix := strings.TrimPrefix(key, algorithm+"_")
+			switch suffix {
+			case "1w_mb_s":
+				return "probe.crypto.metric." + algorithm + ".1w"
+			case "nw_mb_s":
+				return "probe.crypto.metric." + algorithm + ".nw"
+			case "scaling_ratio":
+				return "probe.crypto.metric." + algorithm + ".scaling"
+			}
+		}
+	}
+	return "probe.crypto.metric.unknown"
+}
+
+func stabilizeCryptoTable(table *model.Table, workers int) {
+	if table == nil || table.Key != "benchmark.openssl.results" {
+		return
+	}
+	table.Title = "probe.crypto.table.title"
+	table.Columns = []string{
+		"probe.crypto.column.algorithm",
+		"probe.crypto.column.worker_context",
+		"probe.crypto.column.block",
+		"probe.crypto.column.raw_bytes_per_second",
+		"probe.crypto.column.throughput",
+		"probe.crypto.column.scaling",
+	}
+	for index := range table.Rows {
+		row := table.Rows[index]
+		if len(row) < 6 {
+			continue
+		}
+		if index%2 == 0 {
+			row[1] = "1W"
+		} else if workers <= 1 {
+			row[1] = "NW(1W-reused)"
+		} else {
+			row[1] = fmt.Sprintf("NW(%dW)", workers)
+		}
+		if workers <= 1 {
+			row[5] = "na"
+		}
+	}
+}
+
+func stableCryptoNotes(result model.Result, allowance cpuAllowance) []string {
+	notes := []string{
+		"probe.crypto.note.contract",
+		"probe.crypto.note.algorithms",
+		"probe.crypto.note.output",
+		"probe.crypto.note.hardware_acceleration",
+		"probe.crypto.note.no_composite_score",
+	}
+	if allowance.Threads <= 1 {
+		notes = append(notes, "probe.crypto.note.single_core")
+	} else {
+		notes = append(notes, "probe.crypto.note.separate_runs")
+	}
+	if allowance.Limited() && allowance.Threads > 1 {
+		notes = append(notes, "probe.crypto.note.quota_limited")
+	}
+	for _, failure := range result.Failures {
+		switch failure.Stage {
+		case "tool_lookup":
+			notes = append(notes, "probe.crypto.note.tool_missing")
+		case "version_check":
+			notes = append(notes, "probe.crypto.note.version_mismatch")
+		case "benchmark_run":
+			notes = append(notes, "probe.crypto.note.run_failure")
+		}
+	}
+	seen := make(map[string]bool, len(notes))
+	out := notes[:0]
+	for _, note := range notes {
+		if seen[note] {
+			continue
+		}
+		seen[note] = true
+		out = append(out, note)
+	}
+	return out
+}
+
+func firstFailureAt(result *model.Result, stage string) *model.Failure {
+	for index := range result.Failures {
+		if result.Failures[index].Stage == stage {
+			return &result.Failures[index]
+		}
+	}
+	return nil
+}
+
+func cryptoVersionValues(result model.Result) (string, string) {
+	detected, required := "unknown", openSSLExpectedVersion
+	for _, field := range result.Fields {
+		switch field.Key {
+		case "version":
+			detected = fallback(field.Value, "unknown")
+		case "required_version":
+			required = fallback(field.Value, openSSLExpectedVersion)
+		}
+	}
+	return detected, required
+}
+
+func cryptoMachineSummary(result model.Result, workers int) string {
+	values := make(map[string]string, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		if measurement.Value > 0 {
+			values[measurement.Key] = measurement.Display
+		}
+	}
+	parts := make([]string, 0, 3)
+	for _, algorithm := range []string{"aes_256_gcm", "chacha20_poly1305", "sha_256"} {
+		if value := values["openssl_"+algorithm+"_1w_mb_s"]; value != "" {
+			parts = append(parts, algorithm+" 1W="+value)
+		}
+		if workers > 1 {
+			if value := values["openssl_"+algorithm+"_nw_mb_s"]; value != "" {
+				parts = append(parts, fmt.Sprintf("%s NW(%dW)=%s", algorithm, workers, value))
+			}
+			if value := values["openssl_"+algorithm+"_scaling_ratio"]; value != "" {
+				parts = append(parts, algorithm+" scaling="+value)
+			}
+		}
+	}
+	return strings.Join(parts, ";")
 }

@@ -113,19 +113,8 @@ func TestProbeFormattingAndParsingHelpers(t *testing.T) {
 	if formatHardwareBytes(0) != "0 B" || formatHardwareBytes(1536) != "1.5 KiB" {
 		t.Fatalf("hardware bytes = %q/%q", formatHardwareBytes(0), formatHardwareBytes(1536))
 	}
-	for _, test := range []struct {
-		value time.Duration
-		want  string
-	}{{-time.Second, "unknown"}, {90 * time.Minute, "1 小时 30 分"}, {2*24*time.Hour + 3*time.Hour, "2 天 3 小时 0 分"}} {
-		if got := formatDuration(test.value); got != test.want {
-			t.Fatalf("duration %s = %q, want %q", test.value, got, test.want)
-		}
-	}
 	if parseUintDefault("42", 7) != 42 || parseUintDefault("bad", 7) != 7 || fallback(" value ", "default") != "value" || fallback(" ", "default") != "default" {
 		t.Fatal("uint parser success/fallback failed")
-	}
-	if describeSteal(systemSnapshot{}) != "unavailable（/proc/stat 不可读）" || describeSteal(systemSnapshot{StealKnown: true, StealPercent: 12.34}) != "12.34 %" {
-		t.Fatal("steal description formatting failed")
 	}
 }
 

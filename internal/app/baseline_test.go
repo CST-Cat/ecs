@@ -55,7 +55,7 @@ func submitTestReport() model.Report {
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run:           model.RunInfo{Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
-		Summary:       model.Summary{Status: model.StatusOK, OK: 2, Headline: "完成"},
+		Summary:       model.Summary{Status: model.StatusOK, OK: 2, Messages: []model.Message{model.NewMessage("message.summary.allOK", 2)}},
 		Results: []model.Result{{
 			ID: "cpu", Status: model.StatusOK,
 			Measurements: []model.Measurement{

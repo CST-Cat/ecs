@@ -92,7 +92,7 @@ func sparseComparisonFixture() comparison.Report {
 		Inputs:  []comparison.Input{{Index: 0, Label: "empty-1"}, {Index: 1, Label: "empty-2"}},
 		Summary: comparison.Summary{Comparability: comparison.NotComparable, Reports: 2, Modules: 1},
 		Modules: []comparison.Module{{ID: "empty", Title: "Empty", Comparability: comparison.NotComparable, Statuses: []comparison.StatusValue{{Report: 0}, {Report: 1}}, Evidence: []comparison.EvidenceValue{{Report: 0}, {Report: 1}}}},
-		Notices: []string{"compare.notice.scope"},
+		Notices: []comparison.Notice{{Key: "compare.notice.scope"}},
 		Tool:    model.ToolInfo{Name: "ecs", Version: "test"},
 	}
 }
@@ -105,7 +105,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 	payload := "<payload>|[unsafe]\x1b[31m"
 	pair.Inputs[0].Label = payload
 	pair.Modules[0].Metrics[0].Label = payload
-	pair.Notices = append(pair.Notices, payload)
+	pair.Notices = append(pair.Notices, comparison.Notice{Key: "compare.notice.schemaMixed", Args: []string{payload}})
 	pairBefore, err := ComparisonJSON(pair)
 	if err != nil {
 		t.Fatal(err)
@@ -231,9 +231,13 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 		t.Fatalf("comparison empty-directory output = %v, %v", currentDirectoryWritten, err)
 	}
 
-	partial, err := WriteComparisonFiles(data, t.TempDir(), "partial", []string{"json", "unknown"})
-	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(partial) != 1 {
-		t.Fatalf("comparison partial unknown-format result = %v, %v", partial, err)
+	partialDirectory := t.TempDir()
+	partial, err := WriteComparisonFiles(data, partialDirectory, "partial", []string{"json", "unknown"})
+	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(partial) != 0 {
+		t.Fatalf("comparison atomic unknown-format result = %v, %v", partial, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(partialDirectory, "partial.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("comparison renderer failure left a partial file: %v", statErr)
 	}
 	invalid := comparisonReportFixture(t, 2, 0)
 	invalid.Modules[0].Metrics[0].Values[0].Value = math.NaN()

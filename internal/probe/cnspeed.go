@@ -248,7 +248,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	nodes, err := fetchCNNodes(ctx, env.HTTPClient, env.UserAgent)
 	if err != nil {
-		result.Skip("无法获取中国测速节点清单")
+		result.Skip(model.NewMessage("probe.cnspeed.summary.skipped"))
 		addFailure(&result, "node_list", "speedtest.cn-CN-ID", err)
 		result.Evidence = model.NewEvidence(0, len(cnCarriers), "target")
 		result.Notes = append(result.Notes, fmt.Sprintf(
@@ -301,7 +301,6 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		RowIdentity: "carrier",
 	}
 	succeeded := 0
-	var totalBytes int64
 	for _, item := range results {
 		status := "完成"
 		if item.Err != "" {
@@ -316,7 +315,6 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		if item.Mbps > 0 {
 			succeeded++
-			totalBytes += item.Bytes
 			download = model.FormatRate(item.Mbps, "Mbps")
 			transferred = model.FormatBytes(uint64(item.Bytes))
 			result.Measurements = append(result.Measurements, model.Measurement{
@@ -354,18 +352,10 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	)
 	if succeeded == 0 {
 		result.Status = model.StatusWarning
-		result.Summary = "三网节点均未测得带宽"
 	} else {
 		if succeeded < len(cnCarriers) {
 			result.Status = model.StatusWarning
 		}
-		var parts []string
-		for _, item := range results {
-			if item.Mbps > 0 {
-				parts = append(parts, fmt.Sprintf("%s %s", item.Carrier, model.FormatRate(item.Mbps, "Mbps")))
-			}
-		}
-		result.Summary = strings.Join(parts, " · ") + fmt.Sprintf(" · 共传输 %s", model.FormatBytes(uint64(totalBytes)))
 	}
 	result.Finish(start)
 	return result
