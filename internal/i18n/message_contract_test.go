@@ -20,7 +20,7 @@ import (
 // be registered with its complete finite key set and argument contract. The
 // AST audit below rejects any new dynamic call until it is explicitly added.
 var dynamicMessageContracts = map[string]dynamicMessageContract{
-	"internal/probe/network_semantics.go|category": {
+	"internal/probe/nat.go|natSummaryKey(natCategoryKey(categoryCode))": {
 		keys: []string{
 			"probe.nat.summary.unknown",
 			"probe.nat.summary.public",

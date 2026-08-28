@@ -69,6 +69,6 @@ go test ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./i
 sh -n run.sh
 ```
 
-`run.sh` 下载 `ecs` 二进制后会调用其 `list --machine`，读取模块 descriptor 的 TSV contract，
-用于规划模块、配置档、暴露级别和工具依赖；该输出缺失或非法会直接停止，不会使用另一套过期模块列表。只有 `ScoreKey` 非空的 descriptor 才能进入
+`run.sh` 下载 `ecs` 二进制后会调用 `plan --json`，读取稳定的模块、配置档、暴露级别、reveal 和工具 ID，
+按该结果准备依赖并运行；该输出缺失或非法会直接停止，不会使用另一套过期模块列表。只有 `ScoreKey` 非空的 descriptor 才能进入
 排行榜；指标定义仍由 `internal/score` 单独维护。

@@ -109,6 +109,23 @@ func TestMediaRulesCoverPlatformAndHTTPVerdicts(t *testing.T) {
 	}
 }
 
+func TestMediaRegionOrderReturnsCopy(t *testing.T) {
+	original := MediaRegionOrder()
+	want := []string{"global", "jp", "tw", "hk", "cn"}
+	if !reflect.DeepEqual(original, want) {
+		t.Fatalf("MediaRegionOrder = %v, want %v", original, want)
+	}
+	mutated := append([]string(nil), original...)
+	if len(mutated) == 0 {
+		t.Fatal("media region order must not be empty")
+	}
+	mutated[0] = "mutated"
+	got := MediaRegionOrder()
+	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
+		t.Fatalf("MediaRegionOrder returned mutable canonical data: %v", got)
+	}
+}
+
 func TestMediaFallbackPreservesFiniteEvidence(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -198,7 +215,7 @@ func TestMediaPreservesTypedRequestErrorsAcrossMixedVerdicts(t *testing.T) {
 	}
 	for _, table := range result.Tables {
 		for _, row := range table.Rows {
-			if row[0] == mediaPlatformNameKey("netflix") && row[1] != stateUnlocked {
+			if row[0].Text() == mediaPlatformNameKey("netflix") && row[1].Text() != stateUnlocked {
 				t.Fatalf("mixed Netflix success/error was not retained as available: %#v", row)
 			}
 		}
@@ -286,10 +303,10 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 	if got, want := result.SummaryMessages[0].Args, []string{"12", "20", "2", "6"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("media summary counts = %v, want %v", got, want)
 	}
-	if result.Measurements[0].Display != "12/20" || result.Measurements[1].Display != "6/20" || result.Evidence.Valid != 14 {
+	if result.Measurements[0].Display.Text() != "12/20" || result.Measurements[1].Display.Text() != "6/20" || result.Evidence.Valid != 14 {
 		t.Fatalf("media count/evidence consistency = measurements=%+v evidence=%+v", result.Measurements, result.Evidence)
 	}
-	if result.Methodology.Parameters != nil || result.Measurements[0].Method != "media-rules-"+mediaRulesVersion {
+	if result.Methodology.Parameters["scope_revision"] != "1" || result.Methodology.Parameters["regions_sha256"] == "" || result.Measurements[0].Method != "media-rules-"+mediaRulesVersion {
 		t.Fatalf("media method metadata = methodology=%+v measurement=%+v", result.Methodology, result.Measurements[0])
 	}
 	finiteStates := map[string]bool{
@@ -310,8 +327,18 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 			t.Fatalf("media table is not machine-shaped: %+v", table)
 		}
 		for _, row := range table.Rows {
-			if len(row) != 7 || !strings.HasPrefix(row[0], "probe.media.platform.") || !finiteStates[row[1]] || !finiteEvidence[row[3]] || !finiteStrength[row[4]] {
+			if len(row) != 7 || !strings.HasPrefix(row[0].Text(), "probe.media.platform.") || !finiteStates[row[1].Text()] || !finiteEvidence[row[3].Text()] || !finiteStrength[row[4].Text()] {
 				t.Fatalf("media row is not machine-shaped: %#v", row)
+			}
+			for _, index := range []int{0, 1, 3, 4} {
+				if _, ok := row[index].Key(); !ok {
+					t.Fatalf("media row cell %d is not a tagged key: %#v", index, row)
+				}
+			}
+			for _, index := range []int{2, 5, 6} {
+				if _, ok := row[index].Raw(); !ok {
+					t.Fatalf("media row cell %d is not raw data: %#v", index, row)
+				}
 			}
 		}
 	}

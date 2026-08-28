@@ -11,6 +11,12 @@
 
 后续变更记录将在这里补充。
 
+## 0.7.10 — 2026-08-27
+
+- 收敛 ECS machine model：`Field.Value`、`Measurement.Display` 和表格单元使用严格的 raw/key tagged value，表格元数据集中到 typed columns，JSON、脱敏、compare 与多格式 renderer 共享同一稳定边界。
+- 各内建 probe 直接生成 stable `Result`，删除 semantic adapter 与 runner 对具体字段/表格 schema 的反解析；comparison parameters 回到 producer，Probe interface 只保留 `ID` 与 `Run`，模块事实统一由 descriptor 管理。
+- 修复短格式 early flags、Exposure 严格校验和非法 terminal color fallback，补充 CLI/model/probe/renderer 回归覆盖；整理 probe、app、i18n 文件并清理临时任务 Markdown。
+
 ## 0.7.9 — 2026-08-26
 
 - Probe 与报告边界改为稳定机器语义：内建探针的标题、字段、表格、状态和摘要以 stable key/Message 保存，JSON 不再依赖中文原文；`render`、Markdown、HTML 和终端展示在输出边界直接按当前语言渲染，中英文重渲染不改变机器数据。

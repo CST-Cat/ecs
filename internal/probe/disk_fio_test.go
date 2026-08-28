@@ -32,8 +32,11 @@ func TestFIOParserAndLatency(t *testing.T) {
 	}
 
 	result := model.NewResult("disk", "disk")
-	if !appendFIOBaseMeasurement(&result, "seq_write", "write", 2, "MiB/s", "fixture") || appendFIOBaseMeasurement(&result, "bad", "bad", 0, "MiB/s", "fixture") {
+	if !appendFIOBaseMeasurement(&result, "seq_write", 2, "MiB/s", "fixture") || appendFIOBaseMeasurement(&result, "bad", 0, "MiB/s", "fixture") {
 		t.Fatal("base measurement validity boundary failed")
+	}
+	if result.Measurements[0].Label != "probe.disk.metric.seq_write" {
+		t.Fatalf("base measurement label = %q", result.Measurements[0].Label)
 	}
 	appendFIOQD1LatencyMeasurements(&result, jobs)
 	for _, key := range []string{fioQD1LatencyAvgKey, fioQD1LatencyP95Key, fioQD1LatencyP99Key, fioQD1LatencyMaxKey} {
@@ -82,12 +85,12 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	fullJobs := map[string]fioJob{"mix4k": {Name: "mix4k", Read: validRead, Write: validWrite}}
 	full := model.NewResult("disk", "disk")
 	appendFIOMixedResults(&full, fullPlan, fullJobs, 64)
-	if len(full.Tables) != 1 || full.Tables[0].Key != "disk.fio.mixed" || full.Tables[0].RowIdentity != "block_size" || len(full.Tables[0].ColumnKeys) != len(full.Tables[0].Columns) || full.Tables[0].Rows[0][5] == "—" {
+	if len(full.Tables) != 1 || full.Tables[0].Key != "disk.fio.mixed" || full.Tables[0].RowIdentity != "block_size" || len(full.Tables[0].Columns) != 6 || full.Tables[0].Rows[0][5].Text() == "—" {
 		t.Fatalf("full mixed matrix = %+v", full.Tables)
 	}
 	partial := model.NewResult("disk", "disk")
 	appendFIOMixedResults(&partial, fullPlan, map[string]fioJob{"mix4k": {Name: "mix4k", Read: fullJobs["mix4k"].Read}}, 64)
-	if partial.Status != model.StatusWarning || partial.Tables[0].Rows[0][5] != "—" || len(partial.Notes) == 0 {
+	if partial.Status != model.StatusWarning || partial.Tables[0].Rows[0][5].Text() != "—" || len(partial.Notes) == 0 {
 		t.Fatalf("partial mixed matrix = %+v", partial)
 	}
 
@@ -106,8 +109,14 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	}
 	crystal := model.NewResult("disk", "disk")
 	appendCrystalMatrix(&crystal, crystalJobs, fioEngine{Name: "psync"}, map[string]float64{crystalJobSpecs()[0].Name: 1})
-	if len(crystal.Tables) != 1 || crystal.Tables[0].Key != "disk.fio.crystal" || len(crystal.Tables[0].ColumnKeys) != len(crystal.Tables[0].Columns) || len(crystal.Tables[0].Rows) != 4 || crystal.Tables[0].Rows[0][6] != "完成" || crystal.Status != model.StatusWarning {
+	if len(crystal.Tables) != 1 || crystal.Tables[0].Key != "disk.fio.crystal" || len(crystal.Tables[0].Columns) != 7 || len(crystal.Tables[0].Rows) != 4 || crystal.Tables[0].Rows[0][6].Text() != "probe.disk.status.complete" || crystal.Status != model.StatusWarning {
 		t.Fatalf("crystal matrix = %+v status=%s", crystal.Tables, crystal.Status)
+	}
+	if crystal.Tables[0].Title != "probe.disk.table.crystal" || crystal.Tables[0].Columns[0].Label != "probe.disk.column.workload" {
+		t.Fatalf("crystal presentation metadata = %+v", crystal.Tables[0])
+	}
+	if _, ok := crystal.Tables[0].Rows[0][6].Key(); !ok {
+		t.Fatalf("crystal status is not a tagged key: %#v", crystal.Tables[0].Rows[0][6])
 	}
 	crystalFullJobs := make(map[string]fioJob, len(crystalJobSpecs()))
 	for _, spec := range crystalJobSpecs() {
@@ -121,7 +130,7 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	}
 	crystalFull := model.NewResult("disk", "disk")
 	appendCrystalMatrix(&crystalFull, crystalFullJobs, fioEngine{Name: "io_uring", AsyncQueue: true}, nil)
-	if crystalFull.Status != model.StatusOK || crystalFull.Tables[0].Rows[1][6] != "完成" {
+	if crystalFull.Status != model.StatusOK || crystalFull.Tables[0].Rows[1][6].Text() != "probe.disk.status.complete" {
 		t.Fatalf("complete crystal matrix = %+v status=%s", crystalFull.Tables, crystalFull.Status)
 	}
 
@@ -133,11 +142,14 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	}
 	attach := model.NewResult("disk", "disk")
 	appendATTOMatrix(&attach, jobs, fioEngine{Name: "io_uring", AsyncQueue: true}, nil)
-	if len(attach.Tables) != 1 || attach.Tables[0].Key != "disk.fio.atto" || len(attach.Tables[0].ColumnKeys) != len(attach.Tables[0].Columns) || len(attach.Tables[0].Rows) != len(attoBlockSizes) || !hasMeasurement(attach, "atto_512b_read_mib_s") {
+	if len(attach.Tables) != 1 || attach.Tables[0].Key != "disk.fio.atto" || len(attach.Tables[0].Columns) != 8 || len(attach.Tables[0].Rows) != len(attoBlockSizes) || !hasMeasurement(attach, "atto_512b_read_mib_s") {
 		t.Fatalf("ATTO matrix = %+v measurements=%+v", attach.Tables, attach.Measurements)
 	}
-	if attach.Tables[0].Rows[0][7] != "完成" || attach.Tables[0].Rows[1][7] != "未返回" {
+	if attach.Tables[0].Rows[0][7].Text() != "probe.disk.status.complete" || attach.Tables[0].Rows[1][7].Text() != "probe.disk.status.missing" {
 		t.Fatalf("ATTO partial rows = %+v/%+v", attach.Tables[0].Rows[0], attach.Tables[0].Rows[1])
+	}
+	if _, ok := attach.Tables[0].Rows[1][7].Key(); !ok {
+		t.Fatalf("ATTO status is not a tagged key: %#v", attach.Tables[0].Rows[1][7])
 	}
 	fullATTOJobs := make(map[string]fioJob, len(attoJobSpecs()))
 	for _, spec := range attoJobSpecs() {
@@ -151,7 +163,7 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	}
 	fullATTO := model.NewResult("disk", "disk")
 	appendATTOMatrix(&fullATTO, fullATTOJobs, fioEngine{Name: "io_uring", AsyncQueue: true}, nil)
-	if fullATTO.Status != model.StatusOK || fullATTO.Tables[0].Rows[len(fullATTO.Tables[0].Rows)-1][7] != "完成" {
+	if fullATTO.Status != model.StatusOK || fullATTO.Tables[0].Rows[len(fullATTO.Tables[0].Rows)-1][7].Text() != "probe.disk.status.complete" {
 		t.Fatalf("complete ATTO matrix = %+v status=%s", fullATTO.Tables, fullATTO.Status)
 	}
 }

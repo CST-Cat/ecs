@@ -28,14 +28,14 @@ func retryRendererFixture() model.Report {
 			DurationMS: 700, SummaryMessages: []model.Message{model.NewMessage("probe.cpu.summary.single", "100 events/s")},
 			Measurements: []model.Measurement{{
 				Key: "cpu_steal_percent_window", Label: "probe.pressure.metric.cpu_steal_percent_window",
-				Value: 7.5, Unit: "%", Display: "7.50 %", Method: "proc-stat-steal-window-v1",
+				Value: 7.5, Unit: "%", Display: model.RawValue("7.50 %"), Method: "proc-stat-steal-window-v1",
 			}},
 			Interference: &model.Interference{
 				Detected: true, Score: 5,
 				Reasons: []model.Message{model.NewMessage("probe.pressure.reason.cpu_steal_high", "7.50")},
 				Measurements: []model.Measurement{{
 					Key: "cpu_steal_percent_window", Label: "probe.pressure.metric.cpu_steal_percent_window",
-					Value: 7.5, Unit: "%", Display: "7.50 %", Method: "proc-stat-steal-window-v1",
+					Value: 7.5, Unit: "%", Display: model.RawValue("7.50 %"), Method: "proc-stat-steal-window-v1",
 				}},
 			},
 			Retry: &model.RetryInfo{

@@ -14,9 +14,7 @@ import (
 
 type mediaProbe struct{}
 
-func (mediaProbe) ID() string         { return "media" }
-func (mediaProbe) Title() string      { return "module.media.title" }
-func (mediaProbe) NeedsNetwork() bool { return true }
+func (mediaProbe) ID() string { return "media" }
 
 // mediaResult 是一个平台的完整检测记录。
 type mediaResult struct {
@@ -45,6 +43,10 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "probe.media.profile",
 		ComparisonScope: "probe.media.comparison_scope",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameterHash(result.Methodology.Parameters, "regions_sha256", env.Config.MediaRegions)
+	addComparisonParameter(result.Methodology.Parameters, "http_timeout", env.Config.HTTPTimeout.String())
 	client, closeClient := httpClientForMode(env)
 	defer closeClient()
 	env.HTTPClient = client
@@ -85,12 +87,15 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		table := model.Table{
 			Key:   "network.media." + category.Key,
 			Title: "probe.media.table." + category.Key,
-			Columns: []string{
-				"probe.media.column.platform", "probe.media.column.verdict", "probe.media.column.region",
-				"probe.media.column.evidence", "probe.media.column.strength", "probe.media.column.http_status",
-				"probe.media.column.duration",
+			Columns: []model.TableColumn{
+				{Key: "platform", Label: "probe.media.column.platform"},
+				{Key: "verdict", Label: "probe.media.column.verdict"},
+				{Key: "region", Label: "probe.media.column.region"},
+				{Key: "evidence", Label: "probe.media.column.evidence"},
+				{Key: "strength", Label: "probe.media.column.strength"},
+				{Key: "http_status", Label: "probe.media.column.http_status"},
+				{Key: "latency_ms", Label: "probe.media.column.duration"},
 			},
-			ColumnKeys:  []string{"platform", "verdict", "region", "evidence", "strength", "http_status", "latency_ms"},
 			RowIdentity: "platform",
 		}
 		for _, item := range grouped[category.Key] {
@@ -98,14 +103,11 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 				target := fmt.Sprintf("%s/request_%d", item.Check.ID, responseError.Index+1)
 				addFailure(&result, "platform_check", target, responseError.Err)
 			}
-			table.Rows = append(table.Rows, []string{
-				mediaPlatformNameKey(item.Check.ID),
-				item.Verdict.State,
-				item.Verdict.Region,
-				item.Verdict.Evidence,
-				string(item.Check.Strength),
-				mediaStatusDisplay(item.Statuses),
-				formatMilliseconds(item.Latency),
+			table.Rows = append(table.Rows, []model.Value{
+				model.KeyValue(mediaPlatformNameKey(item.Check.ID)), model.KeyValue(item.Verdict.State),
+				model.RawValue(item.Verdict.Region), model.KeyValue(item.Verdict.Evidence),
+				model.KeyValue(string(item.Check.Strength)), model.RawValue(mediaStatusDisplay(item.Statuses)),
+				model.RawValue(formatMilliseconds(item.Latency)),
 			})
 		}
 		result.Tables = append(result.Tables, table)
@@ -119,13 +121,13 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 		{
 			Key: "media_unlocked", Label: "probe.media.metric.unlocked",
 			Value: float64(unlocked), Unit: "count",
-			Display: fmt.Sprintf("%d/%d", unlocked, total),
+			Display: model.RawValue(fmt.Sprintf("%d/%d", unlocked, total)),
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(true),
 		},
 		{
 			Key: "media_unknown", Label: "probe.media.metric.unknown",
 			Value: float64(unknown), Unit: "count",
-			Display: fmt.Sprintf("%d/%d", unknown, total),
+			Display: model.RawValue(fmt.Sprintf("%d/%d", unknown, total)),
 			Method:  "media-rules-" + mediaRulesVersion, HigherIsBetter: model.BoolPtr(false),
 		},
 	}

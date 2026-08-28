@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -56,8 +57,31 @@ func TestExampleManifestParsesAndValidates(t *testing.T) {
 	if err := Validate(manifest); err != nil {
 		t.Fatalf("parsed manifest failed validation: %v", err)
 	}
-	if manifest.SchemaVersion != SchemaVersion || manifest.Architecture == "" || len(manifest.Tools) != len(ToolNames) {
+	if manifest.SchemaVersion != SchemaVersion || manifest.Architecture == "" || len(manifest.Tools) != len(ToolNames()) {
 		t.Fatalf("manifest = schema %q, architecture %q, tools %d", manifest.SchemaVersion, manifest.Architecture, len(manifest.Tools))
+	}
+}
+
+func TestCanonicalManifestListsReturnCopies(t *testing.T) {
+	originalArchitectures := Architectures()
+	originalToolNames := ToolNames()
+	wantArchitectures := []string{"amd64", "arm64", "armv7", "386", "s390x", "riscv64", "ppc64le"}
+	wantToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3", "nexttrace-tiny", "ping"}
+	if !reflect.DeepEqual(originalArchitectures, wantArchitectures) || !reflect.DeepEqual(originalToolNames, wantToolNames) {
+		t.Fatalf("canonical manifest lists = architectures:%v tools:%v", originalArchitectures, originalToolNames)
+	}
+	if len(originalArchitectures) == 0 || len(originalToolNames) == 0 {
+		t.Fatal("canonical manifest lists must not be empty")
+	}
+	mutatedArchitectures := append([]string(nil), originalArchitectures...)
+	mutatedToolNames := append([]string(nil), originalToolNames...)
+	mutatedArchitectures[0] = "mutated"
+	mutatedToolNames[0] = "mutated"
+	if got := Architectures(); !reflect.DeepEqual(got, originalArchitectures) || reflect.DeepEqual(got, mutatedArchitectures) {
+		t.Fatalf("Architectures returned mutable canonical data: %v", got)
+	}
+	if got := ToolNames(); !reflect.DeepEqual(got, originalToolNames) || reflect.DeepEqual(got, mutatedToolNames) {
+		t.Fatalf("ToolNames returned mutable canonical data: %v", got)
 	}
 }
 

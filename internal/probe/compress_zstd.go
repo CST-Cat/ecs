@@ -67,9 +67,7 @@ type zstdBenchmarkSample struct {
 
 type zstdProbe struct{}
 
-func (zstdProbe) ID() string         { return "zstd" }
-func (zstdProbe) Title() string      { return "zstd 压缩性能" }
-func (zstdProbe) NeedsNetwork() bool { return false }
+func (zstdProbe) ID() string { return "zstd" }
 
 func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("zstd")
@@ -78,28 +76,26 @@ func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	corpus, err := findZstdCorpus(path, defaultZstdContract)
 	if err != nil {
-		result := missingZstdResult(zstdCorpusName, err)
-		result.Notes = append(result.Notes, err.Error())
-		return result
+		return missingZstdResult(zstdCorpusName, err)
 	}
 	return runZstdBenchmark(ctx, env, path, corpus, defaultZstdContract)
 }
 
 func missingZstdResult(target string, err error) model.Result {
 	start := time.Now()
-	result := model.NewResult("zstd", "zstd 压缩性能")
-	result.Description = "固定 Silesia corpus 上的 zstd 压缩与解压吞吐，分别运行 1 worker 与当前 CPU allowance 的全 worker"
+	allowance := detectCPUAllowance()
+	result := model.NewResult("zstd", "module.zstd.title")
+	result.Description = "probe.zstd.description"
 	result.Methodology = zstdMethodology(defaultZstdContract)
+	result.Methodology.Parameters = newComparisonParameters()
 	result.Status = model.StatusWarning
 	message := ""
 	if err != nil {
 		message = err.Error()
 	}
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: target, Count: 1, Message: message})
-	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(detectCPUAllowance().Threads)), "run")
-	result.Notes = append(result.Notes,
-		"probe.zstd.tool_missing",
-	)
+	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(allowance.Threads)), "run")
+	finalizeZstdResult(&result, allowance)
 	result.Finish(start)
 	return result
 }
@@ -107,10 +103,10 @@ func missingZstdResult(target string, err error) model.Result {
 func zstdMethodology(contract zstdBenchmarkContract) model.Methodology {
 	return model.Methodology{
 		Kind:            "standard-benchmark",
-		Label:           "标准基准",
+		Label:           "methodology.standard-benchmark",
 		Engine:          "zstd",
-		Profile:         fmt.Sprintf("Silesia v1 · level=%d · -i%d · -T1/-TN", contract.Level, contract.Seconds),
-		ComparisonScope: "相同 zstd 版本、corpus SHA-256、压缩等级、评估时长、线程数与 method version",
+		Profile:         "probe.zstd.profile",
+		ComparisonScope: "probe.zstd.comparison_scope",
 	}
 }
 
@@ -167,9 +163,10 @@ func runZstdBenchmark(ctx context.Context, env Environment, path, corpus string,
 
 func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, corpus string, contract zstdBenchmarkContract, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("zstd", "zstd 压缩性能")
-	result.Description = "固定 Silesia corpus 上的 zstd 压缩与解压吞吐，分别运行 1 worker 与当前 CPU allowance 的全 worker"
+	result := model.NewResult("zstd", "module.zstd.title")
+	result.Description = "probe.zstd.description"
 	result.Methodology = zstdMethodology(contract)
+	result.Methodology.Parameters = newComparisonParameters()
 	threadCounts := distinctBenchmarkThreadCounts(allowance.Threads)
 
 	versionLine := commandVersion(ctx, path)
@@ -181,14 +178,16 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 			Count: 1, Message: versionLine,
 		})
 		result.Fields = []model.Field{
-			{Key: "engine", Label: "标准工具", Value: "zstd"},
-			{Key: "version", Label: "zstd 版本", Value: versionLine},
-			{Key: "binary_sha256", Label: "zstd SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
-			{Key: "required_version", Label: "固定版本", Value: contract.Version},
-			{Key: "corpus_sha256", Label: "corpus SHA-256", Value: contract.CorpusSHA256},
+			{Key: "engine", Label: "probe.zstd.field.engine", Value: model.RawValue("zstd")},
+			{Key: "version", Label: "probe.zstd.field.version", Value: model.RawValue(versionLine)},
+			{Key: "binary_sha256", Label: "probe.zstd.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
+			{Key: "required_version", Label: "probe.zstd.field.required_version", Value: model.RawValue(contract.Version)},
+			{Key: "corpus_sha256", Label: "probe.zstd.field.corpus_sha256", Value: model.RawValue(contract.CorpusSHA256)},
 		}
+		addComparisonParameter(result.Methodology.Parameters, "tool_version", versionLine)
+		addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
-		result.Notes = append(result.Notes, "请使用 run.sh 提供版本与哈希均经过 ecs-tools manifest 校验的 zstd binary。")
+		finalizeZstdResult(&result, allowance)
 		result.Finish(start)
 		return result
 	}
@@ -199,7 +198,7 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 			Count: 1, Message: err.Error(),
 		})
 		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
-		result.Notes = append(result.Notes, err.Error())
+		finalizeZstdResult(&result, allowance)
 		result.Finish(start)
 		return result
 	}
@@ -233,21 +232,36 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 
 	appendZstdMeasurements(&result, runs, workers)
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "标准工具", Value: "zstd"},
-		{Key: "version", Label: "zstd 版本", Value: versionLine},
-		{Key: "binary_sha256", Label: "zstd SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
-		{Key: "method_version", Label: "method version", Value: zstdMethodVersion},
-		{Key: "compression_level", Label: "压缩等级", Value: strconv.Itoa(contract.Level)},
-		{Key: "threads", Label: "测试 worker", Value: benchmarkThreadField(workers)},
-		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
-		{Key: "duration", Label: "每阶段最短评估时长", Value: fmt.Sprintf("%ds", contract.Seconds)},
-		{Key: "corpus", Label: "固定 corpus", Value: contract.CorpusName},
-		{Key: "corpus_bytes", Label: "corpus 大小", Value: strconv.FormatInt(contract.CorpusBytes, 10) + " bytes"},
-		{Key: "corpus_sha256", Label: "corpus SHA-256", Value: contract.CorpusSHA256},
-		{Key: "corpus_source_sha256", Label: "Silesia ZIP SHA-256", Value: contract.CorpusSourceHash},
-		{Key: "corpus_construction", Label: "corpus 构造", Value: "dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml（原字节顺序拼接）"},
-		{Key: "arguments_1t", Label: "完整参数（1 worker）", Value: strings.Join(runs[0].Args, " ")},
-		{Key: "arguments_nt", Label: "完整参数（全 worker）", Value: strings.Join(runs[1].Args, " ")},
+		{Key: "engine", Label: "probe.zstd.field.engine", Value: model.RawValue("zstd")},
+		{Key: "version", Label: "probe.zstd.field.version", Value: model.RawValue(versionLine)},
+		{Key: "binary_sha256", Label: "probe.zstd.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
+		{Key: "method_version", Label: "probe.zstd.field.method_version", Value: model.RawValue(zstdMethodVersion)},
+		{Key: "compression_level", Label: "probe.zstd.field.compression_level", Value: model.RawValue(strconv.Itoa(contract.Level))},
+		{Key: "threads", Label: "probe.zstd.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
+		{Key: "cpu_allowance", Label: "probe.zstd.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
+		{Key: "duration", Label: "probe.zstd.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", contract.Seconds))},
+		{Key: "corpus", Label: "probe.zstd.field.corpus", Value: model.RawValue(contract.CorpusName)},
+		{Key: "corpus_bytes", Label: "probe.zstd.field.corpus_bytes", Value: model.RawValue(strconv.FormatInt(contract.CorpusBytes, 10) + " bytes")},
+		{Key: "corpus_sha256", Label: "probe.zstd.field.corpus_sha256", Value: model.RawValue(contract.CorpusSHA256)},
+		{Key: "corpus_source_sha256", Label: "probe.zstd.field.corpus_source_sha256", Value: model.RawValue(contract.CorpusSourceHash)},
+		{Key: "corpus_construction", Label: "probe.zstd.field.corpus_construction", Value: model.RawValue("dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml")},
+		{Key: "arguments_1t", Label: "probe.zstd.field.arguments_1t", Value: model.RawValue(strings.Join(runs[0].Args, " "))},
+		{Key: "arguments_nt", Label: "probe.zstd.field.arguments_nt", Value: model.RawValue(strings.Join(runs[1].Args, " "))},
+	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", versionLine)
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
+	addComparisonParameter(result.Methodology.Parameters, "method_version", zstdMethodVersion)
+	addComparisonParameter(result.Methodology.Parameters, "compression_level", strconv.Itoa(contract.Level))
+	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
+	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", contract.Seconds))
+	addComparisonParameter(result.Methodology.Parameters, "corpus_bytes", strconv.FormatInt(contract.CorpusBytes, 10)+" bytes")
+	addComparisonParameter(result.Methodology.Parameters, "corpus_sha256", contract.CorpusSHA256)
+	addComparisonParameter(result.Methodology.Parameters, "corpus_source_sha256", contract.CorpusSourceHash)
+	if len(runs[0].Args) > 0 {
+		addComparisonParameter(result.Methodology.Parameters, "arguments_1t_sha256", comparisonParameterHash(zstdComparisonArguments(runs[0].Args)))
+	}
+	if len(runs[1].Args) > 0 {
+		addComparisonParameter(result.Methodology.Parameters, "arguments_nt_sha256", comparisonParameterHash(zstdComparisonArguments(runs[1].Args)))
 	}
 	for index, sample := range runs {
 		if singleCore && index > 0 {
@@ -256,38 +270,14 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		if sample.Output == "" {
 			continue
 		}
-		title := "zstd 1 worker 原始输出"
-		if index == 1 {
-			title = fmt.Sprintf("zstd 全 worker（%d）原始输出", workers)
-		}
-		result.TextBlocks = append(result.TextBlocks, model.TextBlock{Title: title, Language: "text", Content: sample.Output})
+		result.TextBlocks = append(result.TextBlocks, model.TextBlock{Title: "probe.zstd.raw_output", Language: "text", Content: sample.Output})
 	}
 	result.Tables = append(result.Tables, zstdThroughputTable(runs, workers))
 	result.Sources = []model.Source{
-		{Name: "Zstandard", URL: "https://github.com/facebook/zstd", Purpose: "官方 zstd CLI 内存 benchmark 模式"},
-		{Name: "Silesia Corpus", URL: "https://data-compression.info/Corpora/SilesiaCorpus/", Purpose: "固定的多类型无损压缩测试数据"},
+		{Name: "Zstandard", URL: "https://github.com/facebook/zstd", Purpose: "probe.zstd.source.zstandard"},
+		{Name: "Silesia Corpus", URL: "https://data-compression.info/Corpora/SilesiaCorpus/", Purpose: "probe.zstd.source.silesia"},
 	}
-	if singleCore {
-		result.Notes = append(result.Notes,
-			fmt.Sprintf("zstd 固定为 v%s、level %d、每阶段至少 %d 秒；单核 allowance 下 1 worker 与全 worker 逻辑指标复用同一次实测，未执行第二次相同命令，扩展倍率与每 worker 效率不适用。", contract.Version, contract.Level, contract.Seconds),
-		)
-	} else {
-		result.Notes = append(result.Notes,
-			fmt.Sprintf("zstd 固定为 v%s、level %d、每阶段至少 %d 秒；1 worker 与 %d worker 是两次独立运行。", contract.Version, contract.Level, contract.Seconds, workers),
-		)
-	}
-	result.Notes = append(result.Notes,
-		"corpus 由 Silesia ZIP 中 12 个文件按固定顺序逐字节拼接；运行前同时校验长度与 SHA-256，数据不同不会产生成绩。",
-		"zstd benchmark 在内存中重复压缩/解压整个输入；结构化值保留 CLI 报告的十进制 MB/s，不换算为 MiB/s。",
-		"zstd 的 -T 参数控制压缩 worker；解压阶段本身不做多线程并行，因此解压扩展倍率与每 worker 效率仅用于揭示两轮波动，不代表并行解压能力。",
-		"本模块只输出原始吞吐、扩展倍率和每 worker 效率，不进入 CPU 综合分，也不生成自定义综合分。",
-	)
-	if allowance.Limited() && !singleCore {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"检测到 CPU 配额 %.2f 核（%s），全 worker 轮按 allowance 使用 %d worker。",
-			allowance.Quota, allowance.Source, workers,
-		))
-	}
+	finalizeZstdResult(&result, allowance)
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
 	result.Finish(start)
 	return result
@@ -299,6 +289,17 @@ func parseZstdVersion(output string) (string, bool) {
 		return "", false
 	}
 	return match[1], true
+}
+
+// zstdComparisonArguments removes the per-run corpus path from the argument
+// fingerprint.  The command keeps the stable benchmark contract in its first
+// four tokens; the fifth token is a temporary path selected by the producer.
+func zstdComparisonArguments(args []string) []string {
+	parts := strings.Fields(strings.Join(args, " "))
+	if len(parts) > 4 {
+		parts = parts[:4]
+	}
+	return parts
 }
 
 func executeZstdBenchmark(ctx context.Context, path, corpus string, threads int, contract zstdBenchmarkContract) (zstdBenchmarkSample, error) {
@@ -424,42 +425,41 @@ func appendZstdMeasurements(result *model.Result, runs []zstdBenchmarkSample, wo
 		return
 	}
 	contexts := []string{"1t", "nt"}
-	labels := []string{"1 worker", fmt.Sprintf("%d worker", workers)}
 	for index, sample := range runs {
 		if sample.CompressMBPS > 0 {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "zstd_compress_" + contexts[index] + "_mb_s", Label: "zstd " + labels[index] + " 压缩吞吐",
-				Value: sample.CompressMBPS, Unit: "MB/s", Display: model.FormatRate(sample.CompressMBPS, "MB/s"),
+				Key: "zstd_compress_" + contexts[index] + "_mb_s", Label: "probe.zstd.metric.zstd_compress_" + contexts[index] + "_mb_s",
+				Value: sample.CompressMBPS, Unit: "MB/s", Display: model.RawValue(model.FormatRate(sample.CompressMBPS, "MB/s")),
 				Method: zstdMethodVersion + "-compress-" + contexts[index], HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 		if sample.DecompressMBPS > 0 {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "zstd_decompress_" + contexts[index] + "_mb_s", Label: "zstd " + labels[index] + " 解压吞吐",
-				Value: sample.DecompressMBPS, Unit: "MB/s", Display: model.FormatRate(sample.DecompressMBPS, "MB/s"),
+				Key: "zstd_decompress_" + contexts[index] + "_mb_s", Label: "probe.zstd.metric.zstd_decompress_" + contexts[index] + "_mb_s",
+				Value: sample.DecompressMBPS, Unit: "MB/s", Display: model.RawValue(model.FormatRate(sample.DecompressMBPS, "MB/s")),
 				Method: zstdMethodVersion + "-decompress-" + contexts[index], HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 	}
 	if workers > 1 && runs[0].CompressMBPS > 0 && runs[1].CompressMBPS > 0 {
-		appendZstdScalingMeasurements(result, "compress", "压缩", runs[1].CompressMBPS/runs[0].CompressMBPS, workers)
+		appendZstdScalingMeasurements(result, "compress", runs[1].CompressMBPS/runs[0].CompressMBPS, workers)
 	}
 	if workers > 1 && runs[0].DecompressMBPS > 0 && runs[1].DecompressMBPS > 0 {
-		appendZstdScalingMeasurements(result, "decompress", "解压", runs[1].DecompressMBPS/runs[0].DecompressMBPS, workers)
+		appendZstdScalingMeasurements(result, "decompress", runs[1].DecompressMBPS/runs[0].DecompressMBPS, workers)
 	}
 }
 
-func appendZstdScalingMeasurements(result *model.Result, key, label string, scaling float64, workers int) {
+func appendZstdScalingMeasurements(result *model.Result, key string, scaling float64, workers int) {
 	efficiency := scaling / float64(workers) * 100
 	result.Measurements = append(result.Measurements,
 		model.Measurement{
-			Key: "zstd_" + key + "_scaling_ratio", Label: "zstd " + label + "多线程扩展倍率",
-			Value: scaling, Unit: "x", Display: fmt.Sprintf("%.2f×", scaling),
+			Key: "zstd_" + key + "_scaling_ratio", Label: "probe.zstd.metric.zstd_" + key + "_scaling_ratio",
+			Value: scaling, Unit: "x", Display: model.RawValue(fmt.Sprintf("%.2f×", scaling)),
 			Method: zstdMethodVersion + "-" + key + "-scaling", HigherIsBetter: model.BoolPtr(true),
 		},
 		model.Measurement{
-			Key: "zstd_" + key + "_per_worker_efficiency_percent", Label: "zstd " + label + "每 worker 效率",
-			Value: efficiency, Unit: "%", Display: fmt.Sprintf("%.1f %%", efficiency),
+			Key: "zstd_" + key + "_per_worker_efficiency_percent", Label: "probe.zstd.metric.zstd_" + key + "_per_worker_efficiency_percent",
+			Value: efficiency, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.1f %%", efficiency)),
 			Method: zstdMethodVersion + "-" + key + "-scaling", HigherIsBetter: model.BoolPtr(true),
 		},
 	)
@@ -467,17 +467,26 @@ func appendZstdScalingMeasurements(result *model.Result, key, label string, scal
 
 func zstdThroughputTable(runs []zstdBenchmarkSample, workers int) model.Table {
 	table := model.Table{
-		Key:                   "benchmark.zstd.throughput",
-		Title:                 "zstd 压缩与解压吞吐",
-		Columns:               []string{"线程上下文", "压缩吞吐", "解压吞吐", "压缩扩展", "解压扩展", "压缩每 worker 效率", "解压每 worker 效率"},
-		ColumnKeys:            []string{"worker_context", "compress_mbps", "decompress_mbps", "compress_scaling_ratio", "decompress_scaling_ratio", "compress_efficiency_percent", "decompress_efficiency_percent"},
-		NumericColumns:        []int{1, 2, 3, 4, 5, 6},
-		NumericHigherIsBetter: []bool{true, true, true, true, true, true},
+		Key:   "benchmark.zstd.throughput",
+		Title: "probe.zstd.table.title",
+		Columns: []model.TableColumn{
+			{Key: "worker_context", Label: "probe.zstd.column.context"},
+			{Key: "compress_mbps", Label: "probe.zstd.column.compress", Numeric: true, HigherIsBetter: true},
+			{Key: "decompress_mbps", Label: "probe.zstd.column.decompress", Numeric: true, HigherIsBetter: true},
+			{Key: "compress_scaling_ratio", Label: "probe.zstd.column.compress_scaling", Numeric: true, HigherIsBetter: true},
+			{Key: "decompress_scaling_ratio", Label: "probe.zstd.column.decompress_scaling", Numeric: true, HigherIsBetter: true},
+			{Key: "compress_efficiency_percent", Label: "probe.zstd.column.compress_efficiency", Numeric: true, HigherIsBetter: true},
+			{Key: "decompress_efficiency_percent", Label: "probe.zstd.column.decompress_efficiency", Numeric: true, HigherIsBetter: true},
+		},
 	}
 	for index, sample := range runs {
-		contextName := "1 worker"
+		contextName := "1T"
 		if index == 1 {
-			contextName = fmt.Sprintf("全 worker（%d）", workers)
+			if workers <= 1 {
+				contextName = "NT(1T-reused)"
+			} else {
+				contextName = fmt.Sprintf("NT(%dT)", workers)
+			}
 		}
 		compress, decompress := "—", "—"
 		if sample.CompressMBPS > 0 {
@@ -503,15 +512,92 @@ func zstdThroughputTable(runs []zstdBenchmarkSample, workers int) model.Table {
 			decompressScale = fmt.Sprintf("%.2f x", ratio)
 			decompressEfficiency = fmt.Sprintf("%.1f %%", ratio/float64(workers)*100)
 		}
-		table.Rows = append(table.Rows, []string{
-			contextName, compress, decompress, compressScale, decompressScale, compressEfficiency, decompressEfficiency,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(contextName), model.RawValue(compress), model.RawValue(decompress), model.RawValue(compressScale), model.RawValue(decompressScale), model.RawValue(compressEfficiency), model.RawValue(decompressEfficiency),
 		})
 		if workers <= 1 {
 			row := table.Rows[len(table.Rows)-1]
 			for column := 3; column < len(row); column++ {
-				row[column] = "不适用"
+				row[column] = model.RawValue("na")
 			}
 		}
 	}
 	return table
+}
+
+func finalizeZstdResult(result *model.Result, allowance cpuAllowance) {
+	if result == nil {
+		return
+	}
+	result.Notes = zstdNotes(*result, allowance)
+	result.SummaryMessages = []model.Message{zstdSummaryMessage(*result, allowance.Threads)}
+}
+
+func zstdNotes(result model.Result, allowance cpuAllowance) []string {
+	notes := []string{
+		"probe.zstd.note.contract",
+		"probe.zstd.note.corpus",
+		"probe.zstd.note.units",
+		"probe.zstd.note.decompression",
+		"probe.zstd.note.no_composite_score",
+	}
+	if allowance.Threads <= 1 {
+		notes = append(notes, "probe.zstd.note.single_core")
+	} else {
+		notes = append(notes, "probe.zstd.note.separate_runs")
+	}
+	if allowance.Limited() && allowance.Threads > 1 {
+		notes = append(notes, "probe.zstd.note.quota_limited")
+	}
+	for _, failure := range result.Failures {
+		switch failure.Stage {
+		case "tool_lookup":
+			notes = append(notes, "probe.zstd.note.tool_missing")
+		case "version_check":
+			notes = append(notes, "probe.zstd.note.version_mismatch")
+		case "corpus_verify":
+			notes = append(notes, "probe.zstd.note.corpus_invalid")
+		case "benchmark_run":
+			notes = append(notes, "probe.zstd.note.run_failure")
+		}
+	}
+	seen := make(map[string]bool, len(notes))
+	out := notes[:0]
+	for _, note := range notes {
+		if seen[note] {
+			continue
+		}
+		seen[note] = true
+		out = append(out, note)
+	}
+	return out
+}
+
+func zstdSummaryMessage(result model.Result, workers int) model.Message {
+	if summary := zstdMachineSummary(result, workers); summary != "" {
+		return model.NewMessage("probe.zstd.summary.values", summary)
+	}
+	return model.NewMessage("probe.zstd.summary.none")
+}
+
+func zstdMachineSummary(result model.Result, workers int) string {
+	values := make(map[string]string, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		if measurement.Value > 0 {
+			values[measurement.Key] = measurement.Display.Text()
+		}
+	}
+	parts := make([]string, 0, 3)
+	if value := values["zstd_compress_1t_mb_s"]; value != "" {
+		parts = append(parts, "compress:1T="+value)
+	}
+	if workers > 1 {
+		if value := values["zstd_compress_nt_mb_s"]; value != "" {
+			parts = append(parts, fmt.Sprintf("compress:NT(%dT)=%s", workers, value))
+		}
+		if value := values["zstd_compress_scaling_ratio"]; value != "" {
+			parts = append(parts, "compress:scaling="+value)
+		}
+	}
+	return strings.Join(parts, ";")
 }

@@ -20,9 +20,18 @@ func renderMessage(message model.Message) string {
 	}
 	args := make([]any, len(message.Args))
 	for index, arg := range message.Args {
-		args[index] = displayReportText(arg)
+		args[index] = renderMessageArg(message.Key, index, arg)
 	}
 	return fmt.Sprintf(format, args...)
+}
+
+// renderMessageArg handles the one message contract whose argument carries an
+// explicit presentation key. All other message arguments remain raw text.
+func renderMessageArg(messageKey string, index int, arg string) string {
+	if index == 3 && (messageKey == "probe.network.summary.version" || messageKey == "probe.network.summary.version.additional") {
+		return displayKey(arg)
+	}
+	return arg
 }
 
 func renderMessages(messages []model.Message) string {

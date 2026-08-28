@@ -74,10 +74,13 @@ func appendKernelNetworkParams(result *model.Result) {
 
 func appendKernelNetworkFacts(result *model.Result, values map[string]string) {
 	table := model.Table{
-		Key:         "system.kernel.network_parameters",
-		Title:       "probe.kernel.table.title",
-		Columns:     []string{"probe.kernel.column.parameter", "probe.kernel.column.current_value", "probe.kernel.column.rationale"},
-		ColumnKeys:  []string{"parameter", "current_value", "rationale"},
+		Key:   "system.kernel.network_parameters",
+		Title: "probe.kernel.table.title",
+		Columns: []model.TableColumn{
+			{Key: "parameter", Label: "probe.kernel.column.parameter"},
+			{Key: "current_value", Label: "probe.kernel.column.current_value"},
+			{Key: "rationale", Label: "probe.kernel.column.rationale"},
+		},
 		RowIdentity: "parameter",
 	}
 	for _, param := range kernelParams() {
@@ -85,7 +88,9 @@ func appendKernelNetworkFacts(result *model.Result, values map[string]string) {
 		if value == "" {
 			continue
 		}
-		table.Rows = append(table.Rows, []string{kernelParamLabelKey(param.Key), value, kernelParamWhyKey(param.Key)})
+		table.Rows = append(table.Rows, []model.Value{
+			model.KeyValue(kernelParamLabelKey(param.Key)), model.RawValue(value), model.KeyValue(kernelParamWhyKey(param.Key)),
+		})
 	}
 	if len(table.Rows) == 0 {
 		return
@@ -96,9 +101,9 @@ func appendKernelNetworkFacts(result *model.Result, values map[string]string) {
 	available := values["tcp_available_congestion"]
 	bbrStatus := bbrMachineStatus(current, available)
 	result.Fields = append(result.Fields,
-		model.Field{Key: "bbr_status", Label: "probe.kernel.field.bbr_status", Value: bbrStatus},
-		model.Field{Key: "tcp_congestion_control", Label: "probe.kernel.field.current_congestion_control", Value: fallback(current, "unknown")},
-		model.Field{Key: "tcp_available_congestion", Label: "probe.kernel.field.available_congestion_controls", Value: fallback(available, "unknown")},
+		model.Field{Key: "bbr_status", Label: "probe.kernel.field.bbr_status", Value: model.RawValue(bbrStatus)},
+		model.Field{Key: "tcp_congestion_control", Label: "probe.kernel.field.current_congestion_control", Value: model.RawValue(fallback(current, "unknown"))},
+		model.Field{Key: "tcp_available_congestion", Label: "probe.kernel.field.available_congestion_controls", Value: model.RawValue(fallback(available, "unknown"))},
 	)
 	if bbrStatus == "unavailable" {
 		result.Notes = append(result.Notes, "probe.kernel.note.bbr_unavailable")
@@ -108,14 +113,14 @@ func appendKernelNetworkFacts(result *model.Result, values map[string]string) {
 		if bufferBytes, err := strconv.Atoi(raw); err == nil && bufferBytes > 0 {
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key: "tcp_rmem_max_bytes", Label: "probe.kernel.metric.rmem_max",
-				Value: float64(bufferBytes), Unit: "bytes", Display: model.FormatBytes(uint64(bufferBytes)),
+				Value: float64(bufferBytes), Unit: "bytes", Display: model.RawValue(model.FormatBytes(uint64(bufferBytes))),
 				Method: "proc-sys-net-core-rmem-max-v1", HigherIsBetter: model.BoolPtr(true),
 			})
 			const referenceRTTMS = 150.0
 			if limit := bdpThroughputMbps(bufferBytes, referenceRTTMS); limit > 0 {
 				result.Measurements = append(result.Measurements, model.Measurement{
 					Key: "tcp_single_flow_window_limit_150ms_mbps", Label: "probe.kernel.metric.single_flow_window_limit_150ms",
-					Value: limit, Unit: "Mbps", Display: model.FormatRate(limit, "Mbps"),
+					Value: limit, Unit: "Mbps", Display: model.RawValue(model.FormatRate(limit, "Mbps")),
 					Method: "tcp-window-bdp-limit-150ms-v1", HigherIsBetter: model.BoolPtr(true),
 				})
 				if limit < 500 {

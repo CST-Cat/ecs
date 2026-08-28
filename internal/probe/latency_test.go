@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -97,4 +98,129 @@ func TestLatencyResolutionFamiliesInterceptionAndICMP(t *testing.T) {
 	if len(result.Measurements) != before || formatICMPMilliseconds(-1) != "n/a" || formatICMPMilliseconds(1.5) != "1.50 ms" {
 		t.Fatal("ICMP unavailable/format contract failed")
 	}
+}
+
+func TestLatencyProducerDirectResult(t *testing.T) {
+	t.Run("skip without targets", func(t *testing.T) {
+		result := (latencyProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
+		if result.Status != model.StatusSkipped || result.Title != "module.latency.title" || result.Description != "probe.latency.description" {
+			t.Fatalf("latency skip result = %+v", result)
+		}
+		if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 0 || result.Evidence.Unit != "sample" {
+			t.Fatalf("latency skip evidence = %+v", result.Evidence)
+		}
+		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.skipped" {
+			t.Fatalf("latency skip summary = %+v", result.SummaryMessages)
+		}
+		if got := strings.Join(result.Notes, ","); got != "probe.latency.note.resolution,probe.latency.note.region,probe.latency.note.icmp_unavailable" {
+			t.Fatalf("latency skip notes = %q", got)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		accepted := make(chan int, 1)
+		go func() {
+			count := 0
+			for count < 2 {
+				connection, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					break
+				}
+				count++
+				_ = connection.Close()
+			}
+			accepted <- count
+		}()
+
+		t.Setenv("PATH", t.TempDir())
+		result := (latencyProbe{}).Run(context.Background(), Environment{
+			Config: config.Runtime{
+				IPVersion:       config.IPVersion4,
+				LatencyAttempts: 2,
+				LatencyTargets:  []config.Endpoint{{Name: "fixture", Address: listener.Addr().String(), Kind: "local", Family: config.IPVersion4}},
+			},
+			Network: NetworkCapabilities{IPv4Usable: true},
+		})
+		if got := <-accepted; got != 2 {
+			t.Fatalf("latency successful TCP connections = %d, want 2", got)
+		}
+		if result.Status != model.StatusOK || result.Title != "module.latency.title" || result.Description != "probe.latency.description" {
+			t.Fatalf("latency success status/metadata = %s/%+v", result.Status, result)
+		}
+		if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.latency.profile" || result.Methodology.ComparisonScope != "probe.latency.comparison_scope" {
+			t.Fatalf("latency success methodology = %+v", result.Methodology)
+		}
+		if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "sample" {
+			t.Fatalf("latency success evidence = %+v", result.Evidence)
+		}
+		if result.StartedAt.IsZero() || len(result.Failures) != 0 {
+			t.Fatalf("latency success completion/failures = %s/%+v", result.StartedAt, result.Failures)
+		}
+		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.values" {
+			t.Fatalf("latency success summary = %+v", result.SummaryMessages)
+		}
+		if len(result.Notes) != 3 || result.Notes[0] != "probe.latency.note.resolution" || result.Notes[1] != "probe.latency.note.region" || result.Notes[2] != "probe.latency.note.icmp_unavailable" {
+			t.Fatalf("latency success notes = %v", result.Notes)
+		}
+		if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.latency.metric.tcp" || result.Measurements[4].Label != "probe.latency.metric.best_median" {
+			t.Fatalf("latency success measurements = %+v", result.Measurements)
+		}
+		for _, measurement := range result.Measurements {
+			if _, ok := measurement.Display.Raw(); !ok {
+				t.Fatalf("latency measurement display is not raw: %+v", measurement)
+			}
+		}
+		if len(result.Tables) != 1 || result.Tables[0].Title != "probe.latency.table.tcp_icmp" || len(result.Tables[0].Columns) != 13 || len(result.Tables[0].Rows) != 1 {
+			t.Fatalf("latency success table = %+v", result.Tables)
+		}
+		for index, column := range result.Tables[0].Columns {
+			if column.Key == "" || column.Label == "" {
+				t.Fatalf("latency success column %d = %+v", index, column)
+			}
+		}
+		row := result.Tables[0].Rows[0]
+		if len(row) != len(result.Tables[0].Columns) || row[0].Text() != "fixture" || row[1].Text() != "IPv4" || row[2].Text() != "local" {
+			t.Fatalf("latency success raw cells = %+v", row)
+		}
+		for index, cell := range row {
+			if index == len(row)-1 {
+				continue
+			}
+			if _, ok := cell.Raw(); !ok {
+				t.Fatalf("latency success cell %d is not raw: %+v", index, cell)
+			}
+		}
+		if key, ok := row[12].Key(); !ok || key != "probe.latency.status.no_resolution" {
+			t.Fatalf("latency success resolution status = %+v", row[12])
+		}
+	})
+
+	t.Run("all failed resolution", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		result := (latencyProbe{}).Run(context.Background(), Environment{
+			Config: config.Runtime{
+				IPVersion:       config.IPVersion4,
+				LatencyAttempts: 1,
+				LatencyTargets:  []config.Endpoint{{Name: "bad", Address: "not-an-address", Family: config.IPVersion4}},
+			},
+			Network: NetworkCapabilities{IPv4Usable: true},
+		})
+		if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 1 {
+			t.Fatalf("latency all-failed status/evidence = %s/%+v", result.Status, result.Evidence)
+		}
+		if len(result.Failures) != 1 || result.Failures[0].Stage != "resolve" || result.Failures[0].Message == "" {
+			t.Fatalf("latency all-failed failure = %+v", result.Failures)
+		}
+		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.all_failed" {
+			t.Fatalf("latency all-failed summary = %+v", result.SummaryMessages)
+		}
+		if key, ok := result.Tables[0].Rows[0][12].Key(); !ok || key != "probe.latency.status.resolve_failed" {
+			t.Fatalf("latency resolution failure status = %+v", result.Tables[0].Rows[0][12])
+		}
+	})
 }

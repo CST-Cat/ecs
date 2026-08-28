@@ -11,8 +11,18 @@
 /ecs.exe
 *.test
 *.out
-/AGENTS.md
 ecs-report-*
 .DS_Store
+# 临时 Agent 任务记录：合并或交付前删除，不作为仓库文档
+/PLAN.md
+/REQUIREMENTS.md
+/REVIEW.md
+/SEARCH_SUMMARY.md
+/RESEARCH.md
+/DECISIONS.md
+/VALIDATION.md
+/TODO.md
+/NOTES.md
+
 # 本地 Agent 权限配置属于开发者环境，不入库
 .claude/

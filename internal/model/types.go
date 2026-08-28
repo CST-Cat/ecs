@@ -167,7 +167,7 @@ type Methodology struct {
 type Field struct {
 	Key       string `json:"key"`
 	Label     string `json:"label"`
-	Value     string `json:"value"`
+	Value     Value  `json:"value"`
 	Sensitive bool   `json:"sensitive,omitempty"`
 }
 
@@ -176,24 +176,30 @@ type Measurement struct {
 	Label          string  `json:"label"`
 	Value          float64 `json:"value"`
 	Unit           string  `json:"unit,omitempty"`
-	Display        string  `json:"display"`
+	Display        Value   `json:"display"`
 	Rating         string  `json:"rating,omitempty"`
 	Method         string  `json:"method,omitempty"`
 	HigherIsBetter *bool   `json:"higher_is_better,omitempty"`
 }
 
+// TableColumn contains all metadata for one table column. Columns are ordered
+// by their position in Table.Columns, and every row uses that same order.
+type TableColumn struct {
+	Key            string `json:"key"`
+	Label          string `json:"label"`
+	Numeric        bool   `json:"numeric,omitempty"`
+	HigherIsBetter bool   `json:"higher_is_better,omitempty"`
+	Sensitive      bool   `json:"sensitive,omitempty"`
+}
+
 type Table struct {
 	// Key is the stable machine identifier for this table schema.
-	Key        string     `json:"key,omitempty"`
-	Title      string     `json:"title,omitempty"`
-	Columns    []string   `json:"columns"`
-	ColumnKeys []string   `json:"column_keys,omitempty"`
-	Rows       [][]string `json:"rows"`
+	Key     string        `json:"key,omitempty"`
+	Title   string        `json:"title,omitempty"`
+	Columns []TableColumn `json:"columns"`
+	Rows    [][]Value     `json:"rows"`
 	// RowIdentity names the stable machine key of the row-identity column.
-	RowIdentity           string `json:"row_identity,omitempty"`
-	NumericColumns        []int  `json:"numeric_columns,omitempty"`
-	NumericHigherIsBetter []bool `json:"numeric_higher_is_better,omitempty"`
-	SensitiveColumns      []int  `json:"sensitive_columns,omitempty"`
+	RowIdentity string `json:"row_identity,omitempty"`
 }
 
 type TextBlock struct {

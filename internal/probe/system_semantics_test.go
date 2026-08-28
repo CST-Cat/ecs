@@ -140,7 +140,7 @@ func TestSystemDirectBuilderUsesSingleStableShape(t *testing.T) {
 			t.Fatalf("duplicate system field %q", field.Key)
 		}
 		fieldKeys[field.Key] = true
-		values[field.Key] = field.Value
+		values[field.Key] = field.Value.Text()
 		if (!strings.HasPrefix(field.Label, "probe.system.field.") && !strings.HasPrefix(field.Label, "probe.kernel.field.")) || !i18n.Has(i18n.LangZH, field.Label) || !i18n.Has(i18n.LangEN, field.Label) {
 			t.Fatalf("field is not a bilingual stable key: %+v", field)
 		}
@@ -179,7 +179,7 @@ func TestSystemDirectBuilderUsesSingleStableShape(t *testing.T) {
 			t.Fatalf("table title is not a bilingual stable key: %+v", table)
 		}
 		for _, column := range table.Columns {
-			if !i18n.Has(i18n.LangZH, column) || !i18n.Has(i18n.LangEN, column) {
+			if !i18n.Has(i18n.LangZH, column.Label) || !i18n.Has(i18n.LangEN, column.Label) {
 				t.Fatalf("table column is not a bilingual stable key: %+v", table)
 			}
 		}
@@ -308,7 +308,7 @@ func TestSystemBuiltinUsesDirectProbeAndLiveResultHasNoDuplicateFacts(t *testing
 				t.Fatalf("live kernel table title is not bilingual: %+v", table)
 			}
 			for _, column := range table.Columns {
-				if !i18n.Has(i18n.LangZH, column) || !i18n.Has(i18n.LangEN, column) {
+				if !i18n.Has(i18n.LangZH, column.Label) || !i18n.Has(i18n.LangEN, column.Label) {
 					t.Fatalf("live kernel table column is not bilingual: %+v", table)
 				}
 			}

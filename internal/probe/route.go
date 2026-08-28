@@ -16,9 +16,7 @@ import (
 
 type routeProbe struct{}
 
-func (routeProbe) ID() string         { return "route" }
-func (routeProbe) Title() string      { return "module.route.title" }
-func (routeProbe) NeedsNetwork() bool { return true }
+func (routeProbe) ID() string { return "route" }
 
 type routeEngine struct {
 	Name    string
@@ -47,6 +45,10 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "probe.route.profile",
 		ComparisonScope: "probe.route.comparison_scope",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.RouteTargets)
+	addComparisonParameter(result.Methodology.Parameters, "max_hops", strconv.Itoa(routeSnapshotHops))
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
@@ -68,21 +70,29 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		return result
 	}
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "probe.route.field.engine", Value: engine.Name},
-		{Key: "version", Label: "probe.route.field.version", Value: fallback(engine.Version, "unknown")},
-		{Key: "binary_sha256", Label: "probe.route.field.binary_sha256", Value: fallback(engine.SHA256, "unavailable")},
-		{Key: "arguments", Label: "probe.route.field.arguments", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")},
+		{Key: "engine", Label: "probe.route.field.engine", Value: model.RawValue(engine.Name)},
+		{Key: "version", Label: "probe.route.field.version", Value: model.RawValue(fallback(engine.Version, "unknown"))},
+		{Key: "binary_sha256", Label: "probe.route.field.binary_sha256", Value: model.RawValue(fallback(engine.SHA256, "unavailable"))},
+		{Key: "arguments", Label: "probe.route.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))},
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(engine.Version, "unknown"))
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(engine.SHA256, "unavailable"))
+	addComparisonParameterHash(result.Methodology.Parameters, "arguments_sha256", strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))
 	result.Sources = append(result.Sources, model.Source{
 		Name: "probe.route.source.nexttrace.name", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "probe.route.source.nexttrace",
 	})
 	table := model.Table{
-		Key:                   "network.route.summary",
-		Title:                 "probe.route.table.summary",
-		Columns:               []string{"probe.route.column.target", "probe.route.column.target_type", "probe.route.column.status", "probe.route.column.probed_hops", "probe.route.column.visible_hops", "probe.route.column.timeout_hops", "probe.route.column.duration"},
-		ColumnKeys:            []string{"target", "target_type", "status", "probed_hops", "visible_hops", "timeout_hops", "elapsed_ms"},
-		NumericColumns:        []int{3, 4, 5, 6},
-		NumericHigherIsBetter: []bool{false, true, false, false},
+		Key:   "network.route.summary",
+		Title: "probe.route.table.summary",
+		Columns: []model.TableColumn{
+			{Key: "target", Label: "probe.route.column.target"},
+			{Key: "target_type", Label: "probe.route.column.target_type"},
+			{Key: "status", Label: "probe.route.column.status"},
+			{Key: "probed_hops", Label: "probe.route.column.probed_hops", Numeric: true},
+			{Key: "visible_hops", Label: "probe.route.column.visible_hops", Numeric: true, HigherIsBetter: true},
+			{Key: "timeout_hops", Label: "probe.route.column.timeout_hops", Numeric: true},
+			{Key: "elapsed_ms", Label: "probe.route.column.duration", Numeric: true},
+		},
 	}
 	successes := 0
 	// validTraces is both usable evidence and the historical summary count:
@@ -114,30 +124,30 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 			successes++
 			validTraces++
 		}
-		table.Rows = append(table.Rows, []string{
-			target.Name, routeTargetKindKey(target.Kind), status, strconv.Itoa(slots), strconv.Itoa(visible), strconv.Itoa(timeouts), elapsed.Round(time.Millisecond).String(),
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(target.Name), routeTargetKindValue(target.Kind), model.KeyValue(status), model.RawValue(strconv.Itoa(slots)), model.RawValue(strconv.Itoa(visible)), model.RawValue(strconv.Itoa(timeouts)), model.RawValue(elapsed.Round(time.Millisecond).String()),
 		})
 		if parsed {
 			prefix := fmt.Sprintf("route_target_%02d", targetIndex+1)
 			result.Measurements = append(result.Measurements,
 				model.Measurement{
 					Key: prefix + "_hop_slots", Label: "probe.route.metric.hop_slots",
-					Value: float64(slots), Unit: "hops", Display: strconv.Itoa(slots),
+					Value: float64(slots), Unit: "hops", Display: model.RawValue(strconv.Itoa(slots)),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
 					Key: prefix + "_visible_hops", Label: "probe.route.metric.visible_hops",
-					Value: float64(visible), Unit: "hops", Display: strconv.Itoa(visible),
+					Value: float64(visible), Unit: "hops", Display: model.RawValue(strconv.Itoa(visible)),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(true),
 				},
 				model.Measurement{
 					Key: prefix + "_timeout_hops", Label: "probe.route.metric.timeout_hops",
-					Value: float64(timeouts), Unit: "hops", Display: strconv.Itoa(timeouts),
+					Value: float64(timeouts), Unit: "hops", Display: model.RawValue(strconv.Itoa(timeouts)),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
 					Key: prefix + "_duration_ms", Label: "probe.route.metric.duration",
-					Value: float64(elapsed) / float64(time.Millisecond), Unit: "ms", Display: elapsed.Round(time.Millisecond).String(),
+					Value: float64(elapsed) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(elapsed.Round(time.Millisecond).String()),
 					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 			)
@@ -179,6 +189,14 @@ func routeTargetKindKey(kind string) string {
 	default:
 		return kind
 	}
+}
+
+func routeTargetKindValue(kind string) model.Value {
+	key := routeTargetKindKey(kind)
+	if key == kind {
+		return model.RawValue(kind)
+	}
+	return model.KeyValue(key)
 }
 
 func detectRouteEngine(ctx context.Context) routeEngine {

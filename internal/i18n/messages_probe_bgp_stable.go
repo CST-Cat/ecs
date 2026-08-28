@@ -1,0 +1,43 @@
+package i18n
+
+var probeBGPChinese = map[string]string{
+	"probe.bgp.description":                  "查询当前出口前缀在 RouteViews 公共 RIB 中的可见性、起源 ASN 与观测到的 AS 路径",
+	"probe.bgp.profile":                      "按启用协议族观察最长匹配前缀",
+	"probe.bgp.comparison_scope":             "当前公共观测；不是运营商私有互联全图，也不是历史 BGP 事件分析",
+	"probe.bgp.field.ip_family":              "IPv4/IPv6 出口与 RouteViews 观测字段",
+	"probe.bgp.metric.bgp_families_observed": "BGP 可观测协议族",
+	"probe.bgp.table.observation":            "公共 BGP / 互联观测",
+	"probe.bgp.column.ip_family":             "协议族",
+	"probe.bgp.column.prefix":                "匹配前缀",
+	"probe.bgp.column.origin_asn":            "起源 ASN",
+	"probe.bgp.column.rpki":                  "RPKI",
+	"probe.bgp.column.peer_collector":        "观测 peer/collector",
+	"probe.bgp.column.as_path":               "AS 路径样本",
+	"probe.bgp.source.routeviews":            "当前 RIB 前缀、起源 ASN、RPKI 状态与观测 AS 路径",
+	"probe.bgp.summary.values":               "%s 个协议族取得公共 RIB 观测",
+	"probe.bgp.note.public_observation":      "该模块只查询 RouteViews 当前公共 RIB，不下载历史 MRT，也不上传报告。",
+	"probe.bgp.note.longest_match":           "查询按出口 IP 的最长匹配前缀返回；精确 /32 或 /128 没有单独观测时可能显示已发布的父前缀。",
+	"probe.bgp.note.as_path_scope":           "AS_PATH 中的 ASN 来自公开样本，不代表 VPS 与这些 ASN 直接互联；观测 peer 也不等于提供商直接互联。",
+	"probe.bgp.note.no_observation":          "没有公共观测不等于前缀没有发布，可能由查询、RIB 收敛、过滤或覆盖范围造成。",
+}
+
+var probeBGPEnglish = map[string]string{
+	"probe.bgp.description":                  "RouteViews public-RIB visibility, origin ASN, and observed AS paths for the current egress prefixes",
+	"probe.bgp.profile":                      "Longest-match prefix observation per enabled address family",
+	"probe.bgp.comparison_scope":             "Current public observation; not the provider's private peering graph or historical BGP analysis",
+	"probe.bgp.field.ip_family":              "IPv4/IPv6 egress and RouteViews observation field",
+	"probe.bgp.metric.bgp_families_observed": "Observable BGP families",
+	"probe.bgp.table.observation":            "Public BGP / peering observation",
+	"probe.bgp.column.ip_family":             "Address family",
+	"probe.bgp.column.prefix":                "Matched prefix",
+	"probe.bgp.column.origin_asn":            "Origin ASN",
+	"probe.bgp.column.rpki":                  "RPKI",
+	"probe.bgp.column.peer_collector":        "Observed peer/collector",
+	"probe.bgp.column.as_path":               "AS-path sample",
+	"probe.bgp.source.routeviews":            "Current-RIB prefixes, origin ASN, RPKI state, and observed AS paths",
+	"probe.bgp.summary.values":               "%s address family/families have public RIB observations",
+	"probe.bgp.note.public_observation":      "This module queries only the current public RouteViews RIB; it does not download historical MRT data or upload the report.",
+	"probe.bgp.note.longest_match":           "The query returns the longest matching prefix for the egress IP; when no exact /32 or /128 observation exists, a published parent prefix may be shown.",
+	"probe.bgp.note.as_path_scope":           "ASNs in AS_PATH come from public samples and do not prove direct peering with the VPS; an observing peer is not the provider's direct peer either.",
+	"probe.bgp.note.no_observation":          "No public observation does not prove that a prefix is unpublished; query errors, RIB convergence, filtering, or coverage may be responsible.",
+}

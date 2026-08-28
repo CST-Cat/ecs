@@ -11,8 +11,8 @@
 5. 实施前必须读取并理解适用的 `AGENTS.md`、`CONTRIBUTING.md`、README、开发规范、CI 配置及与当前任务直接相关的文档。
 6. 涉及仓库修改时，除非用户明确要求直接改稳定分支，应优先从任务指定基准创建独立工作 Branch，不直接污染 `main`、`master` 或其他稳定分支。
 7. 创建工作 Branch 后必须记录基准 Branch 与基准 commit；最终 diff 只能包含本任务相关修改。
-8. 允许在工作 Branch 中维护 `PLAN.md`、`REQUIREMENTS.md`、`SEARCH_SUMMARY.md`、`RESEARCH.md`、`DECISIONS.md`、`REVIEW.md`、`VALIDATION.md`、`TODO.md`、`NOTES.md` 等任务 Markdown；文件名按实际需要确定。
-9. 工作 Markdown 应少而清晰，避免无意义碎片。
+8. 允许在工作 Branch 中临时维护 `PLAN.md`、`REQUIREMENTS.md`、`SEARCH_SUMMARY.md`、`RESEARCH.md`、`DECISIONS.md`、`REVIEW.md`、`VALIDATION.md`、`TODO.md`、`NOTES.md` 等任务 Markdown；文件名按实际需要确定。此类任务记录默认由 `.gitignore` 排除，不作为长期项目文档。
+9. 工作 Markdown 应少而清晰，避免无意义碎片；任务合并或交付前由 Agent 自动清理全部临时任务 Markdown，不能把过程记录遗留在仓库中。
 10. `PLAN.md` 必须动态维护，阶段完成、返工、计划调整、需求变化或发现前置条件后应同步更新。
 11. `REQUIREMENTS.md` 或等价文件保存当前任务具体需求；后续需求变化更新该文件，不更新 `AGENTS.md`。
 12. 大量仓库搜索、外部检索或技术调查应维护 `SEARCH_SUMMARY.md`、`RESEARCH.md` 或等价记录，保存搜索范围、事实、证据、结论和未解决问题。
@@ -47,7 +47,7 @@
 41. 全部计划大点完成后必须审查工作 Branch 相对基准 Branch 的完整最终 diff，而非只看最后阶段。
 42. 最终 diff 每项实质修改必须可追溯到用户需求、后续明确要求或已记录批准的计划调整；无法解释的修改视为异常。
 43. 全部阶段完成后必须进行一次完整任务视角的最终总审查，重新验证完整性、正确性、一致性、回归风险、遗漏和测试充分性。
-44. 最终审查必须处理工作 Markdown：无长期价值的纯临时记录在交付前清理；有维护价值的文档可保留。
+44. 最终审查必须处理工作 Markdown：无长期价值的纯临时记录在合并或交付前清理；有维护价值的文档才可保留在明确的文档目录中。
 45. `AGENTS.md` 不属于普通临时任务文件。本规范可保留，但后续业务需求不得堆入其中。
 46. 若通过 Pull Request 交付，PR 最终 diff 必须与最后一次总审查一致；总审查后若发生实质修改，相应 diff 和测试必须重新审查。
 47. 最终输出必须明确列出原始需求对应计划项、各阶段状态和主要修改、关键审查与返工、实际测试、未验证内容、Branch/commit/PR 状态、工作 Markdown 去留，以及是否满足全部明确要求。
@@ -59,7 +59,7 @@
 - 模型限制：环境支持时仅使用 Sol + high；不支持时必须公开能力限制。
 - 仓库权限：允许从指定基准创建独立 Branch，并维护任务辅助 Markdown。
 - 文档边界：稳定工作纪律写入 `AGENTS.md`；具体任务只写入任务文档。
-- 核心流程：读取约束 → 写入 `AGENTS.md` → 建立 `REQUIREMENTS.md` → 制定并动态维护 `PLAN.md` → 串行执行阶段 → 实际 diff/测试审查 → 不合格返工 → 完成后检查完整 Branch diff → 最终回归与总审查 → 清理无价值临时文档 → 交付。
+- 核心流程：读取约束 → 写入 `AGENTS.md` → 建立临时 `REQUIREMENTS.md` → 制定并动态维护临时 `PLAN.md` → 串行执行阶段 → 实际 diff/测试审查 → 不合格返工 → 完成后检查完整 Branch diff → 最终回归与总审查 → 合并/交付前自动删除全部临时任务 Markdown → 交付。
 - 禁止并发 Worker、禁止未经审查跨阶段推进、禁止冒充模型或 effort、禁止绕过实际 diff 与实际验证进行验收。
 
 ## Beta 版本纪律
@@ -67,3 +67,9 @@
 - 当前项目处于 beta 阶段。代码、JSON schema、内部 API 或其他契约发生 breaking change 时，默认**直接修改当前 v1 契约**，不因为兼容性考虑自动升级为 `v2`。
 - 除非用户以后明确要求，否则禁止为了保留旧行为新增兼容层、双 schema、迁移适配器或旧版本 fallback；旧设计可以直接删除或原地替换。
 - `ecs.report/v1`、`ecs.compare/v1` 等当前版本标识应保持不变；版本号变化必须来自用户明确要求，而不是 Agent 自行依据 breaking change 推断。
+
+## 临时任务 Markdown 生命周期
+
+- `PLAN.md`、`REQUIREMENTS.md`、`REVIEW.md`、`SEARCH_SUMMARY.md`、`RESEARCH.md`、`DECISIONS.md`、`VALIDATION.md`、`TODO.md`、`NOTES.md` 和同类过程记录仅用于当前工作 Branch。
+- 这些文件由 `.gitignore` 默认排除；需要长期维护的设计、使用或安全文档必须放在明确的正式文档位置，并经过单独审查。
+- 每次工作完成并合并前，主 Agent 必须删除上述临时文件；合并后的工作区检查也必须确认没有残留。不得通过保留旧的空文件、归档副本或重复文件绕过清理要求。

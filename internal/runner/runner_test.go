@@ -14,7 +14,6 @@ import (
 type runnerTestProbe struct {
 	id         string
 	title      string
-	network    bool
 	runs       *int
 	result     model.Result
 	panicValue any
@@ -26,15 +25,6 @@ func (p *runnerTestProbe) ID() string {
 	}
 	return p.result.ID
 }
-
-func (p *runnerTestProbe) Title() string {
-	if p.title != "" {
-		return p.title
-	}
-	return p.ID()
-}
-
-func (p *runnerTestProbe) NeedsNetwork() bool { return p.network }
 
 func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 	if p.runs != nil {
@@ -48,7 +38,10 @@ func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 		result.ID = p.ID()
 	}
 	if result.Title == "" {
-		result.Title = p.Title()
+		result.Title = p.title
+		if result.Title == "" {
+			result.Title = p.ID()
+		}
 	}
 	return result
 }
@@ -67,8 +60,12 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 		id: "system", title: "probe title", runs: &runs,
 		result: model.Result{
 			ID: "system", Status: model.StatusOK,
-			Methodology: model.Methodology{Kind: "fixture", Label: "probe methodology"},
-			Evidence:    model.NewEvidence(1, 2, "sample"),
+			Methodology: model.Methodology{
+				Kind:       "fixture",
+				Label:      "probe methodology",
+				Parameters: map[string]string{"scope_revision": "producer", "owned": "producer"},
+			},
+			Evidence: model.NewEvidence(1, 2, "sample"),
 		},
 	}
 	first := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
@@ -76,11 +73,12 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("runner result changed between identical machine runs:\nfirst=%+v\nsecond=%+v", first, second)
 	}
-	if first.Title != "probe title" || first.Methodology.Label != "probe methodology" || first.Evidence == nil || first.Evidence.Valid != 1 || first.Evidence.Expected != 2 {
+	if first.Title != descriptor.TitleKey || first.Methodology.Label != "probe methodology" || first.Evidence == nil || first.Evidence.Valid != 1 || first.Evidence.Expected != 2 {
 		t.Fatalf("canonical result metadata = %+v", first)
 	}
-	if first.Methodology.Parameters["scope_revision"] == "" || runs != 2 {
-		t.Fatalf("runner parameters/runs = %v/%d", first.Methodology.Parameters, runs)
+	wantParameters := map[string]string{"scope_revision": "producer", "owned": "producer"}
+	if !reflect.DeepEqual(first.Methodology.Parameters, wantParameters) || runs != 2 {
+		t.Fatalf("runner parameters/runs = %v/%d, want producer-owned parameters", first.Methodology.Parameters, runs)
 	}
 }
 
@@ -149,6 +147,9 @@ func TestRunOneAndSafeRunIsolatePanic(t *testing.T) {
 	result := runOne(context.Background(), item, cfg, probe.Environment{}, true)
 	if runs != 1 || result.ID != "custom" || result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 1 {
 		t.Fatalf("runOne result = %+v, runs=%d", result, runs)
+	}
+	if result.Methodology.Label != "" || result.Methodology.Profile != "" || result.Methodology.ComparisonScope != "" {
+		t.Fatalf("unknown custom probe received hidden descriptor methodology: %+v", result.Methodology)
 	}
 
 	panicItem := &runnerTestProbe{id: "panic-probe", title: "panic probe", panicValue: "fixture panic"}

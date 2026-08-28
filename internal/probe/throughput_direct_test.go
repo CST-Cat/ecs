@@ -1,0 +1,498 @@
+package probe
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"ecs/internal/config"
+	"ecs/internal/model"
+)
+
+func writeThroughputExecutable(t *testing.T, name, body string) string {
+	t.Helper()
+	directory := t.TempDir()
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory)
+	return path
+}
+
+const fakeIPerfExecutable = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'iperf 3.16'
+  exit 0
+fi
+udp=0
+reverse=0
+for arg do
+  case "$arg" in
+    -u) udp=1 ;;
+    -R) reverse=1 ;;
+  esac
+done
+if [ "$udp" = "1" ]; then
+  printf '%s\n' '{"start":{"test_start":{"protocol":"UDP"}},"end":{"sum_received":{"bits_per_second":50000000,"jitter_ms":1.25,"packets":10,"lost_percent":2}}}'
+elif [ "$FAKE_IPERF_PARTIAL" = "1" ] && [ "$reverse" = "1" ]; then
+  printf '%s\n' '{"error":"fixture reverse unavailable"}'
+elif [ "$reverse" = "1" ]; then
+  printf '%s\n' '{"start":{"connected":[{"local_host":"local","remote_host":"remote"}],"test_start":{"protocol":"TCP","reverse":1}},"intervals":[{"sum":{"bits_per_second":90000000}},{"sum":{"bits_per_second":110000000}}],"end":{"sum_sent":{"bytes":90,"bits_per_second":90000000,"retransmits":1,"seconds":1},"sum_received":{"bytes":100,"bits_per_second":100000000,"seconds":1}}}'
+else
+  printf '%s\n' '{"start":{"connected":[{"local_host":"local","remote_host":"remote"}],"test_start":{"protocol":"TCP","reverse":0}},"intervals":[{"sum":{"bits_per_second":90000000}},{"sum":{"bits_per_second":110000000}}],"end":{"sum_sent":{"bytes":100,"bits_per_second":100000000,"retransmits":1,"seconds":1},"sum_received":{"bytes":90,"bits_per_second":90000000,"seconds":1}}}'
+fi
+`
+
+func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
+	path := writeThroughputExecutable(t, "iperf3", fakeIPerfExecutable)
+	env := Environment{
+		Config: config.Runtime{
+			IPVersion:     config.IPVersion4,
+			IPerfDuration: time.Second,
+			SpeedThreads:  2,
+			IPerfTargets: []config.IPerfEndpoint{{
+				Name: "fixture", Host: "fixture.invalid", Networks: "IPv4", PortStart: 5200, PortEnd: 5200,
+			}},
+		},
+		Network: NetworkCapabilities{IPv4Usable: true},
+	}
+	result := (speedProbe{}).Run(context.Background(), env)
+	if result.Title != "module.speed.title" || result.Description != "probe.speed.description" || result.Status != model.StatusOK {
+		t.Fatalf("speed result metadata/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.speed.profile" {
+		t.Fatalf("speed methodology = %+v", result.Methodology)
+	}
+	if len(result.Tables) != 2 || result.Tables[0].Title != "probe.speed.table.results" || result.Tables[1].Title != "probe.speed.table.stability" {
+		t.Fatalf("speed tables = %+v", result.Tables)
+	}
+	row := result.Tables[0].Rows[0]
+	if len(row) != len(result.Tables[0].Columns) || row[0].Text() != "fixture" || row[3].Text() == "失败" {
+		t.Fatalf("speed result row = %#v", row)
+	}
+	if status, ok := row[8].Key(); !ok || status != "probe.speed.status.complete" {
+		t.Fatalf("speed status = %#v", row[8])
+	}
+	if result.Tables[0].Columns[3].Label != "probe.speed.column.upload" || result.Tables[1].Columns[3].Label != "probe.speed.column.minimum" {
+		t.Fatalf("speed column labels = %#v/%#v", result.Tables[0].Columns, result.Tables[1].Columns)
+	}
+	if len(result.Measurements) == 0 || result.Measurements[0].Label != "probe.speed.metric.upload" {
+		t.Fatalf("speed measurements = %#v", result.Measurements)
+	}
+	if raw, ok := result.Measurements[0].Display.Raw(); !ok || raw == "" {
+		t.Fatalf("speed measurement display = %#v", result.Measurements[0].Display)
+	}
+	if len(result.Fields) != 8 || result.Fields[0].Label != "probe.speed.field.engine" {
+		t.Fatalf("speed fields = %#v", result.Fields)
+	}
+	if len(result.Sources) != 2 || result.Sources[0].Purpose != "probe.speed.source.iperf3" {
+		t.Fatalf("speed sources = %#v", result.Sources)
+	}
+	if len(result.Notes) != 5 || result.SummaryMessages[0].Key != "probe.speed.summary.values" {
+		t.Fatalf("speed notes/summary = %#v/%#v", result.Notes, result.SummaryMessages)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 3 || result.Evidence.Expected != 3 {
+		t.Fatalf("speed evidence = %+v", result.Evidence)
+	}
+	assertProducerParameterScope(t, result,
+		"ip_version", "configured_duration", "configured_threads", "targets_sha256",
+		"tool_version", "tool_sha256", "threads", "duration",
+	)
+	parameters := result.Methodology.Parameters
+	if parameters["ip_version"] != config.IPVersion4 || parameters["configured_duration"] != "1s" || parameters["configured_threads"] != "2" || parameters["targets_sha256"] != comparisonParameterHash(env.Config.IPerfTargets) || parameters["tool_version"] != "iperf 3.16" || parameters["tool_sha256"] != binarySHA256(path) || parameters["threads"] != "2" || parameters["duration"] != "1s" {
+		t.Fatalf("speed comparison parameters = %v", parameters)
+	}
+}
+
+func TestSpeedProducerBuildsStablePartialStatusDirectly(t *testing.T) {
+	path := writeThroughputExecutable(t, "iperf3", fakeIPerfExecutable)
+	t.Setenv("FAKE_IPERF_PARTIAL", "1")
+	env := Environment{
+		Config: config.Runtime{
+			IPVersion:     config.IPVersion4,
+			IPerfDuration: time.Second,
+			SpeedThreads:  2,
+			IPerfTargets: []config.IPerfEndpoint{{
+				Name: "fixture", Host: "fixture.invalid", Networks: "IPv4", PortStart: 5200, PortEnd: 5200,
+			}},
+		},
+		Network: NetworkCapabilities{IPv4Usable: true},
+	}
+	result := runIPerfSpeed(context.Background(), env, path)
+	if result.Status != model.StatusWarning || len(result.Failures) == 0 {
+		t.Fatalf("speed partial status/failures = %s/%+v", result.Status, result.Failures)
+	}
+	row := result.Tables[0].Rows[0]
+	if status, ok := row[8].Key(); !ok || status != "probe.speed.status.partial" {
+		t.Fatalf("speed partial status = %#v", row[8])
+	}
+	if len(result.Measurements) == 0 || result.SummaryMessages[0].Key != "probe.speed.summary.values" {
+		t.Fatalf("speed partial measurements/summary = %#v/%#v", result.Measurements, result.SummaryMessages)
+	}
+	assertProducerParameterScope(t, result,
+		"ip_version", "configured_duration", "configured_threads", "targets_sha256",
+		"tool_version", "tool_sha256", "threads", "duration",
+	)
+}
+
+func TestCNSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
+	oldURL := cnNodeListURLForTest
+	oldFactory := cnspeedHTTPClientFactory
+	t.Cleanup(func() {
+		cnNodeListURLForTest = oldURL
+		cnspeedHTTPClientFactory = oldFactory
+	})
+	cnNodeListURLForTest = "https://fixture.invalid/CN.csv"
+	csvBody := "id,operator,province,city,host,pingUrl,downloadUrl,active\n" +
+		"1,电信,上海,上海,cn1,https://8.8.8.8/ping,https://8.8.8.8/file,1\n" +
+		"2,联通,北京,北京,cn2,https://8.8.4.4/ping,https://8.8.4.4/file,1\n" +
+		"3,移动,广州,广州,cn3,https://1.1.1.1/ping,https://1.1.1.1/file,1\n"
+	cnspeedHTTPClientFactory = func(time.Duration, string, cnIPResolver, cnDialContextFunc) *http.Client {
+		return &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+			body := csvBody
+			if request.URL.Path == "/ping" {
+				body = "pong"
+			} else if request.URL.Path == "/file" {
+				body = "abcdefgh"
+			}
+			return fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(body))), nil
+		})}
+	}
+	result := (cnSpeedProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4, HTTPTimeout: time.Second}})
+	if result.Title != "module.cnspeed.title" || result.Description != "probe.cnspeed.description" || result.Status != model.StatusOK {
+		t.Fatalf("cnspeed result metadata/status = %+v", result)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 3 || result.Evidence.Expected != 3 {
+		t.Fatalf("cnspeed evidence = %+v", result.Evidence)
+	}
+	if len(result.Fields) != 3 || result.Fields[0].Label != "probe.cnspeed.field.node_list" || result.Fields[0].Value.Text() != "speedtest.cn-CN-ID@audited-commit" {
+		t.Fatalf("cnspeed fields = %#v", result.Fields)
+	}
+	if raw, ok := result.Fields[0].Value.Raw(); !ok || raw != "speedtest.cn-CN-ID@audited-commit" {
+		t.Fatalf("cnspeed node list variant = %#v", result.Fields[0].Value)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].Title != "probe.cnspeed.table.nodes" || len(result.Tables[0].Rows) != 3 {
+		t.Fatalf("cnspeed table = %#v", result.Tables)
+	}
+	for _, row := range result.Tables[0].Rows {
+		if carrier, ok := row[0].Key(); !ok || !strings.HasPrefix(carrier, "probe.cnspeed.carrier.") {
+			t.Fatalf("cnspeed carrier = %#v", row[0])
+		}
+		if status, ok := row[6].Key(); !ok || status != "probe.cnspeed.status.complete" {
+			t.Fatalf("cnspeed status = %#v", row[6])
+		}
+	}
+	if len(result.Measurements) != 3 || result.Measurements[0].Label != "probe.cnspeed.metric.download" || result.Sources[0].Purpose != "probe.cnspeed.source.nodes" {
+		t.Fatalf("cnspeed measurements/sources = %#v/%#v", result.Measurements, result.Sources)
+	}
+	if len(result.Notes) != 5 || result.SummaryMessages[0].Key != "probe.cnspeed.summary.values" {
+		t.Fatalf("cnspeed notes/summary = %#v/%#v", result.Notes, result.SummaryMessages)
+	}
+	assertProducerParameterScope(t, result, "ip_version", "download_budget_sha256", "selected_nodes_sha256")
+	parameters := result.Methodology.Parameters
+	if parameters["ip_version"] != config.IPVersion4 || parameters["download_budget_sha256"] != comparisonParameterHash("8s 或 100 MiB") || parameters["selected_nodes_sha256"] != selectedValueHash(result.Tables[0], 0, 1, 2) {
+		t.Fatalf("cnspeed comparison parameters = %v", parameters)
+	}
+}
+
+func runCNSpeedComparisonFixture(t *testing.T, csvBody, downloadBody string, downloadStatus int) model.Result {
+	t.Helper()
+	oldURL := cnNodeListURLForTest
+	oldFactory := cnspeedHTTPClientFactory
+	defer func() {
+		cnNodeListURLForTest = oldURL
+		cnspeedHTTPClientFactory = oldFactory
+	}()
+	cnNodeListURLForTest = "https://fixture.invalid/CN.csv"
+	cnspeedHTTPClientFactory = func(time.Duration, string, cnIPResolver, cnDialContextFunc) *http.Client {
+		return &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Path == "/ping" {
+				return fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader("pong"))), nil
+			}
+			if request.URL.Path == "/file" {
+				return fixtureResponse(downloadStatus, io.NopCloser(strings.NewReader(downloadBody))), nil
+			}
+			return fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(csvBody))), nil
+		})}
+	}
+	return (cnSpeedProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+		IPVersion: config.IPVersion4, HTTPTimeout: time.Second,
+	}})
+}
+
+func TestCNSpeedProducerSelectedNodeComparisonScope(t *testing.T) {
+	csvBody := "id,operator,province,city,host,pingUrl,downloadUrl,active\n" +
+		"1,电信,上海,上海,cn1,https://8.8.8.8/ping,https://8.8.8.8/file,1\n" +
+		"2,联通,北京,北京,cn2,https://8.8.4.4/ping,https://8.8.4.4/file,1\n" +
+		"3,移动,广州,广州,cn3,https://1.1.1.1/ping,https://1.1.1.1/file,1\n"
+	base := runCNSpeedComparisonFixture(t, csvBody, "abcdefgh", http.StatusOK)
+	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_nodes_sha256"] == "" {
+		t.Fatalf("cnspeed producer omitted selected-node scope: %+v", base.Methodology.Parameters)
+	}
+	if got, want := base.Methodology.Parameters["selected_nodes_sha256"], selectedValueHash(base.Tables[0], 0, 1, 2); got != want {
+		t.Fatalf("cnspeed selected-node hash = %q, want %q", got, want)
+	}
+
+	differentDownload := runCNSpeedComparisonFixture(t, csvBody, strings.Repeat("x", 4096), http.StatusOK)
+	if base.Methodology.Parameters["selected_nodes_sha256"] != differentDownload.Methodology.Parameters["selected_nodes_sha256"] {
+		t.Fatal("cnspeed download result changed selected-node comparison scope")
+	}
+	differentStatus := runCNSpeedComparisonFixture(t, csvBody, "download failed", http.StatusServiceUnavailable)
+	if base.Methodology.Parameters["selected_nodes_sha256"] != differentStatus.Methodology.Parameters["selected_nodes_sha256"] {
+		t.Fatal("cnspeed status change changed selected-node comparison scope")
+	}
+
+	changedCSV := strings.Replace(csvBody, "1,电信,上海,上海,cn1", "1b,电信,浙江,杭州,cn1b", 1)
+	changedNode := runCNSpeedComparisonFixture(t, changedCSV, "abcdefgh", http.StatusOK)
+	if base.Methodology.Parameters["selected_nodes_sha256"] == changedNode.Methodology.Parameters["selected_nodes_sha256"] {
+		t.Fatal("cnspeed selected node identity change was omitted from comparison scope")
+	}
+
+	selected := selectedValueRows(base.Tables[0].Rows, 0, 1, 2)
+	rawCarrier := make([][]model.Value, len(selected))
+	for index, row := range selected {
+		rawCarrier[index] = append([]model.Value(nil), row...)
+	}
+	rawCarrier[0][0] = model.RawValue(selected[0][0].Text())
+	if comparisonParameterHash(selected) == comparisonParameterHash(rawCarrier) {
+		t.Fatal("cnspeed selected-node hash ignored a raw/key Value tag change")
+	}
+}
+
+func TestCNSpeedProducerBuildsStableSkipDirectly(t *testing.T) {
+	oldURL := cnNodeListURLForTest
+	oldFactory := cnspeedHTTPClientFactory
+	t.Cleanup(func() {
+		cnNodeListURLForTest = oldURL
+		cnspeedHTTPClientFactory = oldFactory
+	})
+	cnNodeListURLForTest = "https://fixture.invalid/CN.csv"
+	cnspeedHTTPClientFactory = func(time.Duration, string, cnIPResolver, cnDialContextFunc) *http.Client {
+		return &http.Client{Transport: fixtureRoundTripper(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("fixture registry unavailable")
+		})}
+	}
+	result := (cnSpeedProbe{}).Run(context.Background(), Environment{})
+	if result.Status != model.StatusSkipped || len(result.Failures) != 1 || result.Failures[0].Stage != "node_list" {
+		t.Fatalf("cnspeed skip = %s/%+v", result.Status, result.Failures)
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.cnspeed.summary.skipped" || len(result.Notes) != 5 {
+		t.Fatalf("cnspeed skip notes/summary = %#v/%#v", result.Notes, result.SummaryMessages)
+	}
+}
+
+func TestCNSpeedProducerBuildsStableFailureRowsDirectly(t *testing.T) {
+	oldURL := cnNodeListURLForTest
+	oldFactory := cnspeedHTTPClientFactory
+	t.Cleanup(func() {
+		cnNodeListURLForTest = oldURL
+		cnspeedHTTPClientFactory = oldFactory
+	})
+	cnNodeListURLForTest = "https://fixture.invalid/CN.csv"
+	csvBody := "id,operator,province,city,host,pingUrl,downloadUrl,active\n" +
+		"1,电信,上海,上海,cn1,https://8.8.8.8/ping,https://8.8.8.8/file,1\n" +
+		"2,联通,北京,北京,cn2,https://8.8.4.4/ping,https://8.8.4.4/file,1\n" +
+		"3,移动,广州,广州,cn3,https://1.1.1.1/ping,https://1.1.1.1/file,1\n"
+	cnspeedHTTPClientFactory = func(time.Duration, string, cnIPResolver, cnDialContextFunc) *http.Client {
+		return &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Path == "/file" {
+				return fixtureResponse(http.StatusServiceUnavailable, io.NopCloser(strings.NewReader("fixture download failure"))), nil
+			}
+			body := csvBody
+			if request.URL.Path == "/ping" {
+				body = "pong"
+			}
+			return fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(body))), nil
+		})}
+	}
+	result := (cnSpeedProbe{}).Run(context.Background(), Environment{})
+	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 3 {
+		t.Fatalf("cnspeed failure status/evidence = %s/%+v", result.Status, result.Evidence)
+	}
+	if len(result.Measurements) != 0 || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.cnspeed.summary.none" {
+		t.Fatalf("cnspeed failure measurements/summary = %#v/%#v", result.Measurements, result.SummaryMessages)
+	}
+	for _, row := range result.Tables[0].Rows {
+		if status, ok := row[6].Key(); !ok || status != "probe.cnspeed.status.failed" {
+			t.Fatalf("cnspeed failure row status = %#v", row[6])
+		}
+	}
+}
+
+const fakeOoklaExecutable = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'speedtest 1.2.3'
+  exit 0
+fi
+printf '%s\n' '__PAYLOAD__'
+`
+
+func runOoklaFixture(t *testing.T, payload string) model.Result {
+	t.Helper()
+	writeThroughputExecutable(t, "speedtest", strings.Replace(fakeOoklaExecutable, "__PAYLOAD__", payload, 1))
+	return (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+		Exposure:     config.ExposureThirdParty,
+		OoklaServers: []config.OoklaServer{{Carrier: "电信", ID: 42}},
+	}})
+}
+
+func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
+	result := runOoklaFixture(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"isp":"Fixture ISP","interface":{"externalIp":"8.8.8.8"},"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
+	if result.Title != "module.ookla.title" || result.Description != "probe.ookla.description" || result.Status != model.StatusOK {
+		t.Fatalf("Ookla result metadata/status = %+v", result)
+	}
+	if result.Methodology.Engine != "ookla-speedtest-cli" || result.Methodology.Profile != "probe.ookla.profile" {
+		t.Fatalf("Ookla methodology = %+v", result.Methodology)
+	}
+	if len(result.Fields) < 8 || result.Fields[0].Label != "probe.ookla.field.engine" || result.Fields[6].Value.Text() != "configured" {
+		t.Fatalf("Ookla fields = %#v", result.Fields)
+	}
+	if raw, ok := result.Fields[6].Value.Raw(); !ok || raw != "configured" {
+		t.Fatalf("Ookla server selection variant = %#v", result.Fields[6].Value)
+	}
+	if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.ookla.metric.latency" {
+		t.Fatalf("Ookla measurements = %#v", result.Measurements)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].Title != "probe.ookla.table.results" {
+		t.Fatalf("Ookla tables = %#v", result.Tables)
+	}
+	row := result.Tables[0].Rows[0]
+	if carrier, ok := row[0].Key(); !ok || carrier != "probe.cnspeed.carrier.telecom" {
+		t.Fatalf("Ookla carrier = %#v", row[0])
+	}
+	if status, ok := row[6].Key(); !ok || status != "probe.ookla.status.complete" {
+		t.Fatalf("Ookla status = %#v", row[6])
+	}
+	if len(result.Sources) != 1 || result.Sources[0].Purpose != "probe.ookla.source.engine" || len(result.Notes) != 3 {
+		t.Fatalf("Ookla sources/notes = %#v/%#v", result.Sources, result.Notes)
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.ookla.summary.values" {
+		t.Fatalf("Ookla summary = %#v", result.SummaryMessages)
+	}
+}
+
+func TestOoklaProducerSelectedServerComparisonScope(t *testing.T) {
+	basePayload := `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`
+	base := runOoklaFixture(t, basePayload)
+	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_servers_sha256"] == "" {
+		t.Fatalf("Ookla producer omitted selected-server scope: %+v", base.Methodology.Parameters)
+	}
+	if got, want := base.Methodology.Parameters["selected_servers_sha256"], selectedValueHash(base.Tables[0], 0, 1); got != want {
+		t.Fatalf("Ookla selected-server hash = %q, want %q", got, want)
+	}
+	assertProducerParameterScope(t, base, "server_configuration_sha256", "tool_version", "tool_sha256", "arguments_sha256", "selected_servers_sha256")
+	if got, want := base.Methodology.Parameters["server_configuration_sha256"], comparisonParameterHash([]config.OoklaServer{{Carrier: "电信", ID: 42}}); got != want {
+		t.Fatalf("Ookla server configuration scope = %q, want %q", got, want)
+	}
+	argumentsField := ""
+	for _, field := range base.Fields {
+		if field.Key == "arguments" {
+			argumentsField = field.Value.Text()
+			break
+		}
+	}
+	if argumentsField == "" || base.Methodology.Parameters["arguments_sha256"] != comparisonParameterHash(argumentsField) {
+		t.Fatalf("Ookla argument scope = %q, field arguments = %q", base.Methodology.Parameters["arguments_sha256"], argumentsField)
+	}
+
+	changedMetrics := runOoklaFixture(t, `{"ping":{"jitter":9,"latency":99},"download":{"bandwidth":25000000},"upload":{"bandwidth":5000000},"packetLoss":10,"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
+	if base.Methodology.Parameters["selected_servers_sha256"] != changedMetrics.Methodology.Parameters["selected_servers_sha256"] {
+		t.Fatal("Ookla metric/result columns changed selected-server comparison scope")
+	}
+	changedStatus := runOoklaFixture(t, `{"ping":{"latency":8.5},"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
+	if base.Methodology.Parameters["selected_servers_sha256"] != changedStatus.Methodology.Parameters["selected_servers_sha256"] {
+		t.Fatal("Ookla status change changed selected-server comparison scope")
+	}
+
+	changedServer := runOoklaFixture(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"server":{"id":42,"name":"Other","location":"Paris","country":"FR"}}`)
+	if base.Methodology.Parameters["selected_servers_sha256"] == changedServer.Methodology.Parameters["selected_servers_sha256"] {
+		t.Fatal("Ookla selected server identity change was omitted from comparison scope")
+	}
+
+	selected := selectedValueRows(base.Tables[0].Rows, 0, 1)
+	rawCarrier := make([][]model.Value, len(selected))
+	for index, row := range selected {
+		rawCarrier[index] = append([]model.Value(nil), row...)
+	}
+	rawCarrier[0][0] = model.RawValue(selected[0][0].Text())
+	if comparisonParameterHash(selected) == comparisonParameterHash(rawCarrier) {
+		t.Fatal("Ookla selected-server hash ignored a raw/key Value tag change")
+	}
+}
+
+func TestOoklaProducerBuildsStablePartialAndParseStatesDirectly(t *testing.T) {
+	partial := runOoklaFixture(t, `{"ping":{"latency":8.5}}`)
+	if partial.Status != model.StatusWarning || len(partial.Measurements) != 1 || partial.SummaryMessages[0].Key != "probe.ookla.summary.values" {
+		t.Fatalf("Ookla partial = %+v", partial)
+	}
+	if status, ok := partial.Tables[0].Rows[0][6].Key(); !ok || status != "probe.ookla.status.partial" {
+		t.Fatalf("Ookla partial row status = %#v", partial.Tables[0].Rows[0][6])
+	}
+
+	parsed := runOoklaFixture(t, "{not-json")
+	if parsed.Status != model.StatusWarning || len(parsed.Failures) == 0 || parsed.Failures[0].Stage != "parse" {
+		t.Fatalf("Ookla parse failure = %+v", parsed)
+	}
+	if status, ok := parsed.Tables[0].Rows[0][6].Key(); !ok || status != "probe.ookla.status.unparsed" {
+		t.Fatalf("Ookla parse row status = %#v", parsed.Tables[0].Rows[0][6])
+	}
+	if parsed.SummaryMessages[0].Key != "probe.ookla.summary.no_metric" {
+		t.Fatalf("Ookla parse summary = %#v", parsed.SummaryMessages)
+	}
+}
+
+func TestOoklaStatusKeyUsesParsedResult(t *testing.T) {
+	complete, err := parseOoklaJSON([]byte(`{"ping":{"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ooklaStatusKey(complete, "fixture", nil); got != "probe.ookla.status.complete" {
+		t.Fatalf("complete status = %q", got)
+	}
+	partial, err := parseOoklaJSON([]byte(`{"ping":{"latency":8.5}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ooklaStatusKey(partial, "fixture", nil); got != "probe.ookla.status.partial" {
+		t.Fatalf("partial status = %q", got)
+	}
+	if got := ooklaStatusKey(complete, "fixture", []model.Failure{{Stage: "parse", Target: "fixture"}}); got != "probe.ookla.status.unparsed" {
+		t.Fatalf("parse failure status = %q", got)
+	}
+	if got := ooklaStatusKey(complete, "fixture", []model.Failure{{Stage: "execute", Target: "fixture"}}); got != "probe.ookla.status.partial" {
+		t.Fatalf("execute failure status = %q", got)
+	}
+}
+
+func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
+	t.Run("exposure denied", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: config.ExposureLocal}})
+		if result.Status != model.StatusSkipped || len(result.Fields) != 2 || result.SummaryMessages[0].Key != "probe.ookla.summary.skipped" {
+			t.Fatalf("Ookla exposure skip = %+v", result)
+		}
+		if result.Fields[0].Label != "probe.ookla.field.skip_reason" || result.Fields[0].Value.Text() != "exposure_denied" || result.Fields[1].Value.Text() != "rerun_with_more_exposure" {
+			t.Fatalf("Ookla exposure fields = %#v", result.Fields)
+		}
+	})
+	t.Run("tool missing", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: config.ExposureThirdParty}})
+		if result.Status != model.StatusSkipped || len(result.Failures) != 1 || result.Failures[0].Stage != "tool_lookup" {
+			t.Fatalf("Ookla tool skip = %+v", result)
+		}
+		if len(result.Fields) != 2 || result.Fields[0].Value.Text() != "tool_unavailable" || result.Fields[1].Value.Text() != "install_official_client" {
+			t.Fatalf("Ookla tool fields = %#v", result.Fields)
+		}
+	})
+}

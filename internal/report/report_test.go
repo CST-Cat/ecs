@@ -38,17 +38,19 @@ func sampleReport() model.Report {
 				Parameters:      map[string]string{"scope_revision": "1", "workload": "standard"},
 			},
 			Fields: []model.Field{
-				{Key: "state", Label: "probe.system.field.hostname", Value: "probe.network.status.ok"},
-				{Key: "secret", Label: "probe.system.field.os", Value: "token", Sensitive: true},
+				{Key: "state", Label: "probe.system.field.hostname", Value: model.KeyValue("probe.network.status.ok")},
+				{Key: "secret", Label: "probe.system.field.os", Value: model.RawValue("token"), Sensitive: true},
 			},
 			Measurements: []model.Measurement{{
-				Key: "events", Label: "probe.system.metric.logical_cpus", Value: 780, Unit: "events/s", Display: "780",
+				Key: "events", Label: "probe.system.metric.logical_cpus", Value: 780, Unit: "events/s", Display: model.RawValue("780"),
 				Rating: "probe.network.status.ok", Method: "sysbench-v1", HigherIsBetter: &higher,
 			}},
 			Tables: []model.Table{{
-				Key: "system.state", Title: "probe.system.pressure.table.title", Columns: []string{"probe.system.pressure.column.resource", "probe.system.pressure.column.cumulative_events"},
-				ColumnKeys: []string{"state", "value"}, RowIdentity: "state", Rows: [][]string{{"probe.network.status.ok", "780"}},
-				NumericColumns: []int{1}, NumericHigherIsBetter: []bool{true}, SensitiveColumns: []int{0},
+				Key: "system.state", Title: "probe.system.pressure.table.title", Columns: []model.TableColumn{
+					{Key: "state", Label: "probe.system.pressure.column.resource", Sensitive: true},
+					{Key: "value", Label: "probe.system.pressure.column.cumulative_events", Numeric: true, HigherIsBetter: true},
+				},
+				RowIdentity: "state", Rows: [][]model.Value{{model.KeyValue("probe.network.status.ok"), model.RawValue("780")}},
 			}},
 			TextBlocks: []model.TextBlock{{Title: "说明", Language: "en", Content: "raw output 192.0.2.10", Sensitive: true}},
 			Notes:      []string{"probe.system.note.partial_inventory"},
@@ -65,9 +67,9 @@ func sampleReport() model.Report {
 					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt", Grade: model.EvidenceComplete},
 					Interference: model.Interference{
 						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
-						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: "1", HigherIsBetter: &lower}},
+						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: model.RawValue("1"), HigherIsBetter: &lower}},
 					},
-					Measurements: []model.Measurement{{Key: "events", Label: "probe.system.metric.logical_cpus", Value: 700, Unit: "events/s", Display: "700", HigherIsBetter: &higher}},
+					Measurements: []model.Measurement{{Key: "events", Label: "probe.system.metric.logical_cpus", Value: 700, Unit: "events/s", Display: model.RawValue("700"), HigherIsBetter: &higher}},
 				}},
 			},
 		}},
@@ -125,7 +127,7 @@ func TestWriteFilesCanonicalAndLanguageSpecificOutputs(t *testing.T) {
 			t.Fatalf("localized %s output lost translated display or raw evidence:\n%s", format, output)
 		}
 	}
-	if data.Results[0].Fields[0].Value != "probe.network.status.ok" || data.Results[0].Tables[0].Rows[0][0] != "probe.network.status.ok" {
+	if data.Results[0].Fields[0].Value.Text() != "probe.network.status.ok" || data.Results[0].Tables[0].Rows[0][0].Text() != "probe.network.status.ok" {
 		t.Fatal("WriteFiles mutated the canonical report")
 	}
 	fallbackWritten, err := WriteFilesWithOptions(data, t.TempDir(), "...", []string{"json"}, Options{})

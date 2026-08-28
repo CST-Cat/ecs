@@ -125,7 +125,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	titles := make([]string, len(selected))
 	titleKeys := make([]string, len(selected))
 	for index, binding := range selected {
-		titles[index] = binding.Probe.Title()
+		titles[index] = bindingTitle(binding)
 		titleKeys[index] = binding.Descriptor.TitleKey
 	}
 	results := make([]model.Result, len(selected))
@@ -211,35 +211,27 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	item := binding.Probe
 	descriptor := binding.Descriptor
 	hasDescriptor := descriptor.ID != ""
-	canonicalTitle := item.Title()
-	needsNetwork := item.NeedsNetwork()
-	if hasDescriptor {
-		needsNetwork = descriptor.Exposure > config.ExposureLocal
-	}
+	canonicalTitle := bindingTitle(binding)
+	needsNetwork := hasDescriptor && descriptor.Exposure > config.ExposureLocal
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
-		result = model.NewResult(item.ID(), item.Title())
+		result = model.NewResult(item.ID(), canonicalTitle)
 		result.Status = model.StatusSkipped
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.offline")}
 		result.Finish(start)
 	} else if !networkRunnable && needsNetwork {
 		start := time.Now()
-		result = model.NewResult(item.ID(), item.Title())
+		result = model.NewResult(item.ID(), canonicalTitle)
 		result.Status = model.StatusSkipped
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
 	} else {
 		result = runWithConditionalRetry(ctx, item, descriptor.RetryOnInterference, env)
 	}
-	if result.Methodology.Label == "" {
-		if hasDescriptor {
-			result.Methodology = descriptor.Methodology
-		} else {
-			result.Methodology = probe.MethodologyFor(item.ID())
-		}
+	if result.Methodology.Label == "" && hasDescriptor {
+		result.Methodology = descriptor.Methodology
 	}
-	result.Methodology.Parameters = comparisonParameters(item.ID(), cfg, result)
 	if result.Evidence == nil {
 		// Probes normally report their real sample denominator. This fallback
 		// keeps panic, offline and legacy/custom probe results explicit without
@@ -251,8 +243,23 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 		result.Evidence = model.NewEvidence(valid, 1, "module")
 	}
 	failure.EnsureResult(&result)
-	result.Title = canonicalTitle
+	if hasDescriptor || result.Title == "" {
+		result.Title = canonicalTitle
+	}
 	return result
+}
+
+// bindingTitle returns the descriptor-owned title for built-ins. A custom
+// runOne probe has no descriptor, so its stable ID is the narrow fallback
+// available at this boundary; an explicit result title is preserved below.
+func bindingTitle(binding moduleBinding) string {
+	if binding.Descriptor.TitleKey != "" {
+		return binding.Descriptor.TitleKey
+	}
+	if binding.Probe != nil {
+		return binding.Probe.ID()
+	}
+	return ""
 }
 
 // runOne is retained as a small test/custom-probe convenience. Production
@@ -263,13 +270,7 @@ func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe
 
 func hasNetworkModules(selected []moduleBinding) bool {
 	for _, binding := range selected {
-		if binding.Descriptor.ID != "" {
-			if binding.Descriptor.Exposure > config.ExposureLocal {
-				return true
-			}
-			continue
-		}
-		if binding.Probe != nil && binding.Probe.NeedsNetwork() {
+		if binding.Descriptor.ID != "" && binding.Descriptor.Exposure > config.ExposureLocal {
 			return true
 		}
 	}
@@ -320,7 +321,7 @@ func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (resu
 	start := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result = model.NewResult(item.ID(), item.Title())
+			result = model.NewResult(item.ID(), item.ID())
 			result.Status = model.StatusError
 			result.Error = fmt.Sprint(recovered)
 			result.SummaryMessages = []model.Message{model.NewMessage("message.runner.panic")}

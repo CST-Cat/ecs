@@ -25,10 +25,10 @@ func writeAppRenderReport(t *testing.T, directory string) string {
 		Summary:       model.Summary{Status: model.StatusOK, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
 		Results: []model.Result{{
 			ID: "system", Title: "系统", Status: model.StatusOK,
-			Fields: []model.Field{{Key: "state", Label: "状态", Value: "系统"}},
+			Fields: []model.Field{{Key: "state", Label: "状态", Value: model.RawValue("系统")}},
 			Tables: []model.Table{{
-				Key: "state", Title: "当前值", Columns: []string{"状态"},
-				ColumnKeys: []string{"status"}, Rows: [][]string{{"完成"}},
+				Key: "state", Title: "当前值", Columns: []model.TableColumn{{Key: "status", Label: "状态"}},
+				Rows: [][]model.Value{{model.RawValue("完成")}},
 			}},
 		}},
 	}

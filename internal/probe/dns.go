@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,9 +17,7 @@ import (
 
 type dnsProbe struct{}
 
-func (dnsProbe) ID() string         { return "dns" }
-func (dnsProbe) Title() string      { return "DNS 质量" }
-func (dnsProbe) NeedsNetwork() bool { return true }
+func (dnsProbe) ID() string { return "dns" }
 
 // dnsQueryName 是固定的探测域名，各解析器都能递归到且 TTL 稳定。
 const dnsQueryName = "www.cloudflare.com"
@@ -43,22 +42,19 @@ type dnsResult struct {
 
 func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("dns", "DNS 质量")
-	result.Description = "向多个公共递归解析器发送原生 UDP DNS 查询"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "native DNS/UDP",
-		Profile:         "A query " + dnsQueryName + " (warmed up)",
-		ComparisonScope: "相同解析器、域名、缓存状态、样本数与网络路径；不是标准基准分数",
-	}
+	result := newDNSResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(result.Methodology.Parameters, "query_name", dnsQueryName)
+	addComparisonParameter(result.Methodology.Parameters, "attempts", strconv.Itoa(env.Config.DNSAttempts))
+	addComparisonParameterHash(result.Methodology.Parameters, "resolvers_sha256", env.Config.DNSResolvers)
+	result.Notes = []string{"probe.dns.note.warmup", "probe.dns.note.udp_scope"}
 
 	attempts := env.Config.DNSAttempts
 	resolvers := endpointsForIPVersion(env.Config.DNSResolvers, env.Config.IPVersion)
 	if len(resolvers) == 0 {
 		result.Skip(model.NewMessage("probe.dns.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, 0, "query")
-		result.Notes = append(result.Notes, "当前协议族没有可用的字面量 DNS 解析器；请用 --dns-resolvers 提供对应协议族的 host:port。")
 		result.Finish(start)
 		return result
 	}
@@ -102,13 +98,18 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Key:                   "network.dns.resolvers",
-		Title:                 "递归解析器",
-		Columns:               []string{"解析器", "地址", "成功", "P50", "P95", "抖动", "状态"},
-		ColumnKeys:            []string{"resolver", "address", "success_count", "p50_ms", "p95_ms", "jitter_ms", "status"},
-		RowIdentity:           "address",
-		NumericColumns:        []int{3, 4, 5},
-		NumericHigherIsBetter: []bool{false, false, false},
+		Key:   "network.dns.resolvers",
+		Title: "probe.dns.table.resolvers",
+		Columns: []model.TableColumn{
+			{Key: "resolver", Label: "probe.dns.column.resolver"},
+			{Key: "address", Label: "probe.dns.column.address"},
+			{Key: "success_count", Label: "probe.dns.column.success"},
+			{Key: "p50_ms", Label: "probe.dns.column.p50", Numeric: true},
+			{Key: "p95_ms", Label: "probe.dns.column.p95", Numeric: true},
+			{Key: "jitter_ms", Label: "probe.dns.column.jitter", Numeric: true},
+			{Key: "status", Label: "probe.dns.column.status"},
+		},
+		RowIdentity: "address",
 	}
 	var best time.Duration
 	allFailed := true
@@ -137,14 +138,11 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 		if item.Failures > 0 && item.LastErr != nil {
 			addFailure(&result, "query", item.Endpoint.Address, item.LastErr, item.Failures)
 		}
-		table.Rows = append(table.Rows, []string{
-			item.Endpoint.Name,
-			item.Endpoint.Address,
-			fmt.Sprintf("%d/%d", len(item.Values), attempts),
-			formatMilliseconds(median),
-			formatMilliseconds(p95),
-			fmt.Sprintf("%.2f ms", jitter),
-			status,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(item.Endpoint.Name), model.RawValue(item.Endpoint.Address),
+			model.RawValue(fmt.Sprintf("%d/%d", len(item.Values), attempts)),
+			model.RawValue(formatMilliseconds(median)), model.RawValue(formatMilliseconds(p95)),
+			model.RawValue(fmt.Sprintf("%.2f ms", jitter)), dnsStatusValue(status),
 		})
 		prefix := fmt.Sprintf("dns_resolver_%02d", itemIndex+1)
 		successPercent := 0.0
@@ -152,25 +150,25 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 			successPercent = float64(len(item.Values)) / float64(attempts) * 100
 		}
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: prefix + "_success_percent", Label: item.Endpoint.Name + " DNS 成功率",
-			Value: successPercent, Unit: "%", Display: fmt.Sprintf("%.1f %%", successPercent),
+			Key: prefix + "_success_percent", Label: "probe.dns.metric.resolver",
+			Value: successPercent, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.1f %%", successPercent)),
 			Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(true),
 		})
 		if len(item.Values) > 0 {
 			result.Measurements = append(result.Measurements,
 				model.Measurement{
-					Key: prefix + "_p50_ms", Label: item.Endpoint.Name + " DNS P50",
-					Value: float64(median) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(median),
+					Key: prefix + "_p50_ms", Label: "probe.dns.metric.resolver",
+					Value: float64(median) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(median)),
 					Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_p95_ms", Label: item.Endpoint.Name + " DNS P95",
-					Value: float64(p95) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(p95),
+					Key: prefix + "_p95_ms", Label: "probe.dns.metric.resolver",
+					Value: float64(p95) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(p95)),
 					Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_jitter_ms", Label: item.Endpoint.Name + " DNS 抖动",
-					Value: jitter, Unit: "ms", Display: fmt.Sprintf("%.2f ms", jitter),
+					Key: prefix + "_jitter_ms", Label: "probe.dns.metric.resolver",
+					Value: jitter, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.2f ms", jitter)),
 					Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 			)
@@ -180,17 +178,55 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Evidence = model.NewEvidence(validQueries, len(collected)*attempts, "query")
 	if allFailed {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "UDP/53 可能被防火墙拦截；系统 DNS 仍可能通过其他协议工作。")
 	} else {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "best_dns_median_ms", Label: "最佳 DNS P50",
-			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
+			Key: "best_dns_median_ms", Label: "probe.dns.metric.best_median",
+			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(best)),
 			Method: "udp-a-query-warm-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
-	result.Notes = append(result.Notes, "查询域名固定为 "+dnsQueryName+"；每个解析器先发一次不计入统计的预热查询，随后的样本反映缓存命中后的稳态 UDP/53 往返，不等同于系统解析器体验。")
+	if result.Evidence.Valid == 0 && result.Evidence.Expected > 0 {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.dns.summary.all_failed")}
+	} else {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.dns.summary.values", dnsSummaryText(result))}
+	}
 	result.Finish(start)
 	return result
+}
+
+func newDNSResult() model.Result {
+	result := model.NewResult("dns", "module.dns.title")
+	result.Description = "probe.dns.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "native DNS/UDP",
+		Profile:         "probe.dns.profile",
+		ComparisonScope: "probe.dns.comparison_scope",
+	}
+	return result
+}
+
+func dnsStatusValue(status string) model.Value {
+	switch status {
+	case dnsStatusOK:
+		return model.KeyValue("probe.dns.status.ok")
+	case dnsStatusFailed:
+		return model.KeyValue("probe.dns.status.failed")
+	case dnsStatusPartial:
+		return model.KeyValue("probe.dns.status.partial")
+	default:
+		return model.RawValue(status)
+	}
+}
+
+func dnsSummaryText(result model.Result) string {
+	for _, measurement := range result.Measurements {
+		if measurement.Key == "best_dns_median_ms" {
+			return "best_p50=" + measurement.Display.Text()
+		}
+	}
+	return ""
 }
 
 func dnsQueryForMode(ctx context.Context, address, name string, timeout time.Duration, mode string) (time.Duration, error) {

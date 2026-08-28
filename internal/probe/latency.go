@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +17,7 @@ import (
 
 type latencyProbe struct{}
 
-func (latencyProbe) ID() string         { return "latency" }
-func (latencyProbe) Title() string      { return "网络延迟" }
-func (latencyProbe) NeedsNetwork() bool { return true }
+func (latencyProbe) ID() string { return "latency" }
 
 type latencyResult struct {
 	Endpoint config.Endpoint
@@ -129,22 +128,25 @@ func tcpLikelyIntercepted(tcpMedian time.Duration, icmp icmpStats) bool {
 
 func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("latency", "网络延迟")
-	result.Description = "面向全球与中国大陆服务的 TCP 建连延迟和可达率"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "native TCP connect",
-		Profile:         "TCP handshake to pre-resolved IP, port 443",
-		ComparisonScope: "相同目标、样本数、IP 协议和网络路径；不是 ICMP 标准 ping",
-	}
+	result := newLatencyResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(result.Methodology.Parameters, "attempts", strconv.Itoa(env.Config.LatencyAttempts))
+	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.LatencyTargets)
 
 	attempts := env.Config.LatencyAttempts
-	icmpEnabled := icmpAvailable()
 	capacity := 0
 	for _, endpoint := range env.Config.LatencyTargets {
 		capacity += len(latencyFamiliesForEndpoint(endpoint, env.Config.IPVersion, env.Network.IPv4Usable, env.Network.IPv6Usable))
 	}
+	if capacity == 0 {
+		result.Skip(model.NewMessage("probe.latency.summary.skipped"))
+		result.Evidence = model.NewEvidence(0, 0, "sample")
+		result.Notes = latencyNotes(result)
+		result.Finish(start)
+		return result
+	}
+	icmpEnabled := icmpAvailable()
 	results := make(chan latencyResult, capacity)
 	var wg sync.WaitGroup
 	for _, endpoint := range env.Config.LatencyTargets {
@@ -206,12 +208,23 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	})
 
 	table := model.Table{
-		Key:                   "network.latency.tcp_icmp",
-		Title:                 "TCP 建连与 ICMP 往返",
-		Columns:               []string{"目标", "协议", "区域", "成功", "TCP P50", "TCP P95", "标准差", "ICMP 最小", "ICMP 平均", "ICMP 最大", "ICMP mdev", "ICMP 丢包", "DNS 解析"},
-		ColumnKeys:            []string{"target", "protocol", "region", "success", "tcp_p50_ms", "tcp_p95_ms", "tcp_stddev_ms", "icmp_min_ms", "icmp_avg_ms", "icmp_max_ms", "icmp_mdev_ms", "icmp_loss_percent", "dns_resolution"},
-		NumericColumns:        []int{4, 5, 6, 7, 8, 9, 10, 11, 12},
-		NumericHigherIsBetter: []bool{false, false, false, false, false, false, false, false, false},
+		Key:   "network.latency.tcp_icmp",
+		Title: "probe.latency.table.tcp_icmp",
+		Columns: []model.TableColumn{
+			{Key: "target", Label: "probe.latency.column.target"},
+			{Key: "protocol", Label: "probe.latency.column.protocol"},
+			{Key: "region", Label: "probe.latency.column.region"},
+			{Key: "success", Label: "probe.latency.column.success"},
+			{Key: "tcp_p50_ms", Label: "probe.latency.column.tcp_p50", Numeric: true},
+			{Key: "tcp_p95_ms", Label: "probe.latency.column.tcp_p95", Numeric: true},
+			{Key: "tcp_stddev_ms", Label: "probe.latency.column.tcp_stddev", Numeric: true},
+			{Key: "icmp_min_ms", Label: "probe.latency.column.icmp_min", Numeric: true},
+			{Key: "icmp_avg_ms", Label: "probe.latency.column.icmp_avg", Numeric: true},
+			{Key: "icmp_max_ms", Label: "probe.latency.column.icmp_max", Numeric: true},
+			{Key: "icmp_mdev_ms", Label: "probe.latency.column.icmp_mdev", Numeric: true},
+			{Key: "icmp_loss_percent", Label: "probe.latency.column.icmp_loss", Numeric: true},
+			{Key: "dns_resolution", Label: "probe.latency.column.dns", Numeric: true},
+		},
 	}
 	var best time.Duration
 	allFailed := true
@@ -231,12 +244,6 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 				best = median
 			}
 		}
-		resolveText := formatMilliseconds(item.ResolveTime)
-		if item.ResolveErr != nil {
-			resolveText = "解析失败"
-		} else if item.ResolveTime == 0 {
-			resolveText = "无需解析"
-		}
 		icmpMin, icmpAvg, icmpMax, icmpMDev, icmpLoss := "n/a", "n/a", "n/a", "n/a", "n/a"
 		if item.ICMP.RTTKnown {
 			icmpMin = formatICMPMilliseconds(item.ICMP.MinMS)
@@ -249,20 +256,12 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		if item.ICMP.LossKnown {
 			icmpLoss = fmt.Sprintf("%.0f %%", item.ICMP.LossPercent)
 		}
-		table.Rows = append(table.Rows, []string{
-			item.Endpoint.Name,
-			"IPv" + item.Family,
-			item.Endpoint.Kind,
-			fmt.Sprintf("%d/%d", len(item.Values), attempts),
-			formatMilliseconds(median),
-			formatMilliseconds(p95),
-			fmt.Sprintf("%.2f ms", stddevFloat(floatValues)),
-			icmpMin,
-			icmpAvg,
-			icmpMax,
-			icmpMDev,
-			icmpLoss,
-			resolveText,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(item.Endpoint.Name), model.RawValue("IPv" + item.Family), model.RawValue(item.Endpoint.Kind),
+			model.RawValue(fmt.Sprintf("%d/%d", len(item.Values), attempts)), model.RawValue(formatMilliseconds(median)),
+			model.RawValue(formatMilliseconds(p95)), model.RawValue(fmt.Sprintf("%.2f ms", stddevFloat(floatValues))),
+			model.RawValue(icmpMin), model.RawValue(icmpAvg), model.RawValue(icmpMax), model.RawValue(icmpMDev),
+			model.RawValue(icmpLoss), latencyResolutionValue(item),
 		})
 		prefix := fmt.Sprintf("tcp_target_%02d_ipv%s", itemIndex+1, item.Family)
 		successPercent := 0.0
@@ -270,32 +269,31 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			successPercent = float64(len(item.Values)) / float64(attempts) * 100
 		}
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: prefix + "_success_percent", Label: fmt.Sprintf("%s IPv%s TCP 成功率", item.Endpoint.Name, item.Family),
-			Value: successPercent, Unit: "%", Display: fmt.Sprintf("%.1f %%", successPercent),
+			Key: prefix + "_success_percent", Label: "probe.latency.metric.tcp",
+			Value: successPercent, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.1f %%", successPercent)),
 			Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(true),
 		})
 		if len(item.Values) > 0 {
 			jitter := stddevFloat(floatValues)
 			result.Measurements = append(result.Measurements,
 				model.Measurement{
-					Key: prefix + "_p50_ms", Label: fmt.Sprintf("%s IPv%s TCP P50", item.Endpoint.Name, item.Family),
-					Value: float64(median) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(median),
+					Key: prefix + "_p50_ms", Label: "probe.latency.metric.tcp",
+					Value: float64(median) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(median)),
 					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_p95_ms", Label: fmt.Sprintf("%s IPv%s TCP P95", item.Endpoint.Name, item.Family),
-					Value: float64(p95) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(p95),
+					Key: prefix + "_p95_ms", Label: "probe.latency.metric.tcp",
+					Value: float64(p95) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(p95)),
 					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
-					Key: prefix + "_jitter_ms", Label: fmt.Sprintf("%s IPv%s TCP 标准差", item.Endpoint.Name, item.Family),
-					Value: jitter, Unit: "ms", Display: fmt.Sprintf("%.2f ms", jitter),
+					Key: prefix + "_jitter_ms", Label: "probe.latency.metric.tcp",
+					Value: jitter, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.2f ms", jitter)),
 					Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
 				},
 			)
 		}
 		if item.ResolveErr != nil {
-			result.Notes = append(result.Notes, fmt.Sprintf("%s 解析失败：%s", item.Endpoint.Name, compactError(item.ResolveErr)))
 			addFailure(&result, "resolve", item.Endpoint.Address, item.ResolveErr, attempts)
 		} else if item.Failures > 0 && item.LastErr != nil {
 			addFailure(&result, "connect", item.DialAddress, item.LastErr, item.Failures)
@@ -311,41 +309,97 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Status = model.StatusWarning
 	} else {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "best_tcp_median_ms", Label: "最佳 TCP P50",
-			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: formatMilliseconds(best),
+			Key: "best_tcp_median_ms", Label: "probe.latency.metric.best_median",
+			Value: float64(best) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(formatMilliseconds(best)),
 			Method: "tcp-connect-resolved-v2", HigherIsBetter: model.BoolPtr(false),
 		})
-	}
-	result.Notes = append(result.Notes,
-		"每个目标只解析一次 DNS，之后固定对该 IP 建连；表中的 TCP 延迟只包含三次握手，解析耗时单列。",
-		"区域标签说明服务归属，不保证本次连接实际落在该地区。",
-	)
-	if icmpEnabled {
-		result.Notes = append(result.Notes,
-			"ICMP 列由系统 ping 提供，反映纯网络往返；与 TCP 列并列可区分链路问题与服务端排队。",
-			"部分网络会限速或丢弃 ICMP，ICMP 丢包高但 TCP 正常时通常是策略限制而非线路故障。",
-		)
-	} else {
-		result.Notes = append(result.Notes, "系统没有可用的 ping，本次只有 TCP 建连延迟；ecs 不会用 TCP 数字冒充 ICMP 结果。")
 	}
 	if len(intercepted) > 0 {
 		result.Status = model.StatusWarning
 		// 目标名单单独成字段而不是嵌进说明句：嵌进去会让整句随目标变化，
 		// 既无法翻译也无法在不同机器之间对照。
 		result.Fields = append(result.Fields, model.Field{
-			Key: "tcp_intercepted_targets", Label: "疑似被代答的目标",
-			Value: strings.Join(intercepted, "、"),
+			Key: "tcp_intercepted_targets", Label: "probe.latency.field.tcp_intercepted_targets",
+			Value: model.RawValue(strings.Join(intercepted, "、")),
 		})
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"%d 个目标的 TCP 建连延迟不到同目标 ICMP 往返的 1/%d：握手几乎不可能真的到达目标，"+
-				"通常是本机或网关上的透明代理、TPROXY 重定向或加速器代答了 TCP。"+
-				"此时 TCP 列反映的是到代理的距离，不能当作本机到目标的链路延迟；"+
-				"ICMP 列不经代理，更接近真实往返。",
-			len(intercepted), tcpInterceptRatio,
-		))
+	}
+	result.Notes = latencyNotes(result)
+	if result.Evidence.Valid == 0 && result.Evidence.Expected > 0 {
+		result.Status = model.StatusWarning
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.latency.summary.all_failed")}
+	} else {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.latency.summary.values", latencySummaryText(result))}
 	}
 	result.Finish(start)
 	return result
+}
+
+func newLatencyResult() model.Result {
+	result := model.NewResult("latency", "module.latency.title")
+	result.Description = "probe.latency.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "native TCP connect",
+		Profile:         "probe.latency.profile",
+		ComparisonScope: "probe.latency.comparison_scope",
+	}
+	return result
+}
+
+func latencyResolutionValue(item latencyResult) model.Value {
+	if item.ResolveErr != nil {
+		return model.KeyValue("probe.latency.status.resolve_failed")
+	}
+	host := item.Endpoint.Address
+	if parsedHost, _, err := net.SplitHostPort(item.Endpoint.Address); err == nil {
+		host = parsedHost
+	}
+	if net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return model.KeyValue("probe.latency.status.no_resolution")
+	}
+	return model.RawValue(formatMilliseconds(item.ResolveTime))
+}
+
+func latencyNotes(result model.Result) []string {
+	notes := []string{
+		"probe.latency.note.resolution",
+		"probe.latency.note.region",
+	}
+	hasICMP := false
+	for _, measurement := range result.Measurements {
+		if strings.HasPrefix(measurement.Key, "icmp_") {
+			hasICMP = true
+			break
+		}
+	}
+	if hasICMP {
+		notes = append(notes, "probe.latency.note.icmp")
+	} else {
+		notes = append(notes, "probe.latency.note.icmp_unavailable")
+	}
+	if _, ok := fieldByKey(result, "tcp_intercepted_targets"); ok {
+		notes = append(notes, "probe.latency.note.intercepted")
+	}
+	return notes
+}
+
+func latencySummaryText(result model.Result) string {
+	for _, measurement := range result.Measurements {
+		if measurement.Key == "best_tcp_median_ms" {
+			return "best_p50=" + measurement.Display.Text()
+		}
+	}
+	return ""
+}
+
+func fieldByKey(result model.Result, key string) (model.Field, bool) {
+	for _, field := range result.Fields {
+		if field.Key == key {
+			return field, true
+		}
+	}
+	return model.Field{}, false
 }
 
 func formatICMPMilliseconds(value float64) string {
@@ -360,35 +414,33 @@ func appendICMPMeasurementsForFamily(result *model.Result, targetName, family st
 		return
 	}
 	slug := strings.ToLower(strings.ReplaceAll(targetName, " ", "_"))
-	displayName := targetName
 	if family != "" {
 		slug += "_ipv" + strings.ToLower(family)
-		displayName += " IPv" + family
 	}
-	appendMeasurement := func(suffix, label, unit, display string, value float64) {
+	appendMeasurement := func(suffix, unit, display string, value float64) {
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 			return
 		}
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key:            "icmp_" + suffix + "_" + slug,
-			Label:          displayName + " ICMP " + label,
+			Label:          "probe.latency.metric.icmp",
 			Value:          value,
 			Unit:           unit,
-			Display:        display,
+			Display:        model.RawValue(display),
 			Method:         "icmp-echo-v1",
 			HigherIsBetter: model.BoolPtr(false),
 		})
 	}
 	if stats.RTTKnown {
-		appendMeasurement("min_ms", "最小", "ms", formatICMPMilliseconds(stats.MinMS), stats.MinMS)
-		appendMeasurement("avg_ms", "平均", "ms", formatICMPMilliseconds(stats.AvgMS), stats.AvgMS)
-		appendMeasurement("max_ms", "最大", "ms", formatICMPMilliseconds(stats.MaxMS), stats.MaxMS)
+		appendMeasurement("min_ms", "ms", formatICMPMilliseconds(stats.MinMS), stats.MinMS)
+		appendMeasurement("avg_ms", "ms", formatICMPMilliseconds(stats.AvgMS), stats.AvgMS)
+		appendMeasurement("max_ms", "ms", formatICMPMilliseconds(stats.MaxMS), stats.MaxMS)
 		if stats.StdDevKnown {
-			appendMeasurement("mdev_ms", "mdev", "ms", formatICMPMilliseconds(stats.StdDevMS), stats.StdDevMS)
+			appendMeasurement("mdev_ms", "ms", formatICMPMilliseconds(stats.StdDevMS), stats.StdDevMS)
 		}
 	}
 	if stats.LossKnown {
-		appendMeasurement("loss_percent", "丢包", "%", fmt.Sprintf("%.2f %%", stats.LossPercent), stats.LossPercent)
+		appendMeasurement("loss_percent", "%", fmt.Sprintf("%.2f %%", stats.LossPercent), stats.LossPercent)
 	}
 }
 

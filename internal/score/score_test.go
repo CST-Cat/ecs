@@ -20,11 +20,11 @@ func scoreReportFixture() model.Report {
 		Results: []model.Result{{
 			ID: "system", Status: model.StatusOK,
 			Fields: []model.Field{
-				{Key: "cloud_provider", Label: "Provider", Value: "fixture-cloud"},
-				{Key: "cloud_region", Label: "Region", Value: "fixture-region"},
-				{Key: "virtualization", Label: "Virtualization", Value: "kvm"},
-				{Key: "cpu_model", Label: "CPU", Value: "Fixture CPU"},
-				{Key: "arch", Label: "Arch", Value: "amd64"},
+				{Key: "cloud_provider", Label: "Provider", Value: model.RawValue("fixture-cloud")},
+				{Key: "cloud_region", Label: "Region", Value: model.RawValue("fixture-region")},
+				{Key: "virtualization", Label: "Virtualization", Value: model.RawValue("kvm")},
+				{Key: "cpu_model", Label: "CPU", Value: model.RawValue("Fixture CPU")},
+				{Key: "arch", Label: "Arch", Value: model.RawValue("amd64")},
 			},
 			Measurements: []model.Measurement{
 				{Key: "logical_cpus", Value: 4},
@@ -76,13 +76,13 @@ func scoreReportFixture() model.Report {
 				prefixMeasurements("iperf3_target_", "_upload_mbps", []float64{80, 120, 160})...)
 		}
 		if dimension.Key == "cpu" {
-			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: "sysbench 1.0.20"}}
+			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: model.RawValue("sysbench 1.0.20")}}
 		}
 		if dimension.Key == "disk" {
-			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: "fio-3.35"}}
+			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: model.RawValue("fio-3.35")}}
 		}
 		if dimension.Key == "bandwidth" {
-			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: "iperf 3.12"}}
+			result.Fields = []model.Field{{Key: "version", Label: "Version", Value: model.RawValue("iperf 3.12")}}
 		}
 		report.Results = append(report.Results, result)
 	}

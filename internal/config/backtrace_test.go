@@ -10,6 +10,7 @@ import (
 
 func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 	useEnglish(t)
+	cityOrder := BacktraceCityOrder()
 	cases := []struct {
 		name   string
 		raw    string
@@ -18,7 +19,7 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 	}{
 		{name: "default", raw: "", want: defaultBacktraceCities},
 		{name: "selected", raw: "shanghai", want: []string{"shanghai"}},
-		{name: "all", raw: "all", want: BacktraceCityOrder},
+		{name: "all", raw: "all", want: cityOrder},
 		{name: "unknown", raw: "unknown", marker: "unknown backtrace city"},
 		{name: "all combination", raw: "all,beijing", marker: "cannot be combined"},
 	}
@@ -39,7 +40,7 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 	if !reflect.DeepEqual(targets, wantTargets) {
 		t.Fatalf("BacktraceTargetsFor reverse selection = %+v, want canonical %v", targets, wantTargets)
 	}
-	all := BacktraceTargetsFor(BacktraceCityOrder)
+	all := BacktraceTargetsFor(cityOrder)
 	if len(all) != 24 {
 		t.Fatalf("built-in backtrace target count = %d, want 24", len(all))
 	}
@@ -52,6 +53,19 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 				t.Fatalf("%s target catalog key missing: %s", language, target.Name)
 			}
 		}
+	}
+}
+
+func TestBacktraceCityOrderReturnsCopy(t *testing.T) {
+	original := BacktraceCityOrder()
+	if len(original) == 0 {
+		t.Fatal("backtrace city order must not be empty")
+	}
+	mutated := append([]string(nil), original...)
+	mutated[0] = "mutated"
+	got := BacktraceCityOrder()
+	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
+		t.Fatalf("BacktraceCityOrder returned mutable canonical data: %v", got)
 	}
 }
 

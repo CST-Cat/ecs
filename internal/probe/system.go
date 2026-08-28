@@ -15,9 +15,7 @@ import (
 
 type systemProbe struct{}
 
-func (systemProbe) ID() string         { return "system" }
-func (systemProbe) Title() string      { return "module.system.title" }
-func (systemProbe) NeedsNetwork() bool { return false }
+func (systemProbe) ID() string { return "system" }
 
 type systemSnapshot struct {
 	Hostname      string
@@ -70,6 +68,8 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 	resources := CaptureEnvironmentSnapshot()
 	cloud := discoverLocalCloudIdentity()
 	result := buildSystemResult(start, snapshot, resources, cloud)
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "disk_path", env.Config.DiskPath)
 	appendKernelNetworkParams(&result)
 	finalizeSystemResult(&result, snapshot)
 	result.Finish(start)

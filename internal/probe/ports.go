@@ -14,9 +14,7 @@ import (
 
 type portsProbe struct{}
 
-func (portsProbe) ID() string         { return "ports" }
-func (portsProbe) Title() string      { return "module.ports.title" }
-func (portsProbe) NeedsNetwork() bool { return true }
+func (portsProbe) ID() string { return "ports" }
 
 type portTarget struct {
 	Service string
@@ -42,6 +40,9 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "probe.ports.profile",
 		ComparisonScope: "probe.ports.comparison_scope",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(result.Methodology.Parameters, "target_set", "ports-v1")
 
 	dnsTarget := "1.1.1.1:53"
 	if env.Config.IPVersion == config.IPVersion6 {
@@ -94,14 +95,13 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	table := model.Table{
 		Key:   "network.ports.tcp",
 		Title: "probe.ports.table.title",
-		Columns: []string{
-			"probe.ports.column.service",
-			"probe.ports.column.target",
-			"probe.ports.column.type",
-			"probe.ports.column.status",
-			"probe.ports.column.detail",
+		Columns: []model.TableColumn{
+			{Key: "service", Label: "probe.ports.column.service"},
+			{Key: "target", Label: "probe.ports.column.target"},
+			{Key: "target_type", Label: "probe.ports.column.type"},
+			{Key: "status", Label: "probe.ports.column.status"},
+			{Key: "detail", Label: "probe.ports.column.detail"},
 		},
-		ColumnKeys:  []string{"service", "target", "target_type", "status", "detail"},
 		RowIdentity: "target",
 	}
 	openCount := 0
@@ -124,12 +124,15 @@ func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 		if !item.Open && item.Error != "" {
 			addFailureMessage(&result, "connect", item.Target.Address, item.Error)
 		}
-		table.Rows = append(table.Rows, []string{item.Target.Service, item.Target.Address, item.Target.TypeKey, status, detail})
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(item.Target.Service), model.RawValue(item.Target.Address), model.KeyValue(item.Target.TypeKey),
+			model.KeyValue(status), model.RawValue(detail),
+		})
 	}
 	result.Tables = []model.Table{table}
 	result.Measurements = []model.Measurement{
-		{Key: "reachable_ports", Label: "probe.ports.metric.reachable", Value: float64(openCount), Unit: "count", Display: fmt.Sprintf("%d/%d", openCount, len(targets)), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
-		{Key: "reachable_mail_ports", Label: "probe.ports.metric.reachable_mail", Value: float64(emailOpen), Unit: "count", Display: fmt.Sprintf("%d/4", emailOpen), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "reachable_ports", Label: "probe.ports.metric.reachable", Value: float64(openCount), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", openCount, len(targets))), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
+		{Key: "reachable_mail_ports", Label: "probe.ports.metric.reachable_mail", Value: float64(emailOpen), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/4", emailOpen)), Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true)},
 	}
 	result.Evidence = model.NewEvidence(validAttempts, len(targets), "target")
 	result.Notes = append(result.Notes,

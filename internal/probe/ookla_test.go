@@ -20,7 +20,7 @@ func TestOoklaJSONFixturesAndMeasurements(t *testing.T) {
 		t.Fatalf("Ookla parsed metadata = %+v, err=%v", full, err)
 	}
 	result := model.NewResult("ookla", "Ookla")
-	appendOoklaMeasurementsFor(&result, full, "", "")
+	appendOoklaMeasurementsFor(&result, full, "")
 	values := make(map[string]model.Measurement, len(result.Measurements))
 	for _, measurement := range result.Measurements {
 		values[measurement.Key] = measurement
@@ -47,7 +47,7 @@ func TestOoklaJSONFixturesAndMeasurements(t *testing.T) {
 		t.Fatalf("partial Ookla result = %+v, err=%v", partial, err)
 	}
 	partialResult := model.NewResult("ookla", "Ookla")
-	appendOoklaMeasurementsFor(&partialResult, partial, "", "")
+	appendOoklaMeasurementsFor(&partialResult, partial, "")
 	if len(partialResult.Measurements) != 1 {
 		t.Fatalf("partial Ookla measurements = %+v", partialResult.Measurements)
 	}

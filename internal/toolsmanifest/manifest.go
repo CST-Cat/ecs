@@ -12,7 +12,7 @@ import (
 
 const SchemaVersion = "ecs-tools.manifest/v1"
 
-var Architectures = []string{
+var architectures = [...]string{
 	"amd64",
 	"arm64",
 	"armv7",
@@ -22,7 +22,7 @@ var Architectures = []string{
 	"ppc64le",
 }
 
-var ToolNames = []string{
+var toolNames = [...]string{
 	"sysbench",
 	"zstd",
 	"npb-ep",
@@ -33,6 +33,18 @@ var ToolNames = []string{
 	"iperf3",
 	"nexttrace-tiny",
 	"ping",
+}
+
+// Architectures returns the supported Linux architecture order.
+// The returned slice is a copy, so callers cannot mutate the manifest contract.
+func Architectures() []string {
+	return append([]string(nil), architectures[:]...)
+}
+
+// ToolNames returns the manifest tool allowlist order.
+// The returned slice is a copy, so callers cannot mutate the manifest contract.
+func ToolNames() []string {
+	return append([]string(nil), toolNames[:]...)
 }
 
 var sha256Pattern = regexp.MustCompile(`^[[:xdigit:]]{64}$`)
@@ -213,7 +225,7 @@ func Validate(manifest Manifest) error {
 	if manifest.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("schema_version must be %q, got %q", SchemaVersion, manifest.SchemaVersion)
 	}
-	if !contains(Architectures, manifest.Architecture) {
+	if !contains(architectures[:], manifest.Architecture) {
 		return fmt.Errorf("unsupported architecture %q", manifest.Architecture)
 	}
 	if manifest.Build.ToolchainMode != "native" && manifest.Build.ToolchainMode != "cross" {
@@ -235,28 +247,28 @@ func Validate(manifest Manifest) error {
 		return fmt.Errorf("build.validation.performance_valid must be false for CI smoke validation")
 	}
 	if manifest.SupportedArchitectures != nil {
-		if len(manifest.SupportedArchitectures) != len(Architectures) {
-			return fmt.Errorf("supported_architectures must list all %d Linux architectures", len(Architectures))
+		if len(manifest.SupportedArchitectures) != len(architectures) {
+			return fmt.Errorf("supported_architectures must list all %d Linux architectures", len(architectures))
 		}
 		seen := make(map[string]bool, len(manifest.SupportedArchitectures))
 		for _, architecture := range manifest.SupportedArchitectures {
-			if !contains(Architectures, architecture) || seen[architecture] {
+			if !contains(architectures[:], architecture) || seen[architecture] {
 				return fmt.Errorf("invalid supported architecture %q", architecture)
 			}
 			seen[architecture] = true
 		}
-		for _, architecture := range Architectures {
+		for _, architecture := range architectures {
 			if !seen[architecture] {
 				return fmt.Errorf("supported_architectures omits %q", architecture)
 			}
 		}
 	}
-	if len(manifest.Tools) != len(ToolNames) {
-		return fmt.Errorf("tools must contain exactly %d entries", len(ToolNames))
+	if len(manifest.Tools) != len(toolNames) {
+		return fmt.Errorf("tools must contain exactly %d entries", len(toolNames))
 	}
 	seenTools := make(map[string]bool, len(manifest.Tools))
 	for index, tool := range manifest.Tools {
-		if !contains(ToolNames, tool.Name) {
+		if !contains(toolNames[:], tool.Name) {
 			return fmt.Errorf("tool %d has unsupported name %q", index, tool.Name)
 		}
 		if seenTools[tool.Name] {
@@ -302,7 +314,7 @@ func validateTool(manifestArchitecture string, tool Tool) error {
 	if tool.Architecture != manifestArchitecture {
 		return fmt.Errorf("architecture %q does not match manifest architecture %q", tool.Architecture, manifestArchitecture)
 	}
-	if !contains(Architectures, tool.Architecture) {
+	if !contains(architectures[:], tool.Architecture) {
 		return fmt.Errorf("unsupported architecture %q", tool.Architecture)
 	}
 	if !isSHA256(tool.SHA256) {

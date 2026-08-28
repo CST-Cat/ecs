@@ -189,10 +189,16 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 	}
 
 	table := model.Table{
-		Key:         "disk.fio.mounts",
-		Title:       "其他挂载盘 I/O",
-		Columns:     []string{"挂载点", "设备", "文件系统", "顺序写", "4K 随机读", "状态"},
-		ColumnKeys:  []string{"mount_path", "device", "filesystem", "sequential_write_mibs", "random_read_iops", "status"},
+		Key:   "disk.fio.mounts",
+		Title: "probe.disk.table.mounts",
+		Columns: []model.TableColumn{
+			{Key: "mount_path", Label: "probe.disk.column.mount"},
+			{Key: "device", Label: "probe.disk.column.device"},
+			{Key: "filesystem", Label: "probe.disk.column.filesystem"},
+			{Key: "sequential_write_mibs", Label: "probe.disk.column.write"},
+			{Key: "random_read_iops", Label: "probe.disk.column.read_iops"},
+			{Key: "status", Label: "probe.disk.column.status"},
+		},
 		RowIdentity: "mount_path",
 	}
 	engine := detectFIOEngine(ctx, fioPath)
@@ -203,20 +209,24 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 		}
 		sample, err := runMultiDiskFIO(ctx, fioPath, mount.Path, engine)
 		if err != nil {
-			table.Rows = append(table.Rows, []string{
-				mount.Path, mount.Device, mount.FSType, "—", "—", "失败：" + compactError(err),
-			})
+			row := []model.Value{
+				model.RawValue(mount.Path), model.RawValue(mount.Device), model.RawValue(mount.FSType), model.RawValue("—"), model.RawValue("—"), model.RawValue("失败：" + compactError(err)),
+			}
+			row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
+			table.Rows = append(table.Rows, row)
 			continue
 		}
 		tested++
 		writeAvailable := isPositiveFinite(sample.WriteMiB)
 		readAvailable := isPositiveFinite(sample.ReadIOPS)
-		table.Rows = append(table.Rows, []string{
-			mount.Path, mount.Device, mount.FSType,
-			formatMatrixRate(sample.WriteMiB, "MiB/s"),
-			formatMatrixRate(sample.ReadIOPS, "IOPS"),
-			"完成",
-		})
+		row := []model.Value{
+			model.RawValue(mount.Path), model.RawValue(mount.Device), model.RawValue(mount.FSType),
+			model.RawValue(formatMatrixRate(sample.WriteMiB, "MiB/s")),
+			model.RawValue(formatMatrixRate(sample.ReadIOPS, "IOPS")),
+			model.RawValue("完成"),
+		}
+		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
+		table.Rows = append(table.Rows, row)
 		if !writeAvailable || !readAvailable {
 			result.Status = model.StatusWarning
 			result.Notes = append(result.Notes, "多盘 fio 的一个或多个挂载点只返回部分统计；缺失项不补零。")
@@ -227,15 +237,15 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 		}
 		if writeAvailable {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "fio_mount_" + key + "_write_mib_s", Label: mount.Path + " 顺序写",
-				Value: sample.WriteMiB, Unit: "MiB/s", Display: model.FormatRate(sample.WriteMiB, "MiB/s"),
+				Key: "fio_mount_" + key + "_write_mib_s", Label: diskMeasurementLabel("fio_mount_" + key + "_write_mib_s"),
+				Value: sample.WriteMiB, Unit: "MiB/s", Display: model.RawValue(model.FormatRate(sample.WriteMiB, "MiB/s")),
 				Method: "fio-direct-1MiB-write-qd1-multidisk-v1", HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 		if readAvailable {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: "fio_mount_" + key + "_randread_iops", Label: mount.Path + " 4K 随机读",
-				Value: sample.ReadIOPS, Unit: "IOPS", Display: model.FormatRate(sample.ReadIOPS, "IOPS"),
+				Key: "fio_mount_" + key + "_randread_iops", Label: diskMeasurementLabel("fio_mount_" + key + "_randread_iops"),
+				Value: sample.ReadIOPS, Unit: "IOPS", Display: model.RawValue(model.FormatRate(sample.ReadIOPS, "IOPS")),
 				Method:         fmt.Sprintf("fio-direct-4KiB-randread-qd%d-multidisk-v1", engine.EffectiveDepth(32)),
 				HigherIsBetter: model.BoolPtr(true),
 			})

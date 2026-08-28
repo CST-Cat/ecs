@@ -26,6 +26,10 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if err != nil {
 		var parseErr runFlagParseError
 		if errors.As(err, &parseErr) {
+			if colorErr := validateExplicitTerminalColorArgs(args); colorErr != nil {
+				fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
+				return 1
+			}
 			if errors.Is(err, flag.ErrHelp) {
 				return 0
 			}
@@ -35,11 +39,16 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	cfg := resolved.Runtime
+	terminalColor, colorErr := resolveTerminalColor(resolved.Color, cfg.NoColor, stdout)
+	if colorErr != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
+		return 1
+	}
 	if resolved.Version {
 		fmt.Fprintf(stdout, "%s %s\n", buildinfo.Name, buildinfo.Version)
 		return 0
 	}
-	cfg := resolved.Runtime
 	if resolved.Interactive && !resolved.Yes {
 		if !runWizard(&cfg, stdout) {
 			return 0
@@ -59,7 +68,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		baseline = loaded
 	}
 
-	terminalColor := resolveTerminalColor(resolved.Color, cfg.NoColor, stdout)
 	terminal := ui.NewWithColor(stdout, terminalColor)
 	terminal.Header(cfg, probe.EstimateFor(cfg))
 	progress := terminal.BeginProgress(len(cfg.Modules))
@@ -93,24 +101,61 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	return 0
 }
 
-func resolveTerminalColor(raw string, noColor bool, out io.Writer) termcolor.Level {
-	if noColor {
-		return termcolor.LevelNone
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "auto":
-		return termcolor.Detect(writerIsTerminal(out))
+func resolveTerminalColor(raw string, noColor bool, out io.Writer) (termcolor.Level, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(raw)); normalized {
+	case "":
+		return termcolor.LevelNone, invalidTerminalColorError(raw)
+	case "auto":
+		if noColor {
+			return termcolor.LevelNone, nil
+		}
+		return termcolor.Detect(writerIsTerminal(out)), nil
 	case "always":
+		if noColor {
+			return termcolor.LevelNone, nil
+		}
 		level := termcolor.Detect(true)
 		if level == termcolor.LevelNone {
 			level = termcolor.LevelANSI256
 		}
-		return level
+		return level, nil
+	default:
+		level, ok := termcolor.ParseLevel(raw)
+		if !ok {
+			return termcolor.LevelNone, invalidTerminalColorError(raw)
+		}
+		if noColor {
+			return termcolor.LevelNone, nil
+		}
+		return level, nil
 	}
-	if level, ok := termcolor.ParseLevel(raw); ok {
-		return level
+}
+
+func invalidTerminalColorError(raw string) error {
+	return fmt.Errorf("invalid terminal color mode %q; choose auto, none, basic, 256, truecolor, or always", raw)
+}
+
+func validateExplicitTerminalColorArgs(args []string) error {
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--" {
+			break
+		}
+		name, value, hasValue := splitEarlyFlag(args[index])
+		if name != "color" {
+			continue
+		}
+		if !hasValue {
+			if index+1 >= len(args) || args[index+1] == "--" || strings.HasPrefix(args[index+1], "-") {
+				return invalidTerminalColorError("")
+			}
+			value = args[index+1]
+			index++
+		}
+		if _, err := resolveTerminalColor(value, false, io.Discard); err != nil {
+			return err
+		}
 	}
-	return termcolor.LevelNone
+	return nil
 }
 
 func writerIsTerminal(writer io.Writer) bool {

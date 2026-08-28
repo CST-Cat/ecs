@@ -170,11 +170,17 @@ func mediaChecks() []mediaCheck {
 	return checks
 }
 
-// MediaRegionOrder 固定地区选项的顺序。
+// mediaRegionOrder 固定地区选项的顺序。
 //
 // 对应 oneclickvirt 的 -utregion：只想知道日本解锁情况时，没必要把 33 条规则
 // 全跑一遍——那既慢又会给无关平台平白制造请求。
-var MediaRegionOrder = []string{"global", "jp", "tw", "hk", "cn"}
+var mediaRegionOrder = [...]string{"global", "jp", "tw", "hk", "cn"}
+
+// MediaRegionOrder returns the canonical media-region selection order.
+// The returned slice is a copy, so callers cannot mutate the rules catalog.
+func MediaRegionOrder() []string {
+	return append([]string(nil), mediaRegionOrder[:]...)
+}
 
 // mediaRegionCategories 把地区选项映射到显式的规则分类描述。
 //

@@ -150,7 +150,7 @@ func SelectModules(base, only, skip []string) []string {
 		delete(selected, id)
 	}
 	out := make([]string, 0, len(selected))
-	for _, id := range ModuleOrder {
+	for _, id := range ModuleOrder() {
 		if selected[id] {
 			out = append(out, id)
 		}

@@ -94,10 +94,14 @@ func TestSTUNMessageParsesMappingAndClassifiesUnknownFiltering(t *testing.T) {
 }
 
 func TestNATWithoutServersSkipsWithoutNetwork(t *testing.T) {
-	result := (natSemanticProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
+	result := (natProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
 	if result.Status != model.StatusSkipped || len(result.SummaryMessages) != 1 ||
 		result.SummaryMessages[0].Key != "probe.nat.summary.skipped" || result.Evidence == nil || result.Evidence.Valid != 0 {
 		t.Fatalf("NAT no-server result = %+v", result)
+	}
+	if result.Title != "module.nat.title" || result.Description != "probe.nat.description" ||
+		result.Methodology.Label != "methodology.protocol-measurement" || len(result.Notes) != 3 {
+		t.Fatalf("NAT skip stable shape = %+v", result)
 	}
 	if len(result.Tables) != 0 {
 		t.Fatalf("NAT no-server result unexpectedly has tables: %+v", result.Tables)
@@ -132,7 +136,7 @@ func startTestSTUNServer(t *testing.T) string {
 
 func natCandidateFixture(t *testing.T, servers []config.Endpoint) model.Report {
 	t.Helper()
-	result := (natSemanticProbe{}).Run(context.Background(), Environment{Config: config.Runtime{STUNServers: servers}})
+	result := (natProbe{}).Run(context.Background(), Environment{Config: config.Runtime{STUNServers: servers}})
 	data := model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
@@ -157,7 +161,7 @@ func natPoolTable(t *testing.T, result model.Result) model.Table {
 	return model.Table{}
 }
 
-func TestNATSemanticPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
+func TestNATPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 	servers := []config.Endpoint{
 		{Name: "Alpha STUN", Address: startTestSTUNServer(t)},
 		{Name: "Beta STUN", Address: "beta.example:bad"},
@@ -166,17 +170,34 @@ func TestNATSemanticPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 	result := data.Results[0]
 	pool := natPoolTable(t, result)
 	if pool.Title != "probe.nat.table.stun_pool" ||
-		!reflect.DeepEqual(pool.Columns, []string{"probe.nat.column.server_name", "probe.nat.column.server_address"}) ||
-		!reflect.DeepEqual(pool.ColumnKeys, []string{"server_name", "server_address"}) ||
-		pool.RowIdentity != "" || len(pool.SensitiveColumns) != 0 {
+		!reflect.DeepEqual(pool.Columns, []model.TableColumn{{Key: "server_name", Label: "probe.nat.column.server_name"}, {Key: "server_address", Label: "probe.nat.column.server_address"}}) ||
+		pool.RowIdentity != "" {
 		t.Fatalf("candidate pool shape = %+v", pool)
 	}
-	wantRows := [][]string{{servers[0].Name, servers[0].Address}, {servers[1].Name, servers[1].Address}}
+	wantRows := [][]model.Value{{model.RawValue(servers[0].Name), model.RawValue(servers[0].Address)}, {model.RawValue(servers[1].Name), model.RawValue(servers[1].Address)}}
 	if !reflect.DeepEqual(pool.Rows, wantRows) {
 		t.Fatalf("candidate pool rows = %v, want %v", pool.Rows, wantRows)
 	}
 	if len(result.Tables) != 2 || len(result.Tables[0].Rows) != 1 {
 		t.Fatalf("early-stop probe details = %+v", result.Tables)
+	}
+	row := result.Tables[0].Rows[0]
+	if key, ok := row[3].Key(); !ok || key != "probe.nat.mapping.endpoint_independent" {
+		t.Fatalf("NAT mapping cell = %#v", row[3])
+	}
+	if key, ok := row[4].Key(); !ok || key != "probe.nat.filtering.unknown" {
+		t.Fatalf("NAT filtering cell = %#v", row[4])
+	}
+	if key, ok := row[6].Key(); !ok || key != "probe.nat.status.complete" {
+		t.Fatalf("NAT status cell = %#v", row[6])
+	}
+	for _, field := range result.Fields {
+		switch field.Key {
+		case "nat_category", "behind_nat", "mapping_behaviour", "filtering_behaviour":
+			if _, ok := field.Value.Key(); !ok {
+				t.Fatalf("NAT field %q lost key variant: %#v", field.Key, field.Value)
+			}
+		}
 	}
 	for _, field := range result.Fields {
 		if field.Key == "stun_pool" {
@@ -185,7 +206,7 @@ func TestNATSemanticPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 	}
 }
 
-func TestNATSemanticPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
+func TestNATPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
 	servers := []config.Endpoint{
 		{Name: "Alpha STUN", Address: "alpha.example:bad"},
 		{Name: "Beta STUN", Address: "beta.example:bad"},
@@ -200,9 +221,21 @@ func TestNATSemanticPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
 		t.Fatalf("all-failed candidate pool = %v, want %d rows", pool.Rows, len(servers))
 	}
 	for index, server := range servers {
-		if got := pool.Rows[index]; len(got) != 2 || got[0] != server.Name || got[1] != server.Address {
+		if got := pool.Rows[index]; len(got) != 2 || got[0].Text() != server.Name || got[1].Text() != server.Address {
 			t.Fatalf("all-failed pool row %d = %v", index, got)
 		}
+	}
+	for _, row := range result.Tables[0].Rows {
+		if status, ok := row[6].Key(); !ok || status != "probe.nat.status.failed" {
+			t.Fatalf("all-failed detail status = %#v", row[6])
+		}
+	}
+	if len(result.Failures) != len(servers) || result.Failures[0].Message == "" {
+		t.Fatalf("all-failed diagnostics = %+v", result.Failures)
+	}
+	if len(result.Notes) != 3 || result.Notes[2] != "probe.nat.note.no_response" ||
+		len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.nat.summary.all_failed" {
+		t.Fatalf("all-failed stable shape = notes=%#v summary=%#v", result.Notes, result.SummaryMessages)
 	}
 }
 

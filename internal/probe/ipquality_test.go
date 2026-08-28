@@ -174,12 +174,12 @@ func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
 	bundle.Findings["ipqs"] = qualityFinding{ID: "ipqs", Enabled: true, Access: "fixture", Err: errors.New("fixture provider failure")}
 	tables := []model.Table{bundle.typeTable(), bundle.scoreTable(), bundle.factorTable(), bundle.statusTable()}
 	for _, table := range tables {
-		if table.Key == "" || len(table.Columns) != len(table.ColumnKeys) || table.RowIdentity == "" || len(table.Rows) == 0 {
+		if table.Key == "" || len(table.Columns) == 0 || table.RowIdentity == "" || len(table.Rows) == 0 {
 			t.Fatalf("invalid IP quality table = %+v", table)
 		}
 	}
 	measurements := bundle.measurements()
-	if len(measurements) != 3 || !strings.Contains(measurements[2].Display, "*") {
+	if len(measurements) != 3 || !strings.Contains(measurements[2].Display.Text(), "*") {
 		t.Fatalf("IP quality measurements = %+v", measurements)
 	}
 	for _, measurement := range measurements {

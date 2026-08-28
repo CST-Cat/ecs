@@ -581,7 +581,7 @@ func (r *textRenderer) result(result model.Result) {
 	r.subsectionNo = 0
 	r.moduleBanner(result)
 	if result.Status != model.StatusOK && result.Description != "" {
-		r.indented(displayReportText(result.Description))
+		r.indented(displayKey(result.Description))
 	}
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
@@ -593,7 +593,7 @@ func (r *textRenderer) result(result model.Result) {
 		r.indentedStyled(status, r.statusStyle(result.Status))
 	}
 	if result.Error != "" {
-		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(displayReportText(result.Error), maxInt(1, r.width-10)), r.palette.ErrorBold)
+		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, maxInt(1, r.width-10)), r.palette.ErrorBold)
 	}
 	r.resultEvidenceCoverage(result.Evidence)
 	r.resultFailures(result.Failures)
@@ -687,7 +687,7 @@ func evidenceText(evidence model.Evidence) string {
 func (r *textRenderer) resultEvidence(result model.Result) {
 	if result.Description != "" && result.Status == model.StatusOK {
 		r.subsection(i18n.T("report.description"))
-		r.indented(displayReportText(result.Description))
+		r.indented(displayKey(result.Description))
 	}
 	methodology := displayMethodology(result.Methodology)
 	if methodology.Kind != "" || methodology.Label != "" || methodology.Engine != "" || methodology.Profile != "" || methodology.ComparisonScope != "" {
@@ -714,7 +714,7 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 	if len(result.Notes) > 0 {
 		r.subsection(i18n.T("report.notes"))
 		for _, note := range result.Notes {
-			r.note(displayReportText(note))
+			r.note(displayKey(note))
 		}
 		r.blank()
 	}
@@ -723,8 +723,8 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 		bannerSource := -1
 		for index, rawSource := range result.Sources {
 			source := rawSource
-			source.Name = displayReportText(source.Name)
-			source.Purpose = displayReportText(source.Purpose)
+			source.Name = displayKey(source.Name)
+			source.Purpose = displayKey(source.Purpose)
 			if strings.TrimSpace(source.URL) != "" {
 				bannerSource = index
 				break
@@ -732,8 +732,8 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 		}
 		for index, rawSource := range result.Sources {
 			source := rawSource
-			source.Name = displayReportText(source.Name)
-			source.Purpose = displayReportText(source.Purpose)
+			source.Name = displayKey(source.Name)
+			source.Purpose = displayKey(source.Purpose)
 			if index == bannerSource {
 				// The banner already carries this source URL. Keep its name and
 				// purpose in the evidence section without printing the URL twice.
@@ -969,7 +969,7 @@ func measurementGroupTitle(id, key, label, resultTitle string) string {
 }
 
 func tableGroupTitle(id, title, resultTitle string) string {
-	lower := strings.ToLower(displayReportText(title))
+	lower := strings.ToLower(displayKey(title))
 	if id == "system" {
 		return localizedGroup("内核网络", "Kernel networking")
 	}
@@ -1018,15 +1018,17 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 	labelWidth, valueWidth := 0, 0
 	for _, rawItem := range items {
 		item := displayMeasurement(rawItem)
+		display := displayValue(item.Display)
 		labelWidth = maxInt(labelWidth, textwidth.Width(item.Label))
-		valueWidth = maxInt(valueWidth, textwidth.Width(item.Display))
+		valueWidth = maxInt(valueWidth, textwidth.Width(display))
 	}
 	labelWidth = minInt(labelWidth, labelLimit)
 	valueWidth = minInt(valueWidth, valueLimit)
 	for _, rawItem := range items {
 		item := displayMeasurement(rawItem)
+		display := displayValue(item.Display)
 		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), labelWidth) + i18n.T("punct.colon")
-		valueLines := wrapText(item.Display, valueWidth)
+		valueLines := wrapText(display, valueWidth)
 		if len(valueLines) == 0 {
 			valueLines = []string{""}
 		}
@@ -1303,7 +1305,7 @@ func (r *textRenderer) fields(items []model.Field) {
 	width = minInt(width, labelLimit)
 	for _, rawItem := range items {
 		item := displayField(rawItem)
-		value := item.Value
+		value := displayValue(item.Value)
 		label := textwidth.Pad(textwidth.Truncate(item.Label, labelLimit), width) + i18n.T("punct.colon")
 		prefix := "  " + r.palette.Label(label) + "  "
 		available := r.width - textwidth.Width(prefix)
@@ -1319,14 +1321,14 @@ func (r *textRenderer) fields(items []model.Field) {
 			if index > 0 {
 				linePrefix = strings.Repeat(" ", textwidth.Width(prefix))
 			}
-			displayValue := r.semanticValue(valueLine)
+			renderedValue := r.semanticValue(valueLine)
 			switch strings.ToLower(strings.TrimSpace(valueLine)) {
 			case "available", "true":
-				displayValue = r.palette.WrapRatio(valueLine, 1)
+				renderedValue = r.palette.WrapRatio(valueLine, 1)
 			case "unavailable", "false":
-				displayValue = r.palette.WrapRatio(valueLine, 0)
+				renderedValue = r.palette.WrapRatio(valueLine, 0)
 			}
-			r.line(linePrefix + displayValue)
+			r.line(linePrefix + renderedValue)
 		}
 	}
 	r.blank()
@@ -1350,7 +1352,7 @@ func (r *textRenderer) resultTable(table model.Table) {
 		// wrapping harder. Preserve the exact numeric text in this layout.
 		cellBarWidth = 0
 	}
-	r.table(table.Columns, tableRowsWithBars(table, r.palette, cellBarWidth), nil)
+	r.table(displayTableLabels(table.Columns), tableRowsWithBars(table, r.palette, cellBarWidth), nil)
 	r.blank()
 }
 
@@ -1369,68 +1371,43 @@ func visibleTableColumns(table model.Table) model.Table {
 	}
 	columnMap := make(map[int]int, len(keep))
 	out := table
-	out.Columns = make([]string, 0, len(keep))
-	if table.ColumnKeys != nil {
-		out.ColumnKeys = make([]string, 0, len(keep))
-	}
+	out.Columns = make([]model.TableColumn, 0, len(keep))
 	for index, original := range keep {
 		columnMap[original] = index
 		out.Columns = append(out.Columns, table.Columns[original])
-		if table.ColumnKeys != nil {
-			if original < len(table.ColumnKeys) {
-				out.ColumnKeys = append(out.ColumnKeys, table.ColumnKeys[original])
-			} else {
-				// Keep the parallel shape even for malformed legacy input. Such
-				// an empty key is not a usable identity, but it is safer than
-				// shifting the remaining column keys onto the wrong columns.
-				out.ColumnKeys = append(out.ColumnKeys, "")
-			}
-		}
 	}
 	if table.RowIdentity != "" {
 		out.RowIdentity = ""
-		for original, key := range table.ColumnKeys {
-			if key == table.RowIdentity {
+		for original, column := range table.Columns {
+			if column.Key == table.RowIdentity {
 				if _, ok := columnMap[original]; ok {
-					out.RowIdentity = key
+					out.RowIdentity = column.Key
 				}
 				break
 			}
 		}
 	}
-	out.Rows = make([][]string, len(table.Rows))
+	out.Rows = make([][]model.Value, len(table.Rows))
 	for rowIndex, row := range table.Rows {
-		filtered := make([]string, 0, len(keep))
+		filtered := make([]model.Value, 0, len(keep))
 		for _, original := range keep {
 			if original < len(row) {
 				filtered = append(filtered, row[original])
 			} else {
-				filtered = append(filtered, "")
+				filtered = append(filtered, model.RawValue(""))
 			}
 		}
 		out.Rows[rowIndex] = filtered
 	}
-	out.NumericColumns = nil
-	out.NumericHigherIsBetter = nil
-	for index, original := range table.NumericColumns {
-		if mapped, ok := columnMap[original]; ok {
-			out.NumericColumns = append(out.NumericColumns, mapped)
-			if index < len(table.NumericHigherIsBetter) {
-				out.NumericHigherIsBetter = append(out.NumericHigherIsBetter, table.NumericHigherIsBetter[index])
-			}
-		}
-	}
-	out.SensitiveColumns = nil
-	for _, original := range table.SensitiveColumns {
-		if mapped, ok := columnMap[original]; ok {
-			out.SensitiveColumns = append(out.SensitiveColumns, mapped)
-		}
-	}
 	return out
 }
 
-func isExplanatoryColumn(column string) bool {
-	lower := strings.ToLower(strings.TrimSpace(column))
+func isExplanatoryColumn(column model.TableColumn) bool {
+	heading := column.Label
+	if strings.TrimSpace(heading) == "" {
+		heading = column.Key
+	}
+	lower := strings.ToLower(strings.TrimSpace(heading))
 	for _, token := range []string{
 		"为什么值得看", "指标口径", "分段规则", "备注", "说明", "解释",
 		"why", "rationale", "definition", "segment", "note", "comment", "description", "guidance",
@@ -1453,7 +1430,7 @@ func normalizeMatrixTable(table model.Table) model.Table {
 	if kind == matrixATTO {
 		table.Title = "ATTO"
 	}
-	table.Columns = append([]string(nil), table.Columns...)
+	table.Columns = append([]model.TableColumn(nil), table.Columns...)
 	columns := []string{}
 	switch kind {
 	case matrixCrystal, matrixATTO:
@@ -1463,7 +1440,7 @@ func normalizeMatrixTable(table model.Table) model.Table {
 	}
 	for index := range table.Columns {
 		if index < len(columns) {
-			table.Columns[index] = columns[index]
+			table.Columns[index].Label = columns[index]
 		}
 	}
 	return table
@@ -1486,7 +1463,7 @@ func matrixKindForTable(title string) diskMatrixKind {
 func visibleMeasurements(result model.Result) []model.Measurement {
 	tables := make(map[diskMatrixKind]bool)
 	for _, table := range result.Tables {
-		if kind := matrixKindForTable(displayReportText(table.Title)); kind != "" && len(table.Rows) > 0 {
+		if kind := matrixKindForTable(displayKey(table.Title)); kind != "" && len(table.Rows) > 0 {
 			tables[kind] = true
 		}
 	}
@@ -1520,8 +1497,10 @@ func matrixKindForMeasurement(key string) diskMatrixKind {
 }
 
 func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBarWidth ...int) [][]string {
-	if len(table.NumericColumns) == 0 || len(table.Rows) == 0 {
-		return table.Rows
+	rows := displayTableRows(table)
+	numericColumns := numericTableColumnIndexes(table)
+	if len(numericColumns) == 0 || len(rows) == 0 {
+		return rows
 	}
 	// A table column is not necessarily a metric group.  Crystal/ATTO, for
 	// example, put read and write throughput in adjacent columns; calculating a
@@ -1532,15 +1511,12 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 	// helper keeps compact ranges linear and switches wide ranges to a
 	// min-relative logarithmic scale, while the table itself remains the scope
 	// so values from different matrices never borrow a scale.
-	stats := make(map[tableBarGroup]tableBarStats, len(table.NumericColumns))
-	valueWidths := make(map[int]int, len(table.NumericColumns))
-	semantics := make(map[int]string, len(table.NumericColumns))
-	directions := make(map[int]bool, len(table.NumericColumns))
-	for index, column := range table.NumericColumns {
-		higher := true
-		if index < len(table.NumericHigherIsBetter) {
-			higher = table.NumericHigherIsBetter[index]
-		}
+	stats := make(map[tableBarGroup]tableBarStats, len(numericColumns))
+	valueWidths := make(map[int]int, len(numericColumns))
+	semantics := make(map[int]string, len(numericColumns))
+	directions := make(map[int]bool, len(numericColumns))
+	for _, column := range numericColumns {
+		higher := table.Columns[column].HigherIsBetter
 		if riskNumericColumn(table, column) {
 			// Risk magnitude is intentionally drawn directly: a larger
 			// 0–100 score gets a longer warning bar even though the quality
@@ -1549,7 +1525,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 		}
 		semantics[column] = tableBarSemantic(table, column)
 		directions[column] = higher
-		for _, row := range table.Rows {
+		for _, row := range rows {
 			if column >= len(row) {
 				continue
 			}
@@ -1591,14 +1567,14 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 	if len(requestedBarWidth) > 0 {
 		cellBarWidth = maxInt(0, requestedBarWidth[0])
 	}
-	rows := make([][]string, len(table.Rows))
-	for rowIndex, original := range table.Rows {
-		rows[rowIndex] = append([]string(nil), original...)
-		for _, column := range table.NumericColumns {
-			if column >= len(rows[rowIndex]) {
+	barRows := make([][]string, len(rows))
+	for rowIndex, original := range rows {
+		barRows[rowIndex] = append([]string(nil), original...)
+		for _, column := range numericColumns {
+			if column >= len(barRows[rowIndex]) {
 				continue
 			}
-			value, unit, ok := numericCell(rows[rowIndex][column])
+			value, unit, ok := numericCell(barRows[rowIndex][column])
 			if !ok || value < 0 {
 				continue
 			}
@@ -1616,13 +1592,23 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 			// Reserve one stable value field before the bar.  Without this
 			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
 			// row and the visual column drifts with digit count or unit text.
-			cell := textwidth.Pad(rows[rowIndex][column], valueWidths[column])
+			cell := textwidth.Pad(barRows[rowIndex][column], valueWidths[column])
 			if cellBarWidth > 0 {
-				rows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, cellBarWidth)
+				barRows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, cellBarWidth)
 			}
 		}
 	}
-	return rows
+	return barRows
+}
+
+func numericTableColumnIndexes(table model.Table) []int {
+	columns := make([]int, 0, len(table.Columns))
+	for index, column := range table.Columns {
+		if column.Numeric {
+			columns = append(columns, index)
+		}
+	}
+	return columns
 }
 
 // tableBarGroup is the scale identity for a numeric table cell.  Unit is
@@ -1651,7 +1637,7 @@ func tableBarSemantic(table model.Table, column int) string {
 	if column < 0 || column >= len(table.Columns) {
 		return ""
 	}
-	heading := strings.ToLower(strings.TrimSpace(table.Columns[column]))
+	heading := strings.ToLower(strings.TrimSpace(table.Columns[column].Label))
 	// Direction words are often attached to the metric token (读吞吐,
 	// upload bandwidth), so remove them before splitting English-style
 	// separators.  The direction is not a metric: read/write and upload/download
@@ -1699,12 +1685,12 @@ func riskNumericColumn(table model.Table, column int) bool {
 	if column < 0 || column >= len(table.Columns) {
 		return false
 	}
-	heading := strings.ToLower(table.Columns[column])
+	heading := strings.ToLower(table.Columns[column].Label)
 	if !strings.Contains(heading, "risk") && !strings.Contains(heading, "风险") {
 		return false
 	}
 	for _, row := range table.Rows {
-		if column < len(row) && strings.Contains(strings.ToLower(row[column]), "/100") {
+		if column < len(row) && strings.Contains(strings.ToLower(displayValue(row[column])), "/100") {
 			return true
 		}
 	}

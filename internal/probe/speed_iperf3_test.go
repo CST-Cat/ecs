@@ -28,12 +28,11 @@ func TestSpeedMissingToolPreservesRawLookPathError(t *testing.T) {
 		t.Fatalf("missing-tool failure lost typed lookup error: %#v, want %q", failure, expectedErr.Error())
 	}
 
-	semantic := (speedSemanticProbe{}).Run(context.Background(), Environment{})
-	if len(semantic.SummaryMessages) != 1 || semantic.SummaryMessages[0].Key != "probe.speed.summary.tool_missing" {
-		t.Fatalf("missing-tool summary = %#v", semantic.SummaryMessages)
+	if len(direct.SummaryMessages) != 1 || direct.SummaryMessages[0].Key != "probe.speed.summary.tool_missing" {
+		t.Fatalf("missing-tool summary = %#v", direct.SummaryMessages)
 	}
-	if len(semantic.Failures) != 1 || semantic.Failures[0].Message != expectedErr.Error() {
-		t.Fatalf("semantic adapter changed raw lookup error: %#v", semantic.Failures)
+	if len(direct.Notes) != 5 || direct.Notes[0] != "probe.speed.note.active_traffic" {
+		t.Fatalf("missing-tool notes = %#v", direct.Notes)
 	}
 }
 

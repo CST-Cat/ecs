@@ -129,8 +129,6 @@ func endpointFamily(endpoint config.Endpoint, fallback string) string {
 
 type Probe interface {
 	ID() string
-	Title() string
-	NeedsNetwork() bool
 	Run(context.Context, Environment) model.Result
 }
 
@@ -185,31 +183,24 @@ func Builtins() []Probe {
 	return []Probe{
 		systemProbe{},
 		networkProbe{},
-		bgpSemanticProbe{},
+		bgpProbe{},
 		cpuProbe{},
-		zstdSemanticProbe{},
-		npbSemanticProbe{},
+		zstdProbe{},
+		npbProbe{},
 		memoryProbe{},
-		cryptoSemanticProbe{},
-		diskSemanticProbe{},
-		dnsSemanticProbe{},
-		latencySemanticProbe{},
-		speedSemanticProbe{},
+		cryptoProbe{},
+		diskProbe{},
+		dnsProbe{},
+		latencyProbe{},
+		speedProbe{},
 		portsProbe{},
-		natSemanticProbe{},
-		blacklistSemanticProbe{},
-		appsSemanticProbe{},
-		cnSpeedSemanticProbe{},
-		ooklaSemanticProbe{},
+		natProbe{},
+		blacklistProbe{},
+		appsProbe{},
+		cnSpeedProbe{},
+		ooklaProbe{},
 		mediaProbe{},
 		routeProbe{},
 		backtraceProbe{},
 	}
-}
-
-func MethodologyFor(id string) model.Methodology {
-	if descriptor, ok := config.ModuleDescriptorFor(id); ok {
-		return descriptor.Methodology
-	}
-	return model.Methodology{}
 }

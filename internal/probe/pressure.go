@@ -317,7 +317,7 @@ func pressurePercent(before, after psiValues, elapsed time.Duration) (float64, b
 
 func environmentMeasurement(key, label string, value float64, unit, display, method string) model.Measurement {
 	return model.Measurement{
-		Key: key, Label: label, Value: value, Unit: unit, Display: display,
+		Key: key, Label: label, Value: value, Unit: unit, Display: model.RawValue(display),
 		Method: method, HigherIsBetter: model.BoolPtr(false),
 	}
 }

@@ -119,24 +119,24 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 	result.Tables = append(result.Tables, systemPressureTable(snapshot))
 	fieldValues := make(map[string]string, len(result.Fields))
 	for _, field := range result.Fields {
-		fieldValues[field.Key] = field.Value
+		fieldValues[field.Key] = field.Value.Text()
 	}
 	if fieldValues["cgroup_memory_swap_limit_bytes"] != "unlimited" || len(result.Tables) != 1 || result.Tables[0].Key != "system.pressure.cgroup" {
 		t.Fatalf("system diagnostics = fields:%v tables:%v", result.Fields, result.Tables)
 	}
-	assessment := model.Interference{Detected: true, Score: 2, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.cpu_steal_high", "fixture")}, Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: "2", Method: "fixture"}}}
+	assessment := model.Interference{Detected: true, Score: 2, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.cpu_steal_high", "fixture")}, Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: model.RawValue("2"), Method: "fixture"}}}
 	fieldCount, tableCount := len(result.Fields), len(result.Tables)
 	AppendInterferenceDiagnostics(&result, assessment)
 	if result.Status != model.StatusWarning || result.Interference == nil || result.Interference.Reasons[0].Key != assessment.Reasons[0].Key || len(result.Notes) != 0 || len(result.Fields) != fieldCount || len(result.Tables) != tableCount {
 		t.Fatalf("interference diagnostics = %+v", result)
 	}
 	assessment.Reasons[0].Args[0] = "changed"
-	assessment.Measurements[0].Display = "changed"
-	if result.Interference.Reasons[0].Args[0] == "changed" || result.Interference.Measurements[0].Display == "changed" || result.Measurements[len(result.Measurements)-1].Display == "changed" {
+	assessment.Measurements[0].Display = model.RawValue("changed")
+	if result.Interference.Reasons[0].Args[0] == "changed" || result.Interference.Measurements[0].Display.Text() == "changed" || result.Measurements[len(result.Measurements)-1].Display.Text() == "changed" {
 		t.Fatal("interference diagnostics shared input slices")
 	}
 	cleanResult := model.NewResult("system", "system")
-	AppendInterferenceDiagnostics(&cleanResult, model.Interference{Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: "0", Method: "fixture"}}})
+	AppendInterferenceDiagnostics(&cleanResult, model.Interference{Measurements: []model.Measurement{{Key: "pressure", Label: "probe.pressure.metric.cpu_steal_percent_window", Display: model.RawValue("0"), Method: "fixture"}}})
 	if cleanResult.Status != model.StatusOK || cleanResult.Interference == nil || len(cleanResult.Tables) != 0 || len(cleanResult.Notes) != 0 || len(cleanResult.Fields) != 0 {
 		t.Fatalf("clean interference diagnostics = %+v", cleanResult)
 	}
@@ -160,8 +160,8 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 				first.Status = model.StatusError
 				first.Evidence = model.NewEvidence(0, 1, "run")
 			}
-			firstInterference := model.Interference{Score: test.firstScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "first")}, Measurements: []model.Measurement{{Key: "first-pressure", Display: "first"}}}
-			secondInterference := model.Interference{Score: test.secondScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "second")}, Measurements: []model.Measurement{{Key: "second-pressure", Display: "second"}}}
+			firstInterference := model.Interference{Score: test.firstScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "first")}, Measurements: []model.Measurement{{Key: "first-pressure", Display: model.RawValue("first")}}}
+			secondInterference := model.Interference{Score: test.secondScore, Reasons: []model.Message{model.NewMessage("probe.pressure.reason.pretest_cpu_psi_high", "second")}, Measurements: []model.Measurement{{Key: "second-pressure", Display: model.RawValue("second")}}}
 			selected := FinalizeBenchmarkRetry(first, firstInterference, second, secondInterference)
 			if selected.Retry == nil || selected.Retry.SelectedAttempt != test.want || len(selected.Retry.Attempts) != 2 || selected.Status != model.StatusOK || selected.Evidence == nil || selected.Evidence.Valid != 1 || len(selected.TextBlocks) != 2 {
 				t.Fatalf("retry selection = %+v", selected.Retry)
@@ -170,8 +170,8 @@ func TestPressureDiagnosticsAndRetry(t *testing.T) {
 				t.Fatalf("retry selected result = %+v", selected)
 			}
 			firstInterference.Reasons[0].Args[0] = "changed"
-			firstInterference.Measurements[0].Display = "changed"
-			if selected.Retry.TriggerReasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Reasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Measurements[0].Display == "changed" {
+			firstInterference.Measurements[0].Display = model.RawValue("changed")
+			if selected.Retry.TriggerReasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Reasons[0].Args[0] == "changed" || selected.Retry.Attempts[0].Interference.Measurements[0].Display.Text() == "changed" {
 				t.Fatal("retry facts shared input slices")
 			}
 			for _, block := range selected.TextBlocks {

@@ -187,9 +187,70 @@ const iperfDirectionBudgetWindows = 2
 
 type iperfDirectionRunner func(context.Context, string, string, int, string, bool, int, int) iperfDirectionResult
 
-func (speedProbe) ID() string         { return "speed" }
-func (speedProbe) Title() string      { return "网络吞吐" }
-func (speedProbe) NeedsNetwork() bool { return true }
+func (speedProbe) ID() string { return "speed" }
+
+func newSpeedResult() model.Result {
+	result := model.NewResult("speed", "module.speed.title")
+	result.Description = "probe.speed.description"
+	result.Methodology = model.Methodology{
+		Kind:            "standard-benchmark",
+		Label:           "methodology.standard-benchmark",
+		Engine:          "iperf3",
+		Profile:         "probe.speed.profile",
+		ComparisonScope: "probe.speed.comparison_scope",
+	}
+	result.Methodology.Parameters = newComparisonParameters()
+	return result
+}
+
+func speedComparisonParameters(env Environment) map[string]string {
+	parameters := newComparisonParameters()
+	addComparisonParameter(parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(parameters, "configured_duration", env.Config.IPerfDuration.String())
+	addComparisonParameter(parameters, "configured_threads", strconv.Itoa(env.Config.SpeedThreads))
+	addComparisonParameterHash(parameters, "targets_sha256", env.Config.IPerfTargets)
+	return parameters
+}
+
+func speedStableNotes() []string {
+	return []string{
+		"probe.speed.note.active_traffic",
+		"probe.speed.note.public_nodes",
+		"probe.speed.note.comparison",
+		"probe.speed.note.raw_values",
+		"probe.speed.note.udp_scope",
+	}
+}
+
+func speedStatusKey(upload, download float64) string {
+	switch {
+	case isPositiveFinite(upload) && isPositiveFinite(download):
+		return "probe.speed.status.complete"
+	case isPositiveFinite(upload) || isPositiveFinite(download):
+		return "probe.speed.status.partial"
+	default:
+		return "probe.speed.status.failed"
+	}
+}
+
+func speedMachineSummary(result model.Result) string {
+	parts := make([]string, 0, 4)
+	for _, measurement := range result.Measurements {
+		if measurement.Value <= 0 {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(measurement.Key, "_upload_mbps"):
+			parts = append(parts, "upload="+measurement.Display.Text())
+		case strings.HasSuffix(measurement.Key, "_download_mbps"):
+			parts = append(parts, "download="+measurement.Display.Text())
+		}
+		if len(parts) >= 4 {
+			break
+		}
+	}
+	return strings.Join(parts, ";")
+}
 
 func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 	path, err := exec.LookPath("iperf3")
@@ -197,37 +258,27 @@ func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
 		return runIPerfSpeed(ctx, env, path)
 	}
 	start := time.Now()
-	result := model.NewResult("speed", "网络吞吐")
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "标准基准",
-		Engine:          "iperf3",
-		Profile:         "TCP multi-stream forward/reverse + UDP 50M/5s",
-		ComparisonScope: "相同 iperf3 版本、节点、方向、并发流与时长",
-	}
+	result := newSpeedResult()
+	result.Methodology.Parameters = speedComparisonParameters(env)
 	result.Status = model.StatusWarning
 	addFailure(&result, "tool_lookup", "iperf3", err)
 	result.Evidence = model.NewEvidence(0, len(env.Config.IPerfTargets)*3, "operation")
-	result.Notes = append(result.Notes, "probe.speed.tool_missing")
+	result.Notes = speedStableNotes()
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.tool_missing")}
 	result.Finish(start)
 	return result
 }
 
 func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Result {
 	start := time.Now()
-	result := model.NewResult("speed", "网络吞吐")
-	result.Description = "iperf3 公共节点 TCP 多流上传/反向下载与 UDP 质量"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "标准基准",
-		Engine:          "iperf3",
-		Profile:         "TCP multi-stream forward/reverse + UDP 50M/5s",
-		ComparisonScope: "相同 iperf3 版本、节点、IP 协议、并发流与时长",
-	}
+	result := newSpeedResult()
+	result.Methodology.Parameters = speedComparisonParameters(env)
+	result.Notes = speedStableNotes()
 
 	if len(env.Config.IPerfTargets) == 0 {
 		result.Status = model.StatusWarning
 		result.Evidence = model.NewEvidence(0, 0, "operation")
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.none")}
 		result.Finish(start)
 		return result
 	}
@@ -266,31 +317,42 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 
 	table := model.Table{
-		Key:                   "network.iperf3.results",
-		Title:                 "iperf3 TCP/UDP 节点",
-		Columns:               []string{"服务商", "位置", "协议", "上传", "下载", "UDP 丢包", "UDP 抖动", "端口", "状态"},
-		ColumnKeys:            []string{"provider", "location", "protocol", "upload_mbps", "download_mbps", "udp_loss_percent", "udp_jitter_ms", "port", "status"},
-		NumericColumns:        []int{3, 4, 5, 6},
-		NumericHigherIsBetter: []bool{true, true, false, false},
+		Key:   "network.iperf3.results",
+		Title: "probe.speed.table.results",
+		Columns: []model.TableColumn{
+			{Key: "provider", Label: "probe.speed.column.provider"},
+			{Key: "location", Label: "probe.speed.column.location"},
+			{Key: "protocol", Label: "probe.speed.column.protocol"},
+			{Key: "upload_mbps", Label: "probe.speed.column.upload", Numeric: true, HigherIsBetter: true},
+			{Key: "download_mbps", Label: "probe.speed.column.download", Numeric: true, HigherIsBetter: true},
+			{Key: "udp_loss_percent", Label: "probe.speed.column.udp_loss", Numeric: true},
+			{Key: "udp_jitter_ms", Label: "probe.speed.column.udp_jitter", Numeric: true},
+			{Key: "port", Label: "probe.speed.column.port"},
+			{Key: "status", Label: "probe.speed.column.status"},
+		},
 	}
 	stabilityTable := model.Table{
-		Key:                   "network.iperf3.stability",
-		Title:                 "iperf3 TCP 分秒稳定性",
-		Columns:               []string{"服务商", "协议", "方向", "最低", "P50", "变异系数", "重传", "区间"},
-		ColumnKeys:            []string{"provider", "protocol", "direction", "minimum_mbps", "p50_mbps", "coefficient_of_variation_percent", "retransmits", "interval"},
-		NumericColumns:        []int{3, 4, 5, 6},
-		NumericHigherIsBetter: []bool{true, true, false, false},
+		Key:   "network.iperf3.stability",
+		Title: "probe.speed.table.stability",
+		Columns: []model.TableColumn{
+			{Key: "provider", Label: "probe.speed.column.provider"},
+			{Key: "protocol", Label: "probe.speed.column.protocol"},
+			{Key: "direction", Label: "probe.speed.column.direction"},
+			{Key: "minimum_mbps", Label: "probe.speed.column.minimum", Numeric: true, HigherIsBetter: true},
+			{Key: "p50_mbps", Label: "probe.speed.column.p50", Numeric: true, HigherIsBetter: true},
+			{Key: "coefficient_of_variation_percent", Label: "probe.speed.column.cv", Numeric: true},
+			{Key: "retransmits", Label: "probe.speed.column.retransmits", Numeric: true},
+			{Key: "interval", Label: "probe.speed.column.interval"},
+		},
 	}
 	var transferred int64
 	failures := 0
 	completedDirections := 0
 	for rowIndex, row := range rows {
-		status := "完成"
+		statusKey := speedStatusKey(row.Upload.Mbps, row.Download.Mbps)
 		if !isPositiveFinite(row.Upload.Mbps) && !isPositiveFinite(row.Download.Mbps) {
-			status = "失败"
 			failures++
 		} else if !isPositiveFinite(row.Upload.Mbps) || !isPositiveFinite(row.Download.Mbps) {
-			status = "部分"
 			failures++
 		}
 		if isPositiveFinite(row.Upload.Mbps) {
@@ -298,10 +360,10 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			completedDirections++
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:            fmt.Sprintf("iperf3_target_%02d_%s_upload_mbps", rowIndex+1, strings.ToLower(row.Family)),
-				Label:          fmt.Sprintf("%s %s 上传", row.Target.Name, row.Family),
+				Label:          "probe.speed.metric.upload",
 				Value:          row.Upload.Mbps,
 				Unit:           "Mbps",
-				Display:        model.FormatRate(row.Upload.Mbps, "Mbps"),
+				Display:        model.RawValue(model.FormatRate(row.Upload.Mbps, "Mbps")),
 				Method:         fmt.Sprintf("iperf3-tcp-forward-p%d-%ds-v1", threads, seconds),
 				HigherIsBetter: model.BoolPtr(true),
 			})
@@ -312,10 +374,10 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			completedDirections++
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:            fmt.Sprintf("iperf3_target_%02d_%s_download_mbps", rowIndex+1, strings.ToLower(row.Family)),
-				Label:          fmt.Sprintf("%s %s 下载", row.Target.Name, row.Family),
+				Label:          "probe.speed.metric.download",
 				Value:          row.Download.Mbps,
 				Unit:           "Mbps",
-				Display:        model.FormatRate(row.Download.Mbps, "Mbps"),
+				Display:        model.RawValue(model.FormatRate(row.Download.Mbps, "Mbps")),
 				Method:         fmt.Sprintf("iperf3-tcp-reverse-p%d-%ds-v1", threads, seconds),
 				HigherIsBetter: model.BoolPtr(true),
 			})
@@ -329,14 +391,14 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			result.Measurements = append(result.Measurements,
 				model.Measurement{
 					Key:   fmt.Sprintf("iperf3_target_%02d_%s_udp_loss_percent", rowIndex+1, strings.ToLower(row.Family)),
-					Label: fmt.Sprintf("%s %s UDP 丢包", row.Target.Name, row.Family),
-					Value: row.UDP.LostPercent, Unit: "%", Display: udpLoss,
+					Label: "probe.speed.metric.udp_loss",
+					Value: row.UDP.LostPercent, Unit: "%", Display: model.RawValue(udpLoss),
 					Method: "iperf3-udp-50M-5s-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
 					Key:   fmt.Sprintf("iperf3_target_%02d_%s_udp_jitter_ms", rowIndex+1, strings.ToLower(row.Family)),
-					Label: fmt.Sprintf("%s %s UDP 抖动", row.Target.Name, row.Family),
-					Value: row.UDP.JitterMS, Unit: "ms", Display: udpJitter,
+					Label: "probe.speed.metric.udp_jitter",
+					Value: row.UDP.JitterMS, Unit: "ms", Display: model.RawValue(udpJitter),
 					Method: "iperf3-udp-50M-5s-v1", HigherIsBetter: model.BoolPtr(false),
 				},
 			)
@@ -345,16 +407,16 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			result.Notes = append(result.Notes,
 				fmt.Sprintf("%s %s UDP 测试失败: %s", row.Target.Name, row.Family, row.UDP.Err))
 		}
-		table.Rows = append(table.Rows, []string{
-			row.Target.Name,
-			fallback(row.Target.Location, row.Target.Host),
-			row.Family,
-			formatOptionalMbps(row.Upload.Mbps),
-			formatOptionalMbps(row.Download.Mbps),
-			udpLoss,
-			udpJitter,
-			ports,
-			status,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(row.Target.Name),
+			model.RawValue(fallback(row.Target.Location, row.Target.Host)),
+			model.RawValue(row.Family),
+			model.RawValue(formatOptionalMbps(row.Upload.Mbps)),
+			model.RawValue(formatOptionalMbps(row.Download.Mbps)),
+			model.RawValue(udpLoss),
+			model.RawValue(udpJitter),
+			model.RawValue(ports),
+			model.KeyValue(statusKey),
 		})
 		for _, direction := range []struct {
 			name   string
@@ -383,6 +445,8 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	result.Evidence = model.NewEvidence(validOperations, len(rows)*3, "operation")
 	if completedDirections == 0 {
 		result.Fail(fmt.Errorf("所有 iperf3 节点与方向均失败"))
+		result.Notes = speedStableNotes()
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.none")}
 		result.Finish(start)
 		return result
 	}
@@ -390,28 +454,25 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		result.Status = model.StatusWarning
 	}
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "标准工具", Value: "iperf3"},
-		{Key: "version", Label: "iperf3 版本", Value: commandVersion(ctx, path)},
-		{Key: "binary_sha256", Label: "iperf3 SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
-		{Key: "threads", Label: "并发流", Value: strconv.Itoa(threads)},
-		{Key: "duration", Label: "每节点每方向", Value: fmt.Sprintf("%ds", seconds)},
-		{Key: "targets", Label: "配置节点", Value: strconv.Itoa(len(env.Config.IPerfTargets))},
-		{Key: "actual_traffic", Label: "已统计传输量", Value: model.FormatBytes(uint64(max64(transferred, 0)))},
-		{Key: "arguments", Label: "参数模板", Value: "iperf3 -4|-6 -c HOST -p PORT -P N -t S -J [-R]"},
+		{Key: "engine", Label: "probe.speed.field.engine", Value: model.RawValue("iperf3")},
+		{Key: "version", Label: "probe.speed.field.version", Value: model.RawValue(commandVersion(ctx, path))},
+		{Key: "binary_sha256", Label: "probe.speed.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
+		{Key: "threads", Label: "probe.speed.field.threads", Value: model.RawValue(strconv.Itoa(threads))},
+		{Key: "duration", Label: "probe.speed.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", seconds))},
+		{Key: "targets", Label: "probe.speed.field.targets", Value: model.RawValue(strconv.Itoa(len(env.Config.IPerfTargets)))},
+		{Key: "actual_traffic", Label: "probe.speed.field.actual_traffic", Value: model.RawValue(model.FormatBytes(uint64(max64(transferred, 0))))},
+		{Key: "arguments", Label: "probe.speed.field.arguments", Value: model.RawValue("iperf3 -4|-6 -c HOST -p PORT -P N -t S -J [-R]")},
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", commandVersion(ctx, path))
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
+	addComparisonParameter(result.Methodology.Parameters, "threads", strconv.Itoa(threads))
+	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", seconds))
 	result.Sources = []model.Source{
-		{Name: "iperf3", URL: "https://software.es.net/iperf/", Purpose: "TCP 网络吞吐标准测试工具"},
-		{Name: "YABS public server registry", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "仅复用默认公共 iperf3 节点清单"},
+		{Name: "iperf3", URL: "https://software.es.net/iperf/", Purpose: "probe.speed.source.iperf3"},
+		{Name: "YABS public server registry", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "probe.speed.source.registry"},
 	}
-	result.Notes = append(result.Notes,
-		"iperf3 是按时长尽力跑满链路的主动测试；实际流量随带宽变化，不能用 MiB 上限精确预估。",
-		"公共节点可能繁忙、限速或更换端口；单节点失败不代表 VPS 网络故障。",
-		"只比较相同节点、IP 协议、iperf3 版本、并发流和时长的结果。",
-		"报告保留每个节点、方向的 iperf3 原值，不计算跨节点平均分、中位数或综合分。",
-	)
-	result.Notes = append(result.Notes,
-		"UDP 列用 50 Mbps 固定码率跑 5 秒，测的是常态丢包与抖动而不是压满带宽后的拥塞表现；实时音视频与游戏体验主要取决于这两项。",
-	)
+	result.Notes = speedStableNotes()
+	result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.values", speedMachineSummary(result))}
 	result.Finish(start)
 	return result
 }
@@ -436,10 +497,10 @@ func appendIPerfDirectionDiagnostics(
 	method := fmt.Sprintf("iperf3-tcp-%s-p%d-%ds-v1", directionMethod, threads, seconds)
 	result.Measurements = append(result.Measurements, model.Measurement{
 		Key:            prefix + "_retransmits",
-		Label:          fmt.Sprintf("%s %s %s重传", row.Target.Name, row.Family, directionLabel),
+		Label:          "probe.speed.metric.retransmits",
 		Value:          float64(sample.Retransmits),
 		Unit:           "retransmits",
-		Display:        strconv.FormatInt(sample.Retransmits, 10),
+		Display:        model.RawValue(strconv.FormatInt(sample.Retransmits, 10)),
 		Method:         method,
 		HigherIsBetter: model.BoolPtr(false),
 	})
@@ -448,28 +509,28 @@ func appendIPerfDirectionDiagnostics(
 	}
 	result.Measurements = append(result.Measurements,
 		model.Measurement{
-			Key: prefix + "_interval_min_mbps", Label: fmt.Sprintf("%s %s %s分秒最低", row.Target.Name, row.Family, directionLabel),
-			Value: sample.IntervalMin, Unit: "Mbps", Display: model.FormatRate(sample.IntervalMin, "Mbps"),
+			Key: prefix + "_interval_min_mbps", Label: "probe.speed.metric.interval_min",
+			Value: sample.IntervalMin, Unit: "Mbps", Display: model.RawValue(model.FormatRate(sample.IntervalMin, "Mbps")),
 			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(true),
 		},
 		model.Measurement{
-			Key: prefix + "_interval_p50_mbps", Label: fmt.Sprintf("%s %s %s分秒 P50", row.Target.Name, row.Family, directionLabel),
-			Value: sample.IntervalMedian, Unit: "Mbps", Display: model.FormatRate(sample.IntervalMedian, "Mbps"),
+			Key: prefix + "_interval_p50_mbps", Label: "probe.speed.metric.interval_p50",
+			Value: sample.IntervalMedian, Unit: "Mbps", Display: model.RawValue(model.FormatRate(sample.IntervalMedian, "Mbps")),
 			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(true),
 		},
 		model.Measurement{
-			Key: prefix + "_interval_cv_percent", Label: fmt.Sprintf("%s %s %s分秒变异系数", row.Target.Name, row.Family, directionLabel),
-			Value: sample.IntervalCV, Unit: "%", Display: fmt.Sprintf("%.2f %%", sample.IntervalCV),
+			Key: prefix + "_interval_cv_percent", Label: "probe.speed.metric.interval_cv",
+			Value: sample.IntervalCV, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.2f %%", sample.IntervalCV)),
 			Method: method + "-intervals", HigherIsBetter: model.BoolPtr(false),
 		},
 	)
-	table.Rows = append(table.Rows, []string{
-		row.Target.Name, row.Family, directionLabel,
-		model.FormatRate(sample.IntervalMin, "Mbps"),
-		model.FormatRate(sample.IntervalMedian, "Mbps"),
-		fmt.Sprintf("%.2f %%", sample.IntervalCV),
-		strconv.FormatInt(sample.Retransmits, 10),
-		strconv.Itoa(len(sample.IntervalMbps)),
+	table.Rows = append(table.Rows, []model.Value{
+		model.RawValue(row.Target.Name), model.RawValue(row.Family), model.RawValue(directionLabel),
+		model.RawValue(model.FormatRate(sample.IntervalMin, "Mbps")),
+		model.RawValue(model.FormatRate(sample.IntervalMedian, "Mbps")),
+		model.RawValue(fmt.Sprintf("%.2f %%", sample.IntervalCV)),
+		model.RawValue(strconv.FormatInt(sample.Retransmits, 10)),
+		model.RawValue(strconv.Itoa(len(sample.IntervalMbps))),
 	})
 }
 

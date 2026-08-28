@@ -149,37 +149,25 @@ func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 }
 
 func runFIODisk(ctx context.Context, env Environment, fioPath string) (result model.Result) {
-	start := time.Now()
-	result = model.NewResult("disk", "磁盘性能")
-	result.Description = "fio Direct I/O 的基础口径、固定 QD1 4K 随机读延迟、Crystal 矩阵、ATTO 矩阵与 YABS 口径补充矩阵"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "标准基准",
-		Engine:          "fio",
-		Profile:         "Direct I/O baseline + Crystal RND4K/SEQ1M + ATTO 512B–64M + YABS mixed",
-		ComparisonScope: "相同 fio/ecs 版本、文件系统、文件大小、ioengine、块大小、队列深度与时长",
-	}
+	result = newDiskResult()
 	expectedJobs := len(fioJobPlan())
 	result.Evidence = model.NewEvidence(0, expectedJobs, "job")
 
 	diskPath, actualBytes, disk, err := prepareFIODiskPath(ctx, env)
 	if err != nil {
 		result.Fail(err)
-		result.Finish(start)
 		return result
 	}
 
 	file, err := os.CreateTemp(diskPath, ".ecs-fio-*")
 	if err != nil {
 		result.Fail(fmt.Errorf("创建 fio 临时文件: %w", err))
-		result.Finish(start)
 		return result
 	}
 	tempName := file.Name()
 	if err := file.Close(); err != nil {
 		_ = os.Remove(tempName)
 		result.Fail(fmt.Errorf("关闭 fio 临时文件: %w", err))
-		result.Finish(start)
 		return result
 	}
 	defer func() {
@@ -219,19 +207,16 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 			runErr = fmt.Errorf("%w: %s", runErr, detail)
 		}
 		result.Fail(fmt.Errorf("fio 执行失败: %w", runErr))
-		result.Finish(start)
 		return result
 	}
 	if stdout.Len() > 4*1024*1024 {
 		result.Fail(fmt.Errorf("fio JSON 超过 4 MiB 安全上限"))
-		result.Finish(start)
 		return result
 	}
 
 	var output fioOutput
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		result.Fail(fmt.Errorf("解析 fio JSON: %w", err))
-		result.Finish(start)
 		return result
 	}
 	jobs := make(map[string]fioJob, len(output.Jobs))
@@ -258,21 +243,20 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	appendFIOQD1LatencyMeasurements(&result, jobs)
 	if !isPositiveFinite(seqWrite) && !isPositiveFinite(seqRead) && !isPositiveFinite(randomRead) && !isPositiveFinite(randomWrite) {
 		result.Fail(fmt.Errorf("fio JSON 未包含可用的磁盘统计"))
-		result.Finish(start)
 		return result
 	}
 	randDepth := engine.EffectiveDepth(32)
 	missingBase := make([]string, 0, 4)
-	if !appendFIOBaseMeasurement(&result, "fio_sequential_write_mib_s", "fio 顺序写入", seqWrite, "MiB/s", "fio-direct-1MiB-write-qd1-v1") {
+	if !appendFIOBaseMeasurement(&result, "fio_sequential_write_mib_s", seqWrite, "MiB/s", "fio-direct-1MiB-write-qd1-v1") {
 		missingBase = append(missingBase, "顺序写")
 	}
-	if !appendFIOBaseMeasurement(&result, "fio_sequential_read_mib_s", "fio 顺序读取", seqRead, "MiB/s", "fio-direct-1MiB-read-qd1-v1") {
+	if !appendFIOBaseMeasurement(&result, "fio_sequential_read_mib_s", seqRead, "MiB/s", "fio-direct-1MiB-read-qd1-v1") {
 		missingBase = append(missingBase, "顺序读")
 	}
-	if !appendFIOBaseMeasurement(&result, "fio_random_read_4k_iops", fmt.Sprintf("fio 4K 随机读 QD%d", randDepth), randomRead, "IOPS", fmt.Sprintf("fio-direct-4KiB-randread-qd%d-v1", randDepth)) {
+	if !appendFIOBaseMeasurement(&result, "fio_random_read_4k_iops", randomRead, "IOPS", fmt.Sprintf("fio-direct-4KiB-randread-qd%d-v1", randDepth)) {
 		missingBase = append(missingBase, "4K 随机读")
 	}
-	if !appendFIOBaseMeasurement(&result, "fio_random_write_4k_iops", fmt.Sprintf("fio 4K 随机写 QD%d", randDepth), randomWrite, "IOPS", fmt.Sprintf("fio-direct-4KiB-randwrite-qd%d-v1", randDepth)) {
+	if !appendFIOBaseMeasurement(&result, "fio_random_write_4k_iops", randomWrite, "IOPS", fmt.Sprintf("fio-direct-4KiB-randwrite-qd%d-v1", randDepth)) {
 		missingBase = append(missingBase, "4K 随机写")
 	}
 	if len(missingBase) > 0 {
@@ -281,8 +265,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}
 	if p95 := fioP95Milliseconds(jobs["randread"].Read); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "fio_random_read_p95_ms", Label: "fio 4K 随机读延迟 P95",
-			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
+			Key: "fio_random_read_p95_ms", Label: diskMeasurementLabel("fio_random_read_p95_ms"),
+			Value: p95, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.3f ms", p95)),
 			Method: "fio-clat-p95-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	} else {
@@ -291,8 +275,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}
 	if p95 := fioP95Milliseconds(jobs["randwrite"].Write); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "fio_random_write_p95_ms", Label: "fio 4K 随机写延迟 P95",
-			Value: p95, Unit: "ms", Display: fmt.Sprintf("%.3f ms", p95),
+			Key: "fio_random_write_p95_ms", Label: diskMeasurementLabel("fio_random_write_p95_ms"),
+			Value: p95, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.3f ms", p95)),
 			Method: "fio-clat-p95-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	} else {
@@ -325,30 +309,37 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		))
 	}
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "引擎", Value: "fio"},
-		{Key: "version", Label: "fio 版本", Value: fallback(output.Version, "unknown")},
-		{Key: "binary_sha256", Label: "fio SHA-256", Value: fallback(binarySHA256(fioPath), "unavailable")},
-		{Key: "disk_device", Label: "测试设备", Value: fallback(disk.DiskDevice, "unavailable")},
-		{Key: "path", Label: "测试目录", Value: diskPath},
-		{Key: "mount", Label: "挂载点", Value: fallback(disk.DiskMount, diskPath)},
-		{Key: "disk_total", Label: "磁盘总量", Value: model.FormatBytes(disk.DiskTotal)},
-		{Key: "disk_used", Label: "磁盘已用", Value: model.FormatBytes(disk.DiskUsed)},
-		{Key: "disk_available", Label: "磁盘可用", Value: model.FormatBytes(disk.DiskFree)},
-		{Key: "disk_usage_percent", Label: "磁盘使用率", Value: fmt.Sprintf("%.1f %%", disk.DiskUsage)},
-		{Key: "file_size", Label: "临时文件", Value: model.FormatBytes(uint64(actualBytes))},
-		{Key: "free_before", Label: "测试前可用", Value: model.FormatBytes(disk.DiskFree)},
-		{Key: "direct_io", Label: "Direct I/O", Value: "1"},
-		{Key: "ioengine", Label: "ioengine", Value: describeFIOEngine(engine)},
-		{Key: "jobs", Label: "作业数", Value: strconv.Itoa(len(plan))},
-		{Key: "job_duration_base", Label: "基础/混合计时", Value: fioBaseRuntime.String()},
-		{Key: "job_duration_crystal", Label: "Crystal 计时", Value: fioCrystalRuntime.String()},
-		{Key: "job_duration_atto", Label: "ATTO 计时", Value: fmt.Sprintf("%s（64K/32M/64M 为 %s）", fioATTORuntime, fioATTOLargeRuntime)},
-		{Key: "plan_duration", Label: "作业计划总时长", Value: fioPlanDuration(plan).String()},
-		{Key: "matrix_mode", Label: "矩阵测量方式", Value: matrixMode},
+		{Key: "engine", Label: diskFieldLabel("engine"), Value: model.RawValue("fio")},
+		{Key: "version", Label: diskFieldLabel("version"), Value: model.RawValue(fallback(output.Version, "unknown"))},
+		{Key: "binary_sha256", Label: diskFieldLabel("binary_sha256"), Value: model.RawValue(fallback(binarySHA256(fioPath), "unavailable"))},
+		{Key: "disk_device", Label: diskFieldLabel("disk_device"), Value: model.RawValue(fallback(disk.DiskDevice, "unavailable"))},
+		{Key: "path", Label: diskFieldLabel("path"), Value: model.RawValue(diskPath)},
+		{Key: "mount", Label: diskFieldLabel("mount"), Value: model.RawValue(fallback(disk.DiskMount, diskPath))},
+		{Key: "disk_total", Label: diskFieldLabel("disk_total"), Value: model.RawValue(model.FormatBytes(disk.DiskTotal))},
+		{Key: "disk_used", Label: diskFieldLabel("disk_used"), Value: model.RawValue(model.FormatBytes(disk.DiskUsed))},
+		{Key: "disk_available", Label: diskFieldLabel("disk_available"), Value: model.RawValue(model.FormatBytes(disk.DiskFree))},
+		{Key: "disk_usage_percent", Label: diskFieldLabel("disk_usage_percent"), Value: model.RawValue(fmt.Sprintf("%.1f %%", disk.DiskUsage))},
+		{Key: "file_size", Label: diskFieldLabel("file_size"), Value: model.RawValue(model.FormatBytes(uint64(actualBytes)))},
+		{Key: "free_before", Label: diskFieldLabel("free_before"), Value: model.RawValue(model.FormatBytes(disk.DiskFree))},
+		{Key: "direct_io", Label: diskFieldLabel("direct_io"), Value: model.RawValue("1")},
+		{Key: "ioengine", Label: diskFieldLabel("ioengine"), Value: model.RawValue(describeFIOEngine(engine))},
+		{Key: "jobs", Label: diskFieldLabel("jobs"), Value: model.RawValue(strconv.Itoa(len(plan)))},
+		{Key: "job_duration_base", Label: diskFieldLabel("job_duration_base"), Value: model.RawValue(fioBaseRuntime.String())},
+		{Key: "job_duration_crystal", Label: diskFieldLabel("job_duration_crystal"), Value: model.RawValue(fioCrystalRuntime.String())},
+		{Key: "job_duration_atto", Label: diskFieldLabel("job_duration_atto"), Value: model.RawValue(fmt.Sprintf("%s（64K/32M/64M 为 %s）", fioATTORuntime, fioATTOLargeRuntime))},
+		{Key: "plan_duration", Label: diskFieldLabel("plan_duration"), Value: model.RawValue(fioPlanDuration(plan).String())},
+		{Key: "matrix_mode", Label: diskFieldLabel("matrix_mode"), Value: model.RawValue(matrixMode)},
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(output.Version, "unknown"))
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(fioPath), "unavailable"))
+	addComparisonParameter(result.Methodology.Parameters, "actual_file_size", model.FormatBytes(uint64(actualBytes)))
+	addComparisonParameter(result.Methodology.Parameters, "direct_io", "1")
+	addComparisonParameter(result.Methodology.Parameters, "ioengine", engine.Name)
+	addComparisonParameter(result.Methodology.Parameters, "jobs", strconv.Itoa(len(plan)))
+	addComparisonParameter(result.Methodology.Parameters, "job_duration", fioPlanDuration(plan).String())
 	result.Sources = []model.Source{
-		{Name: "fio", URL: "https://github.com/axboe/fio", Purpose: "Direct I/O 磁盘工作负载与 JSON 统计"},
-		{Name: "YABS", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "50/50 混合随机读写矩阵的块大小与队列深度口径"},
+		{Name: "fio", URL: "https://github.com/axboe/fio", Purpose: "probe.disk.source.fio"},
+		{Name: "YABS", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "probe.disk.source.yabs"},
 	}
 	result.Notes = append(result.Notes,
 		"fio 可由用户预先安装；缺失时 run.sh 从当前架构的已校验 ecs-tools 包临时提供。ecs 不下载未经校验的裸二进制。",
@@ -381,7 +372,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "未能通过 fio --enghelp 确认可用 ioengine，已退回 psync；成绩仍然有效但队列深度受限。")
 	}
-	result.Finish(start)
 	return result
 }
 
@@ -405,12 +395,12 @@ func fioJobHasEvidence(spec fioJobSpec, job fioJob) bool {
 	}
 }
 
-func appendFIOBaseMeasurement(result *model.Result, key, label string, value float64, unit, method string) bool {
+func appendFIOBaseMeasurement(result *model.Result, key string, value float64, unit, method string) bool {
 	if !isPositiveFinite(value) {
 		return false
 	}
 	result.Measurements = append(result.Measurements, model.Measurement{
-		Key: key, Label: label, Value: value, Unit: unit, Display: model.FormatRate(value, unit),
+		Key: key, Label: diskMeasurementLabel(key), Value: value, Unit: unit, Display: model.RawValue(model.FormatRate(value, unit)),
 		Method: method, HigherIsBetter: model.BoolPtr(true),
 	})
 	return true
@@ -423,10 +413,16 @@ func appendFIOBaseMeasurement(result *model.Result, key, label string, value flo
 // warning；只有读写吞吐都存在时才计算“合计”，避免用一侧数据冒充总吞吐。
 func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[string]fioJob, mixDepth int) {
 	table := model.Table{
-		Key:         "disk.fio.mixed",
-		Title:       fmt.Sprintf("50/50 混合随机读写 QD%d × 2 作业（YABS 口径）", mixDepth),
-		Columns:     []string{"块大小", "读", "读 IOPS", "写", "写 IOPS", "合计"},
-		ColumnKeys:  []string{"block_size", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "total_mib_s"},
+		Key:   "disk.fio.mixed",
+		Title: "probe.disk.table.mixed",
+		Columns: []model.TableColumn{
+			{Key: "block_size", Label: "probe.disk.column.block_size"},
+			{Key: "read_mib_s", Label: "probe.disk.column.read"},
+			{Key: "read_iops", Label: "probe.disk.column.read_iops"},
+			{Key: "write_mib_s", Label: "probe.disk.column.write"},
+			{Key: "write_iops", Label: "probe.disk.column.write_iops"},
+			{Key: "total_mib_s", Label: "probe.disk.column.total"},
+		},
 		RowIdentity: "block_size",
 	}
 	incomplete := 0
@@ -449,26 +445,26 @@ func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[str
 		if isPositiveFinite(readMiB) && isPositiveFinite(writeMiB) {
 			total = formatMatrixRate(readMiB+writeMiB, "MiB/s")
 		}
-		table.Rows = append(table.Rows, []string{
-			job.BlockSize,
-			formatMatrixRate(readMiB, "MiB/s"),
-			formatMatrixRate(readIOPS, "IOPS"),
-			formatMatrixRate(writeMiB, "MiB/s"),
-			formatMatrixRate(writeIOPS, "IOPS"),
-			total,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(job.BlockSize),
+			model.RawValue(formatMatrixRate(readMiB, "MiB/s")),
+			model.RawValue(formatMatrixRate(readIOPS, "IOPS")),
+			model.RawValue(formatMatrixRate(writeMiB, "MiB/s")),
+			model.RawValue(formatMatrixRate(writeIOPS, "IOPS")),
+			model.RawValue(total),
 		})
 		method := fmt.Sprintf("fio-direct-%s-randrw50-qd%d-n2-v1", job.BlockSize, mixDepth)
 		if isPositiveFinite(readMiB) {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: fmt.Sprintf("fio_mixed_%s_read_mib_s", job.BlockSize), Label: fmt.Sprintf("混合 %s 读", job.BlockSize),
-				Value: readMiB, Unit: "MiB/s", Display: model.FormatRate(readMiB, "MiB/s"),
+				Key: fmt.Sprintf("fio_mixed_%s_read_mib_s", job.BlockSize), Label: diskMeasurementLabel(fmt.Sprintf("fio_mixed_%s_read_mib_s", job.BlockSize)),
+				Value: readMiB, Unit: "MiB/s", Display: model.RawValue(model.FormatRate(readMiB, "MiB/s")),
 				Method: method, HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 		if isPositiveFinite(writeMiB) {
 			result.Measurements = append(result.Measurements, model.Measurement{
-				Key: fmt.Sprintf("fio_mixed_%s_write_mib_s", job.BlockSize), Label: fmt.Sprintf("混合 %s 写", job.BlockSize),
-				Value: writeMiB, Unit: "MiB/s", Display: model.FormatRate(writeMiB, "MiB/s"),
+				Key: fmt.Sprintf("fio_mixed_%s_write_mib_s", job.BlockSize), Label: diskMeasurementLabel(fmt.Sprintf("fio_mixed_%s_write_mib_s", job.BlockSize)),
+				Value: writeMiB, Unit: "MiB/s", Display: model.RawValue(model.FormatRate(writeMiB, "MiB/s")),
 				Method: method, HigherIsBetter: model.BoolPtr(true),
 			})
 		}
@@ -524,22 +520,27 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 		cell := cells[spec.Workload]
 		if spec.Direction == "read" {
 			cell.ReadMiB, cell.ReadIOPS, cell.ReadMethod = throughput, direction.IOPS, method
-			appendFioMatrixMeasurements(result, "crystal", crystalMetricStem(spec.Workload), "read", throughput, direction.IOPS, method)
+			appendFioMatrixMeasurements(result, crystalMetricStem(spec.Workload), "read", throughput, direction.IOPS, method)
 		} else {
 			cell.WriteMiB, cell.WriteIOPS, cell.WriteMethod = throughput, direction.IOPS, method
-			appendFioMatrixMeasurements(result, "crystal", crystalMetricStem(spec.Workload), "write", throughput, direction.IOPS, method)
+			appendFioMatrixMeasurements(result, crystalMetricStem(spec.Workload), "write", throughput, direction.IOPS, method)
 		}
 		cells[spec.Workload] = cell
 	}
 
 	table := model.Table{
-		Title:                 "Crystal",
-		Columns:               []string{"工作负载", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "起始偏移", "状态"},
-		Key:                   "disk.fio.crystal",
-		ColumnKeys:            []string{"workload", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "start_offset", "status"},
-		RowIdentity:           "workload",
-		NumericColumns:        []int{1, 2, 3, 4},
-		NumericHigherIsBetter: []bool{true, true, true, true},
+		Title: "probe.disk.table.crystal",
+		Key:   "disk.fio.crystal",
+		Columns: []model.TableColumn{
+			{Key: "workload", Label: "probe.disk.column.workload"},
+			{Key: "read_mib_s", Label: "probe.disk.column.read", Numeric: true, HigherIsBetter: true},
+			{Key: "read_iops", Label: "probe.disk.column.read_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "write_mib_s", Label: "probe.disk.column.write", Numeric: true, HigherIsBetter: true},
+			{Key: "write_iops", Label: "probe.disk.column.write_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "start_offset", Label: "probe.disk.column.offset"},
+			{Key: "status", Label: "probe.disk.column.status"},
+		},
+		RowIdentity: "workload",
 	}
 	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
 		cell := cells[workload]
@@ -547,12 +548,14 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
 			status = "未返回"
 		}
-		table.Rows = append(table.Rows, []string{
-			workload,
-			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
-			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"),
-			fallback(rowOffsets[workload], "—"), status,
-		})
+		row := []model.Value{
+			model.RawValue(workload),
+			model.RawValue(formatMatrixRate(cell.ReadMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.ReadIOPS, "IOPS")),
+			model.RawValue(formatMatrixRate(cell.WriteMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.WriteIOPS, "IOPS")),
+			model.RawValue(fallback(rowOffsets[workload], "—")), model.RawValue(status),
+		}
+		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
+		table.Rows = append(table.Rows, row)
 	}
 	result.Tables = append(result.Tables, table)
 	if missing > 0 {
@@ -587,23 +590,29 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 			cell := cells[block.Label]
 			if directionName == "read" {
 				cell.ReadMiB, cell.ReadIOPS, cell.ReadMethod = throughput, direction.IOPS, method
-				appendFioMatrixMeasurements(result, "atto", "atto_"+block.FIO, "read", throughput, direction.IOPS, method)
+				appendFioMatrixMeasurements(result, "atto_"+block.FIO, "read", throughput, direction.IOPS, method)
 			} else {
 				cell.WriteMiB, cell.WriteIOPS, cell.WriteMethod = throughput, direction.IOPS, method
-				appendFioMatrixMeasurements(result, "atto", "atto_"+block.FIO, "write", throughput, direction.IOPS, method)
+				appendFioMatrixMeasurements(result, "atto_"+block.FIO, "write", throughput, direction.IOPS, method)
 			}
 			cells[block.Label] = cell
 		}
 	}
 
 	table := model.Table{
-		Title:                 "ATTO",
-		Columns:               []string{"块大小", "读吞吐", "读 IOPS", "写吞吐", "写 IOPS", "计时", "起始偏移", "状态"},
-		Key:                   "disk.fio.atto",
-		ColumnKeys:            []string{"block_size", "read_mib_s", "read_iops", "write_mib_s", "write_iops", "runtime", "start_offset", "status"},
-		RowIdentity:           "block_size",
-		NumericColumns:        []int{1, 2, 3, 4},
-		NumericHigherIsBetter: []bool{true, true, true, true},
+		Title: "probe.disk.table.atto",
+		Key:   "disk.fio.atto",
+		Columns: []model.TableColumn{
+			{Key: "block_size", Label: "probe.disk.column.block_size"},
+			{Key: "read_mib_s", Label: "probe.disk.column.read", Numeric: true, HigherIsBetter: true},
+			{Key: "read_iops", Label: "probe.disk.column.read_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "write_mib_s", Label: "probe.disk.column.write", Numeric: true, HigherIsBetter: true},
+			{Key: "write_iops", Label: "probe.disk.column.write_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "runtime", Label: "probe.disk.column.runtime"},
+			{Key: "start_offset", Label: "probe.disk.column.offset"},
+			{Key: "status", Label: "probe.disk.column.status"},
+		},
+		RowIdentity: "block_size",
 	}
 	for _, block := range attoBlockSizes {
 		cell := cells[block.Label]
@@ -611,14 +620,16 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
 			status = "未返回"
 		}
-		table.Rows = append(table.Rows, []string{
-			block.Label,
-			formatMatrixRate(cell.ReadMiB, "MiB/s"), formatMatrixRate(cell.ReadIOPS, "IOPS"),
-			formatMatrixRate(cell.WriteMiB, "MiB/s"), formatMatrixRate(cell.WriteIOPS, "IOPS"),
-			block.Runtime.String(),
-			formatModuleOffset(offsets, "atto_read_"+block.FIO),
-			status,
-		})
+		row := []model.Value{
+			model.RawValue(block.Label),
+			model.RawValue(formatMatrixRate(cell.ReadMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.ReadIOPS, "IOPS")),
+			model.RawValue(formatMatrixRate(cell.WriteMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.WriteIOPS, "IOPS")),
+			model.RawValue(block.Runtime.String()),
+			model.RawValue(formatModuleOffset(offsets, "atto_read_"+block.FIO)),
+			model.RawValue(status),
+		}
+		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
+		table.Rows = append(table.Rows, row)
 	}
 	result.Tables = append(result.Tables, table)
 	if missing > 0 {
@@ -627,18 +638,20 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 	}
 }
 
-func appendFioMatrixMeasurements(result *model.Result, matrix, stem, direction string, throughput, iops float64, method string) {
+func appendFioMatrixMeasurements(result *model.Result, stem, direction string, throughput, iops float64, method string) {
 	if isPositiveFinite(throughput) {
+		key := stem + "_" + direction + "_mib_s"
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: stem + "_" + direction + "_mib_s", Label: matrix + " " + stem + " " + direction + " 吞吐",
-			Value: throughput, Unit: "MiB/s", Display: model.FormatRate(throughput, "MiB/s"), Method: method,
+			Key: key, Label: diskMeasurementLabel(key),
+			Value: throughput, Unit: "MiB/s", Display: model.RawValue(model.FormatRate(throughput, "MiB/s")), Method: method,
 			HigherIsBetter: model.BoolPtr(true),
 		})
 	}
 	if isPositiveFinite(iops) {
+		key := stem + "_" + direction + "_iops"
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: stem + "_" + direction + "_iops", Label: matrix + " " + stem + " " + direction + " IOPS",
-			Value: iops, Unit: "IOPS", Display: model.FormatRate(iops, "IOPS"), Method: method,
+			Key: key, Label: diskMeasurementLabel(key),
+			Value: iops, Unit: "IOPS", Display: model.RawValue(model.FormatRate(iops, "IOPS")), Method: method,
 			HigherIsBetter: model.BoolPtr(true),
 		})
 	}
@@ -676,13 +689,9 @@ func appendFIOQD1LatencyMeasurements(result *model.Result, jobs map[string]fioJo
 			missing = append(missing, label)
 			return
 		}
-		displayLabel := label
-		if label == "P95" || label == "P99" {
-			displayLabel = " " + label
-		}
 		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: key, Label: "fio QD1 4K 随机读延迟" + displayLabel,
-			Value: value, Unit: "ms", Display: fmt.Sprintf("%.3f ms", value),
+			Key: key, Label: diskMeasurementLabel(key),
+			Value: value, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.3f ms", value)),
 			Method: fioQD1LatencyMethod, HigherIsBetter: model.BoolPtr(false),
 		})
 	}

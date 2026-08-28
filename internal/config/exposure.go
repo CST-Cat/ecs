@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 
 	"ecs/internal/i18n"
@@ -10,8 +11,7 @@ import (
 //
 // 每个模块都会碰外部世界，但碰的方式完全不同：跑 sysbench 不发一个包，查公共
 // DNS 只让对方看到出口 IP，而把出口 IP 提交给商业风控 API 是把**被查询对象**
-// 交了出去。以前这些差别只写在 THIRD_PARTY.md 里，代码里唯一的表达是
-// `NeedsNetwork() bool`——一个二值分不出后两者。
+// 交了出去。以前这些差别只写在 THIRD_PARTY.md 里，代码里缺少统一的分级事实。
 //
 // 分级的依据是"对方看到了什么"，不是"用了什么协议"：
 //
@@ -37,13 +37,14 @@ const (
 	ExposureNamePublic     = "public"
 	ExposureNameThirdParty = "thirdparty"
 	ExposureNameAny        = "any"
+	ExposureNameInvalid    = "invalid"
 
 	// DefaultExposure 保持重构前的默认行为：商业 IP 情报可用，闭源客户端不可用。
 	DefaultExposure = ExposureNameThirdParty
 )
 
 // ModuleExposure 描述一个模块的外联性质。具体值来自 ModuleDescriptor；
-// ExposureFor 通过这个派生视图提供查询。
+// ExposureFor 直接查询 canonical moduleDescriptors。
 type ModuleExposure struct {
 	// Level 是该模块的外联级别。
 	Level Exposure
@@ -51,28 +52,15 @@ type ModuleExposure struct {
 	NeedsEgressIP bool
 }
 
-// moduleExposure is derived from the canonical module descriptors so new
-// modules only need one descriptor entry.
-var moduleExposure = descriptorModuleExposure()
-
-func descriptorModuleExposure() map[string]ModuleExposure {
-	out := make(map[string]ModuleExposure, len(moduleDescriptors))
-	for _, descriptor := range moduleDescriptors {
-		out[descriptor.ID] = ModuleExposure{
-			Level:         descriptor.Exposure,
-			NeedsEgressIP: descriptor.NeedsEgressIP,
-		}
-	}
-	return out
-}
-
 // ExposureFor 返回模块的外联性质。
 //
 // 未登记的模块按最高级处理：新增模块时漏配只会让它默认不跑，
 // 而不会悄悄把数据发出去。
 func ExposureFor(id string) ModuleExposure {
-	if info, ok := moduleExposure[id]; ok {
-		return info
+	for _, descriptor := range moduleDescriptors {
+		if descriptor.ID == id {
+			return ModuleExposure{Level: descriptor.Exposure, NeedsEgressIP: descriptor.NeedsEgressIP}
+		}
 	}
 	return ModuleExposure{Level: ExposureConsent}
 }
@@ -110,18 +98,32 @@ func (e Exposure) String() string {
 	case ExposureConsent:
 		return ExposureNameAny
 	default:
-		return ExposureNameThirdParty
+		return ExposureNameInvalid
 	}
+}
+
+func validExposure(exposure Exposure) bool {
+	return exposure >= ExposureLocal && exposure <= ExposureConsent
+}
+
+func exposureError(exposure Exposure) error {
+	return i18n.Errorf("err.unknownExposure", strconv.Itoa(int(exposure)), i18n.JoinList(ExposureNames()))
 }
 
 // AllowsModule 判断模块是否在给定上限内。
 func AllowsModule(limit Exposure, id string) bool {
+	if !validExposure(limit) {
+		return false
+	}
 	info := ExposureFor(id)
 	return info.Level <= limit
 }
 
 // FilterModulesByExposure 按上限裁剪模块集，保持原有顺序。
 func FilterModulesByExposure(modules []string, limit Exposure) []string {
+	if !validExposure(limit) {
+		return nil
+	}
 	out := make([]string, 0, len(modules))
 	for _, id := range modules {
 		if AllowsModule(limit, id) {
@@ -146,7 +148,7 @@ func RequiresEgressIP(modules []string) bool {
 // 只有真正要用 ASN、地理与公司字段的模块才值得走 ipapi.is；只需要知道
 // "我的 IP 是什么"的场景用 STUN 就够，也少交一次待查 IP 给第三方。
 func EgressNeedsIPIntel(modules []string, limit Exposure) bool {
-	if limit < ExposureThirdParty {
+	if !validExposure(limit) || limit < ExposureThirdParty {
 		return false
 	}
 	for _, id := range modules {
@@ -165,6 +167,9 @@ func (r Runtime) OfflineOnly() bool { return r.Exposure == ExposureLocal }
 // 只对 --only 点名的模块报错：档位带进来的模块被静默过滤是预期行为，
 // 而用户亲手写下的模块被悄悄丢掉不是。
 func CheckModuleExposure(named []string, limit Exposure) error {
+	if err := validateExposure(limit); err != nil {
+		return err
+	}
 	for _, id := range named {
 		if AllowsModule(limit, id) {
 			continue
@@ -172,6 +177,13 @@ func CheckModuleExposure(named []string, limit Exposure) error {
 		info := ExposureFor(id)
 		return i18n.Errorf("err.moduleAboveLimit",
 			id, info.Level.String(), limit.String(), info.Level.String())
+	}
+	return nil
+}
+
+func validateExposure(exposure Exposure) error {
+	if !validExposure(exposure) {
+		return exposureError(exposure)
 	}
 	return nil
 }

@@ -460,7 +460,7 @@ func buildMetric(refs []metricRef, reportCount, reference int) Metric {
 	}
 	for _, ref := range refs {
 		metric.Values[ref.input] = MetricValue{
-			Report: ref.input, Available: true, Value: ref.measurement.Value, Display: ref.measurement.Display,
+			Report: ref.input, Available: true, Value: ref.measurement.Value, Display: ref.measurement.Display.Text(),
 			Outcome: OutcomeNoReference,
 		}
 	}
@@ -589,23 +589,49 @@ func decorateMetricValues(metric *Metric, reference int) {
 	}
 }
 
+type observationValue struct {
+	ObservationValue
+	identity string
+}
+
+func observedValue(report int, value model.Value) observationValue {
+	return observationValue{
+		ObservationValue: ObservationValue{Report: report, Available: true, Value: value.Text()},
+		identity:         machineValueIdentity(value),
+	}
+}
+
+func machineValueIdentity(value model.Value) string {
+	if raw, ok := value.Raw(); ok {
+		return encodeMachineValueIdentity("raw", raw)
+	}
+	if key, ok := value.Key(); ok {
+		return encodeMachineValueIdentity("key", key)
+	}
+	return encodeMachineValueIdentity("raw", value.Text())
+}
+
+func encodeMachineValueIdentity(variant, text string) string {
+	return variant + ":" + strconv.Itoa(len(text)) + ":" + text
+}
+
 func buildObservations(results []*model.Result) []Observation {
-	values := make(map[string][]ObservationValue)
+	values := make(map[string][]observationValue)
 	labels := make(map[string]string)
 	sources := make(map[string]string)
 	order := make([]string, 0)
 	seen := make(map[string]bool)
-	add := func(input int, key, label, source, value string) {
+	add := func(input int, key, label, source string, value observationValue) {
 		if !seen[key] {
 			seen[key] = true
 			order = append(order, key)
-			values[key] = make([]ObservationValue, len(results))
+			values[key] = make([]observationValue, len(results))
 			for index := range values[key] {
 				values[key][index].Report = index
 			}
 			labels[key], sources[key] = label, source
 		}
-		values[key][input] = ObservationValue{Report: input, Available: true, Value: value}
+		values[key][input] = value
 	}
 	for input, result := range results {
 		if result == nil {
@@ -619,20 +645,24 @@ func buildObservations(results []*model.Result) []Observation {
 			if field.Key == "" || fieldCounts[field.Key] != 1 {
 				continue
 			}
-			add(input, "field:"+field.Key, field.Label, "field", field.Value)
+			add(input, "field:"+field.Key, field.Label, "field", observedValue(input, field.Value))
 		}
 	}
 	appendTableObservations(results, add)
 	var observations []Observation
 	for _, key := range order {
 		if observationChanged(values[key]) {
-			observations = append(observations, Observation{Key: key, Label: labels[key], Source: sources[key], Values: values[key]})
+			publicValues := make([]ObservationValue, len(values[key]))
+			for index, value := range values[key] {
+				publicValues[index] = value.ObservationValue
+			}
+			observations = append(observations, Observation{Key: key, Label: labels[key], Source: sources[key], Values: publicValues})
 		}
 	}
 	return observations
 }
 
-func appendTableObservations(results []*model.Result, add func(int, string, string, string, string)) {
+func appendTableObservations(results []*model.Result, add func(int, string, string, string, observationValue)) {
 	// A machine schema is the only safe way to match a table across reports.
 	// Legacy tables are kept in a separate positional fallback path so display
 	// labels can never become an accidental identity.
@@ -715,7 +745,7 @@ func hasDuplicateTableInput(group map[int][]tableRef) bool {
 	return false
 }
 
-func appendMachineTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+func appendMachineTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
 	if keyedTableGroup(group) {
 		appendKeyedTableObservations(results, schema, group, add)
 		return
@@ -747,7 +777,7 @@ func keyedTableGroup(group map[int]tableRef) bool {
 			if index >= len(row) {
 				return false
 			}
-			rowKey := strings.TrimSpace(row[index])
+			rowKey := strings.TrimSpace(row[index].Text())
 			if rowKey == "" || seen[rowKey] {
 				return false
 			}
@@ -757,7 +787,7 @@ func keyedTableGroup(group map[int]tableRef) bool {
 	return true
 }
 
-func appendKeyedTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+func appendKeyedTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
 	for input := range results {
 		ref, exists := group[input]
 		if !exists {
@@ -766,21 +796,21 @@ func appendKeyedTableObservations(results []*model.Result, schema string, group 
 		table := ref.table
 		identity := tableRowIdentityIndex(table)
 		for _, row := range table.Rows {
-			rowKey := row[identity]
+			rowKey := row[identity].Text()
 			for column, cell := range row {
-				if column == identity || column >= len(table.ColumnKeys) {
+				if column == identity || column >= len(table.Columns) {
 					continue
 				}
-				columnKey := table.ColumnKeys[column]
+				columnKey := table.Columns[column].Key
 				key := tableObservationKey(schema, rowKey, columnKey)
 				label := tableCellLabel(table, rowKey, column)
-				add(input, key, label, "table", cell)
+				add(input, key, label, "table", observedValue(input, cell))
 			}
 		}
 	}
 }
 
-func appendPositionalTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, string)) {
+func appendPositionalTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
 	for input := range results {
 		ref, exists := group[input]
 		if !exists {
@@ -789,19 +819,19 @@ func appendPositionalTableObservations(results []*model.Result, schema string, g
 		table := ref.table
 		for rowIndex, row := range table.Rows {
 			for column, cell := range row {
-				if column >= len(table.ColumnKeys) {
+				if column >= len(table.Columns) {
 					continue
 				}
-				columnKey := table.ColumnKeys[column]
+				columnKey := table.Columns[column].Key
 				key := "table:" + schema + ":row-index:" + strconv.Itoa(rowIndex) + ":column:" + columnKey
 				label := tableCellLabel(table, "row "+strconv.Itoa(rowIndex+1), column)
-				add(input, key, label, "table", cell)
+				add(input, key, label, "table", observedValue(input, cell))
 			}
 		}
 	}
 }
 
-func appendWholeTableObservation(results []*model.Result, key string, group map[int]tableRef, add func(int, string, string, string, string)) {
+func appendWholeTableObservation(results []*model.Result, key string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
 	for input := range results {
 		ref, exists := group[input]
 		if !exists {
@@ -811,14 +841,14 @@ func appendWholeTableObservation(results []*model.Result, key string, group map[
 		if strings.TrimSpace(label) == "" {
 			label = "table #" + strconv.Itoa(ref.position+1)
 		}
-		add(input, "table:"+key, label, "table", tableSnapshot(ref.table))
+		add(input, "table:"+key, label, "table", tableSnapshotObservation(input, ref.table))
 	}
 }
 
 func tableCellLabel(table model.Table, rowKey string, column int) string {
 	columnLabel := "column " + strconv.Itoa(column+1)
-	if column >= 0 && column < len(table.Columns) && strings.TrimSpace(table.Columns[column]) != "" {
-		columnLabel = table.Columns[column]
+	if column >= 0 && column < len(table.Columns) && strings.TrimSpace(table.Columns[column].Label) != "" {
+		columnLabel = table.Columns[column].Label
 	}
 	return table.Title + " · " + rowKey + " · " + columnLabel
 }
@@ -832,15 +862,42 @@ func tableSnapshot(table model.Table) string {
 	for rowIndex, row := range table.Rows {
 		cells := make([]string, len(row))
 		for column, cell := range row {
-			cells[column] = strconv.Quote(cell)
+			cells[column] = strconv.Quote(cell.Text())
 		}
 		rows[rowIndex] = "[" + strings.Join(cells, ", ") + "]"
 	}
 	return "columns=" + strconv.Itoa(len(table.Columns)) + "; rows=" + strings.Join(rows, ", ")
 }
 
+func tableSnapshotObservation(report int, table model.Table) observationValue {
+	return observationValue{
+		ObservationValue: ObservationValue{Report: report, Available: true, Value: tableSnapshot(table)},
+		identity:         tableSnapshotIdentity(table),
+	}
+}
+
+func tableSnapshotIdentity(table model.Table) string {
+	var identity strings.Builder
+	identity.WriteString("columns=")
+	identity.WriteString(strconv.Itoa(len(table.Columns)))
+	identity.WriteString("; rows=")
+	identity.WriteString(strconv.Itoa(len(table.Rows)))
+	for _, row := range table.Rows {
+		identity.WriteString("; row=")
+		identity.WriteString(strconv.Itoa(len(row)))
+		for _, cell := range row {
+			value := machineValueIdentity(cell)
+			identity.WriteString("; cell=")
+			identity.WriteString(strconv.Itoa(len(value)))
+			identity.WriteByte(':')
+			identity.WriteString(value)
+		}
+	}
+	return identity.String()
+}
+
 func tablesHaveSameShape(group map[int]tableRef) bool {
-	var first [][]string
+	var first [][]model.Value
 	set := false
 	for _, ref := range group {
 		if !set {
@@ -863,16 +920,20 @@ func tableSchemaKey(table model.Table) string {
 	if !validTableMachineSchema(table) {
 		return ""
 	}
-	return table.Key + "\x1f" + strings.Join(table.ColumnKeys, "\x1e")
+	columnKeys := make([]string, len(table.Columns))
+	for index, column := range table.Columns {
+		columnKeys[index] = column.Key
+	}
+	return table.Key + "\x1f" + strings.Join(columnKeys, "\x1e")
 }
 
 func validTableMachineSchema(table model.Table) bool {
-	if strings.TrimSpace(table.Key) == "" || len(table.ColumnKeys) == 0 || len(table.ColumnKeys) != len(table.Columns) {
+	if strings.TrimSpace(table.Key) == "" || len(table.Columns) == 0 {
 		return false
 	}
-	seen := make(map[string]bool, len(table.ColumnKeys))
-	for _, columnKey := range table.ColumnKeys {
-		columnKey = strings.TrimSpace(columnKey)
+	seen := make(map[string]bool, len(table.Columns))
+	for _, column := range table.Columns {
+		columnKey := strings.TrimSpace(column.Key)
 		if columnKey == "" || seen[columnKey] {
 			return false
 		}
@@ -885,16 +946,16 @@ func tableRowIdentityIndex(table model.Table) int {
 	if !validTableMachineSchema(table) || strings.TrimSpace(table.RowIdentity) == "" {
 		return -1
 	}
-	for index, columnKey := range table.ColumnKeys {
-		if columnKey == table.RowIdentity {
+	for index, column := range table.Columns {
+		if column.Key == table.RowIdentity {
 			return index
 		}
 	}
 	return -1
 }
 
-func observationChanged(values []ObservationValue) bool {
-	first := ""
+func observationChanged(values []observationValue) bool {
+	var first string
 	found := false
 	available := 0
 	for _, value := range values {
@@ -903,10 +964,10 @@ func observationChanged(values []ObservationValue) bool {
 		}
 		available++
 		if !found {
-			first, found = value.Value, true
+			first, found = value.identity, true
 			continue
 		}
-		if value.Value != first {
+		if value.identity != first {
 			return true
 		}
 	}

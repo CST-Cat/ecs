@@ -5,18 +5,28 @@ import (
 	"ecs/internal/model"
 )
 
-// displayReportText is the only string-level lookup used by report views. A
-// value is translated only when it is a registered stable key; arbitrary
-// provider data, command output, identifiers, and diagnostics pass through
-// unchanged.
-func displayReportText(value string) string {
-	if value == "" {
+// displayKey resolves a field whose report contract identifies it as a
+// presentation key. i18n.T deliberately returns an unknown key unchanged, so
+// missing catalog entries remain visible without treating arbitrary content as
+// a candidate for translation.
+func displayKey(key string) string {
+	if key == "" {
 		return ""
 	}
-	if i18n.Has(i18n.Current(), value) {
-		return i18n.T(value)
+	return i18n.T(key)
+}
+
+// displayValue resolves only the explicit Value variant. Raw values are
+// provider output or diagnostics and must remain literal; key values are the
+// stable ECS keys that belong to the current presentation language.
+func displayValue(value model.Value) string {
+	if raw, ok := value.Raw(); ok {
+		return raw
 	}
-	return value
+	if key, ok := value.Key(); ok {
+		return i18n.T(key)
+	}
+	return value.Text()
 }
 
 func reportSummaryText(summary model.Summary) string {
@@ -28,44 +38,60 @@ func resultSummary(result model.Result) string {
 }
 
 func displayMeasurement(measurement model.Measurement) model.Measurement {
-	measurement.Label = displayReportText(measurement.Label)
-	measurement.Display = displayReportText(measurement.Display)
-	measurement.Rating = displayReportText(measurement.Rating)
+	measurement.Label = displayKey(measurement.Label)
+	measurement.Rating = displayKey(measurement.Rating)
 	return measurement
 }
 
 func displayField(field model.Field) model.Field {
-	field.Label = displayReportText(field.Label)
-	field.Value = displayReportText(field.Value)
+	field.Label = displayKey(field.Label)
 	return field
 }
 
 func displayTable(table model.Table) model.Table {
-	table.Title = displayReportText(table.Title)
+	table.Title = displayKey(table.Title)
 	if table.Columns != nil {
 		columns := table.Columns
-		table.Columns = make([]string, len(columns))
+		table.Columns = make([]model.TableColumn, len(columns))
 		for index, column := range columns {
-			table.Columns[index] = displayReportText(column)
-		}
-	}
-	if table.Rows != nil {
-		rows := table.Rows
-		table.Rows = make([][]string, len(rows))
-		for rowIndex, row := range rows {
-			table.Rows[rowIndex] = make([]string, len(row))
-			for columnIndex, value := range row {
-				table.Rows[rowIndex][columnIndex] = displayReportText(value)
-			}
+			table.Columns[index] = displayTableColumn(column)
 		}
 	}
 	return table
 }
 
+func displayTableColumn(column model.TableColumn) model.TableColumn {
+	column.Label = displayKey(column.Label)
+	return column
+}
+
+func displayTableColumnLabel(column model.TableColumn) string {
+	return displayTableColumn(column).Label
+}
+
+func displayTableLabels(columns []model.TableColumn) []string {
+	labels := make([]string, len(columns))
+	for index, column := range columns {
+		labels[index] = column.Label
+	}
+	return labels
+}
+
+func displayTableRows(table model.Table) [][]string {
+	rows := make([][]string, len(table.Rows))
+	for rowIndex, row := range table.Rows {
+		rows[rowIndex] = make([]string, len(row))
+		for columnIndex, value := range row {
+			rows[rowIndex][columnIndex] = displayValue(value)
+		}
+	}
+	return rows
+}
+
 func displayMethodology(methodology model.Methodology) model.Methodology {
-	methodology.Label = displayReportText(methodology.Label)
-	methodology.Engine = displayReportText(methodology.Engine)
-	methodology.Profile = displayReportText(methodology.Profile)
-	methodology.ComparisonScope = displayReportText(methodology.ComparisonScope)
+	methodology.Label = displayKey(methodology.Label)
+	methodology.Engine = displayKey(methodology.Engine)
+	methodology.Profile = displayKey(methodology.Profile)
+	methodology.ComparisonScope = displayKey(methodology.ComparisonScope)
 	return methodology
 }

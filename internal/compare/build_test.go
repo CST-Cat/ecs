@@ -26,7 +26,7 @@ func comparisonTestReport(id string, value float64, method, profile, label strin
 			},
 			Evidence: model.NewEvidence(1, 1, "run"),
 			Measurements: []model.Measurement{{
-				Key: "rate", Label: label, Value: value, Unit: "events/s", Display: model.FormatRate(value, "events/s"),
+				Key: "rate", Label: label, Value: value, Unit: "events/s", Display: model.RawValue(model.FormatRate(value, "events/s")),
 				Method: method, HigherIsBetter: model.BoolPtr(higher),
 			}},
 		}},
@@ -41,7 +41,7 @@ func reportWithResults(id string, results ...model.Result) model.Report {
 
 func comparisonMeasurement(key, label string, value float64, unit, method string, higher bool) model.Measurement {
 	return model.Measurement{
-		Key: key, Label: label, Value: value, Unit: unit, Display: model.FormatRate(value, unit),
+		Key: key, Label: label, Value: value, Unit: unit, Display: model.RawValue(model.FormatRate(value, unit)),
 		Method: method, HigherIsBetter: model.BoolPtr(higher),
 	}
 }
@@ -51,6 +51,28 @@ func comparisonModuleResult(id, title string, status model.Status, evidence *mod
 		ID: id, Title: title, Status: status, Evidence: evidence, Measurements: measurements,
 		Methodology: model.Methodology{Kind: "inventory", Profile: "same", Parameters: map[string]string{"scope_revision": "1", "workload": "same"}},
 	}
+}
+
+func tableColumns(keys, labels []string) []model.TableColumn {
+	if len(keys) != len(labels) {
+		panic("table test columns must have matching keys and labels")
+	}
+	columns := make([]model.TableColumn, len(keys))
+	for index := range keys {
+		columns[index] = model.TableColumn{Key: keys[index], Label: labels[index]}
+	}
+	return columns
+}
+
+func rawTableRows(rows ...[]string) [][]model.Value {
+	converted := make([][]model.Value, len(rows))
+	for rowIndex, row := range rows {
+		converted[rowIndex] = make([]model.Value, len(row))
+		for column, cell := range row {
+			converted[rowIndex][column] = model.RawValue(cell)
+		}
+	}
+	return converted
 }
 
 func findModule(report Report, id string) *Module {
@@ -408,10 +430,10 @@ func TestBuildFieldObservationsUseStableKeys(t *testing.T) {
 	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 	second := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
 	first.Results[0].Fields = []model.Field{
-		{Key: "provider", Label: "服务商", Value: "A"},
-		{Key: "duplicate", Value: "one"}, {Key: "duplicate", Value: "two"}, {Value: "ignored"},
+		{Key: "provider", Label: "服务商", Value: model.RawValue("A")},
+		{Key: "duplicate", Value: model.RawValue("one")}, {Key: "duplicate", Value: model.RawValue("two")}, {Value: model.RawValue("ignored")},
 	}
-	second.Results[0].Fields = []model.Field{{Key: "provider", Label: "Provider", Value: "B"}, {Key: "duplicate", Value: "three"}}
+	second.Results[0].Fields = []model.Field{{Key: "provider", Label: "Provider", Value: model.RawValue("B")}, {Key: "duplicate", Value: model.RawValue("three")}}
 	data, err := Build([]model.Report{first, second}, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -422,18 +444,55 @@ func TestBuildFieldObservationsUseStableKeys(t *testing.T) {
 	}
 }
 
+func TestBuildFieldObservationsDistinguishValueVariants(t *testing.T) {
+	const text = "probe.network.status.ok"
+	cases := []struct {
+		name    string
+		first   model.Value
+		second  model.Value
+		changed bool
+	}{
+		{name: "same raw", first: model.RawValue(text), second: model.RawValue(text)},
+		{name: "same key", first: model.KeyValue(text), second: model.KeyValue(text)},
+		{name: "raw and key", first: model.RawValue(text), second: model.KeyValue(text), changed: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
+			second := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
+			first.Results[0].Fields = []model.Field{{Key: "state", Label: "State", Value: test.first}}
+			second.Results[0].Fields = []model.Field{{Key: "state", Label: "State", Value: test.second}}
+
+			data, err := Build([]model.Report{first, second}, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changes := findModule(data, "cpu").Changes
+			if !test.changed {
+				if len(changes) != 0 {
+					t.Fatalf("same value variant produced changes = %+v", changes)
+				}
+				return
+			}
+			if len(changes) != 1 || changes[0].Key != "field:state" || changes[0].Values[0].Value != text || changes[0].Values[1].Value != text {
+				t.Fatalf("field value variant change = %+v", changes)
+			}
+		})
+	}
+}
+
 func TestBuildDeclaredTableIdentitySurvivesLocalizationReorderingAndDuplicates(t *testing.T) {
 	first := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 	second := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
 	first.Results[0].Tables = []model.Table{{
-		Key: "network.routes", Title: "路由", Columns: []string{"类别", "数值", "标识"},
-		ColumnKeys: []string{"kind", "value", "id"}, RowIdentity: "id",
-		Rows: [][]string{{"same", "10", "route-a"}, {"same", "20", "route-b"}},
+		Key: "network.routes", Title: "路由",
+		Columns: tableColumns([]string{"kind", "value", "id"}, []string{"类别", "数值", "标识"}), RowIdentity: "id",
+		Rows: rawTableRows([]string{"same", "10", "route-a"}, []string{"same", "20", "route-b"}),
 	}}
 	second.Results[0].Tables = []model.Table{{
-		Key: "network.routes", Title: "Routes", Columns: []string{"Kind", "Value", "ID"},
-		ColumnKeys: []string{"kind", "value", "id"}, RowIdentity: "id",
-		Rows: [][]string{{"same", "11", "route-b"}, {"same", "10", "route-a"}},
+		Key: "network.routes", Title: "Routes",
+		Columns: tableColumns([]string{"kind", "value", "id"}, []string{"Kind", "Value", "ID"}), RowIdentity: "id",
+		Rows: rawTableRows([]string{"same", "11", "route-b"}, []string{"same", "10", "route-a"}),
 	}}
 	data, err := Build([]model.Report{first, second}, Options{})
 	if err != nil {
@@ -445,6 +504,56 @@ func TestBuildDeclaredTableIdentitySurvivesLocalizationReorderingAndDuplicates(t
 	}
 }
 
+func TestBuildKeyedTableObservationsDistinguishValueVariants(t *testing.T) {
+	const text = "probe.network.status.ok"
+	makeReport := func(value model.Value) model.Report {
+		report := comparisonTestReport("report", 10, "m-v1", "same", "rate", true)
+		report.Results[0].Tables = []model.Table{{
+			Key:         "network.values",
+			Title:       "Values",
+			Columns:     tableColumns([]string{"id", "state"}, []string{"ID", "State"}),
+			RowIdentity: "id",
+			Rows:        [][]model.Value{{model.RawValue("row-1"), value}},
+		}}
+		return report
+	}
+
+	first := makeReport(model.RawValue(text))
+	second := makeReport(model.KeyValue(text))
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := findModule(data, "cpu").Changes
+	if len(changes) != 1 || changes[0].Source != "table" || !strings.Contains(changes[0].Key, "network.values") || !strings.Contains(changes[0].Key, "row-1") || !strings.HasSuffix(changes[0].Key, ":state") || changes[0].Values[0].Value != text || changes[0].Values[1].Value != text {
+		t.Fatalf("keyed table value variant change = %+v", changes)
+	}
+}
+
+func TestBuildWholeTableSnapshotDistinguishValueVariants(t *testing.T) {
+	const text = "probe.network.status.ok"
+	makeReport := func(value model.Value) model.Report {
+		report := comparisonTestReport("report", 10, "m-v1", "same", "rate", true)
+		report.Results[0].Tables = []model.Table{{
+			Title:   "Values",
+			Columns: tableColumns([]string{"state"}, []string{"State"}),
+			Rows:    [][]model.Value{{value}},
+		}}
+		return report
+	}
+
+	first := makeReport(model.RawValue(text))
+	second := makeReport(model.KeyValue(text))
+	data, err := Build([]model.Report{first, second}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := findModule(data, "cpu").Changes
+	if len(changes) != 1 || changes[0].Key != "table:legacy:0" || changes[0].Values[0].Value != `columns=1; rows=["probe.network.status.ok"]` || changes[0].Values[1].Value != `columns=1; rows=["probe.network.status.ok"]` {
+		t.Fatalf("whole table value variant change = %+v", changes)
+	}
+}
+
 func TestBuildTableFallbacksStayConservative(t *testing.T) {
 	tableReports := func(first, second model.Table) []model.Report {
 		left := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
@@ -452,13 +561,13 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 		left.Results[0].Tables, right.Results[0].Tables = []model.Table{first}, []model.Table{second}
 		return []model.Report{left, right}
 	}
-	base := func(key, identity string, rows [][]string) model.Table {
-		return model.Table{Key: key, Title: "Routes", Columns: []string{"Target", "Value"}, ColumnKeys: []string{"target", "value"}, RowIdentity: identity, Rows: rows}
+	base := func(key, identity string, rows [][]model.Value) model.Table {
+		return model.Table{Key: key, Title: "Routes", Columns: tableColumns([]string{"target", "value"}, []string{"Target", "Value"}), RowIdentity: identity, Rows: rows}
 	}
 	t.Run("no identity is positional", func(t *testing.T) {
 		data, err := Build(tableReports(
-			base("routes", "", [][]string{{"a", "10"}, {"b", "20"}}),
-			base("routes", "", [][]string{{"b", "20"}, {"a", "10"}})), Options{})
+			base("routes", "", rawTableRows([]string{"a", "10"}, []string{"b", "20"})),
+			base("routes", "", rawTableRows([]string{"b", "20"}, []string{"a", "10"}))), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -473,7 +582,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 		}
 	})
 	t.Run("invalid identity is positional", func(t *testing.T) {
-		data, err := Build(tableReports(base("routes", "missing", [][]string{{"a", "10"}}), base("routes", "missing", [][]string{{"a", "11"}})), Options{})
+		data, err := Build(tableReports(base("routes", "missing", rawTableRows([]string{"a", "10"})), base("routes", "missing", rawTableRows([]string{"a", "11"}))), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -483,8 +592,8 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 	})
 	t.Run("legacy schema is whole snapshot", func(t *testing.T) {
 		data, err := Build(tableReports(
-			model.Table{Title: "Routes", Columns: []string{"Target"}, Rows: [][]string{{"a"}}},
-			model.Table{Title: "Routes", Columns: []string{"Target"}, Rows: [][]string{{"b"}}}), Options{})
+			model.Table{Title: "Routes", Columns: tableColumns([]string{"target"}, []string{"Target"}), Rows: rawTableRows([]string{"a"})},
+			model.Table{Title: "Routes", Columns: tableColumns([]string{"target"}, []string{"Target"}), Rows: rawTableRows([]string{"b"})}), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -494,7 +603,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 		}
 	})
 	t.Run("malformed shape is whole snapshot", func(t *testing.T) {
-		data, err := Build(tableReports(base("routes", "", [][]string{{"a", "10"}}), base("routes", "", [][]string{{"a"}})), Options{})
+		data, err := Build(tableReports(base("routes", "", rawTableRows([]string{"a", "10"})), base("routes", "", rawTableRows([]string{"a"}))), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -504,7 +613,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 		}
 	})
 	t.Run("different machine key is not compared", func(t *testing.T) {
-		data, err := Build(tableReports(base("routes-a", "", [][]string{{"a", "10"}}), base("routes-b", "", [][]string{{"a", "11"}})), Options{})
+		data, err := Build(tableReports(base("routes-a", "", rawTableRows([]string{"a", "10"})), base("routes-b", "", rawTableRows([]string{"a", "11"}))), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -515,8 +624,8 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 	t.Run("duplicate schema falls back to legacy", func(t *testing.T) {
 		left := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 		right := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
-		left.Results[0].Tables = []model.Table{base("routes", "", [][]string{{"a", "10"}}), base("routes", "", [][]string{{"duplicate", "20"}})}
-		right.Results[0].Tables = []model.Table{base("routes", "", [][]string{{"b", "11"}})}
+		left.Results[0].Tables = []model.Table{base("routes", "", rawTableRows([]string{"a", "10"})), base("routes", "", rawTableRows([]string{"duplicate", "20"}))}
+		right.Results[0].Tables = []model.Table{base("routes", "", rawTableRows([]string{"b", "11"}))}
 		data, err := Build([]model.Report{left, right}, Options{})
 		if err != nil {
 			t.Fatal(err)

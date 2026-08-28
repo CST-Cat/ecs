@@ -21,9 +21,28 @@ import (
 
 type appsProbe struct{}
 
-func (appsProbe) ID() string         { return "apps" }
-func (appsProbe) Title() string      { return "应用服务可达性" }
-func (appsProbe) NeedsNetwork() bool { return true }
+func (appsProbe) ID() string { return "apps" }
+
+func newAppsResult() model.Result {
+	result := model.NewResult("apps", "module.apps.title")
+	result.Description = "probe.apps.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "native TCP connect",
+		Profile:         "probe.apps.profile",
+		ComparisonScope: "probe.apps.comparison_scope",
+	}
+	return result
+}
+
+func appsStableNotes() []string {
+	return []string{
+		"probe.apps.note.handshake_only",
+		"probe.apps.note.service_scope",
+		"probe.apps.note.telegram_targets",
+	}
+}
 
 // appCategory keeps the machine identity and display title together. The
 // machine key is declared at the target descriptor, never recovered from a
@@ -87,17 +106,14 @@ type appResult struct {
 	Detail    string
 }
 
+var appProbeTargetFunc = probeAppTarget
+
 func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("apps", "应用服务可达性")
-	result.Description = "Telegram 各数据中心与代码、镜像、软件源、证书服务的 TCP 可达性"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "native TCP connect",
-		Profile:         fmt.Sprintf("%d 个固定端点", len(appTargets())),
-		ComparisonScope: "网络可达性诊断；不代表服务本身可用，也不是性能基准",
-	}
+	result := newAppsResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(result.Methodology.Parameters, "target_set", "apps-v1")
 
 	targets := appTargets()
 	results := make([]appResult, len(targets))
@@ -109,7 +125,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[index] = probeAppTarget(ctx, target, env.Config.IPVersion)
+			results[index] = appProbeTargetFunc(ctx, target, env.Config.IPVersion)
 		}(index, target)
 	}
 	wg.Wait()
@@ -131,10 +147,15 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	var telegramBestName string
 	for _, category := range categories {
 		table := model.Table{
-			Key:         "network.apps." + category.Key,
-			Title:       category.Label,
-			Columns:     []string{"服务", "端点", "用途", "结果", "延迟/原因"},
-			ColumnKeys:  []string{"service", "endpoint", "purpose", "status", "detail"},
+			Key:   "network.apps." + category.Key,
+			Title: "probe.apps.table." + category.Key,
+			Columns: []model.TableColumn{
+				{Key: "service", Label: "probe.apps.column.service"},
+				{Key: "endpoint", Label: "probe.apps.column.endpoint"},
+				{Key: "purpose", Label: "probe.apps.column.purpose"},
+				{Key: "status", Label: "probe.apps.column.status"},
+				{Key: "detail", Label: "probe.apps.column.detail"},
+			},
 			RowIdentity: "endpoint",
 		}
 		items := grouped[category.Key]
@@ -143,10 +164,10 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			if item.Reachable || item.Detail != "" {
 				validAttempts++
 			}
-			status := "unreachable"
+			status := "probe.apps.status.unreachable"
 			detail := item.Detail
 			if item.Reachable {
-				status = "reachable"
+				status = "probe.apps.status.reachable"
 				detail = formatMilliseconds(item.Latency)
 				reachable++
 				if category.Key == appCategoryTelegram.Key && (telegramBest == 0 || item.Latency < telegramBest) {
@@ -157,12 +178,12 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			if !item.Reachable && item.Detail != "" {
 				addFailureMessage(&result, "connect", net.JoinHostPort(item.Target.Host, fmt.Sprint(item.Target.Port)), item.Detail)
 			}
-			table.Rows = append(table.Rows, []string{
-				item.Target.Name,
-				fmt.Sprintf("%s:%d", item.Target.Host, item.Target.Port),
-				item.Target.Note,
-				status,
-				detail,
+			table.Rows = append(table.Rows, []model.Value{
+				model.RawValue(item.Target.Name),
+				model.RawValue(fmt.Sprintf("%s:%d", item.Target.Host, item.Target.Port)),
+				model.RawValue(item.Target.Note),
+				model.KeyValue(status),
+				model.RawValue(detail),
 			})
 		}
 		result.Tables = append(result.Tables, table)
@@ -171,26 +192,26 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	total := len(targets)
 	result.Measurements = []model.Measurement{
 		{
-			Key: "apps_reachable", Label: "可达服务",
-			Value: float64(reachable), Unit: "项", Display: fmt.Sprintf("%d/%d", reachable, total),
+			Key: "apps_reachable", Label: "probe.apps.metric.apps_reachable",
+			Value: float64(reachable), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", reachable, total)),
 			Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
 	result.Evidence = model.NewEvidence(validAttempts, total, "target")
 	if telegramBestName != "" {
 		result.Fields = append(result.Fields, model.Field{
-			Key: "telegram_nearest_dc", Label: "最快 Telegram DC",
-			Value: fmt.Sprintf("%s · %s", telegramBestName, formatMilliseconds(telegramBest)),
+			Key: "telegram_nearest_dc", Label: "probe.apps.field.telegram_nearest_dc",
+			Value: model.RawValue(fmt.Sprintf("%s · %s", telegramBestName, formatMilliseconds(telegramBest))),
 		})
 	}
-	result.Notes = append(result.Notes,
-		"只完成 TCP 握手，不发送任何应用层数据，也不做鉴权或下载。",
-		"Telegram 用官方 Web 客户端的 DC 域名而非硬编码 IP：实测多个 DC 会解析到同一地址，"+
-			"且 Telegram 会不定期调整 DC 地址，写死 IP 必然过期。最快的 DC 通常就是客户端会选用的那个。",
-		"可达不等于可用：CDN 会让握手在最近的边缘节点完成，实际拉取仍可能被限速或被上游拒绝。",
-	)
+	result.Notes = appsStableNotes()
 	if reachable < total {
 		result.Status = model.StatusWarning
+	}
+	if result.Status == model.StatusSkipped {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.apps.summary.skipped")}
+	} else {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.apps.summary.values", fmt.Sprintf("%d/%d", reachable, total))}
 	}
 	result.Finish(start)
 	return result

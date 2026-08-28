@@ -3,6 +3,8 @@ package probe
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -134,8 +136,14 @@ func TestNPBAssemblyAndEnvironment(t *testing.T) {
 		}
 	}
 	table := npbResultsTable(npbBenchmarkSpecs, runs, 2)
-	if table.Key != "benchmark.npb.results" || len(table.ColumnKeys) != len(table.Columns) || len(table.Rows) != 4 || table.Rows[0][7] != "SUCCESSFUL" {
+	if table.Key != "benchmark.npb.results" || len(table.Columns) != 8 || len(table.Rows) != 4 || table.Rows[0][7].Text() != "probe.npb.verification.successful" {
 		t.Fatalf("NPB result table = %+v", table)
+	}
+	if _, ok := table.Rows[0][1].Key(); !ok {
+		t.Fatalf("NPB workload is not a tagged key: %#v", table.Rows[0][1])
+	}
+	if _, ok := table.Rows[0][7].Key(); !ok {
+		t.Fatalf("NPB verification is not a tagged key: %#v", table.Rows[0][7])
 	}
 	singleRuns := map[string][]npbBenchmarkSample{}
 	for _, spec := range npbBenchmarkSpecs {
@@ -143,7 +151,7 @@ func TestNPBAssemblyAndEnvironment(t *testing.T) {
 		singleRuns[spec.Name] = []npbBenchmarkSample{first, first}
 	}
 	single := npbResultsTable(npbBenchmarkSpecs, singleRuns, 1)
-	if single.Rows[0][6] != "不适用" {
+	if single.Rows[0][6].Text() != "na" {
 		t.Fatalf("single-core NPB output = table:%v", single.Rows[0])
 	}
 	partialRuns := map[string][]npbBenchmarkSample{"EP": {runs["EP"][0], {}}}
@@ -153,7 +161,148 @@ func TestNPBAssemblyAndEnvironment(t *testing.T) {
 		t.Fatal("incomplete NPB sample emitted multi-thread measurements")
 	}
 	partial := npbResultsTable([]npbBenchmarkSpec{npbBenchmarkSpecs[0]}, partialRuns, 2)
-	if len(partial.Rows) != 2 || partial.Rows[1][7] != "失败" {
+	if len(partial.Rows) != 2 || partial.Rows[1][7].Text() != "probe.npb.verification.failed" {
 		t.Fatalf("partial NPB output = %+v", partial.Rows)
 	}
+}
+
+func TestNPBProducerEmitsStableMachineResult(t *testing.T) {
+	directory := t.TempDir()
+	for _, spec := range npbBenchmarkSpecs {
+		writeNPBFixtureTool(t, directory, spec.Binary, npbOutput(spec, 1, 100), npbOutput(spec, 2, 200))
+	}
+	t.Setenv("PATH", directory)
+	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
+
+	if result.ID != "npb" || result.Title != "module.npb.title" || result.Description != "probe.npb.description" || result.Status != model.StatusOK {
+		t.Fatalf("NPB result identity/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.npb.profile" || result.Methodology.ComparisonScope != "probe.npb.comparison_scope" {
+		t.Fatalf("NPB methodology = %+v", result.Methodology)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 4 || result.Evidence.Expected != 4 {
+		t.Fatalf("NPB evidence = %+v", result.Evidence)
+	}
+	assertProducerParameterScope(t, result,
+		"tool_version", "method_version", "problem_class", "threads", "implementation",
+		"compiler_flags", "random_generator", "ep_sha256", "ft_sha256",
+		"environment_1t_sha256", "environment_nt_sha256",
+	)
+	parameters := result.Methodology.Parameters
+	if parameters["tool_version"] != npbExpectedVersion || parameters["method_version"] != npbMethodVersion || parameters["problem_class"] != npbExpectedClass || parameters["threads"] != "1 / 2" || parameters["implementation"] != "NPB3.4-OMP" || parameters["compiler_flags"] != npbCompileFlags || parameters["random_generator"] != npbRandomGenerator {
+		t.Fatalf("NPB stable comparison parameters = %v", parameters)
+	}
+	if parameters["environment_1t_sha256"] != comparisonParameterHash(strings.Join(npbEnvironmentParameters(1), " ")) || parameters["environment_nt_sha256"] != comparisonParameterHash(strings.Join(npbEnvironmentParameters(2), " ")) {
+		t.Fatalf("NPB environment comparison parameters = %v", parameters)
+	}
+	if parameters["ep_sha256"] != binarySHA256(filepath.Join(directory, npbBenchmarkSpecs[0].Binary)) || parameters["ft_sha256"] != binarySHA256(filepath.Join(directory, npbBenchmarkSpecs[1].Binary)) {
+		t.Fatalf("NPB binary comparison parameters = %v", parameters)
+	}
+	for _, field := range result.Fields {
+		if !strings.HasPrefix(field.Label, "probe.npb.field.") {
+			t.Fatalf("unstable NPB field label = %+v", field)
+		}
+	}
+	if value, ok := npbField(result, "cpu_allowance").Value.Raw(); !ok || value != "visible=2;quota=unlimited" {
+		t.Fatalf("NPB CPU allowance variant/value = %q/%v", value, ok)
+	}
+	if npbField(result, "arguments").Value.Text() != "(none)" || !strings.Contains(npbField(result, "environment_1t").Value.Text(), "OMP_NUM_THREADS=1") || !strings.Contains(npbField(result, "environment_nt").Value.Text(), "OMP_NUM_THREADS=2") {
+		t.Fatalf("NPB parameter fields = %+v", result.Fields)
+	}
+	for _, measurement := range result.Measurements {
+		if !strings.HasPrefix(measurement.Label, "probe.npb.metric.") {
+			t.Fatalf("unstable NPB measurement label = %+v", measurement)
+		}
+	}
+	if len(result.TextBlocks) != 4 {
+		t.Fatalf("NPB raw block count = %d", len(result.TextBlocks))
+	}
+	for _, block := range result.TextBlocks {
+		if block.Title != "probe.npb.raw_output" || block.Content == "" {
+			t.Fatalf("NPB raw block = %+v", block)
+		}
+	}
+	if len(result.Sources) != 1 || result.Sources[0].Purpose != "probe.npb.source.purpose" {
+		t.Fatalf("NPB sources = %+v", result.Sources)
+	}
+	for _, note := range result.Notes {
+		if !strings.HasPrefix(note, "probe.npb.note.") {
+			t.Fatalf("unstable NPB note = %q", note)
+		}
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.npb.summary.values" || len(result.SummaryMessages[0].Args) != 1 || result.SummaryMessages[0].Args[0] == "" {
+		t.Fatalf("NPB summary = %+v", result.SummaryMessages)
+	}
+
+	table := result.Tables[0]
+	if table.Title != "probe.npb.table.title" || len(table.Columns) != 8 || len(table.Rows) != 4 {
+		t.Fatalf("NPB table shape = %+v", table)
+	}
+	if workload, ok := table.Rows[0][1].Key(); !ok || workload != "probe.npb.workload.ep" {
+		t.Fatalf("NPB workload cell = %#v", table.Rows[0][1])
+	}
+	if verification, ok := table.Rows[0][7].Key(); !ok || verification != "probe.npb.verification.successful" {
+		t.Fatalf("NPB verification cell = %#v", table.Rows[0][7])
+	}
+	if table.Rows[0][2].Text() != "1T" || table.Rows[1][2].Text() != "NT(2T)" || table.Rows[0][6].Text() != "1.00 x" {
+		t.Fatalf("NPB table contexts/scaling = %+v", table.Rows)
+	}
+}
+
+func TestNPBProducerMissingAndFailureDiagnosticsStayStructured(t *testing.T) {
+	missingDirectory := t.TempDir()
+	t.Setenv("PATH", missingDirectory)
+	missing := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs, cpuAllowance{Visible: 1, Threads: 1})
+	if missing.Status != model.StatusWarning || len(missing.Failures) != 2 || missing.SummaryMessages[0].Key != "probe.npb.summary.none" || !containsNPBNote(missing.Notes, "probe.npb.note.tool_missing") {
+		t.Fatalf("NPB missing result = %+v", missing)
+	}
+	for _, failure := range missing.Failures {
+		if failure.Category != model.FailureToolMissing || failure.Stage != "tool_lookup" || failure.Message == "" {
+			t.Fatalf("NPB missing failure = %+v", failure)
+		}
+	}
+
+	directory := t.TempDir()
+	writeNPBFixtureTool(t, directory, npbBenchmarkSpecs[0].Binary, "malformed NPB diagnostic", "malformed NPB diagnostic")
+	t.Setenv("PATH", directory)
+	failure := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs[:1], cpuAllowance{Visible: 1, Threads: 1})
+	if failure.Status != model.StatusWarning || len(failure.Failures) != 1 || failure.SummaryMessages[0].Key != "probe.npb.summary.none" || !containsNPBNote(failure.Notes, "probe.npb.note.run_failure") {
+		t.Fatalf("NPB run failure result = %+v", failure)
+	}
+	if failure.Failures[0].Category != model.FailureParse || failure.Failures[0].Stage != "benchmark_run" || !strings.Contains(failure.Failures[0].Message, "官方 benchmark header") {
+		t.Fatalf("NPB diagnostic/category = %+v", failure.Failures[0])
+	}
+	if len(failure.Tables) != 1 || len(failure.Tables[0].Rows) != 2 {
+		t.Fatalf("NPB failed table = %+v", failure.Tables)
+	}
+	if verification, ok := failure.Tables[0].Rows[1][7].Key(); !ok || verification != "probe.npb.verification.failed" || failure.Tables[0].Rows[1][6].Text() != "na" {
+		t.Fatalf("NPB failed table variants = %+v", failure.Tables[0].Rows[1])
+	}
+}
+
+func writeNPBFixtureTool(t *testing.T, directory, name, oneThreadOutput, manyThreadOutput string) {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	script := "#!/bin/sh\ncase \"$OMP_NUM_THREADS\" in\n1) /bin/cat <<'EOF'\n" + oneThreadOutput + "\nEOF\n;;\n*) /bin/cat <<'EOF'\n" + manyThreadOutput + "\nEOF\n;;\nesac\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func npbField(result model.Result, key string) model.Field {
+	for _, field := range result.Fields {
+		if field.Key == key {
+			return field
+		}
+	}
+	return model.Field{}
+}
+
+func containsNPBNote(notes []string, want string) bool {
+	for _, note := range notes {
+		if note == want {
+			return true
+		}
+	}
+	return false
 }

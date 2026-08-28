@@ -128,11 +128,11 @@ func TestZstdEnvironmentAndMeasurements(t *testing.T) {
 		t.Fatal("incomplete zstd sample emitted multi-worker measurements")
 	}
 	table := zstdThroughputTable([]zstdBenchmarkSample{sample1, sampleN}, 4)
-	if table.Key != "benchmark.zstd.throughput" || len(table.ColumnKeys) != len(table.Columns) || len(table.Rows) != 2 {
+	if table.Key != "benchmark.zstd.throughput" || len(table.Columns) != 7 || len(table.Rows) != 2 {
 		t.Fatalf("zstd table schema = %+v", table)
 	}
 	partial := zstdThroughputTable([]zstdBenchmarkSample{sample1, {}}, 4)
-	if partial.Rows[1][1] != "—" || partial.Rows[1][2] != "—" {
+	if partial.Rows[1][1].Text() != "—" || partial.Rows[1][2].Text() != "—" {
 		t.Fatalf("zstd partial row = %+v", partial.Rows[1])
 	}
 	single := model.NewResult("zstd", "zstd")
@@ -141,9 +141,173 @@ func TestZstdEnvironmentAndMeasurements(t *testing.T) {
 		t.Fatal("single-core zstd scaling unexpectedly emitted")
 	}
 	singleTable := zstdThroughputTable([]zstdBenchmarkSample{sample1, sample1}, 1)
-	if singleTable.Rows[0][3] != "不适用" || singleTable.Rows[1][3] != "不适用" {
+	if singleTable.Rows[0][3].Text() != "na" || singleTable.Rows[1][3].Text() != "na" {
 		t.Fatalf("single-core zstd table = %+v", singleTable.Rows)
 	}
+}
+
+func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
+	data := []byte("fixture corpus")
+	contract := zstdBenchmarkContract{
+		Version:          "1.5.7",
+		Level:            3,
+		Seconds:          1,
+		CorpusName:       "fixture.corpus",
+		CorpusBytes:      int64(len(data)),
+		CorpusSHA256:     fmt.Sprintf("%x", sha256.Sum256(data)),
+		CorpusSourceHash: "fixture-source-sha256",
+	}
+	directory := t.TempDir()
+	corpus := filepath.Join(directory, contract.CorpusName)
+	if err := os.WriteFile(corpus, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := writeZstdFixtureTool(t, "zstd v1.5.7", "bench 1.5.7 : input 14 bytes, 1 seconds, 0 KB blocks\n-3 7 (2.000) 40.0 MB/s 20.0 MB/s fixture.corpus")
+	result := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, tool, corpus, contract, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
+
+	if result.ID != "zstd" || result.Title != "module.zstd.title" || result.Description != "probe.zstd.description" || result.Status != model.StatusOK {
+		t.Fatalf("zstd result identity/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.zstd.profile" || result.Methodology.ComparisonScope != "probe.zstd.comparison_scope" {
+		t.Fatalf("zstd methodology = %+v", result.Methodology)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 {
+		t.Fatalf("zstd evidence = %+v", result.Evidence)
+	}
+	assertProducerParameterScope(t, result,
+		"tool_version", "tool_sha256", "method_version", "compression_level", "threads", "duration",
+		"corpus_bytes", "corpus_sha256", "corpus_source_sha256", "arguments_1t_sha256", "arguments_nt_sha256",
+	)
+	parameters := result.Methodology.Parameters
+	if parameters["tool_version"] != "zstd v1.5.7" || parameters["tool_sha256"] != binarySHA256(tool) {
+		t.Fatalf("zstd tool comparison parameters = %v", parameters)
+	}
+	if parameters["method_version"] != zstdMethodVersion || parameters["compression_level"] != "3" || parameters["threads"] != "1 / 2" || parameters["duration"] != "1s" || parameters["corpus_bytes"] != "14 bytes" || parameters["corpus_sha256"] != contract.CorpusSHA256 || parameters["corpus_source_sha256"] != contract.CorpusSourceHash {
+		t.Fatalf("zstd stable comparison parameters = %v", parameters)
+	}
+	if got, want := parameters["arguments_1t_sha256"], comparisonParameterHash([]string{"-q", "-b3", "-i1", "-T1"}); got != want {
+		t.Fatalf("zstd 1T argument scope = %q, want %q", got, want)
+	}
+	if got, want := parameters["arguments_nt_sha256"], comparisonParameterHash([]string{"-q", "-b3", "-i1", "-T2"}); got != want {
+		t.Fatalf("zstd NT argument scope = %q, want %q", got, want)
+	}
+
+	for _, field := range result.Fields {
+		if !strings.HasPrefix(field.Label, "probe.zstd.field.") {
+			t.Fatalf("unstable zstd field label = %+v", field)
+		}
+	}
+	if value, ok := zstdField(result, "cpu_allowance").Value.Raw(); !ok || value != "visible=2;quota=unlimited" {
+		t.Fatalf("zstd CPU allowance variant/value = %q/%v", value, ok)
+	}
+	if value := zstdField(result, "corpus_construction").Value.Text(); value != "dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml" {
+		t.Fatalf("zstd corpus construction = %q", value)
+	}
+	if !strings.Contains(zstdField(result, "arguments_1t").Value.Text(), "-T1") || !strings.Contains(zstdField(result, "arguments_nt").Value.Text(), "-T2") {
+		t.Fatalf("zstd benchmark arguments = %+v", result.Fields)
+	}
+	for _, measurement := range result.Measurements {
+		if !strings.HasPrefix(measurement.Label, "probe.zstd.metric.") {
+			t.Fatalf("unstable zstd measurement label = %+v", measurement)
+		}
+	}
+	if len(result.TextBlocks) != 2 || result.TextBlocks[0].Title != "probe.zstd.raw_output" || result.TextBlocks[1].Title != "probe.zstd.raw_output" {
+		t.Fatalf("zstd raw blocks = %+v", result.TextBlocks)
+	}
+	if len(result.Sources) != 2 || result.Sources[0].Purpose != "probe.zstd.source.zstandard" || result.Sources[1].Purpose != "probe.zstd.source.silesia" {
+		t.Fatalf("zstd sources = %+v", result.Sources)
+	}
+	for _, note := range result.Notes {
+		if !strings.HasPrefix(note, "probe.zstd.note.") {
+			t.Fatalf("unstable zstd note = %q", note)
+		}
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.zstd.summary.values" || len(result.SummaryMessages[0].Args) != 1 {
+		t.Fatalf("zstd summary = %+v", result.SummaryMessages)
+	}
+
+	table := result.Tables[0]
+	if table.Title != "probe.zstd.table.title" || len(table.Columns) != 7 || len(table.Rows) != 2 || table.Rows[0][0].Text() != "1T" || table.Rows[1][0].Text() != "NT(2T)" {
+		t.Fatalf("zstd table shape = %+v", table)
+	}
+	if table.Columns[0].Label != "probe.zstd.column.context" || table.Columns[1].Label != "probe.zstd.column.compress" || !table.Columns[1].Numeric || !table.Columns[1].HigherIsBetter {
+		t.Fatalf("zstd table metadata = %+v", table.Columns)
+	}
+}
+
+func TestZstdProducerFailureAndMissingDiagnosticsStayStructured(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	missing := (zstdProbe{}).Run(context.Background(), Environment{})
+	if missing.Status != model.StatusWarning || len(missing.Failures) != 1 || missing.Failures[0].Category != model.FailureToolMissing || missing.SummaryMessages[0].Key != "probe.zstd.summary.none" {
+		t.Fatalf("zstd missing result = %+v", missing)
+	}
+	if missing.Failures[0].Message == "" || !containsZstdNote(missing.Notes, "probe.zstd.note.tool_missing") {
+		t.Fatalf("zstd missing diagnostic/notes = %+v", missing)
+	}
+
+	contract := defaultZstdContract
+	versionTool := writeZstdFixtureTool(t, "zstd v1.4.0", "")
+	versionMismatch := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, versionTool, "unused", contract, cpuAllowance{Visible: 1, Threads: 1})
+	if versionMismatch.Status != model.StatusWarning || !hasZstdFailureStage(versionMismatch, "version_check") || !containsZstdNote(versionMismatch.Notes, "probe.zstd.note.version_mismatch") || versionMismatch.SummaryMessages[0].Key != "probe.zstd.summary.none" {
+		t.Fatalf("zstd version mismatch = %+v", versionMismatch)
+	}
+	if versionMismatch.Failures[0].Message != "zstd v1.4.0" {
+		t.Fatalf("zstd version diagnostic was not preserved: %+v", versionMismatch.Failures)
+	}
+
+	data := []byte("fixture corpus")
+	contract.CorpusBytes = int64(len(data))
+	contract.CorpusSHA256 = fmt.Sprintf("%x", sha256.Sum256(data))
+	directory := t.TempDir()
+	corpus := filepath.Join(directory, contract.CorpusName)
+	if err := os.WriteFile(corpus, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failedTool := writeZstdFixtureTool(t, "zstd v1.5.7", "malformed benchmark output")
+	benchmarkFailure := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, failedTool, corpus, contract, cpuAllowance{Visible: 1, Threads: 1})
+	if benchmarkFailure.Status != model.StatusWarning || !hasZstdFailureStage(benchmarkFailure, "benchmark_run") || !containsZstdNote(benchmarkFailure.Notes, "probe.zstd.note.run_failure") || benchmarkFailure.SummaryMessages[0].Key != "probe.zstd.summary.none" {
+		t.Fatalf("zstd benchmark failure = %+v", benchmarkFailure)
+	}
+	if !strings.Contains(benchmarkFailure.Failures[0].Message, "zstd 输出缺少唯一 benchmark header") {
+		t.Fatalf("zstd benchmark diagnostic was not preserved: %+v", benchmarkFailure.Failures)
+	}
+}
+
+func writeZstdFixtureTool(t *testing.T, version, benchmark string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "zstd")
+	script := "#!/bin/sh\ncase \"$1\" in\n--version|-V) printf '%s\\n' '" + version + "' ;;\n*) /bin/cat <<'EOF'\n" + benchmark + "\nEOF\n;;\nesac\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func zstdField(result model.Result, key string) model.Field {
+	for _, field := range result.Fields {
+		if field.Key == key {
+			return field
+		}
+	}
+	return model.Field{}
+}
+
+func containsZstdNote(notes []string, want string) bool {
+	for _, note := range notes {
+		if note == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasZstdFailureStage(result model.Result, want string) bool {
+	for _, failure := range result.Failures {
+		if failure.Stage == want {
+			return true
+		}
+	}
+	return false
 }
 
 // hasMeasurement is shared by the other probe benchmark tests.

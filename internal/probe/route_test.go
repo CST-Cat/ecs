@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestRouteSummaryArgumentsAndFailures(t *testing.T) {
 }
 
 func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
-	writeRouteFixtureBinary(t)
+	fixturePath := writeRouteFixtureBinary(t)
 	targets := []config.Endpoint{
 		{Name: "Complete", Address: "complete", Kind: config.RouteTargetKindGlobal},
 		{Name: "NoResponse", Address: "zero", Kind: config.RouteTargetKindMainlandChina},
@@ -66,6 +67,15 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 		result.Methodology.Engine != "probe.route.methodology.engine" || result.Methodology.Profile != "probe.route.profile" ||
 		result.Methodology.ComparisonScope != "probe.route.comparison_scope" {
 		t.Fatalf("route methodology = %#v", result.Methodology)
+	}
+	assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops", "tool_version", "tool_sha256", "arguments_sha256")
+	parameters := result.Methodology.Parameters
+	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets_sha256"] != comparisonParameterHash(targets) || parameters["max_hops"] != strconv.Itoa(routeSnapshotHops) || parameters["tool_version"] != "fixture-nexttrace" || parameters["tool_sha256"] != binarySHA256(fixturePath) {
+		t.Fatalf("route comparison parameters = %v", parameters)
+	}
+	arguments := routeTestFieldValue(result, "arguments")
+	if arguments == "" || parameters["arguments_sha256"] != comparisonParameterHash(arguments) {
+		t.Fatalf("route argument scope = %q, field arguments = %q", parameters["arguments_sha256"], arguments)
 	}
 	wantFieldLabels := map[string]string{
 		"engine":        "probe.route.field.engine",
@@ -95,7 +105,7 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 		t.Fatalf("route table = %#v", result.Tables)
 	}
 	wantColumns := []string{"probe.route.column.target", "probe.route.column.target_type", "probe.route.column.status", "probe.route.column.probed_hops", "probe.route.column.visible_hops", "probe.route.column.timeout_hops", "probe.route.column.duration"}
-	if result.Tables[0].Title != "probe.route.table.summary" || !routeTestSlicesEqual(result.Tables[0].Columns, wantColumns) || result.Tables[0].RowIdentity != "" {
+	if result.Tables[0].Title != "probe.route.table.summary" || !routeTestSlicesEqual(routeTestColumnLabels(result.Tables[0].Columns), wantColumns) || result.Tables[0].RowIdentity != "" {
 		t.Fatalf("route table shape = %#v", result.Tables[0])
 	}
 	if len(result.Sources) != 1 || result.Sources[0].Name != "probe.route.source.nexttrace.name" || result.Sources[0].Purpose != "probe.route.source.nexttrace" {
@@ -108,11 +118,14 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 	wantStatuses := []string{routeStatusComplete, routeStatusNoResponse, routeStatusParseFailed, routeStatusFailed}
 	wantKinds := []string{"probe.route.target_type.global", "probe.route.target_type.mainland_china", "custom-kind", "custom-kind"}
 	for index, row := range result.Tables[0].Rows {
-		if len(row) < 3 || row[2] != wantStatuses[index] || row[1] != wantKinds[index] {
+		if len(row) < 3 || row[2].Text() != wantStatuses[index] || row[1].Text() != wantKinds[index] {
 			t.Fatalf("route row %d = %#v, want status=%q kind=%q", index, row, wantStatuses[index], wantKinds[index])
 		}
-		if strings.ContainsAny(row[2], "完成失败无响应解析") {
+		if strings.ContainsAny(row[2].Text(), "完成失败无响应解析") {
 			t.Fatalf("route row %d contains display status: %#v", index, row)
+		}
+		if _, ok := row[2].Key(); !ok {
+			t.Fatalf("route status is not a tagged key: %#v", row[2])
 		}
 	}
 	if len(result.Measurements) != 12 {
@@ -332,7 +345,7 @@ func routeTestFailure(result model.Result, category model.FailureCategory, targe
 func routeTestFieldValue(result model.Result, key string) string {
 	for _, field := range result.Fields {
 		if field.Key == key {
-			return field.Value
+			return field.Value.Text()
 		}
 	}
 	return ""
@@ -348,6 +361,14 @@ func routeTestSlicesEqual(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func routeTestColumnLabels(columns []model.TableColumn) []string {
+	labels := make([]string, len(columns))
+	for index, column := range columns {
+		labels[index] = column.Label
+	}
+	return labels
 }
 
 func routeTestHasHan(value string) bool {

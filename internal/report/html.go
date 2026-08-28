@@ -33,7 +33,8 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"t":             i18n.T,
-		"display":       displayReportText,
+		"displayKey":    displayKey,
+		"displayValue":  displayValue,
 		"summaryText":   reportSummaryText,
 		"resultSummary": resultSummary,
 		"message":       renderMessage,
@@ -105,6 +106,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 		"tableRows": func(table model.Table) [][]htmlTableCell {
 			return htmlTableRows(displayTable(table))
 		},
+		"tableColumnLabel": displayTableColumnLabel,
 		"metricName": func(metric score.MetricScore) string {
 			return metricLabel(metric)
 		},
@@ -301,7 +303,7 @@ const htmlTemplate = `<!doctype html>
   {{range .Results}}
   <section id="{{.ID}}">
     <div class="section-head">
-      <div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{display .Description}}</p>{{end}}</div>
+	<div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{displayKey .Description}}</p>{{end}}</div>
       <div class="badges">
         {{if .Methodology.Label}}<span class="badge method-badge">{{methodology .Methodology}}</span>{{end}}
         <span class="badge {{.Status}}">{{statusIcon .Status}} {{statusLabel .Status}}</span>
@@ -309,9 +311,9 @@ const htmlTemplate = `<!doctype html>
     </div>
     {{if .Methodology.Label}}
     <div class="methodology"><strong>{{methodology .Methodology}}</strong>
-      {{if .Methodology.Engine}} · {{display .Methodology.Engine}}{{end}}
-      {{if .Methodology.Profile}} · <code>{{display .Methodology.Profile}}</code>{{end}}
-      {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{display .Methodology.ComparisonScope}}</div>{{end}}
+      {{if .Methodology.Engine}} · {{displayKey .Methodology.Engine}}{{end}}
+      {{if .Methodology.Profile}} · <code>{{displayKey .Methodology.Profile}}</code>{{end}}
+      {{if .Methodology.ComparisonScope}}<div class="muted">{{t "report.comparability"}}{{t "punct.colon"}}{{displayKey .Methodology.ComparisonScope}}</div>{{end}}
     </div>
     {{end}}
     {{if resultSummary .}}<p class="summary-text">{{resultSummary .}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
@@ -358,8 +360,8 @@ const htmlTemplate = `<!doctype html>
     <div class="metrics">
       {{range .Measurements}}
       <div class="metric">
-        <div class="label">{{display .Label}}{{if .Rating}} · {{display .Rating}}{{end}}</div>
-        <div class="value">{{display .Display}}</div>
+        <div class="label">{{displayKey .Label}}{{if .Rating}} · {{displayKey .Rating}}{{end}}</div>
+        <div class="value">{{displayValue .Display}}</div>
         {{if .Method}}<div class="method">{{.Method}}</div>{{end}}
       </div>
       {{end}}
@@ -368,12 +370,12 @@ const htmlTemplate = `<!doctype html>
 
     {{if .Fields}}
     <h3>{{t "report.details"}}</h3>
-    <dl class="fields">{{range .Fields}}<div class="field"><dt>{{display .Label}}</dt><dd>{{display .Value}}</dd></div>{{end}}</dl>
+    <dl class="fields">{{range .Fields}}<div class="field"><dt>{{displayKey .Label}}</dt><dd>{{displayValue .Value}}</dd></div>{{end}}</dl>
     {{end}}
 
     {{range .Tables}}
-    {{if .Title}}<h3>{{display .Title}}</h3>{{end}}
-    <div class="table-wrap"><table><thead><tr>{{range .Columns}}<th>{{display .}}</th>{{end}}</tr></thead>
+    {{if .Title}}<h3>{{displayKey .Title}}</h3>{{end}}
+    <div class="table-wrap"><table><thead><tr>{{range .Columns}}<th>{{tableColumnLabel .}}</th>{{end}}</tr></thead>
       <tbody>{{range tableRows .}}<tr>{{range .}}<td class="{{.Class}}">{{.Value}}</td>{{end}}</tr>{{end}}</tbody>
     </table></div>
     {{end}}
@@ -382,8 +384,8 @@ const htmlTemplate = `<!doctype html>
     <details><summary>{{if textBlockTitle .}}{{textBlockTitle .}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
     {{end}}
 
-    {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{display .}}</li>{{end}}</ul>{{end}}
-    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{display .Name}}</a>{{else}}{{display .Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{display .Purpose}}{{end}}</li>{{end}}</ul>{{end}}
+    {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{displayKey .}}</li>{{end}}</ul>{{end}}
+    {{if .Sources}}<h3>{{t "report.sources"}}</h3><ul>{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}" rel="noreferrer">{{displayKey .Name}}</a>{{else}}{{displayKey .Name}}{{end}}{{if .Purpose}}{{t "punct.colon"}}{{displayKey .Purpose}}{{end}}</li>{{end}}</ul>{{end}}
   </section>
   {{end}}
 
@@ -497,16 +499,14 @@ func htmlTableRows(table model.Table) [][]htmlTableCell {
 				value = row[column]
 			}
 			original := ""
-			if column < len(table.Rows[rowIndex]) {
-				original = table.Rows[rowIndex][column]
+			if rowIndex < len(table.Rows) && column < len(table.Rows[rowIndex]) {
+				original = displayValue(table.Rows[rowIndex][column])
 			}
 			class := reportValueClass(original)
-			for _, numericColumn := range table.NumericColumns {
-				if numericColumn != column {
-					continue
-				}
+			if table.Columns[column].Numeric {
 				if _, ok := numericCellValue(original); !ok {
-					break
+					result[rowIndex][column] = htmlTableCell{Value: value, Class: class}
+					continue
 				}
 				density := "░"
 				if strings.Contains(value, "█") {
@@ -517,7 +517,6 @@ func htmlTableRows(table model.Table) [][]htmlTableCell {
 					density = "▒"
 				}
 				class = map[string]string{"█": "cell-good", "▓": "cell-good", "▒": "cell-warn", "░": "cell-bad"}[density]
-				break
 			}
 			result[rowIndex][column] = htmlTableCell{Value: value, Class: class}
 		}

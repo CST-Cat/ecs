@@ -74,7 +74,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 		out.WriteString(markdownEscape(resultTitle(result)))
 		out.WriteString("\n\n")
 		if result.Description != "" {
-			out.WriteString(markdownEscape(displayReportText(result.Description)))
+			out.WriteString(markdownEscape(displayKey(result.Description)))
 			out.WriteString("\n\n")
 		}
 		methodology := displayMethodology(result.Methodology)
@@ -150,7 +150,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 				out.WriteString("| ")
 				out.WriteString(markdownEscape(metric.Label))
 				out.WriteString(" | ")
-				out.WriteString(markdownEscape(metric.Display))
+				out.WriteString(markdownEscape(displayValue(metric.Display)))
 				out.WriteString(" | ")
 				out.WriteString(markdownEscape(fallbackReport(metric.Rating, "—")))
 				out.WriteString(" | ")
@@ -164,7 +164,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			out.WriteString("| " + i18n.T("report.field") + " | " + i18n.T("report.content") + " |\n| --- | --- |\n")
 			for _, rawField := range result.Fields {
 				field := displayField(rawField)
-				writeMarkdownRow(&out, field.Label, field.Value)
+				writeMarkdownRow(&out, field.Label, displayValue(field.Value))
 			}
 			out.WriteString("\n")
 		}
@@ -194,7 +194,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			out.WriteString("### " + i18n.T("report.notes") + "\n\n")
 			for _, note := range result.Notes {
 				out.WriteString("- ")
-				out.WriteString(markdownEscape(displayReportText(note)))
+				out.WriteString(markdownEscape(displayKey(note)))
 				out.WriteString("\n")
 			}
 			out.WriteString("\n")
@@ -203,8 +203,8 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			out.WriteString("### " + i18n.T("report.sources") + "\n\n")
 			for _, rawSource := range result.Sources {
 				source := rawSource
-				source.Name = displayReportText(source.Name)
-				source.Purpose = displayReportText(source.Purpose)
+				source.Name = displayKey(source.Name)
+				source.Purpose = displayKey(source.Purpose)
 				out.WriteString("- ")
 				if safeURL := safeMarkdownURL(source.URL); safeURL != "" {
 					out.WriteString("[")
@@ -257,7 +257,7 @@ func writeMarkdownTable(out *strings.Builder, table model.Table) {
 		if index > 0 {
 			out.WriteString(" | ")
 		}
-		out.WriteString(markdownEscape(column))
+		out.WriteString(markdownEscape(displayTableColumnLabel(column)))
 	}
 	out.WriteString(" |\n| ")
 	for index := range table.Columns {
@@ -342,7 +342,7 @@ func localizedMethodology(m model.Methodology) string {
 		}
 	}
 	if m.Label != "" {
-		return displayReportText(m.Label)
+		return displayKey(m.Label)
 	}
 	return i18n.T("methodology.unlabeled")
 }

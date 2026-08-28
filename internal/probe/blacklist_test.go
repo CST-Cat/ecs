@@ -1,10 +1,15 @@
 package probe
 
 import (
+	"context"
 	"errors"
 	"net"
 	"strings"
 	"testing"
+	"time"
+
+	"ecs/internal/config"
+	"ecs/internal/model"
 )
 
 func TestDNSBLClassificationReverseAndPresentation(t *testing.T) {
@@ -41,11 +46,105 @@ func TestDNSBLClassificationReverseAndPresentation(t *testing.T) {
 		t.Fatal("DNSBL measurement directions are incorrect")
 	}
 	for _, test := range []struct {
-		outcome string
+		outcome dnsblOutcome
 		want    int
-	}{{string(dnsblListed), 0}, {string(dnsblRefused), 1}, {string(dnsblFailed), 2}, {string(dnsblClean), 3}} {
-		if got := dnsblRowRank(test.outcome); got != test.want {
+	}{{dnsblListed, 0}, {dnsblRefused, 1}, {dnsblFailed, 2}, {dnsblClean, 3}} {
+		if got := dnsblOutcomeRank(test.outcome); got != test.want {
 			t.Errorf("DNSBL row rank %q = %d, want %d", test.outcome, got, test.want)
 		}
+	}
+}
+
+func TestBlacklistProducerSkipBuildsStableResult(t *testing.T) {
+	result := (blacklistProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion6}})
+	if result.Title != "module.blacklist.title" || result.Description != "probe.blacklist.description" || result.Status != model.StatusSkipped {
+		t.Fatalf("blacklist direct metadata/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.blacklist.profile" || result.Methodology.ComparisonScope != "probe.blacklist.comparison_scope" {
+		t.Fatalf("blacklist methodology = %+v", result.Methodology)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != len(dnsblZones()) || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.blacklist.summary.skipped" {
+		t.Fatalf("blacklist skip evidence/summary = %+v/%+v", result.Evidence, result.SummaryMessages)
+	}
+	if len(result.Notes) != 3 {
+		t.Fatalf("blacklist skip notes = %v", result.Notes)
+	}
+}
+
+func TestBlacklistOutcomeValuesAreExplicitKeys(t *testing.T) {
+	for _, test := range []struct {
+		outcome dnsblOutcome
+		key     string
+	}{{dnsblListed, "probe.blacklist.outcome.listed"}, {dnsblClean, "probe.blacklist.outcome.clean"}, {dnsblRefused, "probe.blacklist.outcome.refused"}, {dnsblFailed, "probe.blacklist.outcome.failed"}} {
+		value := dnsblOutcomeValue(test.outcome)
+		if key, ok := value.Key(); !ok || key != test.key {
+			t.Errorf("DNSBL outcome %q = %#v, want key %q", test.outcome, value, test.key)
+		}
+	}
+}
+func TestBlacklistProducerBuildsStableResultFromFindings(t *testing.T) {
+	originalQuery := dnsblQueryForProbe
+	originalReverse := appendReverseDNSForProbe
+	t.Cleanup(func() {
+		dnsblQueryForProbe = originalQuery
+		appendReverseDNSForProbe = originalReverse
+	})
+	dnsblQueryForProbe = func(_ context.Context, _ *net.Resolver, _ string, zone dnsblZone) dnsblFinding {
+		finding := dnsblFinding{Zone: zone, Duration: 2 * time.Millisecond}
+		switch zone.Name {
+		case "Spamhaus ZEN":
+			finding.Outcome = dnsblListed
+			finding.Codes = []string{"127.0.0.2"}
+		case "SpamCop":
+			finding.Outcome = dnsblRefused
+			finding.Detail = "fixture query refused"
+		case "Barracuda":
+			finding.Outcome = dnsblFailed
+			finding.Detail = "fixture query failed"
+		default:
+			finding.Outcome = dnsblClean
+		}
+		return finding
+	}
+	appendReverseDNSForProbe = func(context.Context, *model.Result, string) {}
+
+	result := (blacklistProbe{}).Run(context.Background(), Environment{
+		Config: config.Runtime{IPVersion: config.IPVersion4},
+		Egress: Egress{ByVersion: map[string]EgressAddress{
+			config.IPVersion4: {Version: config.IPVersion4, IP: "203.0.113.9"},
+		}},
+	})
+	if result.Title != "module.blacklist.title" || result.Description != "probe.blacklist.description" || result.Status != model.StatusWarning {
+		t.Fatalf("blacklist direct metadata/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.blacklist.profile" || result.Methodology.ComparisonScope != "probe.blacklist.comparison_scope" {
+		t.Fatalf("blacklist methodology = %+v", result.Methodology)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != len(dnsblZones())-2 || result.Evidence.Expected != len(dnsblZones()) || len(result.Failures) != 2 {
+		t.Fatalf("blacklist evidence/failures = %+v/%+v", result.Evidence, result.Failures)
+	}
+	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.blacklist.summary.listed" || len(result.SummaryMessages[0].Args) != 2 || result.SummaryMessages[0].Args[0] != "1" {
+		t.Fatalf("blacklist summary = %+v", result.SummaryMessages)
+	}
+	if len(result.Fields) != 3 || result.Fields[0].Label != "probe.blacklist.field.queried_ip" || result.Fields[0].Value.Text() != "203.0.113.9" {
+		t.Fatalf("blacklist fields = %+v", result.Fields)
+	}
+	if len(result.Measurements) != 4 || result.Measurements[0].Label != "probe.blacklist.metric.dnsbl_listed_count" {
+		t.Fatalf("blacklist measurements = %+v", result.Measurements)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].Title != "probe.blacklist.table.results" || result.Tables[0].Columns[1].Label != "probe.blacklist.column.outcome" {
+		t.Fatalf("blacklist table schema = %+v", result.Tables)
+	}
+	if len(result.Tables[0].Rows) != len(dnsblZones()) || result.Tables[0].Rows[0][0].Text() != "Spamhaus ZEN" || result.Tables[0].Rows[0][1].Text() != "probe.blacklist.outcome.listed" {
+		t.Fatalf("blacklist table ordering = %+v", result.Tables[0].Rows)
+	}
+	if _, ok := result.Tables[0].Rows[0][1].Key(); !ok {
+		t.Fatalf("blacklist outcome is not a key value: %+v", result.Tables[0].Rows[0][1])
+	}
+	if _, ok := result.Tables[0].Rows[0][0].Raw(); !ok {
+		t.Fatalf("blacklist list name should be raw: %+v", result.Tables[0].Rows[0][0])
+	}
+	if len(result.Sources) != 3 || result.Sources[0].Purpose != "probe.blacklist.source.list" || len(result.Notes) != 3 {
+		t.Fatalf("blacklist sources/notes = %+v/%v", result.Sources, result.Notes)
 	}
 }

@@ -38,9 +38,18 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := flags.Parse(normalized); err != nil {
+		if colorErr := validateExplicitTerminalColorArgs(normalized); colorErr != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
+			return 1
+		}
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 1
+	}
+	terminalColor, colorErr := resolveTerminalColor(*colorFlag, *noColorFlag, stdout)
+	if colorErr != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
 		return 1
 	}
 	if *outputFlag == "" {
@@ -97,7 +106,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	fmt.Fprint(stdout, reporter.ComparisonText(data, resolveTerminalColor(*colorFlag, *noColorFlag, stdout)))
+	fmt.Fprint(stdout, reporter.ComparisonText(data, terminalColor))
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, i18n.T("compare.written")+i18n.T("punct.colon"))
 	keys := make([]string, 0, len(written))

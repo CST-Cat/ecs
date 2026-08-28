@@ -181,31 +181,31 @@ func extractHostSpec(data model.Report, values map[string]measured) HostSpec {
 			// 按 key 白名单取值，不按 label——label 会随语言变。
 			switch field.Key {
 			case "cloud_provider":
-				if value := safeMetadataValue(field.Value, 48); value != "" {
+				if value := safeMetadataValue(field.Value.Text(), 48); value != "" {
 					spec.Provider = value
 				}
 			case "provider":
 				if spec.Provider == "" {
-					if value := safeMetadataValue(field.Value, 48); value != "" {
+					if value := safeMetadataValue(field.Value.Text(), 48); value != "" {
 						spec.Provider = value
 					}
 				}
 			case "cloud_region":
-				if value := safeMetadataValue(field.Value, 32); value != "" {
+				if value := safeMetadataValue(field.Value.Text(), 32); value != "" {
 					spec.Region = value
 				}
 			case "region":
 				if spec.Region == "" {
-					if value := safeMetadataValue(field.Value, 32); value != "" {
+					if value := safeMetadataValue(field.Value.Text(), 32); value != "" {
 						spec.Region = value
 					}
 				}
 			case "virtualization":
-				spec.Virtualization = field.Value
+				spec.Virtualization = field.Value.Text()
 			case "cpu_model":
-				spec.CPUModel = field.Value
+				spec.CPUModel = field.Value.Text()
 			case "arch", "architecture":
-				spec.Arch = field.Value
+				spec.Arch = field.Value.Text()
 			}
 		}
 	}
@@ -244,15 +244,15 @@ func extractToolSpec(data model.Report) ToolSpec {
 			switch tool {
 			case "sysbench":
 				if spec.Sysbench == "" {
-					spec.Sysbench = shortVersion(field.Value)
+					spec.Sysbench = shortVersion(field.Value.Text())
 				}
 			case "fio":
 				if spec.Fio == "" {
-					spec.Fio = shortVersion(field.Value)
+					spec.Fio = shortVersion(field.Value.Text())
 				}
 			case "iperf3":
 				if spec.IPerf3 == "" {
-					spec.IPerf3 = shortVersion(field.Value)
+					spec.IPerf3 = shortVersion(field.Value.Text())
 				}
 			}
 		}
@@ -459,8 +459,8 @@ func (s Submission) AsReport() model.Report {
 	report.Results = append(report.Results, model.Result{
 		ID: "system", Status: model.StatusOK,
 		Fields: []model.Field{
-			{Key: "cloud_provider", Label: "云厂商", Value: s.Host.Provider},
-			{Key: "cloud_region", Label: "云区域", Value: s.Host.Region},
+			{Key: "cloud_provider", Label: "云厂商", Value: model.RawValue(s.Host.Provider)},
+			{Key: "cloud_region", Label: "云区域", Value: model.RawValue(s.Host.Region)},
 		},
 		Measurements: []model.Measurement{
 			{Key: "logical_cpus", Value: float64(s.Host.VCPU)},

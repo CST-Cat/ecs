@@ -291,8 +291,12 @@ func ValidateModuleDescriptors() error {
 	return nil
 }
 
-// ModuleOrder is derived from the canonical descriptor registry.
-var ModuleOrder = ModuleIDs()
+// ModuleOrder returns the canonical descriptor order.
+//
+// The returned slice is a copy, so callers cannot mutate the registry.
+func ModuleOrder() []string {
+	return ModuleIDs()
+}
 
 func init() {
 	if err := ValidateModuleDescriptors(); err != nil {

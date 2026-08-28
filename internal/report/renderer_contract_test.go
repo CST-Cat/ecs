@@ -1,14 +1,17 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
+	"ecs/internal/termcolor"
 )
 
 func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
@@ -16,7 +19,7 @@ func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	data := textSampleReport()
-	data.Results[0].Fields = append(data.Results[0].Fields, model.Field{Key: "unsafe", Label: "unsafe", Value: "<field>unsafe</field>"})
+	data.Results[0].Fields = append(data.Results[0].Fields, model.Field{Key: "unsafe", Label: "unsafe", Value: model.RawValue("<field>unsafe</field>")})
 	data.Results[0].SummaryMessages = []model.Message{model.NewMessage("message.summary.withWarnings", "<script>alert(1)</script>", "1")}
 	data.Results[0].Sources = append(data.Results[0].Sources, model.Source{Name: "unsafe", URL: "javascript:alert(1)"})
 
@@ -38,12 +41,92 @@ func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
 	}
 }
 
+func TestFieldValueDisplayPreservesExplicitVariant(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	const key = "probe.network.status.ok"
+	if got := displayValue(model.RawValue(key)); got != key {
+		t.Fatalf("raw field value was translated: got %q, want %q", got, key)
+	}
+	if got, want := displayValue(model.KeyValue(key)), i18n.T(key); got != want {
+		t.Fatalf("key field value was not translated: got %q, want %q", got, want)
+	}
+}
+
+func TestMeasurementDisplayPreservesExplicitVariant(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	const key = "probe.network.status.ok"
+	raw := displayMeasurement(model.Measurement{Display: model.RawValue(key)})
+	if got := displayValue(raw.Display); got != key {
+		t.Fatalf("raw measurement display was translated: got %q, want %q", got, key)
+	}
+	keyMeasurement := displayMeasurement(model.Measurement{Display: model.KeyValue(key)})
+	if got, want := displayValue(keyMeasurement.Display), i18n.T(key); got != want {
+		t.Fatalf("key measurement display was not translated: got %q, want %q", got, want)
+	}
+}
+
+func TestTableCellDisplayPreservesExplicitVariantAndCanonicalInput(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	const key = "probe.network.status.ok"
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
+		Run:           model.RunInfo{ID: "table", Profile: "test", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusOK},
+		Results: []model.Result{{
+			ID: "table", Title: "Table", Status: model.StatusOK,
+			Tables: []model.Table{{
+				Key: "table.values", Title: "Values",
+				Columns: []model.TableColumn{{Key: "key_value", Label: "Key value"}, {Key: "raw_value", Label: "Raw value"}},
+				Rows:    [][]model.Value{{model.KeyValue(key), model.RawValue(key)}},
+			}},
+		}},
+	}
+	canonical, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textOutput := Text(data, TextOptions{Color: termcolor.LevelNone})
+	markdownOutput := Markdown(data, nil)
+	htmlOutput, err := HTML(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	translated := i18n.T(key)
+	for name, output := range map[string]string{
+		"text": string(textOutput), "markdown": markdownOutput, "html": string(htmlOutput),
+	} {
+		if !strings.Contains(output, key) || !strings.Contains(output, translated) {
+			t.Fatalf("%s table output did not preserve raw/key display: %s", name, output)
+		}
+	}
+	after, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(canonical, after) {
+		t.Fatalf("table rendering changed canonical report:\nbefore=%s\nafter=%s", canonical, after)
+	}
+	if raw, ok := data.Results[0].Tables[0].Rows[0][1].Raw(); !ok || raw != key {
+		t.Fatalf("raw table cell changed variant or text: %q, %v", raw, ok)
+	}
+	if stableKey, ok := data.Results[0].Tables[0].Rows[0][0].Key(); !ok || stableKey != key {
+		t.Fatalf("key table cell changed variant or text: %q, %v", stableKey, ok)
+	}
+}
+
 func TestMarkdownRendersRichReportAndSafeLinks(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	data := textSampleReport()
-	data.Results[0].Fields = append(data.Results[0].Fields, model.Field{Key: "unsafe", Label: "unsafe", Value: "<field>unsafe</field>"})
+	data.Results[0].Fields = append(data.Results[0].Fields, model.Field{Key: "unsafe", Label: "unsafe", Value: model.RawValue("<field>unsafe</field>")})
 	data.Results[0].SummaryMessages = []model.Message{model.NewMessage("message.summary.withWarnings", "<script>alert(1)</script>", "1")}
 	data.Results[0].TextBlocks[0].Content = "raw output 192.0.2.10\n``` <payload>unsafe</payload>"
 	data.Results[0].Sources = append(data.Results[0].Sources, model.Source{Name: "unsafe", URL: "javascript:alert(1)"})
@@ -177,7 +260,7 @@ func TestStructuredSummariesRenderAcrossFormatsWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestReportLocalizesRegisteredMessageArgsAndSourceNamesWithoutMutation(t *testing.T) {
+func TestReportRendersNetworkSummaryKeyArgAndKeepsOtherMessageArgsRaw(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	data := model.Report{
@@ -202,10 +285,6 @@ func TestReportLocalizesRegisteredMessageArgsAndSourceNamesWithoutMutation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantOrigin := map[i18n.Lang]string{
-		i18n.LangZH: "原生 IP",
-		i18n.LangEN: "Native IP",
-	}
 	wantPurpose := map[i18n.Lang]string{
 		i18n.LangZH: "ip-api 国家、网络类型与代理字段",
 		i18n.LangEN: "ip-api country, network type, and proxy fields",
@@ -214,8 +293,12 @@ func TestReportLocalizesRegisteredMessageArgsAndSourceNamesWithoutMutation(t *te
 		t.Run(string(language), func(t *testing.T) {
 			i18n.Set(language)
 			message := renderMessage(data.Results[0].SummaryMessages[0])
-			if !strings.Contains(message, "provider/raw") || !strings.Contains(message, wantOrigin[language]) || strings.Contains(message, "probe.network.ip_type.native") {
-				t.Fatalf("message args were not localized/preserved: %q", message)
+			if !strings.Contains(message, "provider/raw") || !strings.Contains(message, i18n.T("probe.network.ip_type.native")) || strings.Contains(message, "probe.network.ip_type.native") {
+				t.Fatalf("network summary key arg was not rendered explicitly: %q", message)
+			}
+			plain := renderMessage(model.NewMessage("message.summary.withWarnings", "probe.network.ip_type.native", "1"))
+			if !strings.Contains(plain, "probe.network.ip_type.native") || strings.Contains(plain, i18n.T("probe.network.ip_type.native")) {
+				t.Fatalf("ordinary message arg was translated: %q", plain)
 			}
 			textOutput := Text(data, TextOptions{Color: 0, Width: 120})
 			markdownOutput := Markdown(data, nil)
@@ -240,6 +323,49 @@ func TestReportLocalizesRegisteredMessageArgsAndSourceNamesWithoutMutation(t *te
 				t.Fatal("rendering mutated canonical report")
 			}
 		})
+	}
+}
+
+func TestValuePresentationKeepsRawAndTranslatesKeyAcrossRenderers(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	const rawKey = "probe.network.ip_type.native"
+	const errorKey = "probe.network.status.ok"
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Run:           model.RunInfo{ID: "value-render", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusWarning},
+		Results: []model.Result{{
+			ID: "value", Title: "Value presentation", Status: model.StatusWarning,
+			Error: errorKey,
+			Fields: []model.Field{
+				{Key: "raw", Label: "Raw", Value: model.RawValue(rawKey)},
+				{Key: "key", Label: "Key", Value: model.KeyValue(rawKey)},
+			},
+		}},
+	}
+	outputs := map[string]string{
+		"text":     string(Text(data, TextOptions{Color: termcolor.LevelNone})),
+		"markdown": Markdown(data, nil),
+	}
+	html, err := HTML(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs["html"] = string(html)
+	translated := i18n.T(rawKey)
+	for format, output := range outputs {
+		if !strings.Contains(output, rawKey) {
+			t.Errorf("%s renderer translated raw Value %q: %s", format, rawKey, output)
+		}
+		if !strings.Contains(output, translated) {
+			t.Errorf("%s renderer did not translate Key Value %q to %q: %s", format, rawKey, translated, output)
+		}
+		if !strings.Contains(output, errorKey) {
+			t.Errorf("%s renderer translated raw Result.Error %q: %s", format, errorKey, output)
+		}
 	}
 }
 

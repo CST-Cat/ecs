@@ -89,7 +89,7 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 	appendMemoryInventory(&degraded, limitedFallback, memoryFacility{Evidence: "none"}, memoryFacility{Evidence: "none"})
 	values := make(map[string]string)
 	for _, field := range degraded.Fields {
-		values[field.Key] = field.Value
+		values[field.Key] = field.Value.Text()
 	}
 	if values["balloon_reclaim"] != "unavailable" || values["ksm_merging"] != "unavailable" {
 		t.Fatalf("degraded memory inventory values = %v", values)

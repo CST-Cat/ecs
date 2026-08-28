@@ -64,7 +64,7 @@ func TestStreamParserAndTable(t *testing.T) {
 		{Context: "nt", Threads: 4, Sample: streamParsedOutput{Samples: map[string]streamSample{}}},
 	}
 	stability := streamStabilityTable(runs)
-	if stability.Key != "memory.stream.stability" || len(stability.ColumnKeys) != len(stability.Columns) || len(stability.Rows) != 8 || stability.Rows[0][1] == "—" || stability.Rows[1][1] != "—" {
+	if stability.Key != "memory.stream.stability" || len(stability.Columns) != 5 || len(stability.Rows) != 8 || stability.Rows[0][1].Text() == "—" || stability.Rows[1][1].Text() != "—" {
 		t.Fatalf("STREAM stability table = %+v", stability)
 	}
 	if streamVersion(runs[:1]) == "unknown" || streamVersion(runs[1:]) != "unknown" {
@@ -72,18 +72,30 @@ func TestStreamParserAndTable(t *testing.T) {
 	}
 	runs = runs[:1]
 	reusedTable := streamMemoryTable([]streamMemoryRun{{Context: "nt", Threads: 1, Reused: true, Sample: parsed}})
-	if reusedTable.Rows[0][4] != "复用同一次实测" {
+	if key, ok := reusedTable.Rows[0][4].Key(); !ok || key != "probe.memory.stream.evidence.reused" {
 		t.Fatalf("STREAM reused table = %+v", reusedTable.Rows[0])
 	}
 	table := streamMemoryTable(runs)
-	if table.Key != "memory.stream.bandwidth" || len(table.Rows) != 4 || len(table.ColumnKeys) != len(table.Columns) || table.Rows[0][1] == "—" {
+	if table.Key != "memory.stream.bandwidth" || len(table.Rows) != 4 || len(table.Columns) != 5 || table.Rows[0][1].Text() == "—" {
 		t.Fatalf("STREAM report table = %+v", table)
 	}
+	if table.Title != "probe.memory.stream.table.bandwidth" || table.Columns[0].Label != "probe.memory.stream.column.kernel_context" {
+		t.Fatalf("STREAM stable table metadata = %+v", table)
+	}
+	if raw, ok := table.Rows[0][0].Raw(); !ok || raw != "Copy / 1T" {
+		t.Fatalf("STREAM stable row identity = %+v", table.Rows[0][0])
+	}
+	if key, ok := table.Rows[0][4].Key(); !ok || key != "probe.memory.stream.evidence.best_rate" {
+		t.Fatalf("STREAM stable row evidence = %+v", table.Rows[0][4])
+	}
 	failureTable := streamMemoryTable([]streamMemoryRun{{Context: "nt", Threads: 4, Err: errors.New("fixture failure")}})
-	if failureTable.Rows[0][1] != "—" || failureTable.Rows[0][4] != "失败" {
+	if failureTable.Rows[0][1].Text() != "—" || failureTable.Rows[0][4].Text() != "probe.memory.stream.evidence.failed" {
 		t.Fatalf("STREAM failure table = %+v", failureTable)
 	}
-	if got := streamThreadControlField(4); !strings.Contains(got, "OMP_NUM_THREADS=4") || !strings.Contains(streamThreadControlField(1), "同一次实测") || !strings.Contains(streamContextLabel(runs[0]), "1T") {
+	if key, ok := failureTable.Rows[0][4].Key(); !ok || key != "probe.memory.stream.evidence.failed" {
+		t.Fatalf("STREAM failure evidence = %+v", failureTable.Rows[0][4])
+	}
+	if got := streamThreadControlValue(4); !strings.Contains(got, "OMP_NUM_THREADS=4") || !strings.Contains(got, "measurement=separate") || !strings.Contains(streamThreadControlValue(1), "measurement=reused") || !strings.Contains(streamTableContextLabel(runs[0]), "1T") {
 		t.Fatalf("STREAM thread controls = %q", got)
 	}
 }

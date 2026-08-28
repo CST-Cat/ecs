@@ -85,15 +85,21 @@ func backtraceTargetNameKey(city, carrier, family string) string {
 	return "probe.backtrace.target." + city + "." + carrier + "." + family
 }
 
-// BacktraceCityOrder fixes display and selection order.
-var BacktraceCityOrder = []string{"beijing", "guangzhou", "shanghai", "chengdu"}
+// backtraceCityOrder fixes display and selection order.
+var backtraceCityOrder = [...]string{"beijing", "guangzhou", "shanghai", "chengdu"}
+
+// BacktraceCityOrder returns the canonical display and selection order.
+// The returned slice is a copy, so callers cannot mutate the catalog.
+func BacktraceCityOrder() []string {
+	return append([]string(nil), backtraceCityOrder[:]...)
+}
 
 var defaultBacktraceCities = []string{"beijing", "guangzhou"}
 
 // BacktraceTargetsFor aggregates targets for the requested cities.
 func BacktraceTargetsFor(cities []string) []Endpoint {
 	var targets []Endpoint
-	for _, city := range BacktraceCityOrder {
+	for _, city := range backtraceCityOrder {
 		if !contains(cities, city) {
 			continue
 		}
@@ -128,13 +134,13 @@ func ValidateMediaRegions(regions []string) error {
 func ParseBacktraceCities(raw string) ([]string, error) {
 	items := ParseList(raw)
 	if len(items) == 0 {
-		return defaultBacktraceCities, nil
+		return append([]string(nil), defaultBacktraceCities...), nil
 	}
 	if contains(items, "all") {
 		if len(items) > 1 {
 			return nil, i18n.Errorf("err.cityAllCombo")
 		}
-		return append([]string(nil), BacktraceCityOrder...), nil
+		return BacktraceCityOrder(), nil
 	}
 	for _, item := range items {
 		if _, ok := backtraceCityTargets[item]; !ok {

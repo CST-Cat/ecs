@@ -1,18 +1,22 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	descriptors := ModuleDescriptors()
-	if len(descriptors) == 0 || len(descriptors) != len(ModuleOrder) || len(ModuleIDs()) != len(descriptors) {
-		t.Fatalf("descriptor/order sizes = %d/%d", len(descriptors), len(ModuleOrder))
+	order := ModuleOrder()
+	if len(descriptors) == 0 || len(descriptors) != len(order) || len(ModuleIDs()) != len(descriptors) {
+		t.Fatalf("descriptor/order sizes = %d/%d", len(descriptors), len(order))
 	}
 	if err := ValidateModuleDescriptors(); err != nil {
 		t.Fatal(err)
 	}
 	for index, descriptor := range descriptors {
-		if descriptor.ID == "" || descriptor.ID != ModuleOrder[index] {
-			t.Fatalf("descriptor[%d] = %q, order = %q", index, descriptor.ID, ModuleOrder[index])
+		if descriptor.ID == "" || descriptor.ID != order[index] {
+			t.Fatalf("descriptor[%d] = %q, order = %q", index, descriptor.ID, order[index])
 		}
 		if _, ok := ModuleDescriptorFor(descriptor.ID); !ok {
 			t.Fatalf("descriptor lookup failed for %q", descriptor.ID)
@@ -25,6 +29,19 @@ func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	full := ModulesForProfile(ProfileFull)
 	if len(standard) == 0 || len(full) != len(descriptors) || contains(standard, "network") || !contains(full, "network") {
 		t.Fatalf("profile module sets = standard:%v full:%v", standard, full)
+	}
+}
+
+func TestModuleOrderReturnsCopy(t *testing.T) {
+	original := ModuleOrder()
+	if len(original) == 0 {
+		t.Fatal("module order must not be empty")
+	}
+	mutated := append([]string(nil), original...)
+	mutated[0] = "mutated"
+	got := ModuleOrder()
+	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
+		t.Fatalf("ModuleOrder returned mutable canonical data: %v", got)
 	}
 }
 

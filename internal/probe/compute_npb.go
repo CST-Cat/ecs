@@ -73,9 +73,7 @@ type npbBenchmarkSample struct {
 
 type npbProbe struct{}
 
-func (npbProbe) ID() string         { return "npb" }
-func (npbProbe) Title() string      { return "NPB EP + FT 计算性能" }
-func (npbProbe) NeedsNetwork() bool { return false }
+func (npbProbe) ID() string { return "npb" }
 
 func (npbProbe) Run(ctx context.Context, env Environment) model.Result {
 	return runNPBBenchmarks(ctx, env, npbBenchmarkSpecs)
@@ -84,10 +82,10 @@ func (npbProbe) Run(ctx context.Context, env Environment) model.Result {
 func npbMethodology() model.Methodology {
 	return model.Methodology{
 		Kind:            "standard-benchmark",
-		Label:           "标准基准",
+		Label:           "methodology.standard-benchmark",
 		Engine:          "NAS Parallel Benchmarks OpenMP",
-		Profile:         "NPB 3.4.4 · EP + FT · Class A · 1T/NT",
-		ComparisonScope: "相同 NPB 版本、EP/FT Class A、OpenMP 编译参数、线程环境、binary SHA-256 与 method version",
+		Profile:         "probe.npb.profile",
+		ComparisonScope: "probe.npb.comparison_scope",
 	}
 }
 
@@ -97,9 +95,10 @@ func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmark
 
 func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs []npbBenchmarkSpec, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("npb", "NPB EP + FT 计算性能")
-	result.Description = "NASA NPB-OMP Class A：EP 覆盖浮点与多核吞吐，FT 覆盖 3D FFT、浮点和 cache/memory access"
+	result := model.NewResult("npb", "module.npb.title")
+	result.Description = "probe.npb.description"
 	result.Methodology = npbMethodology()
+	result.Methodology.Parameters = newComparisonParameters()
 
 	workers := allowance.Threads
 	threadCounts := distinctBenchmarkThreadCounts(workers)
@@ -113,7 +112,6 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 		if err != nil {
 			message := fmt.Sprintf("未找到固定 NPB %s Class A binary，%s 未运行", spec.Name, spec.Name)
 			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, message)
 			result.AddFailure(model.Failure{
 				Category: model.FailureToolMissing, Stage: "tool_lookup", Target: spec.Binary,
 				Count: len(threadCounts), Message: message,
@@ -130,7 +128,6 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 			}
 			result.Status = model.StatusWarning
 			contextName := fmt.Sprintf("%s %dT", spec.Name, threads)
-			result.Notes = append(result.Notes, fmt.Sprintf("NPB %s 运行失败：%s", contextName, runErr.Error()))
 			result.AddFailure(model.Failure{
 				Category: benchmarkFailureCategory(ctx, runErr), Stage: "benchmark_run", Target: contextName,
 				Count: 1, Message: runErr.Error(),
@@ -144,27 +141,45 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 
 	appendNPBMeasurements(&result, specs, runs, workers)
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "标准工具", Value: "NASA NPB-OMP"},
-		{Key: "version", Label: "NPB 版本", Value: npbExpectedVersion},
-		{Key: "method_version", Label: "method version", Value: npbMethodVersion},
-		{Key: "benchmarks", Label: "固定 benchmark", Value: "EP / FT"},
-		{Key: "problem_class", Label: "problem class", Value: npbExpectedClass},
-		{Key: "threads", Label: "测试线程", Value: benchmarkThreadField(workers)},
-		{Key: "cpu_allowance", Label: "可用 CPU", Value: describeCPUAllowance(allowance)},
-		{Key: "implementation", Label: "实现", Value: "NPB3.4-OMP"},
-		{Key: "compiler_flags", Label: "固定编译参数", Value: npbCompileFlags},
-		{Key: "random_generator", Label: "随机数实现", Value: npbRandomGenerator},
-		{Key: "arguments", Label: "程序参数", Value: "(none)"},
-		{Key: "environment_1t", Label: "完整环境（1T）", Value: strings.Join(npbEnvironmentParameters(1), " ")},
-		{Key: "environment_nt", Label: "完整环境（全线程）", Value: strings.Join(npbEnvironmentParameters(workers), " ")},
+		{Key: "engine", Label: "probe.npb.field.engine", Value: model.RawValue("NASA NPB-OMP")},
+		{Key: "version", Label: "probe.npb.field.version", Value: model.RawValue(npbExpectedVersion)},
+		{Key: "method_version", Label: "probe.npb.field.method_version", Value: model.RawValue(npbMethodVersion)},
+		{Key: "benchmarks", Label: "probe.npb.field.benchmarks", Value: model.RawValue("EP / FT")},
+		{Key: "problem_class", Label: "probe.npb.field.problem_class", Value: model.RawValue(npbExpectedClass)},
+		{Key: "threads", Label: "probe.npb.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
+		{Key: "cpu_allowance", Label: "probe.npb.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
+		{Key: "implementation", Label: "probe.npb.field.implementation", Value: model.RawValue("NPB3.4-OMP")},
+		{Key: "compiler_flags", Label: "probe.npb.field.compiler_flags", Value: model.RawValue(npbCompileFlags)},
+		{Key: "random_generator", Label: "probe.npb.field.random_generator", Value: model.RawValue(npbRandomGenerator)},
+		{Key: "arguments", Label: "probe.npb.field.arguments", Value: model.RawValue("(none)")},
+		{Key: "environment_1t", Label: "probe.npb.field.environment_1t", Value: model.RawValue(strings.Join(npbEnvironmentParameters(1), " "))},
+		{Key: "environment_nt", Label: "probe.npb.field.environment_nt", Value: model.RawValue(strings.Join(npbEnvironmentParameters(workers), " "))},
 	}
 	for _, spec := range specs {
 		path := paths[spec.Name]
 		result.Fields = append(result.Fields,
-			model.Field{Key: "binary_" + strings.ToLower(spec.Name), Label: spec.Name + " binary", Value: fallback(path, "unavailable")},
-			model.Field{Key: "binary_" + strings.ToLower(spec.Name) + "_sha256", Label: spec.Name + " SHA-256", Value: fallback(binarySHA256(path), "unavailable")},
+			model.Field{Key: "binary_" + strings.ToLower(spec.Name), Label: "probe.npb.field.binary_" + strings.ToLower(spec.Name), Value: model.RawValue(fallback(path, "unavailable"))},
+			model.Field{Key: "binary_" + strings.ToLower(spec.Name) + "_sha256", Label: "probe.npb.field.binary_" + strings.ToLower(spec.Name) + "_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		)
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", npbExpectedVersion)
+	addComparisonParameter(result.Methodology.Parameters, "method_version", npbMethodVersion)
+	addComparisonParameter(result.Methodology.Parameters, "problem_class", npbExpectedClass)
+	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
+	addComparisonParameter(result.Methodology.Parameters, "implementation", "NPB3.4-OMP")
+	addComparisonParameter(result.Methodology.Parameters, "compiler_flags", npbCompileFlags)
+	addComparisonParameter(result.Methodology.Parameters, "random_generator", npbRandomGenerator)
+	for _, spec := range specs {
+		path := paths[spec.Name]
+		if strings.EqualFold(spec.Name, "EP") {
+			addComparisonParameter(result.Methodology.Parameters, "ep_sha256", fallback(binarySHA256(path), "unavailable"))
+		}
+		if strings.EqualFold(spec.Name, "FT") {
+			addComparisonParameter(result.Methodology.Parameters, "ft_sha256", fallback(binarySHA256(path), "unavailable"))
+		}
+	}
+	addComparisonParameterHash(result.Methodology.Parameters, "environment_1t_sha256", strings.Join(npbEnvironmentParameters(1), " "))
+	addComparisonParameterHash(result.Methodology.Parameters, "environment_nt_sha256", strings.Join(npbEnvironmentParameters(workers), " "))
 	for _, spec := range specs {
 		for index, sample := range runs[spec.Name] {
 			if singleCore && index > 0 {
@@ -173,40 +188,21 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 			if sample.Output == "" {
 				continue
 			}
-			contextName := "1T"
-			if index == 1 {
-				contextName = fmt.Sprintf("全线程（%dT）", workers)
-			}
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:    fmt.Sprintf("NPB %s Class A %s 原始输出", spec.Name, contextName),
+				Title:    "probe.npb.raw_output",
 				Language: "text", Content: sample.Output,
 			})
 		}
 	}
 	result.Tables = append(result.Tables, npbResultsTable(specs, runs, workers))
 	result.Sources = []model.Source{
-		{Name: "NASA NAS Parallel Benchmarks", URL: "https://www.nas.nasa.gov/software/npb.html", Purpose: "NPB 3.4.4 官方源码与 benchmark 定义"},
-	}
-	if singleCore {
-		result.Notes = append(result.Notes, "仅运行 NPB-OMP 的 EP 与 FT；单核 allowance 下 1T 与 NT 逻辑指标复用各 benchmark 的同一次 1T 实测，未执行第二次相同命令，扩展倍率不适用。")
-	} else {
-		result.Notes = append(result.Notes, "仅运行 NPB-OMP 的 EP 与 FT；固定 NPB 3.4.4、Class A、1T/当前 CPU allowance 全线程与相同 OpenMP 环境。")
-	}
-	result.Notes = append(result.Notes,
-		"EP 输出随机数/高斯对浮点计算 Mop/s；FT 输出 3D FFT、浮点与 cache/memory access 综合 Mop/s。两者 workload 不同，不互相混算。",
-		"每轮必须报告 Class A、正确 size/iteration、实际线程数、NPB 3.4.4、固定编译参数并通过 Verification；否则不采纳 Mop/s。",
-		"本模块只保留各 benchmark 原始 Mop/s、Mop/s/thread 和多线程扩展倍率，不进入 CPU 综合分，也不生成自定义综合分。",
-	)
-	if allowance.Limited() && !singleCore {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"检测到 CPU 配额 %.2f 核（%s），全线程轮按 allowance 使用 %d 线程。",
-			allowance.Quota, allowance.Source, workers,
-		))
+		{Name: "NASA NAS Parallel Benchmarks", URL: "https://www.nas.nasa.gov/software/npb.html", Purpose: "probe.npb.source.purpose"},
 	}
 	result.Evidence = model.NewEvidence(validRuns, expectedRuns, "run")
 	if validRuns < expectedRuns {
 		result.Status = model.StatusWarning
 	}
+	finalizeNPBResult(&result, allowance)
 	result.Finish(start)
 	return result
 }
@@ -409,14 +405,10 @@ func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs 
 			if index >= len(contexts) || sample.MOPS <= 0 {
 				continue
 			}
-			contextLabel := "1T"
-			if index == 1 {
-				contextLabel = fmt.Sprintf("%dT", workers)
-			}
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:   "npb_" + strings.ToLower(spec.Name) + "_" + contexts[index] + "_mops",
-				Label: "NPB " + spec.MeasurementLabel + " " + contextLabel,
-				Value: sample.MOPS, Unit: "Mop/s", Display: model.FormatRate(sample.MOPS, "Mop/s"),
+				Label: "probe.npb.metric.npb_" + strings.ToLower(spec.Name) + "_" + contexts[index] + "_mops",
+				Value: sample.MOPS, Unit: "Mop/s", Display: model.RawValue(model.FormatRate(sample.MOPS, "Mop/s")),
 				Method:         npbMethodVersion + "-" + strings.ToLower(spec.Name) + "-" + contexts[index],
 				HigherIsBetter: model.BoolPtr(true),
 			})
@@ -425,8 +417,8 @@ func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs 
 			scaling := samples[1].MOPS / samples[0].MOPS
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:   "npb_" + strings.ToLower(spec.Name) + "_scaling_ratio",
-				Label: "NPB " + spec.Name + " 多线程扩展倍率",
-				Value: scaling, Unit: "x", Display: fmt.Sprintf("%.2f×", scaling),
+				Label: "probe.npb.metric.npb_" + strings.ToLower(spec.Name) + "_scaling_ratio",
+				Value: scaling, Unit: "x", Display: model.RawValue(fmt.Sprintf("%.2f×", scaling)),
 				Method:         npbMethodVersion + "-" + strings.ToLower(spec.Name) + "-scaling",
 				HigherIsBetter: model.BoolPtr(true),
 			})
@@ -436,35 +428,144 @@ func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs 
 
 func npbResultsTable(specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSample, workers int) model.Table {
 	table := model.Table{
-		Key:            "benchmark.npb.results",
-		Title:          "NPB EP + FT Class A 原始结果",
-		Columns:        []string{"Benchmark", "负载", "线程上下文", "Mop/s total", "Mop/s/thread", "耗时", "扩展倍率", "验证"},
-		ColumnKeys:     []string{"benchmark", "load", "worker_context", "mops_total", "mops_per_thread", "elapsed_seconds", "scaling_ratio", "verification"},
-		NumericColumns: []int{3, 4, 5, 6}, NumericHigherIsBetter: []bool{true, true, false, true},
+		Key:   "benchmark.npb.results",
+		Title: "probe.npb.table.title",
+		Columns: []model.TableColumn{
+			{Key: "benchmark", Label: "probe.npb.column.benchmark"},
+			{Key: "load", Label: "probe.npb.column.workload"},
+			{Key: "worker_context", Label: "probe.npb.column.context"},
+			{Key: "mops_total", Label: "probe.npb.column.mops_total", Numeric: true, HigherIsBetter: true},
+			{Key: "mops_per_thread", Label: "probe.npb.column.mops_per_thread", Numeric: true, HigherIsBetter: true},
+			{Key: "elapsed_seconds", Label: "probe.npb.column.elapsed", Numeric: true, HigherIsBetter: false},
+			{Key: "scaling_ratio", Label: "probe.npb.column.scaling", Numeric: true, HigherIsBetter: true},
+			{Key: "verification", Label: "probe.npb.column.verification"},
+		},
 	}
+	seen := make(map[string]int, 2)
 	for _, spec := range specs {
 		samples := runs[spec.Name]
-		for index, sample := range samples {
+		for _, sample := range samples {
 			contextName := "1T"
-			if index == 1 {
-				contextName = fmt.Sprintf("全线程（%dT）", workers)
+			benchmark := strings.ToUpper(strings.TrimSpace(spec.Name))
+			seen[benchmark]++
+			if seen[benchmark] > 1 {
+				if workers <= 1 {
+					contextName = "NT(1T-reused)"
+				} else {
+					contextName = fmt.Sprintf("NT(%dT)", workers)
+				}
 			}
-			mops, perThread, seconds, scaling, verification := "—", "—", "—", "—", "失败"
+			mops, perThread, seconds, scaling := "—", "—", "—", "—"
+			verification := model.KeyValue("probe.npb.verification.failed")
 			if sample.MOPS > 0 {
 				mops = model.FormatRate(sample.MOPS, "Mop/s")
 				perThread = model.FormatRate(sample.MOPSPerThread, "Mop/s")
 				seconds = fmt.Sprintf("%.2f s", sample.Seconds)
-				verification = "SUCCESSFUL"
+				verification = model.KeyValue("probe.npb.verification.successful")
 				if workers <= 1 {
-					scaling = "不适用"
-				} else if index == 0 {
+					scaling = "na"
+				} else if seen[benchmark] == 1 {
 					scaling = "1.00 x"
 				} else if len(samples) >= 2 && samples[0].MOPS > 0 {
 					scaling = fmt.Sprintf("%.2f x", sample.MOPS/samples[0].MOPS)
 				}
+			} else if workers <= 1 {
+				scaling = "na"
+			} else {
+				scaling = "unavailable"
 			}
-			table.Rows = append(table.Rows, []string{spec.Name, spec.Description, contextName, mops, perThread, seconds, scaling, verification})
+			table.Rows = append(table.Rows, []model.Value{
+				model.RawValue(spec.Name), workloadValue(spec.Name), model.RawValue(contextName),
+				model.RawValue(mops), model.RawValue(perThread), model.RawValue(seconds),
+				model.RawValue(scaling), verification,
+			})
 		}
 	}
 	return table
+}
+
+func workloadValue(benchmark string) model.Value {
+	switch strings.ToUpper(strings.TrimSpace(benchmark)) {
+	case "EP":
+		return model.KeyValue("probe.npb.workload.ep")
+	case "FT":
+		return model.KeyValue("probe.npb.workload.ft")
+	default:
+		return model.KeyValue("probe.npb.workload.unknown")
+	}
+}
+
+func finalizeNPBResult(result *model.Result, allowance cpuAllowance) {
+	if result == nil {
+		return
+	}
+	result.Notes = npbNotes(*result, allowance)
+	result.SummaryMessages = []model.Message{npbSummaryMessage(*result, allowance.Threads)}
+}
+
+func npbNotes(result model.Result, allowance cpuAllowance) []string {
+	notes := make([]string, 0, 7)
+	if allowance.Threads <= 1 {
+		notes = append(notes, "probe.npb.note.single_core")
+	} else {
+		notes = append(notes, "probe.npb.note.separate_runs")
+	}
+	notes = append(notes,
+		"probe.npb.note.workloads",
+		"probe.npb.note.verification",
+		"probe.npb.note.no_composite_score",
+	)
+	if allowance.Limited() && allowance.Threads > 1 {
+		notes = append(notes, "probe.npb.note.quota_limited")
+	}
+	for _, failure := range result.Failures {
+		switch failure.Stage {
+		case "tool_lookup":
+			notes = append(notes, "probe.npb.note.tool_missing")
+		case "benchmark_run":
+			notes = append(notes, "probe.npb.note.run_failure")
+		}
+	}
+	seen := make(map[string]bool, len(notes))
+	out := notes[:0]
+	for _, note := range notes {
+		if seen[note] {
+			continue
+		}
+		seen[note] = true
+		out = append(out, note)
+	}
+	return out
+}
+
+func npbSummaryMessage(result model.Result, workers int) model.Message {
+	if summary := npbMachineSummary(result, workers); summary != "" {
+		return model.NewMessage("probe.npb.summary.values", summary)
+	}
+	return model.NewMessage("probe.npb.summary.none")
+}
+
+func npbMachineSummary(result model.Result, workers int) string {
+	values := make(map[string]string, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		if measurement.Value > 0 {
+			values[measurement.Key] = measurement.Display.Text()
+		}
+	}
+	parts := make([]string, 0, 6)
+	for _, benchmark := range []string{"ep", "ft"} {
+		upper := strings.ToUpper(benchmark)
+		if value := values["npb_"+benchmark+"_1t_mops"]; value != "" {
+			parts = append(parts, upper+":1T="+value)
+		}
+		if workers > 1 {
+			if value := values["npb_"+benchmark+"_nt_mops"]; value != "" {
+				parts = append(parts, fmt.Sprintf("%s:NT(%dT)=%s", upper, workers, value))
+			}
+			if value := values["npb_"+benchmark+"_scaling_ratio"]; value != "" {
+				parts = append(parts, upper+":scaling="+value)
+			}
+		}
+	}
+	return strings.Join(parts, ";")
 }

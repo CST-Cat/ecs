@@ -16,26 +16,6 @@ import "ecs/internal/config"
 //
 // 未列出的模块一律按独占处理：新增模块时漏配只会慢一点，不会得到错误数据。
 
-// concurrencyClass 描述一个模块的并发特性。
-type concurrencyClass int
-
-const (
-	// classExclusive 必须独占运行。
-	classExclusive concurrencyClass = iota
-	// classProbe 是轻量探测，可与同类并行。
-	classProbe
-)
-
-// classOf returns a binding's concurrency class. An invalid or missing
-// descriptor conservatively runs exclusively; built-in bindings are validated
-// before they reach the scheduler.
-func classOf(binding moduleBinding) concurrencyClass {
-	if binding.Descriptor.Concurrency == config.ModuleConcurrencyProbe {
-		return classProbe
-	}
-	return classExclusive
-}
-
 // scheduleGroup 是一批可以同时执行的模块。
 type scheduleGroup struct {
 	// Parallel 为真时组内模块并行执行。
@@ -58,7 +38,7 @@ func planSchedule(bindings []moduleBinding) []scheduleGroup {
 		pending = nil
 	}
 	for index, binding := range bindings {
-		if classOf(binding) == classProbe {
+		if binding.Descriptor.ID != "" && binding.Descriptor.Concurrency == config.ModuleConcurrencyProbe {
 			pending = append(pending, index)
 			continue
 		}

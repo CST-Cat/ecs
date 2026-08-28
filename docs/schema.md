@@ -52,9 +52,17 @@ source purpose、notes）在 canonical JSON 中保存为稳定 i18n key string�
 ```
 
 `Message` 的 JSON 形状固定为 `{"key": string, "args": string[]}`；`args` 省略时表示空数组。
+通常 `Message.args` 是原始插值值：renderer 只把它们填入消息格式，不翻译它们，即使某个参数的
+字符串碰巧等于 catalog key。当前唯一的参数级展示合同是网络摘要
+`probe.network.summary.version` 与 `probe.network.summary.version.additional`：这两个消息的
+`args[3]`（第 4 个参数）明确保存 network origin/IP 类型的稳定 key，renderer 仅在这个 message
+key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN、成功数和总数等其他参数仍保持
+原样。canonical JSON 始终保存该原始 key，不由 producer 预本地化，也不通过 catalog 反向猜测，
+只有 renderer 按这条显式合同展示。
+
 生产者不得把已经本地化的句子写进 canonical JSON，也不得从句子反推机器语义。供应商返回的
 原始错误、命令 stdout/stderr、主机名、地址和其他外部证据保留在各自的 raw 字符串字段中，展示时
-不翻译、不把它们冒充成稳定 key 或 `Message`。
+不翻译、不把它们冒充成稳定 key 或 `Message`；普通 `Message.args` 同样保持 raw。
 
 ## Result
 
@@ -202,11 +210,11 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
           {"key": "probe.pressure.reason.pretest_cpu_psi_high", "args": ["21.00"]}
         ],
         "measurements": [
-          {"key": "cpu_steal_percent_window", "label": "probe.pressure.metric.cpu_steal_percent_window", "value": 6.2, "unit": "%", "display": "6.20 %", "method": "proc-stat-steal-window-v1", "higher_is_better": false},
-          {"key": "cpu_psi_some_avg10_pretest", "label": "probe.pressure.metric.cpu_psi_some_avg10_pretest", "value": 21, "unit": "%", "display": "21.00 %", "method": "linux-psi-avg10-v1", "higher_is_better": false}
+          {"key": "cpu_steal_percent_window", "label": "probe.pressure.metric.cpu_steal_percent_window", "value": 6.2, "unit": "%", "display": {"raw": "6.20 %"}, "method": "proc-stat-steal-window-v1", "higher_is_better": false},
+          {"key": "cpu_psi_some_avg10_pretest", "label": "probe.pressure.metric.cpu_psi_some_avg10_pretest", "value": 21, "unit": "%", "display": {"raw": "21.00 %"}, "method": "linux-psi-avg10-v1", "higher_is_better": false}
         ]
       },
-      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 500, "unit": "MiB/s", "display": "500.0 MiB/s", "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
+      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 500, "unit": "MiB/s", "display": {"raw": "500.0 MiB/s"}, "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
     },
     {
       "number": 2,
@@ -214,7 +222,7 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
       "duration_ms": 260000,
       "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
       "interference": {"detected": false, "score": 0, "measurements": []},
-      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 510, "unit": "MiB/s", "display": "510.0 MiB/s", "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
+      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 510, "unit": "MiB/s", "display": {"raw": "510.0 MiB/s"}, "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
     }
   ]
 }
@@ -227,10 +235,13 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
 `fields` 适合离散信息：
 
 ```json
-{"key":"ipv4","label":"probe.network.field.egress","value":"203.0.x.x","sensitive":true}
+{"key":"ipv4","label":"probe.network.field.egress","value":{"raw":"203.0.x.x"},"sensitive":true}
 ```
 
-`sensitive` 表示该值是本机 IP，写报告前应进入遮盖流程。默认 JSON 本身已经遮盖，而不是只在 HTML 上隐藏。主机名、远端 IP 和网络前缀不应设置该标记。
+`value` 必须是严格的 tagged `Value`：原始事实使用 `{"raw":"..."}`，明确的 ECS 展示 key 使用
+`{"key":"..."}`。两者不能同时出现，也不接受旧的 JSON 字符串形状。`sensitive` 表示该值是本机 IP，
+写报告前应进入遮盖流程。默认 JSON 本身已经遮盖，而不是只在 HTML 上隐藏。主机名、远端 IP 和网络前缀
+不应设置该标记。
 
 ## Measurement
 
@@ -242,14 +253,15 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
   "label": "probe.disk.metric.fio_sequential_write_mib_s",
   "value": 512.34,
   "unit": "MiB/s",
-  "display": "512.3 MiB/s",
+  "display": {"raw": "512.3 MiB/s"},
   "method": "fio-direct-1MiB-write-qd1-v1",
   "higher_is_better": true
 }
 ```
 
 - `value` 与 `unit` 用于机器处理；
-- `display` 是报告中的稳定显示值；
+- `display` 是严格 tagged `Value`：格式化数值和 provider 原文使用 `{"raw":"..."}`，明确的稳定 ECS
+  展示 key 使用 `{"key":"..."}`；渲染器只按 tag 决定是否翻译，不按字符串内容猜测；
 - `method` 是版本化的工作负载/算法标识；
 - `rating` 可选，只有存在公开阈值时才使用；
 - `higher_is_better` 可为 `true`、`false` 或缺省，避免对无方向指标做错误排序。
@@ -332,24 +344,39 @@ IP 质量指标尤其需要保留 `method`：
 
 ## Table 与 TextBlock
 
-`tables` 保存端点、平台或样本矩阵。`columns` 定义顺序，每一行应与列数一致。
-
-表格可选 `numeric_columns` 与对应的 `numeric_higher_is_better`。前者是从零开始的
-数值列索引，后者注明相对柱的方向；渲染器据此绘制按数据比例变化的柱，不猜测本地化
-列名。省略方向时按越大越好处理。该元数据只影响呈现，不改变 JSON 中的原始单元格。
-
-`sensitive_columns` 是可选的列索引数组，列出需要遮盖的列：
+`tables` 保存端点、平台或样本矩阵。`columns` 是按显示顺序排列的 `TableColumn[]`，每列集中保存
+`key`、`label`、`numeric`、`higher_is_better` 和 `sensitive` 元数据；`rows` 是同样顺序的
+`Value[][]`，每一行必须与列数完全一致。不存在旧的 parallel metadata 数组，也不接受旧的字符串 cell。
+每个 cell 都必须使用严格 tagged `Value`：原始文字使用 `{"raw":"..."}`，明确的稳定 ECS/i18n key
+使用 `{"key":"..."}`。
 
 ```json
 {
   "key": "network.nat.stun",
   "title": "probe.nat.table.stun",
-  "columns": ["probe.nat.column.protocol", "probe.nat.column.server", "probe.nat.column.mapped_address", "probe.nat.column.mapping", "probe.nat.column.filtering", "probe.nat.column.alternate_address", "probe.nat.column.status"],
-  "column_keys": ["protocol", "server", "mapped_address", "mapping_behavior", "filtering_behavior", "alternate_address", "status"],
-  "rows": [["IPv4", "example-stun", "203.0.x.x:54321", "probe.nat.mapping.endpoint_independent", "probe.nat.filtering.endpoint_independent", "—", "probe.nat.status.complete"]],
-  "sensitive_columns": [2]
+  "columns": [
+    {"key":"protocol","label":"probe.nat.column.protocol","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"server","label":"probe.nat.column.server","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"mapped_address","label":"probe.nat.column.mapped_address","numeric":false,"higher_is_better":false,"sensitive":true},
+    {"key":"mapping_behavior","label":"probe.nat.column.mapping","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"filtering_behavior","label":"probe.nat.column.filtering","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"alternate_address","label":"probe.nat.column.alternate_address","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"status","label":"probe.nat.column.status","numeric":false,"higher_is_better":false,"sensitive":false}
+  ],
+  "rows": [[
+    {"raw":"IPv4"},
+    {"raw":"example-stun"},
+    {"raw":"203.0.x.x:54321"},
+    {"key":"probe.nat.mapping.endpoint_independent"},
+    {"key":"probe.nat.filtering.endpoint_independent"},
+    {"raw":"—"},
+    {"key":"probe.nat.status.complete"}
+  ]]
 }
 ```
+
+`sensitive` 列中的 raw cell 在写文件前进入遮盖流程；key cell 保持 key 不变。列元数据只影响呈现和
+脱敏，不改变 canonical JSON 中的 Value tag 与文本。
 
 `network` 结果固定保留 IP 类型属性、风险评分、风险因子和数据源状态表。即使供应商未配置、被限流或解析失败，对应行也不能静默删除；canonical 表格保存有限的 machine status key，渲染器再将其本地化并区分缺口，不能把缺失误判成低风险。
 
@@ -377,11 +404,13 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 {
   "key": "network.nat.stun_pool",
   "title": "probe.nat.table.stun_pool",
-  "columns": ["probe.nat.column.server_name", "probe.nat.column.server_address"],
-  "column_keys": ["server_name", "server_address"],
+  "columns": [
+    {"key":"server_name","label":"probe.nat.column.server_name","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"server_address","label":"probe.nat.column.server_address","numeric":false,"higher_is_better":false,"sensitive":false}
+  ],
   "rows": [
-    ["edge-a", "stun-a.example:3478"],
-    ["edge-b", "stun-b.example:3478"]
+    [{"raw":"edge-a"}, {"raw":"stun-a.example:3478"}],
+    [{"raw":"edge-b"}, {"raw":"stun-b.example:3478"}]
   ]
 }
 ```

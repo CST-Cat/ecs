@@ -115,23 +115,25 @@ func appendReverseDNSResult(result *model.Result, check rdnsResult) {
 	table := model.Table{
 		Key:   "network.reverse_dns.checks",
 		Title: "probe.rdns.table.title",
-		Columns: []string{
-			"probe.rdns.column.item",
-			"probe.rdns.column.result",
-			"probe.rdns.column.description",
+		Columns: []model.TableColumn{
+			{Key: "item", Label: "probe.rdns.column.item"},
+			{Key: "result", Label: "probe.rdns.column.result"},
+			{Key: "description", Label: "probe.rdns.column.description"},
 		},
-		ColumnKeys:  []string{"item", "result", "description"},
 		RowIdentity: "item",
 	}
 
 	ptrValue := "probe.rdns.ptr.none"
+	ptrFieldValue := model.KeyValue(ptrValue)
 	if check.ReverseErr != nil {
 		ptrValue = "probe.rdns.ptr.query_failed"
+		ptrFieldValue = model.KeyValue(ptrValue)
 	} else if len(check.Names) > 0 {
 		ptrValue = strings.Join(check.Names, ", ")
+		ptrFieldValue = model.RawValue(ptrValue)
 	}
-	table.Rows = append(table.Rows, []string{
-		"probe.rdns.item.ptr", ptrValue, "probe.rdns.description.ptr",
+	table.Rows = append(table.Rows, []model.Value{
+		model.KeyValue("probe.rdns.item.ptr"), ptrFieldValue, model.KeyValue("probe.rdns.description.ptr"),
 	})
 
 	fcrdns := "probe.rdns.status.failed"
@@ -147,25 +149,25 @@ func appendReverseDNSResult(result *model.Result, check rdnsResult) {
 	case len(check.Names) > 0:
 		fcrdnsWhy = "probe.rdns.description.fcrdns.mismatch"
 	}
-	table.Rows = append(table.Rows, []string{"probe.rdns.item.fcrdns", fcrdns, fcrdnsWhy})
+	table.Rows = append(table.Rows, []model.Value{model.KeyValue("probe.rdns.item.fcrdns"), model.KeyValue(fcrdns), model.KeyValue(fcrdnsWhy)})
 
 	if len(check.Hints) > 0 {
-		table.Rows = append(table.Rows, []string{
-			"probe.rdns.item.naming_hints", strings.Join(check.Hints, ", "), "probe.rdns.description.naming_hints",
+		table.Rows = append(table.Rows, []model.Value{
+			model.KeyValue("probe.rdns.item.naming_hints"), model.RawValue(strings.Join(check.Hints, ", ")), model.KeyValue("probe.rdns.description.naming_hints"),
 		})
 	}
 	result.Tables = append(result.Tables, table)
 
 	result.Fields = append(result.Fields,
-		model.Field{Key: "ptr_record", Label: "probe.rdns.field.ptr", Value: ptrValue},
-		model.Field{Key: "fcrdns", Label: "probe.rdns.field.fcrdns", Value: fcrdns},
+		model.Field{Key: "ptr_record", Label: "probe.rdns.field.ptr", Value: ptrFieldValue},
+		model.Field{Key: "fcrdns", Label: "probe.rdns.field.fcrdns", Value: model.KeyValue(fcrdns)},
 	)
 	if len(check.Hints) > 0 {
-		result.Fields = append(result.Fields, model.Field{Key: "ptr_naming_hints", Label: "probe.rdns.field.naming_hints", Value: strings.Join(check.Hints, ",")})
+		result.Fields = append(result.Fields, model.Field{Key: "ptr_naming_hints", Label: "probe.rdns.field.naming_hints", Value: model.RawValue(strings.Join(check.Hints, ","))})
 	}
 	result.Measurements = append(result.Measurements, model.Measurement{
 		Key: "fcrdns_passed", Label: "probe.rdns.metric.fcrdns_passed",
-		Value: boolValue(check.Confirmed), Unit: "boolean", Display: fcrdns,
+		Value: boolValue(check.Confirmed), Unit: "boolean", Display: model.KeyValue(fcrdns),
 		Method: "reverse-dns-forward-confirm-v1", HigherIsBetter: model.BoolPtr(true),
 	})
 	if check.ReverseErr != nil {

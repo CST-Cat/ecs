@@ -25,14 +25,16 @@ func textSampleReport() model.Report {
 		ID: "memory", Title: "内存", Description: "内存带宽测量", Status: model.StatusWarning,
 		StartedAt: start, DurationMS: 1500, SummaryMessages: []model.Message{model.NewMessage("message.summary.withWarnings", 1, 1)},
 		Methodology: model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "stream", Profile: "standard"},
-		Fields:      []model.Field{{Key: "memory_state", Label: "状态", Value: "需留意"}},
+		Fields:      []model.Field{{Key: "memory_state", Label: "状态", Value: model.RawValue("需留意")}},
 		Measurements: []model.Measurement{
-			{Key: "copy", Label: "复制", Value: 100, Unit: "MiB/s", Display: "100 MiB/s", Rating: "成功", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
-			{Key: "scale", Label: "缩放", Value: 80, Unit: "MiB/s", Display: "80 MiB/s", Rating: "需留意", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
+			{Key: "copy", Label: "复制", Value: 100, Unit: "MiB/s", Display: model.RawValue("100 MiB/s"), Rating: "成功", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
+			{Key: "scale", Label: "缩放", Value: 80, Unit: "MiB/s", Display: model.RawValue("80 MiB/s"), Rating: "需留意", Method: "stream-v1", HigherIsBetter: model.BoolPtr(true)},
 		},
 		Tables: []model.Table{{
-			Key: "memory.samples", Title: "采样", Columns: []string{"项目", "数值"}, ColumnKeys: []string{"name", "value"},
-			Rows: [][]string{{"复制", "100"}, {"缩放", "80"}}, NumericColumns: []int{1}, NumericHigherIsBetter: []bool{true},
+			Key: "memory.samples", Title: "采样", Columns: []model.TableColumn{
+				{Key: "name", Label: "项目"}, {Key: "value", Label: "数值", Numeric: true, HigherIsBetter: true},
+			},
+			Rows: [][]model.Value{{model.RawValue("复制"), model.RawValue("100")}, {model.RawValue("缩放"), model.RawValue("80")}},
 		}},
 		Evidence: model.NewEvidence(1, 1, "sample"),
 	}
@@ -40,7 +42,7 @@ func textSampleReport() model.Report {
 		ID: "disk", Title: "磁盘", Description: "磁盘测试失败", Status: model.StatusError,
 		StartedAt: start, DurationMS: 2, Error: "失败",
 		Methodology:  model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio"},
-		Measurements: []model.Measurement{{Key: "disk", Label: "吞吐", Value: 0, Unit: "MiB/s", Display: "0 MiB/s", HigherIsBetter: model.BoolPtr(true)}},
+		Measurements: []model.Measurement{{Key: "disk", Label: "吞吐", Value: 0, Unit: "MiB/s", Display: model.RawValue("0 MiB/s"), HigherIsBetter: model.BoolPtr(true)}},
 		Evidence:     model.NewEvidence(0, 1, "sample"),
 		Failures:     []model.Failure{{Category: model.FailurePermissionDenied, Stage: "open", Target: "/dev/test", Retryable: false, Message: "permission denied"}},
 	}

@@ -61,7 +61,7 @@ func interferencePresentation(result model.Result) *reportInterferenceView {
 	}
 	for _, rawMeasurement := range result.Interference.Measurements {
 		measurement := displayMeasurement(rawMeasurement)
-		value := measurement.Display
+		value := displayValue(measurement.Display)
 		if value == "" {
 			value = formatFloat(measurement.Value)
 			if measurement.Unit != "" {
@@ -147,7 +147,7 @@ func retryPresentation(result model.Result) *reportRetryView {
 // displayTextBlockTitle localizes the base title first, then adds a localized
 // attempt prefix for retry evidence. The input block is never modified.
 func displayTextBlockTitle(block model.TextBlock) string {
-	title := displayReportText(block.Title)
+	title := displayKey(block.Title)
 	if title == "" && block.Attempt == 0 {
 		return ""
 	}

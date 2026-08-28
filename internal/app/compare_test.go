@@ -25,11 +25,11 @@ func writeLocalizedObservationInput(t *testing.T, directory, name, fieldValue, t
 		Run:           model.RunInfo{ID: name, Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
 		Results: []model.Result{{
 			ID: "system", Title: "系统", Status: model.StatusOK,
-			Fields: []model.Field{{Key: "state", Label: "状态", Value: fieldValue}},
+			Fields: []model.Field{{Key: "state", Label: "状态", Value: model.RawValue(fieldValue)}},
 			Tables: []model.Table{{
 				Key: "system.state", Title: "当前值",
-				Columns: []string{"名称", "状态"}, ColumnKeys: []string{"name", "state"}, RowIdentity: "name",
-				Rows: [][]string{{"系统", tableValue}},
+				Columns: []model.TableColumn{{Key: "name", Label: "名称"}, {Key: "state", Label: "状态"}}, RowIdentity: "name",
+				Rows: [][]model.Value{{model.RawValue("系统"), model.RawValue(tableValue)}},
 			}},
 		}},
 	}

@@ -22,9 +22,20 @@ import (
 
 type natProbe struct{}
 
-func (natProbe) ID() string         { return "nat" }
-func (natProbe) Title() string      { return "NAT 类型" }
-func (natProbe) NeedsNetwork() bool { return true }
+func (natProbe) ID() string { return "nat" }
+
+func newNATResult() model.Result {
+	result := model.NewResult("nat", "module.nat.title")
+	result.Description = "probe.nat.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "STUN (RFC 5389/5780)",
+		Profile:         "probe.nat.profile",
+		ComparisonScope: "probe.nat.comparison_scope",
+	}
+	return result
+}
 
 // NAT 映射行为（RFC 5780 §4.3）。这些值是机器枚举，不是展示文案。
 const (
@@ -78,20 +89,17 @@ const natTimeout = 3 * time.Second
 
 func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("nat", "NAT 类型")
-	result.Description = "按 RFC 5780 检测 UDP 映射与过滤行为，判断是否处于 NAT 之后"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "STUN (RFC 5389/5780)",
-		Profile:         "binding mapping + filtering behaviour discovery",
-		ComparisonScope: "当次 UDP 路径上的 NAT 行为；不代表 TCP 或其他协议",
-	}
+	result := newNATResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameterHash(result.Methodology.Parameters, "servers_sha256", env.Config.STUNServers)
 
 	servers := env.Config.STUNServers
 	if len(servers) == 0 {
 		result.Skip(model.NewMessage("probe.nat.summary.skipped"))
 		result.Evidence = model.NewEvidence(0, 1, "target")
+		result.Notes = stableNATNotes(result)
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.nat.summary.skipped")}
 		result.Finish(start)
 		return result
 	}
@@ -114,55 +122,55 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	table := model.Table{
-		Key:        "network.nat.stun",
-		Title:      "STUN 探测明细",
-		Columns:    []string{"协议", "服务器", "映射地址", "映射行为", "过滤行为", "备用地址", "状态"},
-		ColumnKeys: []string{"protocol", "server", "mapped_address", "mapping_behavior", "filtering_behavior", "alternate_address", "status"},
+		Key:   "network.nat.stun",
+		Title: "probe.nat.table.stun",
+		Columns: []model.TableColumn{
+			{Key: "protocol", Label: "probe.nat.column.protocol"},
+			{Key: "server", Label: "probe.nat.column.server"},
+			{Key: "mapped_address", Label: "probe.nat.column.mapped_address", Sensitive: true},
+			{Key: "mapping_behavior", Label: "probe.nat.column.mapping"},
+			{Key: "filtering_behavior", Label: "probe.nat.column.filtering"},
+			{Key: "alternate_address", Label: "probe.nat.column.alternate_address"},
+			{Key: "status", Label: "probe.nat.column.status"},
+		},
 		// 映射地址是本机公网出口，默认按段遮盖。
-		SensitiveColumns: []int{2},
 	}
 	var best *natFinding
 	for index := range findings {
 		finding := &findings[index]
-		status := "complete"
+		status := "probe.nat.status.complete"
 		switch {
 		case finding.UDPBlocked:
-			status = "udp_blocked"
+			status = "probe.nat.status.udp_blocked"
 			message := ""
 			if finding.Err != nil {
 				message = compactError(finding.Err)
 			}
 			result.AddFailure(model.Failure{Category: model.FailureTimeout, Stage: "stun_binding", Target: finding.Server.Address, Retryable: true, Count: 1, Message: message})
 		case finding.Err != nil:
-			status = "failed"
+			status = "probe.nat.status.failed"
 			addFailure(&result, "stun_binding", finding.Server.Address, finding.Err)
 		}
 		other := finding.Other.String()
 		if other == "" {
 			other = "—"
 		}
-		table.Rows = append(table.Rows, []string{
-			"IPv" + family,
-			finding.Server.Name,
-			fallback(finding.Mapped.String(), "—"),
-			finding.Mapping,
-			finding.Filtering,
-			other,
-			status,
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue("IPv" + family), model.RawValue(finding.Server.Name),
+			model.RawValue(fallback(finding.Mapped.String(), "—")), natBehaviorValue(finding.Mapping, false),
+			natBehaviorValue(finding.Filtering, true), model.RawValue(other), model.KeyValue(status),
 		})
 		if best == nil && finding.Err == nil && finding.Mapped.valid() {
 			best = finding
 		}
 	}
-	result.Tables = []model.Table{table}
+	result.Tables = []model.Table{table, natSTUNPoolTable(servers)}
 
 	if best == nil {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"所有 STUN 服务器都没有返回映射地址。常见原因是出站 UDP 被封锁、"+
-				"防火墙只放行 TCP，或本次选用的服务器全部不可用；这本身也说明 UDP 类应用会受影响。",
-		)
 		result.Evidence = model.NewEvidence(0, 1, "target")
+		result.Notes = stableNATNotes(result)
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.nat.summary.all_failed")}
 		result.Finish(start)
 		return result
 	}
@@ -170,32 +178,32 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	behind := best.Mapped.IP != best.LocalAddr.IP
 	_, categoryNote := natCategory(*best, behind)
 	categoryCode := natCategoryCode(*best, behind)
-	behindValue := "no"
+	behindValue := "probe.nat.boolean.no"
 	if behind {
-		behindValue = "yes"
+		behindValue = "probe.nat.boolean.yes"
 	}
 
 	result.Fields = []model.Field{
-		{Key: "ip_version", Label: "协议族", Value: "IPv" + family},
-		{Key: "nat_category", Label: "NAT 类型", Value: categoryCode},
-		{Key: "mapped_address", Label: "公网映射地址", Value: best.Mapped.String(), Sensitive: true},
-		{Key: "local_address", Label: "本地出口地址", Value: best.LocalAddr.String(), Sensitive: true},
-		{Key: "behind_nat", Label: "位于 NAT 之后", Value: behindValue},
-		{Key: "mapping_behaviour", Label: "映射行为", Value: best.Mapping},
-		{Key: "filtering_behaviour", Label: "过滤行为", Value: best.Filtering},
-		{Key: "stun_server", Label: "判定所用服务器", Value: best.Server.Name},
+		{Key: "ip_version", Label: "probe.nat.field.ip_version", Value: model.RawValue("IPv" + family)},
+		{Key: "nat_category", Label: "probe.nat.field.nat_category", Value: natCategoryValue(categoryCode)},
+		{Key: "mapped_address", Label: "probe.nat.field.mapped_address", Value: model.RawValue(best.Mapped.String()), Sensitive: true},
+		{Key: "local_address", Label: "probe.nat.field.local_address", Value: model.RawValue(best.LocalAddr.String()), Sensitive: true},
+		{Key: "behind_nat", Label: "probe.nat.field.behind_nat", Value: model.KeyValue(behindValue)},
+		{Key: "mapping_behaviour", Label: "probe.nat.field.mapping_behaviour", Value: natBehaviorValue(best.Mapping, false)},
+		{Key: "filtering_behaviour", Label: "probe.nat.field.filtering_behaviour", Value: natBehaviorValue(best.Filtering, true)},
+		{Key: "stun_server", Label: "probe.nat.field.stun_server", Value: model.RawValue(best.Server.Name)},
 	}
 	result.Measurements = []model.Measurement{
 		{
-			Key: "udp_stun_reachable", Label: "STUN 可达",
-			Value: 1, Unit: "项", Display: "probe.nat.boolean.yes",
+			Key: "udp_stun_reachable", Label: "probe.nat.metric.udp_stun_reachable",
+			Value: 1, Unit: "项", Display: model.KeyValue("probe.nat.boolean.yes"),
 			Method: "stun-binding-rfc5389-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
 	result.Evidence = model.NewEvidence(1, 1, "target")
 	result.Sources = []model.Source{
-		{Name: "RFC 5389", URL: "https://www.rfc-editor.org/rfc/rfc5389", Purpose: "STUN Binding 协议"},
-		{Name: "RFC 5780", URL: "https://www.rfc-editor.org/rfc/rfc5780", Purpose: "NAT 映射与过滤行为发现方法"},
+		{Name: "RFC 5389", URL: "https://www.rfc-editor.org/rfc/rfc5389", Purpose: "probe.nat.source.rfc"},
+		{Name: "RFC 5780", URL: "https://www.rfc-editor.org/rfc/rfc5780", Purpose: "probe.nat.source.rfc"},
 	}
 	result.Notes = append(result.Notes,
 		"映射行为决定同一本地端口对不同目标是否复用同一个公网端口，端点无关（锥形）才利于 P2P 打洞。",
@@ -224,6 +232,8 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	if behind {
 		result.Status = model.StatusWarning
 	}
+	result.Notes = stableNATNotes(result)
+	result.SummaryMessages = []model.Message{model.NewMessage(natSummaryKey(natCategoryKey(categoryCode)))}
 	result.Finish(start)
 	return result
 }
@@ -393,6 +403,114 @@ func natCategoryCode(finding natFinding, behind bool) string {
 	default:
 		return "unknown"
 	}
+}
+
+// natSTUNPoolTable discloses the configured candidate pool as machine rows.
+// It is intentionally built from configuration rather than findings so that
+// early stop, failed probes, and partial execution never hide candidates.
+func natSTUNPoolTable(servers []config.Endpoint) model.Table {
+	table := model.Table{
+		Key:   "network.nat.stun_pool",
+		Title: "probe.nat.table.stun_pool",
+		Columns: []model.TableColumn{
+			{Key: "server_name", Label: "probe.nat.column.server_name"},
+			{Key: "server_address", Label: "probe.nat.column.server_address"},
+		},
+		Rows: make([][]model.Value, 0, len(servers)),
+	}
+	for _, server := range servers {
+		table.Rows = append(table.Rows, []model.Value{model.RawValue(server.Name), model.RawValue(server.Address)})
+	}
+	return table
+}
+
+func natBehaviorKey(value string, filtering bool) string {
+	prefix := "probe.nat.mapping."
+	if filtering {
+		prefix = "probe.nat.filtering."
+	}
+	switch value {
+	case mappingEndpointIndependent:
+		return prefix + "endpoint_independent"
+	case mappingAddressDependent:
+		return prefix + "address_dependent"
+	case mappingAddressPortDependent:
+		return prefix + "address_port_dependent"
+	case mappingUnknown:
+		return prefix + "unknown"
+	default:
+		return value
+	}
+}
+
+func natCategoryKey(value string) string {
+	switch value {
+	case "public":
+		return "probe.nat.category.public"
+	case "symmetric":
+		return "probe.nat.category.symmetric"
+	case "full_cone":
+		return "probe.nat.category.full_cone"
+	case "restricted_cone":
+		return "probe.nat.category.restricted_cone"
+	case "port_restricted":
+		return "probe.nat.category.port_restricted"
+	case "cone_unknown_filtering":
+		return "probe.nat.category.cone_unknown_filtering"
+	case "unknown":
+		return "probe.nat.category.unknown"
+	default:
+		return value
+	}
+}
+
+func natCategoryValue(value string) model.Value {
+	key := natCategoryKey(value)
+	if key == value {
+		return model.RawValue(value)
+	}
+	return model.KeyValue(key)
+}
+
+func natBehaviorValue(value string, filtering bool) model.Value {
+	key := natBehaviorKey(value, filtering)
+	if key == value {
+		return model.RawValue(value)
+	}
+	return model.KeyValue(key)
+}
+
+func natSummaryKey(category string) string {
+	switch category {
+	case "probe.nat.category.public":
+		return "probe.nat.summary.public"
+	case "probe.nat.category.symmetric":
+		return "probe.nat.summary.symmetric"
+	case "probe.nat.category.full_cone":
+		return "probe.nat.summary.full_cone"
+	case "probe.nat.category.restricted_cone":
+		return "probe.nat.summary.restricted_cone"
+	case "probe.nat.category.port_restricted":
+		return "probe.nat.summary.port_restricted"
+	case "probe.nat.category.cone_unknown_filtering":
+		return "probe.nat.summary.cone_unknown_filtering"
+	default:
+		return "probe.nat.summary.unknown"
+	}
+}
+
+func stableNATNotes(result model.Result) []string {
+	notes := []string{"probe.nat.note.mapping", "probe.nat.note.udp_scope"}
+	if result.Status == model.StatusSkipped {
+		return append(notes, "probe.nat.note.skipped")
+	}
+	if result.Evidence != nil && result.Evidence.Valid == 0 {
+		return append(notes, "probe.nat.note.no_response")
+	}
+	if result.Status == model.StatusWarning {
+		notes = append(notes, "probe.nat.note.limited_evidence")
+	}
+	return notes
 }
 
 func outboundLocalIPForNetwork(target *net.UDPAddr, network string) net.IP {

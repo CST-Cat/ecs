@@ -36,9 +36,7 @@ type sysbenchCPUResult struct {
 
 type cpuProbe struct{}
 
-func (cpuProbe) ID() string         { return "cpu" }
-func (cpuProbe) Title() string      { return "module.cpu.title" }
-func (cpuProbe) NeedsNetwork() bool { return false }
+func (cpuProbe) ID() string { return "cpu" }
 
 func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 	if path, err := exec.LookPath("sysbench"); err == nil {
@@ -53,6 +51,8 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "cpu prime=20000",
 		ComparisonScope: "probe.cpu.comparison_scope.tool_missing",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "configured_duration", env.Config.CPUTime.String())
 	result.Status = model.StatusWarning
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.cpu.summary.tool_missing")}
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "sysbench", Count: 1, Message: "executable not found"})
@@ -77,6 +77,8 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 		Profile:         "cpu prime=20000",
 		ComparisonScope: "probe.cpu.comparison_scope",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "configured_duration", env.Config.CPUTime.String())
 
 	seconds := int((env.Config.CPUTime + time.Second - 1) / time.Second)
 	if seconds < 1 {
@@ -122,22 +124,27 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	if stealOK {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "cpu_steal_percent_during_test", Label: "probe.cpu.metric.steal",
-			Value: steal, Unit: "%", Display: fmt.Sprintf("%.2f %%", steal),
+			Value: steal, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.2f %%", steal)),
 			Method: "proc-stat-steal-delta-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
 	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "probe.cpu.field.engine", Value: "sysbench"},
-		{Key: "version", Label: "probe.cpu.field.version", Value: version},
-		{Key: "binary_sha256", Label: "probe.cpu.field.binary_sha256", Value: fallback(binarySHA256(path), "unavailable")},
-		{Key: "threads", Label: "probe.cpu.field.threads", Value: benchmarkThreadField(workers)},
-		{Key: "cpu_allowance", Label: "probe.cpu.field.cpu_allowance", Value: cpuAllowanceMachineValue(allowance)},
-		{Key: "duration", Label: "probe.cpu.field.duration", Value: fmt.Sprintf("%ds", seconds)},
-		{Key: "prime", Label: "probe.cpu.field.prime", Value: "20000"},
-		{Key: "single_events", Label: "probe.cpu.field.single_events", Value: formatSysbenchEvents(single)},
-		{Key: "multi_events", Label: "probe.cpu.field.multi_events", Value: formatSysbenchEvents(multi)},
+		{Key: "engine", Label: "probe.cpu.field.engine", Value: model.RawValue("sysbench")},
+		{Key: "version", Label: "probe.cpu.field.version", Value: model.RawValue(version)},
+		{Key: "binary_sha256", Label: "probe.cpu.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
+		{Key: "threads", Label: "probe.cpu.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
+		{Key: "cpu_allowance", Label: "probe.cpu.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
+		{Key: "duration", Label: "probe.cpu.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", seconds))},
+		{Key: "prime", Label: "probe.cpu.field.prime", Value: model.RawValue("20000")},
+		{Key: "single_events", Label: "probe.cpu.field.single_events", Value: model.RawValue(formatSysbenchEvents(single))},
+		{Key: "multi_events", Label: "probe.cpu.field.multi_events", Value: model.RawValue(formatSysbenchEvents(multi))},
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
+	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
+	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", seconds))
+	addComparisonParameter(result.Methodology.Parameters, "prime", "20000")
 	validity := "probe.cpu.validity.valid"
 	if allowance.Limited() {
 		validity = "probe.cpu.validity.quota"
@@ -148,10 +155,10 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	if (stealOK && steal >= stealNoticeThreshold) || (loadKnown && load1 > float64(workers)*1.5) {
 		validity = "probe.cpu.validity.interfered"
 	}
-	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "probe.cpu.field.result_validity", Value: validity})
+	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "probe.cpu.field.result_validity", Value: model.KeyValue(validity)})
 	if loadKnown {
 		result.Fields = append(result.Fields, model.Field{
-			Key: "pretest_load_1m", Label: "probe.cpu.field.pretest_load_1m", Value: fmt.Sprintf("%.2f", load1),
+			Key: "pretest_load_1m", Label: "probe.cpu.field.pretest_load_1m", Value: model.RawValue(fmt.Sprintf("%.2f", load1)),
 		})
 	}
 	result.TextBlocks = []model.TextBlock{
@@ -196,20 +203,20 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 func appendSysbenchCPUMeasurements(result *model.Result, single, multi sysbenchCPUResult, workers int) {
 	result.Measurements = append(result.Measurements, model.Measurement{
 		Key: "sysbench_cpu_single_events_s", Label: "probe.cpu.metric.single_events_s",
-		Value: single.Rate, Unit: "events/s", Display: model.FormatRate(single.Rate, "events/s"),
+		Value: single.Rate, Unit: "events/s", Display: model.RawValue(model.FormatRate(single.Rate, "events/s")),
 		Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(true),
 	})
 	if single.P95MS > 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "sysbench_cpu_single_p95_ms", Label: "probe.cpu.metric.single_p95_ms",
-			Value: single.P95MS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", single.P95MS),
+			Value: single.P95MS, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.2f ms", single.P95MS)),
 			Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(false),
 		})
 	}
 	if multi.Rate > 0 {
 		result.Measurements = append(result.Measurements, model.Measurement{
 			Key: "sysbench_cpu_multi_events_s", Label: "probe.cpu.metric.multi_events_s",
-			Value: multi.Rate, Unit: "events/s", Display: model.FormatRate(multi.Rate, "events/s"),
+			Value: multi.Rate, Unit: "events/s", Display: model.RawValue(model.FormatRate(multi.Rate, "events/s")),
 			Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(true),
 		})
 		if workers > 1 {
@@ -217,18 +224,18 @@ func appendSysbenchCPUMeasurements(result *model.Result, single, multi sysbenchC
 			efficiency := scaling / float64(workers) * 100
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key: "sysbench_cpu_scaling_ratio", Label: "probe.cpu.metric.scaling_ratio",
-				Value: scaling, Unit: "x", Display: fmt.Sprintf("%.2f×", scaling),
+				Value: scaling, Unit: "x", Display: model.RawValue(fmt.Sprintf("%.2f×", scaling)),
 				Method: "sysbench-cpu-scaling-v1", HigherIsBetter: model.BoolPtr(true),
 			}, model.Measurement{
 				Key: "sysbench_cpu_per_thread_efficiency_percent", Label: "probe.cpu.metric.per_thread_efficiency_percent",
-				Value: efficiency, Unit: "%", Display: fmt.Sprintf("%.1f %%", efficiency),
+				Value: efficiency, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.1f %%", efficiency)),
 				Method: "sysbench-cpu-scaling-v1", HigherIsBetter: model.BoolPtr(true),
 			})
 		}
 		if multi.P95MS > 0 {
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key: "sysbench_cpu_multi_p95_ms", Label: "probe.cpu.metric.multi_p95_ms",
-				Value: multi.P95MS, Unit: "ms", Display: fmt.Sprintf("%.2f ms", multi.P95MS),
+				Value: multi.P95MS, Unit: "ms", Display: model.RawValue(fmt.Sprintf("%.2f ms", multi.P95MS)),
 				Method: "sysbench-cpu-prime20000-v1", HigherIsBetter: model.BoolPtr(false),
 			})
 		}

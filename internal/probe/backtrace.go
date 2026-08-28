@@ -28,9 +28,7 @@ import (
 
 type backtraceProbe struct{}
 
-func (backtraceProbe) ID() string         { return "backtrace" }
-func (backtraceProbe) Title() string      { return "module.backtrace.title" }
-func (backtraceProbe) NeedsNetwork() bool { return true }
+func (backtraceProbe) ID() string { return "backtrace" }
 
 const (
 	backtraceStatusIdentified   = "probe.backtrace.status.identified"
@@ -167,6 +165,11 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         "probe.backtrace.profile",
 		ComparisonScope: "probe.backtrace.comparison_scope",
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.BacktraceTargets)
+	addComparisonParameter(result.Methodology.Parameters, "max_hops", strconv.Itoa(backtraceMaxHops))
+	addComparisonParameter(result.Methodology.Parameters, "signature_set", "china-backbone-v2")
 
 	engine := detectRouteEngine(ctx)
 	if engine.Path == "" {
@@ -198,11 +201,13 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		return result
 	}
 	result.Fields = []model.Field{
-		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: engine.Name},
-		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: fallback(engine.Version, "unknown")},
-		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256", Value: fallback(engine.SHA256, "unavailable")},
-		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: strings.Join(routeCommandArgsForFamily(engine, "<target>", backtraceMaxHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")},
+		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: model.RawValue(engine.Name)},
+		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: model.RawValue(fallback(engine.Version, "unknown"))},
+		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256", Value: model.RawValue(fallback(engine.SHA256, "unavailable"))},
+		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(engine, "<target>", backtraceMaxHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))},
 	}
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(engine.Version, "unknown"))
+	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(engine.SHA256, "unavailable"))
 
 	rows := make([]backtraceRow, len(targets))
 	semaphore := make(chan struct{}, backtraceConcurrency)
@@ -219,10 +224,17 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	wg.Wait()
 
 	table := model.Table{
-		Key:        "network.backtrace.summary",
-		Title:      "probe.backtrace.table.summary",
-		Columns:    []string{"probe.backtrace.column.provider", "probe.backtrace.column.target", "probe.backtrace.column.line", "probe.backtrace.column.hit_hop", "probe.backtrace.column.hit_ip", "probe.backtrace.column.status", "probe.backtrace.column.reason"},
-		ColumnKeys: []string{"provider", "reference_target", "line", "hit_hop", "hit_ip", "status", "reason"},
+		Key:   "network.backtrace.summary",
+		Title: "probe.backtrace.table.summary",
+		Columns: []model.TableColumn{
+			{Key: "provider", Label: "probe.backtrace.column.provider"},
+			{Key: "reference_target", Label: "probe.backtrace.column.target"},
+			{Key: "line", Label: "probe.backtrace.column.line"},
+			{Key: "hit_hop", Label: "probe.backtrace.column.hit_hop"},
+			{Key: "hit_ip", Label: "probe.backtrace.column.hit_ip"},
+			{Key: "status", Label: "probe.backtrace.column.status"},
+			{Key: "reason", Label: "probe.backtrace.column.reason"},
+		},
 	}
 	identified := 0
 	validTraces := 0
@@ -240,18 +252,27 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		if row.Err != nil {
 			addFailure(&result, "trace", row.Target.Address, row.Err)
 			if countValidTraceHops(row.Details) == 0 {
-				table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonTraceError})
+				table.Rows = append(table.Rows, []model.Value{
+					backtraceCarrierValue(row.Target.Kind), backtraceTargetValue(row.Target.Name), model.KeyValue(backtraceMissingValue),
+					model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceStatusFailed), model.KeyValue(backtraceReasonTraceError),
+				})
 				continue
 			}
 			validTraces++
 		} else if row.ParseFailed {
 			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: row.Target.Address, Count: 1})
 			parseFailed = true
-			table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonParseFailed})
+			table.Rows = append(table.Rows, []model.Value{
+				backtraceCarrierValue(row.Target.Kind), backtraceTargetValue(row.Target.Name), model.KeyValue(backtraceMissingValue),
+				model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceStatusFailed), model.KeyValue(backtraceReasonParseFailed),
+			})
 			continue
 		} else if row.NoResponsiveHops {
 			result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "trace", Target: row.Target.Address, Count: 1})
-			table.Rows = append(table.Rows, []string{backtraceCarrierKey(row.Target.Kind), row.Target.Name, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed, backtraceReasonNoResponsiveHops})
+			table.Rows = append(table.Rows, []model.Value{
+				backtraceCarrierValue(row.Target.Kind), backtraceTargetValue(row.Target.Name), model.KeyValue(backtraceMissingValue),
+				model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceMissingValue), model.KeyValue(backtraceStatusFailed), model.KeyValue(backtraceReasonNoResponsiveHops),
+			})
 			continue
 		} else {
 			validTraces++
@@ -268,35 +289,44 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			status = backtraceStatusIdentified
 			reason = backtraceReasonSignatureMatch
 		}
-		table.Rows = append(table.Rows, []string{
-			backtraceCarrierKey(row.Target.Kind), row.Target.Name, line, hitHop, hitIP, status, reason,
+		table.Rows = append(table.Rows, []model.Value{
+			backtraceCarrierValue(row.Target.Kind), backtraceTargetValue(row.Target.Name), model.KeyValue(line), backtraceDataValue(hitHop), backtraceDataValue(hitIP), model.KeyValue(status), model.KeyValue(reason),
 		})
 	}
 	detailTable := model.Table{
-		Key:        "network.backtrace.hops",
-		Title:      "probe.backtrace.table.hops",
-		Columns:    []string{"probe.backtrace.column.target", "probe.backtrace.column.provider", "probe.backtrace.column.hop", "probe.backtrace.column.latency", "probe.backtrace.column.ip", "probe.backtrace.column.asn", "probe.backtrace.column.network", "probe.backtrace.column.location", "probe.backtrace.column.status"},
-		ColumnKeys: []string{"reference_target", "provider", "hop", "latency_ms", "ip", "asn", "network", "location", "status"},
+		Key:   "network.backtrace.hops",
+		Title: "probe.backtrace.table.hops",
+		Columns: []model.TableColumn{
+			{Key: "reference_target", Label: "probe.backtrace.column.target"},
+			{Key: "provider", Label: "probe.backtrace.column.provider"},
+			{Key: "hop", Label: "probe.backtrace.column.hop"},
+			{Key: "latency_ms", Label: "probe.backtrace.column.latency"},
+			{Key: "ip", Label: "probe.backtrace.column.ip"},
+			{Key: "asn", Label: "probe.backtrace.column.asn"},
+			{Key: "network", Label: "probe.backtrace.column.network"},
+			{Key: "location", Label: "probe.backtrace.column.location"},
+			{Key: "status", Label: "probe.backtrace.column.status"},
+		},
 		// 回程跳点是远端路径信息；按要求只脱敏本机出口 IP。
 	}
 	for _, row := range rows {
 		if len(row.Details) == 0 {
-			detailTable.Rows = append(detailTable.Rows, []string{
-				row.Target.Name, backtraceCarrierKey(row.Target.Kind), backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceMissingValue, backtraceStatusFailed,
+			detailTable.Rows = append(detailTable.Rows, []model.Value{
+				backtraceTargetValue(row.Target.Name), backtraceCarrierValue(row.Target.Kind), model.KeyValue(backtraceMissingValue), backtraceDataValue(backtraceMissingValue), backtraceDataValue(backtraceMissingValue), backtraceDataValue(backtraceMissingValue), backtraceDataValue(backtraceMissingValue), backtraceDataValue(backtraceMissingValue), model.KeyValue(backtraceStatusFailed),
 			})
 			continue
 		}
 		for _, hop := range row.Details {
-			detailTable.Rows = append(detailTable.Rows, []string{
-				row.Target.Name,
-				backtraceCarrierKey(row.Target.Kind),
-				strconv.Itoa(hop.Hop),
-				backtraceCellValue(hop.Latency),
-				backtraceCellValue(hop.IP),
-				backtraceCellValue(hop.ASN),
-				backtraceCellValue(hop.Network),
-				backtraceCellValue(hop.Location),
-				backtraceCellValue(hop.Status),
+			detailTable.Rows = append(detailTable.Rows, []model.Value{
+				backtraceTargetValue(row.Target.Name),
+				backtraceCarrierValue(row.Target.Kind),
+				model.RawValue(strconv.Itoa(hop.Hop)),
+				backtraceDataValue(backtraceCellValue(hop.Latency)),
+				backtraceDataValue(backtraceCellValue(hop.IP)),
+				backtraceDataValue(backtraceCellValue(hop.ASN)),
+				backtraceNetworkValue(backtraceCellValue(hop.Network)),
+				backtraceDataValue(backtraceCellValue(hop.Location)),
+				model.KeyValue(backtraceCellValue(hop.Status)),
 			})
 		}
 	}
@@ -305,7 +335,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		{
 			Key: "backtrace_identified", Label: "probe.backtrace.metric.identified",
 			Value: float64(identified), Unit: "count",
-			Display: fmt.Sprintf("%d/%d", identified, len(targets)),
+			Display: model.RawValue(fmt.Sprintf("%d/%d", identified, len(targets))),
 			Method:  "china-backbone-signature-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}
@@ -634,6 +664,77 @@ func backtraceCellValue(value string) string {
 		return backtraceMissingValue
 	}
 	return value
+}
+
+// backtraceTargetValue uses the explicit built-in target-key format. Custom
+// target names remain literal even when they happen to resemble a catalog
+// entry; no catalog lookup is used to infer the variant.
+func backtraceTargetValue(name string) model.Value {
+	const prefix = "probe.backtrace.target."
+	suffix, ok := strings.CutPrefix(name, prefix)
+	if ok {
+		parts := strings.Split(suffix, ".")
+		if len(parts) == 3 && isBacktraceCity(parts[0]) && isBacktraceCarrier(parts[1]) && isBacktraceFamily(parts[2]) {
+			return model.KeyValue(name)
+		}
+	}
+	return model.RawValue(name)
+}
+
+func isBacktraceCity(city string) bool {
+	for _, known := range config.BacktraceCityOrder() {
+		if city == known {
+			return true
+		}
+	}
+	return false
+}
+
+func isBacktraceCarrier(carrier string) bool {
+	switch carrier {
+	case config.BacktraceCarrierTelecom, config.BacktraceCarrierUnicom, config.BacktraceCarrierMobile:
+		return true
+	default:
+		return false
+	}
+}
+
+func isBacktraceFamily(family string) bool {
+	return family == "ipv4" || family == "ipv6"
+}
+
+func backtraceCarrierValue(carrier string) model.Value {
+	key := backtraceCarrierKey(carrier)
+	if key == carrier {
+		return model.RawValue(carrier)
+	}
+	return model.KeyValue(key)
+}
+
+func backtraceDataValue(value string) model.Value {
+	if value == backtraceMissingValue {
+		return model.KeyValue(value)
+	}
+	return model.RawValue(value)
+}
+
+func backtraceNetworkValue(value string) model.Value {
+	if value == backtraceMissingValue || isBacktraceLineKey(value) {
+		return model.KeyValue(value)
+	}
+	return model.RawValue(value)
+}
+
+func isBacktraceLineKey(value string) bool {
+	switch value {
+	case backtraceLineTelecomCN2, backtraceLineTelecomCN2GIA, backtraceLineTelecomCN2GT,
+		backtraceLineTelecom163, backtraceLineUnicomCUII, backtraceLineUnicom169,
+		backtraceLineMobileCMI, backtraceLineMobileCMNET, backtraceLineTelecomIPv6,
+		backtraceLineUnicomCUIIIPv6, backtraceLineUnicom169IPv6, backtraceLineMobileCMNETIPv6:
+		return true
+	default:
+		return false
+	}
 }
 
 func backtraceCarrierKey(carrier string) string {

@@ -20,9 +20,7 @@ import (
 
 type networkProbe struct{}
 
-func (networkProbe) ID() string         { return "network" }
-func (networkProbe) Title() string      { return networkTitleKey }
-func (networkProbe) NeedsNetwork() bool { return true }
+func (networkProbe) ID() string { return "network" }
 
 type ipAPIResponse struct {
 	IP string `json:"ip"`
@@ -145,6 +143,10 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		Profile:         networkMethodologyProfile,
 		ComparisonScope: networkComparisonScope,
 	}
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameterHash(result.Methodology.Parameters, "ip_quality_sources_sha256", env.Config.IPQualitySources)
+	addComparisonParameter(result.Methodology.Parameters, "http_timeout", env.Config.HTTPTimeout.String())
 
 	versions := config.IPVersions(env.Config.IPVersion)
 	plannedSources := enabledIPQualitySourceCount(env.Config.IPQualitySources)
@@ -174,7 +176,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		result.Notes = append(result.Notes, "probe.network.note.egress_lookup_failed")
 		result.Fields = append(result.Fields, model.Field{
-			Key: "ipv" + version + "_lookup_error", Label: networkFieldLabelKey("ipv" + version + "_lookup_error"), Value: "probe.network.value.lookup_failed",
+			Key: "ipv" + version + "_lookup_error", Label: networkFieldLabelKey("ipv" + version + "_lookup_error"), Value: model.KeyValue("probe.network.value.lookup_failed"),
 		})
 	}
 	if len(found) == 0 {
@@ -216,12 +218,16 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	overview := model.Table{
 		Key:   "network.egress.overview",
 		Title: "probe.network.table.overview",
-		Columns: []string{
-			"probe.network.column.ip_family", "probe.network.column.network_type", "probe.network.column.datacenter",
-			"probe.network.column.proxy", "probe.network.column.vpn", "probe.network.column.tor",
-			"probe.network.column.abuse", "probe.network.column.duration",
+		Columns: []model.TableColumn{
+			{Key: "ip_family", Label: "probe.network.column.ip_family"},
+			{Key: "network_type", Label: "probe.network.column.network_type"},
+			{Key: "datacenter", Label: "probe.network.column.datacenter"},
+			{Key: "proxy", Label: "probe.network.column.proxy"},
+			{Key: "vpn", Label: "probe.network.column.vpn"},
+			{Key: "tor", Label: "probe.network.column.tor"},
+			{Key: "abuse_record", Label: "probe.network.column.abuse"},
+			{Key: "source_duration", Label: "probe.network.column.duration"},
 		},
-		ColumnKeys:  []string{"ip_family", "network_type", "datacenter", "proxy", "vpn", "tor", "abuse_record", "source_duration"},
 		RowIdentity: "ip_family",
 	}
 	var summaryMessages []model.Message
@@ -242,8 +248,9 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		if location == "" {
 			location = bundleCountry(bundle)
 		}
+		locationValue := model.RawValue(location)
 		if location == "" {
-			location = unavailableIPField(lookup, "unknown")
+			locationValue = unavailableIPFieldValue(lookup, "unknown")
 		}
 		originASN, route := egressBGPIdentity(lookup.BGPObservations)
 		asnNumber := data.ASN.ASN
@@ -251,44 +258,52 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 			asnNumber = originASN
 		}
 		asn := formatASNWithOrganization(asnNumber, data.ASN.Organization)
-		if asn == "unknown" {
-			asn = unavailableIPField(lookup, asn)
+		asnValue := model.RawValue(asn)
+		if asn == "unknown" || asn == networkMissingValue {
+			asnValue = unavailableIPFieldValue(lookup, asn)
 		}
 		route = firstNonEmpty(data.ASN.Route, route)
+		routeValue := model.RawValue(route)
 		if route == "" {
-			route = unavailableIPField(lookup, "unknown")
+			routeValue = unavailableIPFieldValue(lookup, "unknown")
 		}
 		owner := firstNonEmpty(data.Company.Name, data.ASN.Organization)
+		ownerValue := model.RawValue(owner)
 		if owner == "" {
-			owner = unavailableIPField(lookup, "unknown")
+			ownerValue = unavailableIPFieldValue(lookup, "unknown")
 		}
 		ipType := "probe.network.ip_type.unknown"
-		usageCountry := networkMissingValue
-		registeredCountry := networkMissingValue
+		usageCountryValue := model.KeyValue(networkMissingValue)
+		registeredCountryValue := model.KeyValue(networkMissingValue)
 		if bundle.Origin.Enabled {
 			ipType = bundle.Origin.Label
-			usageCountry = firstNonEmpty(bundle.Origin.UsageCountry, networkMissingValue)
-			registeredCountry = firstNonEmpty(bundle.Origin.RegisteredCountry, networkMissingValue)
+			if strings.TrimSpace(bundle.Origin.UsageCountry) != "" {
+				usageCountryValue = model.RawValue(bundle.Origin.UsageCountry)
+			}
+			if strings.TrimSpace(bundle.Origin.RegisteredCountry) != "" {
+				registeredCountryValue = model.RawValue(bundle.Origin.RegisteredCountry)
+			}
 		}
 		result.Fields = append(result.Fields,
-			model.Field{Key: prefix, Label: networkFieldLabelKey(prefix), Value: data.IP, Sensitive: true},
-			model.Field{Key: prefix + "_asn", Label: networkFieldLabelKey(prefix + "_asn"), Value: asn},
-			model.Field{Key: prefix + "_route", Label: networkFieldLabelKey(prefix + "_route"), Value: route},
-			model.Field{Key: prefix + "_location", Label: networkFieldLabelKey(prefix + "_location"), Value: location},
-			model.Field{Key: prefix + "_owner", Label: networkFieldLabelKey(prefix + "_owner"), Value: owner},
-			model.Field{Key: prefix + "_ip_type", Label: networkFieldLabelKey(prefix + "_ip_type"), Value: ipType},
-			model.Field{Key: prefix + "_usage_country", Label: networkFieldLabelKey(prefix + "_usage_country"), Value: usageCountry},
-			model.Field{Key: prefix + "_registered_country", Label: networkFieldLabelKey(prefix + "_registered_country"), Value: registeredCountry},
+			model.Field{Key: prefix, Label: networkFieldLabelKey(prefix), Value: model.RawValue(data.IP), Sensitive: true},
+			model.Field{Key: prefix + "_asn", Label: networkFieldLabelKey(prefix + "_asn"), Value: asnValue},
+			model.Field{Key: prefix + "_route", Label: networkFieldLabelKey(prefix + "_route"), Value: routeValue},
+			model.Field{Key: prefix + "_location", Label: networkFieldLabelKey(prefix + "_location"), Value: locationValue},
+			model.Field{Key: prefix + "_owner", Label: networkFieldLabelKey(prefix + "_owner"), Value: ownerValue},
+			model.Field{Key: prefix + "_ip_type", Label: networkFieldLabelKey(prefix + "_ip_type"), Value: model.KeyValue(ipType)},
+			model.Field{Key: prefix + "_usage_country", Label: networkFieldLabelKey(prefix + "_usage_country"), Value: usageCountryValue},
+			model.Field{Key: prefix + "_registered_country", Label: networkFieldLabelKey(prefix + "_registered_country"), Value: registeredCountryValue},
 		)
-		overview.Rows = append(overview.Rows, []string{
-			networkIPFamilyKey(lookup.Version),
-			firstNonEmpty(normalizeNetworkType(firstNonEmpty(data.Company.Type, data.ASN.Type)), networkMissingValue),
-			ipAPIBooleanText(data.IsDatacenter, data.BooleanPresence.IsDatacenter),
-			ipAPIBooleanText(data.IsProxy, data.BooleanPresence.IsProxy),
-			ipAPIBooleanText(data.IsVPN, data.BooleanPresence.IsVPN),
-			ipAPIBooleanText(data.IsTor, data.BooleanPresence.IsTor),
-			ipAPIBooleanText(data.IsAbuser, data.BooleanPresence.IsAbuser),
-			fmt.Sprintf("%.0f ms", float64(lookup.Latency)/float64(time.Millisecond)),
+		networkType := firstNonEmpty(normalizeNetworkType(firstNonEmpty(data.Company.Type, data.ASN.Type)), networkMissingValue)
+		overview.Rows = append(overview.Rows, []model.Value{
+			model.KeyValue(networkIPFamilyKey(lookup.Version)),
+			model.KeyValue(networkType),
+			model.KeyValue(ipAPIBooleanText(data.IsDatacenter, data.BooleanPresence.IsDatacenter)),
+			model.KeyValue(ipAPIBooleanText(data.IsProxy, data.BooleanPresence.IsProxy)),
+			model.KeyValue(ipAPIBooleanText(data.IsVPN, data.BooleanPresence.IsVPN)),
+			model.KeyValue(ipAPIBooleanText(data.IsTor, data.BooleanPresence.IsTor)),
+			model.KeyValue(ipAPIBooleanText(data.IsAbuser, data.BooleanPresence.IsAbuser)),
+			model.RawValue(fmt.Sprintf("%.0f ms", float64(lookup.Latency)/float64(time.Millisecond))),
 		})
 		result.Measurements = append(result.Measurements, bundle.measurements()...)
 		if !lookup.HasIntel && lookup.IntelErr != nil && !qualitySourceEnabled(env.Config.IPQualitySources, "ipapi") {
@@ -360,7 +375,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Tables = append([]model.Table{overview}, result.Tables...)
 	result.Evidence = model.NewEvidence(validSources, expectedSources, "source")
 	result.Fields = append([]model.Field{{
-		Key: "ip_version_mode", Label: networkFieldLabelKey("ip_version_mode"), Value: fallback(env.Config.IPVersion, config.IPVersionAuto),
+		Key: "ip_version_mode", Label: networkFieldLabelKey("ip_version_mode"), Value: model.RawValue(fallback(env.Config.IPVersion, config.IPVersionAuto)),
 	}}, result.Fields...)
 	result.Sources = []model.Source{
 		{Name: networkSourceNameKey("ipapi"), URL: "https://ipapi.is/", Purpose: "probe.network.source.ipapi"},
@@ -462,6 +477,18 @@ func unavailableIPField(lookup ipLookup, normalFallback string) string {
 		return "probe.network.value.intel_unavailable"
 	}
 	return "probe.network.value.intel_not_attempted"
+}
+
+func unavailableIPFieldValue(lookup ipLookup, normalFallback string) model.Value {
+	if lookup.HasIntel {
+		switch normalFallback {
+		case "", "unknown", networkMissingValue:
+			return model.KeyValue(networkMissingValue)
+		default:
+			return model.RawValue(normalFallback)
+		}
+	}
+	return model.KeyValue(unavailableIPField(lookup, normalFallback))
 }
 
 func lookupIP(ctx context.Context, env Environment, version string) (ipAPIResponse, time.Duration, error) {

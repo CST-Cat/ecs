@@ -25,7 +25,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	report := scoreReportFixture()
 	system := findResult(&report, "system")
 	system.Fields = append(system.Fields,
-		model.Field{Key: "public_ip", Value: "203.0.113.10"},
+		model.Field{Key: "public_ip", Value: model.RawValue("203.0.113.10")},
 	)
 	provider, region := ExtractSubmissionMetadata(report)
 	if provider != "fixture-cloud" || region != "fixture-region" {
@@ -95,8 +95,8 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 
 	unsafe := scoreReportFixture()
 	unsafeSystem := findResult(&unsafe, "system")
-	unsafeSystem.Fields[0].Value = "https://provider.example"
-	unsafeSystem.Fields[1].Value = "203.0.113.10"
+	unsafeSystem.Fields[0].Value = model.RawValue("https://provider.example")
+	unsafeSystem.Fields[1].Value = model.RawValue("203.0.113.10")
 	provider, region = ExtractSubmissionMetadata(unsafe)
 	if provider != "" || region != "" {
 		t.Fatalf("unsafe report metadata was retained: %q/%q", provider, region)

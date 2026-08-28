@@ -11,13 +11,10 @@ import (
 )
 
 type bindingTestProbe struct {
-	id      string
-	network bool
+	id string
 }
 
 func (p bindingTestProbe) ID() string                                          { return p.id }
-func (p bindingTestProbe) Title() string                                       { return p.id }
-func (p bindingTestProbe) NeedsNetwork() bool                                  { return p.network }
 func (p bindingTestProbe) Run(context.Context, probe.Environment) model.Result { return model.Result{} }
 
 func TestBindBuiltinModulesAndSelectCanonicalOrder(t *testing.T) {
@@ -61,9 +58,6 @@ func TestBindModuleProbesRejectsDistinctContractErrors(t *testing.T) {
 		{name: "missing probe", descr: func() []config.ModuleDescriptor {
 			return []config.ModuleDescriptor{{ID: "local"}, {ID: "remote", Exposure: config.ExposurePublic}}
 		}, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{id: "local"}} }, marker: "has no probe"},
-		{name: "network metadata mismatch", descr: func() []config.ModuleDescriptor {
-			return []config.ModuleDescriptor{{ID: "remote", Exposure: config.ExposurePublic}}
-		}, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{id: "remote"}} }, marker: "NeedsNetwork=false"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -75,14 +69,14 @@ func TestBindModuleProbesRejectsDistinctContractErrors(t *testing.T) {
 	}
 }
 
-func TestHasNetworkModulesUsesDescriptorExposureAndProbeFallback(t *testing.T) {
-	local := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "local", Exposure: config.ExposureLocal}, Probe: bindingTestProbe{id: "local", network: true}}
-	remote := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "remote", Exposure: config.ExposurePublic}, Probe: bindingTestProbe{id: "remote", network: false}}
-	fallback := moduleBinding{Probe: bindingTestProbe{id: "custom", network: true}}
+func TestHasNetworkModulesUsesDescriptorExposure(t *testing.T) {
+	local := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "local", Exposure: config.ExposureLocal}, Probe: bindingTestProbe{id: "local"}}
+	remote := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "remote", Exposure: config.ExposurePublic}, Probe: bindingTestProbe{id: "remote"}}
+	fallback := moduleBinding{Probe: bindingTestProbe{id: "custom"}}
 	if hasNetworkModules(nil) || hasNetworkModules([]moduleBinding{local}) {
 		t.Fatal("local or empty selection unexpectedly requires network")
 	}
-	if !hasNetworkModules([]moduleBinding{remote}) || !hasNetworkModules([]moduleBinding{fallback}) {
-		t.Fatal("network descriptor/probe fallback was not detected")
+	if !hasNetworkModules([]moduleBinding{remote}) || hasNetworkModules([]moduleBinding{fallback}) {
+		t.Fatal("network detection did not use descriptor metadata exclusively")
 	}
 }

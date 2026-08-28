@@ -59,22 +59,16 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // flag 包要等到子命令解析时才能拿到值，但帮助与错误输出比那更早，
 // 因此这里先扫一遍参数。
 func resolveLanguage(args []string) i18n.Lang {
-	for index := 0; index < len(args); index++ {
-		value := args[index]
-		var raw string
-		switch {
-		case (value == "--lang" || value == "-lang") && index+1 < len(args):
-			raw = args[index+1]
-		case strings.HasPrefix(value, "--lang="):
-			raw = strings.TrimPrefix(value, "--lang=")
-		case strings.HasPrefix(value, "-lang="):
-			raw = strings.TrimPrefix(value, "-lang=")
-		default:
-			continue
+	var resolved i18n.Lang
+	valid := false
+	for _, occurrence := range scanEarlyFlags(args, "lang") {
+		if lang, ok := i18n.Parse(occurrence.Value); ok {
+			resolved = lang
+			valid = true
 		}
-		if lang, ok := i18n.Parse(raw); ok {
-			return lang
-		}
+	}
+	if valid {
+		return resolved
 	}
 	return i18n.DetectFromEnv()
 }

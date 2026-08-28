@@ -33,9 +33,20 @@ import (
 
 type blacklistProbe struct{}
 
-func (blacklistProbe) ID() string         { return "blacklist" }
-func (blacklistProbe) Title() string      { return "IP 信誉与发信条件" }
-func (blacklistProbe) NeedsNetwork() bool { return true }
+func (blacklistProbe) ID() string { return "blacklist" }
+
+func newBlacklistResult() model.Result {
+	result := model.NewResult("blacklist", "module.blacklist.title")
+	result.Description = "probe.blacklist.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "DNSBL over DNS A lookup",
+		Profile:         "probe.blacklist.profile",
+		ComparisonScope: "probe.blacklist.comparison_scope",
+	}
+	return result
+}
 
 // dnsblZone 是一个黑名单区域。
 type dnsblZone struct {
@@ -159,6 +170,11 @@ func queryDNSBL(ctx context.Context, resolver *net.Resolver, prefix string, zone
 	return finding
 }
 
+var (
+	dnsblQueryForProbe       = queryDNSBL
+	appendReverseDNSForProbe = appendReverseDNS
+)
+
 // asDNSError 在不引入额外依赖的前提下做一次类型断言。
 func asDNSError(err error, target **net.DNSError) bool {
 	if dnsErr, ok := err.(*net.DNSError); ok {
@@ -170,20 +186,15 @@ func asDNSError(err error, target **net.DNSError) bool {
 
 func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("blacklist", "IP 信誉与发信条件")
-	result.Description = "DNS 黑名单收录情况与反向解析（FCrDNS）——判断发信能力的两大要素"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "DNSBL over DNS A lookup",
-		Profile:         fmt.Sprintf("%d 个实测可用的黑名单区域", len(dnsblZones())),
-		ComparisonScope: "当次查询结果；各名单收录标准与解除流程不同，不可合并计分",
-	}
+	result := newBlacklistResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	addComparisonParameter(result.Methodology.Parameters, "zone_set", "dnsbl-zones-v1")
+	zones := dnsblZones()
 	if env.Config.IPVersion == config.IPVersion6 {
 		result.Skip(model.NewMessage("probe.blacklist.summary.skipped"))
-		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
-		result.Notes = append(result.Notes,
-			"本次运行显式限制为 IPv6。绝大多数 DNS 黑名单只支持 IPv4，因此不会把 IPv6 强行映射成无意义的反向查询。")
+		result.Evidence = model.NewEvidence(0, len(zones), "query")
+		result.Notes = blacklistNotes()
 		result.Finish(start)
 		return result
 	}
@@ -191,8 +202,9 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	egressIP, err := env.Egress.IPFor(config.IPVersion4)
 	if err != nil {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "黑名单查询需要先知道出口 IPv4；本次出口发现失败。")
-		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
+		result.Notes = blacklistNotes()
+		result.Evidence = model.NewEvidence(0, len(zones), "query")
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.clean", 0)}
 		result.Finish(start)
 		return result
 	}
@@ -200,14 +212,13 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	prefix, ok := reverseIPv4(ip)
 	if !ok {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"绝大多数 DNS 黑名单只收录 IPv4；本机出口为 IPv6，本项无法给出结论。")
-		result.Evidence = model.NewEvidence(0, len(dnsblZones()), "query")
+		result.Notes = blacklistNotes()
+		result.Evidence = model.NewEvidence(0, len(zones), "query")
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.clean", 0)}
 		result.Finish(start)
 		return result
 	}
 
-	zones := dnsblZones()
 	findings := make([]dnsblFinding, len(zones))
 	// 限制并发：DNSBL 对突发查询敏感，过快会被判为滥用而拒绝服务。
 	semaphore := make(chan struct{}, 6)
@@ -219,19 +230,22 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			findings[index] = queryDNSBL(ctx, resolver, prefix, zone)
+			findings[index] = dnsblQueryForProbe(ctx, resolver, prefix, zone)
 		}(index, zone)
 	}
 	wg.Wait()
 
 	table := model.Table{
-		Key:                   "network.dnsbl.results",
-		Title:                 "DNS 黑名单查询",
-		Columns:               []string{"名单", "结论", "返回码", "收录范围", "耗时"},
-		ColumnKeys:            []string{"list", "outcome", "response_code", "scope", "latency_ms"},
-		RowIdentity:           "list",
-		NumericColumns:        []int{4},
-		NumericHigherIsBetter: []bool{false},
+		Key:   "network.dnsbl.results",
+		Title: "probe.blacklist.table.results",
+		Columns: []model.TableColumn{
+			{Key: "list", Label: "probe.blacklist.column.list"},
+			{Key: "outcome", Label: "probe.blacklist.column.outcome"},
+			{Key: "response_code", Label: "probe.blacklist.column.code"},
+			{Key: "scope", Label: "probe.blacklist.column.scope"},
+			{Key: "latency_ms", Label: "probe.blacklist.column.latency", Numeric: true, HigherIsBetter: false},
+		},
+		RowIdentity: "list",
 	}
 	listed, refused, failed := 0, 0, 0
 	for _, finding := range findings {
@@ -248,96 +262,112 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 			failed++
 			addFailureMessage(&result, "dnsbl_query", finding.Zone.Zone, finding.Detail)
 		}
+	}
+	orderedFindings := append([]dnsblFinding(nil), findings...)
+	sort.SliceStable(orderedFindings, func(i, j int) bool {
+		// Sort from the structured DNSBL outcome, before it is converted to a
+		// localized table cell.
+		return dnsblOutcomeRank(orderedFindings[i].Outcome) < dnsblOutcomeRank(orderedFindings[j].Outcome)
+	})
+	for _, finding := range orderedFindings {
 		codes := strings.Join(finding.Codes, ", ")
 		if codes == "" {
 			codes = "—"
 		}
-		table.Rows = append(table.Rows, []string{
-			finding.Zone.Name,
-			string(finding.Outcome),
-			codes,
-			finding.Zone.Purpose,
-			formatMilliseconds(finding.Duration),
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(finding.Zone.Name),
+			dnsblOutcomeValue(finding.Outcome),
+			model.RawValue(codes),
+			model.RawValue(finding.Zone.Purpose),
+			model.RawValue(formatMilliseconds(finding.Duration)),
 		})
 	}
-	sort.SliceStable(table.Rows, func(i, j int) bool {
-		// 命中的排在最前，最需要被看到。
-		return dnsblRowRank(table.Rows[i][1]) < dnsblRowRank(table.Rows[j][1])
-	})
 	result.Tables = []model.Table{table}
 
 	result.Fields = []model.Field{
-		{Key: "queried_ip", Label: "查询的出口 IP", Value: egressIP, Sensitive: true},
-		{Key: "zones_total", Label: "查询名单数", Value: fmt.Sprintf("%d", len(zones))},
-		{Key: "resolver", Label: "使用的解析器", Value: "系统默认（部分名单拒绝公共解析器查询）"},
+		{Key: "queried_ip", Label: "probe.blacklist.field.queried_ip", Value: model.RawValue(egressIP), Sensitive: true},
+		{Key: "zones_total", Label: "probe.blacklist.field.zones_total", Value: model.RawValue(fmt.Sprintf("%d", len(zones)))},
+		{Key: "resolver", Label: "probe.blacklist.field.resolver", Value: model.RawValue("系统默认（部分名单拒绝公共解析器查询）")},
 	}
 	clean := len(zones) - listed - refused - failed
 	result.Measurements = dnsblCountMeasurements(listed, clean, refused, failed, len(zones))
 	result.Evidence = model.NewEvidence(listed+clean, len(zones), "query")
 	result.Sources = []model.Source{
-		{Name: "Spamhaus", URL: "https://www.spamhaus.org/", Purpose: "ZEN 综合黑名单"},
-		{Name: "SpamCop", URL: "https://www.spamcop.net/", Purpose: "基于举报的垃圾邮件源名单"},
-		{Name: "Barracuda", URL: "https://www.barracudacentral.org/", Purpose: "信誉库"},
+		{Name: "Spamhaus", URL: "https://www.spamhaus.org/", Purpose: "probe.blacklist.source.list"},
+		{Name: "SpamCop", URL: "https://www.spamcop.net/", Purpose: "probe.blacklist.source.list"},
+		{Name: "Barracuda", URL: "https://www.barracudacentral.org/", Purpose: "probe.blacklist.source.list"},
 	}
-	result.Notes = append(result.Notes,
-		"查询只把出口 IP 反转后作为域名发给各黑名单的 DNS 服务，不发送任何其他信息。",
-		"各名单收录标准差异很大：UCEPROTECT L2 按整段连带收录，可能因同机房邻居而误伤；"+
-			"SpamRats Dyna 只表示该段被认为是动态地址，与是否发过垃圾邮件无关。命中含义须逐条看。",
-		"127.255.255.x 是“查询被拒绝”的保留码（多为使用了公共解析器或超出配额），"+
-			"ecs 不会把它当作命中——否则换个 DNS 就会凭空多出几条黑名单记录。",
-	)
-	if refused > 0 {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"%d 个名单拒绝了本次查询。这些名单要求使用非公共解析器；若需要准确结果，"+
-				"请把系统 DNS 换成 VPS 服务商自带的解析器后重跑。", refused))
-	}
-	if failed > 0 {
-		result.Notes = append(result.Notes, fmt.Sprintf("%d 个名单查询失败（解析超时或服务不可用）。", failed))
-	}
-
-	appendReverseDNS(ctx, &result, egressIP)
+	result.Notes = blacklistNotes()
+	appendReverseDNSForProbe(ctx, &result, egressIP)
 
 	switch {
 	case listed > 0:
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"被主流黑名单收录会显著影响发信送达率；多数名单提供自助解除入口，"+
-				"但若该 IP 是被回收再分配的，解除后仍可能被再次收录。")
 	case refused == len(zones):
 		result.Status = model.StatusWarning
+	}
+	switch {
+	case listed > 0:
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.listed", listed, clean+listed+refused+failed)}
+	case refused > 0 && clean == 0 && failed == 0:
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.refused")}
+	default:
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.blacklist.summary.clean", clean)}
 	}
 	result.Finish(start)
 	return result
 }
 
+func blacklistNotes() []string {
+	return []string{
+		"probe.blacklist.note.query_scope",
+		"probe.blacklist.note.list_semantics",
+		"probe.blacklist.note.refused_code",
+	}
+}
+
+func dnsblOutcomeValue(outcome dnsblOutcome) model.Value {
+	switch outcome {
+	case dnsblListed:
+		return model.KeyValue("probe.blacklist.outcome.listed")
+	case dnsblClean:
+		return model.KeyValue("probe.blacklist.outcome.clean")
+	case dnsblRefused:
+		return model.KeyValue("probe.blacklist.outcome.refused")
+	case dnsblFailed:
+		return model.KeyValue("probe.blacklist.outcome.failed")
+	default:
+		return model.RawValue(string(outcome))
+	}
+}
+
 func dnsblCountMeasurements(listed, clean, refused, failed, total int) []model.Measurement {
 	return []model.Measurement{
 		{
-			Key: "dnsbl_listed_count", Label: "被收录名单数",
-			Value: float64(listed), Unit: "项", Display: fmt.Sprintf("%d/%d", listed, total),
+			Key: "dnsbl_listed_count", Label: "probe.blacklist.metric.dnsbl_listed_count",
+			Value: float64(listed), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", listed, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 		{
-			Key: "dnsbl_clean_count", Label: "确认未收录名单数",
-			Value: float64(clean), Unit: "项", Display: fmt.Sprintf("%d/%d", clean, total),
+			Key: "dnsbl_clean_count", Label: "probe.blacklist.metric.dnsbl_clean_count",
+			Value: float64(clean), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", clean, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 		{
-			Key: "dnsbl_refused_count", Label: "拒绝查询名单数",
-			Value: float64(refused), Unit: "项", Display: fmt.Sprintf("%d/%d", refused, total),
+			Key: "dnsbl_refused_count", Label: "probe.blacklist.metric.dnsbl_refused_count",
+			Value: float64(refused), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", refused, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 		{
-			Key: "dnsbl_failed_count", Label: "查询失败名单数",
-			Value: float64(failed), Unit: "项", Display: fmt.Sprintf("%d/%d", failed, total),
+			Key: "dnsbl_failed_count", Label: "probe.blacklist.metric.dnsbl_failed_count",
+			Value: float64(failed), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", failed, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 	}
 }
 
-// dnsblRowRank 决定表格排序：命中 > 被拒 > 失败 > 干净。
-func dnsblRowRank(outcome string) int {
-	switch dnsblOutcome(outcome) {
+func dnsblOutcomeRank(outcome dnsblOutcome) int {
+	switch outcome {
 	case dnsblListed:
 		return 0
 	case dnsblRefused:

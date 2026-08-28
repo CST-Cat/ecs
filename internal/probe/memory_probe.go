@@ -12,9 +12,7 @@ import (
 
 type memoryProbe struct{}
 
-func (memoryProbe) ID() string         { return "memory" }
-func (memoryProbe) Title() string      { return "module.memory.title" }
-func (memoryProbe) NeedsNetwork() bool { return false }
+func (memoryProbe) ID() string { return "memory" }
 
 func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
@@ -24,21 +22,13 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	allowance := detectCPUAllowance()
 
 	if path := officialStreamPath(); path != "" {
-		result := runStreamMemory(ctx, env, path)
-		stabilizeStreamMemoryResult(&result, allowance)
+		result := runStreamMemoryWithAllowance(ctx, env, path, allowance)
 		appendMemoryInventory(&result, memory, balloon, ksm)
+		result.Finish(start)
 		return result
 	}
 
-	result := model.NewResult("memory", "module.memory.title")
-	result.Description = "probe.memory.description"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "STREAM",
-		Profile:         "probe.memory.stream.profile",
-		ComparisonScope: "probe.memory.comparison_scope",
-	}
+	result := newMemoryResult()
 	appendMemoryInventory(&result, memory, balloon, ksm)
 	result.Status = model.StatusWarning
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.memory.stream_missing")}
@@ -52,6 +42,20 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Notes = append(result.Notes, "probe.memory.stream_missing")
 	result.Evidence = model.NewEvidence(0, len(distinctBenchmarkThreadCounts(allowance.Threads)), "run")
 	result.Finish(start)
+	return result
+}
+
+func newMemoryResult() model.Result {
+	result := model.NewResult("memory", "module.memory.title")
+	result.Description = "probe.memory.description"
+	result.Methodology = model.Methodology{
+		Kind:            "standard-benchmark",
+		Label:           "methodology.standard-benchmark",
+		Engine:          "STREAM",
+		Profile:         "probe.memory.stream.profile",
+		ComparisonScope: "probe.memory.comparison_scope",
+	}
+	result.Methodology.Parameters = newComparisonParameters()
 	return result
 }
 
@@ -86,16 +90,16 @@ func appendMemoryInventory(result *model.Result, memory memoryUsageSnapshot, bal
 		return
 	}
 	result.Fields = append(result.Fields,
-		model.Field{Key: "memory_total", Label: "probe.memory.field.total", Value: model.FormatBytes(memory.EffectiveTotalBytes)},
-		model.Field{Key: "memory_used", Label: "probe.memory.field.used", Value: model.FormatBytes(memory.EffectiveUsedBytes)},
-		model.Field{Key: "memory_available", Label: "probe.memory.field.available", Value: model.FormatBytes(memory.EffectiveAvailableBytes)},
-		model.Field{Key: "memory_usage_percent", Label: "probe.memory.field.usage_percent", Value: fmt.Sprintf("%.1f %%", memory.EffectiveUsagePercent)},
-		model.Field{Key: "balloon_reclaim", Label: "probe.memory.field.balloon_reclaim", Value: balloon.Status()},
-		model.Field{Key: "balloon_reclaim_available", Label: "probe.memory.field.balloon_reclaim_available", Value: strconv.FormatBool(balloon.Available)},
-		model.Field{Key: "balloon_reclaim_evidence", Label: "probe.memory.field.balloon_reclaim_evidence", Value: fallback(balloon.Evidence, "none found")},
-		model.Field{Key: "ksm_merging", Label: "probe.memory.field.ksm_merging", Value: ksm.Status()},
-		model.Field{Key: "ksm_merging_available", Label: "probe.memory.field.ksm_merging_available", Value: strconv.FormatBool(ksm.Available)},
-		model.Field{Key: "ksm_merging_evidence", Label: "probe.memory.field.ksm_merging_evidence", Value: fallback(ksm.Evidence, "none found")},
+		model.Field{Key: "memory_total", Label: "probe.memory.field.total", Value: model.RawValue(model.FormatBytes(memory.EffectiveTotalBytes))},
+		model.Field{Key: "memory_used", Label: "probe.memory.field.used", Value: model.RawValue(model.FormatBytes(memory.EffectiveUsedBytes))},
+		model.Field{Key: "memory_available", Label: "probe.memory.field.available", Value: model.RawValue(model.FormatBytes(memory.EffectiveAvailableBytes))},
+		model.Field{Key: "memory_usage_percent", Label: "probe.memory.field.usage_percent", Value: model.RawValue(fmt.Sprintf("%.1f %%", memory.EffectiveUsagePercent))},
+		model.Field{Key: "balloon_reclaim", Label: "probe.memory.field.balloon_reclaim", Value: model.RawValue(balloon.Status())},
+		model.Field{Key: "balloon_reclaim_available", Label: "probe.memory.field.balloon_reclaim_available", Value: model.RawValue(strconv.FormatBool(balloon.Available))},
+		model.Field{Key: "balloon_reclaim_evidence", Label: "probe.memory.field.balloon_reclaim_evidence", Value: model.RawValue(fallback(balloon.Evidence, "none found"))},
+		model.Field{Key: "ksm_merging", Label: "probe.memory.field.ksm_merging", Value: model.RawValue(ksm.Status())},
+		model.Field{Key: "ksm_merging_available", Label: "probe.memory.field.ksm_merging_available", Value: model.RawValue(strconv.FormatBool(ksm.Available))},
+		model.Field{Key: "ksm_merging_evidence", Label: "probe.memory.field.ksm_merging_evidence", Value: model.RawValue(fallback(ksm.Evidence, "none found"))},
 	)
 	if memory.LimitApplied {
 		result.Notes = append(result.Notes, "probe.memory.note.cgroup_limit")

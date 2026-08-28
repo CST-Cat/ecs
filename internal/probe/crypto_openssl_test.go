@@ -63,12 +63,12 @@ func TestOpenSSLMeasurementsAndTable(t *testing.T) {
 		}
 	}
 	table := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, runs, 2)
-	if table.Key != "benchmark.openssl.results" || len(table.ColumnKeys) != len(table.Columns) || len(table.Rows) != 2 || table.Rows[1][5] == "—" {
+	if table.Key != "benchmark.openssl.results" || len(table.Columns) != 6 || len(table.Rows) != 2 || table.Rows[1][5].Text() == "—" {
 		t.Fatalf("OpenSSL result table = %+v", table)
 	}
 	singleRuns := map[string][]openSSLSpeedSample{spec.Key: {first, first}}
 	single := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, singleRuns, 1)
-	if single.Rows[0][5] != "不适用" {
+	if single.Rows[0][5].Text() != "na" {
 		t.Fatalf("single-core OpenSSL output = table:%v", single.Rows[0])
 	}
 	partialRuns := map[string][]openSSLSpeedSample{spec.Key: {first, {}}}
@@ -78,7 +78,7 @@ func TestOpenSSLMeasurementsAndTable(t *testing.T) {
 		t.Fatal("incomplete OpenSSL sample emitted multi-worker measurements")
 	}
 	partial := openSSLResultsTable([]openSSLAlgorithmSpec{spec}, partialRuns, 2)
-	if partial.Rows[1][4] != "—" {
+	if partial.Rows[1][4].Text() != "—" {
 		t.Fatalf("partial OpenSSL output = %+v", partial.Rows[1])
 	}
 }

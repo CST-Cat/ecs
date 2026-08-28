@@ -54,20 +54,18 @@ func RedactedCopy(in Report, reveal bool) Report {
 		out.Results[i].Tables = make([]Table, len(result.Tables))
 		for j, table := range result.Tables {
 			out.Results[i].Tables[j] = table
-			out.Results[i].Tables[j].Columns = append([]string(nil), table.Columns...)
-			out.Results[i].Tables[j].ColumnKeys = append([]string(nil), table.ColumnKeys...)
-			out.Results[i].Tables[j].NumericColumns = append([]int(nil), table.NumericColumns...)
-			out.Results[i].Tables[j].NumericHigherIsBetter = append([]bool(nil), table.NumericHigherIsBetter...)
-			out.Results[i].Tables[j].SensitiveColumns = append([]int(nil), table.SensitiveColumns...)
-			out.Results[i].Tables[j].Rows = make([][]string, len(table.Rows))
+			out.Results[i].Tables[j].Columns = append([]TableColumn(nil), table.Columns...)
+			out.Results[i].Tables[j].Rows = make([][]Value, len(table.Rows))
 			for k, row := range table.Rows {
-				out.Results[i].Tables[j].Rows[k] = append([]string(nil), row...)
+				out.Results[i].Tables[j].Rows[k] = append([]Value(nil), row...)
 			}
 		}
 		if !reveal {
 			for j := range out.Results[i].Fields {
 				if out.Results[i].Fields[j].Sensitive {
-					out.Results[i].Fields[j].Value = Mask(out.Results[i].Fields[j].Value)
+					if raw, ok := out.Results[i].Fields[j].Value.Raw(); ok {
+						out.Results[i].Fields[j].Value = RawValue(Mask(raw))
+					}
 				}
 			}
 		}
@@ -187,7 +185,7 @@ func collectSensitiveIPs(report Report) map[string]struct{} {
 	for _, item := range report.Results {
 		for _, field := range item.Fields {
 			if field.Sensitive {
-				addIPsFromText(result, field.Value)
+				addIPsFromText(result, field.Value.Text())
 			}
 		}
 		for _, block := range item.TextBlocks {
@@ -196,10 +194,15 @@ func collectSensitiveIPs(report Report) map[string]struct{} {
 			}
 		}
 		for _, table := range item.Tables {
-			for _, column := range table.SensitiveColumns {
+			for columnIndex, column := range table.Columns {
+				if !column.Sensitive {
+					continue
+				}
 				for _, row := range table.Rows {
-					if column >= 0 && column < len(row) {
-						addIPsFromText(result, row[column])
+					if columnIndex >= 0 && columnIndex < len(row) {
+						if raw, ok := row[columnIndex].Raw(); ok {
+							addIPsFromText(result, raw)
+						}
 					}
 				}
 			}
@@ -265,6 +268,14 @@ func redactStringValues(value reflect.Value, selected map[string]struct{}) {
 			redactStringValues(value.Elem(), selected)
 		}
 	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(Value{}) {
+			if tagged, ok := value.Interface().(Value); ok {
+				if raw, isRaw := tagged.Raw(); isRaw && value.CanSet() {
+					value.Set(reflect.ValueOf(RawValue(maskSelectedIPsInText(raw, selected))))
+				}
+			}
+			return
+		}
 		for index := 0; index < value.NumField(); index++ {
 			field := value.Field(index)
 			if field.CanSet() {

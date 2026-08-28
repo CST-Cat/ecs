@@ -90,7 +90,7 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	}
 	missing := 0
 	for _, field := range result.Fields {
-		if field.Value == "" || field.Value == "unknown" {
+		if field.Value.Text() == "" || field.Value.Text() == "unknown" {
 			missing++
 		}
 	}
@@ -105,7 +105,7 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 }
 
 func systemField(key, value string) model.Field {
-	return model.Field{Key: key, Label: "probe.system.field." + key, Value: value}
+	return model.Field{Key: key, Label: "probe.system.field." + key, Value: model.RawValue(value)}
 }
 
 func systemStealMachineValue(snapshot systemSnapshot) string {
@@ -217,19 +217,22 @@ func systemResourceMeasurements(resources EnvironmentSnapshot) []model.Measureme
 func systemMeasurement(key string, value float64, unit, display, method string, higher *bool) model.Measurement {
 	return model.Measurement{
 		Key: key, Label: "probe.system.metric." + key, Value: value, Unit: unit,
-		Display: display, Method: method, HigherIsBetter: higher,
+		Display: model.RawValue(display), Method: method, HigherIsBetter: higher,
 	}
 }
 
 func systemPressureTable(snapshot EnvironmentSnapshot) model.Table {
 	table := model.Table{
-		Key:                   "system.pressure.cgroup",
-		Title:                 "probe.system.pressure.table.title",
-		Columns:               []string{"probe.system.pressure.column.resource", "probe.system.pressure.column.some_avg10", "probe.system.pressure.column.full_avg10", "probe.system.pressure.column.cumulative_events", "probe.system.pressure.column.source"},
-		ColumnKeys:            []string{"resource", "psi_some_avg10", "psi_full_avg10", "cumulative_events", "source"},
-		RowIdentity:           "resource",
-		NumericColumns:        []int{1, 2},
-		NumericHigherIsBetter: []bool{false, false},
+		Key:   "system.pressure.cgroup",
+		Title: "probe.system.pressure.table.title",
+		Columns: []model.TableColumn{
+			{Key: "resource", Label: "probe.system.pressure.column.resource"},
+			{Key: "psi_some_avg10", Label: "probe.system.pressure.column.some_avg10", Numeric: true},
+			{Key: "psi_full_avg10", Label: "probe.system.pressure.column.full_avg10", Numeric: true},
+			{Key: "cumulative_events", Label: "probe.system.pressure.column.cumulative_events"},
+			{Key: "source", Label: "probe.system.pressure.column.source"},
+		},
+		RowIdentity: "resource",
 	}
 	for _, resource := range []string{"cpu", "memory", "io"} {
 		pressure := snapshot.PSI[resource]
@@ -251,7 +254,9 @@ func systemPressureTable(snapshot EnvironmentSnapshot) model.Table {
 				events = fmt.Sprintf("high %d · max %d · OOM %d · kill %d", snapshot.Memory.High, snapshot.Memory.Max, snapshot.Memory.OOM, snapshot.Memory.OOMKill)
 			}
 		}
-		table.Rows = append(table.Rows, []string{strings.ToUpper(resource), some, full, events, fallback(pressure.Source, "unavailable")})
+		table.Rows = append(table.Rows, []model.Value{
+			model.RawValue(strings.ToUpper(resource)), model.RawValue(some), model.RawValue(full), model.RawValue(events), model.RawValue(fallback(pressure.Source, "unavailable")),
+		})
 	}
 	return table
 }

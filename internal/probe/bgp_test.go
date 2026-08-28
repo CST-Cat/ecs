@@ -9,6 +9,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"ecs/internal/config"
+	"ecs/internal/model"
 )
 
 func TestBGPNormalizationIdentityAndSummaries(t *testing.T) {
@@ -90,4 +93,111 @@ func TestQueryRouteViewsPrefixUsesHTTPAdapter(t *testing.T) {
 	if _, err := queryRouteViewsPrefix(context.Background(), env, "203.0.113.9"); err == nil || !strings.Contains(err.Error(), "解析 RouteViews 响应失败") {
 		t.Fatalf("malformed RouteViews response error = %v", err)
 	}
+}
+
+func TestBGPProducerBuildsStableResultFromCachedObservation(t *testing.T) {
+	env := Environment{
+		Config: config.Runtime{IPVersion: config.IPVersion4},
+		Egress: Egress{ByVersion: map[string]EgressAddress{
+			config.IPVersion4: {
+				Version:         config.IPVersion4,
+				IP:              "203.0.113.9",
+				BGPQueried:      true,
+				BGPObservations: []routeViewsPrefix{{Prefix: "203.0.113.0/24", OriginASN: 64501, RPKIState: "valid", ReportingPeers: []routeViewsPeer{{PeerASN: 64500, Collector: "rr1", ASPath: "64500 64501"}}}},
+			},
+		}},
+	}
+	result := (bgpProbe{}).Run(context.Background(), env)
+	if result.Title != "module.bgp.title" || result.Description != "probe.bgp.description" || result.Status != model.StatusOK {
+		t.Fatalf("BGP direct metadata/status = %+v", result)
+	}
+	if result.Methodology.Label != "methodology.provider-assessment" || result.Methodology.Profile != "probe.bgp.profile" || result.Methodology.ComparisonScope != "probe.bgp.comparison_scope" {
+		t.Fatalf("BGP methodology = %+v", result.Methodology)
+	}
+	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.bgp.summary.values" || result.SummaryMessages[0].Args[0] != "1" {
+		t.Fatalf("BGP evidence/summary = %+v/%+v", result.Evidence, result.SummaryMessages)
+	}
+	if len(result.Fields) == 0 || result.Fields[0].Label != "probe.bgp.field.ip_family" || result.Fields[0].Value.Text() != "203.0.113.9" {
+		t.Fatalf("BGP fields = %+v", result.Fields)
+	}
+	if len(result.Measurements) != 1 || result.Measurements[0].Label != "probe.bgp.metric.bgp_families_observed" || result.Measurements[0].Display.Text() != "1/1" {
+		t.Fatalf("BGP measurements = %+v", result.Measurements)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].Title != "probe.bgp.table.observation" || result.Tables[0].Columns[0].Label != "probe.bgp.column.ip_family" || len(result.Tables[0].Rows) != 1 || result.Tables[0].Rows[0][1].Text() != "203.0.113.0/24" {
+		t.Fatalf("BGP table = %+v", result.Tables)
+	}
+	if _, ok := result.Tables[0].Rows[0][1].Raw(); !ok {
+		t.Fatalf("BGP observation cell should be raw: %+v", result.Tables[0].Rows[0][1])
+	}
+	if result.Sources[0].Purpose != "probe.bgp.source.routeviews" || len(result.Notes) != 4 || result.Notes[0] != "probe.bgp.note.public_observation" {
+		t.Fatalf("BGP source/notes = %+v/%v", result.Sources, result.Notes)
+	}
+}
+
+func TestBGPProducerCachedFailureAndNoObservationContracts(t *testing.T) {
+	makeEnvironment := func(address EgressAddress) Environment {
+		return Environment{
+			Config: config.Runtime{IPVersion: config.IPVersion4},
+			Egress: Egress{ByVersion: map[string]EgressAddress{config.IPVersion4: address}},
+		}
+	}
+	assertStableMetadata := func(t *testing.T, result model.Result) {
+		t.Helper()
+		if result.Title != "module.bgp.title" || result.Description != "probe.bgp.description" || result.Methodology.Label != "methodology.provider-assessment" || result.Methodology.Profile != "probe.bgp.profile" || result.Methodology.ComparisonScope != "probe.bgp.comparison_scope" {
+			t.Fatalf("BGP stable metadata = %+v/%+v", result, result.Methodology)
+		}
+		if len(result.Tables) != 1 || result.Tables[0].Title != "probe.bgp.table.observation" || len(result.Tables[0].Columns) != 6 {
+			t.Fatalf("BGP stable table metadata = %+v", result.Tables)
+		}
+	}
+
+	t.Run("cached RouteViews failure", func(t *testing.T) {
+		result := (bgpProbe{}).Run(context.Background(), makeEnvironment(EgressAddress{
+			Version:    config.IPVersion4,
+			IP:         "203.0.113.9",
+			BGPQueried: true,
+			BGPError:   errors.New("cached RouteViews failure"),
+		}))
+		assertStableMetadata(t, result)
+		if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 1 {
+			t.Fatalf("BGP cached failure status/evidence = %s/%+v", result.Status, result.Evidence)
+		}
+		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.bgp.summary.values" || result.SummaryMessages[0].Args[0] != "0" {
+			t.Fatalf("BGP cached failure summary = %+v", result.SummaryMessages)
+		}
+		foundError := false
+		for _, field := range result.Fields {
+			if field.Key != "ipv4_routeviews_error" {
+				continue
+			}
+			foundError = true
+			if value, ok := field.Value.Raw(); !ok || value != "cached RouteViews failure" {
+				t.Fatalf("BGP cached failure error field = %+v", field)
+			}
+		}
+		if !foundError || len(result.Failures) != 1 || result.Failures[0].Stage != "provider" {
+			t.Fatalf("BGP cached failure fields/failures = %+v/%+v", result.Fields, result.Failures)
+		}
+	})
+
+	t.Run("cached no observation", func(t *testing.T) {
+		result := (bgpProbe{}).Run(context.Background(), makeEnvironment(EgressAddress{
+			Version:    config.IPVersion4,
+			IP:         "203.0.113.9",
+			BGPQueried: true,
+		}))
+		assertStableMetadata(t, result)
+		if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 1 {
+			t.Fatalf("BGP no-observation status/evidence = %s/%+v", result.Status, result.Evidence)
+		}
+		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.bgp.summary.values" || result.SummaryMessages[0].Args[0] != "0" {
+			t.Fatalf("BGP no-observation summary = %+v", result.SummaryMessages)
+		}
+		if len(result.Tables[0].Rows) != 1 || result.Tables[0].Rows[0][0].Text() != "IPv4" || result.Tables[0].Rows[0][1].Text() != "未找到匹配前缀" {
+			t.Fatalf("BGP no-observation table rows = %+v", result.Tables[0].Rows)
+		}
+		if _, ok := result.Tables[0].Rows[0][1].Raw(); !ok {
+			t.Fatalf("BGP no-observation row should remain raw = %+v", result.Tables[0].Rows[0])
+		}
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -245,20 +246,38 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 		t.Fatalf("tables = %+v", result.Tables)
 	}
 	rows := result.Tables[0].Rows
-	if rows[0][0] != "probe.backtrace.carrier.telecom" || rows[0][1] != "probe.backtrace.target.beijing.telecom.ipv4" || rows[0][2] != backtraceLineTelecomCN2GIA || rows[0][5] != backtraceStatusIdentified || rows[0][6] != backtraceReasonSignatureMatch {
+	if rows[0][0].Text() != "probe.backtrace.carrier.telecom" || rows[0][1].Text() != "probe.backtrace.target.beijing.telecom.ipv4" || rows[0][2].Text() != backtraceLineTelecomCN2GIA || rows[0][5].Text() != backtraceStatusIdentified || rows[0][6].Text() != backtraceReasonSignatureMatch {
 		t.Fatalf("identified row = %+v", rows[0])
 	}
-	if rows[1][0] != "probe.backtrace.carrier.unicom" || rows[1][5] != backtraceStatusUnidentified || rows[1][6] != backtraceReasonForeignOnly || rows[2][0] != "probe.backtrace.carrier.mobile" || rows[2][6] != backtraceReasonNoKnownSignature || rows[3][6] != backtraceReasonLimitedOrFiltered {
+	if rows[1][0].Text() != "probe.backtrace.carrier.unicom" || rows[1][5].Text() != backtraceStatusUnidentified || rows[1][6].Text() != backtraceReasonForeignOnly || rows[2][0].Text() != "probe.backtrace.carrier.mobile" || rows[2][6].Text() != backtraceReasonNoKnownSignature || rows[3][6].Text() != backtraceReasonLimitedOrFiltered {
 		t.Fatalf("unidentified rows = %v, %v, %v, %v", rows[1], rows[2], rows[3], rows[4])
 	}
-	if rows[4][2] != backtraceLineTelecomCN2GIA || rows[4][5] != backtraceStatusIdentified || rows[4][6] != backtraceReasonSignatureMatch || rows[5][5] != backtraceStatusUnidentified || rows[5][6] != backtraceReasonNoKnownSignature || rows[6][5] != backtraceStatusFailed || rows[6][6] != backtraceReasonParseFailed || rows[7][5] != backtraceStatusFailed || rows[7][6] != backtraceReasonTraceError || rows[8][5] != backtraceStatusFailed || rows[8][6] != backtraceReasonNoResponsiveHops {
+	if rows[4][2].Text() != backtraceLineTelecomCN2GIA || rows[4][5].Text() != backtraceStatusIdentified || rows[4][6].Text() != backtraceReasonSignatureMatch || rows[5][5].Text() != backtraceStatusUnidentified || rows[5][6].Text() != backtraceReasonNoKnownSignature || rows[6][5].Text() != backtraceStatusFailed || rows[6][6].Text() != backtraceReasonParseFailed || rows[7][5].Text() != backtraceStatusFailed || rows[7][6].Text() != backtraceReasonTraceError || rows[8][5].Text() != backtraceStatusFailed || rows[8][6].Text() != backtraceReasonNoResponsiveHops {
 		t.Fatalf("failure rows = %v, %v, %v", rows[4], rows[5], rows[6])
+	}
+	if _, ok := rows[0][0].Key(); !ok {
+		t.Fatalf("backtrace carrier is not a tagged key: %#v", rows[0][0])
+	}
+	if target, ok := rows[0][1].Key(); !ok || target != "probe.backtrace.target.beijing.telecom.ipv4" {
+		t.Fatalf("built-in backtrace target is not a tagged key: %#v", rows[0][1])
+	}
+	if target, ok := rows[4][1].Raw(); !ok || target != "用户部分" {
+		t.Fatalf("custom backtrace target is not raw: %#v", rows[4][1])
+	}
+	if target, ok := result.Tables[1].Rows[0][0].Key(); !ok || target != "probe.backtrace.target.beijing.telecom.ipv4" {
+		t.Fatalf("detail built-in backtrace target is not a tagged key: %#v", result.Tables[1].Rows[0][0])
+	}
+	if target, ok := result.Tables[1].Rows[9][0].Raw(); !ok || target != "用户部分" {
+		t.Fatalf("detail custom backtrace target is not raw: %#v", result.Tables[1].Rows[9][0])
 	}
 	if len(result.Tables[1].Rows) != 15 {
 		t.Fatalf("hop rows = %d, want partial/no-response details retained", len(result.Tables[1].Rows))
 	}
-	if result.Tables[1].Rows[13][8] != "probe.backtrace.hop.no_response" || result.Tables[1].Rows[14][8] != "probe.backtrace.hop.no_response" {
+	if result.Tables[1].Rows[13][8].Text() != "probe.backtrace.hop.no_response" || result.Tables[1].Rows[14][8].Text() != "probe.backtrace.hop.no_response" {
 		t.Fatalf("no-response hop rows = %v, %v", result.Tables[1].Rows[13], result.Tables[1].Rows[14])
+	}
+	if _, ok := result.Tables[1].Rows[13][8].Key(); !ok {
+		t.Fatalf("no-response hop status is not a tagged key: %#v", result.Tables[1].Rows[13][8])
 	}
 	if len(result.TextBlocks) != 9 || !strings.Contains(result.TextBlocks[0].Content, "外部网") || !strings.Contains(result.TextBlocks[0].Content, "外部国") || !strings.Contains(result.TextBlocks[0].Content, "外部城") || !strings.Contains(result.TextBlocks[4].Content, "59.43.130.23") || result.TextBlocks[7].Content != "fixture typed command error" || result.TextBlocks[8].Content != `{"Hops":[[],[]]}` {
 		t.Fatalf("raw blocks = %+v", result.TextBlocks)
@@ -305,52 +324,66 @@ func TestBacktraceSkipReasonsAreDistinctAndMachineOnly(t *testing.T) {
 }
 
 func runBacktraceFixtureResult(t *testing.T) model.Result {
+	result, _ := runBacktraceFixtureResultWithPath(t)
+	return result
+}
+
+func runBacktraceFixtureResultWithPath(t *testing.T) (model.Result, string) {
 	t.Helper()
-	t.Setenv("PATH", writeBacktraceFixture(t))
+	fixtureDirectory := writeBacktraceFixture(t)
+	fixturePath := filepath.Join(fixtureDirectory, routeEngineTiny)
+	t.Setenv("PATH", fixtureDirectory)
 	runtime, err := config.Defaults(config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtime.BacktraceTargets = backtraceFixtureTargets()
-	return (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime})
+	return (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime}), fixturePath
 }
 
 func TestBacktraceProducerDirectShapeContract(t *testing.T) {
-	result := runBacktraceFixtureResult(t)
-	wantMethodology := model.Methodology{
-		Kind: "heuristic", Label: "methodology.heuristic", Engine: "probe.backtrace.methodology.engine",
-		Profile: "probe.backtrace.profile", ComparisonScope: "probe.backtrace.comparison_scope",
+	result, fixturePath := runBacktraceFixtureResultWithPath(t)
+	if result.Methodology.Kind != "heuristic" || result.Methodology.Label != "methodology.heuristic" ||
+		result.Methodology.Engine != "probe.backtrace.methodology.engine" || result.Methodology.Profile != "probe.backtrace.profile" ||
+		result.Methodology.ComparisonScope != "probe.backtrace.comparison_scope" {
+		t.Fatalf("methodology = %#v", result.Methodology)
 	}
-	if !reflect.DeepEqual(result.Methodology, wantMethodology) {
-		t.Fatalf("methodology = %#v, want %#v", result.Methodology, wantMethodology)
+	assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops", "signature_set", "tool_version", "tool_sha256")
+	parameters := result.Methodology.Parameters
+	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets_sha256"] != comparisonParameterHash(backtraceFixtureTargets()) || parameters["max_hops"] != strconv.Itoa(backtraceMaxHops) || parameters["signature_set"] != "china-backbone-v2" || parameters["tool_version"] != "backtrace-fixture 1" || parameters["tool_sha256"] != binarySHA256(fixturePath) {
+		t.Fatalf("backtrace comparison parameters = %v", parameters)
 	}
 	wantFields := []model.Field{
-		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: routeEngineTiny},
-		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: "backtrace-fixture 1"},
+		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: model.RawValue(routeEngineTiny)},
+		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: model.RawValue("backtrace-fixture 1")},
 		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256"},
-		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: strings.Join(routeCommandArgsForFamily(routeEngine{Name: routeEngineTiny}, "<target>", backtraceMaxHops, config.IPVersionAuto), " ")},
+		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(routeEngine{Name: routeEngineTiny}, "<target>", backtraceMaxHops, config.IPVersionAuto), " "))},
 	}
 	if len(result.Fields) != len(wantFields) {
 		t.Fatalf("fields = %#v", result.Fields)
 	}
 	for index, want := range wantFields {
 		got := result.Fields[index]
-		if got.Key != want.Key || got.Label != want.Label || (want.Value != "" && got.Value != want.Value) {
+		if got.Key != want.Key || got.Label != want.Label || (want.Value.Text() != "" && got.Value.Text() != want.Value.Text()) {
 			t.Fatalf("field %d = %#v, want key/label/value %#v", index, got, want)
 		}
 	}
-	if len(result.Fields[2].Value) != 64 {
-		t.Fatalf("binary SHA-256 field = %q, want a 64-character machine digest", result.Fields[2].Value)
+	if len(result.Fields[2].Value.Text()) != 64 {
+		t.Fatalf("binary SHA-256 field = %q, want a 64-character machine digest", result.Fields[2].Value.Text())
 	}
 	measurement := result.Measurements[0]
-	if measurement.Key != "backtrace_identified" || measurement.Label != "probe.backtrace.metric.identified" || measurement.Unit != "count" || measurement.Display != "2/9" || measurement.Method != "china-backbone-signature-v1" || measurement.Value != 2 {
+	if measurement.Key != "backtrace_identified" || measurement.Label != "probe.backtrace.metric.identified" || measurement.Unit != "count" || measurement.Display.Text() != "2/9" || measurement.Method != "china-backbone-signature-v1" || measurement.Value != 2 {
 		t.Fatalf("measurement = %#v", measurement)
 	}
-	wantSummaryColumns := []string{"probe.backtrace.column.provider", "probe.backtrace.column.target", "probe.backtrace.column.line", "probe.backtrace.column.hit_hop", "probe.backtrace.column.hit_ip", "probe.backtrace.column.status", "probe.backtrace.column.reason"}
-	wantSummaryKeys := []string{"provider", "reference_target", "line", "hit_hop", "hit_ip", "status", "reason"}
-	wantHopColumns := []string{"probe.backtrace.column.target", "probe.backtrace.column.provider", "probe.backtrace.column.hop", "probe.backtrace.column.latency", "probe.backtrace.column.ip", "probe.backtrace.column.asn", "probe.backtrace.column.network", "probe.backtrace.column.location", "probe.backtrace.column.status"}
-	wantHopKeys := []string{"reference_target", "provider", "hop", "latency_ms", "ip", "asn", "network", "location", "status"}
-	if len(result.Tables) != 2 || result.Tables[0].Title != "probe.backtrace.table.summary" || !reflect.DeepEqual(result.Tables[0].Columns, wantSummaryColumns) || !reflect.DeepEqual(result.Tables[0].ColumnKeys, wantSummaryKeys) || result.Tables[0].RowIdentity != "" || result.Tables[1].Title != "probe.backtrace.table.hops" || !reflect.DeepEqual(result.Tables[1].Columns, wantHopColumns) || !reflect.DeepEqual(result.Tables[1].ColumnKeys, wantHopKeys) || result.Tables[1].RowIdentity != "" {
+	wantSummaryColumns := []model.TableColumn{
+		{Key: "provider", Label: "probe.backtrace.column.provider"}, {Key: "reference_target", Label: "probe.backtrace.column.target"}, {Key: "line", Label: "probe.backtrace.column.line"},
+		{Key: "hit_hop", Label: "probe.backtrace.column.hit_hop"}, {Key: "hit_ip", Label: "probe.backtrace.column.hit_ip"}, {Key: "status", Label: "probe.backtrace.column.status"}, {Key: "reason", Label: "probe.backtrace.column.reason"},
+	}
+	wantHopColumns := []model.TableColumn{
+		{Key: "reference_target", Label: "probe.backtrace.column.target"}, {Key: "provider", Label: "probe.backtrace.column.provider"}, {Key: "hop", Label: "probe.backtrace.column.hop"}, {Key: "latency_ms", Label: "probe.backtrace.column.latency"},
+		{Key: "ip", Label: "probe.backtrace.column.ip"}, {Key: "asn", Label: "probe.backtrace.column.asn"}, {Key: "network", Label: "probe.backtrace.column.network"}, {Key: "location", Label: "probe.backtrace.column.location"}, {Key: "status", Label: "probe.backtrace.column.status"},
+	}
+	if len(result.Tables) != 2 || result.Tables[0].Title != "probe.backtrace.table.summary" || !reflect.DeepEqual(result.Tables[0].Columns, wantSummaryColumns) || result.Tables[0].RowIdentity != "" || result.Tables[1].Title != "probe.backtrace.table.hops" || !reflect.DeepEqual(result.Tables[1].Columns, wantHopColumns) || result.Tables[1].RowIdentity != "" {
 		t.Fatalf("table shape = %#v", result.Tables)
 	}
 	if len(result.Sources) != 1 || result.Sources[0].Name != "probe.backtrace.source.method.name" || result.Sources[0].Purpose != "probe.backtrace.source.method" {

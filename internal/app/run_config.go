@@ -103,7 +103,8 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	// Preserve the historical CLI contract: --version short-circuits before
 	// positional-argument and run-specific override validation.
 	if *versionFlag {
-		return resolvedRunConfig{Runtime: cfg, Version: true}, nil
+		cfg.NoColor = *noColorFlag
+		return resolvedRunConfig{Runtime: cfg, Color: *colorFlag, Version: true}, nil
 	}
 	if flags.NArg() != 0 {
 		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
@@ -218,19 +219,12 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 }
 
 func preparse(args []string) (configPath, profile string) {
-	for index := 0; index < len(args); index++ {
-		value := args[index]
-		switch {
-		case value == "--config" && index+1 < len(args):
-			configPath = args[index+1]
-			index++
-		case strings.HasPrefix(value, "--config="):
-			configPath = strings.TrimPrefix(value, "--config=")
-		case value == "--profile" && index+1 < len(args):
-			profile = args[index+1]
-			index++
-		case strings.HasPrefix(value, "--profile="):
-			profile = strings.TrimPrefix(value, "--profile=")
+	for _, occurrence := range scanEarlyFlags(args, "config", "profile") {
+		switch occurrence.Name {
+		case "config":
+			configPath = occurrence.Value
+		case "profile":
+			profile = occurrence.Value
 		}
 	}
 	return configPath, profile

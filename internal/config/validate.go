@@ -12,11 +12,14 @@ import (
 
 func Validate(runtime Runtime) error {
 	knownModules := make(map[string]bool)
-	for _, id := range ModuleOrder {
+	for _, id := range ModuleOrder() {
 		knownModules[id] = true
 	}
 	if len(runtime.Modules) == 0 {
 		return i18n.Errorf("err.noModules")
+	}
+	if err := validateExposure(runtime.Exposure); err != nil {
+		return err
 	}
 	switch runtime.IPVersion {
 	case "", IPVersionAuto, IPVersion4, IPVersion6:

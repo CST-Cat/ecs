@@ -3,6 +3,8 @@ package report
 import (
 	"reflect"
 	"strings"
+
+	"ecs/internal/model"
 )
 
 // terminalSafeCopy returns a deep copy whose strings cannot carry terminal
@@ -22,6 +24,13 @@ func terminalSafeCopy[T any](value T) T {
 func cloneTerminalValue(value reflect.Value) reflect.Value {
 	if !value.IsValid() {
 		return reflect.Value{}
+	}
+	if value.Type() == reflect.TypeOf(model.Value{}) {
+		fieldValue := value.Interface().(model.Value)
+		if raw, ok := fieldValue.Raw(); ok {
+			return reflect.ValueOf(model.RawValue(sanitizeTerminalText(raw)))
+		}
+		return value
 	}
 
 	switch value.Kind() {

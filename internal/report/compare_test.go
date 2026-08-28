@@ -53,14 +53,14 @@ func comparisonReportFixture(t *testing.T, count, reference int) comparison.Repo
 			result.Evidence = &model.Evidence{Valid: 0, Expected: 0, Grade: model.EvidenceNotPlanned}
 		}
 		result.Measurements = []model.Measurement{
-			{Key: "cpu", Label: "CPU", Value: float64(100 + index*20), Unit: "points", Display: fmt.Sprintf("%d points", 100+index*20), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true)},
-			{Key: "latency", Label: "Latency", Value: float64(20 - index), Unit: "ms", Display: fmt.Sprintf("%d ms", 20-index), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(false)},
+			{Key: "cpu", Label: "CPU", Value: float64(100 + index*20), Unit: "points", Display: model.RawValue(fmt.Sprintf("%d points", 100+index*20)), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true)},
+			{Key: "latency", Label: "Latency", Value: float64(20 - index), Unit: "ms", Display: model.RawValue(fmt.Sprintf("%d ms", 20-index)), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(false)},
 			{Key: "ratio", Label: "Ratio", Value: 0.125 + float64(index)/1000, Unit: "ratio", Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true)},
 		}
-		result.Fields = []model.Field{{Key: "state", Label: "状态", Value: map[bool]string{true: "ready", false: "done"}[index == 0]}}
+		result.Fields = []model.Field{{Key: "state", Label: "状态", Value: model.RawValue(map[bool]string{true: "ready", false: "done"}[index == 0])}}
 		result.Tables = []model.Table{{
-			Key: "system.state", Title: "状态", Columns: []string{"ID", "状态"},
-			ColumnKeys: []string{"id", "state"}, RowIdentity: "id", Rows: [][]string{{"row-1", map[bool]string{true: "ready", false: "done"}[index == 0]}},
+			Key: "system.state", Title: "状态", Columns: []model.TableColumn{{Key: "id", Label: "ID"}, {Key: "state", Label: "状态"}},
+			RowIdentity: "id", Rows: [][]model.Value{{model.RawValue("row-1"), model.RawValue(map[bool]string{true: "ready", false: "done"}[index == 0])}},
 		}}
 		if count >= 6 {
 			switch index {

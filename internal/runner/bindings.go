@@ -65,10 +65,6 @@ func bindModuleProbes(descriptors []config.ModuleDescriptor, probes []probe.Prob
 		if !ok {
 			return nil, fmt.Errorf("module %q has no probe", descriptor.ID)
 		}
-		expectedNetwork := descriptor.Exposure > config.ExposureLocal
-		if item.NeedsNetwork() != expectedNetwork {
-			return nil, fmt.Errorf("probe %q NeedsNetwork=%v disagrees with descriptor exposure network=%v", descriptor.ID, item.NeedsNetwork(), expectedNetwork)
-		}
 		bindings = append(bindings, moduleBinding{Descriptor: descriptor, Probe: item})
 	}
 	return bindings, nil

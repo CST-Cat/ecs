@@ -49,8 +49,8 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 			t.Fatalf("table title is not bilingual stable key: %+v", table)
 		}
 		for _, column := range table.Columns {
-			if !i18n.Has(i18n.LangZH, column) || !i18n.Has(i18n.LangEN, column) {
-				t.Fatalf("table column is not bilingual stable key: %q", column)
+			if !i18n.Has(i18n.LangZH, column.Label) || !i18n.Has(i18n.LangEN, column.Label) {
+				t.Fatalf("table column is not bilingual stable key: %q", column.Label)
 			}
 		}
 	}
@@ -65,10 +65,13 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 			continue
 		}
 		for _, row := range table.Rows {
-			if len(row) == 0 || !sourceKeys[row[0]] {
+			if len(row) == 0 || !sourceKeys[row[0].Text()] {
 				t.Fatalf("source row is not keyed by producer ID: table=%s row=%v", table.Key, row)
 			}
-			seenSourceKeys[row[0]] = true
+			seenSourceKeys[row[0].Text()] = true
+			if _, ok := row[0].Key(); !ok {
+				t.Fatalf("source row does not preserve key variant: table=%s row=%v", table.Key, row)
+			}
 		}
 	}
 	for _, id := range qualitySourceOrder {
@@ -80,10 +83,13 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 	scores := bundle.scoreTable()
 	foundDBIP := false
 	for _, row := range scores.Rows {
-		if row[0] == networkSourceNameKey("dbip") {
+		if row[0].Text() == networkSourceNameKey("dbip") {
 			foundDBIP = true
-			if row[5] != "probe.network.score_band.dbip" || strings.Contains(row[5], "db-ip") {
-				t.Fatalf("DB-IP score bucket = %q", row[5])
+			if row[5].Text() != "probe.network.score_band.dbip" || strings.Contains(row[5].Text(), "db-ip") {
+				t.Fatalf("DB-IP score bucket = %q", row[5].Text())
+			}
+			if _, ok := row[5].Key(); !ok {
+				t.Fatalf("DB-IP score bucket is not a tagged key: %#v", row[5])
 			}
 		}
 	}
@@ -94,7 +100,7 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 	for _, id := range []string{"dbip", "ipapicom", "ipsb"} {
 		found := false
 		for _, row := range statusTable.Rows {
-			if len(row) > 0 && row[0] == networkSourceNameKey(id) {
+			if len(row) > 0 && row[0].Text() == networkSourceNameKey(id) {
 				found = true
 				break
 			}
@@ -278,7 +284,7 @@ func TestNetworkFailureKeepsRawDiagnosticWithStableStatus(t *testing.T) {
 		t.Fatalf("status table = %+v", status)
 	}
 	for _, row := range status.Rows {
-		if len(row) > 1 && row[0] == networkSourceNameKey("ipinfo") && row[1] != "probe.network.status.failed" {
+		if len(row) > 1 && row[0].Text() == networkSourceNameKey("ipinfo") && row[1].Text() != "probe.network.status.failed" {
 			t.Fatalf("failed source status = %v", row)
 		}
 	}
@@ -316,11 +322,11 @@ func TestNetworkEgressLookupFailureKeepsRawErrorAndStableField(t *testing.T) {
 		if field.Label != "probe.network.field.lookup_error" {
 			t.Fatalf("egress lookup field label = %q", field.Label)
 		}
-		if field.Value != "probe.network.value.lookup_failed" {
-			t.Fatalf("egress lookup field value = %q", field.Value)
+		if field.Value.Text() != "probe.network.value.lookup_failed" {
+			t.Fatalf("egress lookup field value = %q", field.Value.Text())
 		}
-		if strings.Contains(field.Value, rawErr.Error()) {
-			t.Fatalf("raw egress error leaked into field value: %q", field.Value)
+		if strings.Contains(field.Value.Text(), rawErr.Error()) {
+			t.Fatalf("raw egress error leaked into field value: %q", field.Value.Text())
 		}
 	}
 	if !foundField {
@@ -379,8 +385,8 @@ func TestNetworkStatusRowsUseFiniteMachineStates(t *testing.T) {
 			bundle := ipQualityBundle{Version: "4", Origin: test.origin, Findings: map[string]qualityFinding{}}
 			table := bundle.statusTable()
 			for _, row := range table.Rows {
-				if len(row) > 1 && row[0] == networkSourceNameKey("maxmind") {
-					if row[1] != test.want {
+				if len(row) > 1 && row[0].Text() == networkSourceNameKey("maxmind") {
+					if row[1].Text() != test.want {
 						t.Fatalf("origin row = %v, want status %q", row, test.want)
 					}
 					return
@@ -409,9 +415,9 @@ func TestNetworkStatusRowsUseFiniteMachineStates(t *testing.T) {
 	for _, test := range findingCases {
 		found := false
 		for _, row := range table.Rows {
-			if len(row) > 1 && row[0] == networkSourceNameKey(test.id) {
+			if len(row) > 1 && row[0].Text() == networkSourceNameKey(test.id) {
 				found = true
-				if row[1] != test.want {
+				if row[1].Text() != test.want {
 					t.Fatalf("%s row = %v, want status %q", test.id, row, test.want)
 				}
 				break

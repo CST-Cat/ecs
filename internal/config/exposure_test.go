@@ -18,8 +18,8 @@ func TestExposureParsingAndNames(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
 		t.Fatalf("unknown exposure error = %v", err)
 	}
-	if Exposure(99).String() != ExposureNameThirdParty {
-		t.Fatal("unknown exposure enum should use the safe fallback")
+	if Exposure(99).String() != ExposureNameInvalid {
+		t.Fatal("unknown exposure enum should use an explicit invalid marker")
 	}
 }
 
@@ -65,5 +65,28 @@ func TestCheckModuleExposure(t *testing.T) {
 	err := CheckModuleExposure([]string{"network"}, ExposureLocal)
 	if err == nil || !strings.Contains(err.Error(), "above the current --exposure local") {
 		t.Fatalf("blocked module error = %v", err)
+	}
+}
+
+func TestInvalidRuntimeExposureFailsClosed(t *testing.T) {
+	useEnglish(t)
+	for _, invalid := range []Exposure{-1, 4, 99} {
+		runtime := validRuntimeForExposure()
+		runtime.Exposure = invalid
+		if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
+			t.Fatalf("Validate(%d) = %v, want an invalid exposure error", invalid, err)
+		}
+		if AllowsModule(invalid, "system") {
+			t.Fatalf("invalid exposure %d allowed a module", invalid)
+		}
+		if got := FilterModulesByExposure([]string{"system", "dns"}, invalid); got != nil {
+			t.Fatalf("invalid exposure %d filtered modules to %v", invalid, got)
+		}
+		if err := CheckModuleExposure([]string{"system"}, invalid); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
+			t.Fatalf("CheckModuleExposure(%d) = %v, want an invalid exposure error", invalid, err)
+		}
+		if EgressNeedsIPIntel([]string{"network"}, invalid) {
+			t.Fatalf("invalid exposure %d enabled IP intelligence", invalid)
+		}
 	}
 }

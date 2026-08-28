@@ -32,9 +32,32 @@ import (
 
 type cnSpeedProbe struct{}
 
-func (cnSpeedProbe) ID() string         { return "cnspeed" }
-func (cnSpeedProbe) Title() string      { return "中国三网测速" }
-func (cnSpeedProbe) NeedsNetwork() bool { return true }
+func (cnSpeedProbe) ID() string { return "cnspeed" }
+
+func newCNSpeedResult() model.Result {
+	result := model.NewResult("cnspeed", "module.cnspeed.title")
+	result.Description = "probe.cnspeed.description"
+	result.Methodology = model.Methodology{
+		Kind:            "protocol-measurement",
+		Label:           "methodology.protocol-measurement",
+		Engine:          "HTTP download against speedtest.cn nodes",
+		Profile:         "probe.cnspeed.profile",
+		ComparisonScope: "probe.cnspeed.comparison_scope",
+	}
+	result.Methodology.Parameters = newComparisonParameters()
+	result.Notes = cnSpeedStableNotes()
+	return result
+}
+
+func cnSpeedStableNotes() []string {
+	return []string{
+		"probe.cnspeed.note.pinned_nodes",
+		"probe.cnspeed.note.address_safety",
+		"probe.cnspeed.note.selection",
+		"probe.cnspeed.note.scope",
+		"probe.cnspeed.note.ookla_registry",
+	}
+}
 
 // cnNodeListURL 是社区维护的中国测速节点清单。
 //
@@ -55,6 +78,8 @@ func cnSpeedBudget() (time.Duration, int64) {
 
 // cnNodeListURLForTest 让测试把清单指向本地服务器，生产路径始终用上面的常量。
 var cnNodeListURLForTest = cnNodeListURL
+
+var cnspeedHTTPClientFactory = newCNSpeedHTTPClient
 
 // cnCarriers 是要覆盖的三大运营商。
 var cnCarriers = []string{"电信", "联通", "移动"}
@@ -233,16 +258,12 @@ func cnDownload(ctx context.Context, client *http.Client, userAgent string, node
 
 func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("cnspeed", "中国三网测速")
-	result.Description = "从社区清单选取电信/联通/移动就近节点，测 HTTP 下载带宽"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "协议测量",
-		Engine:          "HTTP download against speedtest.cn nodes",
-		Profile:         "per-carrier nearest node by HTTP latency",
-		ComparisonScope: "当次到该节点的 HTTP 下载带宽；节点、时段与运营商策略都会影响结果",
-	}
-	client := newCNSpeedHTTPClient(env.Config.HTTPTimeout, env.Config.IPVersion, nil, nil)
+	result := newCNSpeedResult()
+	result.Methodology.Parameters = newComparisonParameters()
+	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
+	duration, maxBytes := cnSpeedBudget()
+	addComparisonParameterHash(result.Methodology.Parameters, "download_budget_sha256", fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024))
+	client := cnspeedHTTPClientFactory(env.Config.HTTPTimeout, env.Config.IPVersion, nil, nil)
 	defer client.CloseIdleConnections()
 	env.HTTPClient = client
 
@@ -251,9 +272,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Skip(model.NewMessage("probe.cnspeed.summary.skipped"))
 		addFailure(&result, "node_list", "speedtest.cn-CN-ID", err)
 		result.Evidence = model.NewEvidence(0, len(cnCarriers), "target")
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"抓取固定提交 %s 的节点清单失败（%s）；不会改用未经本版本审计的清单。",
-			cnNodeListCommit, compactError(err)))
+		result.Notes = cnSpeedStableNotes()
 		result.Finish(start)
 		return result
 	}
@@ -265,7 +284,6 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	// 每个运营商最多试这么多节点来选最快的，避免把清单里几十个节点全 ping 一遍。
 	const probeCandidates = 6
-	duration, maxBytes := cnSpeedBudget()
 
 	results := make([]cnNodeResult, len(cnCarriers))
 	var wg sync.WaitGroup
@@ -294,17 +312,24 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	table := model.Table{
-		Key:         "network.cnspeed.nodes",
-		Title:       "三网就近节点下载带宽",
-		Columns:     []string{"运营商", "节点", "位置", "HTTP 延迟", "下载", "已传输", "状态"},
-		ColumnKeys:  []string{"carrier", "node", "location", "http_latency_ms", "download_mbps", "transferred_bytes", "status"},
+		Key:   "network.cnspeed.nodes",
+		Title: "probe.cnspeed.table.nodes",
+		Columns: []model.TableColumn{
+			{Key: "carrier", Label: "probe.cnspeed.column.carrier"},
+			{Key: "node", Label: "probe.cnspeed.column.node"},
+			{Key: "location", Label: "probe.cnspeed.column.location"},
+			{Key: "http_latency_ms", Label: "probe.cnspeed.column.latency"},
+			{Key: "download_mbps", Label: "probe.cnspeed.column.download"},
+			{Key: "transferred_bytes", Label: "probe.cnspeed.column.transferred"},
+			{Key: "status", Label: "probe.cnspeed.column.status"},
+		},
 		RowIdentity: "carrier",
 	}
 	succeeded := 0
+	selectedNodes := make([][]model.Value, 0, len(results))
 	for _, item := range results {
-		status := "完成"
+		statusKey := "probe.cnspeed.status.failed"
 		if item.Err != "" {
-			status = item.Err
 			addFailureMessage(&result, "download", item.Carrier, item.Err)
 		}
 		location, nodeName, latency, download, transferred := "—", "—", "—", "—", "—"
@@ -315,41 +340,44 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		if item.Mbps > 0 {
 			succeeded++
+			statusKey = "probe.cnspeed.status.complete"
 			download = model.FormatRate(item.Mbps, "Mbps")
 			transferred = model.FormatBytes(uint64(item.Bytes))
 			result.Measurements = append(result.Measurements, model.Measurement{
 				Key:   "cnspeed_" + carrierKey(item.Carrier) + "_download_mbps",
-				Label: item.Carrier + " 下载带宽",
-				Value: item.Mbps, Unit: "Mbps", Display: model.FormatRate(item.Mbps, "Mbps"),
+				Label: "probe.cnspeed.metric.download",
+				Value: item.Mbps, Unit: "Mbps", Display: model.RawValue(model.FormatRate(item.Mbps, "Mbps")),
 				Method:         fmt.Sprintf("http-download-%ds-cap%dMiB-v1", int(duration.Seconds()), maxBytes/1024/1024),
 				HigherIsBetter: model.BoolPtr(true),
 			})
 		}
-		table.Rows = append(table.Rows, []string{
-			item.Carrier, nodeName, location, latency, download, transferred, status,
-		})
+		row := []model.Value{
+			carrierMachineValue(item.Carrier), model.RawValue(nodeName), model.RawValue(location),
+			model.RawValue(latency), model.RawValue(download), model.RawValue(transferred), model.KeyValue(statusKey),
+		}
+		table.Rows = append(table.Rows, row)
+		selectedNodes = append(selectedNodes, append([]model.Value(nil), row[:3]...))
 	}
 	result.Tables = []model.Table{table}
 	result.Evidence = model.NewEvidence(succeeded, len(cnCarriers), "target")
 	result.Fields = []model.Field{
-		{Key: "node_list", Label: "节点清单来源", Value: "spiritLHLS/speedtest.cn-CN-ID（MIT，固定提交 " + cnNodeListCommit + "）"},
-		{Key: "nodes_available", Label: "清单可用节点", Value: fmt.Sprintf("%d", len(nodes))},
-		{Key: "download_budget", Label: "单运营商上限", Value: fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024)},
+		{Key: "node_list", Label: "probe.cnspeed.field.node_list", Value: model.RawValue("speedtest.cn-CN-ID@audited-commit")},
+		{Key: "nodes_available", Label: "probe.cnspeed.field.nodes_available", Value: model.RawValue(fmt.Sprintf("%d", len(nodes)))},
+		{Key: "download_budget", Label: "probe.cnspeed.field.download_budget", Value: model.RawValue(fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024))},
 	}
+	addComparisonParameterHash(result.Methodology.Parameters, "selected_nodes_sha256", selectedNodes)
 	result.Sources = []model.Source{
 		{Name: "speedtest.cn-CN-ID", URL: "https://github.com/spiritLHLS/speedtest.cn-CN-ID",
-			Purpose: "中国测速节点清单与运营商标注（MIT，固定审计提交）"},
+			Purpose: "probe.cnspeed.source.nodes"},
 	}
-	result.Notes = append(result.Notes,
-		"节点清单固定到本版本审计过的上游提交；升级提交需要经过代码评审，避免上游 main 未经审查地改变访问目标。",
-		"节点 URL 仅允许 HTTP(S)，解析与每次拨号都会拒绝本机、内网、链路本地、文档、基准及保留地址；重定向执行相同检查。",
-		"每个运营商先按 HTTP 延迟从候选节点里选最快的一个，再对它做限时下载；"+
-			"三个运营商的下载串行执行，同时拉流会互相抢带宽，测出来是瓜分后的结果。",
-		"这是到某个具体测速节点的 HTTP 带宽，不是“到该运营商全网”的带宽；"+
-			"节点负载、时段、运营商对跨境流量的策略都会显著影响数值。",
-		"Ookla 已不再提供全球节点列表（speedtest.net 的相关接口实测返回 403，"+
-			"c.speedtest.net 只回基于出口 IP 的就近节点），因此中国节点只能依赖社区维护的清单。",
-	)
+	result.Notes = cnSpeedStableNotes()
+	if result.Status == model.StatusSkipped {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cnspeed.summary.skipped")}
+	} else if len(result.Measurements) == 0 {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cnspeed.summary.none")}
+	} else {
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.cnspeed.summary.values", cnSpeedMachineSummary(result))}
+	}
 	if succeeded == 0 {
 		result.Status = model.StatusWarning
 	} else {
@@ -416,4 +444,25 @@ func carrierKey(carrier string) string {
 	default:
 		return "other"
 	}
+}
+
+func carrierMachineValue(value string) model.Value {
+	switch strings.TrimSpace(value) {
+	case "电信", "China Telecom", "telecom":
+		return model.KeyValue("probe.cnspeed.carrier.telecom")
+	case "联通", "China Unicom", "unicom":
+		return model.KeyValue("probe.cnspeed.carrier.unicom")
+	case "移动", "China Mobile", "mobile":
+		return model.KeyValue("probe.cnspeed.carrier.mobile")
+	default:
+		return model.RawValue(value)
+	}
+}
+
+func cnSpeedMachineSummary(result model.Result) string {
+	parts := make([]string, 0, len(result.Measurements))
+	for _, measurement := range result.Measurements {
+		parts = append(parts, measurement.Key+"="+measurement.Display.Text())
+	}
+	return strings.Join(parts, ";")
 }
