@@ -61,48 +61,48 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	parseOutput := &bytes.Buffer{}
 	flags.SetOutput(parseOutput)
 	languageFlag := &runLanguageFlag{}
-	flags.Var(languageFlag, "lang", i18n.T("flag.lang"))
+	flags.Var(languageFlag, "lang", "flag.lang")
 	helpFlag := flags.Bool("help", false, "")
 	hFlag := flags.Bool("h", false, "")
-	profileFlag := flags.String("profile", "", i18n.T("flag.profile"))
-	configFlag := flags.String("config", "", i18n.T("flag.config"))
-	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
-	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
-	exposureFlag := flags.String("exposure", "", i18n.T("flag.exposure"))
-	revealFlag := flags.Bool("reveal", false, i18n.T("flag.reveal"))
-	ipVersionFlag := flags.String("ip-version", "", i18n.T("flag.ipVersion"))
-	ipv4Flag := flags.Bool("4", false, i18n.T("flag.ipv4"))
-	ipv6Flag := flags.Bool("6", false, i18n.T("flag.ipv6"))
-	ipSourcesFlag := flags.String("ip-quality-sources", "", i18n.T("flag.ipQualitySources"))
-	formatsFlag := flags.String("format", "", i18n.T("flag.format"))
-	outputFlag := flags.String("output", "", i18n.T("flag.output"))
-	nameFlag := flags.String("name", "", i18n.T("flag.name"))
-	noColorFlag := flags.Bool("no-color", false, i18n.T("flag.noColor"))
-	colorFlag := flags.String("color", "auto", i18n.T("flag.color"))
-	baselineFlag := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
-	cpuTimeFlag := flags.Duration("cpu-time", 0, i18n.T("flag.cpuTime"))
-	diskFlag := flags.Int("disk-mib", 0, i18n.T("flag.diskMiB"))
-	diskPathFlag := flags.String("disk-path", "", i18n.T("flag.diskPath"))
-	diskMultiFlag := flags.Bool("disk-multi", false, i18n.T("flag.diskMulti"))
-	diskMatrixModeFlag := flags.String("disk-matrix-mode", "", i18n.T("flag.diskMatrixMode"))
-	iperfDurationFlag := flags.Duration("iperf-duration", 0, i18n.T("flag.iperfDuration"))
-	threadsFlag := flags.Int("speed-threads", 0, i18n.T("flag.speedThreads"))
-	timeoutFlag := flags.Duration("timeout", 0, i18n.T("flag.timeout"))
-	dnsAttemptsFlag := flags.Int("dns-attempts", 0, i18n.T("flag.dnsAttempts"))
-	latencyAttemptsFlag := flags.Int("latency-attempts", 0, i18n.T("flag.latencyAttempts"))
-	dnsResolversFlag := flags.String("dns-resolvers", "", i18n.T("flag.dnsResolvers"))
-	latencyTargetsFlag := flags.String("latency-targets", "", i18n.T("flag.latencyTargets"))
-	routeTargetsFlag := flags.String("route-targets", "", i18n.T("flag.routeTargets"))
-	stunServersFlag := flags.String("stun-servers", "", i18n.T("flag.stunServers"))
-	iperfTargetsFlag := flags.String("iperf-targets", "", i18n.T("flag.iperfTargets"))
-	mediaRegionFlag := flags.String("media-region", "", i18n.T("flag.mediaRegion"))
-	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
-	backtraceTargetsFlag := flags.String("backtrace-targets", "", i18n.T("flag.backtraceTargets"))
-	ooklaServersFlag := flags.String("ookla-servers", "", i18n.T("flag.ooklaServers"))
-	interactiveFlag := flags.Bool("interactive", false, i18n.T("flag.interactive"))
-	yesFlag := flags.Bool("yes", false, i18n.T("flag.yes"))
-	strictFlag := flags.Bool("strict", false, i18n.T("flag.strict"))
-	versionFlag := flags.Bool("version", false, i18n.T("flag.version"))
+	profileFlag := flags.String("profile", "", "flag.profile")
+	configFlag := flags.String("config", "", "flag.config")
+	onlyFlag := flags.String("only", "", "flag.only")
+	skipFlag := flags.String("skip", "", "flag.skip")
+	exposureFlag := flags.String("exposure", "", "flag.exposure")
+	revealFlag := flags.Bool("reveal", false, "flag.reveal")
+	ipVersionFlag := flags.String("ip-version", "", "flag.ipVersion")
+	ipv4Flag := flags.Bool("4", false, "flag.ipv4")
+	ipv6Flag := flags.Bool("6", false, "flag.ipv6")
+	ipSourcesFlag := flags.String("ip-quality-sources", "", "flag.ipQualitySources")
+	formatsFlag := flags.String("format", "", "flag.format")
+	outputFlag := flags.String("output", "", "flag.output")
+	nameFlag := flags.String("name", "", "flag.name")
+	noColorFlag := flags.Bool("no-color", false, "flag.noColor")
+	colorFlag := flags.String("color", "auto", "flag.color")
+	baselineFlag := flags.String("score-baseline", "", "flag.scoreBaseline")
+	cpuTimeFlag := flags.Duration("cpu-time", 0, "flag.cpuTime")
+	diskFlag := flags.Int("disk-mib", 0, "flag.diskMiB")
+	diskPathFlag := flags.String("disk-path", "", "flag.diskPath")
+	diskMultiFlag := flags.Bool("disk-multi", false, "flag.diskMulti")
+	diskMatrixModeFlag := flags.String("disk-matrix-mode", "", "flag.diskMatrixMode")
+	iperfDurationFlag := flags.Duration("iperf-duration", 0, "flag.iperfDuration")
+	threadsFlag := flags.Int("speed-threads", 0, "flag.speedThreads")
+	timeoutFlag := flags.Duration("timeout", 0, "flag.timeout")
+	dnsAttemptsFlag := flags.Int("dns-attempts", 0, "flag.dnsAttempts")
+	latencyAttemptsFlag := flags.Int("latency-attempts", 0, "flag.latencyAttempts")
+	dnsResolversFlag := flags.String("dns-resolvers", "", "flag.dnsResolvers")
+	latencyTargetsFlag := flags.String("latency-targets", "", "flag.latencyTargets")
+	routeTargetsFlag := flags.String("route-targets", "", "flag.routeTargets")
+	stunServersFlag := flags.String("stun-servers", "", "flag.stunServers")
+	iperfTargetsFlag := flags.String("iperf-targets", "", "flag.iperfTargets")
+	mediaRegionFlag := flags.String("media-region", "", "flag.mediaRegion")
+	backtraceCityFlag := flags.String("backtrace-city", "", "flag.backtraceCity")
+	backtraceTargetsFlag := flags.String("backtrace-targets", "", "flag.backtraceTargets")
+	ooklaServersFlag := flags.String("ookla-servers", "", "flag.ooklaServers")
+	interactiveFlag := flags.Bool("interactive", false, "flag.interactive")
+	yesFlag := flags.Bool("yes", false, "flag.yes")
+	strictFlag := flags.Bool("strict", false, "flag.strict")
+	versionFlag := flags.Bool("version", false, "flag.version")
 	flags.Usage = func() { printRunHelp(parseOutput, flags) }
 	if err := flags.Parse(args); err != nil {
 		if isMissingRunLanguageError(err) {
@@ -321,6 +321,23 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 }
 
 func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
+	type savedUsage struct {
+		parsedFlag *flag.Flag
+		usage      string
+	}
+	var originalUsages []savedUsage
+	flags.VisitAll(func(parsedFlag *flag.Flag) {
+		if !strings.HasPrefix(parsedFlag.Usage, "flag.") {
+			return
+		}
+		originalUsages = append(originalUsages, savedUsage{parsedFlag: parsedFlag, usage: parsedFlag.Usage})
+		parsedFlag.Usage = i18n.T(parsedFlag.Usage)
+	})
+	defer func() {
+		for _, saved := range originalUsages {
+			saved.parsedFlag.Usage = saved.usage
+		}
+	}()
 	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
 	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleIDs(), ","))

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"ecs/internal/config"
 )
@@ -109,11 +110,51 @@ func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
 	}
 }
 
-func TestMainKeepsGlobalLanguageAfterFormalOptionValue(t *testing.T) {
-	t.Setenv("ECS_LANG", "zh")
-	status, stdout, stderr := runInformationCommand("run", "--name", "value", "--lang=en", "--help")
-	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run] [options]") || strings.Contains(stderr, "用法: ecs [run]") {
-		t.Fatalf("language after formal option value status=%d stdout=%q stderr=%q", status, stdout, stderr)
+func TestMainLocalizesRunHelpAfterFormalLanguage(t *testing.T) {
+	cases := []struct {
+		name       string
+		env        string
+		args       []string
+		want       string
+		forbidden  []string
+		noHanRunes bool
+	}{
+		{
+			name:       "late English language",
+			env:        "zh",
+			args:       []string{"run", "--name", "value", "--lang=en", "--help"},
+			want:       "Usage: ecs [run] [options]",
+			forbidden:  []string{"用法:", "仅测试", "配置档", "三网回程", "报告文件名前缀"},
+			noHanRunes: true,
+		},
+		{
+			name:      "late Chinese language",
+			env:       "en",
+			args:      []string{"run", "--name", "value", "--lang=zh", "--help"},
+			want:      "用法: ecs [run] [选项]",
+			forbidden: []string{"Usage: ecs [run] [options]", "test IPv4 only", "profile: standard, full", "run only these modules", "report filename prefix"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("ECS_LANG", test.env)
+			status, stdout, stderr := runInformationCommand(test.args...)
+			if status != 0 || stdout != "" || !strings.Contains(stderr, test.want) {
+				t.Fatalf("late language help status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			for _, forbidden := range test.forbidden {
+				if strings.Contains(stderr, forbidden) {
+					t.Fatalf("late language help contains %q: %q", forbidden, stderr)
+				}
+			}
+			if test.noHanRunes {
+				for _, runeValue := range stderr {
+					if unicode.Is(unicode.Han, runeValue) {
+						t.Fatalf("English late language help contains Han text: %q", stderr)
+					}
+				}
+			}
+		})
 	}
 }
 
