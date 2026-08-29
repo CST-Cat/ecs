@@ -9,7 +9,7 @@
 
 ## Unreleased
 
-- 将固定 Release 工具链升级到 Go 1.27.0，修复 Go 标准库安全扫描发现的可达漏洞，并确认 govulncheck 无漏洞结果。
+- Release/正式构建改为跟随 setup-go v7 stable 的最新稳定 Go，修复 Go 标准库安全扫描发现的可达漏洞，并确认 govulncheck 无漏洞结果。
 - 收敛排行榜提交的 artifact 指纹为单一当前规范 JSON 算法：投影排除 `id`、`sample_id` 和 `ran_at`，保留其余允许公开字段及精确浮点值；提交 JSON 不再接受 `fingerprint_version`，旧格式需按当前 v1 contract 重新导出。
 
 ## 0.7.10 — 2026-08-27

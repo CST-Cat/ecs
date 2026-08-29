@@ -36,9 +36,9 @@ preflight → tools × 7 → assemble → verify → attest → publish
 
 发布入口确认候选提交等于当时远端 `main`，随后所有阶段只使用该冻结 SHA；发布构建要求 Git 工作区洁净。工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败。工具 manifest 记录来源和实际二进制 SHA-256，并在构建、staging 和打包路径校验。最终资产由 `checksums.txt` 与实际字节逐项对应。
 
-当前开发、普通 CI、排行榜重建与 Release 的 Go 工具链由仓库根 `.go-version` 人工固定；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本。Go 编译器及各工具版本由维护者人工选择、审查和升级：项目不追随 `stable`/`latest`，不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
+普通 CI、排行榜重建、security 与 Release workflow 直接通过 `actions/setup-go@v7` 的 `stable` 和 `check-latest` 选择当前官方稳定 Go；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本，`ci.yml` 的 `compat` job 仍固定使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`。`devtools/go.mod` 只记录工具 module 的最低 Go 版本要求与工具依赖清单，不是 compiler selector。项目不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
 
-所有 GitHub Actions `uses` 引用固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。最终发布资产还会生成 GitHub artifact attestation，可用 `gh attestation verify` 核对仓库、workflow 和提交来源。
+`actions/setup-go@v7` 是本任务为跟随官方稳定版本明确允许的浮动引用例外；除此之外，所有 GitHub Actions `uses` 引用仍固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。最终发布资产还会生成 GitHub artifact attestation，可用 `gh attestation verify` 核对仓库、workflow 和提交来源。
 
 ## 报告安全问题
 

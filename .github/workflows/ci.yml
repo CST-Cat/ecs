@@ -7,8 +7,8 @@ name: ci
 # 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
 # compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
-# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 从仓库根
-# .go-version 读取，不跟随 stable/latest 漂移；compat 只验证最低支持版本。
+# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 直接通过
+# setup-go 请求官方 stable 并启用 check-latest；compat 仍固定验证最低支持版本 1.22.x。
 
 on:
   push:
@@ -32,9 +32,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
       - name: Unit and parser tests
@@ -53,7 +54,7 @@ jobs:
         go-version: ["1.22.x"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
           go-version: ${{ matrix.go-version }}
           cache: false
@@ -69,9 +70,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - run: ./scripts/ci/check.sh
 
@@ -81,9 +83,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - run: ./scripts/ci/integration.sh
 
@@ -93,9 +96,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - run: go test -race ./...
 
@@ -105,9 +109,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - run: ./scripts/cross.sh
 
@@ -118,9 +123,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - name: Validate submissions
         env:

@@ -4,8 +4,8 @@ set -euo pipefail
 # 发布前校验：这组制品是不是真的由这次提交、这条工具链产出的。
 #
 # 根 go.mod 只声明源码最低兼容版本，devtools/go.mod 只管理 staticcheck。
-# 正式 Release 工具链由仓库根 .go-version 固定；构建阶段记录
-# 实际的 go env GOVERSION，再作为 --build-go-version 传给本脚本。
+# 正式 Release 工具链由 setup-go stable 选择；构建阶段记录实际的
+# go env GOVERSION，再作为 --build-go-version 传给本脚本。
 #
 # 校验对象是**解包出来的实际二进制**，不是构建日志。它检查
 # go version -m 记录的 Go build metadata：

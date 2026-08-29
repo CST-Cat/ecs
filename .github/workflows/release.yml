@@ -30,10 +30,10 @@ on:
 permissions:
   contents: read
 
-# 正式发布统一使用仓库根目录 .go-version 人工固定的 Go 编译器版本，不从主模块
-# go.mod 自动漂移；升级正式 Go 版本时只需修改仓库根目录 .go-version 文件。
-# 所有 release job（包括被脚本间接调用的 go build/go test/go run）都禁止
-# go 命令根据 go.mod 自动切换工具链；编译器版本只由仓库根目录 .go-version 选择。
+# 正式发布的所有 job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，
+# 不从主模块 go.mod 自动选择工具链。所有 release job（包括被脚本间接调用的
+# go build/go test/go run）都禁止 go 命令根据 go.mod 自动切换工具链；assemble 记录
+# 实际 go env GOVERSION，并原样交给 verify 校验。
 env:
   GOTOOLCHAIN: local
 
@@ -60,9 +60,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
 
       - name: Freeze the release candidate
@@ -120,9 +121,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.preflight.outputs.sha }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
 
       # 交叉构建把宿主当成构建机，跑错架构的宿主会得到错误的产物。
@@ -166,10 +168,9 @@ jobs:
 
   # 组装全部发布物，并记录**实测**的工具链版本。
   #
-  # 编译器版本由仓库根目录 .go-version 人工固定，不另写
-  # expected_go=... 这种可能分叉的期望值。这里记录的是 setup-go 后本次构建
-  # 实际使用的 go env GOVERSION，verify 原样传入 --build-go-version，去对二进制
-  # 里的元数据。升级正式 Go 版本时只需更新仓库根目录 .go-version。
+  # Release job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
+  # expected_go=... 这种可能分叉的期望值。这里在 assemble 记录 setup-go 后本次构建
+  # 实际的 go env GOVERSION，并原样通过 --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
     needs: [preflight, tools]
     runs-on: ubuntu-latest
@@ -181,9 +182,10 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -229,9 +231,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.preflight.outputs.sha }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7 # v7
         with:
-          go-version-file: .go-version
+          go-version: 'stable'
+          check-latest: true
           cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
