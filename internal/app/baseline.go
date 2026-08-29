@@ -24,9 +24,15 @@ type duplicateReportPath struct {
 	previous string
 }
 
+type reportPathIssue struct {
+	path string
+	err  error
+}
+
 type reportPathExpansion struct {
 	paths      []string
 	duplicates []duplicateReportPath
+	issues     []reportPathIssue
 }
 
 // expandReportPaths 展开位置参数，目录递归收集其中的 .json 文件。
@@ -59,9 +65,10 @@ func expandReportPathsDetailed(args []string) reportPathExpansion {
 			appendPath(arg)
 			continue
 		}
-		_ = filepath.WalkDir(arg, func(path string, entry fs.DirEntry, err error) error {
+		walkErr := filepath.WalkDir(arg, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				// 单个不可读的子目录不该中断整次收集。
+				expanded.issues = append(expanded.issues, reportPathIssue{path: path, err: err})
 				return nil
 			}
 			if entry.IsDir() {
@@ -76,6 +83,9 @@ func expandReportPathsDetailed(args []string) reportPathExpansion {
 			}
 			return nil
 		})
+		if walkErr != nil {
+			expanded.issues = append(expanded.issues, reportPathIssue{path: arg, err: walkErr})
+		}
 	}
 	sort.Strings(expanded.paths)
 	sort.SliceStable(expanded.duplicates, func(left, right int) bool {
@@ -83,6 +93,12 @@ func expandReportPathsDetailed(args []string) reportPathExpansion {
 			return expanded.duplicates[left].previous < expanded.duplicates[right].previous
 		}
 		return expanded.duplicates[left].path < expanded.duplicates[right].path
+	})
+	sort.SliceStable(expanded.issues, func(left, right int) bool {
+		if expanded.issues[left].path == expanded.issues[right].path {
+			return expanded.issues[left].err.Error() < expanded.issues[right].err.Error()
+		}
+		return expanded.issues[left].path < expanded.issues[right].path
 	})
 	return expanded
 }

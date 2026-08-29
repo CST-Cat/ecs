@@ -37,9 +37,23 @@ const outlierThreshold = 3.5
 // madScale 把 MAD 换算成可与标准差比较的尺度（正态分布下 MAD ≈ 0.6745σ）。
 const madScale = 0.6745
 
+// OutlierSample 是离群检测所需的一条评分样本。
+//
+// 报告与提交都投影成这个值后，检测器不需要知道输入 artifact 的类型。
+type OutlierSample struct {
+	ID      string
+	VCPU    int
+	Metrics map[string]float64
+}
+
+// OutlierSample returns the value projection used by DetectOutliers.
+func (s Submission) OutlierSample() OutlierSample {
+	return OutlierSample{ID: s.SampleID, VCPU: s.Host.VCPU, Metrics: s.Metrics}
+}
+
 // Outlier 是一条离群记录。
 type Outlier struct {
-	// SubmissionID 是被标记的提交。
+	// SubmissionID 是被标记样本的稳定 sample identity。
 	SubmissionID string
 	// MetricKey 是出问题的指标。
 	MetricKey string
@@ -80,22 +94,22 @@ type OutlierReport struct {
 //
 // 分档比较是必须的：32 核机器的多线程分数本来就该远高于 2 核，放在一起比
 // 会把所有大机器都标成离群。
-func DetectOutliers(submissions []Submission) OutlierReport {
+func DetectOutliers(samples []OutlierSample) OutlierReport {
 	type group struct {
 		values map[string][]float64
 		ids    map[string][]string
 	}
 	groups := make(map[int]*group)
-	for _, submission := range submissions {
-		key := TierKeyFor(submission.Host.VCPU)
+	for _, sample := range samples {
+		key := TierKeyFor(sample.VCPU)
 		entry, ok := groups[key]
 		if !ok {
 			entry = &group{values: make(map[string][]float64), ids: make(map[string][]string)}
 			groups[key] = entry
 		}
-		for metricKey, value := range submission.Metrics {
+		for metricKey, value := range sample.Metrics {
 			entry.values[metricKey] = append(entry.values[metricKey], value)
-			entry.ids[metricKey] = append(entry.ids[metricKey], submission.ID)
+			entry.ids[metricKey] = append(entry.ids[metricKey], sample.ID)
 		}
 	}
 

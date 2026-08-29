@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"ecs/internal/model"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -181,7 +182,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 	root := t.TempDir()
 	values := []float64{98, 99, 100, 101, 102, 103, 104, 1000}
 	inputs := make([]string, 0, len(values))
-	submissions := make([]score.Submission, 0, len(values))
+	samples := make([]score.OutlierSample, 0, len(values))
 	for index, value := range values {
 		var multi *float64
 		if index == 0 {
@@ -194,9 +195,9 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		submissions = append(submissions, submission)
+		samples = append(samples, submission.OutlierSample())
 	}
-	expected := score.DetectOutliers(submissions)
+	expected := score.DetectOutliers(samples)
 	if len(expected.Outliers) == 0 || len(expected.Undecidable) == 0 {
 		t.Fatalf("fixture did not produce both outlier states: %+v", expected)
 	}
@@ -228,5 +229,140 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		if !strings.Contains(stdout, notice) {
 			t.Fatalf("undecidable notice %q missing from output", notice)
 		}
+	}
+}
+
+func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
+	root := t.TempDir()
+	values := []float64{98, 99, 100, 101, 102, 103, 104, 105, 1000}
+	reportPaths := make([]string, 0, len(values))
+	submissionPaths := make([]string, 0, len(values))
+	samples := make([]score.OutlierSample, 0, len(values))
+	for index, value := range values {
+		runID := fmt.Sprintf("representation-run-%d", index)
+		reportPath := writeLeaderboardReport(t, filepath.Join(root, fmt.Sprintf("report-%d.json", index)), runID, value)
+		report, err := reporter.LoadJSON(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		submissionPath := writeLeaderboardSubmission(t, filepath.Join(root, fmt.Sprintf("submission-%d.json", index)), report)
+		submission, err := score.LoadSubmission(submissionPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reportSample, err := score.OutlierSampleFromReport(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reportSample.ID != submission.SampleID {
+			t.Fatalf("report/submission sample identity = %q/%q", reportSample.ID, submission.SampleID)
+		}
+		samples = append(samples, reportSample)
+		reportPaths = append(reportPaths, reportPath)
+		submissionPaths = append(submissionPaths, submissionPath)
+	}
+	expected := score.DetectOutliers(samples)
+	if len(expected.Outliers) == 0 || len(expected.Undecidable) == 0 {
+		t.Fatalf("fixture did not produce both outlier states: %+v", expected)
+	}
+
+	run := func(name string, inputs []string) {
+		t.Helper()
+		output := filepath.Join(root, name+"-baseline.json")
+		args := []string{"leaderboard", "--lang", "en", "--annotate", "--verbose", "--output", output}
+		args = append(args, inputs...)
+		status, stdout, stderr := invokeAppMain(args...)
+		if status != 0 || stderr != "" {
+			t.Fatalf("%s representation status=%d stdout=%q stderr=%q", name, status, stdout, stderr)
+		}
+		if warnings := strings.Count(stdout, "::warning::"); warnings != len(expected.Outliers) {
+			t.Fatalf("%s representation outlier count=%d, want %d", name, warnings, len(expected.Outliers))
+		}
+		for _, outlier := range expected.Outliers {
+			if !strings.Contains(stdout, outlier.Describe()) {
+				t.Fatalf("%s representation missing outlier %q in %q", name, outlier.Describe(), stdout)
+			}
+		}
+		for _, notice := range expected.Undecidable {
+			if !strings.Contains(stdout, notice) {
+				t.Fatalf("%s representation missing undecidable notice %q", name, notice)
+			}
+		}
+	}
+
+	run("reports", reportPaths)
+	run("submissions", submissionPaths)
+	mixed := make([]string, 0, len(values))
+	for index := range values {
+		if index%2 == 0 {
+			mixed = append(mixed, reportPaths[index])
+		} else {
+			mixed = append(mixed, submissionPaths[index])
+		}
+	}
+	run("mixed", mixed)
+}
+
+func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		strict     bool
+		wantStatus int
+	}{
+		{name: "default warns and aggregates", wantStatus: 0},
+		{name: "strict rejects without output", strict: true, wantStatus: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			report := submitTestReport()
+			report.Run.ID = "projection-failure-run"
+			// The CPU measurement is enough for BuildBaseline, while omitting
+			// system host measurements makes BuildSubmission's host contract fail.
+			report.Results = []model.Result{report.Results[1]}
+			if err := validateBaselineReport(report); err != nil {
+				t.Fatalf("projection failure fixture is not baseline-valid: %v", err)
+			}
+			if _, err := score.OutlierSampleFromReport(report); err == nil {
+				t.Fatal("projection failure fixture unexpectedly produced an outlier sample")
+			}
+			input := filepath.Join(root, "projection-failure.json")
+			content, err := reporter.JSON(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(input, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(root, "baseline.json")
+			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			if test.strict {
+				args = append(args, "--strict")
+			}
+			args = append(args, input)
+			status, stdout, stderr := invokeAppMain(args...)
+			if status != test.wantStatus || !strings.Contains(strings.ToLower(stderr), "outlier projection") ||
+				!strings.Contains(strings.ToLower(stderr), "host vcpu") {
+				t.Fatalf("projection failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			if test.strict {
+				if stdout != "" || !strings.Contains(strings.ToLower(stderr), "strict mode rejected") {
+					t.Fatalf("strict projection failure output status=%d stdout=%q stderr=%q", status, stdout, stderr)
+				}
+				if _, err := os.Lstat(output); !os.IsNotExist(err) {
+					t.Fatalf("strict projection failure wrote output: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(stderr, "Skipped") || !strings.Contains(stdout, "written") {
+				t.Fatalf("default projection failure did not warn and continue: stdout=%q stderr=%q", stdout, stderr)
+			}
+			baseline, err := score.LoadBaseline(output)
+			if err != nil {
+				t.Fatalf("default projection failure output is not loadable: %v", err)
+			}
+			if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 900 {
+				t.Fatalf("default projection failure baseline = %+v", baseline)
+			}
+		})
 	}
 }

@@ -68,6 +68,11 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	// 输入按位置参数给出，方便直接用 shell 展开：ecs leaderboard reports/*.json
 	expanded := expandReportPathsDetailed(flags.Args())
+	for _, issue := range expanded.issues {
+		if inputIssue(issue.path, fmt.Errorf("traversal error: %w", issue.err)) {
+			return 1
+		}
+	}
 	for _, duplicate := range expanded.duplicates {
 		issue := fmt.Errorf("duplicate input path %q (already included as %q)",
 			filepath.Base(duplicate.path), filepath.Base(duplicate.previous))
@@ -84,7 +89,6 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	// 两种输入都收：完整报告（本地跑完直接用）与瘦身提交（排行榜库里的）。
 	// 提交会被转成最小报告，因此聚合只有一条代码路径。
 	var reports []model.Report
-	var submissions []score.Submission
 	providerCounts := make(map[string]int)
 	regionCounts := make(map[string]int)
 	recordMetadata := func(provider, region string) {
@@ -101,6 +105,7 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	// benchmark run. Only the latter is used here so a full report and its
 	// derived submission cannot become two leaderboard samples.
 	seenSampleIDs := make(map[string]string)
+	var outlierSamples []score.OutlierSample
 	for _, path := range paths {
 		// 目录里通常就放着上一次生成的基线，它不是输入。
 		if _, err := score.LoadBaseline(path); err == nil {
@@ -115,7 +120,7 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 				continue
 			}
 			seenSampleIDs[submission.SampleID] = path
-			submissions = append(submissions, submission)
+			outlierSamples = append(outlierSamples, submission.OutlierSample())
 			recordMetadata(submission.Host.Provider, submission.Host.Region)
 			reports = append(reports, submission.AsReport())
 			continue
@@ -149,6 +154,13 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		seenSampleIDs[sampleID] = path
+		if sample, err := score.OutlierSampleFromReport(data); err != nil {
+			if inputIssue(path, fmt.Errorf("outlier projection: %w", err)) {
+				return 1
+			}
+		} else {
+			outlierSamples = append(outlierSamples, sample)
+		}
 		provider, region := score.ExtractSubmissionMetadata(data)
 		recordMetadata(provider, region)
 		reports = append(reports, data)
@@ -209,8 +221,8 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// 离群只标记不阻断：可能是新硬件或特殊配置，由维护者判断是否收录。
-	if len(submissions) > 0 {
-		outliers := score.DetectOutliers(submissions)
+	if len(outlierSamples) > 0 {
+		outliers := score.DetectOutliers(outlierSamples)
 		if len(outliers.Outliers) > 0 {
 			fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.outliersHeader"))
 			for _, item := range outliers.Outliers {

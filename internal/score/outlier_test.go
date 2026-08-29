@@ -2,13 +2,17 @@ package score
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"ecs/internal/model"
 )
 
 func TestDetectOutlierStates(t *testing.T) {
 	makeSubmission := func(id string, vcpu int, cpu, memory float64) Submission {
-		return Submission{ID: id, Host: HostSpec{VCPU: vcpu}, Metrics: map[string]float64{
+		return Submission{ID: id, SampleID: id, Host: HostSpec{VCPU: vcpu}, Metrics: map[string]float64{
 			"cpu_single": cpu, "memory_copy": memory,
 		}}
 	}
@@ -42,7 +46,11 @@ func TestDetectOutlierStates(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			got := DetectOutliers(test.submissions)
+			samples := make([]OutlierSample, 0, len(test.submissions))
+			for _, submission := range test.submissions {
+				samples = append(samples, submission.OutlierSample())
+			}
+			got := DetectOutliers(samples)
 			if len(got.Outliers) != test.wantOutliers {
 				t.Fatalf("outliers = %+v, want %d", got.Outliers, test.wantOutliers)
 			}
@@ -76,4 +84,103 @@ func TestDetectOutlierStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDetectOutliersIsRepresentationInvariant(t *testing.T) {
+	values := []float64{98, 99, 100, 101, 102, 103, 104, 105, 1000}
+	reportSamples := make([]OutlierSample, 0, len(values))
+	submissionSamples := make([]OutlierSample, 0, len(values))
+	for index, value := range values {
+		var multi *float64
+		if index == 0 {
+			multiValue := 3400.0
+			multi = &multiValue
+		}
+		report := outlierReportFixture(fmt.Sprintf("representation-%d", index), value, multi)
+		submission, err := BuildSubmission(report, SubmissionOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reportSample, err := OutlierSampleFromReport(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reportSamples = append(reportSamples, reportSample)
+		submissionSamples = append(submissionSamples, submission.OutlierSample())
+	}
+
+	fromReports := DetectOutliers(reportSamples)
+	fromSubmissions := DetectOutliers(submissionSamples)
+	if !reflect.DeepEqual(fromReports, fromSubmissions) {
+		t.Fatalf("report/submission outlier results differ:\nreports=%+v\nsubmissions=%+v", fromReports, fromSubmissions)
+	}
+	if len(fromReports.Outliers) == 0 || len(fromReports.Undecidable) == 0 {
+		t.Fatalf("fixture did not cover both outlier states: %+v", fromReports)
+	}
+	for _, outlier := range fromReports.Outliers {
+		if outlier.TierLabel != "4–7 vCPU" || outlier.MetricKey != "cpu_single" || outlier.SampleCount != len(values) {
+			t.Fatalf("outlier grouping = %+v", outlier)
+		}
+	}
+	if !strings.Contains(fromReports.Undecidable[0], "4–7 vCPU / cpu_multi") {
+		t.Fatalf("undecidable grouping = %v", fromReports.Undecidable)
+	}
+}
+
+func TestDetectOutliersMixedRepresentationsAreInvariant(t *testing.T) {
+	values := []float64{98, 99, 100, 101, 102, 103, 104, 105, 1000}
+	allReportSamples := make([]OutlierSample, 0, len(values))
+	mixedSamples := make([]OutlierSample, 0, len(values))
+	for index, value := range values {
+		var multi *float64
+		if index == 0 {
+			multiValue := 3400.0
+			multi = &multiValue
+		}
+		report := outlierReportFixture(fmt.Sprintf("mixed-%d", index), value, multi)
+		submission, err := BuildSubmission(report, SubmissionOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reportSample, err := OutlierSampleFromReport(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allReportSamples = append(allReportSamples, reportSample)
+		if index%2 == 0 {
+			mixedSamples = append(mixedSamples, reportSample)
+		} else {
+			mixedSamples = append(mixedSamples, submission.OutlierSample())
+		}
+	}
+	want := DetectOutliers(allReportSamples)
+	got := DetectOutliers(mixedSamples)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mixed report/submission outlier results differ:\nwant=%+v\ngot=%+v", want, got)
+	}
+}
+
+func outlierReportFixture(runID string, single float64, multi *float64) model.Report {
+	report := model.Report{
+		Tool: model.ToolInfo{Version: "test"},
+		Run:  model.RunInfo{ID: runID, Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
+		Results: []model.Result{
+			{
+				ID: "system", Status: model.StatusOK,
+				Measurements: []model.Measurement{
+					{Key: "logical_cpus", Value: 4},
+					{Key: "memory_total_bytes", Value: 8 * (1 << 30)},
+				},
+			},
+			{
+				ID: "cpu", Status: model.StatusOK,
+				Measurements: []model.Measurement{{Key: "sysbench_cpu_single_events_s", Value: single}},
+			},
+		},
+	}
+	if multi != nil {
+		report.Results[1].Measurements = append(report.Results[1].Measurements,
+			model.Measurement{Key: "sysbench_cpu_multi_events_s", Value: *multi})
+	}
+	return report
 }

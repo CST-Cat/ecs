@@ -3,7 +3,10 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"ecs/internal/score"
 )
 
 func TestExpandReportPathsRecursesIntoSubdirectories(t *testing.T) {
@@ -56,5 +59,64 @@ func TestExpandReportPathsDeduplicatesCanonicalPaths(t *testing.T) {
 	got := expandReportPaths([]string{path, uncleanPath, reports})
 	if len(got) != 1 || got[0] != path {
 		t.Fatalf("canonical duplicate paths = %v, want [%s]", got, path)
+	}
+}
+
+func TestLeaderboardHandlesNestedTraversalErrors(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		strict bool
+	}{
+		{name: "default continues", strict: false},
+		{name: "strict rejects", strict: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			readable := writeLeaderboardReport(t, filepath.Join(root, "readable.json"), "traversal-readable", 100)
+			blocked := filepath.Join(root, "blocked")
+			if err := os.Mkdir(blocked, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(blocked, "unreadable.json"), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(blocked, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+
+			expanded := expandReportPathsDetailed([]string{root})
+			if len(expanded.issues) == 0 {
+				t.Skip("filesystem did not enforce the unreadable directory permission")
+			}
+
+			output := filepath.Join(root, "baseline.json")
+			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			if test.strict {
+				args = append(args, "--strict")
+			}
+			args = append(args, root)
+			status, stdout, stderr := invokeAppMain(args...)
+			if test.strict {
+				if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "traversal error") {
+					t.Fatalf("strict traversal status=%d stdout=%q stderr=%q", status, stdout, stderr)
+				}
+				if _, err := os.Lstat(output); !os.IsNotExist(err) {
+					t.Fatalf("strict traversal wrote output: %v", err)
+				}
+				return
+			}
+			if status != 0 || !strings.Contains(stdout, "written") ||
+				!strings.Contains(stderr, "Skipped") || !strings.Contains(strings.ToLower(stderr), "traversal error") {
+				t.Fatalf("default traversal status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			baseline, err := score.LoadBaseline(output)
+			if err != nil {
+				t.Fatalf("default traversal output is not loadable: %v", err)
+			}
+			if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 100 {
+				t.Fatalf("default traversal baseline = %+v, readable input=%s", baseline, readable)
+			}
+		})
 	}
 }

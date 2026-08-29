@@ -235,6 +235,17 @@ func ExtractSubmissionMetadata(data model.Report) (provider, region string) {
 	return spec.Provider, spec.Region
 }
 
+// OutlierSampleFromReport reuses the public submission projection so a full
+// report and its derived submission expose the same ID, tier input, and metric
+// values to the artifact-independent outlier detector.
+func OutlierSampleFromReport(data model.Report) (OutlierSample, error) {
+	submission, err := BuildSubmission(data, SubmissionOptions{})
+	if err != nil {
+		return OutlierSample{}, err
+	}
+	return submission.OutlierSample(), nil
+}
+
 func extractToolSpec(data model.Report) ToolSpec {
 	spec := ToolSpec{ECS: data.Tool.Version}
 	for _, result := range data.Results {
