@@ -77,6 +77,10 @@ func networkSourceNameKey(id string) string {
 	return "probe.network.source_name." + id
 }
 
+func networkSourcePurposeKey(id string) string {
+	return "probe.network.source." + id
+}
+
 func networkScoreBandKey(id string) string {
 	return "probe.network.score_band." + id
 }

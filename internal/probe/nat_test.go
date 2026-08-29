@@ -51,25 +51,23 @@ func TestSTUNMessageParsesMappingAndClassifiesUnknownFiltering(t *testing.T) {
 		t.Fatalf("STUN mapped address = %+v, err=%v", result.Mapped, err)
 	}
 
-	category, note := natCategory(natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringUnknown}, true)
-	if !strings.Contains(category, "锥型") || note == "" {
-		t.Fatalf("NAT classification = %q, note=%q", category, note)
+	if got, want := natCategoryCode(natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringUnknown}, true), "cone_unknown_filtering"; got != want {
+		t.Fatalf("NAT stable classification = %q, want %q", got, want)
 	}
 	for _, test := range []struct {
 		name, want string
 		finding    natFinding
 		behind     bool
 	}{
-		{name: "public", finding: natFinding{Mapping: mappingEndpointIndependent}, want: "公网直连", behind: false},
-		{name: "symmetric", finding: natFinding{Mapping: mappingAddressDependent}, want: "NAT4", behind: true},
-		{name: "full cone", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringEndpointIndependent}, want: "NAT1", behind: true},
-		{name: "restricted cone", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringAddressDependent}, want: "NAT2", behind: true},
-		{name: "port restricted", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringAddressPortDependent}, want: "NAT3", behind: true},
-		{name: "unknown mapping", finding: natFinding{Mapping: mappingUnknown}, want: "类型未判定", behind: true},
+		{name: "public", finding: natFinding{Mapping: mappingEndpointIndependent}, want: "public", behind: false},
+		{name: "symmetric", finding: natFinding{Mapping: mappingAddressDependent}, want: "symmetric", behind: true},
+		{name: "full cone", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringEndpointIndependent}, want: "full_cone", behind: true},
+		{name: "restricted cone", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringAddressDependent}, want: "restricted_cone", behind: true},
+		{name: "port restricted", finding: natFinding{Mapping: mappingEndpointIndependent, Filtering: filteringAddressPortDependent}, want: "port_restricted", behind: true},
+		{name: "unknown mapping", finding: natFinding{Mapping: mappingUnknown}, want: "unknown", behind: true},
 	} {
-		category, note := natCategory(test.finding, test.behind)
-		if !strings.Contains(category, test.want) || note == "" {
-			t.Errorf("%s category = %q, note=%q", test.name, category, note)
+		if got := natCategoryCode(test.finding, test.behind); got != test.want {
+			t.Errorf("%s stable category = %q, want %q", test.name, got, test.want)
 		}
 	}
 	wrongTransaction := transaction
@@ -142,7 +140,7 @@ func natCandidateFixture(t *testing.T, servers []config.Endpoint) model.Report {
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
 		Run: model.RunInfo{
 			ID: "nat-fixture", Profile: "standard", StartedAt: time.Unix(0, 0).UTC(),
-			Exposure: "local", Offline: false,
+			Exposure: "local",
 		},
 		Summary: model.Summary{Status: result.Status, Warnings: 1},
 		Results: []model.Result{result},
@@ -163,18 +161,21 @@ func natPoolTable(t *testing.T, result model.Result) model.Table {
 
 func TestNATPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 	servers := []config.Endpoint{
-		{Name: "Alpha STUN", Address: startTestSTUNServer(t)},
-		{Name: "Beta STUN", Address: "beta.example:bad"},
+		{Name: "Alpha STUN", Address: startTestSTUNServer(t), Kind: config.STUNServerKindDualAddress},
+		{Name: "Beta STUN", Address: "beta.example:bad", Kind: config.STUNServerKindMappingOnly},
 	}
 	data := natCandidateFixture(t, servers)
 	result := data.Results[0]
 	pool := natPoolTable(t, result)
 	if pool.Title != "probe.nat.table.stun_pool" ||
-		!reflect.DeepEqual(pool.Columns, []model.TableColumn{{Key: "server_name", Label: "probe.nat.column.server_name"}, {Key: "server_address", Label: "probe.nat.column.server_address"}}) ||
+		!reflect.DeepEqual(pool.Columns, []model.TableColumn{{Key: "server_name", Label: "probe.nat.column.server_name"}, {Key: "server_address", Label: "probe.nat.column.server_address"}, {Key: "kind", Label: "probe.nat.column.kind"}}) ||
 		pool.RowIdentity != "" {
 		t.Fatalf("candidate pool shape = %+v", pool)
 	}
-	wantRows := [][]model.Value{{model.RawValue(servers[0].Name), model.RawValue(servers[0].Address)}, {model.RawValue(servers[1].Name), model.RawValue(servers[1].Address)}}
+	wantRows := [][]model.Value{
+		{model.RawValue(servers[0].Name), model.RawValue(servers[0].Address), model.KeyValue("probe.nat.stun_kind.dual_address")},
+		{model.RawValue(servers[1].Name), model.RawValue(servers[1].Address), model.KeyValue("probe.nat.stun_kind.mapping_only")},
+	}
 	if !reflect.DeepEqual(pool.Rows, wantRows) {
 		t.Fatalf("candidate pool rows = %v, want %v", pool.Rows, wantRows)
 	}
@@ -182,14 +183,14 @@ func TestNATPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 		t.Fatalf("early-stop probe details = %+v", result.Tables)
 	}
 	row := result.Tables[0].Rows[0]
-	if key, ok := row[3].Key(); !ok || key != "probe.nat.mapping.endpoint_independent" {
-		t.Fatalf("NAT mapping cell = %#v", row[3])
+	if key, ok := row[4].Key(); !ok || key != "probe.nat.mapping.endpoint_independent" {
+		t.Fatalf("NAT mapping cell = %#v", row[4])
 	}
-	if key, ok := row[4].Key(); !ok || key != "probe.nat.filtering.unknown" {
-		t.Fatalf("NAT filtering cell = %#v", row[4])
+	if key, ok := row[5].Key(); !ok || key != "probe.nat.filtering.unknown" {
+		t.Fatalf("NAT filtering cell = %#v", row[5])
 	}
-	if key, ok := row[6].Key(); !ok || key != "probe.nat.status.complete" {
-		t.Fatalf("NAT status cell = %#v", row[6])
+	if key, ok := row[7].Key(); !ok || key != "probe.nat.status.complete" {
+		t.Fatalf("NAT status cell = %#v", row[7])
 	}
 	for _, field := range result.Fields {
 		switch field.Key {
@@ -208,8 +209,8 @@ func TestNATPoolRetainsOrderedCandidatesAfterEarlyStop(t *testing.T) {
 
 func TestNATPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
 	servers := []config.Endpoint{
-		{Name: "Alpha STUN", Address: "alpha.example:bad"},
-		{Name: "Beta STUN", Address: "beta.example:bad"},
+		{Name: "Alpha STUN", Address: "alpha.example:bad", Kind: config.STUNServerKindDualAddress},
+		{Name: "Beta STUN", Address: "beta.example:bad", Kind: config.STUNServerKindMappingOnly},
 	}
 	data := natCandidateFixture(t, servers)
 	result := data.Results[0]
@@ -221,13 +222,13 @@ func TestNATPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
 		t.Fatalf("all-failed candidate pool = %v, want %d rows", pool.Rows, len(servers))
 	}
 	for index, server := range servers {
-		if got := pool.Rows[index]; len(got) != 2 || got[0].Text() != server.Name || got[1].Text() != server.Address {
+		if got := pool.Rows[index]; len(got) != 3 || got[0].Text() != server.Name || got[1].Text() != server.Address {
 			t.Fatalf("all-failed pool row %d = %v", index, got)
 		}
 	}
 	for _, row := range result.Tables[0].Rows {
-		if status, ok := row[6].Key(); !ok || status != "probe.nat.status.failed" {
-			t.Fatalf("all-failed detail status = %#v", row[6])
+		if status, ok := row[7].Key(); !ok || status != "probe.nat.status.failed" {
+			t.Fatalf("all-failed detail status = %#v", row[7])
 		}
 	}
 	if len(result.Failures) != len(servers) || result.Failures[0].Message == "" {
@@ -241,13 +242,19 @@ func TestNATPoolRetainsCandidatesWhenAllAttemptsFail(t *testing.T) {
 
 func TestNATCandidatePoolRendersLocalizedWithoutMutatingCanonical(t *testing.T) {
 	servers := []config.Endpoint{
-		{Name: "Alpha STUN", Address: "alpha.example:bad"},
-		{Name: "Beta STUN", Address: "beta.example:bad"},
+		{Name: "Alpha STUN", Address: "alpha.example:bad", Kind: config.STUNServerKindDualAddress},
+		{Name: "Beta STUN", Address: "beta.example:bad", Kind: config.STUNServerKindMappingOnly},
 	}
 	data := natCandidateFixture(t, servers)
 	before, err := report.JSON(data)
 	if err != nil {
 		t.Fatal(err)
+	}
+	canonical := string(before)
+	if !strings.Contains(canonical, `"key": "probe.nat.stun_kind.dual_address"`) ||
+		!strings.Contains(canonical, `"key": "probe.nat.stun_kind.mapping_only"`) ||
+		strings.Contains(canonical, "双 IP") || strings.Contains(canonical, "仅映射") {
+		t.Fatalf("NAT canonical kind values = %s", canonical)
 	}
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
@@ -255,8 +262,8 @@ func TestNATCandidatePoolRendersLocalizedWithoutMutatingCanonical(t *testing.T) 
 		lang    i18n.Lang
 		markers []string
 	}{
-		{lang: i18n.LangZH, markers: []string{"STUN 候选服务器", "服务器名称", "服务器地址"}},
-		{lang: i18n.LangEN, markers: []string{"STUN candidate servers", "Server name", "Server address"}},
+		{lang: i18n.LangZH, markers: []string{"STUN 候选服务器", "服务器名称", "服务器地址", "双 IP", "仅映射"}},
+		{lang: i18n.LangEN, markers: []string{"STUN candidate servers", "Server name", "Server address", "Dual address", "Mapping only"}},
 	} {
 		i18n.Set(language.lang)
 		text := report.Text(data, report.TextOptions{Color: termcolor.LevelNone, Width: 120})

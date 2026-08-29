@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -230,6 +231,25 @@ func ModuleIDs() []string {
 		out = append(out, descriptor.ID)
 	}
 	return out
+}
+
+// ValidateModuleSelection checks explicit --only/--skip IDs against the
+// canonical module catalog. SelectModules intentionally remains a set
+// operation and therefore assumes its inputs have already passed this
+// boundary.
+func ValidateModuleSelection(only, skip []string) error {
+	known := make(map[string]struct{}, len(moduleDescriptors))
+	for _, descriptor := range moduleDescriptors {
+		known[descriptor.ID] = struct{}{}
+	}
+	for _, ids := range [][]string{only, skip} {
+		for _, id := range ids {
+			if _, ok := known[id]; !ok {
+				return i18n.Errorf("err.unknownModule", id)
+			}
+		}
+	}
+	return nil
 }
 
 // ModulesForProfile returns the module IDs selected by a profile in canonical

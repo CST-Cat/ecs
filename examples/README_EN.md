@@ -124,7 +124,7 @@ ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
 
-Across schemas, `compare` uses only matching metric signatures and marks the result as partially comparable; it never probes again. See [../docs/schema.md](../docs/schema.md) for fields.
+`compare` accepts only JSON reports that pass the current `ecs.report/v1` exact loader; reports with a different schema version are rejected, and it never probes again. See [../docs/schema.md](../docs/schema.md) for fields.
 
 ## Scoring and submissions
 

@@ -7,42 +7,13 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"ecs/internal/config"
 )
 
 const communityIPInfoBase = "https://ipinfo.check.place"
 
-var (
-	communityRequestGate = make(chan struct{}, 1)
-	qualitySourceOrder   = []string{
-		"maxmind",
-		"ipinfo",
-		"ipregistry",
-		"ipapi",
-		"ip2location",
-		"abuseipdb",
-		"scamalytics",
-		"ipqs",
-		"dbip",
-		"ipdata",
-		"ipwhois",
-		"ipapicom",
-		"ipsb",
-	}
-	typeSourceOrder   = []string{"ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb", "ipapicom", "ipsb"}
-	scoreSourceOrder  = []string{"ip2location", "scamalytics", "ipapi", "abuseipdb", "ipqs", "dbip"}
-	factorSourceOrder = []string{
-		"ip2location",
-		"ipapi",
-		"ipregistry",
-		"ipqs",
-		"scamalytics",
-		"ipdata",
-		"ipinfo",
-		"ipwhois",
-		"dbip",
-		"ipapicom",
-	}
-)
+var communityRequestGate = make(chan struct{}, 1)
 
 type qualitySignal struct {
 	Known bool
@@ -89,9 +60,9 @@ type ipQualityBundle struct {
 func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQualityBundle {
 	bundle := ipQualityBundle{
 		Version:  lookup.Version,
-		Findings: make(map[string]qualityFinding, len(qualitySourceOrder)),
+		Findings: make(map[string]qualityFinding, len(config.IPQualitySourceIDs())),
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if id == "maxmind" {
 			continue
 		}
@@ -129,7 +100,7 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 		finding qualityFinding
 		origin  *originAssessment
 	}
-	outcomes := make(chan outcome, len(qualitySourceOrder))
+	outcomes := make(chan outcome, len(config.IPQualitySourceIDs()))
 	var wg sync.WaitGroup
 
 	if qualitySourceEnabled(env.Config.IPQualitySources, "maxmind") {
@@ -154,7 +125,7 @@ func collectIPQuality(ctx context.Context, env Environment, lookup ipLookup) ipQ
 		"ipapicom":    fetchIPAPICom,
 		"ipsb":        fetchIPSB,
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		fetcher, ok := fetchers[id]
 		if !ok || !qualitySourceEnabled(env.Config.IPQualitySources, id) {
 			continue
@@ -193,6 +164,18 @@ func qualitySourceEnabled(configured []string, source string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalQualitySourceSubset keeps table-specific field capabilities as
+// membership only; every resulting order still comes from the config catalog.
+func canonicalQualitySourceSubset(allowed map[string]struct{}) []string {
+	ordered := make([]string, 0, len(allowed))
+	for _, id := range config.IPQualitySourceIDs() {
+		if _, ok := allowed[id]; ok {
+			ordered = append(ordered, id)
+		}
+	}
+	return ordered
 }
 
 func newIPVersionHTTPClient(timeout time.Duration, version string) *http.Client {

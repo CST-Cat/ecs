@@ -57,6 +57,84 @@ func TestDefaultsAndProfiles(t *testing.T) {
 	requireError(t, err, "unknown profile")
 }
 
+func TestIPQualitySourceCatalogHasStableOrderAndIdentity(t *testing.T) {
+	want := []string{
+		"maxmind", "ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb",
+		"scamalytics", "ipqs", "dbip", "ipdata", "ipwhois", "ipapicom", "ipsb",
+	}
+	original := i18n.Current()
+	t.Cleanup(func() { i18n.Set(original) })
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		got := IPQualitySourceIDs()
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("IP quality source IDs for %s = %v, want %v", language, got, want)
+		}
+		got[0] = "localized-name"
+		if IPQualitySourceIDs()[0] != want[0] {
+			t.Fatalf("IP quality source catalog leaked mutable storage for %s", language)
+		}
+	}
+	for _, id := range want {
+		if !IsIPQualitySource(id) {
+			t.Fatalf("catalog does not recognize canonical source %q", id)
+		}
+	}
+	if IsIPQualitySource("all") || IsIPQualitySource("none") || IsIPQualitySource("localized-name") {
+		t.Fatal("selector or display text was accepted as a canonical source ID")
+	}
+}
+
+func TestIPQualitySourceParsingDeduplicatesAndValidationRejectsUnknown(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, File{IPQualitySources: []string{"IPINFO", "ipinfo", "IPAPI"}}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ipinfo", "ipapi"}; !reflect.DeepEqual(runtime.IPQualitySources, want) {
+		t.Fatalf("normalized IP quality sources = %v, want %v", runtime.IPQualitySources, want)
+	}
+	if err := Validate(runtime); err != nil {
+		t.Fatalf("normalized canonical sources rejected: %v", err)
+	}
+	runtime.IPQualitySources = []string{"unknown-source"}
+	requireError(t, Validate(runtime), "unknown IP quality source")
+}
+
+func TestDefaultsUseStableEndpointKinds(t *testing.T) {
+	runtime, err := Defaults(ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLatency := []string{
+		LatencyTargetKindGlobalCDN,
+		LatencyTargetKindGlobal,
+		LatencyTargetKindMainlandChina,
+		LatencyTargetKindMainlandChina,
+		LatencyTargetKindGlobal,
+	}
+	if len(runtime.LatencyTargets) != len(wantLatency) {
+		t.Fatalf("latency target count = %d, want %d", len(runtime.LatencyTargets), len(wantLatency))
+	}
+	for index, target := range runtime.LatencyTargets {
+		if target.Kind != wantLatency[index] {
+			t.Errorf("latency target %d kind = %q, want %q", index, target.Kind, wantLatency[index])
+		}
+	}
+	wantSTUN := []string{
+		STUNServerKindDualAddress, STUNServerKindDualAddress, STUNServerKindDualAddress,
+		STUNServerKindMappingOnly, STUNServerKindMappingOnly,
+	}
+	if len(runtime.STUNServers) != len(wantSTUN) {
+		t.Fatalf("STUN server count = %d, want %d", len(runtime.STUNServers), len(wantSTUN))
+	}
+	for index, server := range runtime.STUNServers {
+		if server.Kind != wantSTUN[index] {
+			t.Errorf("STUN server %d kind = %q, want %q", index, server.Kind, wantSTUN[index])
+		}
+	}
+}
+
 func TestLoadFileDiagnostics(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {
@@ -118,7 +196,7 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 		BacktraceTargets: []Endpoint{{Name: "trace", Address: "1.1.1.1"}},
 		STUNServers:      []Endpoint{{Name: "stun", Address: "stun.example.com:3478"}},
 		MediaRegions:     []string{"JP", "global", "jp"},
-		OoklaServers:     []OoklaServer{{Carrier: "电信", ID: 1}},
+		OoklaServers:     []OoklaServer{{Carrier: OoklaCarrierTelecom, ID: 1}},
 	}
 	if err := ApplyFile(&runtime, file); err != nil {
 		t.Fatal(err)
@@ -138,7 +216,7 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 	expected.BacktraceTargets = []Endpoint{{Name: "trace", Address: "1.1.1.1"}}
 	expected.STUNServers = []Endpoint{{Name: "stun", Address: "stun.example.com:3478"}}
 	expected.MediaRegions = []string{"jp", "global"}
-	expected.OoklaServers = []OoklaServer{{Carrier: "电信", ID: 1}}
+	expected.OoklaServers = []OoklaServer{{Carrier: OoklaCarrierTelecom, ID: 1}}
 	expected.Modules = []string{"network"}
 	if !reflect.DeepEqual(runtime, expected) {
 		t.Fatalf("applied runtime differs from expected:\n got:  %+v\n want: %+v", runtime, expected)
@@ -161,12 +239,47 @@ func TestApplyFileDiagnostics(t *testing.T) {
 		{name: "disk matrix", file: File{DiskMatrixMode: "burst"}, marker: "unknown disk matrix mode"},
 		{name: "iperf duration", file: File{IPerfDuration: "later"}, marker: "iperf_duration:"},
 		{name: "HTTP timeout", file: File{HTTPTimeout: "later"}, marker: "http_timeout:"},
+		{name: "only unknown module", file: File{Only: []string{"system", "missing"}}, marker: `unknown module "missing"`},
+		{name: "skip unknown module", file: File{Skip: []string{"missing"}}, marker: `unknown module "missing"`},
+		{name: "unknown module with any exposure", file: File{Only: []string{"missing"}, Exposure: ExposureNameAny}, marker: `unknown module "missing"`},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			requireError(t, ApplyFile(&runtime, test.file), test.marker)
 		})
+	}
+}
+
+func TestValidateModuleSelection(t *testing.T) {
+	useEnglish(t)
+	for _, test := range []struct {
+		name   string
+		only   []string
+		skip   []string
+		marker string
+	}{
+		{name: "only unknown", only: []string{"system", "missing"}, marker: `unknown module "missing"`},
+		{name: "skip unknown", skip: []string{"missing"}, marker: `unknown module "missing"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			requireError(t, ValidateModuleSelection(test.only, test.skip), test.marker)
+		})
+	}
+
+	if err := ValidateModuleSelection([]string{"system", "system"}, nil); err != nil {
+		t.Fatalf("duplicate known module rejected: %v", err)
+	}
+	if got := SelectModules(nil, []string{"system", "system"}, nil); !reflect.DeepEqual(got, []string{"system"}) {
+		t.Fatalf("duplicate known module selection = %v", got)
+	}
+	if got := ParseList("SYSTEM"); !reflect.DeepEqual(got, []string{"system"}) {
+		t.Fatalf("uppercase module selection = %v", got)
+	}
+
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, File{Only: []string{"missing"}, Exposure: ExposureNameAny}); err == nil || !strings.Contains(err.Error(), "unknown module") {
+		t.Fatalf("unknown module with any exposure = %v", err)
 	}
 }
 
@@ -217,9 +330,10 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		{name: "backtrace unsafe", mutate: func(r *Runtime) { r.BacktraceTargets = []Endpoint{{Name: "trace", Address: "bad host"}} }, marker: "backtrace target"},
 		{name: "backtrace family", mutate: func(r *Runtime) { r.BacktraceTargets = []Endpoint{{Name: "trace", Address: "1.1.1.1", Family: "9"}} }, marker: "backtrace target \"trace\" family"},
 		{name: "Ookla carrier", mutate: func(r *Runtime) { r.OoklaServers = []OoklaServer{{Carrier: "other", ID: 1}} }, marker: "carrier must be"},
-		{name: "Ookla ID", mutate: func(r *Runtime) { r.OoklaServers = []OoklaServer{{Carrier: "电信", ID: 0}} }, marker: "invalid ID"},
+		{name: "Ookla localized carrier is not canonical", mutate: func(r *Runtime) { r.OoklaServers = []OoklaServer{{Carrier: "电信", ID: 1}} }, marker: "carrier must be"},
+		{name: "Ookla ID", mutate: func(r *Runtime) { r.OoklaServers = []OoklaServer{{Carrier: OoklaCarrierTelecom, ID: 0}} }, marker: "invalid ID"},
 		{name: "Ookla duplicate", mutate: func(r *Runtime) {
-			r.OoklaServers = []OoklaServer{{Carrier: "电信", ID: 1}, {Carrier: "电信", ID: 2}}
+			r.OoklaServers = []OoklaServer{{Carrier: OoklaCarrierTelecom, ID: 1}, {Carrier: OoklaCarrierTelecom, ID: 2}}
 		}, marker: "must not configure"},
 		{name: "disk path", mutate: func(r *Runtime) { r.DiskPath = "" }, marker: "disk test path must not"},
 		{name: "disk matrix", mutate: func(r *Runtime) { r.DiskMatrixMode = "burst" }, marker: "unknown disk matrix mode"},
@@ -244,10 +358,14 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 }
 
 func TestListSelectionAndIPVersionHelpers(t *testing.T) {
+	useEnglish(t)
 	if got := ParseList(" A, a, b,, "); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("ParseList = %v", got)
 	}
-	if got := SelectModules([]string{"dns", "system"}, []string{"network", "missing", "system", "network"}, nil); !reflect.DeepEqual(got, []string{"system", "network"}) {
+	if err := ValidateModuleSelection([]string{"network", "missing", "system", "network"}, nil); err == nil || !strings.Contains(err.Error(), "unknown module") {
+		t.Fatalf("unknown module selection validation = %v", err)
+	}
+	if got := SelectModules([]string{"dns", "system"}, []string{"network", "system", "network"}, nil); !reflect.DeepEqual(got, []string{"system", "network"}) {
 		t.Fatalf("SelectModules = %v", got)
 	}
 	if got := SelectModules([]string{"dns", "system"}, nil, []string{"dns"}); !reflect.DeepEqual(got, []string{"system"}) {

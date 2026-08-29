@@ -172,7 +172,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}
 	defer func() {
 		if err := os.Remove(tempName); err != nil && !os.IsNotExist(err) {
-			result.Notes = append(result.Notes, "fio 临时文件清理失败: "+err.Error())
+			addFailure(&result, "cleanup", tempName, err)
 			if result.Status == model.StatusOK {
 				result.Status = model.StatusWarning
 			}
@@ -224,7 +224,10 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		jobs[job.Name] = job
 		if job.Error != 0 {
 			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, fmt.Sprintf("fio 作业 %s 返回错误码 %d", job.Name, job.Error))
+			result.AddFailure(model.Failure{
+				Category: model.FailureUnknown, Stage: "benchmark_run", Target: job.Name,
+				Count: 1, Message: fmt.Sprintf("fio job returned error code %d", job.Error),
+			})
 		}
 	}
 	offsets := fioModuleOffsets(jobs)
@@ -261,7 +264,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}
 	if len(missingBase) > 0 {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf("fio 基础作业有 %d 项未返回；缺失项不补零。", len(missingBase)))
 	}
 	if p95 := fioP95Milliseconds(jobs["randread"].Read); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
@@ -271,7 +273,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		})
 	} else {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "fio 4K 随机读 QD32 P95 未返回；该指标未生成。")
 	}
 	if p95 := fioP95Milliseconds(jobs["randwrite"].Write); isPositiveFinite(p95) {
 		result.Measurements = append(result.Measurements, model.Measurement{
@@ -281,7 +282,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		})
 	} else {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "fio 4K 随机写 QD32 P95 未返回；该指标未生成。")
 	}
 
 	mixDepth := engine.EffectiveDepth(64)
@@ -291,22 +291,10 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 
 	if !isPositiveFinite(seqWrite) || !isPositiveFinite(seqRead) || !isPositiveFinite(randomRead) || !isPositiveFinite(randomWrite) {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "一个或多个 fio 作业没有返回有效吞吐；请检查文件系统的 Direct I/O 与 ioengine 支持。")
 	}
 	requestedBytes := int64(env.Config.DiskMiB) * 1024 * 1024
 	if actualBytes < requestedBytes {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"为保留至少 80%% 空闲空间，fio 文件已从 %s 自动缩小为 %s。",
-			model.FormatBytes(uint64(requestedBytes)),
-			model.FormatBytes(uint64(actualBytes)),
-		))
-	}
-	if actualBytes > requestedBytes {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"为安全容纳 ATTO 64 MiB 作业，fio 文件从配置的 %s 对齐/扩展为 %s（至少两个 64 MiB 窗口）。",
-			model.FormatBytes(uint64(requestedBytes)), model.FormatBytes(uint64(actualBytes)),
-		))
 	}
 	result.Fields = []model.Field{
 		{Key: "engine", Label: diskFieldLabel("engine"), Value: model.RawValue("fio")},
@@ -341,36 +329,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Name: "fio", URL: "https://github.com/axboe/fio", Purpose: "probe.disk.source.fio"},
 		{Name: "YABS", URL: "https://github.com/masonr/yet-another-bench-script", Purpose: "probe.disk.source.yabs"},
 	}
-	result.Notes = append(result.Notes,
-		"fio 可由用户预先安装；缺失时 run.sh 从当前架构的已校验 ecs-tools 包临时提供。ecs 不下载未经校验的裸二进制。",
-		fmt.Sprintf("%d 项作业使用 stonewall 串行执行，避免顺序与随机负载相互干扰。", len(plan)),
-		"固定低延迟作业使用 4 KiB randread、Direct I/O、iodepth=1、numjobs=1；avg/P95/P99/max 均来自同一 fio JSON 的 clat 统计。",
-		"仅比较相同 fio/ecs 版本、文件大小、ioengine、块大小、队列深度与计时时长的结果。",
-		"基线、混合、Crystal 与 ATTO 的吞吐和 IOPS 先按各自矩阵组内平均，再以等权子组参与磁盘分：四组各占四分之一；缺失单元不补零。",
-		"ATTO 使用完整块大小清单 512B、1K、2K、4K、8K、16K、32K、64K、128K、256K、512K、1M、2M、4M、8M、16M、32M、64M；不包含未请求的 5M。",
-		fmt.Sprintf("计时窗口按组划分：基础与混合 %s，Crystal %s，ATTO %s（64K/32M/64M 为 %s）。"+
-			"矩阵各档在 2–3 秒内进入吞吐平台，更长的窗口只是重复采样，却会持续消耗云盘突发额度，"+
-			"让靠后的档位测到额度耗尽后的性能。不同窗口的数值不能互相混比。",
-			fioBaseRuntime, fioCrystalRuntime, fioATTORuntime, fioATTOLargeRuntime),
-		"每个矩阵单元记录它在本模块内的起始偏移；若曲线在某个偏移之后整体下移，"+
-			"通常是突发额度耗尽而非介质特性。",
-	)
-	if matrixMode == config.DiskMatrixFixed {
-		result.Notes = append(result.Notes,
-			"ATTO 处于复核模式：每档传输固定 "+fioFixedIOSize+" 而不是按时长收尾。"+
-				"该口径与默认的按时长测量不是同一件事，数值不可与默认报告混比；"+
-				"小块档位耗时极长，整轮可超过 20 分钟。",
-		)
-	}
-	if !engine.AsyncQueue {
-		result.Notes = append(result.Notes, fmt.Sprintf(
-			"当前 ioengine 为 %s（同步），队列深度对它无效；所有随机项按实际生效的 QD1 标注，不能与 libaio/io_uring 的高队列深度成绩比较。",
-			engine.Name,
-		))
-	}
 	if !engine.Detected {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "未能通过 fio --enghelp 确认可用 ioengine，已退回 psync；成绩仍然有效但队列深度受限。")
 	}
 	return result
 }
@@ -476,7 +436,6 @@ func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[str
 		if result.Status == model.StatusOK {
 			result.Status = model.StatusWarning
 		}
-		result.Notes = append(result.Notes, fmt.Sprintf("fio 混合矩阵有 %d 项作业未返回完整统计；缺失项不补零。", incomplete))
 	}
 }
 
@@ -544,23 +503,19 @@ func appendCrystalMatrix(result *model.Result, jobs map[string]fioJob, engine fi
 	}
 	for _, workload := range []string{"RND4K/Q1", "RND4K/Q32", "SEQ1M/Q1", "SEQ1M/Q8"} {
 		cell := cells[workload]
-		status := "完成"
-		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
-			status = "未返回"
-		}
+		complete := isPositiveFinite(cell.ReadMiB) && isPositiveFinite(cell.ReadIOPS) &&
+			isPositiveFinite(cell.WriteMiB) && isPositiveFinite(cell.WriteIOPS)
 		row := []model.Value{
 			model.RawValue(workload),
 			model.RawValue(formatMatrixRate(cell.ReadMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.ReadIOPS, "IOPS")),
 			model.RawValue(formatMatrixRate(cell.WriteMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.WriteIOPS, "IOPS")),
-			model.RawValue(fallback(rowOffsets[workload], "—")), model.RawValue(status),
+			model.RawValue(fallback(rowOffsets[workload], "—")), model.KeyValue(diskTableStatusKey(table.Key, complete)),
 		}
-		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
 		table.Rows = append(table.Rows, row)
 	}
 	result.Tables = append(result.Tables, table)
 	if missing > 0 {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf("Crystal 矩阵有 %d 个读写单元未返回有效吞吐或 IOPS；缺失项保留为未返回。", missing))
 	}
 }
 
@@ -616,25 +571,21 @@ func appendATTOMatrix(result *model.Result, jobs map[string]fioJob, engine fioEn
 	}
 	for _, block := range attoBlockSizes {
 		cell := cells[block.Label]
-		status := "完成"
-		if !isPositiveFinite(cell.ReadMiB) || !isPositiveFinite(cell.ReadIOPS) || !isPositiveFinite(cell.WriteMiB) || !isPositiveFinite(cell.WriteIOPS) {
-			status = "未返回"
-		}
+		complete := isPositiveFinite(cell.ReadMiB) && isPositiveFinite(cell.ReadIOPS) &&
+			isPositiveFinite(cell.WriteMiB) && isPositiveFinite(cell.WriteIOPS)
 		row := []model.Value{
 			model.RawValue(block.Label),
 			model.RawValue(formatMatrixRate(cell.ReadMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.ReadIOPS, "IOPS")),
 			model.RawValue(formatMatrixRate(cell.WriteMiB, "MiB/s")), model.RawValue(formatMatrixRate(cell.WriteIOPS, "IOPS")),
 			model.RawValue(block.Runtime.String()),
 			model.RawValue(formatModuleOffset(offsets, "atto_read_"+block.FIO)),
-			model.RawValue(status),
+			model.KeyValue(diskTableStatusKey(table.Key, complete)),
 		}
-		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
 		table.Rows = append(table.Rows, row)
 	}
 	result.Tables = append(result.Tables, table)
 	if missing > 0 {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, fmt.Sprintf("ATTO 矩阵有 %d 个读写单元未返回有效吞吐或 IOPS；缺失项保留为未返回。", missing))
 	}
 }
 
@@ -711,8 +662,6 @@ func markFIOQD1LatencyMissing(result *model.Result, missing []string) {
 	if result.Status == model.StatusOK {
 		result.Status = model.StatusWarning
 	}
-	result.Notes = append(result.Notes,
-		fmt.Sprintf("fio QD1 4K 随机读延迟有 %d 项指标未返回；缺失项不补零。", len(missing)))
 }
 
 // parseFIOJobs 把 fio 的 JSON 输出按作业名索引。

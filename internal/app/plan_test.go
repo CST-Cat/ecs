@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -13,23 +15,26 @@ import (
 func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	status := Main(context.Background(), []string{
-		"plan", "--lang", "en", "--json", "--profile", "full",
+		"plan", "--lang", "en", "--profile", "full",
 		"--only", "cpu,ookla,zstd", "--exposure", "any",
 	}, &stdout, &stderr)
 	if status != 0 || stderr.Len() != 0 {
 		t.Fatalf("plan status=%d stderr=%q", status, stderr.String())
 	}
 	var plan struct {
-		SchemaVersion string `json:"schema_version"`
-		Profile       string `json:"profile"`
+		SchemaVersion string                         `json:"schema_version"`
+		Tool          struct{ Name, Version string } `json:"tool"`
+		Profile       string                         `json:"profile"`
+		Exposure      string                         `json:"exposure"`
+		Reveal        bool                           `json:"reveal"`
+		IPVersion     string                         `json:"ip_version"`
 		Modules       []struct {
-			ID                  string   `json:"id"`
-			TitleKey            string   `json:"title_key"`
-			RetryOnInterference bool     `json:"retry_on_interference"`
-			RequiredTools       []string `json:"required_tools"`
+			ID string `json:"id"`
 		} `json:"modules"`
-		RequiredTools []string `json:"required_tools"`
-		Staging       struct {
+		RequiredTools    []string `json:"required_tools"`
+		NeedsEgressIP    bool     `json:"needs_egress_ip"`
+		ExternalServices []string `json:"external_services"`
+		Staging          struct {
 			ToolArchiveRequired  bool     `json:"tool_archive_required"`
 			ToolArchiveTools     []string `json:"tool_archive_tools"`
 			OoklaPackageRequired bool     `json:"ookla_package_required"`
@@ -42,20 +47,54 @@ func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	if plan.SchemaVersion != "ecs.plan/v1" || plan.Profile != "full" {
 		t.Fatalf("plan identity = %#v", plan)
 	}
+	if plan.Tool.Name != "ecs" || plan.Tool.Version == "" || plan.Exposure != "any" || plan.Reveal || plan.IPVersion != config.IPVersionAuto {
+		t.Fatalf("plan top-level machine facts = %#v", plan)
+	}
 	if got := []string{plan.Modules[0].ID, plan.Modules[1].ID, plan.Modules[2].ID}; !strings.EqualFold(strings.Join(got, ","), "cpu,zstd,ookla") {
 		t.Fatalf("selected modules = %v", got)
 	}
-	if plan.Modules[0].TitleKey != "module.cpu.title" || len(plan.RequiredTools) != 3 {
-		t.Fatalf("module/tool metadata = %#v / %#v", plan.Modules, plan.RequiredTools)
-	}
-	if !plan.Modules[0].RetryOnInterference || !plan.Modules[1].RetryOnInterference || plan.Modules[2].RetryOnInterference {
-		t.Fatalf("retry metadata = %#v", plan.Modules)
+	if len(plan.RequiredTools) != 3 || !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) || plan.NeedsEgressIP {
+		t.Fatalf("machine tool/external metadata = %#v / %#v / %v", plan.RequiredTools, plan.ExternalServices, plan.NeedsEgressIP)
 	}
 	if !plan.Staging.ToolArchiveRequired || !plan.Staging.OoklaPackageRequired || !plan.Staging.ZstdCorpusRequired {
 		t.Fatalf("staging = %#v", plan.Staging)
 	}
 	if strings.Contains(stdout.String(), "标准") || strings.Contains(stdout.String(), "完整配置") {
 		t.Fatalf("machine plan contains localized prose: %s", stdout.String())
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	wantTopLevel := []string{
+		"exposure", "external_services", "ip_version", "modules", "needs_egress_ip",
+		"profile", "required_tools", "reveal", "schema_version", "staging", "tool",
+	}
+	gotTopLevel := make([]string, 0, len(raw))
+	for key := range raw {
+		gotTopLevel = append(gotTopLevel, key)
+	}
+	sort.Strings(gotTopLevel)
+	if !reflect.DeepEqual(gotTopLevel, wantTopLevel) {
+		t.Fatalf("plan top-level keys = %v, want %v", gotTopLevel, wantTopLevel)
+	}
+	var rawModules []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["modules"], &rawModules); err != nil {
+		t.Fatal(err)
+	}
+	for index, module := range rawModules {
+		if len(module) != 1 {
+			keys := make([]string, 0, len(module))
+			for key := range module {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			t.Fatalf("module %d keys = %v, want [id]", index, keys)
+		}
+		if _, ok := module["id"]; !ok {
+			t.Fatalf("module %d has no id: %#v", index, module)
+		}
 	}
 }
 
@@ -81,7 +120,7 @@ func TestPlanJSONPreservesRevealSelection(t *testing.T) {
 				revealArg = "--reveal=true"
 			}
 			status := Main(context.Background(), []string{
-				"plan", "--lang", "en", "--json", "--profile", "standard",
+				"plan", "--lang", "en", "--profile", "standard",
 				"--only", "system", "--exposure", test.exposure, revealArg,
 			}, &stdout, &stderr)
 			if status != 0 || stderr.Len() != 0 {
@@ -102,6 +141,27 @@ func TestPlanJSONPreservesRevealSelection(t *testing.T) {
 				t.Fatalf("machine plan contains localized prose: %s", stdout.String())
 			}
 		})
+	}
+}
+
+func TestPlanKeepsTopLevelEgressFactsWhenModulesOnlyExposeIDs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"plan", "--lang", "en", "--only", "network", "--exposure", "thirdparty",
+	}, &stdout, &stderr)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("plan status=%d stderr=%q", status, stderr.String())
+	}
+	var plan struct {
+		Modules          []struct{ ID string } `json:"modules"`
+		NeedsEgressIP    bool                  `json:"needs_egress_ip"`
+		ExternalServices []string              `json:"external_services"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Modules) != 1 || plan.Modules[0].ID != "network" || !plan.NeedsEgressIP || !reflect.DeepEqual(plan.ExternalServices, []string{"egress-ip-discovery", "third-party-provider"}) {
+		t.Fatalf("top-level egress facts = %#v", plan)
 	}
 }
 
@@ -136,7 +196,7 @@ func TestBacktraceCLIUsesExplicitCarrierSyntax(t *testing.T) {
 
 	var stdout, planStderr bytes.Buffer
 	status := Main(context.Background(), []string{
-		"plan", "--json", "--lang", "en", "--only", "backtrace", "--exposure", "public",
+		"plan", "--lang", "en", "--only", "backtrace", "--exposure", "public",
 		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133",
 	}, &stdout, &planStderr)
 	if status != 0 || planStderr.Len() != 0 {
@@ -179,19 +239,29 @@ func TestBacktraceCLIHelpDocumentsExplicitCarrierSyntax(t *testing.T) {
 	}
 }
 
-func TestPlanRequiresJSON(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		args   []string
-		marker string
-	}{
-		{name: "missing json", args: []string{"plan", "--lang", "en"}, marker: "plan requires --json"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+func TestPlanRejectsRemovedJSONOption(t *testing.T) {
+	for _, option := range []string{"--json", "--json=true"} {
+		t.Run(option, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if status := Main(context.Background(), test.args, &stdout, &stderr); status == 0 || !strings.Contains(stderr.String(), test.marker) {
-				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+			status := Main(context.Background(), []string{"plan", "--lang", "en", option}, &stdout, &stderr)
+			if status == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "flag provided but not defined") {
+				t.Fatalf("removed plan JSON option status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
 			}
 		})
+	}
+}
+
+func TestPlanOutputIsLanguageIndependent(t *testing.T) {
+	outputs := make([]string, 0, 2)
+	for _, language := range []string{"zh", "en"} {
+		var stdout, stderr bytes.Buffer
+		status := Main(context.Background(), []string{"plan", "--lang", language, "--only", "system"}, &stdout, &stderr)
+		if status != 0 || stderr.Len() != 0 {
+			t.Fatalf("language=%s status=%d stderr=%q", language, status, stderr.String())
+		}
+		outputs = append(outputs, stdout.String())
+	}
+	if outputs[0] != outputs[1] {
+		t.Fatalf("machine plan changed with language:\nzh=%s\nen=%s", outputs[0], outputs[1])
 	}
 }

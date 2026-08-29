@@ -84,19 +84,15 @@ func finalizeDiskResult(result *model.Result) {
 	}
 }
 
-func diskTableStatusKey(tableKey string, row []model.Value) string {
-	present := func(value string) bool {
-		value = strings.TrimSpace(value)
-		return value != "" && value != "—" && !strings.EqualFold(value, "n/a")
-	}
+func diskTableStatusKey(tableKey string, complete bool) string {
 	switch tableKey {
 	case "disk.fio.crystal", "disk.fio.atto":
-		if len(row) >= 5 && present(row[1].Text()) && present(row[2].Text()) && present(row[3].Text()) && present(row[4].Text()) {
+		if complete {
 			return "probe.disk.status.complete"
 		}
 		return "probe.disk.status.missing"
 	case "disk.fio.mounts":
-		if len(row) >= 5 && (present(row[3].Text()) || present(row[4].Text())) {
+		if complete {
 			return "probe.disk.status.complete"
 		}
 		return "probe.disk.status.missing"

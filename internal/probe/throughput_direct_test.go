@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -83,6 +84,15 @@ func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if status, ok := row[8].Key(); !ok || status != "probe.speed.status.complete" {
 		t.Fatalf("speed status = %#v", row[8])
 	}
+	seenDirections := map[string]bool{}
+	for _, stabilityRow := range result.Tables[1].Rows {
+		if direction, ok := stabilityRow[2].Key(); ok {
+			seenDirections[direction] = true
+		}
+	}
+	if !seenDirections["probe.speed.direction.upload"] || !seenDirections["probe.speed.direction.download"] {
+		t.Fatalf("speed stability directions = %#v", result.Tables[1].Rows)
+	}
 	if result.Tables[0].Columns[3].Label != "probe.speed.column.upload" || result.Tables[1].Columns[3].Label != "probe.speed.column.minimum" {
 		t.Fatalf("speed column labels = %#v/%#v", result.Tables[0].Columns, result.Tables[1].Columns)
 	}
@@ -135,6 +145,9 @@ func TestSpeedProducerBuildsStablePartialStatusDirectly(t *testing.T) {
 	row := result.Tables[0].Rows[0]
 	if status, ok := row[8].Key(); !ok || status != "probe.speed.status.partial" {
 		t.Fatalf("speed partial status = %#v", row[8])
+	}
+	if status, ok := row[4].Key(); !ok || status != "probe.speed.status.failed" {
+		t.Fatalf("speed partial failed direction = %#v", row[4])
 	}
 	if len(result.Measurements) == 0 || result.SummaryMessages[0].Key != "probe.speed.summary.values" {
 		t.Fatalf("speed partial measurements/summary = %#v/%#v", result.Measurements, result.SummaryMessages)
@@ -335,15 +348,32 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 printf '%s\n' '__PAYLOAD__'
+exit "${FAKE_OOKLA_EXIT_CODE:-0}"
 `
 
 func runOoklaFixture(t *testing.T, payload string) model.Result {
+	return runOoklaFixtureWithConfigAndExitCode(t, payload, config.Runtime{
+		Exposure:     config.ExposureThirdParty,
+		OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
+	}, "0")
+}
+
+func runOoklaFixtureWithConfig(t *testing.T, payload string, runtime config.Runtime) model.Result {
+	return runOoklaFixtureWithConfigAndExitCode(t, payload, runtime, "0")
+}
+
+func runOoklaFixtureWithExitCode(t *testing.T, payload, exitCode string) model.Result {
+	return runOoklaFixtureWithConfigAndExitCode(t, payload, config.Runtime{
+		Exposure:     config.ExposureThirdParty,
+		OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
+	}, exitCode)
+}
+
+func runOoklaFixtureWithConfigAndExitCode(t *testing.T, payload string, runtime config.Runtime, exitCode string) model.Result {
 	t.Helper()
 	writeThroughputExecutable(t, "speedtest", strings.Replace(fakeOoklaExecutable, "__PAYLOAD__", payload, 1))
-	return (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-		Exposure:     config.ExposureThirdParty,
-		OoklaServers: []config.OoklaServer{{Carrier: "电信", ID: 42}},
-	}})
+	t.Setenv("FAKE_OOKLA_EXIT_CODE", exitCode)
+	return (ooklaProbe{}).Run(context.Background(), Environment{Config: runtime})
 }
 
 func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
@@ -354,10 +384,10 @@ func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if result.Methodology.Engine != "ookla-speedtest-cli" || result.Methodology.Profile != "probe.ookla.profile" {
 		t.Fatalf("Ookla methodology = %+v", result.Methodology)
 	}
-	if len(result.Fields) < 8 || result.Fields[0].Label != "probe.ookla.field.engine" || result.Fields[6].Value.Text() != "configured" {
+	if len(result.Fields) < 8 || result.Fields[0].Label != "probe.ookla.field.engine" {
 		t.Fatalf("Ookla fields = %#v", result.Fields)
 	}
-	if raw, ok := result.Fields[6].Value.Raw(); !ok || raw != "configured" {
+	if key, ok := result.Fields[6].Value.Key(); !ok || key != "probe.ookla.server_selection.configured" {
 		t.Fatalf("Ookla server selection variant = %#v", result.Fields[6].Value)
 	}
 	if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.ookla.metric.latency" {
@@ -376,7 +406,7 @@ func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if len(result.Sources) != 1 || result.Sources[0].Purpose != "probe.ookla.source.engine" || len(result.Notes) != 3 {
 		t.Fatalf("Ookla sources/notes = %#v/%#v", result.Sources, result.Notes)
 	}
-	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.ookla.summary.values" {
+	if len(result.Failures) != 0 || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.ookla.summary.values" {
 		t.Fatalf("Ookla summary = %#v", result.SummaryMessages)
 	}
 }
@@ -391,7 +421,7 @@ func TestOoklaProducerSelectedServerComparisonScope(t *testing.T) {
 		t.Fatalf("Ookla selected-server hash = %q, want %q", got, want)
 	}
 	assertProducerParameterScope(t, base, "server_configuration_sha256", "tool_version", "tool_sha256", "arguments_sha256", "selected_servers_sha256")
-	if got, want := base.Methodology.Parameters["server_configuration_sha256"], comparisonParameterHash([]config.OoklaServer{{Carrier: "电信", ID: 42}}); got != want {
+	if got, want := base.Methodology.Parameters["server_configuration_sha256"], comparisonParameterHash([]config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}}); got != want {
 		t.Fatalf("Ookla server configuration scope = %q, want %q", got, want)
 	}
 	argumentsField := ""
@@ -435,8 +465,21 @@ func TestOoklaProducerBuildsStablePartialAndParseStatesDirectly(t *testing.T) {
 	if partial.Status != model.StatusWarning || len(partial.Measurements) != 1 || partial.SummaryMessages[0].Key != "probe.ookla.summary.values" {
 		t.Fatalf("Ookla partial = %+v", partial)
 	}
+	if len(partial.Failures) != 1 || partial.Failures[0].Category != model.FailureParse || partial.Failures[0].Stage != "validate" || partial.Failures[0].Target != config.OoklaCarrierTelecom || partial.Failures[0].Message != "fields_incomplete=download.bandwidth,upload.bandwidth" {
+		t.Fatalf("Ookla partial structured failure = %+v", partial.Failures)
+	}
+	if len(partial.SummaryMessages) != 2 || partial.SummaryMessages[1].Key != "probe.ookla.summary.warn.incomplete" || len(partial.SummaryMessages[1].Args) != 2 || partial.SummaryMessages[1].Args[1] != "download.bandwidth,upload.bandwidth" {
+		t.Fatalf("Ookla partial warning summary = %+v", partial.SummaryMessages)
+	}
+	if field := ooklaField(partial, "incomplete_fields_telecom"); field.Value.Text() != "download.bandwidth,upload.bandwidth" {
+		t.Fatalf("Ookla partial incomplete field = %#v", field)
+	}
 	if status, ok := partial.Tables[0].Rows[0][6].Key(); !ok || status != "probe.ookla.status.partial" {
 		t.Fatalf("Ookla partial row status = %#v", partial.Tables[0].Rows[0][6])
+	}
+	partialJSON, err := json.Marshal(partial)
+	if err != nil || !strings.Contains(string(partialJSON), `"key":"probe.ookla.summary.warn.incomplete"`) || strings.Contains(string(partialJSON), "测速字段不完整") {
+		t.Fatalf("Ookla partial canonical warning = %s, err=%v", partialJSON, err)
 	}
 
 	parsed := runOoklaFixture(t, "{not-json")
@@ -449,6 +492,62 @@ func TestOoklaProducerBuildsStablePartialAndParseStatesDirectly(t *testing.T) {
 	if parsed.SummaryMessages[0].Key != "probe.ookla.summary.no_metric" {
 		t.Fatalf("Ookla parse summary = %#v", parsed.SummaryMessages)
 	}
+	if len(parsed.SummaryMessages) != 3 || parsed.SummaryMessages[1].Key != "probe.ookla.summary.warn.unparsed" || parsed.SummaryMessages[2].Key != "probe.ookla.summary.warn.no_result" {
+		t.Fatalf("Ookla parse warning summary = %#v", parsed.SummaryMessages)
+	}
+
+	empty := runOoklaFixture(t, `{}`)
+	if empty.Status != model.StatusWarning || len(empty.Measurements) != 0 || len(empty.Failures) != 1 || empty.Failures[0].Stage != "validate" {
+		t.Fatalf("Ookla empty JSON warning = %+v", empty)
+	}
+	if len(empty.SummaryMessages) != 3 || empty.SummaryMessages[1].Key != "probe.ookla.summary.warn.incomplete" || empty.SummaryMessages[2].Key != "probe.ookla.summary.warn.no_result" {
+		t.Fatalf("Ookla empty JSON warning summary = %#v", empty.SummaryMessages)
+	}
+}
+
+func TestOoklaProducerReportsIPFamilyMismatchStructurally(t *testing.T) {
+	result := runOoklaFixtureWithConfig(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"interface":{"externalIp":"2001:db8::9"},"server":{"id":42,"name":"Example"}}`, config.Runtime{
+		Exposure:     config.ExposureThirdParty,
+		IPVersion:    config.IPVersion4,
+		OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
+	})
+	if result.Status != model.StatusWarning || len(result.Measurements) != 5 || len(result.Failures) != 0 {
+		t.Fatalf("Ookla IP family mismatch status/data = %+v", result)
+	}
+	if len(result.SummaryMessages) != 2 || result.SummaryMessages[1].Key != "probe.ookla.summary.warn.ip_family" || len(result.SummaryMessages[1].Args) != 3 || result.SummaryMessages[1].Args[1] != "4" || result.SummaryMessages[1].Args[2] != "6" {
+		t.Fatalf("Ookla IP family mismatch summary = %#v", result.SummaryMessages)
+	}
+	if field := ooklaField(result, "ip_version_mismatch_telecom"); field.Value.Text() != "requested=4;returned=6" {
+		t.Fatalf("Ookla IP family mismatch field = %#v", field)
+	}
+	if status, ok := result.Tables[0].Rows[0][6].Key(); !ok || status != "probe.ookla.status.ip_family" {
+		t.Fatalf("Ookla IP family mismatch row status = %#v", result.Tables[0].Rows[0][6])
+	}
+}
+
+func TestOoklaProducerReportsExecutableFailureStructurally(t *testing.T) {
+	result := runOoklaFixtureWithExitCode(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"server":{"id":42,"name":"Example"}}`, "7")
+	if result.Status != model.StatusWarning || len(result.Measurements) != 5 {
+		t.Fatalf("Ookla executable failure status/data = %+v", result)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].Stage != "execute" || result.Failures[0].Target != config.OoklaCarrierTelecom || result.Failures[0].Message == "" {
+		t.Fatalf("Ookla executable failure = %+v", result.Failures)
+	}
+	if len(result.SummaryMessages) != 2 || result.SummaryMessages[1].Key != "probe.ookla.summary.warn.execution" {
+		t.Fatalf("Ookla executable failure summary = %#v", result.SummaryMessages)
+	}
+	if status, ok := result.Tables[0].Rows[0][6].Key(); !ok || status != "probe.ookla.status.partial" {
+		t.Fatalf("Ookla executable failure row status = %#v", result.Tables[0].Rows[0][6])
+	}
+}
+
+func ooklaField(result model.Result, key string) model.Field {
+	for _, field := range result.Fields {
+		if field.Key == key {
+			return field
+		}
+	}
+	return model.Field{}
 }
 
 func TestOoklaStatusKeyUsesParsedResult(t *testing.T) {
@@ -481,7 +580,9 @@ func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 		if result.Status != model.StatusSkipped || len(result.Fields) != 2 || result.SummaryMessages[0].Key != "probe.ookla.summary.skipped" {
 			t.Fatalf("Ookla exposure skip = %+v", result)
 		}
-		if result.Fields[0].Label != "probe.ookla.field.skip_reason" || result.Fields[0].Value.Text() != "exposure_denied" || result.Fields[1].Value.Text() != "rerun_with_more_exposure" {
+		reason, reasonOK := result.Fields[0].Value.Key()
+		nextStep, nextStepOK := result.Fields[1].Value.Key()
+		if result.Fields[0].Label != "probe.ookla.field.skip_reason" || !reasonOK || reason != "probe.ookla.skip_reason.exposure_denied" || !nextStepOK || nextStep != "probe.ookla.next_step.rerun_with_more_exposure" {
 			t.Fatalf("Ookla exposure fields = %#v", result.Fields)
 		}
 	})
@@ -491,7 +592,9 @@ func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 		if result.Status != model.StatusSkipped || len(result.Failures) != 1 || result.Failures[0].Stage != "tool_lookup" {
 			t.Fatalf("Ookla tool skip = %+v", result)
 		}
-		if len(result.Fields) != 2 || result.Fields[0].Value.Text() != "tool_unavailable" || result.Fields[1].Value.Text() != "install_official_client" {
+		reason, reasonOK := result.Fields[0].Value.Key()
+		nextStep, nextStepOK := result.Fields[1].Value.Key()
+		if len(result.Fields) != 2 || !reasonOK || reason != "probe.ookla.skip_reason.tool_unavailable" || !nextStepOK || nextStep != "probe.ookla.next_step.install_official_client" {
 			t.Fatalf("Ookla tool fields = %#v", result.Fields)
 		}
 	})

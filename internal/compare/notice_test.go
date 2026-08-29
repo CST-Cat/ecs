@@ -7,13 +7,13 @@ import (
 )
 
 func TestStructuredNoticeJSONContract(t *testing.T) {
-	notice := canonicalNotice("compare.notice.schemaMixed", "ecs.report/v1, ecs.report/v2")
+	notice := canonicalNotice("compare.notice.toolMixed", "1, 2")
 	content, err := json.Marshal(notice)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(content)
-	if !strings.Contains(got, `"key":"compare.notice.schemaMixed"`) || !strings.Contains(got, `"args":["ecs.report/v1, ecs.report/v2"]`) {
+	if !strings.Contains(got, `"key":"compare.notice.toolMixed"`) || !strings.Contains(got, `"args":["1, 2"]`) {
 		t.Fatalf("structured notice JSON = %s", got)
 	}
 	if strings.Contains(got, "::") {

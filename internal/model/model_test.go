@@ -138,6 +138,9 @@ func TestEvidenceNormalizationAndCoverageGrades(t *testing.T) {
 	if got := unnormalized.EvidenceRatio(); got != 1 {
 		t.Fatalf("unnormalized EvidenceRatio = %v, want 1", got)
 	}
+	if got := unnormalized.DerivedGrade(); got != EvidenceComplete {
+		t.Fatalf("unnormalized DerivedGrade = %q, want %q", got, EvidenceComplete)
+	}
 	for _, test := range []struct {
 		name                  string
 		valid, expected       int
@@ -146,21 +149,42 @@ func TestEvidenceNormalizationAndCoverageGrades(t *testing.T) {
 		ratio                 float64
 	}{
 		{name: "not planned", valid: 0, expected: 0, grade: EvidenceNotPlanned},
-		{name: "insufficient", valid: 0, expected: 3, wantExpect: 3, grade: EvidenceInsufficient},
-		{name: "partial", valid: 1, expected: 2, wantValid: 1, wantExpect: 2, grade: EvidencePartial, ratio: 0.5},
-		{name: "complete", valid: 2, expected: 2, wantValid: 2, wantExpect: 2, grade: EvidenceComplete, ratio: 1},
-		{name: "clamped", valid: 9, expected: 2, wantValid: 2, wantExpect: 2, grade: EvidenceComplete, ratio: 1},
-		{name: "negative", valid: -1, expected: -2, grade: EvidenceNotPlanned},
+		{name: "insufficient", valid: 0, expected: 5, wantExpect: 5, grade: EvidenceInsufficient},
+		{name: "partial", valid: 2, expected: 5, wantValid: 2, wantExpect: 5, grade: EvidencePartial, ratio: 0.4},
+		{name: "complete", valid: 5, expected: 5, wantValid: 5, wantExpect: 5, grade: EvidenceComplete, ratio: 1},
+		{name: "clamped", valid: 7, expected: 5, wantValid: 5, wantExpect: 5, grade: EvidenceComplete, ratio: 1},
+		{name: "negative valid", valid: -1, expected: 5, wantExpect: 5, grade: EvidenceInsufficient},
+		{name: "negative expected", valid: -1, expected: -2, grade: EvidenceNotPlanned},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evidence := NewEvidence(test.valid, test.expected, "sample")
-			if evidence.Valid != test.wantValid || evidence.Expected != test.wantExpect || evidence.Grade != test.grade || evidence.EffectiveGrade() != test.grade || evidence.EvidenceRatio() != test.ratio {
+			if evidence.Valid != test.wantValid || evidence.Expected != test.wantExpect || evidence.DerivedGrade() != test.grade || evidence.EvidenceRatio() != test.ratio {
 				t.Fatalf("evidence = %+v ratio=%v", evidence, evidence.EvidenceRatio())
 			}
 		})
 	}
 	var nilEvidence *Evidence
 	nilEvidence.Normalize()
+}
+
+func TestEvidenceJSONPersistsFactsOnly(t *testing.T) {
+	evidence := Evidence{Valid: 2, Expected: 5, Unit: "sample"}
+	content, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(content, []byte(`"grade"`)) {
+		t.Fatalf("derived grade was serialized: %s", content)
+	}
+
+	var loaded Evidence
+	if err := json.Unmarshal([]byte(`{"valid":2,"expected":5,"unit":"sample","grade":"complete"}`), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	loaded.Normalize()
+	if loaded.Valid != 2 || loaded.Expected != 5 || loaded.Unit != "sample" || loaded.DerivedGrade() != EvidencePartial {
+		t.Fatalf("deserialized evidence = %+v, grade=%q", loaded, loaded.DerivedGrade())
+	}
 }
 
 func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {

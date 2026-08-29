@@ -22,7 +22,7 @@ func textSampleReport() model.Report {
 	}
 	start := data.Run.StartedAt
 	memory := model.Result{
-		ID: "memory", Title: "内存", Description: "内存带宽测量", Status: model.StatusWarning,
+		ID: "memory", Title: "module.memory.title", Description: "内存带宽测量", Status: model.StatusWarning,
 		StartedAt: start, DurationMS: 1500, SummaryMessages: []model.Message{model.NewMessage("message.summary.withWarnings", 1, 1)},
 		Methodology: model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "stream", Profile: "standard"},
 		Fields:      []model.Field{{Key: "memory_state", Label: "状态", Value: model.RawValue("需留意")}},
@@ -39,7 +39,7 @@ func textSampleReport() model.Report {
 		Evidence: model.NewEvidence(1, 1, "sample"),
 	}
 	disk := model.Result{
-		ID: "disk", Title: "磁盘", Description: "磁盘测试失败", Status: model.StatusError,
+		ID: "disk", Title: "module.disk.title", Description: "磁盘测试失败", Status: model.StatusError,
 		StartedAt: start, DurationMS: 2, Error: "失败",
 		Methodology:  model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio"},
 		Measurements: []model.Measurement{{Key: "disk", Label: "吞吐", Value: 0, Unit: "MiB/s", Display: model.RawValue("0 MiB/s"), HigherIsBetter: model.BoolPtr(true)}},
@@ -68,6 +68,23 @@ func rendererScoreFixture() *score.Report {
 	}
 }
 
+func TestResultTitleUsesCanonicalResultTitle(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		for _, result := range []model.Result{
+			{ID: "memory", Title: "module.memory.title"},
+			{ID: "disk", Title: "module.disk.title"},
+		} {
+			if got, want := resultTitle(result), i18n.T(result.Title); got != want {
+				t.Errorf("%s result %s title = %q, want canonical %q", language, result.ID, got, want)
+			}
+		}
+	}
+}
+
 func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
@@ -79,7 +96,7 @@ func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	scoreReport.TopPercent = 10.5
 	output := Text(textSampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scoreReport})
 	for _, marker := range []string{
-		"系统", "内存测评", "硬盘测评", "可选检查", "需留意", "异常", "跳过", "逻辑 CPU", "复制", "采样", "raw output 192.0.2.10",
+		"系统", "内存性能", "磁盘性能", "可选检查", "需留意", "异常", "跳过", "逻辑 CPU", "复制", "采样", "raw output 192.0.2.10",
 		"api.example", "permission denied", "mystery", "证据完整度", "100% · 完整", "50% · 部分", "0% · 证据不足", "0/0 样本 · 本轮无计划样本", "评分", "排行榜参考", "排行榜前", "报告说明",
 	} {
 		if !strings.Contains(output, marker) {
@@ -98,6 +115,36 @@ func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	}
 }
 
+func TestTextGroupsUseCanonicalResultTitleForDefaultGroups(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		i18n.Set(language)
+		for _, test := range []struct {
+			id, title string
+		}{
+			{id: "memory", title: "module.memory.title"},
+			{id: "disk", title: "module.disk.title"},
+		} {
+			result := model.Result{
+				ID:    test.id,
+				Title: test.title,
+				Fields: []model.Field{{
+					Key: "state", Label: "state", Value: model.RawValue("ready"),
+				}},
+			}
+			groups := textGroups(result)
+			if len(groups) != 1 {
+				t.Fatalf("%s %s groups = %#v, want one default group", language, test.id, groups)
+			}
+			if got, want := groups[0].title, i18n.T(test.title); got != want {
+				t.Errorf("%s %s group title = %q, want Result.Title %q", language, test.id, got, want)
+			}
+		}
+	}
+}
+
 func TestTextRendersSparseAndNarrowLayouts(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
@@ -108,7 +155,7 @@ func TestTextRendersSparseAndNarrowLayouts(t *testing.T) {
 			t.Fatalf("narrow text line width=%d: %q", textwidth.Width(line), line)
 		}
 	}
-	if !strings.Contains(rich, "Memory benchmark") {
+	if !strings.Contains(rich, "Memory Performance") {
 		t.Fatalf("narrow report lost result title:\n%s", rich)
 	}
 	sparse := model.Report{

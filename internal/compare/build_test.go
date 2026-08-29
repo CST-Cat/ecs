@@ -136,7 +136,7 @@ func TestBuildInputsAndStructuredNotices(t *testing.T) {
 		comparisonTestReport("two", 10, "m-v1", "same", "rate", true),
 		comparisonTestReport("three", 10, "m-v1", "same", "rate", true),
 	}
-	reports[0].SchemaVersion, reports[1].SchemaVersion, reports[2].SchemaVersion = "ecs.report/v1", "", "ecs.report/v2"
+	reports[0].SchemaVersion, reports[1].SchemaVersion, reports[2].SchemaVersion = "ecs.report/v1", "ecs.report/v1", "ecs.report/v1"
 	reports[0].Tool.Version, reports[1].Tool.Version, reports[2].Tool.Version = "1", "2", "1"
 	reports[1].Run.IPVersion, reports[1].Run.Redacted = "6", true
 	options := Options{
@@ -150,7 +150,7 @@ func TestBuildInputsAndStructuredNotices(t *testing.T) {
 	if got := []string{data.Inputs[0].Label, data.Inputs[1].Label, data.Inputs[2].Label}; !reflect.DeepEqual(got, []string{"same", "same #2", "report-3"}) {
 		t.Fatalf("unique labels = %v", got)
 	}
-	if data.Inputs[1].Index != 1 || data.Inputs[1].ReportID != "two" || data.Inputs[1].ToolVersion != "2" || data.Inputs[1].Profile != reports[1].Run.Profile || !data.Inputs[1].StartedAt.Equal(reports[1].Run.StartedAt) || data.Inputs[1].SchemaVersion != "" || data.Inputs[1].IPVersion != "6" || !data.Inputs[1].Redacted {
+	if data.Inputs[1].Index != 1 || data.Inputs[1].ReportID != "two" || data.Inputs[1].ToolVersion != "2" || data.Inputs[1].Profile != reports[1].Run.Profile || !data.Inputs[1].StartedAt.Equal(reports[1].Run.StartedAt) || data.Inputs[1].SchemaVersion != "ecs.report/v1" || data.Inputs[1].IPVersion != "6" || !data.Inputs[1].Redacted {
 		t.Fatalf("input metadata = %+v", data.Inputs[1])
 	}
 	if !reflect.DeepEqual(data.Tool, options.Tool) {
@@ -159,11 +159,15 @@ func TestBuildInputsAndStructuredNotices(t *testing.T) {
 	if data.SchemaVersion != SchemaVersion || data.GeneratedAt.IsZero() || data.GeneratedAt.Location() != time.UTC {
 		t.Fatalf("comparison metadata = schema %q generated_at=%v", data.SchemaVersion, data.GeneratedAt)
 	}
-	if !reflect.DeepEqual(data.SchemaVersions(), []string{"ecs.report/v1", "ecs.report/v2"}) || data.Summary.Comparability != PartiallyComparable {
-		t.Fatalf("schema handling = %v, %+v", data.SchemaVersions(), data.Summary)
+	for index, input := range data.Inputs {
+		if input.SchemaVersion != "ecs.report/v1" {
+			t.Fatalf("input %d schema = %q", index, input.SchemaVersion)
+		}
+	}
+	if data.Summary.Comparability != Comparable {
+		t.Fatalf("current-schema comparison comparability = %v", data.Summary.Comparability)
 	}
 	expectedNotices := []Notice{
-		{Key: "compare.notice.schemaMixed", Args: []string{"ecs.report/v1, ecs.report/v2"}},
 		{Key: "compare.notice.toolMixed", Args: []string{"1, 2"}},
 		{Key: "compare.notice.scope"},
 		{Key: "compare.notice.relative"},
@@ -180,7 +184,7 @@ func TestBuildInputsAndStructuredNotices(t *testing.T) {
 	toolOnly := []model.Report{comparisonTestReport("a", 10, "m-v1", "same", "rate", true), comparisonTestReport("b", 11, "m-v1", "same", "rate", true)}
 	toolOnly[0].Tool.Version, toolOnly[1].Tool.Version = "1", "2"
 	toolData, err := Build(toolOnly, Options{})
-	if err != nil || toolData.Summary.Comparability != Comparable || !hasNoticeKey(toolData.Notices, "compare.notice.toolMixed") || hasNoticeKey(toolData.Notices, "compare.notice.schemaMixed") {
+	if err != nil || toolData.Summary.Comparability != Comparable || !hasNoticeKey(toolData.Notices, "compare.notice.toolMixed") {
 		t.Fatalf("tool-only comparison = %+v, %v", toolData.Summary, toolData.Notices)
 	}
 }
@@ -218,12 +222,12 @@ func TestBuildIsIndependentOfCurrentLanguage(t *testing.T) {
 
 func TestBuildModulesStatusesEvidenceAndUnion(t *testing.T) {
 	cpu0 := comparisonTestReport("base", 100, "m-v1", "same", "rate", true).Results[0]
-	cpu0.Evidence = &model.Evidence{Valid: 2, Expected: 2, Grade: model.EvidenceInsufficient}
+	cpu0.Evidence = &model.Evidence{Valid: 2, Expected: 2}
 	network := comparisonModuleResult("network", "Network", model.StatusOK, nil)
 	base := reportWithResults("base", cpu0, network)
 	cpu1 := comparisonTestReport("candidate", 110, "m-v1", "same", "rate", true).Results[0]
 	cpu1.Status = model.StatusWarning
-	cpu1.Evidence = &model.Evidence{Valid: 1, Expected: 2, Grade: model.EvidenceComplete}
+	cpu1.Evidence = &model.Evidence{Valid: 1, Expected: 2}
 	candidateOnly := comparisonModuleResult("candidate-only", "Candidate only", model.StatusOK, nil)
 	candidate := reportWithResults("candidate", cpu1, candidateOnly)
 	data, err := Build([]model.Report{base, candidate}, Options{})
@@ -234,7 +238,7 @@ func TestBuildModulesStatusesEvidenceAndUnion(t *testing.T) {
 		t.Fatalf("union module order = %v", got)
 	}
 	cpu := findModule(data, "cpu")
-	if cpu == nil || cpu.Statuses[0].Status != model.StatusOK || cpu.Statuses[1].Status != model.StatusWarning || cpu.Evidence[0].Valid != 2 || cpu.Evidence[0].Grade != model.EvidenceComplete || cpu.Evidence[1].Grade != model.EvidencePartial || cpu.Evidence[1].Ratio != 0.5 {
+	if cpu == nil || cpu.Statuses[0].Status != model.StatusOK || cpu.Statuses[1].Status != model.StatusWarning || cpu.Evidence[0].Valid != 2 || (model.Evidence{Valid: cpu.Evidence[0].Valid, Expected: cpu.Evidence[0].Expected}).DerivedGrade() != model.EvidenceComplete || (model.Evidence{Valid: cpu.Evidence[1].Valid, Expected: cpu.Evidence[1].Expected}).DerivedGrade() != model.EvidencePartial || cpu.Evidence[1].Ratio != 0.5 {
 		t.Fatalf("status/evidence normalization = %+v", cpu)
 	}
 	networkModule := findModule(data, "network")
@@ -530,7 +534,7 @@ func TestBuildKeyedTableObservationsDistinguishValueVariants(t *testing.T) {
 	}
 }
 
-func TestBuildWholeTableSnapshotDistinguishValueVariants(t *testing.T) {
+func TestBuildIgnoresLegacyTableValueVariants(t *testing.T) {
 	const text = "probe.network.status.ok"
 	makeReport := func(value model.Value) model.Report {
 		report := comparisonTestReport("report", 10, "m-v1", "same", "rate", true)
@@ -549,12 +553,12 @@ func TestBuildWholeTableSnapshotDistinguishValueVariants(t *testing.T) {
 		t.Fatal(err)
 	}
 	changes := findModule(data, "cpu").Changes
-	if len(changes) != 1 || changes[0].Key != "table:legacy:0" || changes[0].Values[0].Value != `columns=1; rows=["probe.network.status.ok"]` || changes[0].Values[1].Value != `columns=1; rows=["probe.network.status.ok"]` {
-		t.Fatalf("whole table value variant change = %+v", changes)
+	if len(changes) != 0 {
+		t.Fatalf("legacy table value variant was compared = %+v", changes)
 	}
 }
 
-func TestBuildTableFallbacksStayConservative(t *testing.T) {
+func TestBuildTableMatchingStaysConservative(t *testing.T) {
 	tableReports := func(first, second model.Table) []model.Report {
 		left := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 		right := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
@@ -564,7 +568,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 	base := func(key, identity string, rows [][]model.Value) model.Table {
 		return model.Table{Key: key, Title: "Routes", Columns: tableColumns([]string{"target", "value"}, []string{"Target", "Value"}), RowIdentity: identity, Rows: rows}
 	}
-	t.Run("no identity is positional", func(t *testing.T) {
+	t.Run("no identity is whole snapshot", func(t *testing.T) {
 		data, err := Build(tableReports(
 			base("routes", "", rawTableRows([]string{"a", "10"}, []string{"b", "20"})),
 			base("routes", "", rawTableRows([]string{"b", "20"}, []string{"a", "10"}))), Options{})
@@ -572,25 +576,23 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 			t.Fatal(err)
 		}
 		changes := findModule(data, "cpu").Changes
-		if len(changes) == 0 {
-			t.Fatal("positional fallback hid row reorder")
+		if len(changes) != 1 || !strings.Contains(changes[0].Key, "whole") {
+			t.Fatalf("identity-less table snapshot = %+v", changes)
 		}
-		for _, change := range changes {
-			if !strings.Contains(change.Key, "row-index") || strings.Contains(change.Key, ":a:") || strings.Contains(change.Key, ":b:") {
-				t.Fatalf("positional key guessed row data: %+v", change)
-			}
+		if strings.Contains(changes[0].Key, "row-index") || strings.Contains(changes[0].Key, ":a:") || strings.Contains(changes[0].Key, ":b:") {
+			t.Fatalf("identity-less table guessed row data: %+v", changes)
 		}
 	})
-	t.Run("invalid identity is positional", func(t *testing.T) {
+	t.Run("invalid identity is whole snapshot", func(t *testing.T) {
 		data, err := Build(tableReports(base("routes", "missing", rawTableRows([]string{"a", "10"})), base("routes", "missing", rawTableRows([]string{"a", "11"}))), Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if changes := findModule(data, "cpu").Changes; len(changes) == 0 || !strings.Contains(changes[0].Key, "row-index") {
-			t.Fatalf("invalid identity fallback = %+v", changes)
+		if changes := findModule(data, "cpu").Changes; len(changes) != 1 || !strings.Contains(changes[0].Key, "whole") {
+			t.Fatalf("invalid identity snapshot = %+v", changes)
 		}
 	})
-	t.Run("legacy schema is whole snapshot", func(t *testing.T) {
+	t.Run("legacy schema is ignored", func(t *testing.T) {
 		data, err := Build(tableReports(
 			model.Table{Title: "Routes", Columns: tableColumns([]string{"target"}, []string{"Target"}), Rows: rawTableRows([]string{"a"})},
 			model.Table{Title: "Routes", Columns: tableColumns([]string{"target"}, []string{"Target"}), Rows: rawTableRows([]string{"b"})}), Options{})
@@ -598,8 +600,8 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 			t.Fatal(err)
 		}
 		changes := findModule(data, "cpu").Changes
-		if len(changes) != 1 || changes[0].Key != "table:legacy:0" || !strings.Contains(changes[0].Values[0].Value, "columns=1") {
-			t.Fatalf("legacy table fallback = %+v", changes)
+		if len(changes) != 0 {
+			t.Fatalf("legacy table was compared = %+v", changes)
 		}
 	})
 	t.Run("malformed shape is whole snapshot", func(t *testing.T) {
@@ -609,7 +611,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 		}
 		changes := findModule(data, "cpu").Changes
 		if len(changes) != 1 || !strings.Contains(changes[0].Key, "whole") {
-			t.Fatalf("malformed shape fallback = %+v", changes)
+			t.Fatalf("malformed shape snapshot = %+v", changes)
 		}
 	})
 	t.Run("different machine key is not compared", func(t *testing.T) {
@@ -621,7 +623,7 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 			t.Fatalf("different table keys compared: %+v", changes)
 		}
 	})
-	t.Run("duplicate schema falls back to legacy", func(t *testing.T) {
+	t.Run("duplicate schema is ignored", func(t *testing.T) {
 		left := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 		right := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
 		left.Results[0].Tables = []model.Table{base("routes", "", rawTableRows([]string{"a", "10"})), base("routes", "", rawTableRows([]string{"duplicate", "20"}))}
@@ -631,8 +633,8 @@ func TestBuildTableFallbacksStayConservative(t *testing.T) {
 			t.Fatal(err)
 		}
 		changes := findModule(data, "cpu").Changes
-		if len(changes) != 1 || changes[0].Key != "table:legacy:0" {
-			t.Fatalf("duplicate schema fallback = %+v", changes)
+		if len(changes) != 0 {
+			t.Fatalf("duplicate schema was compared = %+v", changes)
 		}
 	})
 }

@@ -42,11 +42,11 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "DNSPod", Address: "119.29.29.29:53"},
 		},
 		LatencyTargets: []Endpoint{
-			{Name: "Cloudflare", Address: "www.cloudflare.com:443", Kind: "Global CDN"},
-			{Name: "Google", Address: "www.google.com:443", Kind: "Global"},
-			{Name: "Aliyun", Address: "www.aliyun.com:443", Kind: "中国大陆"},
-			{Name: "Tencent", Address: "www.tencent.com:443", Kind: "中国大陆"},
-			{Name: "Amazon", Address: "www.amazon.com:443", Kind: "Global"},
+			{Name: "Cloudflare", Address: "www.cloudflare.com:443", Kind: LatencyTargetKindGlobalCDN},
+			{Name: "Google", Address: "www.google.com:443", Kind: LatencyTargetKindGlobal},
+			{Name: "Aliyun", Address: "www.aliyun.com:443", Kind: LatencyTargetKindMainlandChina},
+			{Name: "Tencent", Address: "www.tencent.com:443", Kind: LatencyTargetKindMainlandChina},
+			{Name: "Amazon", Address: "www.amazon.com:443", Kind: LatencyTargetKindGlobal},
 		},
 		RouteTargets: []Endpoint{
 			{Name: "Cloudflare", Address: "1.1.1.1", Kind: RouteTargetKindGlobal},

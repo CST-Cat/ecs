@@ -43,7 +43,7 @@ func Build(reports []model.Report, options Options) (Report, error) {
 			Redacted: report.Run.Redacted,
 		})
 	}
-	schemaMixed := prependVersionNotices(&out)
+	prependToolVersionNotice(&out)
 
 	moduleOrder := unionModuleOrder(reports)
 	for _, moduleID := range moduleOrder {
@@ -67,7 +67,7 @@ func Build(reports []model.Report, options Options) (Report, error) {
 				continue
 			}
 			base := module.Evidence[reference]
-			if base.Available && (!nearlyEqual(base.Ratio, evidence.Ratio) || base.Grade != evidence.Grade || base.Expected != evidence.Expected) {
+			if base.Available && (!nearlyEqual(base.Ratio, evidence.Ratio) || derivedEvidenceGrade(base) != derivedEvidenceGrade(evidence) || base.Expected != evidence.Expected) {
 				out.Summary.EvidenceChanges++
 			}
 		}
@@ -90,38 +90,22 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	out.Summary.Reports = len(reports)
 	out.Summary.Modules = len(out.Modules)
 	out.Summary.Comparability = overallComparability(out)
-	if schemaMixed && out.Summary.Comparability == Comparable {
-		// 跨 schema 版本时不给"完全可比"。指标本身由签名保护，但 status 枚举
-		// 与 evidence 口径不在签名里，它们的语义理论上可以在升版时改变而没有
-		// 任何信号。降一级是对这段未覆盖面的如实表达。
-		out.Summary.Comparability = PartiallyComparable
-	}
 	return out, nil
 }
 
-// prependVersionNotices 把版本差异说明放到 Notices 最前面，并回答"schema 版本
-// 是否不一致"。
-//
-// 两种差异的性质不同，因此提示也不同：
-//
-//	schema 版本不同   下方结论的可信范围缩小了，必须降级并说清楚。
-//	ecs 版本不同      结论照常可信，但"某模块缺失""method 不一致"多半是版本
-//	                  差异的正常结果而不是故障。缺了这句话，用户会把它当 bug。
-func prependVersionNotices(out *Report) bool {
-	schemas := distinctInputValues(out.Inputs, func(input Input) string { return input.SchemaVersion })
+// prependToolVersionNotice puts a note about producer-version differences
+// before the standard comparison notices. All report inputs have already
+// passed the current report schema loader; producer versions may still differ
+// while preserving the same machine contract.
+func prependToolVersionNotice(out *Report) {
 	tools := distinctInputValues(out.Inputs, func(input Input) string { return input.ToolVersion })
 
 	var leading []Notice
-	if len(schemas) > 1 {
-		leading = append(leading,
-			canonicalNotice("compare.notice.schemaMixed", strings.Join(schemas, ", ")))
-	}
 	if len(tools) > 1 {
 		leading = append(leading,
 			canonicalNotice("compare.notice.toolMixed", strings.Join(tools, ", ")))
 	}
 	out.Notices = append(leading, out.Notices...)
-	return len(schemas) > 1
 }
 
 // distinctInputValues 按首次出现顺序收集互不相同的非空取值。
@@ -137,15 +121,6 @@ func distinctInputValues(inputs []Input, pick func(Input) string) []string {
 		values = append(values, value)
 	}
 	return values
-}
-
-// SchemaVersions 返回各输入声明的互不相同的 schema 版本，按首次出现顺序。
-// 长度大于 1 表示这是一次跨版本比较。
-//
-// 渲染器共用这一个判定，而不是各自比对 Inputs——三份各写一遍迟早会出现
-// "文本报告说跨版本、HTML 说不跨"这种自相矛盾的输出。
-func (r Report) SchemaVersions() []string {
-	return distinctInputValues(r.Inputs, func(input Input) string { return input.SchemaVersion })
 }
 
 func uniqueLabels(labels []string, count int) []string {
@@ -216,7 +191,7 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 			e.Normalize()
 			evidence = EvidenceValue{
 				Report: inputIndex, Available: true, Valid: e.Valid, Expected: e.Expected,
-				Unit: e.Unit, Grade: e.EffectiveGrade(), Ratio: e.EvidenceRatio(),
+				Unit: e.Unit, Ratio: e.EvidenceRatio(),
 			}
 		}
 		module.Statuses = append(module.Statuses, status)
@@ -235,6 +210,10 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 		module.Comparability = Comparable
 	}
 	return module
+}
+
+func derivedEvidenceGrade(evidence EvidenceValue) model.EvidenceGrade {
+	return (model.Evidence{Valid: evidence.Valid, Expected: evidence.Expected}).DerivedGrade()
 }
 
 func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIssue) {
@@ -664,13 +643,11 @@ func buildObservations(results []*model.Result) []Observation {
 
 func appendTableObservations(results []*model.Result, add func(int, string, string, string, observationValue)) {
 	// A machine schema is the only safe way to match a table across reports.
-	// Legacy tables are kept in a separate positional fallback path so display
-	// labels can never become an accidental identity.
+	// Tables without one are ignored; display labels and table position are not
+	// stable identities.
 	tables := make(map[string]map[int][]tableRef)
 	order := make([]string, 0)
 	seen := make(map[string]bool)
-	legacy := make(map[int]map[int]tableRef)
-	legacyOrder := make([]int, 0)
 	for input, result := range results {
 		if result == nil {
 			continue
@@ -679,7 +656,6 @@ func appendTableObservations(results []*model.Result, add func(int, string, stri
 			ref := tableRef{input: input, position: position, table: table}
 			schema := tableSchemaKey(table)
 			if schema == "" {
-				appendLegacyTableRef(legacy, &legacyOrder, ref)
 				continue
 			}
 			if tables[schema] == nil {
@@ -695,13 +671,8 @@ func appendTableObservations(results []*model.Result, add func(int, string, stri
 	for _, schema := range order {
 		group := tables[schema]
 		if hasDuplicateTableInput(group) {
-			// Duplicate declarations are malformed. Reclassify their tables as
-			// legacy and compare by position, never by an arbitrary duplicate.
-			for _, refs := range group {
-				for _, ref := range refs {
-					appendLegacyTableRef(legacy, &legacyOrder, ref)
-				}
-			}
+			// Duplicate declarations are malformed. Do not choose an arbitrary
+			// table or fall back to position-based matching.
 			continue
 		}
 		refs := make(map[int]tableRef, len(group))
@@ -713,27 +684,12 @@ func appendTableObservations(results []*model.Result, add func(int, string, stri
 		}
 		appendMachineTableObservations(results, schema, refs, add)
 	}
-	for _, position := range legacyOrder {
-		group := legacy[position]
-		if len(group) < 2 {
-			continue
-		}
-		appendWholeTableObservation(results, "legacy:"+strconv.Itoa(position), group, add)
-	}
 }
 
 type tableRef struct {
 	input    int
 	position int
 	table    model.Table
-}
-
-func appendLegacyTableRef(groups map[int]map[int]tableRef, order *[]int, ref tableRef) {
-	if groups[ref.position] == nil {
-		groups[ref.position] = make(map[int]tableRef)
-		*order = append(*order, ref.position)
-	}
-	groups[ref.position][ref.input] = ref
 }
 
 func hasDuplicateTableInput(group map[int][]tableRef) bool {
@@ -746,17 +702,14 @@ func hasDuplicateTableInput(group map[int][]tableRef) bool {
 }
 
 func appendMachineTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
-	if keyedTableGroup(group) {
-		appendKeyedTableObservations(results, schema, group, add)
+	if !keyedTableGroup(group) {
+		// The current schema requires a stable row identity for cell-level
+		// alignment. A malformed or identity-less table is still observable as
+		// a whole snapshot, but never by row position.
+		appendWholeTableObservation(results, schema+":whole", group, add)
 		return
 	}
-	if tablesHaveSameShape(group) {
-		appendPositionalTableObservations(results, schema, group, add)
-		return
-	}
-	// A malformed row shape cannot be safely aligned even positionally. The
-	// whole-table snapshot still exposes a change without inventing row keys.
-	appendWholeTableObservation(results, schema+":whole", group, add)
+	appendKeyedTableObservations(results, schema, group, add)
 }
 
 func keyedTableGroup(group map[int]tableRef) bool {
@@ -774,7 +727,7 @@ func keyedTableGroup(group map[int]tableRef) bool {
 		}
 		seen := make(map[string]bool, len(table.Rows))
 		for _, row := range table.Rows {
-			if index >= len(row) {
+			if len(row) != len(table.Columns) || index >= len(row) {
 				return false
 			}
 			rowKey := strings.TrimSpace(row[index].Text())
@@ -804,27 +757,6 @@ func appendKeyedTableObservations(results []*model.Result, schema string, group 
 				columnKey := table.Columns[column].Key
 				key := tableObservationKey(schema, rowKey, columnKey)
 				label := tableCellLabel(table, rowKey, column)
-				add(input, key, label, "table", observedValue(input, cell))
-			}
-		}
-	}
-}
-
-func appendPositionalTableObservations(results []*model.Result, schema string, group map[int]tableRef, add func(int, string, string, string, observationValue)) {
-	for input := range results {
-		ref, exists := group[input]
-		if !exists {
-			continue
-		}
-		table := ref.table
-		for rowIndex, row := range table.Rows {
-			for column, cell := range row {
-				if column >= len(table.Columns) {
-					continue
-				}
-				columnKey := table.Columns[column].Key
-				key := "table:" + schema + ":row-index:" + strconv.Itoa(rowIndex) + ":column:" + columnKey
-				label := tableCellLabel(table, "row "+strconv.Itoa(rowIndex+1), column)
 				add(input, key, label, "table", observedValue(input, cell))
 			}
 		}
@@ -894,26 +826,6 @@ func tableSnapshotIdentity(table model.Table) string {
 		}
 	}
 	return identity.String()
-}
-
-func tablesHaveSameShape(group map[int]tableRef) bool {
-	var first [][]model.Value
-	set := false
-	for _, ref := range group {
-		if !set {
-			first, set = ref.table.Rows, true
-			continue
-		}
-		if len(ref.table.Rows) != len(first) {
-			return false
-		}
-		for rowIndex, row := range ref.table.Rows {
-			if len(row) != len(first[rowIndex]) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func tableSchemaKey(table model.Table) string {

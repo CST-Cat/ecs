@@ -2,9 +2,12 @@ package probe
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -83,6 +86,31 @@ func TestDiskProducerFailureUsesStableSummaryAndRawError(t *testing.T) {
 	}
 	if !containsDiskNote(result.Notes, "probe.disk.note.run_failure") {
 		t.Fatalf("disk failure notes = %v", result.Notes)
+	}
+}
+
+func TestDiskProducerReportsFIOJobErrorStructurally(t *testing.T) {
+	directory := t.TempDir()
+	fioPath := filepath.Join(directory, "fio")
+	script := `#!/bin/sh
+if [ "$1" = "--enghelp" ]; then
+  printf '%s\n' 'psync'
+  exit 0
+fi
+printf '%s\n' '{"fio version":"fio-fixture","jobs":[{"jobname":"seqwrite","write":{"io_bytes":1,"bw_bytes":2097152}},{"jobname":"seqread","read":{"io_bytes":1,"bw_bytes":2097152}},{"jobname":"randread","read":{"io_bytes":1,"iops":10}},{"jobname":"randwrite","write":{"io_bytes":1,"iops":10}},{"jobname":"fixture-error","error":7}]}'
+`
+	if err := os.WriteFile(fioPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result := runFIODisk(context.Background(), Environment{Config: config.Runtime{
+		DiskPath: t.TempDir(), DiskMiB: 128,
+	}}, fioPath)
+	if result.Status != model.StatusWarning || len(result.Failures) != 1 {
+		t.Fatalf("fio job error status/failures = %s/%+v", result.Status, result.Failures)
+	}
+	failure := result.Failures[0]
+	if failure.Category != model.FailureUnknown || failure.Stage != "benchmark_run" || failure.Target != "fixture-error" || failure.Count != 1 || !strings.Contains(failure.Message, "error code 7") {
+		t.Fatalf("fio job error failure = %+v", failure)
 	}
 }
 

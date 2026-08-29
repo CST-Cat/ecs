@@ -1,0 +1,110 @@
+{
+  "schema_version": "ecs.report/v1",
+  "tool": {
+    "name": "ecs",
+    "version": "fixture-1"
+  },
+  "run": {
+    "id": "compare-reference",
+    "profile": "standard",
+    "started_at": "2026-08-28T08:00:00Z",
+    "completed_at": "2026-08-28T08:00:05Z",
+    "duration_ms": 5000,
+    "exposure": "local",
+    "ip_version": "4",
+    "redacted": true,
+    "requested_modules": [
+      "cpu"
+    ],
+    "output_formats": [
+      "json"
+    ]
+  },
+  "summary": {
+    "status": "ok",
+    "ok": 1,
+    "warnings": 0,
+    "skipped": 0,
+    "errors": 0
+  },
+  "results": [
+    {
+      "id": "cpu",
+      "title": "module.cpu.title",
+      "description": "probe.cpu.description",
+      "methodology": {
+        "kind": "standard-benchmark",
+        "label": "methodology.standard-benchmark",
+        "engine": "sysbench",
+        "profile": "cpu prime=20000",
+        "comparison_scope": "probe.cpu.comparison_scope",
+        "parameters": {
+          "scope_revision": "1",
+          "configured_duration": "5s",
+          "tool_version": "sysbench-fixture",
+          "tool_sha256": "fixture-sha256",
+          "threads": "1 / 2",
+          "duration": "5s",
+          "prime": "20000"
+        }
+      },
+      "status": "ok",
+      "started_at": "2026-08-28T08:00:00Z",
+      "duration_ms": 5000,
+      "fields": [
+        {
+          "key": "result_validity",
+          "label": "probe.cpu.field.result_validity",
+          "value": {
+            "key": "probe.cpu.validity.valid"
+          }
+        }
+      ],
+      "measurements": [
+        {
+          "key": "sysbench_cpu_single_events_s",
+          "label": "probe.cpu.metric.single_events_s",
+          "value": 100,
+          "unit": "events/s",
+          "display": {
+            "raw": "100.0 events/s"
+          },
+          "method": "sysbench-cpu-prime20000-v1",
+          "higher_is_better": true
+        }
+      ],
+      "tables": [
+        {
+          "key": "cpu.execution",
+          "title": "probe.cpu.table.execution",
+          "columns": [
+            {
+              "key": "run_id",
+              "label": "probe.cpu.column.run_id"
+            },
+            {
+              "key": "state",
+              "label": "probe.cpu.column.state"
+            }
+          ],
+          "rows": [
+            [
+              {
+                "raw": "run-1"
+              },
+              {
+                "key": "probe.cpu.validity.valid"
+              }
+            ]
+          ],
+          "row_identity": "run_id"
+        }
+      ],
+      "evidence": {
+        "valid": 2,
+        "expected": 2,
+        "unit": "run"
+      }
+    }
+  ]
+}

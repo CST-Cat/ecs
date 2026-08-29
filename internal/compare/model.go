@@ -52,8 +52,8 @@ type Notice struct {
 type Input struct {
 	Index int    `json:"index"`
 	Label string `json:"label"`
-	// SchemaVersion 是这份输入报告自身声明的 schema。各输入允许不同——
-	// compare 跨版本时按尽力比较处理，因此消费方需要知道每一份的出处。
+	// SchemaVersion records the input report schema for provenance. The compare
+	// command only admits reports accepted by the current exact loader.
 	SchemaVersion string    `json:"schema_version"`
 	ReportID      string    `json:"report_id"`
 	ToolVersion   string    `json:"tool_version"`
@@ -97,13 +97,12 @@ type StatusValue struct {
 }
 
 type EvidenceValue struct {
-	Report    int                 `json:"report"`
-	Available bool                `json:"available"`
-	Valid     int                 `json:"valid,omitempty"`
-	Expected  int                 `json:"expected,omitempty"`
-	Unit      string              `json:"unit,omitempty"`
-	Grade     model.EvidenceGrade `json:"grade,omitempty"`
-	Ratio     float64             `json:"ratio,omitempty"`
+	Report    int     `json:"report"`
+	Available bool    `json:"available"`
+	Valid     int     `json:"valid,omitempty"`
+	Expected  int     `json:"expected,omitempty"`
+	Unit      string  `json:"unit,omitempty"`
+	Ratio     float64 `json:"ratio,omitempty"`
 }
 
 type Metric struct {
@@ -152,8 +151,8 @@ type MetricIssue struct {
 	// 且只列出确实不同的分量——相同的分量不是用户在找的东西。
 	//
 	// 没有它的时候，"method 或参数口径不一致"这个结论是不可行动的：本项目约定
-	// 工作负载语义变了就升 measurement.method，因此跨版本报告经常撞上这一条，
-	// 而用户看不出到底是 method 变了、某个参数变了，还是单位换了。
+	// 工作负载语义变了就升 measurement.method，而用户看不出到底是 method 变了、
+	// 某个参数变了，还是单位换了。
 	Differences []Difference `json:"differences,omitempty"`
 }
 

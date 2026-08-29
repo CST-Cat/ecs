@@ -126,10 +126,10 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	addComparisonParameterHash(result.Methodology.Parameters, "arguments_sha256", strings.Join(args, " "))
 	servers := append([]config.OoklaServer(nil), env.Config.OoklaServers...)
 	if len(servers) == 0 {
-		servers = []config.OoklaServer{{Carrier: "自动", ID: 0}}
-		result.Fields = append(result.Fields, model.Field{Key: "server_selection", Label: "probe.ookla.field.server_selection", Value: model.RawValue("automatic")})
+		servers = []config.OoklaServer{{Carrier: config.OoklaCarrierAuto, ID: 0}}
+		result.Fields = append(result.Fields, model.Field{Key: "server_selection", Label: "probe.ookla.field.server_selection", Value: ooklaServerSelectionValue("automatic")})
 	} else {
-		result.Fields = append(result.Fields, model.Field{Key: "server_selection", Label: "probe.ookla.field.server_selection", Value: model.RawValue("configured")})
+		result.Fields = append(result.Fields, model.Field{Key: "server_selection", Label: "probe.ookla.field.server_selection", Value: ooklaServerSelectionValue("configured")})
 	}
 
 	table := model.Table{
@@ -146,6 +146,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		},
 	}
 	selectedServers := make([][]model.Value, 0, len(servers))
+	warningMessages := make([]model.Message, 0)
 	successes := 0
 	validResults := 0
 	for _, target := range servers {
@@ -153,27 +154,22 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		if target.ID > 0 {
 			targetArgs = append(targetArgs, "--server-id", strconv.Itoa(target.ID))
 		}
-		parsed, runErr, parseErr, timedOut := runOfficialOokla(ctx, path, targetArgs)
+		parsed, runErr, parseErr, _ := runOfficialOokla(ctx, path, targetArgs)
 		label := target.Carrier
 		if parseErr != nil {
 			addFailure(&result, "parse", label, parseErr)
 			if runErr != nil {
 				addFailure(&result, "execute", label, runErr)
 			}
-			result.Status = model.StatusWarning
+			markOoklaWarning(&result, &warningMessages, model.NewMessage("probe.ookla.summary.warn.unparsed", label))
 			row := []model.Value{
-				carrierMachineValue(label), model.RawValue(formatOoklaServer(parsed)), model.RawValue("—"),
+				ooklaCarrierValue(label), model.RawValue(formatOoklaServer(parsed)), model.RawValue("—"),
 				model.RawValue("—"), model.RawValue("—"), model.RawValue("—"), model.RawValue("—"),
 			}
 			row[len(row)-1] = model.KeyValue(ooklaStatusKey(parsed, label, result.Failures))
 			table.Rows = append(table.Rows, row)
 			selectedServers = append(selectedServers, append([]model.Value(nil), row[:2]...))
 			result.Fields = append(result.Fields, model.Field{Key: "error_" + ooklaCarrierKey(label), Label: "probe.ookla.field.error", Value: model.RawValue(compactError(parseErr))})
-			if timedOut {
-				result.Notes = append(result.Notes, label+" Ookla 测速超时；外部服务可能仍在处理或网络路径不可用。")
-			} else if runErr != nil {
-				result.Notes = append(result.Notes, label+" Ookla 客户端返回非零状态；ecs 不保留原始输出，避免把客户端可能包含的本地标识写入报告。")
-			}
 			continue
 		}
 
@@ -186,31 +182,24 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		hasMetric := ooklaHasValidMetric(parsed)
 		complete := ooklaMeasurementsComplete(parsed)
 		if !complete {
-			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, "Ookla JSON 测速字段不完整；缺失值按未返回处理，结果按部分完成处理。")
+			incompleteFields := ooklaIncompleteRequiredFields(parsed)
+			addOoklaIncompleteFieldsFailure(&result, label, incompleteFields)
+			result.Fields = append(result.Fields, model.Field{
+				Key: "incomplete_fields_" + ooklaCarrierKey(label), Label: "probe.ookla.field.incomplete_fields",
+				Value: model.RawValue(strings.Join(incompleteFields, ",")),
+			})
+			markOoklaWarning(&result, &warningMessages, model.NewMessage(
+				"probe.ookla.summary.warn.incomplete", label, strings.Join(incompleteFields, ","),
+			))
 		}
 		if runErr != nil {
 			addFailure(&result, "execute", label, runErr)
-			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, label+" Ookla 客户端返回非零状态，但仍解析到了部分 JSON；结果按部分完成处理。")
-		}
-		row := []model.Value{
-			carrierMachineValue(label), model.RawValue(serverName), model.RawValue(ooklaLatencyDisplay(parsed.Ping.Latency)),
-			model.RawValue(ooklaBandwidthDisplay(parsed.Download.Bandwidth)), model.RawValue(ooklaBandwidthDisplay(parsed.Upload.Bandwidth)),
-			model.RawValue(ooklaPacketLossDisplay(parsed)), model.RawValue("—"),
-		}
-		row[len(row)-1] = model.KeyValue(ooklaStatusKey(parsed, label, result.Failures))
-		table.Rows = append(table.Rows, row)
-		selectedServers = append(selectedServers, append([]model.Value(nil), row[:2]...))
-		if hasMetric {
-			validResults++
-			if complete && runErr == nil {
-				successes++
-			}
+			markOoklaWarning(&result, &warningMessages, model.NewMessage("probe.ookla.summary.warn.execution", label))
 		}
 		if parsed.ISP != "" {
 			result.Fields = append(result.Fields, model.Field{Key: "isp_" + ooklaCarrierKey(label), Label: "probe.ookla.field.isp", Value: model.RawValue(parsed.ISP)})
 		}
+		ipVersionMismatch := ""
 		if parsed.Interface.ExternalIP != "" {
 			result.Fields = append(result.Fields, model.Field{Key: "external_ip_" + ooklaCarrierKey(label), Label: "probe.ookla.field.external_ip", Value: model.RawValue(parsed.Interface.ExternalIP), Sensitive: true})
 			if expected := env.Config.IPVersion; expected == config.IPVersion4 || expected == config.IPVersion6 {
@@ -220,10 +209,34 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 						actual = config.IPVersion6
 					}
 					if actual != expected {
-						result.Status = model.StatusWarning
-						result.Notes = append(result.Notes, fmt.Sprintf("%s 请求 IPv%s，但 Ookla 返回了 IPv%s 出口地址。", label, expected, actual))
+						ipVersionMismatch = actual
+						result.Fields = append(result.Fields, model.Field{
+							Key: "ip_version_mismatch_" + ooklaCarrierKey(label), Label: "probe.ookla.field.ip_family",
+							Value: model.RawValue("requested=" + expected + ";returned=" + actual),
+						})
+						markOoklaWarning(&result, &warningMessages, model.NewMessage(
+							"probe.ookla.summary.warn.ip_family", label, expected, actual,
+						))
 					}
 				}
+			}
+		}
+		row := []model.Value{
+			ooklaCarrierValue(label), model.RawValue(serverName), model.RawValue(ooklaLatencyDisplay(parsed.Ping.Latency)),
+			model.RawValue(ooklaBandwidthDisplay(parsed.Download.Bandwidth)), model.RawValue(ooklaBandwidthDisplay(parsed.Upload.Bandwidth)),
+			model.RawValue(ooklaPacketLossDisplay(parsed)), model.RawValue("—"),
+		}
+		statusKey := ooklaStatusKey(parsed, label, result.Failures)
+		if ipVersionMismatch != "" && statusKey == "probe.ookla.status.complete" {
+			statusKey = "probe.ookla.status.ip_family"
+		}
+		row[len(row)-1] = model.KeyValue(statusKey)
+		table.Rows = append(table.Rows, row)
+		selectedServers = append(selectedServers, append([]model.Value(nil), row[:2]...))
+		if hasMetric {
+			validResults++
+			if complete && runErr == nil {
+				successes++
 			}
 		}
 	}
@@ -231,9 +244,9 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	addComparisonParameterHash(result.Methodology.Parameters, "selected_servers_sha256", selectedServers)
 	result.Evidence = model.NewEvidence(validResults, len(servers), "run")
 	if successes == 0 && validResults == 0 {
-		result.Status = model.StatusWarning
+		markOoklaWarning(&result, &warningMessages, model.NewMessage("probe.ookla.summary.warn.no_result"))
 	} else if len(result.Measurements) == 0 {
-		result.Status = model.StatusWarning
+		markOoklaWarning(&result, &warningMessages, model.NewMessage("probe.ookla.summary.warn.no_metrics"))
 	}
 	result.Sources = []model.Source{{
 		Name:    "Ookla Speedtest",
@@ -251,15 +264,61 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	default:
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.ookla.summary.values", ooklaMachineSummary(result))}
 	}
+	result.SummaryMessages = append(result.SummaryMessages, warningMessages...)
 	result.Finish(start)
 	return result
 }
 
+func markOoklaWarning(result *model.Result, warningMessages *[]model.Message, message model.Message) {
+	result.Status = model.StatusWarning
+	*warningMessages = append(*warningMessages, message)
+}
+
+func addOoklaIncompleteFieldsFailure(result *model.Result, target string, fields []string) {
+	if len(fields) == 0 {
+		return
+	}
+	result.AddFailure(model.Failure{
+		Category: model.FailureParse,
+		Stage:    "validate",
+		Target:   target,
+		Count:    1,
+		Message:  "fields_incomplete=" + strings.Join(fields, ","),
+	})
+}
+
 func appendOoklaSkipDetails(result *model.Result, reason, nextStep string) {
 	result.Fields = append(result.Fields,
-		model.Field{Key: "skip_reason", Label: "probe.ookla.field.skip_reason", Value: model.RawValue(reason)},
-		model.Field{Key: "next_step", Label: "probe.ookla.field.next_step", Value: model.RawValue(nextStep)},
+		model.Field{Key: "skip_reason", Label: "probe.ookla.field.skip_reason", Value: ooklaSkipReasonValue(reason)},
+		model.Field{Key: "next_step", Label: "probe.ookla.field.next_step", Value: ooklaNextStepValue(nextStep)},
 	)
+}
+
+func ooklaServerSelectionValue(selection string) model.Value {
+	switch selection {
+	case "automatic", "configured":
+		return model.KeyValue("probe.ookla.server_selection." + selection)
+	default:
+		return model.RawValue(selection)
+	}
+}
+
+func ooklaSkipReasonValue(reason string) model.Value {
+	switch reason {
+	case "exposure_denied", "tool_unavailable":
+		return model.KeyValue("probe.ookla.skip_reason." + reason)
+	default:
+		return model.RawValue(reason)
+	}
+}
+
+func ooklaNextStepValue(nextStep string) model.Value {
+	switch nextStep {
+	case "rerun_with_more_exposure", "install_official_client":
+		return model.KeyValue("probe.ookla.next_step." + nextStep)
+	default:
+		return model.RawValue(nextStep)
+	}
 }
 
 func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaResult, error, error, bool) {
@@ -288,22 +347,34 @@ func formatOoklaServer(parsed ooklaResult) string {
 		server += " · " + parsed.Server.Country
 	}
 	if server == "" {
-		return "自动/未知"
+		return "unknown"
 	}
 	return server
 }
 
 func ooklaCarrierKey(carrier string) string {
-	switch carrier {
-	case "电信":
+	switch strings.ToLower(strings.TrimSpace(carrier)) {
+	case "电信", config.OoklaCarrierTelecom, "ct", "chinatelecom":
 		return "telecom"
-	case "联通":
+	case "联通", config.OoklaCarrierUnicom, "cu", "chinaunicom":
 		return "unicom"
-	case "移动":
+	case "移动", config.OoklaCarrierMobile, "cm", "chinamobile":
 		return "mobile"
 	default:
 		return "auto"
 	}
+}
+
+func ooklaCarrierValue(carrier string) model.Value {
+	switch ooklaCarrierKey(carrier) {
+	case config.OoklaCarrierTelecom, config.OoklaCarrierUnicom, config.OoklaCarrierMobile:
+		return carrierMachineValue(ooklaCarrierKey(carrier))
+	case config.OoklaCarrierAuto:
+		if strings.EqualFold(strings.TrimSpace(carrier), config.OoklaCarrierAuto) || strings.TrimSpace(carrier) == "自动" {
+			return model.KeyValue("probe.ookla.carrier.auto")
+		}
+	}
+	return model.RawValue(carrier)
 }
 
 func parseOoklaJSON(output []byte) (ooklaResult, error) {
@@ -351,6 +422,20 @@ func markOoklaFieldPresence(data []byte, parsed *ooklaResult) {
 		DownloadBandwidth: present(download, "bandwidth"),
 		UploadBandwidth:   present(upload, "bandwidth"),
 	}
+}
+
+func ooklaIncompleteRequiredFields(parsed ooklaResult) []string {
+	fields := make([]string, 0, 3)
+	if !parsed.presence.PingLatency || !isPositiveFinite(parsed.Ping.Latency) {
+		fields = append(fields, "ping.latency")
+	}
+	if !parsed.presence.DownloadBandwidth || !isPositiveFinite(ooklaBandwidthMbps(parsed.Download.Bandwidth)) {
+		fields = append(fields, "download.bandwidth")
+	}
+	if !parsed.presence.UploadBandwidth || !isPositiveFinite(ooklaBandwidthMbps(parsed.Upload.Bandwidth)) {
+		fields = append(fields, "upload.bandwidth")
+	}
+	return fields
 }
 
 // ooklaPacketLoss returns packet loss only when the client supplied a value in

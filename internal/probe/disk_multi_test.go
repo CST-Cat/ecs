@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"ecs/internal/model"
 )
 
 func TestDiskMountFilteringAndWritableFixture(t *testing.T) {
@@ -40,18 +38,10 @@ func TestDiskMountFilteringAndWritableFixture(t *testing.T) {
 }
 
 func TestDiskMountRowsUseStableStructuredStatus(t *testing.T) {
-	complete := []model.Value{
-		model.RawValue("/mnt/data"), model.RawValue("/dev/sdb1"), model.RawValue("ext4"),
-		model.RawValue("100.00 MiB/s"), model.RawValue("20.00 IOPS"), model.RawValue("完成"),
-	}
-	if got := diskTableStatusKey("disk.fio.mounts", complete); got != "probe.disk.status.complete" {
+	if got := diskTableStatusKey("disk.fio.mounts", true); got != "probe.disk.status.complete" {
 		t.Fatalf("complete multi-disk status = %q", got)
 	}
-	missing := []model.Value{
-		model.RawValue("/mnt/data"), model.RawValue("/dev/sdb1"), model.RawValue("ext4"),
-		model.RawValue("—"), model.RawValue("—"), model.RawValue("失败：raw diagnostic"),
-	}
-	if got := diskTableStatusKey("disk.fio.mounts", missing); got != "probe.disk.status.missing" {
+	if got := diskTableStatusKey("disk.fio.mounts", false); got != "probe.disk.status.missing" {
 		t.Fatalf("missing multi-disk status = %q", got)
 	}
 	if got := diskMeasurementLabel("fio_mount_mnt_data_write_mib_s"); got != "probe.disk.metric.mount" {

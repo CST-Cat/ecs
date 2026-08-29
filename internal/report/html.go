@@ -454,38 +454,10 @@ func evidenceHTMLLabelColor(evidence *model.Evidence) template.CSS {
 	}
 }
 
-// reportValueClass 给表格单元格挑一个语义色。
-//
-// 值在渲染前已经过本地化，因此中英两种写法都要认：只列中文会让英文报告的
-// 整张表退化成无色。前缀判断放在精确匹配之后，覆盖"失败：<原因>"这类带
-// 后缀的取值。
-func reportValueClass(value string) string {
-	trimmed := strings.TrimSpace(value)
-	switch trimmed {
-	case "极低", "低", "否", "成功", "原生 IP",
-		"very low", "low", "no", "success", "native ip", "available", "true", "unlocked", "passed":
-		return "cell-good"
-	case "中等", "需留意", "可疑", "商业", "其他",
-		"elevated", "medium", "attention", "suspicious", "business", "other", "partial":
-		return "cell-warn"
-	case "高", "极高", "是", "机房", "失败",
-		"high", "very high", "yes", "hosting", "datacenter", "failed", "failure":
-		return "cell-bad"
-	case "—", "未启用", "未返回",
-		"not enabled", "no response", "unavailable", "false", "unknown", "n/a":
-		return "cell-muted"
-	}
-	for _, prefix := range []string{"失败：", "failed:", "failure:"} {
-		if strings.HasPrefix(strings.ToLower(trimmed), prefix) || strings.HasPrefix(trimmed, prefix) {
-			return "cell-bad"
-		}
-	}
-	for _, prefix := range []string{"部分：", "partial:"} {
-		if strings.HasPrefix(strings.ToLower(trimmed), prefix) || strings.HasPrefix(trimmed, prefix) {
-			return "cell-warn"
-		}
-	}
-	return ""
+// reportValueClass colors only explicit stable value keys. Raw provider text is
+// deliberately left unclassified, even when it happens to resemble a status.
+func reportValueClass(value model.Value) string {
+	return explicitValueClass(value)
 }
 
 func htmlTableRows(table model.Table) [][]htmlTableCell {
@@ -498,11 +470,12 @@ func htmlTableRows(table model.Table) [][]htmlTableCell {
 			if column < len(row) {
 				value = row[column]
 			}
-			original := ""
+			originalValue := model.RawValue("")
 			if rowIndex < len(table.Rows) && column < len(table.Rows[rowIndex]) {
-				original = displayValue(table.Rows[rowIndex][column])
+				originalValue = table.Rows[rowIndex][column]
 			}
-			class := reportValueClass(original)
+			original := displayValue(originalValue)
+			class := reportValueClass(originalValue)
 			if table.Columns[column].Numeric {
 				if _, ok := numericCellValue(original); !ok {
 					result[rowIndex][column] = htmlTableCell{Value: value, Class: class}

@@ -78,7 +78,15 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 		}
 	}
 	// 输入按位置参数给出，方便直接用 shell 展开：ecs leaderboard reports/*.json
-	paths := expandReportPaths(flags.Args())
+	expanded := expandReportPathsDetailed(flags.Args())
+	for _, duplicate := range expanded.duplicates {
+		issue := fmt.Errorf("duplicate input path %q (already included as %q)",
+			filepath.Base(duplicate.path), filepath.Base(duplicate.previous))
+		if inputIssue(duplicate.path, issue) {
+			return 1
+		}
+	}
+	paths := expanded.paths
 	if len(paths) == 0 {
 		fmt.Fprintln(stderr, i18n.T("help.baselineInputRequired"))
 		return 1
@@ -101,6 +109,7 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 		regionCounts[region]++
 	}
 	seen := make(map[string]string)
+	seenReportIDs := make(map[string]string)
 	for _, path := range paths {
 		// 目录里通常就放着上一次生成的基线，它不是输入。
 		if _, err := score.LoadBaseline(path); err == nil {
@@ -133,6 +142,20 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 				return 1
 			}
 			continue
+		}
+		// An empty Run.ID is not a stable identity. Keep such reports as
+		// independent samples rather than collapsing unrelated legacy fixtures
+		// or reports that omitted the identifier.
+		if runID := strings.TrimSpace(data.Run.ID); runID != "" {
+			if previous, duplicated := seenReportIDs[runID]; duplicated {
+				issue := fmt.Errorf("duplicate report Run.ID %q (already included as %q)",
+					runID, filepath.Base(previous))
+				if inputIssue(path, issue) {
+					return 1
+				}
+				continue
+			}
+			seenReportIDs[runID] = path
 		}
 		provider, region := score.ExtractSubmissionMetadata(data)
 		recordMetadata(provider, region)

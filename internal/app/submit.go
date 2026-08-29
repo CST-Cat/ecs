@@ -127,47 +127,86 @@ func validateSubmissionParent(path string) error {
 	return nil
 }
 
+type submissionPathState struct {
+	exists bool
+	info   os.FileInfo
+}
+
+// lstatSubmissionPath centralizes the filesystem inspection shared by the
+// early output check, target resolution, and final write boundary. Callers
+// decide whether an existing path is acceptable; this helper only preserves
+// the missing/error distinction and never follows a final symlink.
+func lstatSubmissionPath(path string) (submissionPathState, error) {
+	info, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return submissionPathState{exists: true, info: info}, nil
+	case errors.Is(err, os.ErrNotExist):
+		return submissionPathState{}, nil
+	default:
+		return submissionPathState{}, fmt.Errorf("inspect submission output %s: %w", path, err)
+	}
+}
+
+// inspectSubmissionPath validates an output boundary and rejects a symlink
+// when the path is supplied as an output destination. The final write uses
+// lstatSubmissionPath directly so its historical existing-target error stays
+// uniform for files, directories, and symlinks.
+func inspectSubmissionPath(path string) (submissionPathState, error) {
+	if err := validateSubmissionPath(path); err != nil {
+		return submissionPathState{}, err
+	}
+	state, err := lstatSubmissionPath(path)
+	if err != nil {
+		return submissionPathState{}, err
+	}
+	if state.exists && state.info.Mode()&os.ModeSymlink != 0 {
+		return submissionPathState{}, fmt.Errorf("submission output must not be a symlink: %s", path)
+	}
+	return state, nil
+}
+
+// validateSubmissionTarget performs the final parent check immediately
+// before creating the temporary inode, then inspects the target without
+// changing the existing-target error classification used by the writer.
+func validateSubmissionTarget(path string) (submissionPathState, error) {
+	if err := validateSubmissionPath(path); err != nil {
+		return submissionPathState{}, err
+	}
+	if err := validateSubmissionParent(filepath.Dir(path)); err != nil {
+		return submissionPathState{}, err
+	}
+	return lstatSubmissionPath(path)
+}
+
 // preflightSubmissionOutput rejects an explicitly supplied target before the
 // report is loaded. Existing files are never overwritten; directories are
 // accepted as destinations but are never created by ecs submit.
 func preflightSubmissionOutput(path string) error {
-	if err := validateSubmissionPath(path); err != nil {
+	state, err := inspectSubmissionPath(path)
+	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(path)
-	switch {
-	case err == nil:
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("submission output must not be a symlink: %s", path)
-		}
-		if info.IsDir() {
-			return validateSubmissionParent(path)
-		}
-		return fmt.Errorf("submission output already exists: %s", path)
-	case errors.Is(err, os.ErrNotExist):
+	if !state.exists {
 		return validateSubmissionParent(filepath.Dir(path))
-	default:
-		return fmt.Errorf("inspect submission output %s: %w", path, err)
 	}
+	if state.info.IsDir() {
+		return validateSubmissionParent(path)
+	}
+	return fmt.Errorf("submission output already exists: %s", path)
 }
 
 func resolveSubmissionTarget(output, fileName string, explicit bool) (string, error) {
 	if explicit {
-		if err := validateSubmissionPath(output); err != nil {
+		state, err := inspectSubmissionPath(output)
+		if err != nil {
 			return "", err
 		}
-		info, err := os.Lstat(output)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				return "", fmt.Errorf("submission output must not be a symlink: %s", output)
-			}
-			if info.IsDir() {
+		if state.exists {
+			if state.info.IsDir() {
 				return filepath.Join(output, fileName), nil
 			}
 			return "", fmt.Errorf("submission output already exists: %s", output)
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("inspect submission output %s: %w", output, err)
 		}
 		return output, nil
 	}
@@ -184,17 +223,13 @@ func resolveSubmissionTarget(output, fileName string, explicit bool) (string, er
 // exists (including a symlink or hardlink), unlike rename which would replace
 // it.
 func writeSubmissionExclusive(path string, content []byte) error {
-	if err := validateSubmissionPath(path); err != nil {
+	state, err := validateSubmissionTarget(path)
+	if err != nil {
 		return err
 	}
 	parent := filepath.Dir(path)
-	if err := validateSubmissionParent(parent); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(path); err == nil {
+	if state.exists {
 		return fmt.Errorf("submission output already exists: %s", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect submission output %s: %w", path, err)
 	}
 
 	temporary, err := os.CreateTemp(parent, ".ecs-submit-*")

@@ -16,9 +16,8 @@
 ```
 
 - `tool`：生成器版本、提交和构建时间。
-- `run`：报告 ID、配置档、时间、外联级别、离线/遮盖/中断状态、IP 协议族、请求模块和输出格式。
+- `run`：报告 ID、配置档、时间、外联级别、遮盖/中断状态、IP 协议族、请求模块和输出格式。
   - `exposure`：本次运行允许的最高外联级别，取值 `local`、`public`、`thirdparty`、`any`；
-  - `offline`：`exposure == "local"` 的派生布尔值，保留给既有的报告消费方。
   - `redacted`：只有在写文件前已完成全 schema 本机 IP 遮盖的副本才为 `true`；Runner 内部的原始对象为 `false`。
 - `results`：按实际执行顺序排列的探针结果。
 - `summary`：`status`、`ok`、`warnings`、`skipped`、`errors` 计数，以及可选的结构化 `messages` 摘要；顶层没有旧的 `headline` 字符串。
@@ -102,7 +101,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
   "text_blocks": [],
   "notes": [],
   "sources": [],
-  "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+  "evidence": {"valid": 53, "expected": 53, "unit": "job"},
   "failures": []
 }
 ```
@@ -117,7 +116,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 - `skipped`：被配置、离线模式、能力缺失或资源保护跳过；
 - `error`：探针自身失败。Runner 会隔离 panic 并继续后续模块。
 
-`methodology.kind` 明确方法类型与口径类别，不是 `evidence.grade`：
+`methodology.kind` 明确方法类型与口径类别；证据完整度由 `evidence.valid` / `evidence.expected` 计算，不由该字段表示：
 
 - `standard-benchmark`：由 sysbench、zstd、NASA NPB-OMP、官方 STREAM、OpenSSL speed、fio、iperf3 外部标准工具直接产生；`ecs` 不使用该类别承载自研或替代分数；
 - `protocol-measurement`：DNS、TCP、NextTrace 等协议级现场测量，不是基准分；
@@ -131,13 +130,13 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 - `valid`：取得可用结论或有效统计的样本数；
 - `expected`：本轮实际计划的样本数；
 - `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`。
-- `grade`：由 `valid` / `expected` 规范化得到的稳定等级：
+- 需要展示证据完整度时，由 `valid` / `expected` 在内存中调用 `DerivedGrade()` 推导稳定等级：
   - `complete`：所有计划证据均有效；
   - `partial`：至少一项有效，但未达到计划数；
   - `insufficient`：有计划样本，但没有取得有效证据；
   - `not_planned`：本轮没有计划样本，不能误写成失败。
 
-`valid` / `expected` 是等级的唯一事实来源；若序列化等级与计数冲突，加载时按计数重新规范化，不信任陈旧标签。
+`valid` / `expected` 是等级的唯一事实来源；等级不是 JSON 字段，因此不存在与计数冲突的持久化副本。
 
 例如 DNS 的分母是解析器数乘每个解析器的正式查询次数，预热查询不计入；DNSBL
 只有明确“已收录”或“未收录”才是有效结论，被拒和查询失败不计入 `valid`；端口不可达
@@ -150,7 +149,7 @@ IP 情报返回 13/13 仍可能过期、冲突或误判。
 
 ## 结构化失败原因
 
-`failures[]` 记录“哪一步没有取得可用证据”，与模块 `status` 和 `evidence.grade` 分开。一个模块可以完整取得证据但结论需要留意，也可以只有部分证据而没有任何可归类的操作失败；渲染器不能把“未知”自动当成失败。
+`failures[]` 记录“哪一步没有取得可用证据”，与模块 `status` 和由证据计数派生的覆盖率等级分开。一个模块可以完整取得证据但结论需要留意，也可以只有部分证据而没有任何可归类的操作失败；渲染器不能把“未知”自动当成失败。
 
 ```json
 {
@@ -201,7 +200,7 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
       "number": 1,
       "status": "ok",
       "duration_ms": 260000,
-      "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+      "evidence": {"valid": 53, "expected": 53, "unit": "job"},
       "interference": {
         "detected": true,
         "score": 5,
@@ -220,7 +219,7 @@ CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`
       "number": 2,
       "status": "ok",
       "duration_ms": 260000,
-      "evidence": {"valid": 53, "expected": 53, "unit": "job", "grade": "complete"},
+      "evidence": {"valid": 53, "expected": 53, "unit": "job"},
       "interference": {"detected": false, "score": 0, "measurements": []},
       "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 510, "unit": "MiB/s", "display": {"raw": "510.0 MiB/s"}, "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
     }
@@ -357,6 +356,7 @@ IP 质量指标尤其需要保留 `method`：
   "columns": [
     {"key":"protocol","label":"probe.nat.column.protocol","numeric":false,"higher_is_better":false,"sensitive":false},
     {"key":"server","label":"probe.nat.column.server","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"kind","label":"probe.nat.column.kind","numeric":false,"higher_is_better":false,"sensitive":false},
     {"key":"mapped_address","label":"probe.nat.column.mapped_address","numeric":false,"higher_is_better":false,"sensitive":true},
     {"key":"mapping_behavior","label":"probe.nat.column.mapping","numeric":false,"higher_is_better":false,"sensitive":false},
     {"key":"filtering_behavior","label":"probe.nat.column.filtering","numeric":false,"higher_is_better":false,"sensitive":false},
@@ -366,6 +366,7 @@ IP 质量指标尤其需要保留 `method`：
   "rows": [[
     {"raw":"IPv4"},
     {"raw":"example-stun"},
+    {"key":"probe.nat.stun_kind.dual_address"},
     {"raw":"203.0.x.x:54321"},
     {"key":"probe.nat.mapping.endpoint_independent"},
     {"key":"probe.nat.filtering.endpoint_independent"},
@@ -398,7 +399,8 @@ IPv6 回程目标会固定使用 `family: "6"`，避免 IPv6-only 主机名被�
 `backtrace` 只会从与当前参考目标同运营商的骨干特征中选择结论；异网骨干命中仍保留在路径证据中，但表格直接保存有限的 `probe.backtrace.status.unidentified`/reason key，不用其代替目标运营商的线路类型。
 
 NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存在候选服务器时，Result 追加一个
-按配置顺序排列的机器表；每个候选一行，Name 与 Address 原样保存：
+按配置顺序排列的机器表；每个候选一行，Name 与 Address 原样保存，其中 ECS 默认的 STUN kind
+使用稳定 key，方便机器消费和按语言展示：
 
 ```json
 {
@@ -406,11 +408,12 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
   "title": "probe.nat.table.stun_pool",
   "columns": [
     {"key":"server_name","label":"probe.nat.column.server_name","numeric":false,"higher_is_better":false,"sensitive":false},
-    {"key":"server_address","label":"probe.nat.column.server_address","numeric":false,"higher_is_better":false,"sensitive":false}
+    {"key":"server_address","label":"probe.nat.column.server_address","numeric":false,"higher_is_better":false,"sensitive":false},
+    {"key":"kind","label":"probe.nat.column.kind","numeric":false,"higher_is_better":false,"sensitive":false}
   ],
   "rows": [
-    [{"raw":"edge-a"}, {"raw":"stun-a.example:3478"}],
-    [{"raw":"edge-b"}, {"raw":"stun-b.example:3478"}]
+    [{"raw":"edge-a"}, {"raw":"stun-a.example:3478"}, {"key":"probe.nat.stun_kind.dual_address"}],
+    [{"raw":"edge-b"}, {"raw":"stun-b.example:3478"}, {"key":"probe.nat.stun_kind.mapping_only"}]
   ]
 }
 ```
@@ -419,18 +422,19 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 
 ## Execution plan
 
-`ecs plan --json` 输出固定的 `ecs.plan/v1` 机器计划。顶层 `executionPlan` 的字段为
+`ecs plan` 输出固定的 `ecs.plan/v1` 机器计划，唯一输出格式为 JSON。顶层 `executionPlan` 的字段为
 `schema_version`、`tool`、`profile`、`exposure`、`reveal`、`ip_version`、`modules`、
 `required_tools`、`needs_egress_ip`、`staging`（必需）以及可省略的 `external_services`。其中：
 
 - `exposure` 必须是 `local`、`public`、`thirdparty` 或 `any`；
 - `reveal` 是必需 JSON boolean，不是字符串，也不由本地化文案表达；
-- `modules[]` 保存 `id`、`title_key`、`description_key`、模块 exposure、外联需求、并发、
-  干扰重试策略、所需工具和估算字段；
+- `modules[]` 只保存稳定的 `id`。模块标题、描述、exposure、调度策略、重试策略、估算和隐私提示
+  都是实现或展示层 metadata，不属于机器计划输出；顶层 `required_tools` 是 wrapper 唯一读取的工具集合；
 - `staging` 必须存在，保存工具归档、NextTrace、Ookla 和 zstd corpus 的准备事实；只有
   `external_services` 可以省略。
 
-`run.sh` 将计划的顶层 exposure/reveal 严格解析并追加到每个普通 run 的最终 CLI 参数之后，
+`run.sh` 调用 `ecs plan`，读取 `schema_version`、`profile`、顶层 `exposure/reveal`、`modules[].id`
+和顶层 `required_tools`，并将计划的 exposure/reveal 严格解析后追加到每个普通 run 的最终 CLI 参数之后，
 因此向导生成的计划状态权威覆盖原始参数；缺失、重复或非法字段 fail closed。submit 路径不运行
 向导，保持自己的独立参数和隐私边界。计划 schema 原地保持 v1，不增加兼容层或 v2。
 
@@ -438,11 +442,11 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 
 `ecs.submission/v1` 的新提交增加 `fingerprint_version: "v2"`。v2 ID 是除 `id` 和 `ran_at` 以外所有允许公开字段的规范 JSON SHA-256 前 12 位：同一内容在不同导出时间得到同一 ID，而主机规格、工具、profile、note 或任何精确浮点值的改动都会改变 ID。未携带 `fingerprint_version` 的历史文件仍按冻结的旧算法校验，不重写旧 ID；其它版本值直接拒绝。
 
-`ecs.baseline/v1` 的每个 `tiers[]` 保留总机器数 `sample_count`，并增加 `metric_sample_counts`记录每个平均值的独立样本数。某个分档指标只在自身样本数至少为 5 时覆盖全局值；“该档有 5 台机器”不再让只有 1 个磁盘样本的指标冒充可用分档。为保守兼容，缺少 `metric_sample_counts` 的旧分档不被信任，评分时回落全局指标。加载器会拒绝重复/非法档位、非正有限指标、样本数越界和指标/计数 key 不一致。
+`ecs.baseline/v1` 的每个 `tiers[]` 保留总机器数 `sample_count`，并要求 `metric_sample_counts` 记录每个平均值的独立样本数。某个分档指标只在自身样本数至少为 5 时覆盖全局值；“该档有 5 台机器”不再让只有 1 个磁盘样本的指标冒充可用分档。缺少该字段或计数格式错误的 payload 会被加载器直接拒绝，不提供旧 baseline payload 的兼容或字段 fallback。加载器还会拒绝重复/非法档位、非正有限指标、样本数越界和指标/计数 key 不一致；已通过当前契约的合法计数若样本不足，评分仍回落全局指标。
 
 ## 多报告比较 schema
 
-`ecs compare` 接受 2 份到任意多份 `ecs.report/` 家族 JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。Compare 的**输入格式永久固定为 ECS JSON report**：Markdown 和 HTML 只是展示产物，不会被重新解析进入比较；文件扩展名也不是可信依据，实际内容由 JSON loader 校验。
+`ecs compare` 接受 2 份到任意多份当前 `ecs.report/v1` JSON，生成独立的 `ecs.compare/v1` 对象；它不会把比较结果伪装成一次探针运行。Compare 的**输入格式永久固定为当前 ECS JSON report**：Markdown 和 HTML 只是展示产物，不会被重新解析进入比较；文件扩展名也不是可信依据，实际内容由当前 exact JSON loader 校验，schema 版本不一致直接拒绝。
 
 ```json
 {
@@ -466,15 +470,14 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
   },
   "modules": [],
   "notices": [
-    {"key": "compare.notice.scope"},
-    {"key": "compare.notice.schemaMixed", "args": ["ecs.report/v1, ecs.report/other"]}
+    {"key": "compare.notice.scope"}
   ]
 }
 ```
 
 当前 `ecs.compare/v1` 的 `notices[]` 保存稳定的机器语义 `{key,args}`，不保存编码后的最终字符串。比较核心只生成 key 与参数，Markdown、HTML 和终端 renderer 在展示边界直接按当前语言渲染；不存在“先生成中文、再反向识别原句”的路线，也不需要把 key 与 args 编码成字符串后再 `ParseNotice`。
 
-CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `report` 索引从 0 开始。`inputs[]` 按命令行输入顺序保留标签、原报告 ID、ecs 版本、配置档、开始时间、协议族与遮盖状态。
+CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `report` 索引从 0 开始。`inputs[]` 按命令行输入顺序保留标签、原报告 ID、当前 schema 版本、ecs 版本、配置档、开始时间、协议族与遮盖状态。
 
 ### 数值比较
 
@@ -499,7 +502,7 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 
 ### 事实变化
 
-唯一 `Field.key` 的变化进入 `observed_changes[]`。表格只有在标题与列 schema 相同、且能找到每行唯一身份列时，才会展开改变的单元格；无法安全对齐的表不会靠行号猜测。IP、ASN、平台状态、路由等离散值只展示每份报告的原值，不设置 best/worst，也不推断哪个更优。
+唯一 `Field.key` 的变化进入 `observed_changes[]`。表格按 `key` 与 `columns[].key` 组成的 machine schema 匹配，不使用标题或表格位置；只有能找到每行唯一身份列时，才会展开改变的单元格。无法安全逐行对齐的合法表只保留整表快照，缺少 machine table key 的历史形状不参与比较，不会靠行号猜测。IP、ASN、平台状态、路由等离散值只展示每份报告的原值，不设置 best/worst，也不推断哪个更优。
 
 ### 自适应渲染
 
@@ -511,25 +514,6 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 - `ecs.compare/v1` 与 `ecs.plan/v1` 同样遵循 beta 原地更新纪律；结构变化不自动新增版本或兼容层；
 - `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
-- 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变。
-- `ecs.compare/v1` 消费 `ecs.report/` 家族的输入，**允许各输入的 schema 版本不同**；这只描述比较输入策略，不暗示当前 compare schema 自动升 v2，当前结构仍固定为 `ecs.compare/v1`。
-
-### 为什么只有 `compare` 放宽 schema 版本
-
-使用严格 `LoadJSON` 的非 compare 命令（`render`、`submit`、`baseline`、`leaderboard`）要求输入的
-`schema_version` 与本二进制完全一致：它们把报告当作当前 schema 的实例去解释，版本不符意味着字段语义
-可能已经变了，继续下去只会得到看似合理的错误结论。`run` 只生成当前 `ecs.report/v1`，不读取报告输入。
-
-`compare` 不同。真正防止「拿不可比的数字作比较」的是**指标签名**——`key` + `method` + `unit` + 优劣方向 + 逐个 `methodology.parameters`——而不是顶层版本号。由于本项目约定工作负载语义变化通过 `measurement.method` 表达（见上一条），跨版本输入的语义差异会表现为签名不一致，落进 `metric_issues` 并由 `differences` 逐分量指出是 method、参数还是单位变化。这比拒绝加载信息量严格更大。
-
-硬拒绝的代价则是实打实的：若未经用户明确要求就频繁改变 schema 版本，用户手里所有旧报告会立刻失去可比性；「比较不同时期的报告」正是 `compare` 存在的理由。
-
-放宽的是版本，不是格式：`schema_version` 为空或不属于 `ecs.report/` 家族仍然直接拒绝。
-
-**残留风险**：签名覆盖不到的字段——`status` 枚举语义、`evidence` 的 `grade` 与比例口径——即使在明确版本化后也可能改变含义而没有单项信号。因此各输入 schema 版本不一致时：
-
-- `summary.comparability` 封顶为 `partially_comparable`，不会给出 `comparable`；
-- `notices` 首条列出涉及的全部 schema 版本；
-- 每份输入的 `inputs[].schema_version` 如实记录，三种文件格式和终端 `preview` 都在概览处显示版本集合。
-
-输入报告来自不同 ecs 版本（但 schema 相同）时不降级，只在 `notices` 首条给出说明：下方的模块缺失与 method 不一致多为版本差异的正常结果，而不是故障。
+- 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变；
+- `ecs compare` 与其它报告消费命令一样使用当前 `LoadJSON` exact contract。输入必须声明当前 `ecs.report/v1`，缺少、未知或历史 schema 版本，以及当前 schema 的 malformed 结构，均在加载边界直接拒绝；compare 不提供旧 payload 的 migration adapter 或 legacy fallback；
+- 输入报告可以来自不同 ecs 版本，只要它们都通过当前报告 schema 校验；compare 会保留各输入的工具版本并在需要时提示，但不会因此改变机器比较口径。

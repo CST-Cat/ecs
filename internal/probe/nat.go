@@ -127,6 +127,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		Columns: []model.TableColumn{
 			{Key: "protocol", Label: "probe.nat.column.protocol"},
 			{Key: "server", Label: "probe.nat.column.server"},
+			{Key: "kind", Label: "probe.nat.column.kind"},
 			{Key: "mapped_address", Label: "probe.nat.column.mapped_address", Sensitive: true},
 			{Key: "mapping_behavior", Label: "probe.nat.column.mapping"},
 			{Key: "filtering_behavior", Label: "probe.nat.column.filtering"},
@@ -156,7 +157,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 			other = "—"
 		}
 		table.Rows = append(table.Rows, []model.Value{
-			model.RawValue("IPv" + family), model.RawValue(finding.Server.Name),
+			model.RawValue("IPv" + family), model.RawValue(finding.Server.Name), stunServerKindValue(finding.Server.Kind),
 			model.RawValue(fallback(finding.Mapped.String(), "—")), natBehaviorValue(finding.Mapping, false),
 			natBehaviorValue(finding.Filtering, true), model.RawValue(other), model.KeyValue(status),
 		})
@@ -176,7 +177,6 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	behind := best.Mapped.IP != best.LocalAddr.IP
-	_, categoryNote := natCategory(*best, behind)
 	categoryCode := natCategoryCode(*best, behind)
 	behindValue := "probe.nat.boolean.no"
 	if behind {
@@ -205,29 +205,8 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 		{Name: "RFC 5389", URL: "https://www.rfc-editor.org/rfc/rfc5389", Purpose: "probe.nat.source.rfc"},
 		{Name: "RFC 5780", URL: "https://www.rfc-editor.org/rfc/rfc5780", Purpose: "probe.nat.source.rfc"},
 	}
-	result.Notes = append(result.Notes,
-		"映射行为决定同一本地端口对不同目标是否复用同一个公网端口，端点无关（锥形）才利于 P2P 打洞。",
-		"这里只测 UDP 路径上的 NAT 行为，不代表 TCP：两者可以由不同设备处理，结论不能互相套用。",
-		categoryNote,
-	)
-	if !best.FilteringTested {
-		reason := "本次 STUN 服务器没有响应任何 CHANGE-REQUEST"
-		if best.ChangeRequestIgnored {
-			reason = "本次 STUN 服务器收到 CHANGE-REQUEST 后仍从原地址回复，说明它没有实现该属性"
-		}
-		result.Notes = append(result.Notes,
-			"过滤行为无法判定："+reason+"。"+
-				"多数公共服务器出于 UDP 放大攻击的顾虑禁用或忽略了该属性，因此这既可能是服务器不配合，"+
-				"也可能是真的被过滤；ecs 不会把这种沉默当成证据去猜一个 NAT 等级。"+
-				"判定过滤行为时会核对响应的源地址，只看“有没有回包”会把忽略该属性的服务器误判成全锥型。",
-		)
-	}
 	if !best.DualStackServer {
 		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes,
-			"本次服务器的备用地址与主地址是同一个 IP，只能改端口不能改源 IP，"+
-				"因此无法区分“地址相关”与“地址与端口相关”的映射行为；结论按可测到的部分给出。",
-		)
 	}
 	if behind {
 		result.Status = model.StatusWarning
@@ -344,43 +323,6 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 	return finding
 }
 
-// natCategory 把映射与过滤行为折算成社区习惯的 NAT 说法。
-//
-// 只在证据充分时给出 NAT1–NAT4；缺过滤行为时如实说明只测到了映射行为，
-// 不去凑一个看起来完整的等级。
-func natCategory(finding natFinding, behind bool) (string, string) {
-	if !behind {
-		return "公网直连（无 NAT）",
-			"映射地址与本机出口地址一致，UDP 路径上没有 NAT；独立公网 IP 的常见结果。"
-	}
-	switch finding.Mapping {
-	case mappingAddressDependent, mappingAddressPortDependent:
-		return "对称型 NAT（NAT4）",
-			"映射端口随目标地址变化，属于对称型 NAT：P2P 打洞基本不可用，" +
-				"BT、游戏联机与自建 P2P 服务会明显受限。"
-	case mappingEndpointIndependent:
-		switch finding.Filtering {
-		case filteringEndpointIndependent:
-			return "全锥型 NAT（NAT1）",
-				"映射与过滤都与端点无关，是 NAT 环境里最利于 P2P 的一类。"
-		case filteringAddressDependent:
-			return "受限锥型 NAT（NAT2）",
-				"映射端点无关但过滤按地址受限，P2P 打洞通常仍可行。"
-		case filteringAddressPortDependent:
-			return "端口受限锥型 NAT（NAT3）",
-				"映射端点无关但过滤按地址与端口受限，P2P 打洞需要双方配合。"
-		default:
-			return "锥型 NAT（NAT1–NAT3，过滤行为未测出）",
-				"映射行为为端点无关，属于锥型 NAT；但过滤行为未能判定，" +
-					"无法进一步区分全锥、受限锥与端口受限锥。"
-		}
-	default:
-		return "位于 NAT 之后（类型未判定）",
-			"确认存在 NAT，但本次 STUN 服务器不具备判定映射行为所需的第二个 IP，" +
-				"无法给出 NAT 等级。"
-	}
-}
-
 // natCategoryCode is the language-independent classification stored in fields.
 func natCategoryCode(finding natFinding, behind bool) string {
 	if !behind {
@@ -415,13 +357,25 @@ func natSTUNPoolTable(servers []config.Endpoint) model.Table {
 		Columns: []model.TableColumn{
 			{Key: "server_name", Label: "probe.nat.column.server_name"},
 			{Key: "server_address", Label: "probe.nat.column.server_address"},
+			{Key: "kind", Label: "probe.nat.column.kind"},
 		},
 		Rows: make([][]model.Value, 0, len(servers)),
 	}
 	for _, server := range servers {
-		table.Rows = append(table.Rows, []model.Value{model.RawValue(server.Name), model.RawValue(server.Address)})
+		table.Rows = append(table.Rows, []model.Value{model.RawValue(server.Name), model.RawValue(server.Address), stunServerKindValue(server.Kind)})
 	}
 	return table
+}
+
+func stunServerKindValue(kind string) model.Value {
+	switch kind {
+	case config.STUNServerKindDualAddress, config.STUNServerKindMappingOnly:
+		return model.KeyValue("probe.nat.stun_kind." + kind)
+	default:
+		// A custom STUN classification is caller-owned metadata; never rewrite
+		// it as one of ECS's catalog identities.
+		return model.RawValue(kind)
+	}
 }
 
 func natBehaviorKey(value string, filtering bool) string {

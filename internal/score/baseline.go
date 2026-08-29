@@ -143,10 +143,8 @@ func validateBaseline(baseline Baseline, allowEmptyMetrics bool) error {
 		if err := validatePositiveMetrics(fmt.Sprintf("baseline tier %d", tier.VCPUMin), tier.Metrics); err != nil {
 			return err
 		}
-		// Omission denotes the legacy format and is accepted for compatibility;
-		// MetricsForHost will conservatively refuse to use those tier values.
 		if tier.MetricSampleCounts == nil {
-			continue
+			return fmt.Errorf("baseline tier %d metric_sample_counts is required", tier.VCPUMin)
 		}
 		if len(tier.MetricSampleCounts) != len(tier.Metrics) {
 			return fmt.Errorf("baseline tier %d metric_sample_counts must cover exactly its metrics", tier.VCPUMin)
@@ -297,10 +295,20 @@ func (b Baseline) Encode() ([]byte, error) {
 func MetricSampleCounts(reports []model.Report) map[string]int {
 	counts := make(map[string]int)
 	for _, report := range reports {
+		ran := make(map[string]bool, len(report.Results))
+		for _, result := range report.Results {
+			if result.Status != model.StatusSkipped {
+				ran[result.ID] = true
+			}
+		}
 		values := collectMeasurements(report)
 		for _, dimension := range Dimensions() {
+			if !ran[dimension.ModuleID] {
+				continue
+			}
 			for _, metric := range dimension.Metrics {
-				if value, _, _, ok := resolveMetric(metric, values); ok && value > 0 {
+				if value, _, _, ok := resolveMetric(metric, values); ok &&
+					value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0) {
 					counts[metric.Key]++
 				}
 			}

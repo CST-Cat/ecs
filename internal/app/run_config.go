@@ -200,7 +200,11 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		cfg.OoklaServers = servers
 	}
 	named := config.ParseList(*onlyFlag)
-	cfg.Modules = config.SelectModules(cfg.Modules, named, config.ParseList(*skipFlag))
+	skipped := config.ParseList(*skipFlag)
+	if err := config.ValidateModuleSelection(named, skipped); err != nil {
+		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	cfg.Modules = config.SelectModules(cfg.Modules, named, skipped)
 	if err := config.CheckModuleExposure(named, cfg.Exposure); err != nil {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 	}
@@ -234,5 +238,5 @@ func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
 	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
 	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleIDs(), ","))
-	fmt.Fprintln(writer, i18n.T("cli.sources")+": maxmind,ipinfo,ipregistry,ipapi,ip2location,abuseipdb,scamalytics,ipqs,dbip,ipdata,ipwhois,ipapicom,ipsb")
+	fmt.Fprintln(writer, i18n.T("cli.sources")+": "+strings.Join(config.IPQualitySourceIDs(), ","))
 }

@@ -361,7 +361,7 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 	data := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
-		Run:           model.RunInfo{ID: "media-render", Profile: "fixture", Exposure: "local", Offline: true},
+		Run:           model.RunInfo{ID: "media-render", Profile: "fixture", Exposure: "local"},
 		Summary:       model.Summary{Status: result.Status, Warnings: 1},
 		Results:       []model.Result{result},
 	}

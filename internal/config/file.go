@@ -131,6 +131,9 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	// An explicit file allowlist is independent of the profile preset: callers
 	// may select any ModuleOrder entry, then remove entries with skip.
+	if err := ValidateModuleSelection(file.Only, file.Skip); err != nil {
+		return err
+	}
 	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
 	return nil
 }
@@ -208,11 +211,11 @@ func ParseOoklaServerList(raw string) ([]OoklaServer, error) {
 func normalizeOoklaCarrier(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "电信", "telecom", "ct", "chinatelecom":
-		return "电信"
+		return OoklaCarrierTelecom
 	case "联通", "unicom", "cu", "chinaunicom":
-		return "联通"
+		return OoklaCarrierUnicom
 	case "移动", "mobile", "cm", "chinamobile":
-		return "移动"
+		return OoklaCarrierMobile
 	default:
 		return ""
 	}

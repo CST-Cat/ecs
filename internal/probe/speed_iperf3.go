@@ -404,15 +404,13 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 			)
 		} else if row.UDP.Err != "" {
 			addFailureMessage(&result, "udp", row.Target.Host+" "+row.Family, row.UDP.Err)
-			result.Notes = append(result.Notes,
-				fmt.Sprintf("%s %s UDP 测试失败: %s", row.Target.Name, row.Family, row.UDP.Err))
 		}
 		table.Rows = append(table.Rows, []model.Value{
 			model.RawValue(row.Target.Name),
 			model.RawValue(fallback(row.Target.Location, row.Target.Host)),
 			model.RawValue(row.Family),
-			model.RawValue(formatOptionalMbps(row.Upload.Mbps)),
-			model.RawValue(formatOptionalMbps(row.Download.Mbps)),
+			formatOptionalMbps(row.Upload.Mbps),
+			formatOptionalMbps(row.Download.Mbps),
 			model.RawValue(udpLoss),
 			model.RawValue(udpJitter),
 			model.RawValue(ports),
@@ -427,8 +425,6 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		} {
 			if direction.sample.Error != "" {
 				addFailureMessage(&result, "tcp_"+map[string]string{"上传": "forward", "下载": "reverse"}[direction.name], row.Target.Host+" "+row.Family, direction.sample.Error)
-				result.Notes = append(result.Notes,
-					fmt.Sprintf("%s %s %s失败: %s", row.Target.Name, row.Family, direction.name, direction.sample.Error))
 			}
 		}
 	}
@@ -525,13 +521,22 @@ func appendIPerfDirectionDiagnostics(
 		},
 	)
 	table.Rows = append(table.Rows, []model.Value{
-		model.RawValue(row.Target.Name), model.RawValue(row.Family), model.RawValue(directionLabel),
+		model.RawValue(row.Target.Name), model.RawValue(row.Family), iperfDirectionValue(directionKey, directionLabel),
 		model.RawValue(model.FormatRate(sample.IntervalMin, "Mbps")),
 		model.RawValue(model.FormatRate(sample.IntervalMedian, "Mbps")),
 		model.RawValue(fmt.Sprintf("%.2f %%", sample.IntervalCV)),
 		model.RawValue(strconv.FormatInt(sample.Retransmits, 10)),
 		model.RawValue(strconv.Itoa(len(sample.IntervalMbps))),
 	})
+}
+
+func iperfDirectionValue(directionKey, directionLabel string) model.Value {
+	switch directionKey {
+	case "upload", "download":
+		return model.KeyValue("probe.speed.direction." + directionKey)
+	default:
+		return model.RawValue(directionLabel)
+	}
 }
 
 func runIPerfDirection(ctx context.Context, path string, target config.IPerfEndpoint, family string, reverse bool, threads, seconds int) iperfDirectionResult {
@@ -833,11 +838,11 @@ func endpointFamilies(networks string, hasIPv4, hasIPv6 bool, mode string) []str
 	}
 }
 
-func formatOptionalMbps(value float64) string {
+func formatOptionalMbps(value float64) model.Value {
 	if !isPositiveFinite(value) {
-		return "失败"
+		return model.KeyValue("probe.speed.status.failed")
 	}
-	return model.FormatRate(value, "Mbps")
+	return model.RawValue(model.FormatRate(value, "Mbps"))
 }
 
 func nonNegativeFinite(value float64) bool {

@@ -2,14 +2,51 @@ package config
 
 import "ecs/internal/i18n"
 
+// ipQualitySourceIDs is the canonical set and order of configurable IP
+// quality source identities. Keep presentation names and provider URLs out of
+// this catalog: IDs are machine/configuration values and must not vary by
+// language.
+var ipQualitySourceIDs = []string{
+	"maxmind",
+	"ipinfo",
+	"ipregistry",
+	"ipapi",
+	"ip2location",
+	"abuseipdb",
+	"scamalytics",
+	"ipqs",
+	"dbip",
+	"ipdata",
+	"ipwhois",
+	"ipapicom",
+	"ipsb",
+}
+
+// IPQualitySourceIDs returns the canonical IP quality source IDs in their
+// stable display, execution, and report order. The returned slice is a copy.
+func IPQualitySourceIDs() []string {
+	return append([]string(nil), ipQualitySourceIDs...)
+}
+
+// IsIPQualitySource reports whether id is a canonical configurable IP quality
+// source identity. The all/none selectors are handled by their caller.
+func IsIPQualitySource(id string) bool {
+	for _, known := range ipQualitySourceIDs {
+		if id == known {
+			return true
+		}
+	}
+	return false
+}
+
 // stunServerPool is the public STUN pool used for NAT behavior discovery.
 func stunServerPool() []Endpoint {
 	return []Endpoint{
-		{Name: "Xiaomi", Address: "stun.miwifi.com:3478", Kind: "双 IP"},
-		{Name: "1&1", Address: "stun.1und1.de:3478", Kind: "双 IP"},
-		{Name: "Hoiio", Address: "stun.hoiio.com:3478", Kind: "双 IP"},
-		{Name: "Google", Address: "stun.l.google.com:19302", Kind: "仅映射"},
-		{Name: "Cloudflare", Address: "stun.cloudflare.com:3478", Kind: "仅映射"},
+		{Name: "Xiaomi", Address: "stun.miwifi.com:3478", Kind: STUNServerKindDualAddress},
+		{Name: "1&1", Address: "stun.1und1.de:3478", Kind: STUNServerKindDualAddress},
+		{Name: "Hoiio", Address: "stun.hoiio.com:3478", Kind: STUNServerKindDualAddress},
+		{Name: "Google", Address: "stun.l.google.com:19302", Kind: STUNServerKindMappingOnly},
+		{Name: "Cloudflare", Address: "stun.cloudflare.com:3478", Kind: STUNServerKindMappingOnly},
 	}
 }
 

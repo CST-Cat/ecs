@@ -196,7 +196,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 	t.Run("ookla exposure skipped", func(t *testing.T) {
 		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, Exposure: config.ExposureLocal,
-			OoklaServers: []config.OoklaServer{{Carrier: "电信", ID: 42}},
+			OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
 		}})
 		assertProducerParameterScope(t, result, "ip_version", "server_configuration_sha256")
 	})

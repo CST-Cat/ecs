@@ -20,8 +20,8 @@ import (
 )
 
 func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
-	bundle := ipQualityBundle{Version: "4", Findings: make(map[string]qualityFinding, len(qualitySourceOrder))}
-	for _, id := range qualitySourceOrder {
+	bundle := ipQualityBundle{Version: "4", Findings: make(map[string]qualityFinding, len(config.IPQualitySourceIDs()))}
+	for _, id := range config.IPQualitySourceIDs() {
 		bundle.Findings[id] = qualityFinding{ID: id, Enabled: true, Access: networkChannelDirect}
 	}
 	bundle.Origin = originAssessment{Enabled: true, Label: "probe.network.ip_type.native", Access: networkChannelCommunity}
@@ -55,11 +55,11 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 		}
 	}
 
-	sourceKeys := make(map[string]bool, len(qualitySourceOrder))
-	for _, id := range qualitySourceOrder {
+	sourceKeys := make(map[string]bool, len(config.IPQualitySourceIDs()))
+	for _, id := range config.IPQualitySourceIDs() {
 		sourceKeys[networkSourceNameKey(id)] = true
 	}
-	seenSourceKeys := make(map[string]bool, len(qualitySourceOrder))
+	seenSourceKeys := make(map[string]bool, len(config.IPQualitySourceIDs()))
 	for _, table := range tables {
 		if strings.HasSuffix(table.Key, ".factors") {
 			continue
@@ -74,7 +74,7 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if !seenSourceKeys[networkSourceNameKey(id)] {
 			t.Fatalf("source row for %s is missing", id)
 		}
@@ -128,7 +128,7 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		source, ok := sourceByKey[networkSourceNameKey(id)]
 		if !ok || source.URL == "" {
 			t.Fatalf("provider source disclosure is missing for %s: %+v", id, source)
@@ -153,6 +153,20 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 			if unicode.Is(unicode.Han, r) {
 				t.Fatalf("canonical network semantic contains Han text: %q", value)
 			}
+		}
+	}
+}
+
+func TestNetworkSourceDisclosureUsesCanonicalQualityOrder(t *testing.T) {
+	sources := networkFixtureResult(t).Sources
+	want := config.IPQualitySourceIDs()
+	if len(sources) < len(want) {
+		t.Fatalf("network source disclosure has %d entries, want at least %d", len(sources), len(want))
+	}
+	for index, id := range want {
+		got := sources[index]
+		if got.Name != networkSourceNameKey(id) || got.Purpose != networkSourcePurposeKey(id) || got.URL == "" {
+			t.Fatalf("network source %d = %+v, want canonical quality source %q", index, got, id)
 		}
 	}
 }
@@ -184,13 +198,13 @@ func TestNetworkFiniteSemanticKeysHaveChineseAndEnglishCatalogEntries(t *testing
 			t.Fatalf("network key lacks bilingual catalog entry: %q", key)
 		}
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		key := networkSourceNameKey(id)
 		if !i18n.Has(i18n.LangZH, key) || !i18n.Has(i18n.LangEN, key) {
 			t.Fatalf("source name key lacks bilingual catalog entry: %q", key)
 		}
 	}
-	for _, id := range scoreSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityScoreSources) {
 		for _, key := range []string{networkScoreBandKey(id), networkScoreMethodKey(id)} {
 			if !i18n.Has(i18n.LangZH, key) || !i18n.Has(i18n.LangEN, key) {
 				t.Fatalf("score key lacks bilingual catalog entry: %q", key)
@@ -214,7 +228,7 @@ func TestNetworkRenderersLocalizeOneCanonicalFixtureWithoutMutation(t *testing.T
 	data := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture", Commit: "test"},
-		Run:           model.RunInfo{ID: "network-fixture", Profile: "full", Exposure: "local", Offline: true, Requested: []string{"network"}},
+		Run:           model.RunInfo{ID: "network-fixture", Profile: "full", Exposure: "local", Requested: []string{"network"}},
 		Results:       []model.Result{result},
 		Summary:       model.Summary{Status: result.Status, OK: 1},
 	}
@@ -448,7 +462,7 @@ func TestNetworkDualStackSummaryAndNotesAreDelimitedAndAggregated(t *testing.T) 
 	data := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
-		Run:           model.RunInfo{ID: "network-dual-stack", Profile: "full", Exposure: "local", Offline: true, Requested: []string{"network"}},
+		Run:           model.RunInfo{ID: "network-dual-stack", Profile: "full", Exposure: "local", Requested: []string{"network"}},
 		Results:       []model.Result{result},
 		Summary:       model.Summary{Status: result.Status},
 	}

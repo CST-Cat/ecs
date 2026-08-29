@@ -23,7 +23,7 @@ func sampleReport() model.Report {
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
 		Run: model.RunInfo{
 			ID: "run-1", Profile: "standard", StartedAt: start, CompletedAt: start.Add(time.Second),
-			DurationMS: 1000, Exposure: "local", Offline: true, IPVersion: "6", Redacted: true,
+			DurationMS: 1000, Exposure: "local", IPVersion: "6", Redacted: true,
 			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json", "md"},
 		},
 		Summary:      model.Summary{Status: model.StatusOK, OK: 1, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
@@ -55,7 +55,7 @@ func sampleReport() model.Report {
 			TextBlocks: []model.TextBlock{{Title: "说明", Language: "en", Content: "raw output 192.0.2.10", Sensitive: true}},
 			Notes:      []string{"probe.system.note.partial_inventory"},
 			Sources:    []model.Source{{Name: "kernel", URL: "https://example.test/source", Purpose: "probe.system.note.hardware_privacy"}},
-			Evidence:   &model.Evidence{Valid: 1, Expected: 2, Unit: "sample", Grade: model.EvidenceInsufficient},
+			Evidence:   &model.Evidence{Valid: 1, Expected: 2, Unit: "sample"},
 			Failures: []model.Failure{{
 				Category: model.FailureTimeout, Stage: "fetch", Target: "api.example", Retryable: true,
 				Count: 1, Message: "raw timeout",
@@ -64,7 +64,7 @@ func sampleReport() model.Report {
 				Triggered: true, SelectedAttempt: 1, SelectionRule: model.NewMessage("probe.retry.selection_rule.interference_score"), TriggerReasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory"), model.NewMessage("probe.network.status.ok")},
 				Attempts: []model.RetryAttempt{{
 					Number: 1, Status: model.StatusWarning, DurationMS: 5,
-					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt", Grade: model.EvidenceComplete},
+					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt"},
 					Interference: model.Interference{
 						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
 						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: model.RawValue("1"), HigherIsBetter: &lower}},
@@ -167,6 +167,12 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 		if len(content) == 0 || content[len(content)-1] != '\n' {
 			t.Fatalf("JSON %s output has no trailing newline", language)
 		}
+		if bytes.Contains(content, []byte(`"offline"`)) {
+			t.Fatalf("JSON %s output persisted derived offline field: %s", language, content)
+		}
+		if bytes.Contains(content, []byte(`"grade"`)) {
+			t.Fatalf("JSON %s output persisted derived grade: %s", language, content)
+		}
 		if canonical == nil {
 			canonical = content
 		} else if !bytes.Equal(content, canonical) {
@@ -176,6 +182,59 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 	data.Results[0].Measurements[0].Value = math.NaN()
 	if _, err := JSON(data); err == nil || !strings.Contains(err.Error(), "unsupported value") {
 		t.Fatalf("JSON NaN error = %v", err)
+	}
+}
+
+func TestNetworkModeDerivesFromExposureAndIgnoresLegacyOfflineInput(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+
+	for _, test := range []struct {
+		name, exposure, want, forbid string
+	}{
+		{name: "local", exposure: "local", want: "Offline", forbid: "Online"},
+		{name: "public", exposure: "public", want: "Online", forbid: "Offline"},
+		{name: "thirdparty", exposure: "thirdparty", want: "Online", forbid: "Offline"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := model.Report{
+				SchemaVersion: buildinfo.SchemaVersion,
+				Run:           model.RunInfo{Exposure: test.exposure},
+			}
+			content, err := JSON(data)
+			if err != nil {
+				t.Fatalf("JSON: %v", err)
+			}
+			if bytes.Contains(content, []byte(`"offline"`)) {
+				t.Fatalf("JSON persisted derived offline field: %s", content)
+			}
+			output := Markdown(data, nil)
+			if !strings.Contains(output, test.want) || strings.Contains(output, test.forbid) {
+				t.Fatalf("Markdown exposure=%q output=%q, want %q without %q", test.exposure, output, test.want, test.forbid)
+			}
+		})
+	}
+
+	path := filepath.Join(t.TempDir(), "legacy-offline.json")
+	writeReportFile(t, path, []byte(`{"schema_version":"ecs.report/v1","run":{"exposure":"public","offline":true}}`))
+	loaded, err := LoadJSON(path)
+	if err != nil {
+		t.Fatalf("LoadJSON legacy offline input: %v", err)
+	}
+	if loaded.Run.Exposure != "public" {
+		t.Fatalf("legacy input changed exposure: %q", loaded.Run.Exposure)
+	}
+	content, err := JSON(loaded)
+	if err != nil {
+		t.Fatalf("JSON loaded legacy input: %v", err)
+	}
+	if bytes.Contains(content, []byte(`"offline"`)) {
+		t.Fatalf("loaded legacy input retained derived offline field: %s", content)
+	}
+	output := Markdown(loaded, nil)
+	if !strings.Contains(output, "Online") || strings.Contains(output, "Offline") {
+		t.Fatalf("legacy offline input changed network mode: %q", output)
 	}
 }
 
@@ -191,7 +250,7 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 	validPath := filepath.Join(directory, "valid.json")
 	writeReportFile(t, validPath, valid)
 	loaded, err := LoadJSON(validPath)
-	if err != nil || loaded.SchemaVersion != buildinfo.SchemaVersion || loaded.Results[0].Evidence == nil || loaded.Results[0].Evidence.Grade != model.EvidencePartial {
+	if err != nil || loaded.SchemaVersion != buildinfo.SchemaVersion || loaded.Results[0].Evidence == nil || loaded.Results[0].Evidence.DerivedGrade() != model.EvidencePartial {
 		t.Fatalf("valid LoadJSON = schema=%q evidence=%+v err=%v", loaded.SchemaVersion, loaded.Results[0].Evidence, err)
 	}
 
@@ -243,19 +302,55 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 		t.Fatalf("oversize LoadJSON error = %v", err)
 	}
 
-	for _, schema := range []string{"ecs.report/v1", "ecs.report/v9"} {
+	for _, schema := range []string{buildinfo.SchemaVersion, "ecs.report/v9", "other/v1"} {
 		content := bytes.Replace(valid, []byte("ecs.report/v1"), []byte(schema), 1)
 		path := filepath.Join(directory, "comparison-"+strings.ReplaceAll(schema, "/", "-")+".json")
 		writeReportFile(t, path, content)
-		got, err := LoadJSONForComparison(path)
-		if err != nil || got.SchemaVersion != schema {
-			t.Fatalf("comparison schema %q = %q, %v", schema, got.SchemaVersion, err)
+		got, err := LoadJSON(path)
+		if schema == buildinfo.SchemaVersion {
+			if err != nil || got.SchemaVersion != schema {
+				t.Fatalf("current schema %q = %q, %v", schema, got.SchemaVersion, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), "unsupported schema_version") {
+			t.Fatalf("historical schema %q error = %v", schema, err)
 		}
 	}
-	foreignPath := filepath.Join(directory, "foreign.json")
-	writeReportFile(t, foreignPath, []byte(`{"schema_version":"other/v1"}`))
-	if _, err := LoadJSONForComparison(foreignPath); err == nil || !strings.Contains(err.Error(), "must start with") {
-		t.Fatalf("foreign comparison schema error = %v", err)
+	malformedTablePath := filepath.Join(directory, "malformed-current-table.json")
+	writeReportFile(t, malformedTablePath, []byte(`{"schema_version":"ecs.report/v1","results":[{"tables":[{"key":"network.state","columns":[{"key":"id","label":"ID"}],"rows":[[]]}]}]}`))
+	if _, err := LoadJSON(malformedTablePath); err == nil || !strings.Contains(err.Error(), "table row 0") {
+		t.Fatalf("malformed current table error = %v", err)
+	}
+	legacyTablePath := filepath.Join(directory, "legacy-table.json")
+	writeReportFile(t, legacyTablePath, []byte(`{"schema_version":"ecs.report/v1","results":[{"tables":[{"columns":[{"key":"id","label":"ID"}],"rows":[["legacy"]]}]}]}`))
+	if _, err := LoadJSON(legacyTablePath); err == nil || !strings.Contains(err.Error(), "tagged object") {
+		t.Fatalf("legacy table error = %v", err)
+	}
+	loaderBoundaryCases := []struct {
+		name    string
+		content []byte
+		marker  string
+	}{
+		{
+			name:    "unknown typed table field",
+			content: []byte(`{"schema_version":"ecs.report/v1","results":[{"tables":[{"columns":[{"key":"id","label":"ID","legacy":true}],"rows":[[{"raw":"one"}]]}]}]}`),
+			marker:  "unknown field",
+		},
+		{
+			name:    "unknown value tag",
+			content: []byte(`{"schema_version":"ecs.report/v1","results":[{"fields":[{"key":"state","label":"State","value":{"legacy":"ok"}}]}]}`),
+			marker:  "unknown tag",
+		},
+	}
+	for _, test := range loaderBoundaryCases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(directory, test.name+".json")
+			writeReportFile(t, path, test.content)
+			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("LoadJSON error = %v, want %q", err, test.marker)
+			}
+		})
 	}
 }
 

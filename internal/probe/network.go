@@ -312,7 +312,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		if bundle.Origin.Enabled && bundle.Origin.Err != nil {
 			addFailure(&result, "provider", prefix+"/maxmind", bundle.Origin.Err)
 		}
-		for _, sourceID := range qualitySourceOrder {
+		for _, sourceID := range config.IPQualitySourceIDs() {
 			if sourceID == "maxmind" {
 				continue
 			}
@@ -377,25 +377,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Fields = append([]model.Field{{
 		Key: "ip_version_mode", Label: networkFieldLabelKey("ip_version_mode"), Value: model.RawValue(fallback(env.Config.IPVersion, config.IPVersionAuto)),
 	}}, result.Fields...)
-	result.Sources = []model.Source{
-		{Name: networkSourceNameKey("ipapi"), URL: "https://ipapi.is/", Purpose: "probe.network.source.ipapi"},
-		{Name: networkSourceNameKey("ipapicom"), URL: "http://ip-api.com/json/", Purpose: "probe.network.source.ipapicom"},
-		{Name: networkSourceNameKey("ipsb"), URL: "https://api.ip.sb/geoip/", Purpose: "probe.network.source.ipsb"},
-		{Name: networkSourceNameKey("routeviews"), URL: "https://api.routeviews.org/", Purpose: "probe.network.source.routeviews"},
-		{Name: networkSourceNameKey("maxmind"), URL: "https://www.maxmind.com/", Purpose: "probe.network.source.maxmind"},
-		{Name: networkSourceNameKey("ipquality"), URL: "https://github.com/xykt/IPQuality", Purpose: "probe.network.source.ipquality"},
-		{Name: networkSourceNameKey("checkplace"), URL: "https://check.place/", Purpose: "probe.network.source.checkplace"},
-		{Name: networkSourceNameKey("ipinfo"), URL: "https://ipinfo.io/developers", Purpose: "probe.network.source.ipinfo"},
-		{Name: networkSourceNameKey("ipregistry"), URL: "https://ipregistry.co/docs/", Purpose: "probe.network.source.ipregistry"},
-		{Name: networkSourceNameKey("ip2location"), URL: "https://www.ip2location.io/ip2location-documentation", Purpose: "probe.network.source.ip2location"},
-		{Name: networkSourceNameKey("abuseipdb"), URL: "https://docs.abuseipdb.com/", Purpose: "probe.network.source.abuseipdb"},
-		{Name: networkSourceNameKey("scamalytics"), URL: "https://scamalytics.com/", Purpose: "probe.network.source.scamalytics"},
-		{Name: networkSourceNameKey("ipqs"), URL: "https://www.ipqualityscore.com/documentation/proxy-detection-api/overview", Purpose: "probe.network.source.ipqs"},
-		{Name: networkSourceNameKey("dbip"), URL: "https://db-ip.com/api/doc.php", Purpose: "probe.network.source.dbip"},
-		{Name: networkSourceNameKey("ipdata"), URL: "https://ipdata.co/", Purpose: "probe.network.source.ipdata"},
-		{Name: networkSourceNameKey("ipwhois"), URL: "https://ipwhois.io/documentation", Purpose: "probe.network.source.ipwhois"},
-		{Name: networkSourceNameKey("jina"), URL: "https://github.com/jina-ai/reader", Purpose: "probe.network.source.jina"},
-	}
+	result.Sources = networkSources()
 	result.Notes = append(result.Notes,
 		"probe.network.note.third_party",
 		"probe.network.note.no_upload",
@@ -413,12 +395,45 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 
 func enabledIPQualitySourceCount(configured []string) int {
 	count := 0
-	for _, source := range qualitySourceOrder {
+	for _, source := range config.IPQualitySourceIDs() {
 		if qualitySourceEnabled(configured, source) {
 			count++
 		}
 	}
 	return count
+}
+
+func networkSources() []model.Source {
+	qualitySourceURLs := map[string]string{
+		"maxmind":     "https://www.maxmind.com/",
+		"ipinfo":      "https://ipinfo.io/developers",
+		"ipregistry":  "https://ipregistry.co/docs/",
+		"ipapi":       "https://ipapi.is/",
+		"ip2location": "https://www.ip2location.io/ip2location-documentation",
+		"abuseipdb":   "https://docs.abuseipdb.com/",
+		"scamalytics": "https://scamalytics.com/",
+		"ipqs":        "https://www.ipqualityscore.com/documentation/proxy-detection-api/overview",
+		"dbip":        "https://db-ip.com/api/doc.php",
+		"ipdata":      "https://ipdata.co/",
+		"ipwhois":     "https://ipwhois.io/documentation",
+		"ipapicom":    "http://ip-api.com/json/",
+		"ipsb":        "https://api.ip.sb/geoip/",
+	}
+	sources := make([]model.Source, 0, len(config.IPQualitySourceIDs())+4)
+	for _, id := range config.IPQualitySourceIDs() {
+		sources = append(sources, model.Source{
+			Name:    networkSourceNameKey(id),
+			URL:     qualitySourceURLs[id],
+			Purpose: networkSourcePurposeKey(id),
+		})
+	}
+	sources = append(sources,
+		model.Source{Name: networkSourceNameKey("routeviews"), URL: "https://api.routeviews.org/", Purpose: networkSourcePurposeKey("routeviews")},
+		model.Source{Name: networkSourceNameKey("ipquality"), URL: "https://github.com/xykt/IPQuality", Purpose: networkSourcePurposeKey("ipquality")},
+		model.Source{Name: networkSourceNameKey("checkplace"), URL: "https://check.place/", Purpose: networkSourcePurposeKey("checkplace")},
+		model.Source{Name: networkSourceNameKey("jina"), URL: "https://github.com/jina-ai/reader", Purpose: networkSourcePurposeKey("jina")},
+	)
+	return sources
 }
 
 func egressBGPIdentity(observations []routeViewsPrefix) (asn int, route string) {
@@ -457,7 +472,7 @@ func bundleCountry(bundle ipQualityBundle) string {
 			return country
 		}
 	}
-	for _, id := range typeSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityTypeSources) {
 		finding := bundle.Findings[id]
 		if finding.Enabled && finding.Err == nil && finding.Country != "" {
 			return finding.Country

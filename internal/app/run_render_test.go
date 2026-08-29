@@ -178,6 +178,25 @@ func TestRunCommandReportsPreExecutionFailures(t *testing.T) {
 	}
 }
 
+func TestRunRejectsUnknownModuleBeforeRunnerAndReport(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "reports")
+	status, stdout, stderr := invokeAppMain(
+		"run", "--lang", "en", "--only", "system,nonexistent", "--exposure", "any",
+		"--output", output, "--yes",
+	)
+	if status == 0 || stdout != "" || !strings.Contains(stderr, "unknown module") {
+		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	entries, err := os.ReadDir(output)
+	if err == nil {
+		if len(entries) != 0 {
+			t.Fatalf("unknown module created report files: %v", entries)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("inspect report directory: %v", err)
+	}
+}
+
 func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 	cases := []struct {
 		name   string

@@ -1,6 +1,28 @@
 package probe
 
-import "ecs/internal/model"
+import (
+	"ecs/internal/config"
+	"ecs/internal/model"
+)
+
+// These sets describe which canonical sources expose the fields used by each
+// table. They intentionally carry no order; canonicalQualitySourceSubset
+// applies the one catalog order from config.
+var (
+	ipQualityTypeSources = map[string]struct{}{
+		"ipinfo": {}, "ipregistry": {}, "ipapi": {}, "ip2location": {},
+		"abuseipdb": {}, "ipapicom": {}, "ipsb": {},
+	}
+	ipQualityScoreSources = map[string]struct{}{
+		"ip2location": {}, "scamalytics": {}, "ipapi": {},
+		"abuseipdb": {}, "ipqs": {}, "dbip": {},
+	}
+	ipQualityFactorSources = map[string]struct{}{
+		"ip2location": {}, "ipapi": {}, "ipregistry": {}, "ipqs": {},
+		"scamalytics": {}, "ipdata": {}, "ipinfo": {}, "ipwhois": {},
+		"dbip": {}, "ipapicom": {},
+	}
+)
 
 func ipQualityTableKey(version, kind string) string {
 	return "network.ipquality.ipv" + version + "." + kind
@@ -19,7 +41,7 @@ func (bundle ipQualityBundle) typeTable() model.Table {
 		},
 		RowIdentity: "source",
 	}
-	for _, id := range typeSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityTypeSources) {
 		finding := bundle.Findings[id]
 		table.Rows = append(table.Rows, []model.Value{
 			model.KeyValue(networkSourceNameKey(id)),
@@ -47,7 +69,7 @@ func (bundle ipQualityBundle) scoreTable() model.Table {
 		},
 		RowIdentity: "source",
 	}
-	for _, id := range scoreSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityScoreSources) {
 		finding := bundle.Findings[id]
 		value := scoreText(finding)
 		bar := networkMissingValue
@@ -73,7 +95,7 @@ func scoreBands(id string) string {
 
 func (bundle ipQualityBundle) factorTable() model.Table {
 	columns := []model.TableColumn{{Key: "factor", Label: "probe.network.column.factor"}}
-	for _, id := range factorSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityFactorSources) {
 		columns = append(columns, model.TableColumn{Key: id, Label: networkSourceNameKey(id)})
 	}
 	table := model.Table{
@@ -97,7 +119,7 @@ func (bundle ipQualityBundle) factorTable() model.Table {
 	}
 	for _, item := range factors {
 		row := []model.Value{model.KeyValue(item.label)}
-		for _, id := range factorSourceOrder {
+		for _, id := range canonicalQualitySourceSubset(ipQualityFactorSources) {
 			value := item.value(bundle.Findings[id])
 			if item.label == "probe.network.factor.country" {
 				row = append(row, factorCountryValue(bundle.Findings[id], value))
@@ -128,7 +150,7 @@ func (bundle ipQualityBundle) statusTable() model.Table {
 		networkAccessValue(originAccess(bundle.Origin)),
 		durationValue(bundle.Origin.Latency),
 	})
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if id == "maxmind" {
 			continue
 		}
@@ -145,7 +167,7 @@ func (bundle ipQualityBundle) statusTable() model.Table {
 
 func (bundle ipQualityBundle) measurements() []model.Measurement {
 	var measurements []model.Measurement
-	for _, id := range scoreSourceOrder {
+	for _, id := range canonicalQualitySourceSubset(ipQualityScoreSources) {
 		finding := bundle.Findings[id]
 		if finding.Score == nil {
 			continue
@@ -195,7 +217,7 @@ func (bundle ipQualityBundle) failedSourceIDs() []string {
 	if bundle.Origin.Enabled && bundle.Origin.Err != nil {
 		names = append(names, "maxmind")
 	}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if id == "maxmind" {
 			continue
 		}
@@ -209,7 +231,7 @@ func (bundle ipQualityBundle) failedSourceIDs() []string {
 
 func (bundle ipQualityBundle) partialSourceIDs() []string {
 	var names []string
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if id == "maxmind" {
 			continue
 		}

@@ -31,9 +31,6 @@ func ComparisonMarkdown(data comparison.Report) string {
 	comparisonMarkdownRow(&out, i18n.T("compare.metricIssues"), fmt.Sprintf("%d", data.Summary.MetricIssues))
 	comparisonMarkdownRow(&out, i18n.T("compare.statusChanges"), fmt.Sprintf("%d", data.Summary.StatusChanges))
 	comparisonMarkdownRow(&out, i18n.T("compare.evidenceChanges"), fmt.Sprintf("%d", data.Summary.EvidenceChanges))
-	if schemas := data.SchemaVersions(); len(schemas) > 1 {
-		comparisonMarkdownRow(&out, i18n.T("compare.schemaVersions"), markdownEscape(strings.Join(schemas, " · ")))
-	}
 	out.WriteString("\n> " + markdownEscape(i18n.T("compare.legend")) + "\n\n")
 
 	out.WriteString("## " + i18n.T("compare.inputReports") + "\n\n")
@@ -316,11 +313,12 @@ func comparisonMarkdownEvidenceValue(module comparison.Module, index int, withBa
 		return "—"
 	}
 	evidence := module.Evidence[index]
-	display := markdownEscape(fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(evidence.Grade)))
+	grade := derivedComparisonEvidenceGrade(evidence)
+	display := markdownEscape(fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade)))
 	if withBar {
 		display += "<br>`" + termcolor.Palette{Level: termcolor.LevelNone}.Bar(evidence.Ratio, 12) + "`"
 	}
-	if evidence.Grade == model.EvidenceInsufficient {
+	if grade == model.EvidenceInsufficient {
 		return "**! " + display + "**"
 	}
 	return display

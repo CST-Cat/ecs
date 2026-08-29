@@ -47,11 +47,17 @@ type Endpoint struct {
 	Family string `json:"family,omitempty"`
 }
 
-// Route target kinds are machine identities owned by the route configuration
-// contract. Custom route endpoint kinds remain user-provided values.
+// Endpoint kinds are machine identities owned by the corresponding ECS
+// configuration contract. Custom endpoint kinds remain user-provided values.
 const (
 	RouteTargetKindGlobal        = "global"
 	RouteTargetKindMainlandChina = "mainland_china"
+
+	LatencyTargetKindGlobalCDN     = "global_cdn"
+	LatencyTargetKindGlobal        = RouteTargetKindGlobal
+	LatencyTargetKindMainlandChina = RouteTargetKindMainlandChina
+	STUNServerKindDualAddress      = "dual_address"
+	STUNServerKindMappingOnly      = "mapping_only"
 )
 
 // Backtrace carrier kinds are the only machine identities accepted for
@@ -61,6 +67,11 @@ const (
 	BacktraceCarrierTelecom = "telecom"
 	BacktraceCarrierUnicom  = "unicom"
 	BacktraceCarrierMobile  = "mobile"
+
+	OoklaCarrierTelecom = BacktraceCarrierTelecom
+	OoklaCarrierUnicom  = BacktraceCarrierUnicom
+	OoklaCarrierMobile  = BacktraceCarrierMobile
+	OoklaCarrierAuto    = "auto"
 )
 
 type IPerfEndpoint struct {

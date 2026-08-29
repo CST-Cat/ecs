@@ -74,7 +74,7 @@ ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
-JSON preserves canonical fields, tables and raw evidence. Rendering in Chinese or English does not change machine data, and the same JSON can be rendered again in another language. Across report schemas, `compare` uses only metrics with matching signatures and marks the result as partially comparable. See [docs/schema.md](docs/schema.md) for field definitions.
+JSON preserves canonical fields, tables and raw evidence. Rendering in Chinese or English does not change machine data, and the same JSON can be rendered again in another language. `compare` accepts only JSON reports that pass the current `ecs.report/v1` exact loader; reports with a different schema version are rejected. See [docs/schema.md](docs/schema.md) for field definitions.
 
 ## Profiles and modules
 

@@ -137,6 +137,43 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 	}
 }
 
+func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
+	descriptor, ok := config.ModuleDescriptorFor("system")
+	if !ok {
+		t.Fatal("system descriptor missing")
+	}
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	warning := runBinding(context.Background(), moduleBinding{
+		Descriptor: descriptor,
+		Probe: &runnerTestProbe{result: model.Result{
+			Status: model.StatusWarning,
+			Notes:  []string{"probe.foo.timeout"},
+		}},
+	}, cfg, probe.Environment{}, true)
+	if len(warning.Failures) != 0 {
+		t.Fatalf("warning presentation key created failure: %+v", warning.Failures)
+	}
+
+	wantFailure := model.Failure{
+		Category: model.FailureDNS, Stage: "query", Target: "fixture", Retryable: true, Count: 1, Message: "fixture DNS failure",
+	}
+	owned := runBinding(context.Background(), moduleBinding{
+		Descriptor: descriptor,
+		Probe: &runnerTestProbe{result: model.Result{
+			Status:   model.StatusWarning,
+			Notes:    []string{"probe.foo.timeout"},
+			Failures: []model.Failure{wantFailure},
+		}},
+	}, cfg, probe.Environment{}, true)
+	if !reflect.DeepEqual(owned.Failures, []model.Failure{wantFailure}) {
+		t.Fatalf("runner changed producer-owned warning failure: got %+v want %+v", owned.Failures, []model.Failure{wantFailure})
+	}
+}
+
 func TestRunOneAndSafeRunIsolatePanic(t *testing.T) {
 	cfg, err := config.Defaults(config.ProfileStandard)
 	if err != nil {

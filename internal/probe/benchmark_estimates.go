@@ -17,7 +17,7 @@ func EstimateFor(runtime config.Runtime) config.Estimate {
 	if hasModule(runtime, "speed") {
 		estimate.NetworkMiB = -1
 		estimate.Notes = append(estimate.Notes,
-			fmt.Sprintf("iperf3 为按时长跑满：%d 节点、每方向 %s、%d 并发流；实际流量随带宽变化",
+			fmt.Sprintf(i18n.T("estimate.speed"),
 				len(runtime.IPerfTargets), runtime.IPerfDuration, runtime.SpeedThreads))
 	}
 	if !hasModule(runtime, "disk") {

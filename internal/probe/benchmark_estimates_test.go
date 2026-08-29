@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,45 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 )
+
+func TestEstimateSpeedNoteIsLocalized(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	runtime := config.Runtime{
+		Modules:       []string{"speed"},
+		Exposure:      config.ExposureThirdParty,
+		IPerfTargets:  []config.IPerfEndpoint{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+		IPerfDuration: 7 * time.Second,
+		SpeedThreads:  11,
+	}
+	for _, test := range []struct {
+		name        string
+		language    i18n.Lang
+		containsHan bool
+	}{
+		{name: "English", language: i18n.LangEN, containsHan: false},
+		{name: "Chinese", language: i18n.LangZH, containsHan: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			i18n.Set(test.language)
+			notes := EstimateFor(runtime).Notes
+			if len(notes) != 1 {
+				t.Fatalf("estimate notes = %#v, want one speed note", notes)
+			}
+			note := notes[0]
+			if want := fmt.Sprintf(i18n.T("estimate.speed"), len(runtime.IPerfTargets), runtime.IPerfDuration, runtime.SpeedThreads); note != want {
+				t.Fatalf("speed note = %q, want localized template %q", note, want)
+			}
+			if !strings.Contains(note, "iperf3") {
+				t.Fatalf("speed note = %q, want iperf3", note)
+			}
+			if got := containsHan(note); got != test.containsHan {
+				t.Fatalf("speed note Han characters = %v, want %v: %q", got, test.containsHan, note)
+			}
+		})
+	}
+}
 
 func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	base := config.Runtime{

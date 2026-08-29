@@ -7,7 +7,6 @@ package i18n
 
 var cliChinese = map[string]string{
 	"flag.interactive":     "启动交互向导（无终端时自动跳过）",
-	"flag.planJSON":        "输出机器可读的执行计划 JSON",
 	"flag.yes":             "跳过交互向导，直接按当前参数运行",
 	"wizard.aborted":       "已取消。",
 	"wizard.askIPQuality":  "检测多源 IP 质量？会把出口 IP 发给 13 个数据源",
@@ -96,7 +95,7 @@ var cliChinese = map[string]string{
 	"flag.ipv4":                  "仅测试 IPv4（-4 快捷方式）",
 	"flag.ipv6":                  "仅测试 IPv6（-6 快捷方式）",
 	"flag.exposure":              "外联级别上限：local、public、thirdparty、any",
-	"flag.ooklaServers":          "固定 Ookla 三网服务器：电信=ID,联通=ID,移动=ID（可选，ID 来自官方客户端）",
+	"flag.ooklaServers":          "固定 Ookla 三网服务器：telecom=ID,unicom=ID,mobile=ID（也接受中文名称和官方缩写；可选，ID 来自官方客户端）",
 	"flag.iperfDuration":         "iperf3 每个节点、每个方向的测试时长",
 	"flag.iperfTargets":          "覆盖 iperf3 节点：[名称=]host:start[-end]，逗号分隔",
 	"flag.lang":                  "界面语言：zh、en",
@@ -124,7 +123,6 @@ var cliChinese = map[string]string{
 	"help.extraArgs":             "错误: 多余参数",
 	"help.renderInputRequired":   "错误: --input 必填",
 	"help.runUsage":              "用法: ecs [run] [选项]",
-	"help.planUsage":             "用法: ecs plan --json [run 选项]",
 	"help.usageConfig":           "ecs config example          输出配置文件示例",
 	"help.usageDoctor":           "ecs doctor                  检查标准基准工具",
 	"help.usageList":             "ecs list                    查看配置档与模块",
@@ -161,7 +159,6 @@ var cliChinese = map[string]string{
 }
 
 var cliEnglish = map[string]string{
-	"flag.planJSON":              "print the machine-readable execution plan as JSON",
 	"flag.baselineAnnotate":      "emit GitHub Actions check annotations so outliers show up in the check page",
 	"flag.baselineVerbose":       "also list tier/metric combinations with too few samples to judge",
 	"flag.baselineStrict":        "fail on invalid inputs without writing a baseline file",
@@ -279,7 +276,6 @@ var cliEnglish = map[string]string{
 	"help.extraArgs":           "error: unexpected arguments",
 	"help.renderInputRequired": "error: --input is required",
 	"help.runUsage":            "Usage: ecs [run] [options]",
-	"help.planUsage":           "Usage: ecs plan --json [run options]",
 	"help.usageConfig":         "ecs config example          print a sample configuration",
 	"help.usageDoctor":         "ecs doctor                  check the standard benchmark tools",
 	"help.usageList":           "ecs list                    show profiles and modules",

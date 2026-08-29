@@ -31,10 +31,6 @@ func ComparisonHTML(data comparison.Report) ([]byte, error) {
 	out.WriteString("<p>" + html.EscapeString(i18n.T("compare.subtitle")) + "</p><div class=\"hero-meta\">")
 	writeComparisonHTMLPill(&out, i18n.T("compare.reports"), fmt.Sprintf("%d", data.Summary.Reports))
 	writeComparisonHTMLPill(&out, i18n.T("compare.comparability"), comparisonLabel(string(data.Summary.Comparability)))
-	// 跨版本时才多一个 pill。同版本是常态，不为常态占位。
-	if schemas := data.SchemaVersions(); len(schemas) > 1 {
-		writeComparisonHTMLPill(&out, i18n.T("compare.schemaVersions"), strings.Join(schemas, " · "))
-	}
 	if data.Reference >= 0 && data.Reference < len(data.Inputs) {
 		writeComparisonHTMLPill(&out, i18n.T("compare.reference"), data.Inputs[data.Reference].Label)
 	}
@@ -173,9 +169,10 @@ func writeComparisonHTMLStatus(out *strings.Builder, data comparison.Report, mod
 		evidenceClass := "muted"
 		if index < len(module.Evidence) && module.Evidence[index].Available {
 			evidence := module.Evidence[index]
-			evidenceText = fmt.Sprintf("%d/%d · %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(evidence.Grade))
+			grade := derivedComparisonEvidenceGrade(evidence)
+			evidenceText = fmt.Sprintf("%d/%d · %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade))
 			evidenceRatio = evidence.Ratio
-			evidenceClass = comparisonEvidenceClass(evidence.Grade)
+			evidenceClass = comparisonEvidenceClass(grade)
 		}
 		fmt.Fprintf(out, `<article class="status-card"><div class="report-name">%s</div><strong class="%s">%s</strong><div class="evidence-line %s">%s</div>%s</article>`,
 			html.EscapeString(comparisonInputLabel(data, index)), html.EscapeString(statusClass), html.EscapeString(statusText),

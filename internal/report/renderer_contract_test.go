@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"ecs/internal/model"
 	"ecs/internal/score"
 	"ecs/internal/termcolor"
+	"ecs/internal/textwidth"
 )
 
 func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
@@ -34,7 +36,7 @@ func TestHTMLRendererEscapesUntrustedReportText(t *testing.T) {
 	if !strings.Contains(output, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Fatalf("HTML did not escape untrusted text: %s", output)
 	}
-	for _, marker := range []string{"Memory Benchmark", "Structured failures", "Standard benchmark", "Composite score", "Skipped", "Interrupted by user", "Not enough leaderboard samples", "The official STREAM executable"} {
+	for _, marker := range []string{"Memory Performance", "Structured failures", "Standard benchmark", "Composite score", "Skipped", "Interrupted by user", "Not enough leaderboard samples", "The official STREAM executable"} {
 		if !strings.Contains(output, marker) {
 			t.Fatalf("HTML rich report missing %q: %s", marker, output)
 		}
@@ -134,7 +136,7 @@ func TestMarkdownRendersRichReportAndSafeLinks(t *testing.T) {
 	fallbackScore.RankStatus = score.RankStatusUnavailable
 	fallbackScore.TierLabel = ""
 	output := Markdown(data, fallbackScore)
-	for _, marker := range []string{"ecs VPS Benchmark Report", "Memory Benchmark", "Structured failures", "Standard benchmark", "Evidence coverage", "Composite score", "Leaderboard rank unavailable", "all sizes", "raw output 192.0.2.10", "采样", "The official STREAM executable", "```en"} {
+	for _, marker := range []string{"ecs VPS Benchmark Report", "Memory Performance", "Structured failures", "Standard benchmark", "Evidence coverage", "Composite score", "Leaderboard rank unavailable", "all sizes", "raw output 192.0.2.10", "采样", "The official STREAM executable", "```en"} {
 		if !strings.Contains(output, marker) {
 			t.Fatalf("Markdown missing %q:\n%s", marker, output)
 		}
@@ -395,4 +397,321 @@ func TestResultSummaryUsesExplicitMultifamilySeparator(t *testing.T) {
 			t.Fatalf("%s dual-family summary = %q, want %q", language, got, wantDual[language])
 		}
 	}
+}
+
+func TestRendererStatusPresentationUsesExplicitValueVariants(t *testing.T) {
+	renderer := &textRenderer{palette: termcolor.Palette{Level: termcolor.LevelBasic}}
+	for _, raw := range []string{"failed", "available", "blocked", "true", "失败", "可用"} {
+		if got := renderer.styledValue(raw, model.RawValue(raw)); got != raw {
+			t.Fatalf("raw value %q was styled: %q", raw, got)
+		}
+		if got := reportValueClass(model.RawValue(raw)); got != "" {
+			t.Fatalf("raw value %q received HTML class %q", raw, got)
+		}
+	}
+	status := model.KeyValue("probe.network.status.failed")
+	if got := renderer.styledValue("Failed", status); got == "Failed" || !strings.Contains(got, "\x1b") {
+		t.Fatalf("explicit status key was not styled: %q", got)
+	}
+	if got := reportValueClass(status); got != "cell-bad" {
+		t.Fatalf("explicit status key HTML class = %q, want cell-bad", got)
+	}
+	fields := visibleFields([]model.Field{{Key: "command_args", Label: "Command arguments", Value: model.RawValue("--target example")}})
+	if len(fields) != 1 || fields[0].Value.Text() != "--target example" {
+		t.Fatalf("implementation-looking field was hidden or changed: %#v", fields)
+	}
+}
+
+func TestRawValuesRemainNeutralAcrossTextAndHTML(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+
+	const stableKey = "probe.network.status.failed"
+	rawValues := []string{
+		"failed-provider.example",
+		"available-host",
+		"trueNAS",
+		"blocked.example",
+		"failed",
+		"available",
+		"blocked",
+		"true",
+	}
+	fields := make([]model.Field, 0, len(rawValues))
+	measurements := make([]model.Measurement, 0, len(rawValues))
+	rows := make([][]model.Value, 0, len(rawValues)+1)
+	for index, raw := range rawValues {
+		fields = append(fields, model.Field{Key: fmt.Sprintf("raw_field_%d", index), Label: fmt.Sprintf("Raw field %d", index), Value: model.RawValue(raw)})
+		measurements = append(measurements, model.Measurement{Key: fmt.Sprintf("raw_measurement_%d", index), Label: fmt.Sprintf("Raw measurement %d", index), Display: model.RawValue(raw)})
+		rows = append(rows, []model.Value{model.RawValue(raw)})
+	}
+	rows = append(rows, []model.Value{model.KeyValue(stableKey)})
+	table := model.Table{
+		Key:     "raw-value-attack",
+		Title:   "Raw value attack",
+		Columns: []model.TableColumn{{Key: "value", Label: "Value"}},
+		Rows:    rows,
+	}
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Run:           model.RunInfo{ID: "raw-value-attack", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusOK},
+		Results: []model.Result{{
+			ID:           "raw-value-attack",
+			Title:        "Raw value attack",
+			Status:       model.StatusOK,
+			Measurements: measurements,
+			Fields:       fields,
+			Tables:       []model.Table{table},
+		}},
+	}
+
+	plain := Text(data, TextOptions{Color: termcolor.LevelNone, Width: 120})
+	if strings.Contains(plain, "\x1b") {
+		t.Fatalf("non-colored text output contains ANSI escape: %q", plain)
+	}
+	colored := Text(data, TextOptions{Color: termcolor.LevelBasic, Width: 120})
+	if !strings.Contains(colored, "\x1b[") {
+		t.Fatalf("colored text output did not contain ANSI styling: %q", colored)
+	}
+	for _, raw := range rawValues {
+		assertTextTokenStyle(t, plain, raw, false)
+		assertTextTokenStyle(t, colored, raw, false)
+	}
+	translated := i18n.T(stableKey)
+	assertTextTokenStyle(t, plain, translated, false)
+	assertTextTokenStyle(t, colored, translated, true)
+
+	rowsForHTML := htmlTableRows(displayTable(table))
+	if len(rowsForHTML) != len(rawValues)+1 {
+		t.Fatalf("HTML table row count = %d, want %d", len(rowsForHTML), len(rawValues)+1)
+	}
+	for index, raw := range rawValues {
+		if got := rowsForHTML[index][0]; got.Value != raw || got.Class != "" {
+			t.Errorf("raw HTML row %q = %#v, want neutral exact display", raw, got)
+		}
+	}
+	if got := rowsForHTML[len(rawValues)][0]; got.Value != translated || got.Class != "cell-bad" {
+		t.Fatalf("stable HTML row = %#v, want translated cell-bad value", got)
+	}
+	htmlOutput, err := HTML(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	htmlText := string(htmlOutput)
+	for _, raw := range rawValues {
+		if !strings.Contains(htmlText, `<td class="">`+raw+`</td>`) {
+			t.Errorf("HTML did not preserve neutral raw value %q: %s", raw, htmlText)
+		}
+	}
+	if !strings.Contains(htmlText, `<td class="cell-bad">`+translated+`</td>`) {
+		t.Fatalf("HTML did not render stable key as translated cell-bad value: %s", htmlText)
+	}
+}
+
+func assertTextTokenStyle(t *testing.T, output, token string, wantStyled bool) {
+	t.Helper()
+	found := false
+	for offset := 0; offset < len(output); {
+		relative := strings.Index(output[offset:], token)
+		if relative < 0 {
+			break
+		}
+		index := offset + relative
+		if ansiActiveAt(output[:index]) != wantStyled {
+			t.Fatalf("text token %q styled=%v, want %v in %q", token, ansiActiveAt(output[:index]), wantStyled, output[index:minInt(len(output), index+len(token)+8)])
+		}
+		found = true
+		offset = index + len(token)
+	}
+	if !found {
+		t.Fatalf("text output did not contain token %q: %q", token, output)
+	}
+}
+
+func ansiActiveAt(value string) bool {
+	active := false
+	for index := 0; index < len(value); {
+		if value[index] != '\x1b' || index+1 >= len(value) || value[index+1] != '[' {
+			index++
+			continue
+		}
+		relativeEnd := strings.IndexByte(value[index+2:], 'm')
+		if relativeEnd < 0 {
+			break
+		}
+		sequence := value[index+2 : index+2+relativeEnd]
+		active = sequence != "0"
+		index += relativeEnd + 3
+	}
+	return active
+}
+
+func TestTextGroupsUseStableMachineKeys(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	result := model.Result{
+		ID:    "network",
+		Title: "Risk report",
+		Tables: []model.Table{
+			{Key: "network.egress.overview", Title: "not risk"},
+			{Key: "network.ipquality.ipv4.scores", Title: "overview"},
+		},
+	}
+	groups := textGroups(result)
+	if len(groups) != 2 || groups[0].key != "network.egress" || groups[1].key != "network.risk" {
+		t.Fatalf("groups = %#v, want stable egress then risk grouping", groups)
+	}
+}
+
+func TestRendererContractAcrossLanguagesLayoutsAndColors(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	data := textSampleReport()
+	scored := rendererScoreFixture()
+	canonical, err := JSON(data)
+	if err != nil {
+		t.Fatalf("canonical report JSON: %v", err)
+	}
+
+	type textMode struct {
+		name    string
+		width   int
+		compact bool
+	}
+	modes := []textMode{
+		{name: "wide", width: 120},
+		{name: "wide-compact", width: 120, compact: true},
+		{name: "narrow", width: 30},
+		{name: "narrow-compact", width: 30, compact: true},
+	}
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		language := language
+		t.Run(string(language), func(t *testing.T) {
+			i18n.Set(language)
+
+			markdownBefore := Markdown(data, scored)
+			htmlBeforeBytes, err := HTML(data, scored)
+			if err != nil {
+				t.Fatalf("HTML before Text: %v", err)
+			}
+			htmlBefore := string(htmlBeforeBytes)
+			assertRendererContractContent(t, "Markdown", markdownBefore)
+			assertRendererContractContent(t, "HTML", htmlBefore)
+
+			for _, mode := range modes {
+				mode := mode
+				t.Run(mode.name, func(t *testing.T) {
+					plain := Text(data, TextOptions{
+						Color: termcolor.LevelNone, Compact: mode.compact, Width: mode.width, Score: scored,
+					})
+					colored := Text(data, TextOptions{
+						Color: termcolor.LevelBasic, Compact: mode.compact, Width: mode.width, Score: scored,
+					})
+
+					assertRendererContractContent(t, "Text", plain)
+					assertRendererContractContent(t, "colored Text", colored)
+					assertTextWidthContract(t, plain, mode.width)
+					assertTextWidthContract(t, colored, mode.width)
+					if strings.Contains(plain, "\x1b") {
+						t.Fatal("color-off Text contains ANSI escape")
+					}
+					if !strings.Contains(colored, "\x1b[") {
+						t.Fatal("color-on Text contains no ANSI styling")
+					}
+					if got := stripANSI(colored); got != plain {
+						t.Fatalf("color changed Text content beyond presentation:\nplain=%q\ncolored=%q", plain, colored)
+					}
+
+					if mode.compact {
+						if strings.Contains(plain, "raw output 192.0.2.10") || strings.Contains(plain, "sysbench-v1") {
+							t.Fatalf("compact Text leaked file-only evidence details:\n%s", plain)
+						}
+					} else if !strings.Contains(plain, "raw output 192.0.2.10") || !strings.Contains(plain, "sysbench-v1") {
+						t.Fatalf("full Text lost evidence details:\n%s", plain)
+					}
+
+					gotJSON, err := JSON(data)
+					if err != nil {
+						t.Fatalf("machine JSON after %s Text: %v", mode.name, err)
+					}
+					if !bytes.Equal(gotJSON, canonical) {
+						t.Fatalf("%s Text changed machine facts:\nbefore=%s\nafter=%s", mode.name, canonical, gotJSON)
+					}
+				})
+			}
+
+			markdownAfter := Markdown(data, scored)
+			if markdownAfter != markdownBefore {
+				t.Fatalf("Text rendering changed Markdown output:\nbefore=%s\nafter=%s", markdownBefore, markdownAfter)
+			}
+			htmlAfterBytes, err := HTML(data, scored)
+			if err != nil {
+				t.Fatalf("HTML after Text: %v", err)
+			}
+			if string(htmlAfterBytes) != htmlBefore {
+				t.Fatalf("Text rendering changed HTML output:\nbefore=%s\nafter=%s", htmlBefore, htmlAfterBytes)
+			}
+		})
+	}
+}
+
+func assertRendererContractContent(t *testing.T, format, output string) {
+	t.Helper()
+	markers := []string{
+		i18n.T("probe.system.field.hostname"),
+		"token",
+		i18n.T("probe.system.pressure.column.resource"),
+		"780",
+		i18n.T("probe.network.status.ok"),
+		i18n.T("report.evidence"),
+		"1/2",
+		"50%",
+		i18n.T("report.failures"),
+		i18n.T("failure.timeout"),
+		"api.example",
+		"raw timeout",
+		i18n.T("score.title"),
+		"850",
+		i18n.T("score.dimension.cpu"),
+	}
+	for _, marker := range markers {
+		if !strings.Contains(output, marker) {
+			t.Fatalf("%s renderer lost contract marker %q:\n%s", format, marker, output)
+		}
+	}
+}
+
+func assertTextWidthContract(t *testing.T, output string, requestedWidth int) {
+	t.Helper()
+	wantWidth := normalizeTextWidth(requestedWidth)
+	for lineNumber, line := range strings.Split(output, "\n") {
+		if got := textwidth.Width(line); got > wantWidth {
+			t.Fatalf("Text line %d width=%d exceeds requested width=%d: %q", lineNumber+1, got, wantWidth, line)
+		}
+	}
+}
+
+func stripANSI(value string) string {
+	var output strings.Builder
+	for index := 0; index < len(value); {
+		if value[index] == '\x1b' && index+1 < len(value) && value[index+1] == '[' {
+			index += 2
+			for index < len(value) {
+				character := value[index]
+				index++
+				if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
+					break
+				}
+			}
+			continue
+		}
+		output.WriteByte(value[index])
+		index++
+	}
+	return output.String()
 }

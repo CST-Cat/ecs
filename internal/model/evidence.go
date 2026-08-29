@@ -1,7 +1,6 @@
 package model
 
-// DerivedGrade computes the canonical grade from normalized counters instead
-// of trusting a stale serialized label.
+// DerivedGrade computes the canonical grade from the current counters.
 func (e Evidence) DerivedGrade() EvidenceGrade {
 	switch {
 	case e.Expected <= 0:
@@ -15,10 +14,7 @@ func (e Evidence) DerivedGrade() EvidenceGrade {
 	}
 }
 
-// EffectiveGrade deliberately ignores a stale serialized grade.
-func (e Evidence) EffectiveGrade() EvidenceGrade { return e.DerivedGrade() }
-
-// Normalize clamps malformed counters and refreshes the derived grade.
+// Normalize clamps malformed counters to the persisted machine-fact boundary.
 func (e *Evidence) Normalize() {
 	if e == nil {
 		return
@@ -34,7 +30,6 @@ func (e *Evidence) Normalize() {
 	} else if e.Valid > e.Expected {
 		e.Valid = e.Expected
 	}
-	e.Grade = e.DerivedGrade()
 }
 
 // EvidenceRatio returns a renderer-safe coverage ratio in [0, 1].

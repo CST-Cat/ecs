@@ -77,8 +77,8 @@ var errorChinese = map[string]string{
 
 	// ── Ookla 服务器 ────────────────────────────────────────
 	"err.ooklaFormat":       "Ookla 节点必须是 运营商=服务器ID",
-	"err.ooklaCarrier":      "未知 Ookla 运营商 %q，可选 电信、联通、移动",
-	"err.ooklaCarrierField": "Ookla 服务器 carrier 必须是电信、联通或移动: %q",
+	"err.ooklaCarrier":      "未知 Ookla 运营商 %q，可选 telecom、unicom、mobile（也接受中文名称和官方缩写）",
+	"err.ooklaCarrierField": "Ookla 服务器 carrier 必须是 telecom、unicom 或 mobile（配置文件使用 canonical ID）: %q",
 	"err.ooklaIDInvalid":    "Ookla 服务器 ID 无效 %q",
 	"err.ooklaIDField":      "Ookla 服务器 %q 的 ID 无效",
 	"err.ooklaDuplicate":    "Ookla 运营商重复 %q",
@@ -95,18 +95,16 @@ var errorChinese = map[string]string{
 	"err.reportTrailing":       "报告文件尾部存在无效内容: %w",
 	"err.reportNoSchema":       "缺少 schema_version",
 	"err.reportSchemaMismatch": "不支持 schema_version %q，当前渲染器支持 %q",
-	"err.reportSchemaFamily":   "%q 不是 ecs 报告：schema_version 必须以 %q 开头",
 	"err.baselineNoReports":    "没有可用的报告文件",
 	"err.baselineNoMetrics":    "这些报告里没有可评分的实测值",
 	"err.baselineLoad":         "读取排行榜参考 %s: %w",
 
 	// ── 配置文件 ────────────────────────────────────────────
-	"err.configRead":       "读取配置文件: %w",
-	"err.configParse":      "解析配置文件: %w",
-	"err.configSingle":     "配置文件只能包含一个 JSON 对象",
-	"err.configTrailing":   "配置文件尾部存在无效内容: %w",
-	"err.planJSONRequired": "plan requires --json",
-	"err.planInteractive":  "plan --json cannot use the interactive wizard",
+	"err.configRead":     "读取配置文件: %w",
+	"err.configParse":    "解析配置文件: %w",
+	"err.configSingle":   "配置文件只能包含一个 JSON 对象",
+	"err.configTrailing": "配置文件尾部存在无效内容: %w",
+	"err.planVersion":    "plan 不接受 --version",
 }
 
 var errorEnglish = map[string]string{
@@ -196,16 +194,14 @@ var errorEnglish = map[string]string{
 	"err.reportTrailing":       "invalid trailing content in the report file: %w",
 	"err.reportNoSchema":       "missing schema_version",
 	"err.reportSchemaMismatch": "unsupported schema_version %q; this renderer supports %q",
-	"err.reportSchemaFamily":   "%q is not an ecs report: schema_version must start with %q",
 	"err.baselineNoReports":    "no usable report files",
 	"err.baselineNoMetrics":    "the supplied reports contain no scoreable measurements",
 	"err.baselineLoad":         "read scoring leaderboard reference %s: %w",
 
 	// ── Config file ─────────────────────────────────────────
-	"err.configRead":       "read config file: %w",
-	"err.configParse":      "parse config file: %w",
-	"err.configSingle":     "the config file must contain exactly one JSON object",
-	"err.configTrailing":   "invalid trailing content in the config file: %w",
-	"err.planJSONRequired": "plan requires --json",
-	"err.planInteractive":  "plan --json cannot use the interactive wizard",
+	"err.configRead":     "read config file: %w",
+	"err.configParse":    "parse config file: %w",
+	"err.configSingle":   "the config file must contain exactly one JSON object",
+	"err.configTrailing": "invalid trailing content in the config file: %w",
+	"err.planVersion":    "plan does not accept --version",
 }

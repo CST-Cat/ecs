@@ -148,8 +148,20 @@ func TestMediaAndBacktraceConfigurationHelpers(t *testing.T) {
 func TestParseOoklaServerList(t *testing.T) {
 	useEnglish(t)
 	servers, err := ParseOoklaServerList("telecom=1,cu=2,mobile=3,")
-	if err != nil || len(servers) != 3 || servers[0].Carrier != "电信" || servers[1].Carrier != "联通" || servers[2].Carrier != "移动" || servers[0].ID != 1 || servers[1].ID != 2 || servers[2].ID != 3 {
+	if err != nil || len(servers) != 3 || servers[0].Carrier != OoklaCarrierTelecom || servers[1].Carrier != OoklaCarrierUnicom || servers[2].Carrier != OoklaCarrierMobile || servers[0].ID != 1 || servers[1].ID != 2 || servers[2].ID != 3 {
 		t.Fatalf("valid Ookla list = %+v, %v", servers, err)
+	}
+	for _, test := range []struct {
+		alias, want string
+	}{
+		{alias: "电信", want: OoklaCarrierTelecom}, {alias: "telecom", want: OoklaCarrierTelecom}, {alias: "ct", want: OoklaCarrierTelecom}, {alias: "chinatelecom", want: OoklaCarrierTelecom},
+		{alias: "联通", want: OoklaCarrierUnicom}, {alias: "unicom", want: OoklaCarrierUnicom}, {alias: "cu", want: OoklaCarrierUnicom}, {alias: "chinaunicom", want: OoklaCarrierUnicom},
+		{alias: "移动", want: OoklaCarrierMobile}, {alias: "mobile", want: OoklaCarrierMobile}, {alias: "cm", want: OoklaCarrierMobile}, {alias: "chinamobile", want: OoklaCarrierMobile},
+	} {
+		servers, err := ParseOoklaServerList(test.alias + "=42")
+		if err != nil || len(servers) != 1 || servers[0].Carrier != test.want {
+			t.Errorf("ParseOoklaServerList(%q) = %+v, %v; want carrier %q", test.alias, servers, err, test.want)
+		}
 	}
 	for _, test := range []struct {
 		raw, marker string

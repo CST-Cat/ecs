@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"ecs/internal/config"
@@ -51,7 +52,7 @@ func TestScanEarlyFlagsStopsAtDelimiterAndDoesNotConsumeMissingValues(t *testing
 	}
 }
 
-func TestEarlyFlagsKeepLastValidValueAndLanguageCanSurroundCommand(t *testing.T) {
+func TestEarlyFlagsKeepLastValueAndLanguageCanSurroundCommand(t *testing.T) {
 	configPath, profile := preparse([]string{
 		"run", "--profile", "first", "--profile=second",
 		"-config", "first.json", "--config=second.json",
@@ -68,8 +69,92 @@ func TestEarlyFlagsKeepLastValidValueAndLanguageCanSurroundCommand(t *testing.T)
 			t.Fatalf("language for %v = %s, want %s", args, got, i18n.LangEN)
 		}
 	}
-	if got := resolveLanguage([]string{"--lang=en", "--lang", "--profile", "full", "--lang=invalid"}); got != i18n.LangEN {
-		t.Fatalf("invalid/missing language value changed result to %s", got)
+	if err := validateExplicitLanguage([]string{"--lang=en", "--lang=invalid"}); err == nil {
+		t.Fatal("last invalid language value was accepted")
+	}
+	if got := resolveLanguage([]string{"--lang=invalid", "--lang=en"}); got != i18n.LangEN {
+		t.Fatalf("last valid language value = %s, want %s", got, i18n.LangEN)
+	}
+}
+
+func TestEarlyFlagsUseLastExplicitLanguageValue(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want i18n.Lang
+	}{
+		{name: "long equals", args: []string{"--lang=en", "--lang=zh"}, want: i18n.LangZH},
+		{name: "short equals", args: []string{"-lang=en", "-lang=zh"}, want: i18n.LangZH},
+		{name: "separate values", args: []string{"--lang", "en", "--lang", "zh"}, want: i18n.LangZH},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateExplicitLanguage(test.args); err != nil {
+				t.Fatalf("language validation: %v", err)
+			}
+			if got := resolveLanguage(test.args); got != test.want {
+				t.Fatalf("resolveLanguage(%v) = %s, want %s", test.args, got, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveLanguageWithoutExplicitValueUsesEnvironment(t *testing.T) {
+	for _, key := range []string{"ECS_LANG", "LC_ALL", "LC_MESSAGES", "LANG"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("LANG", "en_US.UTF-8")
+	if got := resolveLanguage([]string{"list"}); got != i18n.LangEN {
+		t.Fatalf("resolveLanguage without --lang = %s, want %s", got, i18n.LangEN)
+	}
+}
+
+func TestEarlyFlagsRejectInvalidMissingAndEmptyLanguage(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		args   []string
+		marker string
+	}{
+		{name: "long equals", args: []string{"--lang=invalid"}, marker: "invalid --lang value \"invalid\""},
+		{name: "short equals", args: []string{"-lang=invalid"}, marker: "invalid --lang value \"invalid\""},
+		{name: "separate value", args: []string{"--lang", "invalid"}, marker: "invalid --lang value \"invalid\""},
+		{name: "missing value", args: []string{"--lang"}, marker: "--lang requires a value"},
+		{name: "empty value", args: []string{"--lang="}, marker: "--lang value must not be empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateExplicitLanguage(test.args); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("validateExplicitLanguage(%v) = %v, want marker %q", test.args, err, test.marker)
+			}
+		})
+	}
+}
+
+func TestMainUsesLastExplicitLanguageValue(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("list", "--lang=invalid", "--lang=en")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "Profiles:") {
+		t.Fatalf("last valid language status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+
+	status, stdout, stderr = invokeAppMain("run", "--lang=en", "--lang=invalid")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "invalid --lang value \"invalid\"") {
+		t.Fatalf("last invalid language status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
+func TestMainRejectsInvalidLanguageAtCommandEntry(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "run", args: []string{`run`, `--lang=invalid`}},
+		{name: "list", args: []string{`list`, `-lang=invalid`}},
+		{name: "compare", args: []string{`compare`, `--lang`, `invalid`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, "invalid --lang value \"invalid\"") {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+		})
 	}
 }
 

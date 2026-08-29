@@ -64,11 +64,11 @@ ID、配置档归属、外联级别、并发分类、方法学、依赖、文案
 新增或删除模块后，先运行：
 
 ```sh
-go run ./cmd/ecs list --machine
+go run ./cmd/ecs list
 go test ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./internal/app ./internal/score
 sh -n run.sh
 ```
 
-`run.sh` 下载 `ecs` 二进制后会调用 `plan --json`，读取稳定的模块、配置档、暴露级别、reveal 和工具 ID，
+`run.sh` 下载 `ecs` 二进制后会调用 `plan`，读取稳定的模块、配置档、暴露级别、reveal 和工具 ID，
 按该结果准备依赖并运行；该输出缺失或非法会直接停止，不会使用另一套过期模块列表。只有 `ScoreKey` 非空的 descriptor 才能进入
 排行榜；指标定义仍由 `internal/score` 单独维护。

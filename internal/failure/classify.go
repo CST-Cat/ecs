@@ -165,9 +165,9 @@ func containsAny(text string, needles ...string) bool {
 	return false
 }
 
-// EnsureResult supplies structured diagnostics for module-level failures and
-// recognizable degraded states. Partial evidence itself is represented by its
-// grade and is not fabricated into an "unknown" failure.
+// EnsureResult normalizes evidence and supplies a defensive module-level
+// failure for legacy error results. Producer-owned failures are preserved;
+// presentation fields such as Notes are never classified here.
 func EnsureResult(result *model.Result) {
 	if result == nil {
 		return
@@ -182,22 +182,5 @@ func EnsureResult(result *model.Result) {
 	if result.Status == model.StatusError {
 		result.AddFailure(FromMessage("module", result.ID, message))
 		return
-	}
-	// Warnings commonly represent semantic findings (for example, being behind
-	// NAT) rather than failed collection. Only add a failure when the text maps
-	// to a concrete operational category.
-	if result.Status == model.StatusWarning {
-		candidate := FromMessage("module", result.ID, message)
-		if candidate.Category != model.FailureUnknown {
-			result.AddFailure(candidate)
-			return
-		}
-		for _, note := range result.Notes {
-			candidate = FromMessage("module", result.ID, note)
-			if candidate.Category != model.FailureUnknown {
-				result.AddFailure(candidate)
-				return
-			}
-		}
 	}
 }

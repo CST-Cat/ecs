@@ -37,9 +37,7 @@ type RunInfo struct {
 	CompletedAt time.Time `json:"completed_at"`
 	DurationMS  int64     `json:"duration_ms"`
 	// Exposure is the maximum external-contact level for this run.
-	Exposure string `json:"exposure"`
-	// Offline is retained as a derived compatibility field for consumers.
-	Offline       bool     `json:"offline"`
+	Exposure      string   `json:"exposure"`
 	IPVersion     string   `json:"ip_version,omitempty"`
 	Redacted      bool     `json:"redacted"`
 	Canceled      bool     `json:"canceled,omitempty"`
@@ -138,10 +136,9 @@ type Failure struct {
 }
 
 type Evidence struct {
-	Valid    int           `json:"valid"`
-	Expected int           `json:"expected"`
-	Unit     string        `json:"unit,omitempty"`
-	Grade    EvidenceGrade `json:"grade,omitempty"`
+	Valid    int    `json:"valid"`
+	Expected int    `json:"expected"`
+	Unit     string `json:"unit,omitempty"`
 }
 
 type EvidenceGrade string

@@ -219,7 +219,6 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		if index == 1 {
 			contextName = fmt.Sprintf("全 worker（%d）", workers)
 		}
-		result.Notes = append(result.Notes, fmt.Sprintf("zstd %s 运行失败：%s", contextName, err.Error()))
 		result.AddFailure(model.Failure{
 			Category: model.FailureParse, Stage: "benchmark_run", Target: contextName,
 			Count: 1, Message: err.Error(),

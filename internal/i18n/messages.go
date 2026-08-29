@@ -121,8 +121,6 @@ var chinese = map[string]string{
 	"report.schema":           "Schema",
 	"report.commit":           "提交",
 	"report.rawOutput":        "原始输出",
-	"report.memoryBenchmark":  "内存测评",
-	"report.diskBenchmark":    "硬盘测评",
 
 	"report.evidence":             "证据完整度",
 	"report.failures":             "结构化失败原因",
@@ -176,7 +174,6 @@ var chinese = map[string]string{
 	"compare.referenceMark":                            "基准",
 	"compare.generatedAt":                              "生成时间",
 	"compare.comparability":                            "可比性",
-	"compare.schemaVersions":                           "报告 schema",
 	"compare.comparable":                               "可比较",
 	"compare.partially_comparable":                     "部分可比较",
 	"compare.not_comparable":                           "不可比较",
@@ -232,7 +229,6 @@ var chinese = map[string]string{
 	"compare.notice.scope":        "只比较模块、指标 key、method、单位、方向和参数口径完全相同的数值。",
 	"compare.notice.relative":     "最佳值与高亮只在本次输入报告内有效，不代表绝对质量等级。",
 	"compare.notice.observation":  "字段和表格变化只展示事实，不推断哪个值更好。",
-	"compare.notice.schemaMixed":  "输入报告的 schema 版本不一致（%s）：只比较双方都存在且签名一致的指标；状态与证据口径不在签名保护范围内，因此整体可比性降为部分可比。",
 	"compare.notice.toolMixed":    "输入报告来自不同的 ecs 版本（%s）：下方的模块缺失与 method 不一致多为版本差异的正常结果。",
 	"compare.flag.reference":      "基准报告序号，从 1 开始（默认 1）",
 	"compare.flag.output":         "对比报告输出目录",
@@ -271,6 +267,7 @@ var chinese = map[string]string{
 	// ── 预估 ────────────────────────────────────────────────
 	"estimate.seconds": "约 %d–%d 秒",
 	"estimate.minutes": "约 %d–%d 分钟",
+	"estimate.speed":   "iperf3 为按时长跑满：%d 节点、每方向 %s、%d 并发流；实际流量随带宽变化",
 	"estimate.offline": "离线模式会跳过全部外网探针",
 	"estimate.route":   "路由探测时长受每跳超时影响",
 
@@ -407,8 +404,6 @@ var english = map[string]string{
 	"report.schema":           "Schema",
 	"report.commit":           "Commit",
 	"report.rawOutput":        "Raw output",
-	"report.memoryBenchmark":  "Memory Benchmark",
-	"report.diskBenchmark":    "Disk Benchmark",
 
 	"report.evidence":             "Evidence coverage",
 	"report.failures":             "Structured failures",
@@ -462,7 +457,6 @@ var english = map[string]string{
 	"compare.referenceMark":                            "reference",
 	"compare.generatedAt":                              "Generated at",
 	"compare.comparability":                            "Comparability",
-	"compare.schemaVersions":                           "Report schema",
 	"compare.comparable":                               "comparable",
 	"compare.partially_comparable":                     "partially comparable",
 	"compare.not_comparable":                           "not comparable",
@@ -518,7 +512,6 @@ var english = map[string]string{
 	"compare.notice.scope":        "Only values with identical module, metric key, method, unit, direction and parameter scope are compared.",
 	"compare.notice.relative":     "Best-value highlights are relative to these input reports and are not absolute quality ratings.",
 	"compare.notice.observation":  "Field and table changes are factual observations; no value is judged better.",
-	"compare.notice.schemaMixed":  "Input reports declare different schema versions (%s): only metrics present in all inputs with identical signatures are compared. Status and evidence semantics are not covered by the signature, so overall comparability is reduced to partial.",
 	"compare.notice.toolMixed":    "Input reports come from different ecs versions (%s): missing modules and method mismatches below are usually the normal result of that difference.",
 	"compare.flag.reference":      "reference report number, starting at 1 (default 1)",
 	"compare.flag.output":         "comparison report output directory",
@@ -556,6 +549,7 @@ var english = map[string]string{
 	// ── Estimates ───────────────────────────────────────────
 	"estimate.seconds": "about %d-%d s",
 	"estimate.minutes": "about %d-%d min",
+	"estimate.speed":   "iperf3 saturates the link for the configured duration: %d nodes, %s per direction, %d parallel streams; actual traffic varies with bandwidth",
 	"estimate.offline": "Offline mode skips every network probe",
 	"estimate.route":   "Route probing time depends on per-hop timeouts",
 

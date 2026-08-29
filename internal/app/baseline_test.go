@@ -44,6 +44,24 @@ func TestExpandReportPathsRecursesIntoSubdirectories(t *testing.T) {
 	}
 }
 
+func TestExpandReportPathsDeduplicatesCanonicalPaths(t *testing.T) {
+	root := t.TempDir()
+	reports := filepath.Join(root, "reports")
+	if err := os.MkdirAll(reports, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(reports, "a.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	uncleanPath := reports + string(os.PathSeparator) + "." + string(os.PathSeparator) + "a.json"
+	got := expandReportPaths([]string{path, uncleanPath, reports})
+	if len(got) != 1 || got[0] != path {
+		t.Fatalf("canonical duplicate paths = %v, want [%s]", got, path)
+	}
+}
+
 func TestBaselineStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	valid := writeBaselineReport(t, "valid.json", submitTestReport())
 	bad := filepath.Join(t.TempDir(), "bad.json")

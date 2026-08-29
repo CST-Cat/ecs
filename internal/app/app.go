@@ -15,6 +15,10 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// 语言要在任何输出之前定下来：帮助文本、错误信息都要用它。
 	// 显式 --lang 优先，其次看环境变量，最后回落中文。
 	i18n.Set(resolveLanguage(args))
+	if err := validateExplicitLanguage(args); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
 	command := "run"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command = args[0]
@@ -62,9 +66,11 @@ func resolveLanguage(args []string) i18n.Lang {
 	var resolved i18n.Lang
 	valid := false
 	for _, occurrence := range scanEarlyFlags(args, "lang") {
-		if lang, ok := i18n.Parse(occurrence.Value); ok {
-			resolved = lang
-			valid = true
+		if strings.TrimSpace(occurrence.Value) != "" {
+			if lang, ok := i18n.Parse(occurrence.Value); ok {
+				resolved = lang
+				valid = true
+			}
 		}
 	}
 	if valid {
@@ -73,13 +79,30 @@ func resolveLanguage(args []string) i18n.Lang {
 	return i18n.DetectFromEnv()
 }
 
+func validateExplicitLanguage(args []string) error {
+	value, found, missing := lastExplicitLanguage(args)
+	if !found {
+		return nil
+	}
+	if missing {
+		return fmt.Errorf("--lang requires a value")
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--lang value must not be empty")
+	}
+	if _, ok := i18n.Parse(value); !ok {
+		return fmt.Errorf("invalid --lang value %q; choose zh or en", value)
+	}
+	return nil
+}
+
 func printHelp(writer io.Writer) {
 	if i18n.Current() == i18n.LangEN {
 		fmt.Fprintln(writer, `ecs — ad-free VPS benchmark with local reports by default
 
 Usage:
   ecs [run] [options]         run tests (standard by default)
-  ecs plan --json [options]   print the resolved machine execution plan
+  ecs plan [options]         print the resolved machine execution plan as JSON
   ecs list                    show profiles and modules
   ecs render --input FILE     re-export JSON/Markdown/HTML from JSON
   ecs compare REPORTS...      compare 2 or more JSON reports safely
@@ -105,7 +128,7 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
 
 用法:
   ecs [run] [选项]            运行测试（默认 standard）
-  ecs plan --json [选项]      输出解析后的机器执行计划
+  ecs plan [选项]            以 JSON 输出解析后的机器执行计划
   ecs list                    查看配置档与模块
   ecs render --input FILE     从 JSON 重新导出 JSON/Markdown/HTML 三种格式
   ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告

@@ -3,6 +3,8 @@ package textwidth
 import (
 	"strings"
 	"testing"
+
+	"ecs/internal/i18n"
 )
 
 func TestDisplayWidthAlignmentAndSafeTruncation(t *testing.T) {
@@ -42,5 +44,39 @@ func TestDisplayWidthAlignmentAndSafeTruncation(t *testing.T) {
 	}
 	if got := Truncate("中文", 2); Width(got) > 2 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("wide-character boundary truncation = %d/%q", Width(got), got)
+	}
+}
+
+func TestECSBilingualReportTextWidthContract(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	for _, test := range []struct {
+		language i18n.Lang
+		key      string
+		text     string
+		width    int
+	}{
+		{language: i18n.LangZH, key: "module.system.title", text: "系统与资源", width: 10},
+		{language: i18n.LangEN, key: "module.system.title", text: "System & Resources", width: 18},
+		{language: i18n.LangZH, key: "module.memory.title", text: "内存性能", width: 8},
+		{language: i18n.LangEN, key: "module.memory.title", text: "Memory Performance", width: 18},
+		{language: i18n.LangZH, key: "module.disk.title", text: "磁盘性能", width: 8},
+		{language: i18n.LangEN, key: "module.disk.title", text: "Disk Performance", width: 16},
+	} {
+		t.Run(string(test.language)+"/"+test.key, func(t *testing.T) {
+			i18n.Set(test.language)
+			value := i18n.T(test.key)
+			if value != test.text || Width(value) != test.width {
+				t.Fatalf("ECS %s text = %q/%d, want %q/%d", test.key, value, Width(value), test.text, test.width)
+			}
+			if got := Width(Pad(value, test.width+2)); got != test.width+2 {
+				t.Fatalf("padded ECS %s width = %d, want %d", test.key, got, test.width+2)
+			}
+			truncated := Truncate(value, 7)
+			if got := Width(truncated); got > 7 || !strings.HasSuffix(truncated, "…") {
+				t.Fatalf("truncated ECS %s = %d/%q", test.key, got, truncated)
+			}
+		})
 	}
 }

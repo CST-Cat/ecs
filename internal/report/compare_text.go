@@ -77,13 +77,6 @@ func (r *comparisonTextRenderer) summaryBlock() {
 		{i18n.T("compare.statusChanges"), fmt.Sprintf("%d", r.data.Summary.StatusChanges)},
 		{i18n.T("compare.evidenceChanges"), fmt.Sprintf("%d", r.data.Summary.EvidenceChanges)},
 	}
-	// 跨版本时才占一行。同版本是常态，为常态加一行只会稀释真正的信息。
-	if schemas := r.data.SchemaVersions(); len(schemas) > 1 {
-		rows = append(rows, []string{
-			i18n.T("compare.schemaVersions"),
-			r.palette.Warning(strings.Join(schemas, " · ")),
-		})
-	}
 	r.table([]string{i18n.T("report.item"), i18n.T("report.content")}, rows, map[int]bool{1: true})
 	r.indentedStyled(i18n.T("compare.legend"), r.palette.Dim)
 	r.blank()
@@ -417,11 +410,12 @@ func (r *comparisonTextRenderer) evidenceValue(module comparison.Module, index i
 		return r.palette.Dim("—")
 	}
 	evidence := module.Evidence[index]
-	display := fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(evidence.Grade))
+	grade := derivedComparisonEvidenceGrade(evidence)
+	display := fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade))
 	if withBar {
 		display += " " + r.palette.Bar(evidence.Ratio, 12)
 	}
-	switch evidence.Grade {
+	switch grade {
 	case model.EvidenceComplete:
 		return r.palette.Success(display)
 	case model.EvidencePartial:
@@ -450,6 +444,10 @@ func (r *comparisonTextRenderer) styleComparability(value comparison.Comparabili
 	default:
 		return r.palette.ErrorBold(display)
 	}
+}
+
+func derivedComparisonEvidenceGrade(evidence comparison.EvidenceValue) model.EvidenceGrade {
+	return (model.Evidence{Valid: evidence.Valid, Expected: evidence.Expected}).DerivedGrade()
 }
 
 func comparisonEvidenceGrade(grade model.EvidenceGrade) string {

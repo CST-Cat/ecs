@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -10,29 +12,17 @@ import (
 )
 
 func listCommand(args []string, stdout, stderr io.Writer) int {
-	format := ""
-	for index := 0; index < len(args); index++ {
-		switch {
-		case args[index] == "--machine":
-			format = "machine"
-		case args[index] == "--format" && index+1 < len(args):
-			format = strings.ToLower(strings.TrimSpace(args[index+1]))
-			index++
-		case strings.HasPrefix(args[index], "--format="):
-			format = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(args[index], "--format=")))
-		case args[index] == "--lang" && index+1 < len(args):
-			index++
-		case strings.HasPrefix(args[index], "--lang="):
-		default:
-			fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), i18n.T("help.extraArgs"))
-			return 1
+	flags := flag.NewFlagSet("ecs list", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
 		}
+		return 1
 	}
-	if format == "machine" || format == "manifest" {
-		return writeModuleManifest(stdout)
-	}
-	if format != "" {
-		fmt.Fprintf(stderr, "%s: unsupported list format %q\n", i18n.T("cli.error"), format)
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), i18n.T("help.extraArgs"))
 		return 1
 	}
 	fmt.Fprintln(stdout, i18n.T("list.profilesHeader"))
@@ -53,19 +43,7 @@ func listCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "  "+i18n.T("list.exposureNote"))
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.sourcesHeader"))
-	fmt.Fprintln(stdout, "  maxmind, ipinfo, ipregistry, ipapi, ip2location, abuseipdb,")
-	fmt.Fprintln(stdout, "  scamalytics, ipqs, dbip, ipdata, ipwhois, ipapicom, ipsb")
+	fmt.Fprintf(stdout, "  %s\n", strings.Join(config.IPQualitySourceIDs(), ", "))
 	fmt.Fprintln(stdout, "  "+i18n.T("list.sourcesNote"))
-	return 0
-}
-
-func writeModuleManifest(stdout io.Writer) int {
-	fmt.Fprintln(stdout, "ecs-module-manifest\t1")
-	for _, profile := range []string{config.ProfileStandard, config.ProfileFull} {
-		fmt.Fprintf(stdout, "profile\t%s\t%s\n", profile, strings.Join(config.ModulesForProfile(profile), ","))
-	}
-	for _, descriptor := range config.ModuleDescriptors() {
-		fmt.Fprintf(stdout, "module\t%s\t%s\t%s\n", descriptor.ID, descriptor.Exposure.String(), strings.Join(descriptor.RequiredTools, ","))
-	}
 	return 0
 }

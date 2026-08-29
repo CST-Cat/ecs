@@ -100,6 +100,25 @@ func TestLatencyResolutionFamiliesInterceptionAndICMP(t *testing.T) {
 	}
 }
 
+func TestLatencyEndpointKindUsesStableMachineKey(t *testing.T) {
+	for _, test := range []struct {
+		kind, wantKey string
+	}{
+		{kind: config.LatencyTargetKindGlobalCDN, wantKey: "probe.latency.endpoint_kind.global_cdn"},
+		{kind: config.LatencyTargetKindGlobal, wantKey: "probe.latency.endpoint_kind.global"},
+		{kind: config.LatencyTargetKindMainlandChina, wantKey: "probe.latency.endpoint_kind.mainland_china"},
+	} {
+		value := latencyEndpointKindValue(test.kind)
+		if key, ok := value.Key(); !ok || key != test.wantKey {
+			t.Errorf("latency endpoint kind %q = %#v, want key %q", test.kind, value, test.wantKey)
+		}
+	}
+	custom := latencyEndpointKindValue("customer-defined")
+	if raw, ok := custom.Raw(); !ok || raw != "customer-defined" {
+		t.Fatalf("custom latency endpoint kind = %#v", custom)
+	}
+}
+
 func TestLatencyProducerDirectResult(t *testing.T) {
 	t.Run("skip without targets", func(t *testing.T) {
 		result := (latencyProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
@@ -142,7 +161,7 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 			Config: config.Runtime{
 				IPVersion:       config.IPVersion4,
 				LatencyAttempts: 2,
-				LatencyTargets:  []config.Endpoint{{Name: "fixture", Address: listener.Addr().String(), Kind: "local", Family: config.IPVersion4}},
+				LatencyTargets:  []config.Endpoint{{Name: "fixture", Address: listener.Addr().String(), Kind: config.LatencyTargetKindMainlandChina, Family: config.IPVersion4}},
 			},
 			Network: NetworkCapabilities{IPv4Usable: true},
 		})
@@ -184,11 +203,14 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 			}
 		}
 		row := result.Tables[0].Rows[0]
-		if len(row) != len(result.Tables[0].Columns) || row[0].Text() != "fixture" || row[1].Text() != "IPv4" || row[2].Text() != "local" {
+		if len(row) != len(result.Tables[0].Columns) || row[0].Text() != "fixture" || row[1].Text() != "IPv4" {
 			t.Fatalf("latency success raw cells = %+v", row)
 		}
+		if key, ok := row[2].Key(); !ok || key != "probe.latency.endpoint_kind.mainland_china" {
+			t.Fatalf("latency endpoint kind = %#v", row[2])
+		}
 		for index, cell := range row {
-			if index == len(row)-1 {
+			if index == 2 || index == len(row)-1 {
 				continue
 			}
 			if _, ok := cell.Raw(); !ok {

@@ -50,7 +50,8 @@ record_argv() {
   done
 }
 
-if [ "${1:-}" = plan ] && [ "${2:-}" = --json ]; then
+if [ "${1:-}" = plan ]; then
+  [ "${2:-}" != --json ] || exit 64
   plan_mode=${ECS_TEST_PLAN_MODE:-valid}
   plan_extra_exposure_line=""
   plan_extra_reveal_line=""
@@ -92,16 +93,26 @@ if [ "${1:-}" = plan ] && [ "${2:-}" = --json ]; then
   cat <<JSON
 {
   "schema_version": "ecs.plan/v1",
+  "tool": {"name": "ecs", "version": "fixture"},
   "profile": "standard",
 ${plan_exposure_line}
 ${plan_extra_exposure_line}
 ${plan_reveal_line}
 ${plan_extra_reveal_line}
+  "ip_version": "auto",
   "modules": [
     {"id": "noop"}
   ],
   "required_tools": [],
-  "staging": {"mode": "temporary-prefix"}
+  "needs_egress_ip": false,
+  "external_services": [],
+  "staging": {
+    "mode": "temporary-prefix",
+    "tool_archive_required": false,
+    "nexttrace_tiny_required": false,
+    "ookla_package_required": false,
+    "zstd_corpus_required": false
+  }
 }
 JSON
   exit 0

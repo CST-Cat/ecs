@@ -38,7 +38,11 @@ func markdownReport(data model.Report, scored *score.Report) string {
 	writeMarkdownRow(&out, i18n.T("report.profile"), data.Run.Profile)
 	writeMarkdownRow(&out, i18n.T("report.startedAt"), data.Run.StartedAt.Format(time.RFC3339))
 	writeMarkdownRow(&out, i18n.T("report.totalDuration"), formatDurationMS(data.Run.DurationMS))
-	writeMarkdownRow(&out, i18n.T("report.networkMode"), map[bool]string{true: i18n.T("report.offline"), false: i18n.T("report.online")}[data.Run.Offline])
+	networkMode := i18n.T("report.online")
+	if data.Run.Exposure == "local" {
+		networkMode = i18n.T("report.offline")
+	}
+	writeMarkdownRow(&out, i18n.T("report.networkMode"), networkMode)
 	if data.Run.Exposure != "" {
 		writeMarkdownRow(&out, i18n.T("report.exposure"), data.Run.Exposure+" — "+i18n.T("exposure."+data.Run.Exposure))
 	}

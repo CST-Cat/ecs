@@ -105,7 +105,9 @@ func TestFailureConstructorsAndEnsureResult(t *testing.T) {
 		wantNoAdd bool
 	}{
 		{name: "error summary", result: model.Result{ID: "system", Status: model.StatusError, Error: "connection refused"}, wantCount: 1, wantClass: model.FailureConnectionRefused},
-		{name: "warning note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}, wantCount: 1, wantClass: model.FailureParse},
+		{name: "warning natural language note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}, wantNoAdd: true},
+		{name: "warning stable key note", result: model.Result{ID: "route", Status: model.StatusWarning, Notes: []string{"probe.route.note.parse_failed"}}, wantNoAdd: true},
+		{name: "warning error text", result: model.Result{ID: "dns", Status: model.StatusWarning, Error: "connection refused"}, wantNoAdd: true},
 		{name: "warning without error or note", result: model.Result{ID: "latency", Status: model.StatusWarning}, wantNoAdd: true},
 		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}, wantNoAdd: true},
 		{name: "existing failure", result: model.Result{ID: "disk", Status: model.StatusError, Error: "permission denied", Failures: []model.Failure{{Category: model.FailurePermissionDenied, Count: 2}}}, wantCount: 1, wantClass: model.FailurePermissionDenied},
@@ -115,7 +117,7 @@ func TestFailureConstructorsAndEnsureResult(t *testing.T) {
 			result := test.result
 			result.Evidence = &model.Evidence{Valid: 4, Expected: 2}
 			EnsureResult(&result)
-			if result.Evidence.Grade != model.EvidenceComplete {
+			if result.Evidence.DerivedGrade() != model.EvidenceComplete {
 				t.Fatalf("EnsureResult did not normalize evidence: %+v", result.Evidence)
 			}
 			if test.wantNoAdd {

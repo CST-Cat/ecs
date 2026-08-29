@@ -90,15 +90,7 @@ func lookupNextTrace() (string, error) {
 }
 
 func doctorTools() []doctorTool {
-	type toolMeta struct {
-		name     string
-		required bool
-		purpose  string
-		args     []string
-		lookup   func() (string, error)
-		check    func(context.Context, string) (string, error)
-	}
-	catalog := []toolMeta{
+	catalog := []doctorTool{
 		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
 		{name: "zstd", required: true, purpose: "doctor.purpose.zstd", check: identifyPinnedZstd},
 		{name: "npb-ep", required: true, purpose: "doctor.purpose.npbEP", check: identifyNPBBinary("EP")},
@@ -111,7 +103,7 @@ func doctorTools() []doctorTool {
 		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
 		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
 	}
-	meta := make(map[string]toolMeta, len(catalog))
+	meta := make(map[string]doctorTool, len(catalog))
 	for _, item := range catalog {
 		meta[item.name] = item
 	}
@@ -129,7 +121,7 @@ func doctorTools() []doctorTool {
 			if _, ok := meta[name]; ok {
 				continue
 			}
-			meta[name] = toolMeta{name: name, purpose: name, args: []string{"--version"}}
+			meta[name] = doctorTool{name: name, purpose: name, args: []string{"--version"}}
 		}
 	}
 	for _, item := range catalog {
@@ -147,7 +139,8 @@ func doctorTools() []doctorTool {
 		if !known[item.name] {
 			continue
 		}
-		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args, lookup: item.lookup, check: item.check})
+		item.purpose = i18n.T(item.purpose)
+		tools = append(tools, item)
 		delete(known, item.name)
 	}
 	for _, name := range toolOrder {
@@ -155,7 +148,8 @@ func doctorTools() []doctorTool {
 			continue
 		}
 		item := meta[name]
-		tools = append(tools, doctorTool{name: item.name, required: item.required, purpose: i18n.T(item.purpose), args: item.args, lookup: item.lookup, check: item.check})
+		item.purpose = i18n.T(item.purpose)
+		tools = append(tools, item)
 	}
 	return tools
 }

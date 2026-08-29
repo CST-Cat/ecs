@@ -52,6 +52,36 @@ func scanEarlyFlags(args []string, names ...string) []earlyFlagOccurrence {
 	return occurrences
 }
 
+// lastExplicitLanguage returns the final --lang/-lang occurrence without
+// interpreting its value.  Unlike scanEarlyFlags, it preserves an empty or
+// missing value so the command entry point can reject it instead of silently
+// falling back to the environment.
+func lastExplicitLanguage(args []string) (value string, found, missing bool) {
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--" {
+			break
+		}
+		name, occurrenceValue, hasValue := splitEarlyFlag(args[index])
+		if name != "lang" {
+			continue
+		}
+		found = true
+		if hasValue {
+			value = occurrenceValue
+			missing = false
+			continue
+		}
+		if index+1 >= len(args) || args[index+1] == "--" || strings.HasPrefix(args[index+1], "-") {
+			missing = true
+			continue
+		}
+		value = args[index+1]
+		missing = false
+		index++
+	}
+	return value, found, missing
+}
+
 func splitEarlyFlag(argument string) (name, value string, hasValue bool) {
 	var raw string
 	switch {

@@ -71,6 +71,51 @@ func TestBlacklistProducerSkipBuildsStableResult(t *testing.T) {
 	}
 }
 
+func TestBlacklistProducerReportsEgressDegradation(t *testing.T) {
+	tests := []struct {
+		name       string
+		egress     EgressAddress
+		category   model.FailureCategory
+		stage      string
+		wantDetail string
+	}{
+		{
+			name:     "typed egress discovery failure",
+			egress:   EgressAddress{Err: context.DeadlineExceeded},
+			category: model.FailureTimeout,
+			stage:    "egress",
+		},
+		{
+			name:       "invalid egress address",
+			egress:     EgressAddress{IP: "2001:db8::1"},
+			category:   model.FailureParse,
+			stage:      "validate",
+			wantDetail: "valid IPv4",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := (blacklistProbe{}).Run(context.Background(), Environment{
+				Config: config.Runtime{IPVersion: config.IPVersion4},
+				Egress: Egress{ByVersion: map[string]EgressAddress{config.IPVersion4: test.egress}},
+			})
+			if result.Status != model.StatusWarning || len(result.Failures) != 1 {
+				t.Fatalf("blacklist egress degradation = status:%s failures:%+v", result.Status, result.Failures)
+			}
+			if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.blacklist.summary.unavailable" {
+				t.Fatalf("blacklist unavailable summary = %+v", result.SummaryMessages)
+			}
+			failure := result.Failures[0]
+			if failure.Category != test.category || failure.Stage != test.stage || failure.Target != "IPv4" || failure.Message == "" {
+				t.Fatalf("blacklist egress failure = %+v", failure)
+			}
+			if test.wantDetail != "" && !strings.Contains(failure.Message, test.wantDetail) {
+				t.Fatalf("blacklist validation detail = %q, want %q", failure.Message, test.wantDetail)
+			}
+		})
+	}
+}
+
 func TestBlacklistOutcomeValuesAreExplicitKeys(t *testing.T) {
 	for _, test := range []struct {
 		outcome dnsblOutcome

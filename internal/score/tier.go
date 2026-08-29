@@ -33,9 +33,9 @@ type Tier struct {
 	VCPUMin     int                `json:"vcpu_min"`
 	SampleCount int                `json:"sample_count"`
 	Metrics     map[string]float64 `json:"metrics"`
-	// MetricSampleCounts records the independent evidence behind each mean.
-	// Older baselines omit it and conservatively fall back to global metrics.
-	MetricSampleCounts map[string]int `json:"metric_sample_counts,omitempty"`
+	// MetricSampleCounts records the independent evidence behind each mean and
+	// is required for every metric in a serialized current baseline tier.
+	MetricSampleCounts map[string]int `json:"metric_sample_counts"`
 }
 
 // MinTierSamples 返回档位可用所需的最少样本数，供命令行说明用。

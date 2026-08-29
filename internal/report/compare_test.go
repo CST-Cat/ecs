@@ -24,9 +24,6 @@ func comparisonReportFixture(t *testing.T, count, reference int) comparison.Repo
 		data := sampleReport()
 		data.Run.ID = "run-" + string(rune('1'+index))
 		data.SchemaVersion = "ecs.report/v1"
-		if index%2 == 1 {
-			data.SchemaVersion = "ecs.report/v2"
-		}
 		data.Tool.Version = "test-" + string(rune('1'+index%2))
 		result := data.Results[0]
 		result.Title = "系统"
@@ -42,15 +39,15 @@ func comparisonReportFixture(t *testing.T, count, reference int) comparison.Repo
 		result.Methodology = model.Methodology{
 			Kind: "inventory", Profile: "standard", Parameters: map[string]string{"scope_revision": "1", "workload": "standard"},
 		}
-		result.Evidence = &model.Evidence{Valid: 1, Expected: 1, Grade: model.EvidenceComplete}
+		result.Evidence = &model.Evidence{Valid: 1, Expected: 1}
 		if index%4 == 1 {
-			result.Evidence = &model.Evidence{Valid: 1, Expected: 2, Grade: model.EvidencePartial}
+			result.Evidence = &model.Evidence{Valid: 1, Expected: 2}
 		}
 		if index%4 == 2 {
-			result.Evidence = &model.Evidence{Valid: 0, Expected: 2, Grade: model.EvidenceInsufficient}
+			result.Evidence = &model.Evidence{Valid: 0, Expected: 2}
 		}
 		if index%4 == 3 {
-			result.Evidence = &model.Evidence{Valid: 0, Expected: 0, Grade: model.EvidenceNotPlanned}
+			result.Evidence = &model.Evidence{Valid: 0, Expected: 0}
 		}
 		result.Measurements = []model.Measurement{
 			{Key: "cpu", Label: "CPU", Value: float64(100 + index*20), Unit: "points", Display: model.RawValue(fmt.Sprintf("%d points", 100+index*20)), Method: "fixture-v1", HigherIsBetter: model.BoolPtr(true)},
@@ -105,7 +102,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 	payload := "<payload>|[unsafe]\x1b[31m"
 	pair.Inputs[0].Label = payload
 	pair.Modules[0].Metrics[0].Label = payload
-	pair.Notices = append(pair.Notices, comparison.Notice{Key: "compare.notice.schemaMixed", Args: []string{payload}})
+	pair.Notices = append(pair.Notices, comparison.Notice{Key: "compare.notice.toolMixed", Args: []string{payload}})
 	pairBefore, err := ComparisonJSON(pair)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +130,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 	for _, count := range []int{3, 6} {
 		data := comparisonReportFixture(t, count, count-1)
 		text := ComparisonText(data, termcolor.LevelNone)
-		if !strings.Contains(text, "Method issues") || !strings.Contains(text, "What differs") || !strings.Contains(text, "Input reports") || !strings.Contains(text, "Input reports declare different schema versions") || (count == 6 && !strings.Contains(text, "no reference")) {
+		if !strings.Contains(text, "Method issues") || !strings.Contains(text, "What differs") || !strings.Contains(text, "Input reports") || !strings.Contains(text, "Input reports come from different ecs versions") || (count == 6 && !strings.Contains(text, "no reference")) {
 			t.Fatalf("rich comparison text (%d) omitted diagnostic state:\n%s", count, text)
 		}
 		if count == 6 {
@@ -144,7 +141,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 			}
 		}
 		markdown := ComparisonMarkdown(data)
-		if !strings.Contains(markdown, "Method issues") || !strings.Contains(markdown, "What differs") || !strings.Contains(markdown, "Input reports declare different schema versions") || (count == 6 && !strings.Contains(markdown, "no reference")) {
+		if !strings.Contains(markdown, "Method issues") || !strings.Contains(markdown, "What differs") || !strings.Contains(markdown, "Input reports come from different ecs versions") || (count == 6 && !strings.Contains(markdown, "no reference")) {
 			t.Fatalf("rich comparison Markdown (%d) omitted diagnostic state:\n%s", count, markdown)
 		}
 		html, err := ComparisonHTML(data)
@@ -155,7 +152,7 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 		if count == 6 {
 			layout = "layout-many"
 		}
-		if !strings.Contains(string(html), layout) || !strings.Contains(string(html), "Method issues") || !strings.Contains(string(html), "Input reports declare different schema versions") {
+		if !strings.Contains(string(html), layout) || !strings.Contains(string(html), "Method issues") || !strings.Contains(string(html), "Input reports come from different ecs versions") {
 			t.Fatalf("rich comparison HTML (%d) omitted layout/diagnostic state", count)
 		}
 	}
@@ -179,6 +176,9 @@ func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 	canonical, err := ComparisonJSON(data)
 	if err != nil || len(canonical) == 0 || canonical[len(canonical)-1] != '\n' {
 		t.Fatalf("comparison JSON = %v", err)
+	}
+	if bytes.Contains(canonical, []byte(`"grade"`)) {
+		t.Fatalf("comparison JSON persisted derived grade: %s", canonical)
 	}
 	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
 		i18n.Set(language)

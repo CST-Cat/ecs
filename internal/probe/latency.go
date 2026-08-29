@@ -257,7 +257,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			icmpLoss = fmt.Sprintf("%.0f %%", item.ICMP.LossPercent)
 		}
 		table.Rows = append(table.Rows, []model.Value{
-			model.RawValue(item.Endpoint.Name), model.RawValue("IPv" + item.Family), model.RawValue(item.Endpoint.Kind),
+			model.RawValue(item.Endpoint.Name), model.RawValue("IPv" + item.Family), latencyEndpointKindValue(item.Endpoint.Kind),
 			model.RawValue(fmt.Sprintf("%d/%d", len(item.Values), attempts)), model.RawValue(formatMilliseconds(median)),
 			model.RawValue(formatMilliseconds(p95)), model.RawValue(fmt.Sprintf("%.2f ms", stddevFloat(floatValues))),
 			model.RawValue(icmpMin), model.RawValue(icmpAvg), model.RawValue(icmpMax), model.RawValue(icmpMDev),
@@ -332,6 +332,17 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Finish(start)
 	return result
+}
+
+func latencyEndpointKindValue(kind string) model.Value {
+	switch kind {
+	case config.LatencyTargetKindGlobalCDN, config.LatencyTargetKindGlobal, config.LatencyTargetKindMainlandChina:
+		return model.KeyValue("probe.latency.endpoint_kind." + kind)
+	default:
+		// Custom endpoint kinds are user configuration, not ECS-owned catalog
+		// identities, so retain their original value.
+		return model.RawValue(kind)
+	}
 }
 
 func newLatencyResult() model.Result {

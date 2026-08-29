@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/model"
 )
 
@@ -162,7 +163,7 @@ func TestIPQualitySignalsAndScoreBuckets(t *testing.T) {
 
 func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
 	bundle := ipQualityBundle{Version: "4", Origin: originAssessment{Enabled: true, Label: "probe.network.ip_type.native", UsageCountry: "US", RegisteredCountry: "US"}, Findings: map[string]qualityFinding{}}
-	for _, id := range qualitySourceOrder {
+	for _, id := range config.IPQualitySourceIDs() {
 		if id != "maxmind" {
 			bundle.Findings[id] = qualityFinding{ID: id}
 		}
@@ -198,5 +199,40 @@ func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
 	}
 	if findingValue(bundle.Findings["ipqs"], "x") != "probe.network.status.failed" || findingValue(bundle.Findings["ipsb"], "") != "probe.network.status.disabled" || findingStatus(bundle.Findings["ip2location"]) != "probe.network.status.partial" {
 		t.Fatal("finding status/value states failed")
+	}
+}
+
+func TestIPQualityTablesUseCanonicalSourceOrder(t *testing.T) {
+	bundle := ipQualityBundle{Version: "4", Origin: originAssessment{Enabled: true}, Findings: map[string]qualityFinding{}}
+	for _, id := range config.IPQualitySourceIDs() {
+		if id != "maxmind" {
+			bundle.Findings[id] = qualityFinding{ID: id, Enabled: true}
+		}
+	}
+	assertSourceRows := func(table model.Table, want []string) {
+		t.Helper()
+		if len(table.Rows) != len(want) {
+			t.Fatalf("%s row count = %d, want %d", table.Key, len(table.Rows), len(want))
+		}
+		for index, id := range want {
+			if got := table.Rows[index][0].Text(); got != networkSourceNameKey(id) {
+				t.Fatalf("%s row %d source = %q, want %q", table.Key, index, got, networkSourceNameKey(id))
+			}
+		}
+	}
+	assertSourceRows(bundle.typeTable(), []string{"ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb", "ipapicom", "ipsb"})
+	assertSourceRows(bundle.scoreTable(), []string{"ipapi", "ip2location", "abuseipdb", "scamalytics", "ipqs", "dbip"})
+	statusIDs := config.IPQualitySourceIDs()
+	assertSourceRows(bundle.statusTable(), statusIDs)
+
+	factor := bundle.factorTable()
+	wantFactors := []string{"ipinfo", "ipregistry", "ipapi", "ip2location", "scamalytics", "ipqs", "dbip", "ipdata", "ipwhois", "ipapicom"}
+	if len(factor.Columns) != len(wantFactors)+1 {
+		t.Fatalf("factor column count = %d, want %d", len(factor.Columns), len(wantFactors)+1)
+	}
+	for index, id := range wantFactors {
+		if got := factor.Columns[index+1].Key; got != id {
+			t.Fatalf("factor column %d source = %q, want %q", index, got, id)
+		}
 	}
 }

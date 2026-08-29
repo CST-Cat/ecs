@@ -74,7 +74,7 @@ ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
-JSON 保存采集后的 canonical 字段、表格和原始证据；中文或英文渲染不会改变机器数据。`render` 可用同一个 JSON 再生成另一种语言；不同报告 schema 只比较签名一致的指标，并明确标记部分可比。字段定义见 [docs/schema.md](docs/schema.md)。
+JSON 保存采集后的 canonical 字段、表格和原始证据；中文或英文渲染不会改变机器数据。`render` 可用同一个 JSON 再生成另一种语言；`compare` 只接受通过当前 `ecs.report/v1` exact loader 的 JSON，schema 不一致的报告会被拒绝。字段定义见 [docs/schema.md](docs/schema.md)。
 
 ## 配置档与模块
 

@@ -6,8 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
-	"time"
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
@@ -37,17 +35,7 @@ type planTool struct {
 }
 
 type plannedModule struct {
-	ID                  string   `json:"id"`
-	TitleKey            string   `json:"title_key"`
-	DescriptionKey      string   `json:"description_key"`
-	Exposure            string   `json:"exposure"`
-	NeedsEgressIP       bool     `json:"needs_egress_ip"`
-	Concurrency         string   `json:"concurrency"`
-	RetryOnInterference bool     `json:"retry_on_interference"`
-	RequiredTools       []string `json:"required_tools,omitempty"`
-	EstimateSeconds     int64    `json:"estimate_seconds"`
-	EstimateMode        string   `json:"estimate_mode"`
-	PrivacyNoticeKey    string   `json:"privacy_notice_key,omitempty"`
+	ID string `json:"id"`
 }
 
 type planStaging struct {
@@ -62,31 +50,7 @@ type planStaging struct {
 }
 
 func planCommand(args []string, stdout, stderr io.Writer) int {
-	filtered := make([]string, 0, len(args))
-	jsonRequested := false
-	for _, arg := range args {
-		switch arg {
-		case "--json":
-			jsonRequested = true
-		default:
-			if strings.HasPrefix(arg, "--json=") {
-				if strings.EqualFold(strings.TrimPrefix(arg, "--json="), "true") {
-					jsonRequested = true
-					continue
-				}
-				fmt.Fprintln(stderr, i18n.T("cli.error")+": "+i18n.T("err.planJSONRequired"))
-				return 1
-			}
-			filtered = append(filtered, arg)
-		}
-	}
-	if !jsonRequested {
-		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+i18n.T("err.planJSONRequired"))
-		fmt.Fprintln(stderr, i18n.T("help.planUsage"))
-		return 1
-	}
-
-	resolved, err := resolveRunConfig(filtered, stderr)
+	resolved, err := resolveRunConfig(args, stderr)
 	if err != nil {
 		var parseErr runFlagParseError
 		if errors.As(err, &parseErr) {
@@ -99,7 +63,7 @@ func planCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if resolved.Version {
-		fmt.Fprintln(stderr, i18n.T("err.planJSONRequired"))
+		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+i18n.T("err.planVersion"))
 		return 1
 	}
 	runtime := resolved.Runtime
@@ -141,17 +105,7 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 		}
 		tools := append([]string(nil), descriptor.RequiredTools...)
 		plan.Modules = append(plan.Modules, plannedModule{
-			ID:                  descriptor.ID,
-			TitleKey:            descriptor.TitleKey,
-			DescriptionKey:      descriptor.DescriptionKey,
-			Exposure:            descriptor.Exposure.String(),
-			NeedsEgressIP:       descriptor.NeedsEgressIP,
-			Concurrency:         string(descriptor.Concurrency),
-			RetryOnInterference: descriptor.RetryOnInterference,
-			RequiredTools:       tools,
-			EstimateSeconds:     int64(descriptor.Estimate / time.Second),
-			EstimateMode:        string(descriptor.EstimateMode),
-			PrivacyNoticeKey:    descriptor.PrivacyNoticeKey,
+			ID: descriptor.ID,
 		})
 		plan.NeedsEgressIP = plan.NeedsEgressIP || descriptor.NeedsEgressIP
 		for _, tool := range tools {
@@ -181,11 +135,15 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 	if plan.NeedsEgressIP {
 		plan.ExternalServices = append(plan.ExternalServices, "egress-ip-discovery")
 	}
-	for _, module := range plan.Modules {
-		if module.Exposure == config.ExposureNameThirdParty && !containsPlanValue(plan.ExternalServices, "third-party-provider") {
+	for _, id := range runtime.Modules {
+		descriptor, ok := config.ModuleDescriptorFor(id)
+		if !ok {
+			continue
+		}
+		if descriptor.Exposure == config.ExposureThirdParty && !containsPlanValue(plan.ExternalServices, "third-party-provider") {
 			plan.ExternalServices = append(plan.ExternalServices, "third-party-provider")
 		}
-		if module.ID == "ookla" && !containsPlanValue(plan.ExternalServices, "ookla") {
+		if descriptor.ID == "ookla" && !containsPlanValue(plan.ExternalServices, "ookla") {
 			plan.ExternalServices = append(plan.ExternalServices, "ookla")
 		}
 	}

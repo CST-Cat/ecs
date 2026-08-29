@@ -38,8 +38,19 @@ func TestOoklaJSONFixturesAndMeasurements(t *testing.T) {
 		values["ookla_upload_mbps"].HigherIsBetter == nil || !*values["ookla_upload_mbps"].HigherIsBetter {
 		t.Fatalf("Ookla measurement directions = %+v", values)
 	}
-	if ooklaCarrierKey("联通") != "unicom" {
-		t.Fatalf("Ookla carrier key = %q", ooklaCarrierKey("联通"))
+	for _, test := range []struct {
+		alias, want string
+	}{
+		{alias: "电信", want: "telecom"}, {alias: "telecom", want: "telecom"}, {alias: "ct", want: "telecom"}, {alias: "chinatelecom", want: "telecom"},
+		{alias: "联通", want: "unicom"}, {alias: "unicom", want: "unicom"}, {alias: "cu", want: "unicom"}, {alias: "chinaunicom", want: "unicom"},
+		{alias: "移动", want: "mobile"}, {alias: "mobile", want: "mobile"}, {alias: "cm", want: "mobile"}, {alias: "chinamobile", want: "mobile"},
+	} {
+		if got := ooklaCarrierKey(test.alias); got != test.want {
+			t.Errorf("Ookla carrier key for %q = %q, want %q", test.alias, got, test.want)
+		}
+	}
+	if key, ok := ooklaCarrierValue("auto").Key(); !ok || key != "probe.ookla.carrier.auto" {
+		t.Fatalf("Ookla automatic carrier value = %#v", ooklaCarrierValue("auto"))
 	}
 
 	partial, err := parseOoklaJSON([]byte(`{"ping":{"latency":8.5}}`))

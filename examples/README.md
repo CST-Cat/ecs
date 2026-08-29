@@ -124,7 +124,7 @@ ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
 ```
 
-跨 schema 只比较签名一致的指标，并标记部分可比；不会重新运行探针。字段定义见 [../docs/schema.md](../docs/schema.md)。
+`compare` 只接受通过当前 `ecs.report/v1` exact loader 的 JSON；schema 版本不一致的报告会被拒绝，且不会重新运行探针。字段定义见 [../docs/schema.md](../docs/schema.md)。
 
 ## 评分与提交
 

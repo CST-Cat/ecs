@@ -948,7 +948,7 @@ install_ookla() {
 }
 
 # Module selection and required tools come from the downloaded binary's
-# `plan --json` output. The wrapper does not interpret profile, only, skip,
+# `plan` output. The wrapper does not interpret profile, only, skip,
 # config, or exposure flags itself.
 PLAN_FILE="$WORK/execution.plan.json"
 PLAN_SCHEMA=""
@@ -958,19 +958,19 @@ PLAN_EXPOSURE=""
 PLAN_REVEAL=""
 PLAN_TOOLS=""
 
-# Read only the machine plan emitted by the downloaded binary. The JSON is
-# intentionally simple and stable: values extracted here are module/tool IDs,
-# not user-facing text.
+# Read only the machine plan emitted by the downloaded binary. The command's
+# sole output is JSON, intentionally simple and stable: values extracted here
+# are module/tool IDs, not user-facing text.
 load_execution_plan() {
   plan_status=0
   if [ -n "$INTERACTIVE" ]; then
-    if "${WORK}/ecs" plan --json "$@" "$INTERACTIVE" >"$PLAN_FILE"; then
+    if "${WORK}/ecs" plan "$@" "$INTERACTIVE" >"$PLAN_FILE"; then
       plan_status=0
     else
       plan_status=$?
     fi
   else
-    if "${WORK}/ecs" plan --json "$@" >"$PLAN_FILE"; then
+    if "${WORK}/ecs" plan "$@" >"$PLAN_FILE"; then
       plan_status=0
     else
       plan_status=$?

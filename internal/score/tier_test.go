@@ -40,9 +40,6 @@ func TestTierLabelsAndReferenceFallback(t *testing.T) {
 	insufficient := baseline
 	insufficient.Tiers = append([]Tier(nil), baseline.Tiers...)
 	insufficient.Tiers[0].MetricSampleCounts = map[string]int{"cpu_single": 4, "disk_seq_read": 2}
-	legacy := baseline
-	legacy.Tiers = append([]Tier(nil), baseline.Tiers...)
-	legacy.Tiers[0].MetricSampleCounts = nil
 	for _, test := range []struct {
 		name       string
 		baseline   Baseline
@@ -52,7 +49,6 @@ func TestTierLabelsAndReferenceFallback(t *testing.T) {
 		wantSample int
 	}{
 		{name: "tier metric fallback", baseline: insufficient, vcpu: 6, wantMetric: 100, wantMin: 0, wantSample: 10},
-		{name: "legacy tier fallback", baseline: legacy, vcpu: 6, wantMetric: 100, wantMin: 0, wantSample: 10},
 		{name: "missing tier fallback", baseline: baseline, vcpu: 32, wantMetric: 100, wantMin: 0, wantSample: 10},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -61,5 +57,33 @@ func TestTierLabelsAndReferenceFallback(t *testing.T) {
 				t.Fatalf("reference = %v, tier %d, samples %d", got, gotMin, gotSamples)
 			}
 		})
+	}
+}
+
+func TestMetricsForHostUsesPerMetricTierCounts(t *testing.T) {
+	baseline := Baseline{
+		SampleCount: 9,
+		Metrics:     map[string]float64{"cpu_single": 100, "cpu_multi": 300},
+		Tiers: []Tier{
+			{
+				VCPUMin: 4, SampleCount: 5,
+				Metrics:            map[string]float64{"cpu_single": 200, "cpu_multi": 600},
+				MetricSampleCounts: map[string]int{"cpu_single": 5, "cpu_multi": 4},
+			},
+			{
+				VCPUMin: 8, SampleCount: 4,
+				Metrics:            map[string]float64{"cpu_single": 400},
+				MetricSampleCounts: map[string]int{"cpu_single": 4},
+			},
+		},
+	}
+
+	active, activeMin, activeSamples := baseline.MetricsForHost(4)
+	if activeMin != 4 || activeSamples != 5 || active["cpu_single"] != 200 || active["cpu_multi"] != 300 {
+		t.Fatalf("active per-metric tier = %v, tier=%d samples=%d", active, activeMin, activeSamples)
+	}
+	fallback, fallbackMin, fallbackSamples := baseline.MetricsForHost(8)
+	if fallbackMin != 0 || fallbackSamples != 9 || fallback["cpu_single"] != 100 || fallback["cpu_multi"] != 300 {
+		t.Fatalf("fallback per-metric tier = %v, tier=%d samples=%d", fallback, fallbackMin, fallbackSamples)
 	}
 }

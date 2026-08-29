@@ -183,8 +183,6 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 		}
 	}
 	if len(mounts) == 0 {
-		result.Notes = append(result.Notes,
-			"未发现系统盘之外可测的挂载点（已排除 tmpfs 等内存盘、只读挂载与不可写目录）。")
 		return
 	}
 
@@ -202,34 +200,31 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 		RowIdentity: "mount_path",
 	}
 	engine := detectFIOEngine(ctx, fioPath)
-	tested := 0
 	for _, mount := range mounts {
 		if ctx.Err() != nil {
 			break
 		}
 		sample, err := runMultiDiskFIO(ctx, fioPath, mount.Path, engine)
 		if err != nil {
+			result.Status = model.StatusWarning
+			addFailure(result, "multidisk_run", mount.Path, err)
 			row := []model.Value{
-				model.RawValue(mount.Path), model.RawValue(mount.Device), model.RawValue(mount.FSType), model.RawValue("—"), model.RawValue("—"), model.RawValue("失败：" + compactError(err)),
+				model.RawValue(mount.Path), model.RawValue(mount.Device), model.RawValue(mount.FSType), model.RawValue("—"), model.RawValue("—"), model.KeyValue(diskTableStatusKey(table.Key, false)),
 			}
-			row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
 			table.Rows = append(table.Rows, row)
 			continue
 		}
-		tested++
 		writeAvailable := isPositiveFinite(sample.WriteMiB)
 		readAvailable := isPositiveFinite(sample.ReadIOPS)
 		row := []model.Value{
 			model.RawValue(mount.Path), model.RawValue(mount.Device), model.RawValue(mount.FSType),
 			model.RawValue(formatMatrixRate(sample.WriteMiB, "MiB/s")),
 			model.RawValue(formatMatrixRate(sample.ReadIOPS, "IOPS")),
-			model.RawValue("完成"),
+			model.KeyValue(diskTableStatusKey(table.Key, writeAvailable && readAvailable)),
 		}
-		row[len(row)-1] = model.KeyValue(diskTableStatusKey(table.Key, row))
 		table.Rows = append(table.Rows, row)
 		if !writeAvailable || !readAvailable {
 			result.Status = model.StatusWarning
-			result.Notes = append(result.Notes, "多盘 fio 的一个或多个挂载点只返回部分统计；缺失项不补零。")
 		}
 		key := strings.NewReplacer("/", "_", ".", "_", "-", "_").Replace(strings.TrimPrefix(mount.Path, "/"))
 		if key == "" {
@@ -254,10 +249,6 @@ func appendMultiDiskResults(ctx context.Context, result *model.Result, env Envir
 	if len(table.Rows) > 0 {
 		result.Tables = append(result.Tables, table)
 	}
-	result.Notes = append(result.Notes, fmt.Sprintf(
-		"额外测试了 %d 个挂载点，使用简化作业集（顺序写 + 4K 随机读，各 3 秒），"+
-			"数值不与主盘的完整矩阵混比；tmpfs 等内存盘已排除，测它们得到的是内存带宽而非磁盘性能。",
-		tested))
 }
 
 // multiDiskSample 是简化作业集的结果。

@@ -74,10 +74,11 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 	reports := make([]model.Report, 0, len(paths))
 	labels := make([]string, 0, len(paths))
 	for _, path := range paths {
-		// Compare has exactly one input contract: an ECS JSON report. The file
-		// extension is only a label; validity is decided by the JSON report
-		// loader, and Markdown/HTML presentation artifacts are never parsed back.
-		data, loadErr := reporter.LoadJSONForComparison(path)
+		// Compare has exactly one input contract: a current-schema ECS JSON
+		// report. The file extension is only a label; validity is decided by the
+		// exact JSON report loader, and Markdown/HTML presentation artifacts are
+		// never parsed back.
+		data, loadErr := reporter.LoadJSON(path)
 		if loadErr != nil {
 			fmt.Fprintf(stderr, "%s: %s: %v\n", i18n.T("cli.error"), path, loadErr)
 			return 1

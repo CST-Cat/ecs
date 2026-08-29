@@ -49,12 +49,12 @@ func TestFIOParserAndLatency(t *testing.T) {
 	}
 	partial := model.NewResult("disk", "disk")
 	appendFIOQD1LatencyMeasurements(&partial, map[string]fioJob{fioQD1LatencyJobName: {Read: fioDirection{ClatNS: fioClat{Mean: 1000000}}}})
-	if len(partial.Measurements) != 1 || partial.Status != model.StatusWarning || len(partial.Notes) != 1 || !strings.Contains(partial.Notes[0], "3 项") {
+	if len(partial.Measurements) != 1 || partial.Status != model.StatusWarning {
 		t.Fatalf("partial QD1 latency = %+v", partial)
 	}
 	missing := model.NewResult("disk", "disk")
 	appendFIOQD1LatencyMeasurements(&missing, map[string]fioJob{})
-	if missing.Status != model.StatusWarning || len(missing.Notes) != 1 {
+	if missing.Status != model.StatusWarning {
 		t.Fatalf("missing QD1 latency = %+v", missing)
 	}
 }
@@ -90,7 +90,7 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	}
 	partial := model.NewResult("disk", "disk")
 	appendFIOMixedResults(&partial, fullPlan, map[string]fioJob{"mix4k": {Name: "mix4k", Read: fullJobs["mix4k"].Read}}, 64)
-	if partial.Status != model.StatusWarning || partial.Tables[0].Rows[0][5].Text() != "—" || len(partial.Notes) == 0 {
+	if partial.Status != model.StatusWarning || partial.Tables[0].Rows[0][5].Text() != "—" {
 		t.Fatalf("partial mixed matrix = %+v", partial)
 	}
 

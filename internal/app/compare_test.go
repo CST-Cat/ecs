@@ -102,6 +102,15 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("not json\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	legacyContent, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyContent = bytes.Replace(legacyContent, []byte(buildinfo.SchemaVersion), []byte("ecs.report/v2"), 1)
+	legacy := filepath.Join(root, "legacy.json")
+	if err := os.WriteFile(legacy, legacyContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	outputFile := filepath.Join(root, "output-file")
 	if err := os.WriteFile(outputFile, []byte("occupied"), 0o600); err != nil {
 		t.Fatal(err)
@@ -127,6 +136,11 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 			name:   "load JSON",
 			args:   []string{"compare", bad, second, "--lang", "en", "--format", "json"},
 			marker: "error:",
+		},
+		{
+			name:   "historical schema",
+			args:   []string{"compare", legacy, second, "--lang", "en", "--format", "json"},
+			marker: "unsupported schema_version",
 		},
 		{
 			name:   "invalid reference",

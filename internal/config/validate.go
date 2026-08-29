@@ -65,18 +65,11 @@ func Validate(runtime Runtime) error {
 			return i18n.Errorf("err.unknownFormat", format)
 		}
 	}
-	allowedIPSources := map[string]bool{
-		"all": true, "none": true, "maxmind": true, "ipinfo": true,
-		"ipregistry": true, "ipapi": true, "ip2location": true,
-		"abuseipdb": true, "scamalytics": true, "ipqs": true,
-		"dbip": true, "ipdata": true, "ipwhois": true,
-		"ipapicom": true, "ipsb": true,
-	}
 	if len(runtime.IPQualitySources) == 0 {
 		return i18n.Errorf("err.ipSourceEmpty")
 	}
 	for _, source := range runtime.IPQualitySources {
-		if !allowedIPSources[source] {
+		if source != "all" && source != "none" && !IsIPQualitySource(source) {
 			return i18n.Errorf("err.ipSourceUnknown", source)
 		}
 	}
@@ -129,7 +122,7 @@ func Validate(runtime Runtime) error {
 	}
 	seenOoklaCarriers := make(map[string]bool)
 	for _, server := range runtime.OoklaServers {
-		if server.Carrier != "电信" && server.Carrier != "联通" && server.Carrier != "移动" {
+		if server.Carrier != OoklaCarrierTelecom && server.Carrier != OoklaCarrierUnicom && server.Carrier != OoklaCarrierMobile {
 			return i18n.Errorf("err.ooklaCarrierField", server.Carrier)
 		}
 		if server.ID < 1 || server.ID > 99999999 {
