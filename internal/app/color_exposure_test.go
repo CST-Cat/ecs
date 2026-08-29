@@ -54,15 +54,41 @@ func TestRunRejectsInvalidColorAndExposureAtCLIEntry(t *testing.T) {
 	}
 }
 
-func TestRunHelpRejectsInvalidColorBeforeEarlyReturn(t *testing.T) {
+func TestRunHelpUsesFlagSetParseResultBeforeColorValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"run", "--lang", "en", "--help", "--color=terminal-magic"},
 		{"run", "--lang", "en", "--help", "--no-color", "--color=terminal-magic"},
 	} {
 		status, stdout, stderr := invokeAppMain(args...)
-		if status == 0 || stdout != "" || !strings.Contains(stderr, "invalid terminal color mode") {
-			t.Fatalf("invalid run help color args=%v status=%d stdout=%q stderr=%q", args, status, stdout, stderr)
+		if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run]") || strings.Contains(stderr, "invalid terminal color mode") {
+			t.Fatalf("run help parse result args=%v status=%d stdout=%q stderr=%q", args, status, stdout, stderr)
 		}
+	}
+}
+
+func TestRunReportsFlagParseErrorWithoutSecondaryColorValidation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		args   []string
+		marker string
+	}{
+		{
+			name:   "unknown flag after invalid color",
+			args:   []string{"run", "--lang", "en", "--color=terminal-magic", "--unknown"},
+			marker: "flag provided but not defined: -unknown",
+		},
+		{
+			name:   "missing color value",
+			args:   []string{"run", "--lang", "en", "--color"},
+			marker: "flag needs an argument: -color",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) || strings.Contains(stderr, "invalid terminal color mode") {
+				t.Fatalf("run parse error args=%v status=%d stdout=%q stderr=%q", test.args, status, stdout, stderr)
+			}
+		})
 	}
 }
 
@@ -99,15 +125,36 @@ func TestCompareRejectsInvalidColorBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestCompareHelpRejectsInvalidColorBeforeEarlyReturn(t *testing.T) {
+func TestCompareHelpUsesFlagSetParseResultBeforeColorValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"compare", "--help", "--color=terminal-magic"},
-		{"compare", "--help", "--no-color", "--color=terminal-magic"},
+		{"compare", "--lang", "en", "--help", "--color=terminal-magic"},
+		{"compare", "--lang", "en", "--help", "--no-color", "--color=terminal-magic"},
 	} {
 		status, stdout, stderr := invokeAppMain(args...)
-		if status == 0 || stdout != "" || !strings.Contains(stderr, "invalid terminal color mode") {
-			t.Fatalf("invalid compare help color args=%v status=%d stdout=%q stderr=%q", args, status, stdout, stderr)
+		if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs compare") || strings.Contains(stderr, "invalid terminal color mode") {
+			t.Fatalf("compare help parse result args=%v status=%d stdout=%q stderr=%q", args, status, stdout, stderr)
 		}
+	}
+}
+
+func TestCompareReportsFlagParseErrorWithoutSecondaryColorValidation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		args   []string
+		marker string
+	}{
+		{
+			name:   "unknown flag after invalid color",
+			args:   []string{"compare", "--lang", "en", "--color=terminal-magic", "--unknown"},
+			marker: "flag provided but not defined: -unknown",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) || strings.Contains(stderr, "invalid terminal color mode") {
+				t.Fatalf("compare parse error args=%v status=%d stdout=%q stderr=%q", test.args, status, stdout, stderr)
+			}
+		})
 	}
 }
 

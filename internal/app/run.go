@@ -26,10 +26,6 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if err != nil {
 		var parseErr runFlagParseError
 		if errors.As(err, &parseErr) {
-			if colorErr := validateExplicitTerminalColorArgs(args); colorErr != nil {
-				fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
-				return 1
-			}
 			if errors.Is(err, flag.ErrHelp) {
 				return 0
 			}
@@ -137,29 +133,6 @@ func resolveTerminalColor(raw string, noColor bool, out io.Writer) (termcolor.Le
 
 func invalidTerminalColorError(raw string) error {
 	return fmt.Errorf("invalid terminal color mode %q; choose auto, none, basic, 256, truecolor, or always", raw)
-}
-
-func validateExplicitTerminalColorArgs(args []string) error {
-	for index := 0; index < len(args); index++ {
-		if args[index] == "--" {
-			break
-		}
-		name, value, hasValue := splitEarlyFlag(args[index])
-		if name != "color" {
-			continue
-		}
-		if !hasValue {
-			if index+1 >= len(args) || args[index+1] == "--" || strings.HasPrefix(args[index+1], "-") {
-				return invalidTerminalColorError("")
-			}
-			value = args[index+1]
-			index++
-		}
-		if _, err := resolveTerminalColor(value, false, io.Discard); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func writerIsTerminal(writer io.Writer) bool {
