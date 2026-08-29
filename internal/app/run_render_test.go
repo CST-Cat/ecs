@@ -53,7 +53,7 @@ func TestRenderWritesRequestedFormats(t *testing.T) {
 	input := writeAppRenderReport(t, root)
 	output := filepath.Join(root, "out")
 	status, stdout, stderr := invokeAppMain(
-		"render", "--lang", "en", "--input", input, "--output", output,
+		"--lang", "en", "render", "--input", input, "--output", output,
 		"--format", "json,md,html",
 	)
 	if status != 0 || stderr != "" {
@@ -93,7 +93,7 @@ func TestRenderLoadsScoreBaseline(t *testing.T) {
 	}
 	output := filepath.Join(root, "out")
 	status, stdout, stderr := invokeAppMain(
-		"render", "--lang", "en", "--input", input, "--score-baseline", baselinePath,
+		"--lang", "en", "render", "--input", input, "--score-baseline", baselinePath,
 		"--output", output, "--format", "json",
 	)
 	if status != 0 || stderr != "" {
@@ -223,46 +223,46 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 	}{
 		{
 			name:   "flag parse",
-			args:   func(string, string, string, string) []string { return []string{"render", "--lang", "en", "--unknown"} },
+			args:   func(string, string, string, string) []string { return []string{"--lang", "en", "render", "--unknown"} },
 			marker: "flag provided but not defined",
 		},
 		{
 			name: "color flag parse",
 			args: func(string, string, string, string) []string {
-				return []string{"render", "--lang", "en", "--color", "none"}
+				return []string{"--lang", "en", "render", "--color", "none"}
 			},
 			marker: "flag provided but not defined: -color",
 		},
 		{
 			name:   "input required",
-			args:   func(string, string, string, string) []string { return []string{"render", "--lang", "en"} },
+			args:   func(string, string, string, string) []string { return []string{"--lang", "en", "render"} },
 			marker: "error: --input is required",
 		},
 		{
 			name: "load JSON",
 			args: func(_, badInput, _, _ string) []string {
-				return []string{"render", "--lang", "en", "--input", badInput}
+				return []string{"--lang", "en", "render", "--input", badInput}
 			},
 			marker: "error:",
 		},
 		{
 			name: "baseline load",
 			args: func(input, _, badBaseline, _ string) []string {
-				return []string{"render", "--lang", "en", "--input", input, "--score-baseline", badBaseline}
+				return []string{"--lang", "en", "render", "--input", input, "--score-baseline", badBaseline}
 			},
 			marker: "read scoring leaderboard reference",
 		},
 		{
 			name: "unsupported format",
 			args: func(input, _, _, _ string) []string {
-				return []string{"render", "--lang", "en", "--input", input, "--format", "txt"}
+				return []string{"--lang", "en", "render", "--input", input, "--format", "txt"}
 			},
 			marker: `unknown report format "txt"`,
 		},
 		{
 			name: "output directory",
 			args: func(input, _, _, output string) []string {
-				return []string{"render", "--lang", "en", "--input", input, "--output", output, "--format", "json"}
+				return []string{"--lang", "en", "render", "--input", input, "--output", output, "--format", "json"}
 			},
 			marker: "create output directory",
 		},

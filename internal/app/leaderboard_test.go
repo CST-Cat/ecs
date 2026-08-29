@@ -78,7 +78,7 @@ func TestLeaderboardCommandsWriteReadableResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "leaderboard.json")
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--source", "fixture", "--output", output, previousPath, input)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--source", "fixture", "--output", output, previousPath, input)
 	if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
 		t.Fatalf("leaderboard status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -105,7 +105,7 @@ func TestLeaderboardCommandsWriteReadableResults(t *testing.T) {
 			inputs = append(inputs, writeOutlierSubmissionFixture(t, filepath.Join(root, fmt.Sprintf("submission-%d.json", index)), value, multi))
 		}
 		output := filepath.Join(root, "annotated.json")
-		args := []string{"leaderboard", "--lang", "en", "--source", "fixture", "--annotate", "--verbose", "--output", output}
+		args := []string{"--lang", "en", "leaderboard", "--source", "fixture", "--annotate", "--verbose", "--output", output}
 		args = append(args, inputs...)
 		status, stdout, stderr := invokeAppMain(args...)
 		if status != 0 || stderr != "" || !strings.Contains(stdout, "Outlier notices:") ||
@@ -125,7 +125,7 @@ func TestLeaderboardDeduplicatesRepeatedPath(t *testing.T) {
 	input := writeLeaderboardReport(t, filepath.Join(root, "a.json"), "path-repeat", 100)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, input, input)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, input, input)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate") {
 		t.Fatalf("repeated path status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -147,7 +147,7 @@ func TestLeaderboardDeduplicatesDirectoryAndFilePath(t *testing.T) {
 	input := writeLeaderboardReport(t, filepath.Join(reports, "a.json"), "directory-repeat", 100)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, reports, input)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, reports, input)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate") {
 		t.Fatalf("directory and file status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -189,7 +189,7 @@ func TestLeaderboardDeduplicatesReportAndSubmissionBySampleID(t *testing.T) {
 	output := filepath.Join(root, "baseline.json")
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--output", output, fullPath, submissionPath,
+		"--lang", "en", "leaderboard", "--output", output, fullPath, submissionPath,
 	)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate sample") {
 		t.Fatalf("cross-artifact duplicate status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -222,7 +222,7 @@ func TestLeaderboardStrictRejectsCrossArtifactDuplicateSample(t *testing.T) {
 	output := filepath.Join(root, "baseline.json")
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--strict", "--output", output, fullPath, submissionPath,
+		"--lang", "en", "leaderboard", "--strict", "--output", output, fullPath, submissionPath,
 	)
 	if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "strict mode rejected") || !strings.Contains(strings.ToLower(stderr), "duplicate sample") {
 		t.Fatalf("strict cross-artifact duplicate status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -239,7 +239,7 @@ func TestLeaderboardDeduplicatesFullReportsByRunIDAndPreservesMean(t *testing.T)
 	second := writeLeaderboardReport(t, filepath.Join(root, "b.json"), "different-run", 300)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, first, copy, second)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, first, copy, second)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate") {
 		t.Fatalf("duplicate Run.ID status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -271,7 +271,7 @@ func TestLeaderboardStrictRejectsDuplicatesWithoutWriting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "baseline.json")
-			args := []string{"leaderboard", "--lang", "en", "--strict", "--output", output}
+			args := []string{"--lang", "en", "leaderboard", "--strict", "--output", output}
 			args = append(args, test.inputs...)
 			status, stdout, stderr := invokeAppMain(args...)
 			if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "duplicate") {
@@ -290,7 +290,7 @@ func TestLeaderboardKeepsDifferentRunIDsEvenWhenContentMatches(t *testing.T) {
 	second := writeLeaderboardReport(t, filepath.Join(root, "b.json"), "run-two", 250)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, first, second)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, first, second)
 	if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
 		t.Fatalf("different Run.ID status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -316,7 +316,7 @@ func TestLeaderboardKeepsDifferentSubmissionSampleIDsWithSameContent(t *testing.
 	second := writeLeaderboardSubmission(t, filepath.Join(root, "second.json"), secondReport)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, first, second)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, first, second)
 	if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
 		t.Fatalf("different submission samples status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -338,7 +338,7 @@ func TestLeaderboardRejectsEmptyRunID(t *testing.T) {
 			root := t.TempDir()
 			input := writeLeaderboardReport(t, filepath.Join(root, "empty-run.json"), "", 100)
 			output := filepath.Join(root, "baseline.json")
-			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			args := []string{"--lang", "en", "leaderboard", "--output", output}
 			if strict {
 				args = append(args, "--strict")
 			}
@@ -378,7 +378,7 @@ func TestLeaderboardKeepsSubmissionIDDeduplication(t *testing.T) {
 	unique := writeLeaderboardSubmission(t, filepath.Join(root, "unique.json"), uniqueReport)
 	output := filepath.Join(root, "baseline.json")
 
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, first, first, duplicate, unique)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, first, first, duplicate, unique)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate") {
 		t.Fatalf("duplicate submission status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -395,14 +395,14 @@ func TestLeaderboardKeepsSubmissionIDDeduplication(t *testing.T) {
 }
 
 func TestLeaderboardHelp(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--help")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--help")
 	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs leaderboard") {
 		t.Fatalf("leaderboard help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }
 
 func TestLeaderboardRejectsUnknownFlag(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--unknown")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--unknown")
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
 		t.Fatalf("leaderboard unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}

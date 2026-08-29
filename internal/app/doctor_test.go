@@ -71,7 +71,7 @@ func installDoctorFixtures(t *testing.T, broken string, optional ...string) {
 func TestDoctorReportsMissingRequiredTools(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	var output strings.Builder
-	status := Main(context.Background(), []string{"doctor", "--lang", "en"}, &output, &strings.Builder{})
+	status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 	if status != 2 || !strings.Contains(output.String(), "ecs standard benchmark dependencies") ||
 		!strings.Contains(output.String(), "missing") {
 		t.Fatalf("doctor missing-required status=%d output=%q", status, output.String())
@@ -81,7 +81,7 @@ func TestDoctorReportsMissingRequiredTools(t *testing.T) {
 func TestDoctorReportsReadyWithLocalFixtures(t *testing.T) {
 	installDoctorFixtures(t, "")
 	var output strings.Builder
-	status := Main(context.Background(), []string{"doctor", "--lang", "en"}, &output, &strings.Builder{})
+	status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 	text := output.String()
 	if status != 0 || !strings.Contains(text, "Standard performance tools are ready.") ||
 		!strings.Contains(text, "optional") {
@@ -103,7 +103,7 @@ func TestDoctorReportsToolVersionFailure(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			installDoctorFixtures(t, test.broken)
 			var output strings.Builder
-			status := Main(context.Background(), []string{"doctor", "--lang", "en"}, &output, &strings.Builder{})
+			status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 			text := output.String()
 			if status != 2 || !strings.Contains(text, test.broken) || !strings.Contains(text, "version unknown") {
 				t.Fatalf("doctor %s failure status=%d output=%q", test.broken, status, text)
@@ -115,7 +115,7 @@ func TestDoctorReportsToolVersionFailure(t *testing.T) {
 func TestDoctorReportsOptionalToolVersionFailureWithoutBlocking(t *testing.T) {
 	installDoctorFixtures(t, "ping", "ping")
 	var output strings.Builder
-	status := Main(context.Background(), []string{"doctor", "--lang", "en"}, &output, &strings.Builder{})
+	status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 	text := output.String()
 	if status != 0 || !strings.Contains(text, "ping") || !strings.Contains(text, "optional") || !strings.Contains(text, "version unknown") {
 		t.Fatalf("doctor optional failure status=%d output=%q", status, text)

@@ -21,7 +21,7 @@ func TestLeaderboardRegressionDeduplicatesPathsAndRunIDsWithStatistics(t *testin
 	output := filepath.Join(root, "baseline.json")
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--output", output,
+		"--lang", "en", "leaderboard", "--output", output,
 		first, copy, first, unique,
 	)
 	if status != 0 || !strings.Contains(stdout, "written") {
@@ -91,7 +91,7 @@ func TestLeaderboardRegressionAcceptsMixedCurrentReportAndSubmissionBySchema(t *
 	}
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--output", output, fullPath, submissionPath,
+		"--lang", "en", "leaderboard", "--output", output, fullPath, submissionPath,
 	)
 	if status != 0 || stdout == "" || stderr != "" {
 		t.Fatalf("mixed input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -171,7 +171,7 @@ func TestLeaderboardRegressionReportsSchemaSpecificInputDiagnostics(t *testing.T
 						t.Fatal(err)
 					}
 					output := filepath.Join(root, "baseline.json")
-					args := []string{"leaderboard", "--lang", "en", "--output", output}
+					args := []string{"--lang", "en", "leaderboard", "--output", output}
 					if strict {
 						args = append(args, "--strict")
 					}
@@ -214,7 +214,7 @@ func TestLeaderboardRegressionDoesNotParsePresentationInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(root, "baseline.json")
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, validReport, presentation)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, validReport, presentation)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(stderr, "Skipped") ||
 		!strings.Contains(stderr, "read ECS artifact schema envelope") {
 		t.Fatalf("presentation input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -243,7 +243,7 @@ func TestLeaderboardRegressionReportsActiveAndFallbackStatistics(t *testing.T) {
 	}
 	output := filepath.Join(root, "baseline.json")
 
-	args := []string{"leaderboard", "--lang", "en", "--output", output}
+	args := []string{"--lang", "en", "leaderboard", "--output", output}
 	args = append(args, inputs...)
 	status, stdout, stderr := invokeAppMain(args...)
 	if status != 0 || stderr != "" {
@@ -321,7 +321,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("fixture did not produce both outlier states: %+v", expected)
 	}
 	output := filepath.Join(root, "baseline.json")
-	args := []string{"leaderboard", "--lang", "en", "--annotate", "--verbose", "--output", output}
+	args := []string{"--lang", "en", "leaderboard", "--annotate", "--verbose", "--output", output}
 	args = append(args, inputs...)
 	status, stdout, stderr := invokeAppMain(args...)
 	if status != 0 || stderr != "" {
@@ -362,7 +362,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 	}
 
 	zhOutput := filepath.Join(root, "zh-baseline.json")
-	zhArgs := []string{"leaderboard", "--lang", "zh", "--annotate", "--verbose", "--output", zhOutput}
+	zhArgs := []string{"--lang", "zh", "leaderboard", "--annotate", "--verbose", "--output", zhOutput}
 	zhArgs = append(zhArgs, inputs...)
 	zhStatus, zhStdout, zhStderr := invokeAppMain(zhArgs...)
 	if zhStatus != 0 || zhStderr != "" {
@@ -432,7 +432,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 	run := func(name string, inputs []string) {
 		t.Helper()
 		output := filepath.Join(root, name+"-baseline.json")
-		args := []string{"leaderboard", "--lang", "en", "--annotate", "--verbose", "--output", output}
+		args := []string{"--lang", "en", "leaderboard", "--annotate", "--verbose", "--output", output}
 		args = append(args, inputs...)
 		status, stdout, stderr := invokeAppMain(args...)
 		if status != 0 || stderr != "" {
@@ -511,7 +511,7 @@ func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := filepath.Join(root, "baseline.json")
-			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			args := []string{"--lang", "en", "leaderboard", "--output", output}
 			if test.strict {
 				args = append(args, "--strict")
 			}

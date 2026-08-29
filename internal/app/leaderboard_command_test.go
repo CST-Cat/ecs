@@ -25,7 +25,7 @@ func TestLeaderboardStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "baseline.json")
-			args := append([]string{"leaderboard", "--lang", "en", "--strict", "--output", output}, test.input...)
+			args := append([]string{"--lang", "en", "leaderboard", "--strict", "--output", output}, test.input...)
 			status, stdout, stderr := invokeAppMain(args...)
 			if status != 1 || stdout != "" || !strings.Contains(stderr, "strict mode rejected") {
 				t.Fatalf("strict input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -56,14 +56,14 @@ func TestLeaderboardInputStates(t *testing.T) {
 	}{
 		{
 			name:       "no input",
-			args:       func(output string) []string { return []string{"--lang", "en", "--output", output} },
+			args:       func(output string) []string { return []string{"--output", output} },
 			wantStatus: 1,
 			markers:    []string{"at least one report file"},
 		},
 		{
 			name: "nonstrict skips bad report",
 			args: func(output string) []string {
-				return []string{"--lang", "en", "--output", output, valid, bad}
+				return []string{"--output", output, valid, bad}
 			},
 			markers:  []string{"Skipped"},
 			checkOut: true,
@@ -71,14 +71,14 @@ func TestLeaderboardInputStates(t *testing.T) {
 		{
 			name: "nonstrict skips duplicate submission",
 			args: func(output string) []string {
-				return []string{"--lang", "en", "--output", output, firstSubmission, secondSubmission}
+				return []string{"--output", output, firstSubmission, secondSubmission}
 			},
 			markers:  []string{"Skipped"},
 			checkOut: true,
 		},
 		{
 			name:       "no usable report",
-			args:       func(output string) []string { return []string{"--lang", "en", "--output", output, noMetrics} },
+			args:       func(output string) []string { return []string{"--output", output, noMetrics} },
 			wantStatus: 1,
 			markers:    []string{"Skipped", "no scoreable measurements", "no usable report files"},
 		},
@@ -86,7 +86,7 @@ func TestLeaderboardInputStates(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "baseline.json")
-			status, stdout, stderr := invokeAppMain(append([]string{"leaderboard"}, test.args(output)...)...)
+			status, stdout, stderr := invokeAppMain(append([]string{"--lang", "en", "leaderboard"}, test.args(output)...)...)
 			if status != test.wantStatus {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
@@ -107,7 +107,7 @@ func TestLeaderboardInputStates(t *testing.T) {
 func TestLeaderboardReportsOutputWriteFailure(t *testing.T) {
 	input := writeBaselineReport(t, "report.json", submitTestReport())
 	outputDirectory := t.TempDir()
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", outputDirectory, input)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", outputDirectory, input)
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "is a directory") {
 		t.Fatalf("leaderboard output failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}

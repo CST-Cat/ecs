@@ -12,21 +12,15 @@ import (
 )
 
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	languageFlags := scanEarlyFlags(args, "lang")
-	command, commandArgs := dispatchCommand(args, languageFlags)
-	earlyLanguageFlags := languageFlags
-	if command == "run" || command == "plan" {
-		earlyLanguageFlags = runLikeInitialLanguageFlags(args, languageFlags)
-	}
+	languageFlags, commandLine := globalLanguagePrefix(args)
 	// 语言要在任何输出之前定下来：帮助文本、错误信息都要用它。
 	// 显式 --lang 优先，其次看环境变量，最后回落中文。
-	i18n.Set(resolveLanguage(earlyLanguageFlags))
-	if command != "run" && command != "plan" {
-		if err := validateExplicitLanguage(languageFlags); err != nil {
-			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
-			return 1
-		}
+	i18n.Set(resolveLanguage(languageFlags))
+	if err := validateExplicitLanguage(languageFlags); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
 	}
+	command, commandArgs := dispatchCommand(commandLine)
 	switch command {
 	case "run":
 		return runCommand(ctx, commandArgs, stdout, stderr)
@@ -59,86 +53,25 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func leadingLanguageFlags(occurrences []earlyFlagOccurrence) []earlyFlagOccurrence {
-	// This only filters occurrences already found by the global-language scan;
-	// it does not interpret any command-specific option.
-	var leading []earlyFlagOccurrence
-	position := 0
-	for _, occurrence := range occurrences {
-		if occurrence.Position != position {
-			break
-		}
-		leading = append(leading, occurrence)
-		position = occurrence.End
-	}
-	return leading
-}
-
-func runLikeInitialLanguageFlags(args []string, occurrences []earlyFlagOccurrence) []earlyFlagOccurrence {
-	leading := leadingLanguageFlags(occurrences)
-	position := 0
-	if len(leading) > 0 {
-		position = leading[len(leading)-1].End
-	}
-	if position >= len(args) || args[position] == "--" || strings.HasPrefix(args[position], "-") {
-		return leading
-	}
-
-	// A language flag immediately follows an explicit run-like command before
-	// any command option. It is safe to use for help localization; all later
-	// occurrences remain with the real FlagSet, which owns their grammar.
-	next := position + 1
-	initial := append([]earlyFlagOccurrence(nil), leading...)
-	for _, occurrence := range occurrences {
-		if occurrence.Position < next {
-			continue
-		}
-		if occurrence.Position != next {
-			break
-		}
-		initial = append(initial, occurrence)
-		next = occurrence.End
-	}
-	return initial
-}
-
-// dispatchCommand accepts the global language flag on either side of a
-// command. Run-like commands receive language occurrences unchanged so their
-// real FlagSet owns option/value ambiguity; other command parsers receive an
-// argv with global language flags removed. A non-language option before a
-// command still means the default run command; its value must not be mistaken
-// for a command name.
-func dispatchCommand(args []string, languageFlags []earlyFlagOccurrence) (string, []string) {
-	leading := leadingLanguageFlags(languageFlags)
-	position := 0
-	if len(leading) > 0 {
-		position = leading[len(leading)-1].End
-	}
-	commandFound := position < len(args) && args[position] != "--" && !strings.HasPrefix(args[position], "-")
-	if !commandFound {
+// dispatchCommand sees argv only after the global prefix has been removed. A
+// leading option still selects the default run command, whose FlagSet owns the
+// complete run grammar.
+func dispatchCommand(args []string) (string, []string) {
+	if len(args) == 0 || args[0] == "--" || strings.HasPrefix(args[0], "-") {
 		return "run", args
 	}
-	command := args[position]
-	if command == "run" || command == "plan" {
-		commandArgs := make([]string, 0, len(args)-1)
-		commandArgs = append(commandArgs, args[:position]...)
-		commandArgs = append(commandArgs, args[position+1:]...)
-		return command, commandArgs
-	}
-
-	cleaned := stripExplicitLanguage(args, languageFlags)
-	return command, cleaned[1:]
+	return args[0], args[1:]
 }
 
 // resolveLanguage 在解析命令前先从已扫描的 occurrences 取出 --lang。
 //
 // flag 包要等到子命令解析时才能拿到值，但帮助与错误输出比那更早，
 // 因此这里先扫一遍参数。
-func resolveLanguage(occurrences []earlyFlagOccurrence) i18n.Lang {
+func resolveLanguage(occurrences []languageFlagOccurrence) i18n.Lang {
 	var resolved i18n.Lang
 	valid := false
 	for _, occurrence := range occurrences {
-		if !occurrence.HasValue || strings.TrimSpace(occurrence.Value) == "" {
+		if occurrence.Missing || strings.TrimSpace(occurrence.Value) == "" {
 			continue
 		}
 		if lang, ok := i18n.Parse(occurrence.Value); ok {
@@ -152,7 +85,7 @@ func resolveLanguage(occurrences []earlyFlagOccurrence) i18n.Lang {
 	return i18n.DetectFromEnv()
 }
 
-func validateExplicitLanguage(occurrences []earlyFlagOccurrence) error {
+func validateExplicitLanguage(occurrences []languageFlagOccurrence) error {
 	if len(occurrences) == 0 {
 		return nil
 	}

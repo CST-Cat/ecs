@@ -118,7 +118,7 @@ ecs --color always
 
 ```sh
 ecs render --input reports/ecs-report-20260813-075451.json --format html,md
-ecs render --input 报告.json --output /tmp/out --name 改个名 --lang en
+ecs --lang en render --input 报告.json --output /tmp/out --name 改个名
 ecs compare 昨天.json 今天.json
 ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./compare
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
