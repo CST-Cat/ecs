@@ -178,7 +178,7 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 		}
 		targets = append(targets, IPerfEndpoint{
 			Name: name, Host: host, PortStart: start, PortEnd: end,
-			Location: "命令行指定", Networks: networks, Region: "custom",
+			Networks: networks, Region: "custom",
 		})
 	}
 	return targets, nil

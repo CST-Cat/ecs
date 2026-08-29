@@ -2,13 +2,17 @@ package report
 
 import (
 	"bytes"
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/probe"
 	"ecs/internal/termcolor"
 )
 
@@ -95,7 +99,7 @@ func loadMachineLocaleReportFixture(t *testing.T) (model.Report, []byte) {
 		t.Fatalf("canonical machine JSON: %v", err)
 	}
 	for _, forbidden := range []string{
-		`"grade"`, `"offline"`, `"headers"`, `"column_keys"`, "中国大陆", "电信", "双 IP", "上传", "下载",
+		`"grade"`, `"offline"`, `"headers"`, `"column_keys"`, "中国大陆", "电信", "双 IP", "上传", "下载", "命令行指定",
 	} {
 		if bytes.Contains(canonical, []byte(forbidden)) {
 			t.Fatalf("canonical machine JSON contains forbidden derived/localized fact %q:\n%s", forbidden, canonical)
@@ -119,6 +123,111 @@ func loadMachineLocaleReportFixture(t *testing.T) (model.Report, []byte) {
 		t.Fatalf("LoadJSON changed canonical machine facts:\nbefore=%s\nafter=%s", canonical, roundTrip)
 	}
 	return loaded, canonical
+}
+
+const machineLocaleFakeIPerfExecutable = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'iperf 3.16'
+  exit 0
+fi
+udp=0
+reverse=0
+for arg do
+  case "$arg" in
+    -u) udp=1 ;;
+    -R) reverse=1 ;;
+  esac
+done
+if [ "$udp" = "1" ]; then
+  printf '%s\n' '{"start":{"test_start":{"protocol":"UDP"}},"end":{"sum_received":{"bits_per_second":50000000,"jitter_ms":1.25,"packets":10,"lost_percent":2}}}'
+elif [ "$reverse" = "1" ]; then
+  printf '%s\n' '{"start":{"connected":[{"local_host":"local","remote_host":"remote"}],"test_start":{"protocol":"TCP","reverse":1}},"intervals":[{"sum":{"bits_per_second":90000000}},{"sum":{"bits_per_second":110000000}}],"end":{"sum_sent":{"bytes":90,"bits_per_second":90000000,"retransmits":1,"seconds":1},"sum_received":{"bytes":100,"bits_per_second":100000000,"seconds":1}}}'
+else
+  printf '%s\n' '{"start":{"connected":[{"local_host":"local","remote_host":"remote"}],"test_start":{"protocol":"TCP","reverse":0}},"intervals":[{"sum":{"bits_per_second":90000000}},{"sum":{"bits_per_second":110000000}}],"end":{"sum_sent":{"bytes":100,"bits_per_second":100000000,"retransmits":1,"seconds":1},"sum_received":{"bytes":90,"bits_per_second":90000000,"seconds":1}}}'
+fi
+`
+
+func machineLocaleCustomIPerfResult(t *testing.T) model.Result {
+	t.Helper()
+	targets, err := config.ParseIPerfTargetList("fixture-provider=fixture.invalid:5200")
+	if err != nil {
+		t.Fatalf("ParseIPerfTargetList custom target: %v", err)
+	}
+	directory := t.TempDir()
+	path := filepath.Join(directory, "iperf3")
+	if err := os.WriteFile(path, []byte(machineLocaleFakeIPerfExecutable), 0o755); err != nil {
+		t.Fatalf("write iperf3 fixture: %v", err)
+	}
+	t.Setenv("PATH", directory)
+	env := probe.Environment{
+		Config: config.Runtime{
+			IPVersion:     config.IPVersion4,
+			IPerfDuration: time.Second,
+			SpeedThreads:  2,
+			IPerfTargets:  targets,
+		},
+		Network: probe.NetworkCapabilities{IPv4Usable: true},
+	}
+	for _, builtin := range probe.Builtins() {
+		if builtin.ID() == "speed" {
+			return builtin.Run(context.Background(), env)
+		}
+	}
+	t.Fatal("speed probe is not registered")
+	return model.Result{}
+}
+
+func TestMachineLocaleCustomIPerfTargetUsesHostFactAcrossCanonicalAndEnglishRenderers(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+
+	data := machineLocaleReportFixture()
+	data.Results = append(data.Results, machineLocaleCustomIPerfResult(t))
+	data.Summary.OK = len(data.Results)
+	data.Summary.Messages = []model.Message{model.NewMessage("message.summary.allOK", data.Summary.OK)}
+
+	speedResult := data.Results[len(data.Results)-1]
+	if len(speedResult.Tables) == 0 || speedResult.Tables[0].Key != "network.iperf3.results" || len(speedResult.Tables[0].Rows) != 1 {
+		t.Fatalf("custom target speed table = %#v", speedResult.Tables)
+	}
+	row := speedResult.Tables[0].Rows[0]
+	if raw, ok := row[0].Raw(); !ok || raw != "fixture-provider" {
+		t.Fatalf("custom target provider cell = %#v", row[0])
+	}
+	if raw, ok := row[1].Raw(); !ok || raw != "fixture.invalid" {
+		t.Fatalf("custom target location cell = %#v, want raw host", row[1])
+	}
+
+	canonical, err := JSON(data)
+	if err != nil {
+		t.Fatalf("canonical custom target JSON: %v", err)
+	}
+	canonicalText := string(canonical)
+	if strings.Contains(canonicalText, "命令行指定") {
+		t.Fatalf("canonical custom target JSON contains ECS-localized location:\n%s", canonicalText)
+	}
+	if !strings.Contains(canonicalText, `"raw": "fixture.invalid"`) || !strings.Contains(canonicalText, machineLocaleRawProviderValue) {
+		t.Fatalf("canonical custom target JSON lost raw host/provider facts:\n%s", canonicalText)
+	}
+
+	outputs := map[string]string{
+		"text":     Text(data, TextOptions{Color: termcolor.LevelNone, Width: 120}),
+		"markdown": Markdown(data, nil),
+	}
+	htmlBytes, err := HTML(data, nil)
+	if err != nil {
+		t.Fatalf("custom target HTML: %v", err)
+	}
+	outputs["html"] = string(htmlBytes)
+	for format, output := range outputs {
+		if strings.Contains(output, "命令行指定") {
+			t.Errorf("English %s contains ECS-localized custom location:\n%s", format, output)
+		}
+		if !strings.Contains(output, "fixture.invalid") || !strings.Contains(output, machineLocaleRawProviderValue) {
+			t.Errorf("English %s lost raw host/provider facts:\n%s", format, output)
+		}
+	}
 }
 
 func TestCurrentMachineContractFixtureRoundTripsThroughLoadJSON(t *testing.T) {

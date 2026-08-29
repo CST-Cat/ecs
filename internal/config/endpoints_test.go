@@ -60,9 +60,9 @@ func TestParseIPerfTargetListSupportsForms(t *testing.T) {
 		name, raw string
 		want      IPerfEndpoint
 	}{
-		{name: "named range", raw: "edge=example.com:5201-5210", want: IPerfEndpoint{Name: "edge", Host: "example.com", PortStart: 5201, PortEnd: 5210, Location: "命令行指定", Region: "custom"}},
-		{name: "IPv4 single", raw: "192.0.2.1:5201", want: IPerfEndpoint{Name: "192.0.2.1", Host: "192.0.2.1", PortStart: 5201, PortEnd: 5201, Location: "命令行指定", Networks: "IPv4", Region: "custom"}},
-		{name: "IPv6 range", raw: "[2001:db8::1]:5201-5202", want: IPerfEndpoint{Name: "2001:db8::1", Host: "2001:db8::1", PortStart: 5201, PortEnd: 5202, Location: "命令行指定", Networks: "IPv6", Region: "custom"}},
+		{name: "named range", raw: "edge=example.com:5201-5210", want: IPerfEndpoint{Name: "edge", Host: "example.com", PortStart: 5201, PortEnd: 5210, Region: "custom"}},
+		{name: "IPv4 single", raw: "192.0.2.1:5201", want: IPerfEndpoint{Name: "192.0.2.1", Host: "192.0.2.1", PortStart: 5201, PortEnd: 5201, Networks: "IPv4", Region: "custom"}},
+		{name: "IPv6 range", raw: "[2001:db8::1]:5201-5202", want: IPerfEndpoint{Name: "2001:db8::1", Host: "2001:db8::1", PortStart: 5201, PortEnd: 5202, Networks: "IPv6", Region: "custom"}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

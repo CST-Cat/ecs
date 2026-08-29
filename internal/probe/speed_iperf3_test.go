@@ -7,9 +7,11 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/report"
 )
 
 func TestSpeedMissingToolPreservesRawLookPathError(t *testing.T) {
@@ -101,6 +103,55 @@ func TestIPerfJSONParsersAndDirectionDiagnostics(t *testing.T) {
 	}
 	if got := parseIPerfUDPJSON(bytes.Repeat([]byte("x"), 4<<20+1), nil, nil); !strings.Contains(got.Err, "超过 4 MiB") {
 		t.Fatalf("oversized UDP JSON error = %q", got.Err)
+	}
+}
+
+func TestIPerfCustomTargetMachineFactFlowsThroughSpeedTableToCanonicalJSON(t *testing.T) {
+	targets, err := config.ParseIPerfTargetList("fixture=fixture.invalid:5200")
+	if err != nil {
+		t.Fatalf("ParseIPerfTargetList custom target: %v", err)
+	}
+	if len(targets) != 1 || targets[0].Location != "" {
+		t.Fatalf("custom target location = %#v, want empty machine fact", targets)
+	}
+
+	path := writeThroughputExecutable(t, "iperf3", fakeIPerfExecutable)
+	result := runIPerfSpeed(context.Background(), Environment{
+		Config: config.Runtime{
+			IPVersion:     config.IPVersion4,
+			IPerfDuration: time.Second,
+			SpeedThreads:  2,
+			IPerfTargets:  targets,
+		},
+		Network: NetworkCapabilities{IPv4Usable: true},
+	}, path)
+	if len(result.Tables) == 0 || result.Tables[0].Key != "network.iperf3.results" || len(result.Tables[0].Rows) != 1 {
+		t.Fatalf("custom target speed table = %#v", result.Tables)
+	}
+	row := result.Tables[0].Rows[0]
+	if raw, ok := row[0].Raw(); !ok || raw != targets[0].Name {
+		t.Fatalf("custom target provider cell = %#v, want raw %q", row[0], targets[0].Name)
+	}
+	if raw, ok := row[1].Raw(); !ok || raw != targets[0].Host {
+		t.Fatalf("custom target location cell = %#v, want raw host %q", row[1], targets[0].Host)
+	}
+	if strings.Contains(row[1].Text(), "命令行指定") {
+		t.Fatalf("speed table retained ECS-localized custom location: %#v", row[1])
+	}
+
+	canonical, err := report.JSON(model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Results:       []model.Result{result},
+	})
+	if err != nil {
+		t.Fatalf("canonical custom target JSON: %v", err)
+	}
+	canonicalText := string(canonical)
+	if strings.Contains(canonicalText, "命令行指定") {
+		t.Fatalf("canonical custom target JSON contains ECS-localized location:\n%s", canonicalText)
+	}
+	if !strings.Contains(canonicalText, `"raw": "fixture.invalid"`) {
+		t.Fatalf("canonical custom target JSON lost raw host fallback:\n%s", canonicalText)
 	}
 }
 
