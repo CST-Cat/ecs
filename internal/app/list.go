@@ -30,11 +30,7 @@ func listCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
 	for _, descriptor := range config.ModuleDescriptors() {
-		descriptionKey := descriptor.DescriptionKey
-		if descriptionKey == "" {
-			descriptionKey = "module." + descriptor.ID + ".desc"
-		}
-		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", descriptor.ID, descriptor.Exposure.String(), i18n.T(descriptionKey))
+		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", descriptor.ID, descriptor.Exposure.String(), i18n.T(descriptor.DescriptionKey))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.exposureHeader"))
 	for _, name := range config.ExposureNames() {
