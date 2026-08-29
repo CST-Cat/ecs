@@ -43,7 +43,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 		return 0
-	case "help", "-h", "--help":
+	case "help":
 		printHelp(stdout)
 		return 0
 	default:

@@ -134,6 +134,27 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 	}
 }
 
+func TestRunBindingNormalizesMalformedEvidence(t *testing.T) {
+	descriptor, ok := config.ModuleDescriptorFor("system")
+	if !ok {
+		t.Fatal("system descriptor missing")
+	}
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runBinding(context.Background(), moduleBinding{
+		Descriptor: descriptor,
+		Probe: &runnerTestProbe{result: model.Result{
+			Status:   model.StatusOK,
+			Evidence: &model.Evidence{Valid: 4, Expected: 2, Unit: "sample"},
+		}},
+	}, cfg, probe.Environment{}, true)
+	if got.Evidence == nil || got.Evidence.Valid != 2 || got.Evidence.Expected != 2 || got.Evidence.Unit != "sample" {
+		t.Fatalf("runner did not normalize malformed evidence: %+v", got.Evidence)
+	}
+}
+
 func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 	descriptor, _ := config.ModuleDescriptorFor("network")
 	localDescriptor, _ := config.ModuleDescriptorFor("system")
@@ -199,15 +220,25 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	warning := runBinding(context.Background(), moduleBinding{
-		Descriptor: descriptor,
-		Probe: &runnerTestProbe{result: model.Result{
-			Status: model.StatusWarning,
-			Notes:  []string{"probe.foo.timeout"},
-		}},
-	}, cfg, probe.Environment{}, true)
-	if len(warning.Failures) != 0 {
-		t.Fatalf("warning presentation key created failure: %+v", warning.Failures)
+	for _, test := range []struct {
+		name   string
+		result model.Result
+	}{
+		{name: "error without structured failure", result: model.Result{ID: "system", Status: model.StatusError}},
+		{name: "warning natural language note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}},
+		{name: "warning stable key note", result: model.Result{ID: "route", Status: model.StatusWarning, Notes: []string{"probe.route.note.parse_failed"}}},
+		{name: "warning without error or note", result: model.Result{ID: "latency", Status: model.StatusWarning}},
+		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := runBinding(context.Background(), moduleBinding{
+				Descriptor: descriptor,
+				Probe:      &runnerTestProbe{result: test.result},
+			}, cfg, probe.Environment{}, true)
+			if len(got.Failures) != 0 {
+				t.Fatalf("semantic status gained inferred failure: %+v", got.Failures)
+			}
+		})
 	}
 
 	wantFailure := model.Failure{
@@ -223,6 +254,18 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	}, cfg, probe.Environment{}, true)
 	if !reflect.DeepEqual(owned.Failures, []model.Failure{wantFailure}) {
 		t.Fatalf("runner changed producer-owned warning failure: got %+v want %+v", owned.Failures, []model.Failure{wantFailure})
+	}
+
+	wantErrorFailure := model.Failure{Category: model.FailurePermissionDenied, Count: 2}
+	ownedError := runBinding(context.Background(), moduleBinding{
+		Descriptor: descriptor,
+		Probe: &runnerTestProbe{result: model.Result{
+			Status:   model.StatusError,
+			Failures: []model.Failure{wantErrorFailure},
+		}},
+	}, cfg, probe.Environment{}, true)
+	if !reflect.DeepEqual(ownedError.Failures, []model.Failure{wantErrorFailure}) {
+		t.Fatalf("runner changed producer-owned error failure: got %+v want %+v", ownedError.Failures, []model.Failure{wantErrorFailure})
 	}
 }
 

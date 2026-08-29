@@ -301,7 +301,6 @@ func boolKey(value bool) string {
 func (r *textRenderer) resultTable(table model.Table) {
 	table = displayTable(table)
 	table = normalizeMatrixTable(table)
-	table = visibleTableColumns(table)
 	if table.Title != "" {
 		title := table.Title
 		if kind := matrixKindForTable(table.Key); kind == matrixCrystal || kind == matrixATTO {
@@ -317,10 +316,6 @@ func (r *textRenderer) resultTable(table model.Table) {
 	}
 	r.tableWithStyles(displayTableLabels(table.Columns), tableRowsWithBars(table, r.palette, cellBarWidth), nil, r.tableValueStyles(table))
 	r.blank()
-}
-
-func visibleTableColumns(table model.Table) model.Table {
-	return table
 }
 
 func normalizeMatrixTable(table model.Table) model.Table {

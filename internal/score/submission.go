@@ -449,8 +449,8 @@ func (s Submission) AsReport() model.Report {
 	report.Results = append(report.Results, model.Result{
 		ID: "system", Status: model.StatusOK,
 		Fields: []model.Field{
-			{Key: "cloud_provider", Label: "云厂商", Value: model.RawValue(s.Host.Provider)},
-			{Key: "cloud_region", Label: "云区域", Value: model.RawValue(s.Host.Region)},
+			{Key: "cloud_provider", Label: "cloud_provider", Value: model.RawValue(s.Host.Provider)},
+			{Key: "cloud_region", Label: "cloud_region", Value: model.RawValue(s.Host.Region)},
 		},
 		Measurements: []model.Measurement{
 			{Key: "logical_cpus", Value: float64(s.Host.VCPU)},

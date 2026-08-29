@@ -72,9 +72,6 @@ func TestTextFullTableKeepsGenericDescriptionColumns(t *testing.T) {
 		row = append(row, model.RawValue(key+" value"))
 	}
 	table := model.Table{Key: "custom.details", Title: "Custom details", Columns: columns, Rows: [][]model.Value{row}}
-	if got := visibleTableColumns(table); len(got.Columns) != len(keys) || len(got.Rows[0]) != len(keys) {
-		t.Fatalf("visibleTableColumns removed canonical explanatory columns: %#v", got)
-	}
 
 	data := model.Report{
 		SchemaVersion: "ecs.report/v1",
@@ -142,6 +139,7 @@ func TestTextKnownMeasurementFamiliesKeepExplicitSemantics(t *testing.T) {
 		{name: "unknown milliseconds", item: model.Measurement{Key: "custom_processing_ms", Unit: "ms"}},
 		{name: "unknown risk", item: model.Measurement{Key: "risk_policy_version", Unit: "/100"}},
 		{name: "near miss matrix", item: model.Measurement{Key: "crystal_custom_read_mib_s", Unit: "MiB/s"}},
+		{name: "canonical IP quality source", item: model.Measurement{Key: "ipv4_ipinfo_risk_score", Unit: "/100"}, want: "risk"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

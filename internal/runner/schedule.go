@@ -23,8 +23,8 @@ type scheduleGroup struct {
 
 // planSchedule 把已绑定的模块序列切成执行批次。
 //
-// 保持原有顺序：连续的可并行模块合成一批，遇到独占模块就单独成批。
-// 这样报告里的结果顺序仍与用户指定的模块顺序一致，只是执行方式变了。
+// 保持绑定后的规范顺序：连续的可并行模块合成一批，遇到独占模块就单独成批。
+// 这样报告里的结果顺序仍与 canonical descriptor order 一致，只是执行方式变了。
 func planSchedule(bindings []moduleBinding) []scheduleGroup {
 	var groups []scheduleGroup
 	var pending []int

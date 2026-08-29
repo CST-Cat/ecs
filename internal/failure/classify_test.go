@@ -91,51 +91,12 @@ func TestClassifyTextCategoriesThroughFromMessage(t *testing.T) {
 	}
 }
 
-func TestFailureConstructorsAndEnsureResult(t *testing.T) {
+func TestFailureConstructors(t *testing.T) {
 	fromError := FromError("download", "node-a", syscall.ECONNREFUSED)
 	if fromError.Category != model.FailureConnectionRefused || !fromError.Retryable || fromError.Stage != "download" || fromError.Target != "node-a" || fromError.Message == "" || fromError.Count != 1 {
 		t.Fatalf("FromError = %+v", fromError)
 	}
 
-	cases := []struct {
-		name      string
-		result    model.Result
-		wantCount int
-		wantClass model.FailureCategory
-		wantNoAdd bool
-	}{
-		{name: "error without structured failure", result: model.Result{ID: "system", Status: model.StatusError}, wantNoAdd: true},
-		{name: "warning natural language note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}, wantNoAdd: true},
-		{name: "warning stable key note", result: model.Result{ID: "route", Status: model.StatusWarning, Notes: []string{"probe.route.note.parse_failed"}}, wantNoAdd: true},
-		{name: "warning without error or note", result: model.Result{ID: "latency", Status: model.StatusWarning}, wantNoAdd: true},
-		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}, wantNoAdd: true},
-		{name: "existing failure", result: model.Result{ID: "disk", Status: model.StatusError, Failures: []model.Failure{{Category: model.FailurePermissionDenied, Count: 2}}}, wantCount: 1, wantClass: model.FailurePermissionDenied},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			result := test.result
-			result.Evidence = &model.Evidence{Valid: 4, Expected: 2}
-			EnsureResult(&result)
-			if result.Evidence.DerivedGrade() != model.EvidenceComplete {
-				t.Fatalf("EnsureResult did not normalize evidence: %+v", result.Evidence)
-			}
-			if test.wantNoAdd {
-				if len(result.Failures) != 0 {
-					t.Fatalf("semantic warning gained failure: %+v", result.Failures)
-				}
-				return
-			}
-			if len(result.Failures) != test.wantCount || result.Failures[0].Category != test.wantClass {
-				t.Fatalf("EnsureResult failures = %+v", result.Failures)
-			}
-			if test.name != "existing failure" && (result.Failures[0].Stage != "module" || result.Failures[0].Target != result.ID) {
-				t.Fatalf("EnsureResult diagnostic location = %+v", result.Failures[0])
-			}
-			if test.name == "existing failure" && result.Failures[0].Count != 2 {
-				t.Fatalf("EnsureResult replaced existing failure = %+v", result.Failures)
-			}
-		})
-	}
 	empty := FromMessage("stage", "target", "")
 	if empty.Category != model.FailureUnknown || empty.Message != "" {
 		t.Fatalf("empty FromMessage = %+v", empty)

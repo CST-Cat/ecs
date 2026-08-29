@@ -30,7 +30,7 @@ func TestExpandReportPathsRecursesIntoSubdirectories(t *testing.T) {
 	_ = os.MkdirAll(hidden, 0o755)
 	_ = os.WriteFile(filepath.Join(hidden, "c.json"), []byte("{}"), 0o600)
 
-	got := expandReportPaths([]string{root})
+	got := expandReportPathsDetailed([]string{root}).paths
 	if len(got) != 3 {
 		t.Fatalf("应收集到 3 个 json（含子目录、不含隐藏目录与非 json），得到 %d 个：%v", len(got), got)
 	}
@@ -56,7 +56,7 @@ func TestExpandReportPathsDeduplicatesCanonicalPaths(t *testing.T) {
 	}
 
 	uncleanPath := reports + string(os.PathSeparator) + "." + string(os.PathSeparator) + "a.json"
-	got := expandReportPaths([]string{path, uncleanPath, reports})
+	got := expandReportPathsDetailed([]string{path, uncleanPath, reports}).paths
 	if len(got) != 1 || got[0] != path {
 		t.Fatalf("canonical duplicate paths = %v, want [%s]", got, path)
 	}

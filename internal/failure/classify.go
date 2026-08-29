@@ -164,15 +164,3 @@ func containsAny(text string, needles ...string) bool {
 	}
 	return false
 }
-
-// EnsureResult normalizes derived evidence facts. Operational failures are
-// producer-owned structured data; status, failures, and presentation notes are
-// never inferred or rewritten here.
-func EnsureResult(result *model.Result) {
-	if result == nil {
-		return
-	}
-	if result.Evidence != nil {
-		result.Evidence.Normalize()
-	}
-}

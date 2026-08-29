@@ -26,14 +26,15 @@ const (
 type EstimateMode string
 
 const (
-	EstimateModeFixed   EstimateMode = "fixed"
-	EstimateModeCPU     EstimateMode = "cpu"
-	EstimateModeMemory  EstimateMode = "memory"
-	EstimateModeDisk    EstimateMode = "disk"
-	EstimateModeDNS     EstimateMode = "dns"
-	EstimateModeLatency EstimateMode = "latency"
-	EstimateModeSpeed   EstimateMode = "speed"
-	EstimateModeRoute   EstimateMode = "route"
+	EstimateModeFixed      EstimateMode = "fixed"
+	EstimateModeTwoContext EstimateMode = "two_context"
+	EstimateModeCPU        EstimateMode = "cpu"
+	EstimateModeMemory     EstimateMode = "memory"
+	EstimateModeDisk       EstimateMode = "disk"
+	EstimateModeDNS        EstimateMode = "dns"
+	EstimateModeLatency    EstimateMode = "latency"
+	EstimateModeSpeed      EstimateMode = "speed"
+	EstimateModeRoute      EstimateMode = "route"
 )
 
 // ModuleDescriptor is the canonical description of a module.
@@ -104,18 +105,18 @@ var moduleDescriptors = []ModuleDescriptor{
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("cpu", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "sysbench", Profile: "probe.cpu.profile", ComparisonScope: "probe.cpu.comparison_scope"},
 		"cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU)),
-	withRetryOnInterference(moduleDescriptor("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "zstd", Profile: "probe.zstd.profile", ComparisonScope: "probe.zstd.comparison_scope"},
-		"", []string{"zstd"}, 25*time.Second)),
-	withRetryOnInterference(moduleDescriptor("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+		"", []string{"zstd"}, 25*time.Second, EstimateModeTwoContext)),
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "NASA NPB-OMP", Profile: "probe.npb.profile", ComparisonScope: "probe.npb.comparison_scope"},
-		"", []string{"npb-ep", "npb-ft"}, 60*time.Second)),
+		"", []string{"npb-ep", "npb-ft"}, 60*time.Second, EstimateModeTwoContext)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "STREAM", Profile: "probe.memory.stream.profile", ComparisonScope: "probe.memory.comparison_scope"},
 		"memory", []string{"stream"}, 5*time.Second, EstimateModeMemory)),
-	withRetryOnInterference(moduleDescriptor("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
+	withRetryOnInterference(moduleDescriptorWithEstimateMode("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "OpenSSL speed", Profile: "probe.crypto.profile", ComparisonScope: "probe.crypto.comparison_scope"},
-		"", []string{"openssl"}, 45*time.Second)),
+		"", []string{"openssl"}, 45*time.Second, EstimateModeTwoContext)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "fio", Profile: "probe.disk.profile", ComparisonScope: "probe.disk.comparison_scope"},
 		"disk", []string{"fio"}, 8*time.Second, EstimateModeDisk)),
@@ -292,7 +293,7 @@ func ValidateModuleDescriptors() error {
 			return fmt.Errorf("module %q has unknown concurrency class %q", descriptor.ID, descriptor.Concurrency)
 		}
 		switch descriptor.EstimateMode {
-		case EstimateModeFixed, EstimateModeCPU, EstimateModeMemory, EstimateModeDisk,
+		case EstimateModeFixed, EstimateModeTwoContext, EstimateModeCPU, EstimateModeMemory, EstimateModeDisk,
 			EstimateModeDNS, EstimateModeLatency, EstimateModeSpeed, EstimateModeRoute:
 		default:
 			return fmt.Errorf("module %q has unknown estimate mode %q", descriptor.ID, descriptor.EstimateMode)

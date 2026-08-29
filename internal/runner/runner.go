@@ -251,7 +251,9 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 		}
 		result.Evidence = model.NewEvidence(valid, 1, "module")
 	}
-	failure.EnsureResult(&result)
+	if result.Evidence != nil {
+		result.Evidence.Normalize()
+	}
 	if hasDescriptor || result.Title == "" {
 		result.Title = canonicalTitle
 	}

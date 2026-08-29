@@ -86,13 +86,9 @@ func estimateModuleDuration(runtime config.Runtime, descriptor config.ModuleDesc
 		return time.Duration(len(runtime.IPerfTargets)*families) * perRow
 	case config.EstimateModeRoute:
 		return time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
+	case config.EstimateModeTwoContext:
+		return twoContextBenchmarkEstimate(descriptor.Estimate, workers)
 	case config.EstimateModeFixed:
-		// These workloads share the ordinary two-context descriptor default,
-		// but collapse to one context on a single-core allowance.
-		switch descriptor.ID {
-		case "zstd", "npb", "crypto":
-			return twoContextBenchmarkEstimate(descriptor.Estimate, workers)
-		}
 		return descriptor.Estimate
 	default:
 		// ValidateModuleDescriptors rejects unknown modes. Treat a descriptor

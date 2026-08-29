@@ -86,6 +86,11 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if err != nil || baseline.Metrics["cpu_single"] != 150 {
 		t.Fatalf("submission baseline = %v/%v", baseline.Metrics, err)
 	}
+	projected := loaded.AsReport()
+	if len(projected.Results) == 0 || len(projected.Results[0].Fields) != 2 ||
+		projected.Results[0].Fields[0].Label != "cloud_provider" || projected.Results[0].Fields[1].Label != "cloud_region" {
+		t.Fatalf("submission report metadata labels = %+v", projected.Results)
+	}
 
 	unchanged := copySubmission(submission)
 	unchanged.RanAt = unchanged.RanAt.Add(24 * time.Hour)

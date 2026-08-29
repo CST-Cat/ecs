@@ -85,7 +85,9 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 		{name: "speed v4", id: "speed", workers: 4, runtime: func() config.Runtime { value := base; value.IPVersion = config.IPVersion4; return value }(), want: 30 * time.Second},
 		{name: "route", id: "route", workers: 4, runtime: base, want: 24 * time.Second},
 		{name: "fixed ordinary", id: "system", workers: 4, runtime: base, want: ordinary},
-		{name: "fixed single context", id: "zstd", workers: 1, runtime: base, want: descriptor("zstd").Estimate / 2},
+		{name: "two-context zstd", id: "zstd", workers: 1, runtime: base, want: descriptor("zstd").Estimate / 2},
+		{name: "two-context npb", id: "npb", workers: 1, runtime: base, want: descriptor("npb").Estimate / 2},
+		{name: "two-context crypto", id: "crypto", workers: 1, runtime: base, want: descriptor("crypto").Estimate / 2},
 		{name: "defensive default", id: "future", workers: 4, runtime: base, want: 7 * time.Second},
 	}
 	for _, test := range cases {

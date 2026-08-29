@@ -38,6 +38,17 @@ func TestInformationCommandsSucceed(t *testing.T) {
 	}
 }
 
+func TestRootHelpUsesDefaultRunCommand(t *testing.T) {
+	for _, argument := range []string{"-h", "--help"} {
+		t.Run(argument, func(t *testing.T) {
+			status, stdout, stderr := runInformationCommand(argument, "--lang=en")
+			if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run]") || strings.Contains(stderr, "ecs —") {
+				t.Fatalf("root %s help status=%d stdout=%q stderr=%q", argument, status, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
 	cases := []struct {
 		name           string

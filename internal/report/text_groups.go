@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/textwidth"
@@ -53,11 +54,13 @@ func textGroups(result model.Result) []textGroup {
 		return &groups[index]
 	}
 	for _, field := range result.Fields {
-		group := add(fieldGroupKey(result.ID, field.Key), fieldGroupTitle(result.ID, field.Key, result.Title))
+		key := fieldGroupKey(result.ID, field.Key)
+		group := add(key, groupTitleForKey(key, result.Title))
 		group.fields = append(group.fields, field)
 	}
 	for _, measurement := range result.Measurements {
-		group := add(fieldGroupKey(result.ID, measurement.Key), measurementGroupTitle(result.ID, measurement.Key, result.Title))
+		key := fieldGroupKey(result.ID, measurement.Key)
+		group := add(key, groupTitleForKey(key, result.Title))
 		group.measurements = append(group.measurements, measurement)
 	}
 	for _, table := range result.Tables {
@@ -65,7 +68,7 @@ func textGroups(result model.Result) []textGroup {
 		group.tables = append(group.tables, table)
 	}
 	if len(groups) == 0 {
-		groups = append(groups, textGroup{key: resultGroupKey(result.ID), title: fallbackGroupTitle(result.ID)})
+		groups = append(groups, textGroup{key: resultGroupKey(result.ID), title: fallbackGroupTitle()})
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
 		return textGroupOrder(result.ID, groups[i].key) < textGroupOrder(result.ID, groups[j].key)
@@ -166,12 +169,7 @@ func knownRiskMeasurementKey(key string) bool {
 		parts[2] != "risk" || parts[3] != "score" {
 		return false
 	}
-	switch parts[1] {
-	case "ip2location", "scamalytics", "ipapi", "abuseipdb", "ipqs", "dbip":
-		return true
-	default:
-		return false
-	}
+	return config.IsIPQualitySource(parts[1])
 }
 
 func knownNetworkRiskTableKey(key string) bool {
@@ -184,12 +182,12 @@ func knownNetworkRiskTableKey(key string) bool {
 	}
 }
 
-func fallbackGroupTitle(id string) string {
+func fallbackGroupTitle() string {
 	return i18n.T("report.group.moduleDetails")
 }
 
-func fieldGroupTitle(id, key, resultTitle string) string {
-	switch fieldGroupKey(id, key) {
+func groupTitleForKey(key, resultTitle string) string {
+	switch key {
 	case "system.kernel":
 		return i18n.T("report.group.system.kernel")
 	case "system.storage":
@@ -201,11 +199,7 @@ func fieldGroupTitle(id, key, resultTitle string) string {
 	case "network.ip":
 		return i18n.T("report.group.network.ip")
 	}
-	return defaultResultGroup(id, resultTitle)
-}
-
-func measurementGroupTitle(id, key, resultTitle string) string {
-	return fieldGroupTitle(id, key, resultTitle)
+	return defaultResultGroup(resultTitle)
 }
 
 func tableGroupTitle(id, key, resultTitle string) string {
@@ -221,14 +215,14 @@ func tableGroupTitle(id, key, resultTitle string) string {
 	case "network.ip":
 		return i18n.T("report.group.network.ip")
 	}
-	return defaultResultGroup(id, resultTitle)
+	return defaultResultGroup(resultTitle)
 }
 
-func defaultResultGroup(id, resultTitle string) string {
+func defaultResultGroup(resultTitle string) string {
 	if title := displayKey(resultTitle); title != "" {
 		return title
 	}
-	return fallbackGroupTitle(id)
+	return fallbackGroupTitle()
 }
 
 // fields 渲染 label: value 列表。

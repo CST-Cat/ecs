@@ -35,13 +35,6 @@ type reportPathExpansion struct {
 	issues     []reportPathIssue
 }
 
-// expandReportPaths 展开位置参数，目录递归收集其中的 .json 文件。
-//
-// 递归而不是只看直接子文件：提交库按月份分子目录存放，只扫一层会什么都找不到。
-func expandReportPaths(args []string) []string {
-	return expandReportPathsDetailed(args).paths
-}
-
 func expandReportPathsDetailed(args []string) reportPathExpansion {
 	var expanded reportPathExpansion
 	seen := make(map[string]string)
