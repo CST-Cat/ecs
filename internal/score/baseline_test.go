@@ -329,8 +329,21 @@ func TestBaselineLoadFileFailuresAndUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadBaseline(write("unknown.json", unknownJSON)); err != nil {
-		t.Fatalf("unknown baseline field should remain forward-compatible: %v", err)
+	if _, err := LoadBaseline(write("unknown.json", unknownJSON)); err == nil || !strings.Contains(err.Error(), `unknown field "future_field"`) {
+		t.Fatalf("unknown baseline field error = %v", err)
+	}
+	typo := map[string]any{}
+	if err := json.Unmarshal(valid, &typo); err != nil {
+		t.Fatal(err)
+	}
+	delete(typo, "rank_min_samples")
+	typo["rank_min_sample"] = 9
+	typoJSON, err := json.Marshal(typo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadBaseline(write("rank-min-sample-typo.json", typoJSON)); err == nil || !strings.Contains(err.Error(), `unknown field "rank_min_sample"`) {
+		t.Fatalf("rank_min_sample typo error = %v", err)
 	}
 	largePath := filepath.Join(directory, "large.json")
 	file, err := os.Create(largePath)

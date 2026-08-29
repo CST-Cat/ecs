@@ -74,6 +74,7 @@ func LoadBaseline(path string) (Baseline, error) {
 		return baseline, fmt.Errorf("baseline file exceeds the 4 MiB safety limit")
 	}
 	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&baseline); err != nil {
 		return baseline, err
 	}
