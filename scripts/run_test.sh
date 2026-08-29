@@ -50,6 +50,8 @@ record_argv() {
   done
 }
 
+record_argv "$ECS_TEST_LOG_ROOT/ecs.argv" "$@"
+
 if [ "${1:-}" = plan ]; then
   [ "${2:-}" != --json ] || exit 64
   plan_mode=${ECS_TEST_PLAN_MODE:-valid}
@@ -188,21 +190,64 @@ chmod 0755 "$fixture_bin/wget"
 release_url="https://github.com/example/ecs/releases/download/v-test"
 test_path="$fixture_bin:$PATH"
 
-# --help 必须在 mktemp、Release 下载和工具 staging 之前成功返回。
-help_tmp="$test_root/help-tmp"
-mkdir -p "$help_tmp"
-if ! ECS_LANG=en TMPDIR="$help_tmp" PATH="$test_path" \
-    ECS_TEST_LOG_ROOT="$fixture_logs" \
+# Wrapper help must be local for every supported global-language spelling.
+# Each case gets its own TMPDIR and fixture log so a download, fake ecs
+# invocation, or temporary work directory cannot be hidden by another case.
+help_cases=(
+  '--help'
+  '-h'
+  '--lang=en --help'
+  '-lang=en --help'
+  '--lang en --help'
+  '-lang en --help'
+)
+for help_case in "${help_cases[@]}"; do
+  help_name=${help_case// /_}
+  help_tmp="$test_root/help-tmp-$help_name"
+  help_logs="$fixture_logs/help-$help_name"
+  mkdir -p "$help_tmp" "$help_logs"
+  read -r -a help_argv <<<"$help_case"
+  if ! ECS_LANG=en TMPDIR="$help_tmp" PATH="$test_path" \
+      ECS_TEST_LOG_ROOT="$help_logs" \
+      ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+      ECS_TEST_ASSET="$fixture_asset" \
+      sh "$repo_root/run.sh" "${help_argv[@]}" >"$test_root/help-$help_name.stdout" 2>"$test_root/help-$help_name.stderr"; then
+    fail "$help_case returned a failure"
+  fi
+  grep -F 'Usage: run.sh' "$test_root/help-$help_name.stdout" >/dev/null ||
+    fail "$help_case output lost its usage header"
+  [[ ! -e "$help_logs/fetch.log" ]] || fail "$help_case attempted a download"
+  [[ ! -e "$help_logs/unexpected-network" ]] || fail "$help_case attempted unexpected network access"
+  [[ ! -e "$help_logs/ecs.argv" ]] || fail "$help_case executed the ecs fixture"
+  assert_empty_dir "$help_tmp" "$help_case"
+done
+
+# A second --help after the explicit boundary belongs to ecs and must not
+# trigger wrapper help.  The local fixture proves that the binary path ran.
+boundary_help_tmp="$test_root/boundary-help-tmp"
+boundary_help_logs="$fixture_logs/boundary-help"
+boundary_help_output="$test_root/boundary-help-output"
+mkdir -p "$boundary_help_tmp" "$boundary_help_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$boundary_help_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$boundary_help_logs" \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
-    sh "$repo_root/run.sh" --help >"$test_root/help.stdout" 2>"$test_root/help.stderr"; then
-  fail "--help returned a failure"
+    sh "$repo_root/run.sh" --lang=en -- --help --output "$boundary_help_output" \
+    >"$test_root/boundary-help.stdout" 2>"$test_root/boundary-help.stderr"; then
+  fail "boundary --help fixture returned a failure: $(<"$test_root/boundary-help.stderr")"
 fi
-grep -F 'Usage: run.sh' "$test_root/help.stdout" >/dev/null ||
-  fail "--help output lost its usage header"
-[[ ! -s "$fixture_logs/fetch.log" ]] || fail "--help attempted a download"
-[[ ! -e "$fixture_logs/unexpected-network" ]] || fail "--help attempted unexpected network access"
-assert_empty_dir "$help_tmp" "--help"
+[[ -e "$boundary_help_logs/ecs.argv" ]] || fail "boundary --help did not execute the ecs fixture"
+grep -F -- '--help' "$boundary_help_logs/ecs.argv" >/dev/null ||
+  fail "boundary --help was not passed to the ecs fixture"
+if grep -F 'Usage: run.sh' "$test_root/boundary-help.stdout" >/dev/null; then
+  fail "boundary --help unexpectedly printed wrapper help"
+fi
+[[ ! -e "$boundary_help_logs/unexpected-network" ]] || fail "boundary --help attempted unexpected network access"
+[[ "$(wc -l <"$boundary_help_logs/fetch.log")" -eq 2 ]] || fail "boundary --help did not use the local fixture downloads"
+[[ -f "$boundary_help_output/fixture.json" ]] || fail "boundary --help fixture did not produce output"
+assert_empty_dir "$boundary_help_tmp" "boundary --help"
 
 # submit/provider/region/用户 output 由 wrapper 消费；普通参数和含空格值必须仍是独立 argv。
 run_tmp="$test_root/run-tmp"

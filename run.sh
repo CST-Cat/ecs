@@ -35,16 +35,28 @@ case "$AUTO_DEPS" in
 esac
 
 # 脚本自身的提示也跟随语言：从参数里取 --lang，其次看环境变量。
+# This scanner must stop at `--`: everything after that boundary belongs to
+# ecs, including a second `--help`.  Keep it before any work-directory or
+# release setup so wrapper help remains entirely local and side-effect free.
 LANG_SEL=""
+LANG_EXPECTED=0
+HELP_REQUESTED=0
 for arg in "$@"; do
+  if [ "$LANG_EXPECTED" -eq 1 ]; then
+    [ "$arg" = "--" ] && break
+    LANG_SEL="$arg"
+    LANG_EXPECTED=0
+    continue
+  fi
   case "$arg" in
+    --) break ;;
     --lang=*) LANG_SEL="${arg#--lang=}" ;;
     -lang=*) LANG_SEL="${arg#-lang=}" ;;
-    --lang|-lang) LANG_SEL="__next__" ;;
-    *) [ "$LANG_SEL" = "__next__" ] && LANG_SEL="$arg" ;;
+    --lang|-lang) LANG_EXPECTED=1 ;;
+    -h|--help) HELP_REQUESTED=1 ;;
   esac
 done
-[ -n "$LANG_SEL" ] && [ "$LANG_SEL" != "__next__" ] || LANG_SEL="${ECS_LANG:-${LC_ALL:-${LANG:-}}}"
+[ -n "$LANG_SEL" ] || LANG_SEL="${ECS_LANG:-${LC_ALL:-${LANG:-}}}"
 case "$LANG_SEL" in
   en*|EN*) UI=en ;;
   *) UI=zh ;;
@@ -71,8 +83,7 @@ fetch() {
 
 # Help must be local and side-effect free.  In particular, asking the wrapper
 # for help must not download a release or prepare system packages first.
-case "${1:-}" in
-  -h|--help)
+if [ "$HELP_REQUESTED" -eq 1 ]; then
     if [ "$UI" = "en" ]; then
       printf '%s\n' \
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
@@ -99,8 +110,7 @@ case "${1:-}" in
         'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
     fi
     exit 0
-    ;;
-esac
+fi
 
 # --submit is a wrapper-only mode.  Parse and remove its options before any
 # arguments reach `ecs run`; keeping the filtering in positional parameters
