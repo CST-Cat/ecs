@@ -192,32 +192,17 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	tierReportCounts := make(map[int]int)
 	for _, report := range reports {
 		values := collectMeasurements(report)
-		ran := make(map[string]bool, len(report.Results))
-		for _, result := range report.Results {
-			if result.Status != model.StatusSkipped {
-				ran[result.ID] = true
-			}
-		}
 		tierKey := TierKeyFor(hostVCPU(values))
 		if tierKey > 0 {
 			tierReportCounts[tierKey]++
 		}
-		for _, dimension := range Dimensions() {
-			if !ran[dimension.ModuleID] {
-				continue
-			}
-			for _, metric := range dimension.Metrics {
-				value, _, _, ok := resolveMetric(metric, values)
-				if !ok || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-					continue
+		for key, value := range scoreableMetrics(report, values) {
+			samples[key] = append(samples[key], value)
+			if tierKey > 0 {
+				if byTier[tierKey] == nil {
+					byTier[tierKey] = make(map[string][]float64)
 				}
-				samples[metric.Key] = append(samples[metric.Key], value)
-				if tierKey > 0 {
-					if byTier[tierKey] == nil {
-						byTier[tierKey] = make(map[string][]float64)
-					}
-					byTier[tierKey][metric.Key] = append(byTier[tierKey][metric.Key], value)
-				}
+				byTier[tierKey][key] = append(byTier[tierKey][key], value)
 			}
 		}
 	}
@@ -296,23 +281,9 @@ func (b Baseline) Encode() ([]byte, error) {
 func MetricSampleCounts(reports []model.Report) map[string]int {
 	counts := make(map[string]int)
 	for _, report := range reports {
-		ran := make(map[string]bool, len(report.Results))
-		for _, result := range report.Results {
-			if result.Status != model.StatusSkipped {
-				ran[result.ID] = true
-			}
-		}
 		values := collectMeasurements(report)
-		for _, dimension := range Dimensions() {
-			if !ran[dimension.ModuleID] {
-				continue
-			}
-			for _, metric := range dimension.Metrics {
-				if value, _, _, ok := resolveMetric(metric, values); ok &&
-					value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0) {
-					counts[metric.Key]++
-				}
-			}
+		for key := range scoreableMetrics(report, values) {
+			counts[key]++
 		}
 	}
 	return counts

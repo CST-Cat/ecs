@@ -537,6 +537,31 @@ func collectMeasurements(data model.Report) map[string]measured {
 	return values
 }
 
+// scoreableMetrics is the single report-to-leaderboard membership boundary.
+// Artifact builders may aggregate or encode the returned values differently.
+func scoreableMetrics(data model.Report, values map[string]measured) map[string]float64 {
+	ran := make(map[string]bool, len(data.Results))
+	for _, result := range data.Results {
+		if result.Status != model.StatusSkipped {
+			ran[result.ID] = true
+		}
+	}
+	metrics := make(map[string]float64)
+	for _, dimension := range Dimensions() {
+		if !ran[dimension.ModuleID] {
+			continue
+		}
+		for _, metric := range dimension.Metrics {
+			value, _, _, ok := resolveMetric(metric, values)
+			if !ok || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+				continue
+			}
+			metrics[metric.Key] = value
+		}
+	}
+	return metrics
+}
+
 // resolveMetric 取出指标对应的实测值，必要时按前缀归并多个节点的结果。
 func resolveMetric(metric Metric, values map[string]measured) (float64, string, string, bool) {
 	if metric.MeasurementKey != "" {

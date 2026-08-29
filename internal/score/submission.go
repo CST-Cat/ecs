@@ -117,24 +117,7 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 		return Submission{}, err
 	}
 	values := collectMeasurements(data)
-	ran := make(map[string]bool, len(data.Results))
-	for _, result := range data.Results {
-		if result.Status != model.StatusSkipped {
-			ran[result.ID] = true
-		}
-	}
-
-	metrics := make(map[string]float64)
-	for _, dimension := range Dimensions() {
-		if !ran[dimension.ModuleID] {
-			continue
-		}
-		for _, metric := range dimension.Metrics {
-			if value, _, _, ok := resolveMetric(metric, values); ok && value > 0 {
-				metrics[metric.Key] = value
-			}
-		}
-	}
+	metrics := scoreableMetrics(data, values)
 	if len(metrics) == 0 {
 		return Submission{}, fmt.Errorf("report contains no scoreable measurements")
 	}
