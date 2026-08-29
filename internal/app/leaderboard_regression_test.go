@@ -345,7 +345,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("annotated outlier count=%d, want %d", warnings, len(expected.Outliers))
 	}
 	for _, fact := range expected.Outliers {
-		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+		for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 			fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 			if !strings.Contains(stdout, marker) {
 				t.Fatalf("outlier fact marker %q missing from output %q", marker, stdout)
@@ -353,7 +353,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		}
 	}
 	for _, fact := range expected.Undecidable {
-		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+		for _, marker := range []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey,
 			fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required)} {
 			if !strings.Contains(stdout, marker) {
 				t.Fatalf("undecidable fact marker %q missing from output %q", marker, stdout)
@@ -373,7 +373,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("localized Chinese outlier output missing presentation text: %q", zhStdout)
 	}
 	for _, fact := range expected.Outliers {
-		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+		for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 			fmt.Sprintf("%d 个样本", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 			if !strings.Contains(zhStdout, marker) {
 				t.Fatalf("Chinese outlier fact marker %q missing from output %q", marker, zhStdout)
@@ -381,7 +381,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		}
 	}
 	for _, fact := range expected.Undecidable {
-		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+		for _, marker := range []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey,
 			fmt.Sprintf("仅 %d 个样本", fact.SampleCount), fmt.Sprintf("需要 %d 个", fact.Required)} {
 			if !strings.Contains(zhStdout, marker) {
 				t.Fatalf("Chinese undecidable fact marker %q missing from output %q", marker, zhStdout)
@@ -442,7 +442,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 			t.Fatalf("%s representation outlier count=%d, want %d", name, warnings, len(expected.Outliers))
 		}
 		for _, fact := range expected.Outliers {
-			for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+			for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 				fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 				if !strings.Contains(stdout, marker) {
 					t.Fatalf("%s representation missing outlier fact marker %q in %q", name, marker, stdout)
@@ -450,7 +450,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 			}
 		}
 		for _, fact := range expected.Undecidable {
-			markers := []string{fact.TierLabel, fact.MetricKey}
+			markers := []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey}
 			switch fact.Reason {
 			case "insufficient_samples":
 				markers = append(markers, fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required))

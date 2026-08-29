@@ -52,8 +52,8 @@ func (s Submission) OutlierSample() OutlierSample {
 
 // Outlier 是一条离群记录。
 type Outlier struct {
-	// SubmissionID 是被标记样本的稳定 sample identity。
-	SubmissionID string
+	// SampleID 是被标记样本的稳定 sample identity。
+	SampleID string
 	// MetricKey 是出问题的指标。
 	MetricKey string
 	// Value 是该提交的实测值。
@@ -61,8 +61,8 @@ type Outlier struct {
 	// Median 与 SampleCount 说明它是跟谁比出来的。
 	Median      float64
 	SampleCount int
-	// TierLabel 指出比较发生在哪一档。
-	TierLabel string
+	// TierMinVCPU 是比较档位的 vCPU 下界。
+	TierMinVCPU int
 	// ZScore 是 modified z-score，正值偏高、负值偏低。
 	ZScore float64
 	// Ratio 是相对中位数的倍率，比 z 值更直观。
@@ -71,8 +71,8 @@ type Outlier struct {
 
 // Undecidable 是无法完成离群判定的一组结构化事实。
 type Undecidable struct {
-	// TierLabel 指出比较发生在哪一档。
-	TierLabel string
+	// TierMinVCPU 是比较档位的 vCPU 下界。
+	TierMinVCPU int
 	// MetricKey 是未能判定的指标。
 	MetricKey string
 	// SampleCount 是该档该指标的实际样本数。
@@ -135,7 +135,7 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 			values := entry.values[metricKey]
 			if len(values) < minOutlierSamples {
 				report.Undecidable = append(report.Undecidable, Undecidable{
-					TierLabel:   TierLabel(tierKey),
+					TierMinVCPU: tierKey,
 					MetricKey:   metricKey,
 					SampleCount: len(values),
 					Required:    minOutlierSamples,
@@ -147,7 +147,7 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 			if mad <= 0 {
 				// 所有样本几乎相同：没有离散度可言，任何偏离都会算出无穷大的 z 值。
 				report.Undecidable = append(report.Undecidable, Undecidable{
-					TierLabel:   TierLabel(tierKey),
+					TierMinVCPU: tierKey,
 					MetricKey:   metricKey,
 					SampleCount: len(values),
 					Required:    minOutlierSamples,
@@ -165,14 +165,14 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 					ratio = median / value
 				}
 				report.Outliers = append(report.Outliers, Outlier{
-					SubmissionID: entry.ids[metricKey][index],
-					MetricKey:    metricKey,
-					Value:        value,
-					Median:       median,
-					SampleCount:  len(values),
-					TierLabel:    TierLabel(tierKey),
-					ZScore:       z,
-					Ratio:        ratio,
+					SampleID:    entry.ids[metricKey][index],
+					MetricKey:   metricKey,
+					Value:       value,
+					Median:      median,
+					SampleCount: len(values),
+					TierMinVCPU: tierKey,
+					ZScore:      z,
+					Ratio:       ratio,
 				})
 			}
 		}
@@ -181,7 +181,7 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 		if math.Abs(report.Outliers[i].ZScore) != math.Abs(report.Outliers[j].ZScore) {
 			return math.Abs(report.Outliers[i].ZScore) > math.Abs(report.Outliers[j].ZScore)
 		}
-		return report.Outliers[i].SubmissionID < report.Outliers[j].SubmissionID
+		return report.Outliers[i].SampleID < report.Outliers[j].SampleID
 	})
 	return report
 }
