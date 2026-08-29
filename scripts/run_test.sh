@@ -190,36 +190,40 @@ chmod 0755 "$fixture_bin/wget"
 release_url="https://github.com/example/ecs/releases/download/v-test"
 test_path="$fixture_bin:$PATH"
 
-# Wrapper help must be local for every supported global-language spelling.
+# Wrapper help must be local for every supported global-language spelling. The
+# first field is the conflicting ECS_LANG fallback: lang=en cases use zh so
+# their English output proves that the argv spelling was actually consumed.
 # Each case gets its own TMPDIR and fixture log so a download, fake ecs
 # invocation, or temporary work directory cannot be hidden by another case.
 help_cases=(
-  '--help'
-  '-h'
-  '--lang=en --help'
-  '-lang=en --help'
-  '--lang en --help'
-  '-lang en --help'
+  'en|--help'
+  'en|-h'
+  'zh|--lang=en --help'
+  'zh|-lang=en --help'
+  'zh|--lang en --help'
+  'zh|-lang en --help'
 )
 for help_case in "${help_cases[@]}"; do
-  help_name=${help_case// /_}
+  help_env=${help_case%%|*}
+  help_args=${help_case#*|}
+  help_name=${help_args// /_}
   help_tmp="$test_root/help-tmp-$help_name"
   help_logs="$fixture_logs/help-$help_name"
   mkdir -p "$help_tmp" "$help_logs"
-  read -r -a help_argv <<<"$help_case"
-  if ! ECS_LANG=en TMPDIR="$help_tmp" PATH="$test_path" \
+  read -r -a help_argv <<<"$help_args"
+  if ! ECS_LANG="$help_env" TMPDIR="$help_tmp" PATH="$test_path" \
       ECS_TEST_LOG_ROOT="$help_logs" \
       ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
       ECS_TEST_ASSET="$fixture_asset" \
       sh "$repo_root/run.sh" "${help_argv[@]}" >"$test_root/help-$help_name.stdout" 2>"$test_root/help-$help_name.stderr"; then
-    fail "$help_case returned a failure"
+    fail "$help_args returned a failure"
   fi
   grep -F 'Usage: run.sh' "$test_root/help-$help_name.stdout" >/dev/null ||
-    fail "$help_case output lost its usage header"
-  [[ ! -e "$help_logs/fetch.log" ]] || fail "$help_case attempted a download"
-  [[ ! -e "$help_logs/unexpected-network" ]] || fail "$help_case attempted unexpected network access"
-  [[ ! -e "$help_logs/ecs.argv" ]] || fail "$help_case executed the ecs fixture"
-  assert_empty_dir "$help_tmp" "$help_case"
+    fail "$help_args output lost its English usage header"
+  [[ ! -e "$help_logs/fetch.log" ]] || fail "$help_args attempted a download"
+  [[ ! -e "$help_logs/unexpected-network" ]] || fail "$help_args attempted unexpected network access"
+  [[ ! -e "$help_logs/ecs.argv" ]] || fail "$help_args executed the ecs fixture"
+  assert_empty_dir "$help_tmp" "$help_args"
 done
 
 # A second --help after the explicit boundary belongs to ecs and must not
