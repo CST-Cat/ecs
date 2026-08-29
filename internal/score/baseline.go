@@ -32,7 +32,7 @@ const DefaultRankMinSamples = 5
 // Baseline 是一份排行榜参考。
 type Baseline struct {
 	Schema string `json:"schema"`
-	// Source 说明这份基线是怎么来的，直接呈现在报告里。
+	// Source 保存 ECS 稳定来源代码或用户提供的原始说明；已知代码在展示边界翻译。
 	Source string `json:"source"`
 	// SampleCount 是聚合时的样本机器数。1 意味着这只是一台机器的快照，
 	// 报告需要据此提醒读者分数的参考价值有限。
@@ -229,7 +229,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 		metrics[key] = arithmeticMean(values)
 	}
 	if source == "" {
-		source = fmt.Sprintf("aggregated from %d reports", len(reports))
+		source = "aggregated"
 	}
 	baseline := Baseline{
 		Schema:         BaselineSchema,

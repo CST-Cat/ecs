@@ -115,6 +115,33 @@ func TestTextRendersRichReportStatesAndDetails(t *testing.T) {
 	}
 }
 
+func TestBaselineSourcePresentationLocalizesKnownCodeAndPreservesCustomSource(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	scored := rendererScoreFixture()
+
+	for _, test := range []struct {
+		language i18n.Lang
+		want     string
+	}{
+		{language: i18n.LangZH, want: "本地聚合"},
+		{language: i18n.LangEN, want: "Local aggregation"},
+	} {
+		i18n.Set(test.language)
+		scored.BaselineSource = "aggregated"
+		output := Text(sampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scored})
+		if !strings.Contains(output, test.want) || strings.Contains(output, "aggregated") {
+			t.Fatalf("%s default baseline source output = %q", test.language, output)
+		}
+
+		scored.BaselineSource = "Fleet August"
+		output = Text(sampleReport(), TextOptions{Color: termcolor.LevelNone, Score: scored})
+		if !strings.Contains(output, "Fleet August") {
+			t.Fatalf("%s custom baseline source output = %q", test.language, output)
+		}
+	}
+}
+
 func TestTextGroupsUseCanonicalResultTitleForDefaultGroups(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
