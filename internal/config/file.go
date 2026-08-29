@@ -130,7 +130,7 @@ func ApplyFile(runtime *Runtime, file File) error {
 		runtime.OoklaServers = append([]OoklaServer(nil), file.OoklaServers...)
 	}
 	// An explicit file allowlist is independent of the profile preset: callers
-	// may select any ModuleOrder entry, then remove entries with skip.
+	// may select any registered module, then remove entries with skip.
 	if err := ValidateModuleSelection(file.Only, file.Skip); err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func SelectModules(base, only, skip []string) []string {
 		delete(selected, id)
 	}
 	out := make([]string, 0, len(selected))
-	for _, id := range ModuleOrder() {
+	for _, id := range ModuleIDs() {
 		if selected[id] {
 			out = append(out, id)
 		}

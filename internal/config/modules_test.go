@@ -7,7 +7,7 @@ import (
 
 func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	descriptors := ModuleDescriptors()
-	order := ModuleOrder()
+	order := ModuleIDs()
 	if len(descriptors) == 0 || len(descriptors) != len(order) || len(ModuleIDs()) != len(descriptors) {
 		t.Fatalf("descriptor/order sizes = %d/%d", len(descriptors), len(order))
 	}
@@ -32,16 +32,16 @@ func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	}
 }
 
-func TestModuleOrderReturnsCopy(t *testing.T) {
-	original := ModuleOrder()
+func TestModuleIDsReturnsCopy(t *testing.T) {
+	original := ModuleIDs()
 	if len(original) == 0 {
 		t.Fatal("module order must not be empty")
 	}
 	mutated := append([]string(nil), original...)
 	mutated[0] = "mutated"
-	got := ModuleOrder()
+	got := ModuleIDs()
 	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
-		t.Fatalf("ModuleOrder returned mutable canonical data: %v", got)
+		t.Fatalf("ModuleIDs returned mutable canonical data: %v", got)
 	}
 }
 

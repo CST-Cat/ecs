@@ -12,7 +12,7 @@ import (
 
 func Validate(runtime Runtime) error {
 	knownModules := make(map[string]bool)
-	for _, id := range ModuleOrder() {
+	for _, id := range ModuleIDs() {
 		knownModules[id] = true
 	}
 	if len(runtime.Modules) == 0 {
