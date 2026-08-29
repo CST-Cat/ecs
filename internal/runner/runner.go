@@ -136,7 +136,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			report.Run.Canceled = true
 			break
 		}
-		if group.Parallel {
+		if len(group.Indices) > 1 {
 			// 先统一发出开始事件，再启动 worker，进度视图不会把一个很快完成的
 			// 模块误显示成尚未开始；回调本身不携带结果，详细报告仍在最后渲染。
 			if progress != nil {
@@ -248,9 +248,9 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	return result
 }
 
-// bindingTitle returns the descriptor-owned title for built-ins. A custom
-// runOne probe has no descriptor, so its stable ID is the narrow fallback
-// available at this boundary; an explicit result title is preserved below.
+// bindingTitle returns the descriptor-owned title for built-ins. A binding
+// without a descriptor falls back to its stable probe ID at this boundary;
+// an explicit result title is preserved below.
 func bindingTitle(binding moduleBinding) string {
 	if binding.Descriptor.TitleKey != "" {
 		return binding.Descriptor.TitleKey
@@ -259,12 +259,6 @@ func bindingTitle(binding moduleBinding) string {
 		return binding.Probe.ID()
 	}
 	return ""
-}
-
-// runOne is retained as a small test/custom-probe convenience. Production
-// paths call runBinding with a descriptor already joined by bindBuiltinModules.
-func runOne(ctx context.Context, item probe.Probe, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
-	return runBinding(ctx, bindingForProbe(item), cfg, env, networkRunnable)
 }
 
 func hasNetworkModules(selected []moduleBinding) bool {
@@ -322,12 +316,8 @@ func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (resu
 		if recovered := recover(); recovered != nil {
 			result = model.NewResult(item.ID(), item.ID())
 			result.Status = model.StatusError
-			result.Error = fmt.Sprint(recovered)
 			result.SummaryMessages = []model.Message{model.NewMessage("message.runner.panic")}
-			result.AddFailure(model.Failure{
-				Category: model.FailureUnknown, Stage: "panic", Target: item.ID(),
-				Count: 1, Message: result.Error,
-			})
+			result.AddFailure(failure.FromMessage("panic", item.ID(), fmt.Sprint(recovered)))
 			result.Finish(start)
 		}
 	}()

@@ -1,6 +1,6 @@
 package app
 
-// baseline 子命令：从多份报告聚合评分基线。
+// leaderboard 子命令：从多份报告聚合评分基线。
 //
 // 横向比较需要跨机器的样本。这个命令就是那条路径：
 // 把多台机器的 JSON 报告喂进来，每个指标取算术平均，写出一份可以用
@@ -25,27 +25,16 @@ import (
 	"ecs/internal/score"
 )
 
-// leaderboardCommand is the preferred name for aggregating reports. The
-// baseline entry point uses the same current aggregation implementation.
 func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
-	return leaderboardCommandNamed("leaderboard", args, stdout, stderr)
-}
-
-func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("ecs "+command, flag.ContinueOnError)
+	flags := flag.NewFlagSet("ecs leaderboard", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	output := flags.String("output", "ecs-baseline.json", i18n.T("flag.baselineOutput"))
 	source := flags.String("source", "", i18n.T("flag.baselineSource"))
 	annotateFlag := flags.Bool("annotate", false, i18n.T("flag.baselineAnnotate"))
 	verboseFlag := flags.Bool("verbose", false, i18n.T("flag.baselineVerbose"))
 	strictFlag := flags.Bool("strict", false, i18n.T("flag.baselineStrict"))
 	flags.Usage = func() {
-		usageKey := "help.baselineUsage"
-		if command == "leaderboard" {
-			usageKey = "help.leaderboardUsage"
-		}
-		fmt.Fprintln(stderr, i18n.T(usageKey))
+		fmt.Fprintln(stderr, i18n.T("help.leaderboardUsage"))
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -108,22 +97,24 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 		providerCounts[provider]++
 		regionCounts[region]++
 	}
-	seen := make(map[string]string)
-	seenReportIDs := make(map[string]string)
+	// Submission.ID identifies an artifact's contents; SampleID identifies the
+	// benchmark run. Only the latter is used here so a full report and its
+	// derived submission cannot become two leaderboard samples.
+	seenSampleIDs := make(map[string]string)
 	for _, path := range paths {
 		// 目录里通常就放着上一次生成的基线，它不是输入。
 		if _, err := score.LoadBaseline(path); err == nil {
 			continue
 		}
 		if submission, err := score.LoadSubmission(path); err == nil {
-			if previous, duplicated := seen[submission.ID]; duplicated {
-				issue := fmt.Errorf("%s (%s)", i18n.T("baseline.duplicate"), filepath.Base(previous))
+			if previous, duplicated := seenSampleIDs[submission.SampleID]; duplicated {
+				issue := duplicateSampleIssue(submission.SampleID, previous)
 				if inputIssue(path, issue) {
 					return 1
 				}
 				continue
 			}
-			seen[submission.ID] = path
+			seenSampleIDs[submission.SampleID] = path
 			submissions = append(submissions, submission)
 			recordMetadata(submission.Host.Provider, submission.Host.Region)
 			reports = append(reports, submission.AsReport())
@@ -143,20 +134,21 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 			}
 			continue
 		}
-		// An empty Run.ID is not a stable identity. Keep such reports as
-		// independent samples rather than collapsing unrelated legacy fixtures
-		// or reports that omitted the identifier.
-		if runID := strings.TrimSpace(data.Run.ID); runID != "" {
-			if previous, duplicated := seenReportIDs[runID]; duplicated {
-				issue := fmt.Errorf("duplicate report Run.ID %q (already included as %q)",
-					runID, filepath.Base(previous))
-				if inputIssue(path, issue) {
-					return 1
-				}
-				continue
+		sampleID, err := score.SampleIDForRunID(data.Run.ID)
+		if err != nil {
+			if inputIssue(path, err) {
+				return 1
 			}
-			seenReportIDs[runID] = path
+			continue
 		}
+		if previous, duplicated := seenSampleIDs[sampleID]; duplicated {
+			issue := duplicateSampleIssue(sampleID, previous)
+			if inputIssue(path, issue) {
+				return 1
+			}
+			continue
+		}
+		seenSampleIDs[sampleID] = path
 		provider, region := score.ExtractSubmissionMetadata(data)
 		recordMetadata(provider, region)
 		reports = append(reports, data)
@@ -238,6 +230,10 @@ func leaderboardCommandNamed(command string, args []string, stdout, stderr io.Wr
 		}
 	}
 	return 0
+}
+
+func duplicateSampleIssue(sampleID, previous string) error {
+	return fmt.Errorf("duplicate sample %q (already included as %q)", sampleID, filepath.Base(previous))
 }
 
 func printMetadataCounts(stdout io.Writer, providerCounts, regionCounts map[string]int) {

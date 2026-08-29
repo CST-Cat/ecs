@@ -77,25 +77,20 @@ func TestLeaderboardCommandsWriteReadableResults(t *testing.T) {
 	if err := os.WriteFile(previousPath, previous, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"baseline", "leaderboard"} {
-		t.Run(command, func(t *testing.T) {
-			output := filepath.Join(t.TempDir(), command+".json")
-			status, stdout, stderr := invokeAppMain(command, "--lang", "en", "--source", "fixture", "--output", output, previousPath, input)
-			if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
-				t.Fatalf("%s status=%d stdout=%q stderr=%q", command, status, stdout, stderr)
-			}
-			if command == "baseline" {
-				baseline, err := score.LoadBaseline(output)
-				if err != nil {
-					t.Fatalf("written baseline is not readable: %v", err)
-				}
-				if baseline.Schema != score.BaselineSchema || baseline.SampleCount != 1 || len(baseline.Metrics) == 0 || baseline.Source != "fixture" {
-					t.Fatalf("unexpected baseline result: %+v", baseline)
-				}
-			} else if _, err := os.Stat(output); err != nil {
-				t.Fatalf("leaderboard did not write output: %v", err)
-			}
-		})
+	output := filepath.Join(t.TempDir(), "leaderboard.json")
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--source", "fixture", "--output", output, previousPath, input)
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
+		t.Fatalf("leaderboard status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	baseline, err := score.LoadBaseline(output)
+	if err != nil {
+		t.Fatalf("written leaderboard reference is not readable: %v", err)
+	}
+	if baseline.Schema != score.BaselineSchema || baseline.SampleCount != 1 || len(baseline.Metrics) == 0 || baseline.Source != "fixture" {
+		t.Fatalf("unexpected leaderboard result: %+v", baseline)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("leaderboard did not write output: %v", err)
 	}
 	t.Run("leaderboard annotations", func(t *testing.T) {
 		root := t.TempDir()
@@ -162,6 +157,78 @@ func TestLeaderboardDeduplicatesDirectoryAndFilePath(t *testing.T) {
 	}
 	if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 100 {
 		t.Fatalf("directory and file baseline = %+v", baseline)
+	}
+}
+
+func TestLeaderboardDeduplicatesReportAndSubmissionBySampleID(t *testing.T) {
+	root := t.TempDir()
+	report := submitTestReport()
+	report.Run.ID = "shared-sample-run"
+	foundMetric := false
+	for resultIndex := range report.Results {
+		for measurementIndex := range report.Results[resultIndex].Measurements {
+			measurement := &report.Results[resultIndex].Measurements[measurementIndex]
+			if measurement.Key == "sysbench_cpu_single_events_s" {
+				measurement.Value = 100
+				foundMetric = true
+			}
+		}
+	}
+	if !foundMetric {
+		t.Fatal("shared sample fixture CPU measurement missing")
+	}
+	fullPath := filepath.Join(root, "report.json")
+	content, err := reporter.JSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	submissionPath := writeLeaderboardSubmission(t, filepath.Join(root, "submission.json"), report)
+	output := filepath.Join(root, "baseline.json")
+
+	status, stdout, stderr := invokeAppMain(
+		"leaderboard", "--lang", "en", "--output", output, fullPath, submissionPath,
+	)
+	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(strings.ToLower(stderr), "duplicate sample") {
+		t.Fatalf("cross-artifact duplicate status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	baseline, err := score.LoadBaseline(output)
+	if err != nil {
+		t.Fatalf("cross-artifact output is not loadable: %v", err)
+	}
+	if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 100 || len(baseline.ScoreSamples) != 1 {
+		t.Fatalf("cross-artifact aggregate = %+v", baseline)
+	}
+	if len(baseline.Tiers) != 1 || baseline.Tiers[0].SampleCount != 1 || baseline.Tiers[0].MetricSampleCounts["cpu_single"] != 1 {
+		t.Fatalf("cross-artifact tier statistics = %+v", baseline.Tiers)
+	}
+}
+
+func TestLeaderboardStrictRejectsCrossArtifactDuplicateSample(t *testing.T) {
+	root := t.TempDir()
+	report := submitTestReport()
+	report.Run.ID = "strict-cross-artifact-run"
+	fullPath := filepath.Join(root, "report.json")
+	content, err := reporter.JSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	submissionPath := writeLeaderboardSubmission(t, filepath.Join(root, "submission.json"), report)
+	output := filepath.Join(root, "baseline.json")
+
+	status, stdout, stderr := invokeAppMain(
+		"leaderboard", "--lang", "en", "--strict", "--output", output, fullPath, submissionPath,
+	)
+	if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "strict mode rejected") || !strings.Contains(strings.ToLower(stderr), "duplicate sample") {
+		t.Fatalf("strict cross-artifact duplicate status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
+		t.Fatalf("strict cross-artifact duplicate wrote output: %v", err)
 	}
 }
 
@@ -234,6 +301,57 @@ func TestLeaderboardKeepsDifferentRunIDsEvenWhenContentMatches(t *testing.T) {
 	if baseline.SampleCount != 2 || baseline.Metrics["cpu_single"] != 250 {
 		t.Fatalf("different Run.ID baseline = %+v", baseline)
 	}
+	if len(baseline.Tiers) != 1 || baseline.Tiers[0].SampleCount != 2 || baseline.Tiers[0].MetricSampleCounts["cpu_single"] != 2 || len(baseline.ScoreSamples) != 2 {
+		t.Fatalf("different Run.ID statistics = %+v", baseline)
+	}
+}
+
+func TestLeaderboardKeepsDifferentSubmissionSampleIDsWithSameContent(t *testing.T) {
+	root := t.TempDir()
+	firstReport := submitTestReport()
+	firstReport.Run.ID = "submission-run-one"
+	secondReport := firstReport
+	secondReport.Run.ID = "submission-run-two"
+	first := writeLeaderboardSubmission(t, filepath.Join(root, "first.json"), firstReport)
+	second := writeLeaderboardSubmission(t, filepath.Join(root, "second.json"), secondReport)
+	output := filepath.Join(root, "baseline.json")
+
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, first, second)
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "written") {
+		t.Fatalf("different submission samples status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	baseline, err := score.LoadBaseline(output)
+	if err != nil {
+		t.Fatalf("different submission samples output is not loadable: %v", err)
+	}
+	if baseline.SampleCount != 2 || baseline.Metrics["cpu_single"] != 900 || len(baseline.ScoreSamples) != 2 {
+		t.Fatalf("different submission samples aggregate = %+v", baseline)
+	}
+	if len(baseline.Tiers) != 1 || baseline.Tiers[0].SampleCount != 2 || baseline.Tiers[0].MetricSampleCounts["cpu_single"] != 2 {
+		t.Fatalf("different submission samples tier statistics = %+v", baseline.Tiers)
+	}
+}
+
+func TestLeaderboardRejectsEmptyRunID(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "nonstrict", true: "strict"}[strict], func(t *testing.T) {
+			root := t.TempDir()
+			input := writeLeaderboardReport(t, filepath.Join(root, "empty-run.json"), "", 100)
+			output := filepath.Join(root, "baseline.json")
+			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			if strict {
+				args = append(args, "--strict")
+			}
+			args = append(args, input)
+			status, stdout, stderr := invokeAppMain(args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, "Run.ID") {
+				t.Fatalf("empty Run.ID status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			if _, err := os.Lstat(output); !os.IsNotExist(err) {
+				t.Fatalf("empty Run.ID wrote output: %v", err)
+			}
+		})
+	}
 }
 
 func TestLeaderboardKeepsSubmissionIDDeduplication(t *testing.T) {
@@ -253,6 +371,7 @@ func TestLeaderboardKeepsSubmissionIDDeduplication(t *testing.T) {
 	firstReport := submitTestReport()
 	setMetric(&firstReport, 100)
 	uniqueReport := submitTestReport()
+	uniqueReport.Run.ID = "unique-submission-run"
 	setMetric(&uniqueReport, 300)
 	first := writeLeaderboardSubmission(t, filepath.Join(root, "first.json"), firstReport)
 	duplicate := writeLeaderboardSubmission(t, filepath.Join(root, "duplicate.json"), firstReport)
@@ -275,26 +394,16 @@ func TestLeaderboardKeepsSubmissionIDDeduplication(t *testing.T) {
 	}
 }
 
-func TestBaselineAndLeaderboardHelp(t *testing.T) {
-	for _, test := range []struct {
-		command string
-		marker  string
-	}{
-		{command: "baseline", marker: "Usage: ecs baseline"},
-		{command: "leaderboard", marker: "Usage: ecs leaderboard"},
-	} {
-		t.Run(test.command, func(t *testing.T) {
-			status, stdout, stderr := invokeAppMain(test.command, "--lang", "en", "--help")
-			if status != 0 || stdout != "" || !strings.Contains(stderr, test.marker) {
-				t.Fatalf("%s help status=%d stdout=%q stderr=%q", test.command, status, stdout, stderr)
-			}
-		})
+func TestLeaderboardHelp(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--help")
+	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs leaderboard") {
+		t.Fatalf("leaderboard help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }
 
-func TestBaselineAndLeaderboardRejectUnknownFlag(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("baseline", "--lang", "en", "--unknown")
+func TestLeaderboardRejectsUnknownFlag(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--unknown")
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
-		t.Fatalf("baseline unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
+		t.Fatalf("leaderboard unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }

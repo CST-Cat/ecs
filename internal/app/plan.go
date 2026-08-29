@@ -98,17 +98,24 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 		Modules:       make([]plannedModule, 0, len(runtime.Modules)),
 		Staging:       planStaging{Mode: "temporary-prefix"},
 	}
+	needsThirdPartyProvider := false
+	needsOokla := false
 	for _, id := range runtime.Modules {
 		descriptor, ok := config.ModuleDescriptorFor(id)
 		if !ok {
 			continue
 		}
-		tools := append([]string(nil), descriptor.RequiredTools...)
 		plan.Modules = append(plan.Modules, plannedModule{
 			ID: descriptor.ID,
 		})
 		plan.NeedsEgressIP = plan.NeedsEgressIP || descriptor.NeedsEgressIP
-		for _, tool := range tools {
+		if descriptor.Exposure == config.ExposureThirdParty {
+			needsThirdPartyProvider = true
+		}
+		if descriptor.ID == "ookla" {
+			needsOokla = true
+		}
+		for _, tool := range descriptor.RequiredTools {
 			if containsPlanValue(plan.RequiredTools, tool) {
 				continue
 			}
@@ -135,17 +142,11 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 	if plan.NeedsEgressIP {
 		plan.ExternalServices = append(plan.ExternalServices, "egress-ip-discovery")
 	}
-	for _, id := range runtime.Modules {
-		descriptor, ok := config.ModuleDescriptorFor(id)
-		if !ok {
-			continue
-		}
-		if descriptor.Exposure == config.ExposureThirdParty && !containsPlanValue(plan.ExternalServices, "third-party-provider") {
-			plan.ExternalServices = append(plan.ExternalServices, "third-party-provider")
-		}
-		if descriptor.ID == "ookla" && !containsPlanValue(plan.ExternalServices, "ookla") {
-			plan.ExternalServices = append(plan.ExternalServices, "ookla")
-		}
+	if needsThirdPartyProvider {
+		plan.ExternalServices = append(plan.ExternalServices, "third-party-provider")
+	}
+	if needsOokla {
+		plan.ExternalServices = append(plan.ExternalServices, "ookla")
 	}
 	return plan
 }

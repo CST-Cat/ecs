@@ -14,16 +14,13 @@ import (
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// 语言要在任何输出之前定下来：帮助文本、错误信息都要用它。
 	// 显式 --lang 优先，其次看环境变量，最后回落中文。
-	i18n.Set(resolveLanguage(args))
-	if err := validateExplicitLanguage(args); err != nil {
+	languageFlags := scanEarlyFlags(args, "lang")
+	i18n.Set(resolveLanguage(languageFlags))
+	if err := validateExplicitLanguage(languageFlags); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	command := "run"
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		command = args[0]
-		args = args[1:]
-	}
+	command, args := dispatchCommand(args, languageFlags)
 	switch command {
 	case "run":
 		return runCommand(ctx, args, stdout, stderr)
@@ -41,8 +38,6 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return doctorCommand(ctx, stdout)
 	case "leaderboard":
 		return leaderboardCommand(args, stdout, stderr)
-	case "baseline":
-		return baselineCommand(args, stdout, stderr)
 	case "submit":
 		return submitCommand(args, stdout, stderr)
 	case "version":
@@ -58,19 +53,41 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// resolveLanguage 在解析命令前先把 --lang 取出来。
+// dispatchCommand accepts the global language flag on either side of a
+// command, then hands the command-specific flag set an argv with that global
+// flag removed.  A non-language option before a command still means the
+// default run command; its value must not be mistaken for a command name.
+func dispatchCommand(args []string, languageFlags []earlyFlagOccurrence) (string, []string) {
+	position := 0
+	for _, occurrence := range languageFlags {
+		if occurrence.Position != position {
+			break
+		}
+		position = occurrence.End
+	}
+	commandFound := position < len(args) && args[position] != "--" && !strings.HasPrefix(args[position], "-")
+
+	cleaned := stripExplicitLanguage(args, languageFlags)
+	if !commandFound || len(cleaned) == 0 || strings.HasPrefix(cleaned[0], "-") {
+		return "run", cleaned
+	}
+	return cleaned[0], cleaned[1:]
+}
+
+// resolveLanguage 在解析命令前先从已扫描的 occurrences 取出 --lang。
 //
 // flag 包要等到子命令解析时才能拿到值，但帮助与错误输出比那更早，
 // 因此这里先扫一遍参数。
-func resolveLanguage(args []string) i18n.Lang {
+func resolveLanguage(occurrences []earlyFlagOccurrence) i18n.Lang {
 	var resolved i18n.Lang
 	valid := false
-	for _, occurrence := range scanEarlyFlags(args, "lang") {
-		if strings.TrimSpace(occurrence.Value) != "" {
-			if lang, ok := i18n.Parse(occurrence.Value); ok {
-				resolved = lang
-				valid = true
-			}
+	for _, occurrence := range occurrences {
+		if !occurrence.HasValue || strings.TrimSpace(occurrence.Value) == "" {
+			continue
+		}
+		if lang, ok := i18n.Parse(occurrence.Value); ok {
+			resolved = lang
+			valid = true
 		}
 	}
 	if valid {
@@ -79,19 +96,19 @@ func resolveLanguage(args []string) i18n.Lang {
 	return i18n.DetectFromEnv()
 }
 
-func validateExplicitLanguage(args []string) error {
-	value, found, missing := lastExplicitLanguage(args)
-	if !found {
+func validateExplicitLanguage(occurrences []earlyFlagOccurrence) error {
+	if len(occurrences) == 0 {
 		return nil
 	}
-	if missing {
+	occurrence := occurrences[len(occurrences)-1]
+	if occurrence.Missing {
 		return fmt.Errorf("--lang requires a value")
 	}
-	if strings.TrimSpace(value) == "" {
+	if strings.TrimSpace(occurrence.Value) == "" {
 		return fmt.Errorf("--lang value must not be empty")
 	}
-	if _, ok := i18n.Parse(value); !ok {
-		return fmt.Errorf("invalid --lang value %q; choose zh or en", value)
+	if _, ok := i18n.Parse(occurrence.Value); !ok {
+		return fmt.Errorf("invalid --lang value %q; choose zh or en", occurrence.Value)
 	}
 	return nil
 }
@@ -109,7 +126,6 @@ Usage:
   ecs config example          print a sample configuration
   ecs doctor                  check standard benchmark tools
   ecs leaderboard REPORTS...  aggregate a leaderboard reference
-  ecs baseline REPORTS...     generate a leaderboard reference (same as leaderboard)
   ecs submit --input FILE     export a minimized public submission
   ecs version                 show version
 
@@ -135,7 +151,6 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
   ecs config example          输出配置文件示例
   ecs doctor                  检查标准基准工具
   ecs leaderboard REPORTS...  从多份报告聚合排行榜参考
-  ecs baseline REPORTS...     生成当前排行榜参考（与 leaderboard 相同）
   ecs submit --input FILE     导出可公开入库的瘦身提交
   ecs version                 显示版本
 

@@ -26,8 +26,8 @@ func (r *textRenderer) renderGroup(group textGroup) {
 	}
 	r.line(r.palette.AccentBold("  " + heading))
 	r.line(r.palette.Dim("  " + strings.Repeat("-", maxInt(0, r.width-2))))
-	fields := dedupeFields(visibleFields(group.fields))
-	measurements := dedupeMeasurements(fields, group.measurements)
+	fields := group.fields
+	measurements := group.measurements
 	if len(fields) > 0 {
 		r.fields(fields)
 	}
@@ -38,48 +38,6 @@ func (r *textRenderer) renderGroup(group textGroup) {
 	for _, table := range group.tables {
 		r.resultTable(table)
 	}
-}
-
-func dedupeFields(items []model.Field) []model.Field {
-	seen := make(map[string]bool, len(items))
-	out := make([]model.Field, 0, len(items))
-	for _, item := range items {
-		key := strings.ToLower(strings.TrimSpace(item.Key))
-		if key != "" && seen[key] {
-			continue
-		}
-		if key != "" {
-			seen[key] = true
-		}
-		out = append(out, item)
-	}
-	return out
-}
-
-func visibleFields(items []model.Field) []model.Field {
-	return append([]model.Field(nil), items...)
-}
-
-func dedupeMeasurements(fields []model.Field, items []model.Measurement) []model.Measurement {
-	seen := make(map[string]bool, len(fields)+len(items))
-	for _, field := range fields {
-		key := strings.ToLower(strings.TrimSpace(field.Key))
-		if key != "" {
-			seen[key] = true
-		}
-	}
-	out := make([]model.Measurement, 0, len(items))
-	for _, item := range items {
-		key := strings.ToLower(strings.TrimSpace(item.Key))
-		if key != "" && seen[key] {
-			continue
-		}
-		if key != "" {
-			seen[key] = true
-		}
-		out = append(out, item)
-	}
-	return out
 }
 
 func textGroups(result model.Result) []textGroup {
@@ -109,22 +67,39 @@ func textGroups(result model.Result) []textGroup {
 	if len(groups) == 0 {
 		groups = append(groups, textGroup{key: resultGroupKey(result.ID), title: fallbackGroupTitle(result.ID)})
 	}
-	groupOrder := func(key string) int {
-		orders := map[string][]string{
-			"system":  {"system.hardware", "system.storage", "system.kernel"},
-			"network": {"network.egress", "network.ip", "network.risk"},
-		}
-		for index, name := range orders[result.ID] {
-			if name == key {
-				return index
-			}
-		}
-		return len(orders[result.ID]) + 1
-	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		return groupOrder(groups[i].key) < groupOrder(groups[j].key)
+		return textGroupOrder(result.ID, groups[i].key) < textGroupOrder(result.ID, groups[j].key)
 	})
 	return groups
+}
+
+func textGroupOrder(id, key string) int {
+	switch id {
+	case "system":
+		switch key {
+		case "system.hardware":
+			return 0
+		case "system.storage":
+			return 1
+		case "system.kernel":
+			return 2
+		default:
+			return 3
+		}
+	case "network":
+		switch key {
+		case "network.egress":
+			return 0
+		case "network.ip":
+			return 1
+		case "network.risk":
+			return 2
+		default:
+			return 3
+		}
+	default:
+		return 0
+	}
 }
 
 func resultGroupKey(id string) string {
@@ -133,17 +108,15 @@ func resultGroupKey(id string) string {
 
 func fieldGroupKey(id, key string) string {
 	lower := strings.ToLower(strings.TrimSpace(key))
-	if id == "system" {
-		if strings.HasPrefix(lower, "tcp") || strings.HasPrefix(lower, "net") || strings.Contains(lower, "ipv6") || strings.Contains(lower, "forward") || strings.Contains(lower, "syn") || strings.Contains(lower, "mtu") || strings.Contains(lower, "queue") || strings.Contains(lower, "conntrack") {
-			return "system.kernel"
+	switch id {
+	case "system":
+		return systemFieldGroupKey(lower)
+	case "network":
+		switch lower {
+		case "fraud_record", "risk_level", "risk_score":
+			return "network.risk"
 		}
-		if strings.HasPrefix(lower, "disk") || strings.HasPrefix(lower, "swap") || strings.HasPrefix(lower, "load") || strings.Contains(lower, "uptime") || strings.HasPrefix(lower, "block") {
-			return "system.storage"
-		}
-		return "system.hardware"
-	}
-	if id == "network" {
-		if strings.Contains(lower, "risk") || strings.Contains(lower, "fraud") || strings.Contains(lower, "proxy") || strings.Contains(lower, "vpn") || strings.Contains(lower, "tor") {
+		if knownRiskMeasurementKey(lower) {
 			return "network.risk"
 		}
 		return "network.ip"
@@ -153,14 +126,19 @@ func fieldGroupKey(id, key string) string {
 
 func tableGroupKey(id, key string) string {
 	lower := strings.ToLower(strings.TrimSpace(key))
-	if id == "system" {
-		return "system.kernel"
-	}
-	if id == "network" {
+	switch id {
+	case "system":
+		switch lower {
+		case "system.kernel.network_parameters", "system.pressure.cgroup":
+			return "system.kernel"
+		default:
+			return "system.hardware"
+		}
+	case "network":
 		switch {
 		case lower == "network.egress.overview":
 			return "network.egress"
-		case strings.HasPrefix(lower, "network.ipquality.") && (strings.HasSuffix(lower, ".scores") || strings.HasSuffix(lower, ".factors")):
+		case knownNetworkRiskTableKey(lower):
 			return "network.risk"
 		default:
 			return "network.ip"
@@ -169,25 +147,59 @@ func tableGroupKey(id, key string) string {
 	return resultGroupKey(id)
 }
 
-func fallbackGroupTitle(id string) string {
-	if i18n.Current() == i18n.LangEN {
-		return "Module details"
+func systemFieldGroupKey(key string) string {
+	switch key {
+	case "swap", "disk_device", "disk_mount", "disk_total", "disk_used", "disk_available", "disk_usage_percent",
+		"disk_total_bytes", "disk_used_bytes", "disk_free_bytes", "uptime_seconds", "load", "block_devices":
+		return "system.storage"
+	case "tcp_congestion", "qdisc", "bbr_status", "tcp_congestion_control", "tcp_available_congestion",
+		"tcp_rmem_max_bytes", "tcp_single_flow_window_limit_150ms_mbps":
+		return "system.kernel"
+	default:
+		return "system.hardware"
 	}
-	return "模块详情"
+}
+
+func knownRiskMeasurementKey(key string) bool {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(key)), "_")
+	if len(parts) != 4 || (parts[0] != "ipv4" && parts[0] != "ipv6") ||
+		parts[2] != "risk" || parts[3] != "score" {
+		return false
+	}
+	switch parts[1] {
+	case "ip2location", "scamalytics", "ipapi", "abuseipdb", "ipqs", "dbip":
+		return true
+	default:
+		return false
+	}
+}
+
+func knownNetworkRiskTableKey(key string) bool {
+	switch key {
+	case "network.ipquality.ipv4.scores", "network.ipquality.ipv4.factors",
+		"network.ipquality.ipv6.scores", "network.ipquality.ipv6.factors":
+		return true
+	default:
+		return false
+	}
+}
+
+func fallbackGroupTitle(id string) string {
+	return i18n.T("report.group.moduleDetails")
 }
 
 func fieldGroupTitle(id, key, resultTitle string) string {
 	switch fieldGroupKey(id, key) {
 	case "system.kernel":
-		return localizedGroup("内核网络", "Kernel networking")
+		return i18n.T("report.group.system.kernel")
 	case "system.storage":
-		return localizedGroup("磁盘与运行状态", "Storage/runtime")
+		return i18n.T("report.group.system.storage")
 	case "system.hardware":
-		return localizedGroup("操作系统与硬件", "OS/hardware")
+		return i18n.T("report.group.system.hardware")
 	case "network.risk":
-		return localizedGroup("风险矩阵", "Risk matrix")
+		return i18n.T("report.group.network.risk")
 	case "network.ip":
-		return localizedGroup("IP 信息", "IP information")
+		return i18n.T("report.group.network.ip")
 	}
 	return defaultResultGroup(id, resultTitle)
 }
@@ -198,14 +210,16 @@ func measurementGroupTitle(id, key, resultTitle string) string {
 
 func tableGroupTitle(id, key, resultTitle string) string {
 	switch tableGroupKey(id, key) {
+	case "system.hardware":
+		return i18n.T("report.group.system.hardware")
 	case "system.kernel":
-		return localizedGroup("内核网络", "Kernel networking")
+		return i18n.T("report.group.system.kernel")
 	case "network.risk":
-		return localizedGroup("风险矩阵", "Risk matrix")
+		return i18n.T("report.group.network.risk")
 	case "network.egress":
-		return localizedGroup("出口概览", "Egress overview")
+		return i18n.T("report.group.network.egress")
 	case "network.ip":
-		return localizedGroup("IP 信息", "IP information")
+		return i18n.T("report.group.network.ip")
 	}
 	return defaultResultGroup(id, resultTitle)
 }
@@ -215,13 +229,6 @@ func defaultResultGroup(id, resultTitle string) string {
 		return title
 	}
 	return fallbackGroupTitle(id)
-}
-
-func localizedGroup(zh, en string) string {
-	if i18n.Current() == i18n.LangEN {
-		return en
-	}
-	return zh
 }
 
 // fields 渲染 label: value 列表。

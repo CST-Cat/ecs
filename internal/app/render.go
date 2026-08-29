@@ -18,7 +18,6 @@ import (
 func renderCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
 	formats := flags.String("format", "json,md,html", i18n.T("flag.format"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))

@@ -155,19 +155,22 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 
 	diskPath, actualBytes, disk, err := prepareFIODiskPath(ctx, env)
 	if err != nil {
-		result.Fail(err)
+		result.Status = model.StatusError
+		addFailure(&result, "prepare", env.Config.DiskPath, err)
 		return result
 	}
 
 	file, err := os.CreateTemp(diskPath, ".ecs-fio-*")
 	if err != nil {
-		result.Fail(fmt.Errorf("创建 fio 临时文件: %w", err))
+		result.Status = model.StatusError
+		addFailure(&result, "create_temp_file", diskPath, fmt.Errorf("创建 fio 临时文件: %w", err))
 		return result
 	}
 	tempName := file.Name()
 	if err := file.Close(); err != nil {
 		_ = os.Remove(tempName)
-		result.Fail(fmt.Errorf("关闭 fio 临时文件: %w", err))
+		result.Status = model.StatusError
+		addFailure(&result, "close_temp_file", tempName, fmt.Errorf("关闭 fio 临时文件: %w", err))
 		return result
 	}
 	defer func() {
@@ -206,17 +209,20 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		if detail != "" {
 			runErr = fmt.Errorf("%w: %s", runErr, detail)
 		}
-		result.Fail(fmt.Errorf("fio 执行失败: %w", runErr))
+		result.Status = model.StatusError
+		addFailure(&result, "benchmark_run", "fio", fmt.Errorf("fio 执行失败: %w", runErr))
 		return result
 	}
 	if stdout.Len() > 4*1024*1024 {
-		result.Fail(fmt.Errorf("fio JSON 超过 4 MiB 安全上限"))
+		result.Status = model.StatusError
+		addFailure(&result, "parse", "fio", fmt.Errorf("fio JSON 超过 4 MiB 安全上限"))
 		return result
 	}
 
 	var output fioOutput
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-		result.Fail(fmt.Errorf("解析 fio JSON: %w", err))
+		result.Status = model.StatusError
+		addFailure(&result, "parse", "fio", fmt.Errorf("解析 fio JSON: %w", err))
 		return result
 	}
 	jobs := make(map[string]fioJob, len(output.Jobs))
@@ -245,7 +251,8 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	randomWrite := jobs["randwrite"].Write.IOPS
 	appendFIOQD1LatencyMeasurements(&result, jobs)
 	if !isPositiveFinite(seqWrite) && !isPositiveFinite(seqRead) && !isPositiveFinite(randomRead) && !isPositiveFinite(randomWrite) {
-		result.Fail(fmt.Errorf("fio JSON 未包含可用的磁盘统计"))
+		result.Status = model.StatusError
+		addFailure(&result, "validate", "fio", fmt.Errorf("fio JSON 未包含可用的磁盘统计"))
 		return result
 	}
 	randDepth := engine.EffectiveDepth(32)

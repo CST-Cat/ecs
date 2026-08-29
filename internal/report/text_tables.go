@@ -97,14 +97,10 @@ type comparableGroup struct {
 
 // riskScoreMeasurement identifies the 0–100 risk scores whose magnitude is
 // useful to show directly.  A high risk score is worse, but a longer bar still
-// communicates a higher observed risk; only latency/utilization-style metrics
-// should invert their values to visualize "higher is better".
+// communicates a higher observed risk; the renderer only inverts the explicit
+// lower-is-better latency families below.
 func riskScoreMeasurement(item model.Measurement) bool {
-	if strings.TrimSpace(item.Unit) != "/100" {
-		return false
-	}
-	key := strings.ToLower(strings.TrimSpace(item.Key))
-	return strings.HasSuffix(key, "_risk_score")
+	return strings.TrimSpace(item.Unit) == "/100" && knownRiskMeasurementKey(item.Key)
 }
 
 // comparisonSemantic prevents unrelated measurements that happen to share a
@@ -114,82 +110,95 @@ func comparisonSemantic(item model.Measurement) string {
 	if riskScoreMeasurement(item) {
 		return "risk"
 	}
-	// The unit alone is insufficient: Crystal, ATTO, mixed and baseline fio
-	// throughput all use MiB/s, but their workloads are not one comparison set.
-	if semantic := matrixMeasurementSemantic(item.Key); semantic != "" {
-		return semantic
-	}
 	key := strings.ToLower(strings.TrimSpace(item.Key))
 	// Percentile and interval qualifiers are separate metrics even when their
 	// units and quality direction match. Keeping them in distinct buckets makes
 	// every bar compare like with like across targets instead of, for example,
 	// scaling a DNS P50 against a DNS P95 or an iperf interval minimum against
 	// the final whole-run throughput.
-	switch {
-	case strings.Contains(key, "iperf3_") && strings.Contains(key, "_interval_min_"):
-		return "iperf-interval-min"
-	case strings.Contains(key, "iperf3_") && strings.Contains(key, "_interval_p50_"):
-		return "iperf-interval-p50"
-	case strings.Contains(key, "iperf3_") && strings.HasSuffix(key, "_mbps"):
-		return "iperf-throughput"
-	case strings.HasPrefix(key, "dns_resolver_") && strings.Contains(key, "_p50_"):
-		return "dns-p50"
-	case key == "best_dns_median_ms":
-		return "dns-p50"
-	case strings.HasPrefix(key, "dns_resolver_") && strings.Contains(key, "_p95_"):
-		return "dns-p95"
-	case strings.HasPrefix(key, "tcp_target_") && strings.Contains(key, "_p50_"):
-		return "tcp-p50"
-	case key == "best_tcp_median_ms":
-		return "tcp-p50"
-	case strings.HasPrefix(key, "tcp_target_") && strings.Contains(key, "_p95_"):
-		return "tcp-p95"
-	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_hop_slots"):
-		return "route-hop-slots"
-	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_visible_hops"):
-		return "route-visible-hops"
-	case strings.HasPrefix(key, "route_target_") && strings.HasSuffix(key, "_timeout_hops"):
-		return "route-timeout-hops"
-	}
 	switch strings.TrimSpace(item.Unit) {
-	case "%":
-		switch {
-		case strings.Contains(key, "loss"):
-			return "loss"
-		case strings.Contains(key, "steal"):
-			return "cpu-steal"
-		case strings.Contains(key, "usage"), strings.Contains(key, "utilization"):
-			return "usage"
-		case strings.Contains(key, "percentage_used"), strings.Contains(key, "percent_used"):
-			return "device-life"
-		default:
-			return "percent"
-		}
 	case "ms":
-		if strings.Contains(key, "jitter") {
-			return "jitter"
+		switch key {
+		case "best_dns_median_ms":
+			return "dns-p50"
+		case "best_tcp_median_ms":
+			return "tcp-p50"
 		}
-		return "latency"
-	case "项":
-		switch {
-		case strings.Contains(key, "blacklist"), strings.Contains(key, "listed"):
-			return "blacklist"
-		case strings.Contains(key, "bgp"), strings.Contains(key, "observed"):
-			return "coverage"
-		case strings.Contains(key, "reachable"):
-			return "reachability"
+		if semantic := dnsMeasurementSemantic(key); semantic != "" {
+			return semantic
 		}
-	case "bytes":
-		switch {
-		case strings.Contains(key, "memory"):
-			return "memory-capacity"
-		case strings.Contains(key, "disk"):
-			return "disk-capacity"
-		case strings.Contains(key, "swap"):
-			return "swap-capacity"
+		if semantic := tcpMeasurementSemantic(key); semantic != "" {
+			return semantic
 		}
+	case "Mbps":
+		return iperfMeasurementSemantic(key)
+	case "MiB/s", "IOPS":
+		return matrixMeasurementSemantic(key)
 	}
 	return ""
+}
+
+func dnsMeasurementSemantic(key string) string {
+	parts := strings.Split(key, "_")
+	if len(parts) != 5 || parts[0] != "dns" || parts[1] != "resolver" ||
+		!canonicalTargetIndex(parts[2]) || parts[4] != "ms" {
+		return ""
+	}
+	switch parts[3] {
+	case "p50":
+		return "dns-p50"
+	case "p95":
+		return "dns-p95"
+	default:
+		return ""
+	}
+}
+
+func tcpMeasurementSemantic(key string) string {
+	parts := strings.Split(key, "_")
+	if len(parts) != 6 || parts[0] != "tcp" || parts[1] != "target" ||
+		!canonicalTargetIndex(parts[2]) || (parts[3] != "ipv4" && parts[3] != "ipv6") || parts[5] != "ms" {
+		return ""
+	}
+	switch parts[4] {
+	case "p50":
+		return "tcp-p50"
+	case "p95":
+		return "tcp-p95"
+	default:
+		return ""
+	}
+}
+
+func iperfMeasurementSemantic(key string) string {
+	parts := strings.Split(key, "_")
+	if len(parts) == 6 && parts[0] == "iperf3" && parts[1] == "target" &&
+		canonicalTargetIndex(parts[2]) && (parts[3] == "ipv4" || parts[3] == "ipv6") &&
+		(parts[4] == "upload" || parts[4] == "download") && parts[5] == "mbps" {
+		return "iperf-throughput"
+	}
+	if len(parts) == 8 && parts[0] == "iperf3" && parts[1] == "target" &&
+		canonicalTargetIndex(parts[2]) && (parts[3] == "ipv4" || parts[3] == "ipv6") &&
+		(parts[4] == "upload" || parts[4] == "download") && parts[5] == "interval" &&
+		(parts[6] == "min" || parts[6] == "p50") && parts[7] == "mbps" {
+		if parts[6] == "min" {
+			return "iperf-interval-min"
+		}
+		return "iperf-interval-p50"
+	}
+	return ""
+}
+
+func canonicalTargetIndex(value string) bool {
+	if len(value) < 2 || (len(value) > 2 && value[0] == '0') || value == "00" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func matrixMeasurementSemantic(key string) string {
@@ -201,17 +210,7 @@ func matrixMeasurementSemantic(key string) string {
 	case matrixMixed:
 		return "matrix-mixed"
 	}
-	lower := strings.ToLower(strings.TrimSpace(key))
-	switch {
-	case strings.HasPrefix(lower, "fio_mount_"):
-		return "disk-mount"
-	case strings.HasPrefix(lower, "fio_"):
-		return "disk-baseline"
-	case strings.HasPrefix(lower, "sysbench_cpu_"):
-		return "cpu"
-	default:
-		return ""
-	}
+	return ""
 }
 
 // groupComparable 找出可以画组内相对柱的指标。
@@ -228,6 +227,9 @@ func groupComparable(items []model.Measurement) map[string]comparableGroup {
 			continue
 		}
 		semantic := comparisonSemantic(item)
+		if semantic == "" {
+			continue
+		}
 		direction := boolKey(*item.HigherIsBetter)
 		if semantic == "risk" {
 			// Keep risk scores in their own magnitude-based bucket instead of
@@ -318,59 +320,7 @@ func (r *textRenderer) resultTable(table model.Table) {
 }
 
 func visibleTableColumns(table model.Table) model.Table {
-	if len(table.Columns) == 0 {
-		return table
-	}
-	keep := make([]int, 0, len(table.Columns))
-	for index, column := range table.Columns {
-		if !isExplanatoryColumnKey(column.Key) {
-			keep = append(keep, index)
-		}
-	}
-	if len(keep) == len(table.Columns) {
-		return table
-	}
-	columnMap := make(map[int]int, len(keep))
-	out := table
-	out.Columns = make([]model.TableColumn, 0, len(keep))
-	for index, original := range keep {
-		columnMap[original] = index
-		out.Columns = append(out.Columns, table.Columns[original])
-	}
-	if table.RowIdentity != "" {
-		out.RowIdentity = ""
-		for original, column := range table.Columns {
-			if column.Key == table.RowIdentity {
-				if _, ok := columnMap[original]; ok {
-					out.RowIdentity = column.Key
-				}
-				break
-			}
-		}
-	}
-	out.Rows = make([][]model.Value, len(table.Rows))
-	for rowIndex, row := range table.Rows {
-		filtered := make([]model.Value, 0, len(keep))
-		for _, original := range keep {
-			if original < len(row) {
-				filtered = append(filtered, row[original])
-			} else {
-				filtered = append(filtered, model.RawValue(""))
-			}
-		}
-		out.Rows[rowIndex] = filtered
-	}
-	return out
-}
-
-func isExplanatoryColumnKey(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "why", "rationale", "definition", "segment", "note", "comment", "description", "guidance",
-		"metric_definition", "bucket_rule":
-		return true
-	default:
-		return false
-	}
+	return table
 }
 
 func normalizeMatrixTable(table model.Table) model.Table {
@@ -448,16 +398,82 @@ func visibleMeasurements(result model.Result) []model.Measurement {
 }
 
 func matrixKindForMeasurement(key string) diskMatrixKind {
-	lower := strings.ToLower(strings.TrimSpace(key))
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(key)), "_")
 	switch {
-	case strings.HasPrefix(lower, "crystal_"):
+	case knownCrystalMatrixMeasurement(parts):
 		return matrixCrystal
-	case strings.HasPrefix(lower, "atto_"):
+	case knownATTOMatrixMeasurement(parts):
 		return matrixATTO
-	case strings.HasPrefix(lower, "fio_mixed_"):
+	case knownMixedMatrixMeasurement(parts):
 		return matrixMixed
 	default:
 		return ""
+	}
+}
+
+func knownCrystalMatrixMeasurement(parts []string) bool {
+	if (len(parts) != 5 && len(parts) != 6) || parts[0] != "crystal" ||
+		!knownCrystalWorkload(parts[1], parts[2]) || !knownMatrixDirection(parts[3]) {
+		return false
+	}
+	return knownMatrixMetric(parts[4:])
+}
+
+func knownATTOMatrixMeasurement(parts []string) bool {
+	if (len(parts) != 4 && len(parts) != 5) || parts[0] != "atto" ||
+		!knownATTOBlock(parts[1]) || !knownMatrixDirection(parts[2]) {
+		return false
+	}
+	return knownMatrixMetric(parts[3:])
+}
+
+func knownMixedMatrixMeasurement(parts []string) bool {
+	if (len(parts) != 5 && len(parts) != 6) || parts[0] != "fio" || parts[1] != "mixed" ||
+		!knownMixedBlock(parts[2]) || !knownMatrixDirection(parts[3]) {
+		return false
+	}
+	return knownMatrixMetric(parts[4:])
+}
+
+func knownCrystalWorkload(workload, queueDepth string) bool {
+	switch workload + "_" + queueDepth {
+	case "rnd4k_q1", "rnd4k_q32", "seq1m_q1", "seq1m_q8":
+		return true
+	default:
+		return false
+	}
+}
+
+func knownMatrixDirection(direction string) bool {
+	return direction == "read" || direction == "write"
+}
+
+func knownMatrixMetric(parts []string) bool {
+	switch len(parts) {
+	case 1:
+		return parts[0] == "iops"
+	case 2:
+		return parts[0] == "mib" && parts[1] == "s"
+	default:
+		return false
+	}
+}
+
+func knownATTOBlock(block string) bool {
+	switch block {
+	case "512b", "1k", "2k", "4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "2m", "4m", "8m", "16m", "32m", "64m":
+		return true
+	default:
+		return false
+	}
+}
+
+func knownMixedBlock(block string) bool {
+	switch block {
+	case "4k", "64k", "512k", "1m":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -481,6 +497,10 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 	semantics := make(map[int]string, len(numericColumns))
 	directions := make(map[int]bool, len(numericColumns))
 	for _, column := range numericColumns {
+		semantic := tableBarSemantic(table, column)
+		if semantic == "" {
+			continue
+		}
 		higher := table.Columns[column].HigherIsBetter
 		if riskNumericColumn(table, column) {
 			// Risk magnitude is intentionally drawn directly: a larger
@@ -488,7 +508,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 			// direction metadata is lower-is-better.
 			higher = true
 		}
-		semantics[column] = tableBarSemantic(table, column)
+		semantics[column] = semantic
 		directions[column] = higher
 		for _, row := range rows {
 			if column >= len(row) {
@@ -593,63 +613,66 @@ type tableBarStats struct {
 	zero bool
 }
 
-// tableBarSemantic canonicalizes only the direction decoration shared by
-// matrix columns. It reads the stable column key, never the localized label.
-// More specific metric qualifiers (for example average vs P95 latency) stay in
-// the key and therefore do not get a misleading common scale.
+// tableBarSemantic recognizes only explicit table-family and column-key pairs.
+// It reads stable machine keys, never localized labels, so arbitrary numeric
+// columns cannot borrow a metric's relative scale.
 func tableBarSemantic(table model.Table, column int) string {
 	if column < 0 || column >= len(table.Columns) {
 		return ""
 	}
-	heading := strings.ToLower(strings.TrimSpace(table.Columns[column].Key))
-	// Direction is not a metric: read/write and upload/download throughput
-	// should share one scale, while qualifiers such as P50/P95 stay.
-	if strings.Contains(heading, "iops") {
-		return "iops"
-	}
-	if strings.Contains(heading, "mib_s") || strings.Contains(heading, "mbps") ||
-		strings.Contains(heading, "throughput") || strings.Contains(heading, "bandwidth") {
-		return "throughput"
-	}
-	for _, separator := range []string{"/", "_", "-", "(", ")", ":", "·"} {
-		heading = strings.ReplaceAll(heading, separator, " ")
-	}
-	fields := strings.Fields(heading)
-	kept := fields[:0]
-	for _, field := range fields {
-		// Do not remove substrings ("thread" contains "read").
-		if field == "read" || field == "write" || field == "upload" || field == "download" ||
-			field == "send" || field == "receive" || field == "sent" || field == "received" ||
-			field == "inbound" || field == "outbound" || field == "tx" || field == "rx" ||
-			field == "r" || field == "w" {
-			continue
+	tableKey := strings.ToLower(strings.TrimSpace(table.Key))
+	columnKey := strings.ToLower(strings.TrimSpace(table.Columns[column].Key))
+	switch tableKey {
+	case "network.dns.resolvers":
+		switch columnKey {
+		case "p50_ms":
+			return "dns-p50"
+		case "p95_ms":
+			return "dns-p95"
 		}
-		kept = append(kept, field)
+	case "network.latency.tcp_icmp":
+		switch columnKey {
+		case "tcp_p50_ms":
+			return "tcp-p50"
+		case "tcp_p95_ms":
+			return "tcp-p95"
+		}
+	case "network.iperf3.results":
+		if columnKey == "upload_mbps" || columnKey == "download_mbps" {
+			return "iperf-throughput"
+		}
+	case "network.iperf3.stability":
+		switch columnKey {
+		case "minimum_mbps":
+			return "iperf-interval-min"
+		case "p50_mbps":
+			return "iperf-interval-p50"
+		}
+	case "disk.fio.crystal", "disk.fio.atto", "disk.fio.mixed":
+		switch columnKey {
+		case "read_mib_s", "write_mib_s", "total_mib_s":
+			return "fio-throughput"
+		case "read_iops", "write_iops":
+			return "fio-iops"
+		}
+	case "network.ipquality.ipv4.scores", "network.ipquality.ipv6.scores":
+		if columnKey == "risk_score" || columnKey == "raw_or_equivalent_value" {
+			return "risk"
+		}
 	}
-	if len(kept) == 0 {
-		return ""
-	}
-	joined := strings.Join(kept, " ")
-	switch {
-	case strings.Contains(joined, "iops"):
-		return "iops"
-	case strings.Contains(joined, "throughput"), strings.Contains(joined, "bandwidth"):
-		return "throughput"
-	case joined == "total":
-		// Mixed/ATTO tables may call the sum simply "合计".  Its unit keeps
-		// it separate from any same-table non-throughput column.
-		return ""
-	default:
-		return joined
-	}
+	return ""
 }
 
 func riskNumericColumn(table model.Table, column int) bool {
 	if column < 0 || column >= len(table.Columns) {
 		return false
 	}
+	tableKey := strings.ToLower(strings.TrimSpace(table.Key))
+	if tableKey != "network.ipquality.ipv4.scores" && tableKey != "network.ipquality.ipv6.scores" {
+		return false
+	}
 	key := strings.ToLower(strings.TrimSpace(table.Columns[column].Key))
-	return key == "risk_score"
+	return key == "risk_score" || key == "raw_or_equivalent_value"
 }
 
 func numericCellValue(cell string) (float64, bool) {

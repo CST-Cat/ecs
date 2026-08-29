@@ -23,13 +23,13 @@ func TestScanEarlyFlagsSupportsLongShortAndEqualsForms(t *testing.T) {
 		"--profile=full",
 	}, "name", "lang", "config", "profile")
 	want := []earlyFlagOccurrence{
-		{Name: "name", Value: "long"},
-		{Name: "name", Value: "short"},
-		{Name: "name", Value: "long-equal"},
-		{Name: "name", Value: "short-equal"},
-		{Name: "lang", Value: "en"},
-		{Name: "config", Value: "short.json"},
-		{Name: "profile", Value: "full"},
+		{Name: "name", Value: "long", Position: 0, End: 2, HasValue: true},
+		{Name: "name", Value: "short", Position: 2, End: 4, HasValue: true},
+		{Name: "name", Value: "long-equal", Position: 4, End: 5, HasValue: true, HasEquals: true},
+		{Name: "name", Value: "short-equal", Position: 5, End: 6, HasValue: true, HasEquals: true},
+		{Name: "lang", Value: "en", Position: 6, End: 8, HasValue: true},
+		{Name: "config", Value: "short.json", Position: 8, End: 10, HasValue: true},
+		{Name: "profile", Value: "full", Position: 10, End: 11, HasValue: true, HasEquals: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("early flag occurrences = %#v, want %#v", got, want)
@@ -46,9 +46,26 @@ func TestScanEarlyFlagsStopsAtDelimiterAndDoesNotConsumeMissingValues(t *testing
 		"--name", "after",
 		"--lang", "en",
 	}, "name", "lang")
-	want := []earlyFlagOccurrence{{Name: "name", Value: "before"}}
+	want := []earlyFlagOccurrence{
+		{Name: "name", Value: "before", Position: 0, End: 2, HasValue: true},
+		{Name: "name", Position: 2, End: 3, Missing: true},
+		{Name: "name", Position: 4, End: 5, Missing: true},
+		{Name: "name", Position: 6, End: 7, HasValue: true, HasEquals: true},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("early flag delimiter/missing-value handling = %#v, want %#v", got, want)
+	}
+}
+
+func TestScanEarlyFlagsDistinguishesEmptySeparateValues(t *testing.T) {
+	got := scanEarlyFlags([]string{"--lang", "", "-lang", "--other", "-lang="}, "lang")
+	want := []earlyFlagOccurrence{
+		{Name: "lang", Position: 0, End: 2, HasValue: true},
+		{Name: "lang", Position: 2, End: 3, Missing: true},
+		{Name: "lang", Position: 4, End: 5, HasValue: true, HasEquals: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("language value states = %#v, want %#v", got, want)
 	}
 }
 
@@ -65,14 +82,14 @@ func TestEarlyFlagsKeepLastValueAndLanguageCanSurroundCommand(t *testing.T) {
 		{"--lang", "zh", "run", "--lang=en"},
 		{"run", "-lang=zh", "--lang", "en"},
 	} {
-		if got := resolveLanguage(args); got != i18n.LangEN {
+		if got := resolveLanguage(scanEarlyFlags(args, "lang")); got != i18n.LangEN {
 			t.Fatalf("language for %v = %s, want %s", args, got, i18n.LangEN)
 		}
 	}
-	if err := validateExplicitLanguage([]string{"--lang=en", "--lang=invalid"}); err == nil {
+	if err := validateExplicitLanguage(scanEarlyFlags([]string{"--lang=en", "--lang=invalid"}, "lang")); err == nil {
 		t.Fatal("last invalid language value was accepted")
 	}
-	if got := resolveLanguage([]string{"--lang=invalid", "--lang=en"}); got != i18n.LangEN {
+	if got := resolveLanguage(scanEarlyFlags([]string{"--lang=invalid", "--lang=en"}, "lang")); got != i18n.LangEN {
 		t.Fatalf("last valid language value = %s, want %s", got, i18n.LangEN)
 	}
 }
@@ -88,10 +105,11 @@ func TestEarlyFlagsUseLastExplicitLanguageValue(t *testing.T) {
 		{name: "separate values", args: []string{"--lang", "en", "--lang", "zh"}, want: i18n.LangZH},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := validateExplicitLanguage(test.args); err != nil {
+			occurrences := scanEarlyFlags(test.args, "lang")
+			if err := validateExplicitLanguage(occurrences); err != nil {
 				t.Fatalf("language validation: %v", err)
 			}
-			if got := resolveLanguage(test.args); got != test.want {
+			if got := resolveLanguage(occurrences); got != test.want {
 				t.Fatalf("resolveLanguage(%v) = %s, want %s", test.args, got, test.want)
 			}
 		})
@@ -103,7 +121,7 @@ func TestResolveLanguageWithoutExplicitValueUsesEnvironment(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	t.Setenv("LANG", "en_US.UTF-8")
-	if got := resolveLanguage([]string{"list"}); got != i18n.LangEN {
+	if got := resolveLanguage(scanEarlyFlags([]string{"list"}, "lang")); got != i18n.LangEN {
 		t.Fatalf("resolveLanguage without --lang = %s, want %s", got, i18n.LangEN)
 	}
 }
@@ -121,7 +139,8 @@ func TestEarlyFlagsRejectInvalidMissingAndEmptyLanguage(t *testing.T) {
 		{name: "empty value", args: []string{"--lang="}, marker: "--lang value must not be empty"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := validateExplicitLanguage(test.args); err == nil || !strings.Contains(err.Error(), test.marker) {
+			err := validateExplicitLanguage(scanEarlyFlags(test.args, "lang"))
+			if err == nil || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("validateExplicitLanguage(%v) = %v, want marker %q", test.args, err, test.marker)
 			}
 		})

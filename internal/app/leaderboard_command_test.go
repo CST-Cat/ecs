@@ -9,60 +9,7 @@ import (
 	"ecs/internal/score"
 )
 
-func TestExpandReportPathsRecursesIntoSubdirectories(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "2026-08")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{
-		filepath.Join(root, "top.json"),
-		filepath.Join(nested, "a.json"),
-		filepath.Join(nested, "b.json"),
-		filepath.Join(root, "README.md"),
-	} {
-		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// 隐藏目录不该被收进来。
-	hidden := filepath.Join(root, ".git")
-	_ = os.MkdirAll(hidden, 0o755)
-	_ = os.WriteFile(filepath.Join(hidden, "c.json"), []byte("{}"), 0o600)
-
-	got := expandReportPaths([]string{root})
-	if len(got) != 3 {
-		t.Fatalf("应收集到 3 个 json（含子目录、不含隐藏目录与非 json），得到 %d 个：%v", len(got), got)
-	}
-	for _, path := range got {
-		if filepath.Ext(path) != ".json" {
-			t.Errorf("收集到非 json 文件：%s", path)
-		}
-		if filepath.Base(filepath.Dir(path)) == ".git" {
-			t.Errorf("收集到隐藏目录里的文件：%s", path)
-		}
-	}
-}
-
-func TestExpandReportPathsDeduplicatesCanonicalPaths(t *testing.T) {
-	root := t.TempDir()
-	reports := filepath.Join(root, "reports")
-	if err := os.MkdirAll(reports, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(reports, "a.json")
-	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	uncleanPath := reports + string(os.PathSeparator) + "." + string(os.PathSeparator) + "a.json"
-	got := expandReportPaths([]string{path, uncleanPath, reports})
-	if len(got) != 1 || got[0] != path {
-		t.Fatalf("canonical duplicate paths = %v, want [%s]", got, path)
-	}
-}
-
-func TestBaselineStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
+func TestLeaderboardStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	valid := writeBaselineReport(t, "valid.json", submitTestReport())
 	bad := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(bad, []byte("{not json\n"), 0o600); err != nil {
@@ -78,7 +25,7 @@ func TestBaselineStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "baseline.json")
-			args := append([]string{"baseline", "--lang", "en", "--strict", "--output", output}, test.input...)
+			args := append([]string{"leaderboard", "--lang", "en", "--strict", "--output", output}, test.input...)
 			status, stdout, stderr := invokeAppMain(args...)
 			if status != 1 || stdout != "" || !strings.Contains(stderr, "strict mode rejected") {
 				t.Fatalf("strict input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -90,7 +37,7 @@ func TestBaselineStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestBaselineInputStates(t *testing.T) {
+func TestLeaderboardInputStates(t *testing.T) {
 	root := t.TempDir()
 	valid := writeBaselineReport(t, "valid.json", submitTestReport())
 	bad := filepath.Join(root, "bad.json")
@@ -139,7 +86,7 @@ func TestBaselineInputStates(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "baseline.json")
-			status, stdout, stderr := invokeAppMain(append([]string{"baseline"}, test.args(output)...)...)
+			status, stdout, stderr := invokeAppMain(append([]string{"leaderboard"}, test.args(output)...)...)
 			if status != test.wantStatus {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
@@ -150,19 +97,19 @@ func TestBaselineInputStates(t *testing.T) {
 			}
 			if test.checkOut {
 				if _, err := score.LoadBaseline(output); err != nil {
-					t.Fatalf("nonstrict input did not produce baseline: %v", err)
+					t.Fatalf("nonstrict input did not produce leaderboard reference: %v", err)
 				}
 			}
 		})
 	}
 }
 
-func TestBaselineReportsOutputWriteFailure(t *testing.T) {
+func TestLeaderboardReportsOutputWriteFailure(t *testing.T) {
 	input := writeBaselineReport(t, "report.json", submitTestReport())
 	outputDirectory := t.TempDir()
-	status, stdout, stderr := invokeAppMain("baseline", "--lang", "en", "--output", outputDirectory, input)
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", outputDirectory, input)
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "is a directory") {
-		t.Fatalf("baseline output failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
+		t.Fatalf("leaderboard output failure status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 	if _, err := os.Stat(outputDirectory); err != nil {
 		t.Fatalf("output failure changed the destination: %v", err)

@@ -18,9 +18,7 @@ import "ecs/internal/config"
 
 // scheduleGroup 是一批可以同时执行的模块。
 type scheduleGroup struct {
-	// Parallel 为真时组内模块并行执行。
-	Parallel bool
-	Indices  []int
+	Indices []int
 }
 
 // planSchedule 把已绑定的模块序列切成执行批次。
@@ -34,7 +32,7 @@ func planSchedule(bindings []moduleBinding) []scheduleGroup {
 		if len(pending) == 0 {
 			return
 		}
-		groups = append(groups, scheduleGroup{Parallel: len(pending) > 1, Indices: pending})
+		groups = append(groups, scheduleGroup{Indices: pending})
 		pending = nil
 	}
 	for index, binding := range bindings {

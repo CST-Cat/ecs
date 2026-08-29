@@ -20,9 +20,3 @@ func (r *Result) Skip(reason Message) {
 	r.Status = StatusSkipped
 	r.SummaryMessages = []Message{cloneMessage(reason)}
 }
-
-func (r *Result) Fail(err error) {
-	r.Status = StatusError
-	r.Error = err.Error()
-	r.SummaryMessages = []Message{NewMessage("message.result.failed")}
-}

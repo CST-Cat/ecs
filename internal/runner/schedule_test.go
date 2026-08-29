@@ -22,8 +22,8 @@ func TestPlanScheduleClassesAndOrder(t *testing.T) {
 	}{
 		{name: "empty", want: nil},
 		{name: "one probe", in: makeBindings(config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0}}}},
-		{name: "continuous probes", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Parallel: true, Indices: []int{0, 1}}}},
-		{name: "mixed groups", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe, config.ModuleConcurrencyExclusive, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Parallel: true, Indices: []int{0, 1}}, {Indices: []int{2}}, {Indices: []int{3}}}},
+		{name: "continuous probes", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}}},
+		{name: "mixed groups", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe, config.ModuleConcurrencyExclusive, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}, {Indices: []int{2}}, {Indices: []int{3}}}},
 		{name: "missing descriptor is exclusive", in: []moduleBinding{{}}, want: []scheduleGroup{{Indices: []int{0}}}},
 	}
 	for _, test := range cases {

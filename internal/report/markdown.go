@@ -116,11 +116,6 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			out.WriteString(markdownEscape(evidenceText(*result.Evidence)))
 			out.WriteString(" · `" + termcolor.Palette{Level: termcolor.LevelNone}.Bar(result.Evidence.EvidenceRatio(), 16) + "`\n\n")
 		}
-		if result.Error != "" {
-			out.WriteString("> " + i18n.T("report.errorPrefix") + i18n.T("punct.colon"))
-			out.WriteString(markdownEscape(result.Error))
-			out.WriteString("\n\n")
-		}
 		if len(result.Failures) > 0 {
 			out.WriteString("### " + i18n.T("report.failures") + "\n\n")
 			out.WriteString("| " + i18n.T("failure.category") + " | " + i18n.T("failure.stage") + " | " +

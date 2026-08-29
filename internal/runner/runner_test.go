@@ -116,7 +116,7 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 			runs := 0
 			item := &runnerTestProbe{id: test.descriptor.ID, runs: &runs, result: model.Result{Status: test.status}}
 			if test.status == model.StatusError {
-				item.result.Error = "fixture failure"
+				item.result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "fixture", Target: test.descriptor.ID, Message: "fixture failure"})
 			}
 			got := runBinding(context.Background(), moduleBinding{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
 			if got.Status != test.wantStatus || got.Evidence == nil || got.Evidence.Valid != test.wantValid || got.Evidence.Expected != 1 || runs != test.wantRuns {
@@ -130,7 +130,7 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 			if test.wantMethodology && got.Methodology.Label != test.descriptor.Methodology.Label {
 				t.Fatalf("methodology = %+v, want descriptor metadata", got.Methodology)
 			}
-			if test.wantFailure && (len(got.Failures) == 0 || got.Failures[0].Stage != "module" || got.Failures[0].Category == "" || !strings.Contains(got.Failures[0].Message, "fixture failure")) {
+			if test.wantFailure && (len(got.Failures) == 0 || got.Failures[0].Stage != "fixture" || got.Failures[0].Target != test.descriptor.ID || got.Failures[0].Category == "" || !strings.Contains(got.Failures[0].Message, "fixture failure")) {
 				t.Fatalf("error diagnostics = %+v", got.Failures)
 			}
 		})
@@ -174,24 +174,10 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	}
 }
 
-func TestRunOneAndSafeRunIsolatePanic(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileStandard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runs := 0
-	item := &runnerTestProbe{id: "custom", title: "custom probe", runs: &runs, result: model.Result{Status: model.StatusOK}}
-	result := runOne(context.Background(), item, cfg, probe.Environment{}, true)
-	if runs != 1 || result.ID != "custom" || result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 1 {
-		t.Fatalf("runOne result = %+v, runs=%d", result, runs)
-	}
-	if result.Methodology.Label != "" || result.Methodology.Profile != "" || result.Methodology.ComparisonScope != "" {
-		t.Fatalf("unknown custom probe received hidden descriptor methodology: %+v", result.Methodology)
-	}
-
+func TestSafeRunIsolatePanic(t *testing.T) {
 	panicItem := &runnerTestProbe{id: "panic-probe", title: "panic probe", panicValue: "fixture panic"}
 	panicResult := safeRun(context.Background(), panicItem, probe.Environment{})
-	if panicResult.Status != model.StatusError || panicResult.Error != "fixture panic" || !reflect.DeepEqual(panicResult.SummaryMessages, []model.Message{model.NewMessage("message.runner.panic")}) {
+	if panicResult.Status != model.StatusError || !reflect.DeepEqual(panicResult.SummaryMessages, []model.Message{model.NewMessage("message.runner.panic")}) {
 		t.Fatalf("panic result = %+v", panicResult)
 	}
 	if len(panicResult.Failures) != 1 || panicResult.Failures[0].Stage != "panic" || panicResult.Failures[0].Target != "panic-probe" || panicResult.Failures[0].Category != model.FailureUnknown || panicResult.Failures[0].Message != "fixture panic" {

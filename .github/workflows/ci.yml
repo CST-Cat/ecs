@@ -132,7 +132,7 @@ jobs:
       - name: Check for outliers
         run: |
           if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
-            go run ./cmd/ecs baseline \
+            go run ./cmd/ecs leaderboard \
               --annotate --verbose \
               --output /tmp/baseline-check.json \
               submissions

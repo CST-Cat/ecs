@@ -180,7 +180,11 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 		})
 	}
 	if len(found) == 0 {
-		result.Fail(fmt.Errorf("egress lookup unavailable"))
+		result.Status = model.StatusError
+		result.SummaryMessages = []model.Message{model.NewMessage("message.result.failed")}
+		if len(result.Failures) == 0 {
+			addFailureMessage(&result, "egress", "network", "egress lookup unavailable")
+		}
 		result.Notes = append(result.Notes, "probe.network.note.egress_unavailable")
 		result.Evidence = model.NewEvidence(0, len(versions)*plannedSources, "source")
 		result.Finish(start)

@@ -168,7 +168,7 @@ func TestPlanKeepsTopLevelEgressFactsWhenModulesOnlyExposeIDs(t *testing.T) {
 func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	var stderr bytes.Buffer
 	resolved, err := resolveRunConfig([]string{
-		"--lang", "en", "--only", "system",
+		"--only", "system",
 		"--exposure", "any", "--reveal=true",
 		// The plan-derived values are appended after the original CLI values.
 		"--exposure", "local", "--reveal=false",
@@ -184,7 +184,7 @@ func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 func TestBacktraceCLIUsesExplicitCarrierSyntax(t *testing.T) {
 	var stderr bytes.Buffer
 	resolved, err := resolveRunConfig([]string{
-		"--lang", "en", "--only", "backtrace", "--exposure", "public",
+		"--only", "backtrace", "--exposure", "public",
 		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133,unicom:IPv6 target=[2001:db8::1]",
 	}, &stderr)
 	if err != nil {
@@ -214,7 +214,7 @@ func TestBacktraceCLIFailsClosedWithoutExplicitCarrier(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stderr bytes.Buffer
-			if _, err := resolveRunConfig(append([]string{"--lang", "en", "--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
+			if _, err := resolveRunConfig(append([]string{"--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
 				t.Fatalf("resolve invalid backtrace target = %v (stderr=%q)", err, stderr.String())
 			}
 		})

@@ -440,7 +440,10 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	}
 	result.Evidence = model.NewEvidence(validOperations, len(rows)*3, "operation")
 	if completedDirections == 0 {
-		result.Fail(fmt.Errorf("所有 iperf3 节点与方向均失败"))
+		result.Status = model.StatusError
+		if len(result.Failures) == 0 {
+			addFailureMessage(&result, "benchmark_run", "iperf3", "所有 iperf3 节点与方向均失败")
+		}
 		result.Notes = speedStableNotes()
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.speed.summary.none")}
 		result.Finish(start)

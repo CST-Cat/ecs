@@ -85,15 +85,3 @@ func selectBindings(bindings []moduleBinding, ids []string) []moduleBinding {
 	}
 	return selected
 }
-
-// bindingForProbe is the explicit fallback for tests that invoke runOne with
-// a custom Probe. Production execution uses validated moduleBinding values.
-func bindingForProbe(item probe.Probe) moduleBinding {
-	if item == nil {
-		return moduleBinding{}
-	}
-	if descriptor, ok := config.ModuleDescriptorFor(item.ID()); ok {
-		return moduleBinding{Descriptor: descriptor, Probe: item}
-	}
-	return moduleBinding{Probe: item}
-}

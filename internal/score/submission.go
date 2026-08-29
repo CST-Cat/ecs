@@ -31,24 +31,24 @@ import (
 // SubmissionSchema 是提交文件的格式标识。
 const SubmissionSchema = "ecs.submission/v1"
 
-// SubmissionFingerprintV2 identifies the canonical, timestamp-independent
-// fingerprint introduced without changing the additive submission schema.
-// An omitted version remains the legacy v1 algorithm for existing files.
-const SubmissionFingerprintV2 = "v2"
-
 const (
 	memoryBackendStream = "stream"
+	sampleIDDomain      = "ecs.sample/v1\x00"
 )
 
 // Submission 是一份可公开入库的跑分记录。
 type Submission struct {
 	Schema string `json:"schema"`
-	// ID 由机器规格与测量值派生，用于查重；不含任何可定位信息。
-	ID                 string    `json:"id"`
-	FingerprintVersion string    `json:"fingerprint_version,omitempty"`
-	Host               HostSpec  `json:"host"`
-	Tool               ToolSpec  `json:"tool"`
-	RanAt              time.Time `json:"ran_at"`
+	// ID is the content identity of this public artifact. It is not the
+	// identity of the benchmark sample represented by the artifact.
+	ID string `json:"id"`
+	// SampleID is a stable anonymous identity for the benchmark Run.ID that
+	// produced this artifact. It is deliberately separate from ID so one run
+	// cannot be counted twice merely because it was exported in two formats.
+	SampleID string    `json:"sample_id"`
+	Host     HostSpec  `json:"host"`
+	Tool     ToolSpec  `json:"tool"`
+	RanAt    time.Time `json:"ran_at"`
 	// Metrics 是评分用的原始实测值，键与 Dimensions() 的 Metric.Key 对应。
 	Metrics map[string]float64 `json:"metrics"`
 	// Profile 记录用户选中的模块预设；各档位使用相同的 full-depth 基准口径，
@@ -99,8 +99,23 @@ type SubmissionOptions struct {
 // maxNoteLength 限制备注长度：这是一个跑分库，不是留言板。
 const maxNoteLength = 200
 
+// SampleIDForRunID derives the anonymous benchmark sample identity from a
+// report's Run.ID. The domain separator keeps this digest distinct from other
+// ECS hashes while the raw Run.ID remains out of submission JSON.
+func SampleIDForRunID(runID string) (string, error) {
+	if strings.TrimSpace(runID) == "" {
+		return "", fmt.Errorf("report Run.ID is required for sample identity")
+	}
+	sum := sha256.Sum256([]byte(sampleIDDomain + runID))
+	return hex.EncodeToString(sum[:]), nil
+}
+
 // BuildSubmission 从完整报告提取一份可公开的提交。
 func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, error) {
+	sampleID, err := SampleIDForRunID(data.Run.ID)
+	if err != nil {
+		return Submission{}, err
+	}
 	values := collectMeasurements(data)
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
@@ -129,14 +144,14 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	}
 
 	submission := Submission{
-		Schema:             SubmissionSchema,
-		FingerprintVersion: SubmissionFingerprintV2,
-		Host:               extractHostSpec(data, values),
-		Tool:               extractToolSpec(data),
-		RanAt:              data.Run.StartedAt,
-		Metrics:            metrics,
-		Profile:            data.Run.Profile,
-		MemoryBackend:      memoryBackend,
+		Schema:        SubmissionSchema,
+		SampleID:      sampleID,
+		Host:          extractHostSpec(data, values),
+		Tool:          extractToolSpec(data),
+		RanAt:         data.Run.StartedAt,
+		Metrics:       metrics,
+		Profile:       data.Run.Profile,
+		MemoryBackend: memoryBackend,
 	}
 	// System metadata is a narrow, non-sensitive whitelist.  Explicit CLI
 	// values remain authoritative, while empty values safely leave the
@@ -260,71 +275,29 @@ func extractToolSpec(data model.Report) ToolSpec {
 	return spec
 }
 
-// fingerprint dispatches to the algorithm declared by the record. Existing
-// files omit fingerprint_version and therefore retain their original IDs.
+// fingerprint hashes a canonical JSON projection of every accepted public
+// content field except ID, SampleID and RanAt. Consequently the same artifact
+// content has one identity across export times or sample annotations, while
+// metadata/tool/profile/note edits and exact float changes are still detected.
+// JSON struct framing keeps the current fingerprint deterministic and removes
+// delimiter ambiguities.
 func (s Submission) fingerprint() string {
-	switch s.FingerprintVersion {
-	case "":
-		return s.legacyFingerprint()
-	case SubmissionFingerprintV2:
-		return s.fingerprintV2()
-	default:
-		return ""
-	}
-}
-
-// legacyFingerprint is frozen for backward compatibility with existing
-// ecs.submission/v1 files. It includes RanAt and rounds metrics to 3 decimals;
-// new records must use fingerprintV2 instead.
-func (s Submission) legacyFingerprint() string {
-	var builder strings.Builder
-	builder.WriteString(s.Host.CPUModel)
-	builder.WriteString("|")
-	builder.WriteString(strconv.Itoa(s.Host.VCPU))
-	builder.WriteString("|")
-	builder.WriteString(strconv.FormatFloat(s.Host.MemoryGiB, 'f', 2, 64))
-	builder.WriteString("|")
-	builder.WriteString(s.Host.Virtualization)
-	builder.WriteString("|")
-	builder.WriteString(s.RanAt.UTC().Format(time.RFC3339))
-	if s.MemoryBackend != "" {
-		builder.WriteString("|memory_backend=")
-		builder.WriteString(s.MemoryBackend)
-	}
-	for _, key := range sortedMetricKeys(s.Metrics) {
-		builder.WriteString("|")
-		builder.WriteString(key)
-		builder.WriteString("=")
-		builder.WriteString(strconv.FormatFloat(s.Metrics[key], 'f', 3, 64))
-	}
-	sum := sha256.Sum256([]byte(builder.String()))
-	return hex.EncodeToString(sum[:])[:12]
-}
-
-// fingerprintV2 hashes a canonical JSON projection of every accepted public
-// field except ID and RanAt. Consequently the same result has one identity
-// across export times, while metadata/tool/profile/note edits and exact float
-// changes are still detected. JSON struct framing also removes the delimiter
-// ambiguities of the legacy concatenation format.
-func (s Submission) fingerprintV2() string {
 	canonical := struct {
-		Schema             string             `json:"schema"`
-		FingerprintVersion string             `json:"fingerprint_version"`
-		Host               HostSpec           `json:"host"`
-		Tool               ToolSpec           `json:"tool"`
-		Metrics            map[string]float64 `json:"metrics"`
-		Profile            string             `json:"profile"`
-		MemoryBackend      string             `json:"memory_backend,omitempty"`
-		Note               string             `json:"note,omitempty"`
+		Schema        string             `json:"schema"`
+		Host          HostSpec           `json:"host"`
+		Tool          ToolSpec           `json:"tool"`
+		Metrics       map[string]float64 `json:"metrics"`
+		Profile       string             `json:"profile"`
+		MemoryBackend string             `json:"memory_backend,omitempty"`
+		Note          string             `json:"note,omitempty"`
 	}{
-		Schema:             s.Schema,
-		FingerprintVersion: SubmissionFingerprintV2,
-		Host:               s.Host,
-		Tool:               s.Tool,
-		Metrics:            s.Metrics,
-		Profile:            s.Profile,
-		MemoryBackend:      s.MemoryBackend,
-		Note:               s.Note,
+		Schema:        s.Schema,
+		Host:          s.Host,
+		Tool:          s.Tool,
+		Metrics:       s.Metrics,
+		Profile:       s.Profile,
+		MemoryBackend: s.MemoryBackend,
+		Note:          s.Note,
 	}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
@@ -386,8 +359,14 @@ func (s Submission) Validate() error {
 	if s.Schema != SubmissionSchema {
 		return fmt.Errorf("unsupported submission schema %q, expected %q", s.Schema, SubmissionSchema)
 	}
-	if s.FingerprintVersion != "" && s.FingerprintVersion != SubmissionFingerprintV2 {
-		return fmt.Errorf("unsupported fingerprint_version %q", s.FingerprintVersion)
+	if s.ID == "" {
+		return fmt.Errorf("submission id is required")
+	}
+	if len(s.SampleID) != sha256.Size*2 || s.SampleID != strings.ToLower(s.SampleID) {
+		return fmt.Errorf("sample_id must be a 64-character lowercase hex string")
+	}
+	if _, err := hex.DecodeString(s.SampleID); err != nil {
+		return fmt.Errorf("sample_id must be a 64-character lowercase hex string")
 	}
 	if len(s.Metrics) == 0 {
 		return fmt.Errorf("submission contains no metrics")
@@ -501,15 +480,6 @@ func safeMetadataValue(value string, limit int) string {
 }
 
 func sortedModuleIDs(values map[string][]model.Measurement) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedMetricKeys(values map[string]float64) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

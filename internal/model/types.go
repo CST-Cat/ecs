@@ -73,7 +73,6 @@ type Result struct {
 	Failures        []Failure     `json:"failures,omitempty"`
 	Interference    *Interference `json:"interference,omitempty"`
 	Retry           *RetryInfo    `json:"retry,omitempty"`
-	Error           string        `json:"error,omitempty"`
 }
 
 // RetryInfo records one interference-triggered benchmark retry.

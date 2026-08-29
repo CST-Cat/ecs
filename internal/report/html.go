@@ -317,7 +317,6 @@ const htmlTemplate = `<!doctype html>
     </div>
     {{end}}
     {{if resultSummary .}}<p class="summary-text">{{resultSummary .}} <span class="muted">· {{duration .DurationMS}}</span></p>{{end}}
-    {{if .Error}}<p class="error">{{t "report.errorPrefix"}}{{t "punct.colon"}}{{.Error}}</p>{{end}}
     {{if .Evidence}}<div class="evidence"><strong style="color:{{evidenceLabelColor .Evidence}}">{{t "report.evidence"}}{{t "punct.colon"}}{{evidenceText .Evidence}}</strong><div class="bar"><i style="width:{{barWidth (evidenceRatio .Evidence)}}%;background:{{evidenceColor .Evidence}}"></i></div></div>{{end}}
 		{{if .Failures}}
 		<h3>{{t "report.failures"}}</h3>

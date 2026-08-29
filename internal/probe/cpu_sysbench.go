@@ -95,7 +95,9 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 
 	single, err := executeSysbenchCPU(ctx, path, 1, seconds)
 	if err != nil {
-		result.Fail(err)
+		result.Status = model.StatusError
+		result.SummaryMessages = []model.Message{model.NewMessage("message.result.failed")}
+		addFailure(&result, "single_thread_run", "sysbench", err)
 		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
 		result.Finish(start)
 		return result

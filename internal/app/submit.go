@@ -18,7 +18,6 @@ import (
 func submitCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs submit", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	input := flags.String("input", "", i18n.T("flag.submitInput"))
 	output := flags.String("output", "", i18n.T("flag.submitOutput"))
 	region := flags.String("region", "", i18n.T("flag.submitRegion"))
@@ -59,10 +58,6 @@ func submitCommand(args []string, stdout, stderr io.Writer) int {
 		Region: *region, Provider: *provider, Note: *note,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
-		return 1
-	}
-	if err := submission.Validate(); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
@@ -166,19 +161,6 @@ func inspectSubmissionPath(path string) (submissionPathState, error) {
 	return state, nil
 }
 
-// validateSubmissionTarget performs the final parent check immediately
-// before creating the temporary inode, then inspects the target without
-// changing the existing-target error classification used by the writer.
-func validateSubmissionTarget(path string) (submissionPathState, error) {
-	if err := validateSubmissionPath(path); err != nil {
-		return submissionPathState{}, err
-	}
-	if err := validateSubmissionParent(filepath.Dir(path)); err != nil {
-		return submissionPathState{}, err
-	}
-	return lstatSubmissionPath(path)
-}
-
 // preflightSubmissionOutput rejects an explicitly supplied target before the
 // report is loaded. Existing files are never overwritten; directories are
 // accepted as destinations but are never created by ecs submit.
@@ -223,11 +205,17 @@ func resolveSubmissionTarget(output, fileName string, explicit bool) (string, er
 // exists (including a symlink or hardlink), unlike rename which would replace
 // it.
 func writeSubmissionExclusive(path string, content []byte) error {
-	state, err := validateSubmissionTarget(path)
-	if err != nil {
+	if err := validateSubmissionPath(path); err != nil {
 		return err
 	}
 	parent := filepath.Dir(path)
+	if err := validateSubmissionParent(parent); err != nil {
+		return err
+	}
+	state, err := lstatSubmissionPath(path)
+	if err != nil {
+		return err
+	}
 	if state.exists {
 		return fmt.Errorf("submission output already exists: %s", path)
 	}

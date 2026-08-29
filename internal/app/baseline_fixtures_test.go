@@ -16,7 +16,7 @@ func submitTestReport() model.Report {
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
+		Run:           model.RunInfo{ID: "app-submit-fixture", Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
 		Summary:       model.Summary{Status: model.StatusOK, OK: 2, Messages: []model.Message{model.NewMessage("message.summary.allOK", 2)}},
 		Results: []model.Result{{
 			ID: "cpu", Status: model.StatusOK,
@@ -70,6 +70,7 @@ func writeSubmissionFixture(t *testing.T, path string) string {
 func writeOutlierSubmissionFixture(t *testing.T, path string, single float64, multi *float64) string {
 	t.Helper()
 	report := submitTestReport()
+	report.Run.ID = filepath.Base(path)
 	for index := range report.Results {
 		if report.Results[index].ID != "cpu" {
 			continue

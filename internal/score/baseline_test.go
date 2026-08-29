@@ -26,6 +26,25 @@ func validBaselineFixture() Baseline {
 	}
 }
 
+func TestBaselineRankThresholdContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		rankMin int
+		wantMin int
+	}{
+		{name: "zero uses default", rankMin: 0, wantMin: DefaultRankMinSamples},
+		{name: "explicit value is preserved", rankMin: 7, wantMin: 7},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			baseline := Baseline{RankMinSamples: test.rankMin}
+			if got := baseline.RankThreshold(); got != test.wantMin {
+				t.Fatalf("rank threshold = %d, want %d", got, test.wantMin)
+			}
+		})
+	}
+}
+
 func TestBuildBaselineAndRoundTrip(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })

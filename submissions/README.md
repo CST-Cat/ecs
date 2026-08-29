@@ -12,7 +12,7 @@
 {
   "schema": "ecs.submission/v1",
   "id": "ddecbbc0421f",
-  "fingerprint_version": "v2",
+  "sample_id": "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5",
   "host": {
     "vcpu": 16,
     "memory_gib": 30.69,
@@ -42,7 +42,7 @@
 }
 ```
 
-字段是显式白名单：主机规格、工具版本和评分所需的 `metrics` 会保留，完整报告中的探针结论不会因为新增字段自动进入提交。`provider`、`region` 和 `note` 为提交者自报字段；长度限制和可用评分键由 validator 检查。
+字段是显式白名单：主机规格、工具版本和评分所需的 `metrics` 会保留，完整报告中的探针结论不会因为新增字段自动进入提交。`sample_id` 是由完整报告 `run.id` 经 `SHA-256("ecs.sample/v1\x00" + run.id)` 派生的匿名 benchmark sample identity；原始 `run.id` 不写入提交。`id` 使用当前唯一的规范 JSON 内容指纹，排除 `id`、`sample_id` 和 `ran_at`，但包含其余允许公开字段；`provider`、`region` 和 `note` 为提交者自报字段；长度限制和可用评分键由 validator 检查。
 
 ## 生成提交
 
@@ -90,9 +90,9 @@ ECS_SUBMISSION_DIR=submissions go test ./internal/score -run '^TestSubmissionCor
 ecs leaderboard --strict --output /tmp/check.json submissions
 ```
 
-提交必须是单个不超过 256 KiB 的 JSON 对象，schema 恰为 `ecs.submission/v1`，没有未知字段或尾随内容；`metrics` 非空且键已登记，数值为正的有限数；主机 vCPU/内存为正，`tool.ecs` 非空；STREAM 指标与 `memory_backend` 一致；`id` 必须与内容重新计算的指纹一致；库中不能存在重复指纹。
+提交必须是单个不超过 256 KiB 的 JSON 对象，schema 恰为 `ecs.submission/v1`，没有未知字段或尾随内容；旧的 `fingerprint_version` 字段不属于当前 schema，会被拒绝；`sample_id` 必须是 64 个小写 hex 字符；`metrics` 非空且键已登记，数值为正的有限数；主机 vCPU/内存为正，`tool.ecs` 非空；STREAM 指标与 `memory_backend` 一致；`id` 必须与当前算法重新计算的指纹一致；库中不能存在重复指纹。排行榜按 `sample_id` 去重，同一运行的报告与提交只计一个 sample。
 
-修改任意值、provider、region、note 或工具版本都会改变指纹，正确做法是重新运行 `ecs submit`，不要手改既有文件。
+修改参与 artifact 指纹的任意字段（包括主机、工具、metrics、profile、memory_backend、provider、region 和 note）都会改变指纹；`sample_id` 与 `ran_at` 不参与该指纹。正确做法是重新运行 `ecs submit`，不要手改既有文件。
 
 ## 重建参考
 

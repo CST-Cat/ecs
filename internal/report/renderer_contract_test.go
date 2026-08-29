@@ -333,7 +333,6 @@ func TestValuePresentationKeepsRawAndTranslatesKeyAcrossRenderers(t *testing.T) 
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	const rawKey = "probe.network.ip_type.native"
-	const errorKey = "probe.network.status.ok"
 	data := model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
@@ -341,7 +340,6 @@ func TestValuePresentationKeepsRawAndTranslatesKeyAcrossRenderers(t *testing.T) 
 		Summary:       model.Summary{Status: model.StatusWarning},
 		Results: []model.Result{{
 			ID: "value", Title: "Value presentation", Status: model.StatusWarning,
-			Error: errorKey,
 			Fields: []model.Field{
 				{Key: "raw", Label: "Raw", Value: model.RawValue(rawKey)},
 				{Key: "key", Label: "Key", Value: model.KeyValue(rawKey)},
@@ -365,8 +363,34 @@ func TestValuePresentationKeepsRawAndTranslatesKeyAcrossRenderers(t *testing.T) 
 		if !strings.Contains(output, translated) {
 			t.Errorf("%s renderer did not translate Key Value %q to %q: %s", format, rawKey, translated, output)
 		}
-		if !strings.Contains(output, errorKey) {
-			t.Errorf("%s renderer translated raw Result.Error %q: %s", format, errorKey, output)
+	}
+}
+
+func TestStructuredFailureRendersOneOperationalDiagnosisAcrossFormats(t *testing.T) {
+	const diagnostic = "structured-failure-diagnostic"
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Run:           model.RunInfo{ID: "failure-render", Profile: "standard", Exposure: "local"},
+		Summary:       model.Summary{Status: model.StatusError, Errors: 1, Messages: []model.Message{model.NewMessage("message.summary.withErrors", 0, 1)}},
+		Results: []model.Result{{
+			ID: "fixture", Title: "Fixture", Status: model.StatusError,
+			SummaryMessages: []model.Message{model.NewMessage("message.result.failed")},
+			Failures:        []model.Failure{{Category: model.FailureConnectionRefused, Stage: "connect", Target: "fixture", Message: diagnostic}},
+		}},
+	}
+	outputs := map[string]string{
+		"text":     Text(data, TextOptions{Color: termcolor.LevelNone, Width: 120}),
+		"markdown": Markdown(data, nil),
+	}
+	html, err := HTML(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs["html"] = string(html)
+	for format, output := range outputs {
+		if got := strings.Count(output, diagnostic); got != 1 {
+			t.Errorf("%s rendered operational diagnosis %d times, want once:\n%s", format, got, output)
 		}
 	}
 }
@@ -416,9 +440,17 @@ func TestRendererStatusPresentationUsesExplicitValueVariants(t *testing.T) {
 	if got := reportValueClass(status); got != "cell-bad" {
 		t.Fatalf("explicit status key HTML class = %q, want cell-bad", got)
 	}
-	fields := visibleFields([]model.Field{{Key: "command_args", Label: "Command arguments", Value: model.RawValue("--target example")}})
-	if len(fields) != 1 || fields[0].Value.Text() != "--target example" {
-		t.Fatalf("implementation-looking field was hidden or changed: %#v", fields)
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Summary:       model.Summary{Status: model.StatusOK},
+		Results: []model.Result{{
+			ID: "field-preservation", Title: "Field preservation", Status: model.StatusOK,
+			Fields: []model.Field{{Key: "command_args", Label: "Command arguments", Value: model.RawValue("--target example")}},
+		}},
+	}
+	if output := Text(data, TextOptions{Color: termcolor.LevelNone, Width: 120}); !strings.Contains(output, "--target example") {
+		t.Fatalf("implementation-looking field was hidden or changed: %s", output)
 	}
 }
 

@@ -165,22 +165,14 @@ func containsAny(text string, needles ...string) bool {
 	return false
 }
 
-// EnsureResult normalizes evidence and supplies a defensive module-level
-// failure for legacy error results. Producer-owned failures are preserved;
-// presentation fields such as Notes are never classified here.
+// EnsureResult normalizes derived evidence facts. Operational failures are
+// producer-owned structured data; status, failures, and presentation notes are
+// never inferred or rewritten here.
 func EnsureResult(result *model.Result) {
 	if result == nil {
 		return
 	}
 	if result.Evidence != nil {
 		result.Evidence.Normalize()
-	}
-	if len(result.Failures) > 0 {
-		return
-	}
-	message := strings.TrimSpace(result.Error)
-	if result.Status == model.StatusError {
-		result.AddFailure(FromMessage("module", result.ID, message))
-		return
 	}
 }

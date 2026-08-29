@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,12 +14,6 @@ import (
 func runInformationCommand(args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
 	status := Main(context.Background(), args, &stdout, &stderr)
-	return status, stdout.String(), stderr.String()
-}
-
-func runListCommand(args ...string) (int, string, string) {
-	var stdout, stderr bytes.Buffer
-	status := listCommand(args, &stdout, &stderr)
 	return status, stdout.String(), stderr.String()
 }
 
@@ -42,6 +38,110 @@ func TestInformationCommandsSucceed(t *testing.T) {
 	}
 }
 
+func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
+	cases := []struct {
+		name           string
+		args           []string
+		stdoutMarker   string
+		languageMarker string
+		stderrMarker   string
+	}{
+		{
+			name:           "language before list",
+			args:           []string{"--lang=en", "list"},
+			stdoutMarker:   "Profiles:",
+			languageMarker: "Standard profile:",
+		},
+		{
+			name:           "language after list",
+			args:           []string{"list", "--lang=en"},
+			stdoutMarker:   "Profiles:",
+			languageMarker: "Standard profile:",
+		},
+		{
+			name:           "language before Chinese list",
+			args:           []string{"--lang=zh", "list"},
+			stdoutMarker:   "配置档:",
+			languageMarker: "标准配置：",
+		},
+		{
+			name:         "language before version",
+			args:         []string{"--lang=zh", "version"},
+			stdoutMarker: "ecs ",
+		},
+		{
+			name:         "language after version",
+			args:         []string{"version", "--lang=zh"},
+			stdoutMarker: "ecs ",
+		},
+		{
+			name:         "language before compare help",
+			args:         []string{"--lang=en", "compare", "--help"},
+			stderrMarker: "Usage: ecs compare",
+		},
+		{
+			name:         "language after compare help",
+			args:         []string{"compare", "--help", "--lang=en"},
+			stderrMarker: "Usage: ecs compare",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := runInformationCommand(test.args...)
+			if status != 0 || (test.stderrMarker == "" && stderr != "") ||
+				(test.stdoutMarker != "" && !strings.Contains(stdout, test.stdoutMarker)) ||
+				(test.languageMarker != "" && !strings.Contains(stdout, test.languageMarker)) ||
+				(test.stderrMarker != "" && !strings.Contains(stderr, test.stderrMarker)) {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMainUsesLastGlobalLanguageAndRejectsLastInvalidValue(t *testing.T) {
+	status, stdout, stderr := runInformationCommand("list", "--lang=zh", "--lang=en")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "Standard profile:") || strings.Contains(stdout, "标准配置：") {
+		t.Fatalf("last global language (post-command) status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+
+	status, stdout, stderr = runInformationCommand("--lang=en", "list", "--lang=zh")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "标准配置：") || strings.Contains(stdout, "Standard profile:") {
+		t.Fatalf("last global language (pre/post-command) status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+
+	status, stdout, stderr = runInformationCommand("--lang=en", "list", "--lang=invalid")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "invalid --lang value \"invalid\"") {
+		t.Fatalf("last invalid global language status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
+func TestMainRejectsMissingOrEmptyGlobalLanguageValues(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		arg    string
+		marker string
+	}{
+		{name: "long missing", arg: "--lang", marker: "--lang requires a value"},
+		{name: "long empty", arg: "--lang=", marker: "--lang value must not be empty"},
+		{name: "short missing", arg: "-lang", marker: "--lang requires a value"},
+		{name: "short empty", arg: "-lang=", marker: "--lang value must not be empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := runInformationCommand("list", test.arg)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMainStopsGlobalLanguageScanAtDoubleDash(t *testing.T) {
+	status, stdout, stderr := runInformationCommand("list", "--lang=en", "--", "--lang=en")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "error: unexpected arguments") {
+		t.Fatalf("double-dash language status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
 func TestInformationCommandsReportDistinctFailures(t *testing.T) {
 	// list's positional arguments use the shared extra-argument guard; unknown
 	// flags and missing flag values are reported by the standard FlagSet.
@@ -62,6 +162,20 @@ func TestInformationCommandsReportDistinctFailures(t *testing.T) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestRemovedBaselineCommandIsUnknownAndDoesNotWriteOutput(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "baseline.json")
+	status, stdout, stderr := runInformationCommand("baseline", "--lang", "en", "--output", output)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, `unknown command "baseline"`) {
+		t.Fatalf("removed baseline command status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if strings.Contains(stderr, "Usage: ecs baseline") {
+		t.Fatalf("removed baseline help leaked into stderr: %q", stderr)
+	}
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
+		t.Fatalf("removed baseline command wrote output: %v", err)
 	}
 }
 
@@ -96,8 +210,8 @@ func TestListReportsStandardFlagErrors(t *testing.T) {
 		}
 	})
 	t.Run("missing language value", func(t *testing.T) {
-		status, stdout, stderr := runListCommand("--lang")
-		if status != 1 || stdout != "" || !strings.Contains(stderr, "flag needs an argument: -lang") {
+		status, stdout, stderr := runInformationCommand("list", "--lang")
+		if status != 1 || stdout != "" || !strings.Contains(stderr, "--lang requires a value") {
 			t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 		}
 	})

@@ -129,20 +129,20 @@ func TestIPerfDirectionPortSelectionAndUDPFallback(t *testing.T) {
 		t.Fatalf("iperf preferred retry = %+v attempts=%v", got, attempts)
 	}
 
-	failResult := runIPerfDirectionWith(context.Background(), "unused", target, "IPv4", false, 1, 1, func(_ context.Context, _ string, _ string, port int, _ string, _ bool, _ int, _ int) iperfDirectionResult {
+	failedDirection := runIPerfDirectionWith(context.Background(), "unused", target, "IPv4", false, 1, 1, func(_ context.Context, _ string, _ string, port int, _ string, _ bool, _ int, _ int) iperfDirectionResult {
 		return iperfDirectionResult{Port: port, Error: "fixture unavailable"}
 	})
-	if failResult.Error != "fixture unavailable" || failResult.Port != 5202 {
-		t.Fatalf("iperf all ports failure = %+v", failResult)
+	if failedDirection.Error != "fixture unavailable" || failedDirection.Port != 5202 {
+		t.Fatalf("iperf all ports failure = %+v", failedDirection)
 	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	canceledResult := runIPerfDirectionWith(canceled, "unused", target, "IPv4", false, 1, 1, func(_ context.Context, _ string, _ string, port int, _ string, _ bool, _ int, _ int) iperfDirectionResult {
+	cancelledDirection := runIPerfDirectionWith(canceled, "unused", target, "IPv4", false, 1, 1, func(_ context.Context, _ string, _ string, port int, _ string, _ bool, _ int, _ int) iperfDirectionResult {
 		t.Fatal("canceled iperf direction invoked runner")
 		return iperfDirectionResult{Port: port, Mbps: 1}
 	})
-	if !strings.Contains(canceledResult.Error, "context canceled") {
-		t.Fatalf("canceled iperf direction = %+v", canceledResult)
+	if !strings.Contains(cancelledDirection.Error, "context canceled") {
+		t.Fatalf("canceled iperf direction = %+v", cancelledDirection)
 	}
 
 	if got := iperfUDPPort(target, iperfDirectionResult{Port: 5201, Mbps: 10}, iperfDirectionResult{Port: 5202, Mbps: 20}); got != 5201 {

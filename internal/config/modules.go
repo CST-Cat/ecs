@@ -9,9 +9,8 @@ import (
 )
 
 // ModuleConcurrency describes the amount of interference a module can cause
-// when it runs alongside another module.  Runner maps these values to its
-// private scheduler type; keeping the value here avoids a second module table
-// in runner.
+// when it runs alongside another module. Runner reads descriptor.Concurrency
+// directly; keeping the value here avoids a second module table in runner.
 type ModuleConcurrency string
 
 const (

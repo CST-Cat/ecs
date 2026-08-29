@@ -3,7 +3,6 @@ package model
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"math"
 	"reflect"
 	"testing"
@@ -41,8 +40,10 @@ func TestResultLifecycleFailuresAndSummaries(t *testing.T) {
 		t.Fatal("Skip retained a shared Message argument slice")
 	}
 	failed := NewResult("fail", "Fail")
-	failed.Fail(errors.New("broken"))
-	if failed.Status != StatusError || failed.Error != "broken" || !reflect.DeepEqual(failed.SummaryMessages, []Message{{Key: "message.result.failed"}}) {
+	failed.Status = StatusError
+	failed.AddFailure(Failure{Category: FailureUnknown, Stage: "run", Target: "demo", Message: "broken"})
+	failed.SummaryMessages = []Message{NewMessage("message.result.failed")}
+	if failed.Status != StatusError || len(failed.Failures) != 1 || failed.Failures[0].Message != "broken" || !reflect.DeepEqual(failed.SummaryMessages, []Message{{Key: "message.result.failed"}}) {
 		t.Fatalf("failed result = %+v", failed)
 	}
 
@@ -105,6 +106,9 @@ func TestReportJSONUsesOnlyStructuredSummaryMessages(t *testing.T) {
 	}
 	if _, ok := resultObject["summary_messages"]; !ok {
 		t.Fatalf("structured result summary missing: %s", content)
+	}
+	if _, ok := resultObject["error"]; ok {
+		t.Fatalf("legacy result error serialized: %s", content)
 	}
 }
 

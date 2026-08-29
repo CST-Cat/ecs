@@ -104,13 +104,12 @@ func TestFailureConstructorsAndEnsureResult(t *testing.T) {
 		wantClass model.FailureCategory
 		wantNoAdd bool
 	}{
-		{name: "error summary", result: model.Result{ID: "system", Status: model.StatusError, Error: "connection refused"}, wantCount: 1, wantClass: model.FailureConnectionRefused},
+		{name: "error without structured failure", result: model.Result{ID: "system", Status: model.StatusError}, wantNoAdd: true},
 		{name: "warning natural language note", result: model.Result{ID: "dns", Status: model.StatusWarning, Notes: []string{"invalid JSON response"}}, wantNoAdd: true},
 		{name: "warning stable key note", result: model.Result{ID: "route", Status: model.StatusWarning, Notes: []string{"probe.route.note.parse_failed"}}, wantNoAdd: true},
-		{name: "warning error text", result: model.Result{ID: "dns", Status: model.StatusWarning, Error: "connection refused"}, wantNoAdd: true},
 		{name: "warning without error or note", result: model.Result{ID: "latency", Status: model.StatusWarning}, wantNoAdd: true},
 		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}, wantNoAdd: true},
-		{name: "existing failure", result: model.Result{ID: "disk", Status: model.StatusError, Error: "permission denied", Failures: []model.Failure{{Category: model.FailurePermissionDenied, Count: 2}}}, wantCount: 1, wantClass: model.FailurePermissionDenied},
+		{name: "existing failure", result: model.Result{ID: "disk", Status: model.StatusError, Failures: []model.Failure{{Category: model.FailurePermissionDenied, Count: 2}}}, wantCount: 1, wantClass: model.FailurePermissionDenied},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

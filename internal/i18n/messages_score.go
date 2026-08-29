@@ -17,6 +17,9 @@ var scoreChinese = map[string]string{
 	"score.missing.noComparableMetric": "无可比指标（未计入）",
 
 	"score.incompleteWarning":   "未跑满全部维度，本次总分不可与完整跑分直接比较。",
+	"score.incompleteStatus":    "评分状态：未覆盖全部维度",
+	"score.matrixItemCount":     "%d 项",
+	"score.matrixMissingCount":  "%d 项",
 	"score.missingMetrics":      "%s 缺少 %d 项指标（%s），未补零。",
 	"score.weightingNote":       "磁盘按基线、混合、Crystal、ATTO 四个等权子组计算；每组先平均，矩阵单元不会按数量放大。内存按 STREAM Copy、Scale、Add、Triad 四个等权子组计算，每个 kernel 的 1T/NT 取中位数；缺失项不补零。",
 	"score.singleSampleWarning": "当前排行榜参考样本不足，分数仅供自查；跨机器比较需要用多机样本重建排行榜统计。",
@@ -60,6 +63,9 @@ var scoreEnglish = map[string]string{
 	"score.missing.noComparableMetric": "no comparable metric (excluded)",
 
 	"score.incompleteWarning":   "Not all dimensions ran; this total is not directly comparable with a full run.",
+	"score.incompleteStatus":    "Score status: not all dimensions ran",
+	"score.matrixItemCount":     "%d items",
+	"score.matrixMissingCount":  "(%d)",
 	"score.missingMetrics":      "%s is missing %d metric(s) (%s); missing values were not filled with zero.",
 	"score.weightingNote":       "Disk uses four equal-weight subgroups: baseline, mixed, Crystal and ATTO; each subgroup is averaged first, so matrix cells do not gain weight by count. Memory uses equal-weight STREAM Copy, Scale, Add and Triad subgroups, with the 1T/NT median per kernel; missing values are excluded.",
 	"score.singleSampleWarning": "The current leaderboard reference has too few samples; scores are for self-comparison. Rebuild the leaderboard statistics from multiple hosts before comparing across machines.",

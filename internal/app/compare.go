@@ -20,7 +20,6 @@ import (
 func compareCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs compare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	outputFormatsFlag := flags.String("format", "json,md,html", i18n.T("compare.flag.format"))
 	outputFlag := flags.String("output", "./reports", i18n.T("compare.flag.output"))
 	nameFlag := flags.String("name", "", i18n.T("flag.name"))
@@ -150,7 +149,7 @@ func validateComparisonFormats(formats []string) error {
 // comparisons are naturally written as `ecs compare a.json b.json --output …`.
 func normalizeCompareArgs(args []string) ([]string, error) {
 	valueFlags := map[string]bool{
-		"--lang": true, "-lang": true, "--format": true, "-format": true,
+		"--format": true, "-format": true,
 		"--output": true, "-output": true, "--name": true, "-name": true,
 		"--reference": true, "-reference": true, "--color": true, "-color": true,
 	}

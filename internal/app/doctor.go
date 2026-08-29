@@ -129,11 +129,6 @@ func doctorTools() []doctorTool {
 			known[item.name] = true
 		}
 	}
-	if len(descriptors) == 0 {
-		for _, item := range catalog {
-			known[item.name] = true
-		}
-	}
 	tools := make([]doctorTool, 0, len(known))
 	for _, item := range catalog {
 		if !known[item.name] {

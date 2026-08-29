@@ -71,15 +71,15 @@ func TestDiskProducerAssemblesStableMetadataAndStructuredStatus(t *testing.T) {
 	}
 }
 
-func TestDiskProducerFailureUsesStableSummaryAndRawError(t *testing.T) {
+func TestDiskProducerFailureUsesStructuredDiagnosticAndStableSummary(t *testing.T) {
 	result := newDiskResult()
 	result.Status = model.StatusError
-	result.Error = "fio JSON malformed: raw diagnostic"
+	result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: "fio", Message: "fio JSON malformed: raw diagnostic"})
 	result.Evidence = model.NewEvidence(0, 1, "job")
 	finalizeDiskResult(&result)
 
-	if result.Error != "fio JSON malformed: raw diagnostic" {
-		t.Fatalf("disk failure diagnostic changed: %q", result.Error)
+	if len(result.Failures) != 1 || result.Failures[0].Message != "fio JSON malformed: raw diagnostic" {
+		t.Fatalf("disk failure diagnostic changed: %+v", result.Failures)
 	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.disk.summary.none" {
 		t.Fatalf("disk failure summary = %+v", result.SummaryMessages)

@@ -160,11 +160,11 @@ func (r *textRenderer) header(data model.Report) {
 	if reportTime.IsZero() {
 		reportTime = data.Run.StartedAt
 	}
-	r.centeredStyled(metaLabel("报告时间", reportTime.Format("2006-01-02 15:04:05 MST"), "Report time", reportTime.Format("2006-01-02 15:04:05 MST")), r.palette.Dim)
-	r.centeredStyled(metaLabel("脚本版本", fallbackReport(data.Tool.Version, "—"), "Script version", fallbackReport(data.Tool.Version, "—")), r.palette.Info)
-	r.centeredStyled(metaLabel("本次配置", fallbackReport(data.Run.Profile, "—"), "Profile", fallbackReport(data.Run.Profile, "—")), r.palette.Info)
+	r.centeredStyled(i18n.T("report.reportTime")+i18n.T("punct.colon")+reportTime.Format("2006-01-02 15:04:05 MST"), r.palette.Dim)
+	r.centeredStyled(i18n.T("report.scriptVersion")+i18n.T("punct.colon")+fallbackReport(data.Tool.Version, "—"), r.palette.Info)
+	r.centeredStyled(i18n.T("report.runProfile")+i18n.T("punct.colon")+fallbackReport(data.Run.Profile, "—"), r.palette.Info)
 	if summaryText := reportSummaryText(data.Summary); summaryText != "" {
-		r.centeredStyled(metaLabel("报告状态", summaryText, "Report status", summaryText), r.statusStyle(data.Summary.Status))
+		r.centeredStyled(i18n.T("report.reportStatus")+i18n.T("punct.colon")+summaryText, r.statusStyle(data.Summary.Status))
 	}
 	exposure := fallbackReport(data.Run.Exposure, "local")
 	second := []string{i18n.T("report.exposure") + " " + exposure, i18n.T("report.privacy") + " " + map[bool]string{true: i18n.T("report.redacted"), false: i18n.T("report.revealed")}[data.Run.Redacted]}
@@ -177,13 +177,6 @@ func (r *textRenderer) header(data model.Report) {
 	r.centeredStyled(strings.Join(second, "    "), r.palette.Dim)
 	r.line(r.palette.Dim(strings.Repeat("#", r.width)))
 	r.blank()
-}
-
-func metaLabel(zh, value, en, englishValue string) string {
-	if i18n.Current() == i18n.LangEN {
-		return en + ": " + englishValue
-	}
-	return zh + "：" + value
 }
 
 func (r *textRenderer) centeredStyled(value string, style func(string) string) {
@@ -204,14 +197,15 @@ func (r *textRenderer) moduleNavigation(data model.Report) {
 			selected = append(selected, result.ID)
 		}
 	}
-	var allTabs []string
-	if i18n.Current() == i18n.LangEN {
-		allTabs = []string{"Basic info", "Hardware", "IP quality", "Network quality", "Return path"}
-	} else {
-		allTabs = []string{"基本信息", "硬件性能", "IP质量", "网络质量", "回程路由"}
+	allTabs := []string{
+		i18n.T("report.navigation.basic"),
+		i18n.T("report.navigation.hardware"),
+		i18n.T("report.navigation.ipQuality"),
+		i18n.T("report.navigation.networkQuality"),
+		i18n.T("report.navigation.returnPath"),
 	}
-	r.compactList(localizedGroup("全部", "All"), allTabs)
-	r.compactList(localizedGroup("本次选择", "Selected"), moduleTitles(selected))
+	r.compactList(i18n.T("report.navigation.all"), allTabs)
+	r.compactList(i18n.T("report.navigation.selected"), moduleTitles(selected))
 	r.blank()
 }
 
@@ -301,11 +295,8 @@ func (r *textRenderer) result(result model.Result) {
 	if summary := resultSummary(result); summary != "" && strings.TrimSpace(summary) != strings.TrimSpace(r.summaryText) {
 		status += " · " + summary
 	}
-	if result.Status != model.StatusOK || result.Error != "" {
+	if result.Status != model.StatusOK {
 		r.indentedStyled(status, r.statusStyle(result.Status))
-	}
-	if result.Error != "" {
-		r.indentedStyled(i18n.T("report.errorPrefix")+i18n.T("punct.colon")+textwidth.Truncate(result.Error, maxInt(1, r.width-10)), r.palette.ErrorBold)
 	}
 	r.resultEvidenceCoverage(result.Evidence)
 	r.resultFailures(result.Failures)
@@ -408,13 +399,13 @@ func (r *textRenderer) resultEvidence(result model.Result) {
 			r.indented(label)
 		}
 		if methodology.Engine != "" {
-			r.indented(metaLabel("引擎", methodology.Engine, "Engine", methodology.Engine))
+			r.indented(i18n.T("report.engine") + i18n.T("punct.colon") + methodology.Engine)
 		}
 		if methodology.Profile != "" {
-			r.indented(metaLabel("参数/工作负载", methodology.Profile, "Profile/workload", methodology.Profile))
+			r.indented(i18n.T("report.profileWorkload") + i18n.T("punct.colon") + methodology.Profile)
 		}
 		if methodology.ComparisonScope != "" {
-			r.indented(metaLabel(i18n.T("report.comparability"), methodology.ComparisonScope, "Comparable scope", methodology.ComparisonScope))
+			r.indented(i18n.T("report.comparability") + i18n.T("punct.colon") + methodology.ComparisonScope)
 		}
 	}
 	if len(result.TextBlocks) > 0 {

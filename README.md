@@ -129,6 +129,7 @@ ecs submit --input report.json --provider vultr --region jp-tokyo --note "monthl
 ```
 
 发行二进制内嵌参考为空时，评分需要提供自己的 `--score-baseline`。提交格式和目录规则见 [submissions/README.md](submissions/README.md)。
+排行榜按完整报告的 `run.id` 计 benchmark sample；提交中的 `sample_id` 是其稳定匿名派生值，原始 `run.id` 不进入提交 JSON。提交 `id` 仍只表示 artifact 内容，因此同一运行的报告与提交只计一次，而不同运行即使指标相同也分别计数。
 
 ## 常用参数与配置
 

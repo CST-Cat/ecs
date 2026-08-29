@@ -129,6 +129,7 @@ ecs submit --input report.json --provider vultr --region jp-tokyo --note "monthl
 ```
 
 When the embedded release reference is empty, provide your own `--score-baseline`. See [submissions/README_EN.md](submissions/README_EN.md) for the submission format and directory rules.
+The leaderboard counts benchmark samples by the full report's `run.id`. A submission carries its stable anonymous derivative as `sample_id` and never includes the raw `run.id`; `id` remains the artifact content identity. Thus a report and submission from one run count once, while different runs count separately even when their metrics match.
 
 ## Common options and configuration
 

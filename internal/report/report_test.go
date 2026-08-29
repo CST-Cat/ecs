@@ -31,7 +31,7 @@ func sampleReport() model.Report {
 		SensitiveIPs: []string{"192.0.2.10"},
 		Results: []model.Result{{
 			ID: "system", Title: "module.system.title", Description: "probe.system.description", Status: model.StatusOK,
-			StartedAt: start, DurationMS: 20, SummaryMessages: []model.Message{model.NewMessage("probe.network.summary.values", "sample=ok")}, Error: "raw failure",
+			StartedAt: start, DurationMS: 20, SummaryMessages: []model.Message{model.NewMessage("probe.network.summary.values", "sample=ok")},
 			Methodology: model.Methodology{
 				Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory", Profile: "probe.system.profile",
 				ComparisonScope: "probe.system.comparison_scope",

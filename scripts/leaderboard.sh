@@ -30,7 +30,7 @@ if ! find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -qui
 fi
 
 ecs_step "重建排行榜参考"
-go run ./cmd/ecs baseline \
+go run ./cmd/ecs leaderboard \
   --source "社区提交聚合" \
   --output submissions/baseline.json \
   submissions

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,6 +196,134 @@ func TestSubmitCommandReportsDistinctFailures(t *testing.T) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestWriteSubmissionExclusivePreservesSafetyAndPermissions(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "submission.json")
+	first := []byte("first submission")
+	if err := writeSubmissionExclusive(target, first); err != nil {
+		t.Fatalf("write initial submission: %v", err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("submission permissions = %o, want 600", info.Mode().Perm())
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != string(first) {
+		t.Fatalf("initial submission content = %q, want %q", content, first)
+	}
+	if err := writeSubmissionExclusive(target, []byte("replacement")); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("existing target error = %v", err)
+	}
+	content, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != string(first) {
+		t.Fatalf("existing target was overwritten: %q", content)
+	}
+
+	realTarget := filepath.Join(root, "real.json")
+	if err := os.WriteFile(realTarget, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkTarget := filepath.Join(root, "target-link")
+	if err := os.Symlink(realTarget, symlinkTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSubmissionExclusive(symlinkTarget, []byte("replacement")); err == nil {
+		t.Fatalf("existing symlink error = %v", err)
+	}
+	content, err = os.ReadFile(realTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "preserve" {
+		t.Fatalf("symlink target was overwritten: %q", content)
+	}
+
+	directoryTarget := filepath.Join(root, "output-directory")
+	if err := os.Mkdir(directoryTarget, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSubmissionExclusive(directoryTarget, []byte("not a directory")); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("directory target error = %v", err)
+	}
+
+	if err := writeSubmissionExclusive(filepath.Join(root, "missing", "submission.json"), []byte("missing parent")); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("missing parent error = %v", err)
+	}
+
+	realParent := filepath.Join(root, "real-parent")
+	if err := os.Mkdir(realParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parentLink := filepath.Join(root, "parent-link")
+	if err := os.Symlink(realParent, parentLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSubmissionExclusive(filepath.Join(parentLink, "submission.json"), []byte("symlink parent")); err == nil || !strings.Contains(err.Error(), "parent must not be a symlink") {
+		t.Fatalf("symlink parent error = %v", err)
+	}
+}
+
+func TestWriteSubmissionExclusiveRejectsTargetRace(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "submission.json")
+	const writers = 8
+	contents := make([][]byte, writers)
+	results := make([]error, writers)
+	start := make(chan struct{})
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(writers)
+	for index := 0; index < writers; index++ {
+		contents[index] = []byte{byte('a' + index)}
+		go func(index int) {
+			defer waitGroup.Done()
+			<-start
+			results[index] = writeSubmissionExclusive(target, contents[index])
+		}(index)
+	}
+	close(start)
+	waitGroup.Wait()
+
+	successes := 0
+	for _, err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("exclusive write successes = %d, want 1 (results=%v)", successes, results)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := false
+	for _, candidate := range contents {
+		if string(content) == string(candidate) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("race winner content = %q, not written by a worker", content)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "submission.json" {
+		t.Fatalf("temporary submission files remain: %v", entries)
 	}
 }
 

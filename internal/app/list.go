@@ -14,7 +14,6 @@ import (
 func listCommand(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs list", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

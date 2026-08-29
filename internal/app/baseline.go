@@ -1,7 +1,6 @@
 package app
 
 import (
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,10 +10,6 @@ import (
 	"ecs/internal/model"
 	"ecs/internal/score"
 )
-
-func baselineCommand(args []string, stdout, stderr io.Writer) int {
-	return leaderboardCommandNamed("baseline", args, stdout, stderr)
-}
 
 // validateBaselineReport rejects a syntactically valid full report that has
 // no scoreable measurements. BuildBaseline is the single source of truth for

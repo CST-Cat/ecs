@@ -138,7 +138,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 					model.Field{Key: "ipv" + version + "_origin_asn", Label: bgpFieldLabel("ipv" + version + "_origin_asn"), Value: model.RawValue(formatASN(observation.OriginASN))},
 					model.Field{Key: "ipv" + version + "_rpki", Label: bgpFieldLabel("ipv" + version + "_rpki"), Value: model.RawValue(fallback(observation.RPKIState, "unknown"))},
 					model.Field{Key: "ipv" + version + "_collectors", Label: bgpFieldLabel("ipv" + version + "_collectors"), Value: model.RawValue(collectors)},
-					// Legacy machine field name; keep it for schema compatibility.
+					// Adjacent ASN observations are part of the current BGP output contract.
 					model.Field{Key: "ipv" + version + "_adjacent_asns", Label: bgpFieldLabel("ipv" + version + "_adjacent_asns"), Value: model.RawValue(observed)},
 				)
 			}

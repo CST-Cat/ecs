@@ -40,7 +40,7 @@ func textSampleReport() model.Report {
 	}
 	disk := model.Result{
 		ID: "disk", Title: "module.disk.title", Description: "磁盘测试失败", Status: model.StatusError,
-		StartedAt: start, DurationMS: 2, Error: "失败",
+		StartedAt: start, DurationMS: 2,
 		Methodology:  model.Methodology{Kind: "standard-benchmark", Label: "标准基准", Engine: "fio"},
 		Measurements: []model.Measurement{{Key: "disk", Label: "吞吐", Value: 0, Unit: "MiB/s", Display: model.RawValue("0 MiB/s"), HigherIsBetter: model.BoolPtr(true)}},
 		Evidence:     model.NewEvidence(0, 1, "sample"),

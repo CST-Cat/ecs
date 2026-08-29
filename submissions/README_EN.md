@@ -12,7 +12,7 @@ A submission is a separate JSON artifact produced by `ecs submit`, not a compres
 {
   "schema": "ecs.submission/v1",
   "id": "ddecbbc0421f",
-  "fingerprint_version": "v2",
+  "sample_id": "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5",
   "host": {
     "vcpu": 16,
     "memory_gib": 30.69,
@@ -42,7 +42,7 @@ A submission is a separate JSON artifact produced by `ecs submit`, not a compres
 }
 ```
 
-The fields are an explicit whitelist: host facts, tool versions and the `metrics` needed for scoring are retained; probe verdicts from a full report do not enter merely because the report gains a field. `provider`, `region` and `note` are self-reported; the validator enforces their limits and the registered metric keys.
+The fields are an explicit whitelist: host facts, tool versions and the `metrics` needed for scoring are retained; probe verdicts from a full report do not enter merely because the report gains a field. `sample_id` is the anonymous benchmark sample identity derived from the full report's `run.id` as `SHA-256("ecs.sample/v1\x00" + run.id)`; the raw `run.id` is never written to a submission. `id` uses the single current canonical JSON content fingerprint, excluding `id`, `sample_id` and `ran_at` while covering every other accepted public field. `provider`, `region` and `note` are self-reported; the validator enforces their limits and the registered metric keys.
 
 ## Produce a submission
 
@@ -90,9 +90,9 @@ ECS_SUBMISSION_DIR=submissions go test ./internal/score -run '^TestSubmissionCor
 ecs leaderboard --strict --output /tmp/check.json submissions
 ```
 
-A submission must be one JSON object no larger than 256 KiB, with schema exactly `ecs.submission/v1`, no unknown fields and no trailing data. `metrics` must be non-empty with registered positive finite values; host vCPU and memory must be positive; `tool.ecs` must be present; STREAM metrics must agree with `memory_backend`; `id` must match the recomputed content fingerprint; and no existing submission may have the same fingerprint.
+A submission must be one JSON object no larger than 256 KiB, with schema exactly `ecs.submission/v1`, no unknown fields and no trailing data. The former `fingerprint_version` field is not part of the current schema and is rejected. `sample_id` must be 64 lowercase hex characters. `metrics` must be non-empty with registered positive finite values; host vCPU and memory must be positive; `tool.ecs` must be present; STREAM metrics must agree with `memory_backend`; `id` must match the current recomputed content fingerprint; and no existing submission may have the same fingerprint. The leaderboard deduplicates by `sample_id`, so a report and submission from one run count once.
 
-Changing any value, provider, region, note or tool version changes the fingerprint. Re-run `ecs submit` instead of editing an existing file by hand.
+Changing any artifact-fingerprinted field (including host, tool, metrics, profile, memory_backend, provider, region and note) changes the fingerprint; `sample_id` and `ran_at` are excluded. Re-run `ecs submit` instead of editing an existing file by hand.
 
 ## Rebuild a reference
 

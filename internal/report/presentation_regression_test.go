@@ -156,9 +156,9 @@ func TestCompactTextGroupingUsesMachineKeysForFieldsAndTables(t *testing.T) {
 			}
 			output := Text(data, TextOptions{Color: termcolor.LevelNone, Compact: true, Width: 120})
 			wantTitles := []string{
-				localizedGroup("出口概览", "Egress overview"),
-				localizedGroup("IP 信息", "IP information"),
-				localizedGroup("风险矩阵", "Risk matrix"),
+				i18n.T("report.group.network.egress"),
+				i18n.T("report.group.network.ip"),
+				i18n.T("report.group.network.risk"),
 			}
 			previous := -1
 			for index, title := range wantTitles {

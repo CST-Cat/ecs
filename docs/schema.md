@@ -33,7 +33,7 @@
 综合评分不写进报告 JSON：它依赖运行时选定的基线，把某一份基线下的分数固化进
 数据文件会让同一份 JSON 在换基线后自相矛盾。评分只在终端文本、Markdown、HTML 展示时计算，
 基线来源与样本数随分数一起呈现。基线文件本身是独立的 `ecs.baseline/v1` 格式，
-由 `ecs leaderboard` 或 `ecs baseline` 生成。
+由 `ecs leaderboard` 生成。
 
 ## Message
 
@@ -114,7 +114,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 - `ok`：探针按计划完成；
 - `warning`：缺少必需的标准工具、条件降级、部分样本失败或需要复核；此状态不保证存在成绩；
 - `skipped`：被配置、离线模式、能力缺失或资源保护跳过；
-- `error`：探针自身失败。Runner 会隔离 panic 并继续后续模块。
+- `error` 状态表示探针自身失败；`Result` 没有独立的 `error` 字段，失败必须写入 `failures[]` 的结构化原因。Runner 会将 panic 隔离为包含类别、阶段、目标和原始诊断的 failure，并继续后续模块。
 
 `methodology.kind` 明确方法类型与口径类别；证据完整度由 `evidence.valid` / `evidence.expected` 计算，不由该字段表示：
 
@@ -440,9 +440,22 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 
 ## 排行榜提交与基线 schema
 
-`ecs.submission/v1` 的新提交增加 `fingerprint_version: "v2"`。v2 ID 是除 `id` 和 `ran_at` 以外所有允许公开字段的规范 JSON SHA-256 前 12 位：同一内容在不同导出时间得到同一 ID，而主机规格、工具、profile、note 或任何精确浮点值的改动都会改变 ID。未携带 `fingerprint_version` 的历史文件仍按冻结的旧算法校验，不重写旧 ID；其它版本值直接拒绝。
+`ecs.submission/v1` 的提交必须包含 `sample_id`。它不是报告 `run.id` 的副本，而是
+`SHA-256("ecs.sample/v1\x00" + run.id)` 的固定小写 64 个 hex 字符匿名值；空的 `run.id`
+不能导出提交或进入排行榜，提交 JSON 也不会泄漏原始 `run.id`。`id` 仍是提交 artifact 的
+内容指纹，不是 benchmark sample identity：同一 `run.id` 的完整报告与由它导出的提交只算
+一个 sample，不同 `run.id` 即使指标和 metadata 相同也算两个。修改 provider、region 或 note
+可以改变 `id`，但不得改变 `sample_id`。
+
+`ecs.submission/v1` 只有一个当前 artifact 指纹算法。`id` 是除 `id`、`sample_id` 和 `ran_at`
+以外所有允许公开字段的规范 JSON SHA-256 前 12 位：同一内容在不同导出时间或 sample 标注下
+得到同一 ID，而主机规格、工具、profile、note 或任何精确浮点值的改动都会改变 ID。当前 JSON
+contract 不包含 `fingerprint_version`；旧 JSON 携带该字段会被严格加载器按未知字段拒绝，缺少
+`sample_id` 等当前必需字段的记录也会由当前校验拒绝。
 
 `ecs.baseline/v1` 的每个 `tiers[]` 保留总机器数 `sample_count`，并要求 `metric_sample_counts` 记录每个平均值的独立样本数。某个分档指标只在自身样本数至少为 5 时覆盖全局值；“该档有 5 台机器”不再让只有 1 个磁盘样本的指标冒充可用分档。缺少该字段或计数格式错误的 payload 会被加载器直接拒绝，不提供旧 baseline payload 的兼容或字段 fallback。加载器还会拒绝重复/非法档位、非正有限指标、样本数越界和指标/计数 key 不一致；已通过当前契约的合法计数若样本不足，评分仍回落全局指标。
+
+`rank_min_samples` 是基线用于判断排行榜排名资格的最小 score distribution 样本数，作用于 `score_samples` 的排名分布；它不是 `sample_id`，也不是某个指标的 `metric_sample_counts`。字段省略或值为 `0` 时，读取后使用 `DefaultRankMinSamples`（当前为 `5`）；显式正整数则按原值使用。只有 `score_samples` 数量达到该阈值时，评分才生成 `rank_status: available` 和 `top_percent`；数量不足时标记为 `insufficient`，没有可用分布时不会仅凭主机或指标样本数推导排名。
 
 ## 多报告比较 schema
 
@@ -466,7 +479,8 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
     "metric_issues": 2,
     "observed_changes": 6,
     "status_changes": 1,
-    "evidence_changes": 3
+    "evidence_changes": 3,
+    "missing_module_values": 0
   },
   "modules": [],
   "notices": [

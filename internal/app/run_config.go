@@ -56,7 +56,6 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.String("lang", string(i18n.Current()), i18n.T("flag.lang"))
 	profileFlag := flags.String("profile", cfg.Profile, i18n.T("flag.profile"))
 	flags.String("config", configPath, i18n.T("flag.config"))
 	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
@@ -224,6 +223,9 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 
 func preparse(args []string) (configPath, profile string) {
 	for _, occurrence := range scanEarlyFlags(args, "config", "profile") {
+		if !occurrence.HasValue || occurrence.Value == "" {
+			continue
+		}
 		switch occurrence.Name {
 		case "config":
 			configPath = occurrence.Value

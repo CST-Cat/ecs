@@ -54,7 +54,7 @@ func (r *textRenderer) scoreSection() {
 	}
 	r.blank()
 	if !r.score.Complete {
-		r.indented(localizedGroup("评分状态：未覆盖全部维度", "Score status: not all dimensions ran"))
+		r.indented(i18n.T("score.incompleteStatus"))
 	}
 	if r.score.BaselineSample > 0 {
 		r.indented(fmt.Sprintf(i18n.T("score.baselineLine"), baselineSourceLabel(r.score.BaselineSource), r.score.BaselineSample))
@@ -84,12 +84,7 @@ func (r *textRenderer) matrixScoreSummary(dimension score.DimensionScore) {
 	parts := make([]string, 0, len(counts))
 	for _, kind := range []diskMatrixKind{matrixCrystal, matrixMixed, matrixATTO} {
 		if count := counts[kind]; count > 0 {
-			itemCount := fmt.Sprintf("%d", count)
-			if i18n.Current() == i18n.LangZH {
-				itemCount += " 项"
-			} else {
-				itemCount += " items"
-			}
+			itemCount := fmt.Sprintf(i18n.T("score.matrixItemCount"), count)
 			parts = append(parts, matrixKindLabel(kind)+" "+itemCount)
 		}
 	}
@@ -122,11 +117,7 @@ func compactMissingMetrics(dimension score.DimensionScore) string {
 	for _, kind := range []diskMatrixKind{matrixCrystal, matrixMixed, matrixATTO} {
 		if count := counts[kind]; count > 0 {
 			label := matrixKindLabel(kind)
-			if i18n.Current() == i18n.LangZH {
-				label += fmt.Sprintf(" %d 项", count)
-			} else {
-				label += fmt.Sprintf(" (%d)", count)
-			}
+			label += " " + fmt.Sprintf(i18n.T("score.matrixMissingCount"), count)
 			nonMatrix = append(nonMatrix, label)
 		}
 	}
@@ -313,14 +304,17 @@ func metricLabel(metric score.MetricScore) string {
 	if key := "score.metric." + metric.Key; i18n.Has(i18n.Current(), key) {
 		return i18n.T(key)
 	}
-	if strings.HasPrefix(metric.Key, "crystal_") {
-		return i18n.T("score.metric.crystal") + " · " + strings.TrimPrefix(metric.Key, "crystal_")
-	}
-	if strings.HasPrefix(metric.Key, "fio_mixed_") {
-		return i18n.T("score.metric.fio_mixed") + " · " + strings.TrimPrefix(metric.Key, "fio_mixed_")
-	}
-	if strings.HasPrefix(metric.Key, "atto_") {
-		return i18n.T("score.metric.atto") + " · " + strings.TrimPrefix(metric.Key, "atto_")
+	if kind := matrixKindForMeasurement(metric.Key); kind != "" {
+		key := strings.ToLower(strings.TrimSpace(metric.Key))
+		switch kind {
+		case matrixCrystal:
+			key = strings.TrimPrefix(key, "crystal_")
+		case matrixMixed:
+			key = strings.TrimPrefix(key, "fio_mixed_")
+		case matrixATTO:
+			key = strings.TrimPrefix(key, "atto_")
+		}
+		return matrixKindLabel(kind) + " · " + key
 	}
 	return metric.Label
 }
