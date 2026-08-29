@@ -81,54 +81,61 @@ func selectIPerfTargets(perRegion int) []IPerfEndpoint {
 	return selected
 }
 
-// backtraceCityTargets contains the reference targets for return-path
-// classification. The target set is configuration data, not probe logic.
-var backtraceCityTargets = map[string][]Endpoint{
-	"beijing": {
+// backtraceCities owns the canonical city IDs, selection order, and reference
+// targets for return-path classification. The target set is configuration data,
+// not probe logic.
+type backtraceCity struct {
+	ID      string
+	Targets []Endpoint
+}
+
+var backtraceCities = []backtraceCity{
+	{ID: "beijing", Targets: []Endpoint{
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierTelecom, "ipv4"), Address: "219.141.136.12", Kind: BacktraceCarrierTelecom},
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierUnicom, "ipv4"), Address: "202.106.50.1", Kind: BacktraceCarrierUnicom},
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierMobile, "ipv4"), Address: "221.179.155.161", Kind: BacktraceCarrierMobile},
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierTelecom, "ipv6"), Address: "bj-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierUnicom, "ipv6"), Address: "bj-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("beijing", BacktraceCarrierMobile, "ipv6"), Address: "bj-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
-	},
-	"guangzhou": {
+	}},
+	{ID: "guangzhou", Targets: []Endpoint{
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierTelecom, "ipv4"), Address: "58.60.188.222", Kind: BacktraceCarrierTelecom},
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierUnicom, "ipv4"), Address: "210.21.196.6", Kind: BacktraceCarrierUnicom},
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierMobile, "ipv4"), Address: "120.196.165.24", Kind: BacktraceCarrierMobile},
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierTelecom, "ipv6"), Address: "gd-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierUnicom, "ipv6"), Address: "gd-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("guangzhou", BacktraceCarrierMobile, "ipv6"), Address: "gd-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
-	},
-	"shanghai": {
+	}},
+	{ID: "shanghai", Targets: []Endpoint{
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierTelecom, "ipv4"), Address: "202.96.209.133", Kind: BacktraceCarrierTelecom},
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierUnicom, "ipv4"), Address: "210.22.97.1", Kind: BacktraceCarrierUnicom},
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierMobile, "ipv4"), Address: "211.136.112.200", Kind: BacktraceCarrierMobile},
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierTelecom, "ipv6"), Address: "sh-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierUnicom, "ipv6"), Address: "sh-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("shanghai", BacktraceCarrierMobile, "ipv6"), Address: "sh-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
-	},
-	"chengdu": {
+	}},
+	{ID: "chengdu", Targets: []Endpoint{
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierTelecom, "ipv4"), Address: "61.139.2.69", Kind: BacktraceCarrierTelecom},
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierUnicom, "ipv4"), Address: "119.6.6.6", Kind: BacktraceCarrierUnicom},
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierMobile, "ipv4"), Address: "211.137.96.205", Kind: BacktraceCarrierMobile},
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierTelecom, "ipv6"), Address: "sc-ct-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierTelecom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierUnicom, "ipv6"), Address: "sc-cu-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
 		{Name: backtraceTargetNameKey("chengdu", BacktraceCarrierMobile, "ipv6"), Address: "sc-cm-v6.ip.zstaticcdn.com", Kind: BacktraceCarrierMobile, Family: IPVersion6},
-	},
+	}},
 }
 
 func backtraceTargetNameKey(city, carrier, family string) string {
 	return "probe.backtrace.target." + city + "." + carrier + "." + family
 }
 
-// backtraceCityOrder fixes display and selection order.
-var backtraceCityOrder = [...]string{"beijing", "guangzhou", "shanghai", "chengdu"}
-
 // BacktraceCityOrder returns the canonical display and selection order.
 // The returned slice is a copy, so callers cannot mutate the catalog.
 func BacktraceCityOrder() []string {
-	return append([]string(nil), backtraceCityOrder[:]...)
+	order := make([]string, 0, len(backtraceCities))
+	for _, city := range backtraceCities {
+		order = append(order, city.ID)
+	}
+	return order
 }
 
 var defaultBacktraceCities = []string{"beijing", "guangzhou"}
@@ -136,11 +143,11 @@ var defaultBacktraceCities = []string{"beijing", "guangzhou"}
 // BacktraceTargetsFor aggregates targets for the requested cities.
 func BacktraceTargetsFor(cities []string) []Endpoint {
 	var targets []Endpoint
-	for _, city := range backtraceCityOrder {
-		if !contains(cities, city) {
+	for _, city := range backtraceCities {
+		if !contains(cities, city.ID) {
 			continue
 		}
-		targets = append(targets, backtraceCityTargets[city]...)
+		targets = append(targets, city.Targets...)
 	}
 	return targets
 }
@@ -180,7 +187,14 @@ func ParseBacktraceCities(raw string) ([]string, error) {
 		return BacktraceCityOrder(), nil
 	}
 	for _, item := range items {
-		if _, ok := backtraceCityTargets[item]; !ok {
+		known := false
+		for _, city := range backtraceCities {
+			if city.ID == item {
+				known = true
+				break
+			}
+		}
+		if !known {
 			return nil, i18n.Errorf("err.unknownCity", item)
 		}
 	}

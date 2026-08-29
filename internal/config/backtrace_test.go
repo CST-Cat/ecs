@@ -36,7 +36,12 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 		})
 	}
 	targets := BacktraceTargetsFor([]string{"chengdu", "beijing"})
-	wantTargets := append(append([]Endpoint(nil), backtraceCityTargets["beijing"]...), backtraceCityTargets["chengdu"]...)
+	var wantTargets []Endpoint
+	for _, city := range backtraceCities {
+		if city.ID == "beijing" || city.ID == "chengdu" {
+			wantTargets = append(wantTargets, city.Targets...)
+		}
+	}
 	if !reflect.DeepEqual(targets, wantTargets) {
 		t.Fatalf("BacktraceTargetsFor reverse selection = %+v, want canonical %v", targets, wantTargets)
 	}
@@ -56,6 +61,28 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 	}
 }
 
+func TestBacktraceCityCatalogEntriesStaySelectable(t *testing.T) {
+	for _, city := range backtraceCities {
+		selected, err := ParseBacktraceCities(city.ID)
+		if err != nil {
+			t.Fatalf("ParseBacktraceCities(%q) failed: %v", city.ID, err)
+		}
+		targets := BacktraceTargetsFor(selected)
+		for _, want := range city.Targets {
+			found := false
+			for _, got := range targets {
+				if reflect.DeepEqual(got, want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("city %q target missing after selection: %+v", city.ID, want)
+			}
+		}
+	}
+}
+
 func TestBacktraceCityOrderReturnsCopy(t *testing.T) {
 	original := BacktraceCityOrder()
 	if len(original) == 0 {
@@ -66,6 +93,19 @@ func TestBacktraceCityOrderReturnsCopy(t *testing.T) {
 	got := BacktraceCityOrder()
 	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
 		t.Fatalf("BacktraceCityOrder returned mutable canonical data: %v", got)
+	}
+}
+
+func TestBacktraceTargetsForReturnsCopy(t *testing.T) {
+	targets := BacktraceTargetsFor([]string{"beijing"})
+	if len(targets) == 0 {
+		t.Fatal("backtrace targets must not be empty")
+	}
+	want := append([]Endpoint(nil), targets...)
+	targets[0].Name = "mutated"
+	got := BacktraceTargetsFor([]string{"beijing"})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BacktraceTargetsFor returned mutable canonical data: %v", got)
 	}
 }
 
