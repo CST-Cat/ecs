@@ -70,22 +70,11 @@ ZH
   fi
 }
 
-# --help 是 wrapper 自身的帮助，必须在平台检查、建目录和下载前处理。
-for arg in "$@"; do
-  [ "$arg" = "--" ] && break
-  case "$arg" in
-    -h|--help) usage; exit 0 ;;
-  esac
-done
-
-# 这里只识别输出选项是否出现，不解析或校验它的取值；其余参数保持原样。
-OUTPUT_GIVEN=0
-for arg in "$@"; do
-  [ "$arg" = "--" ] && break
-  case "$arg" in
-    --output|-output|--output=*|-output=*) OUTPUT_GIVEN=1 ;;
-  esac
-done
+# 只有首个参数是 wrapper 自己的帮助；其余 --help 原样交给 ecs。这样值为
+# --help 的 compare 参数不会被 wrapper 抢走，也不需要在 shell 里重建 grammar。
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
 
 case "$(uname -s)" in
   Linux) : ;;
@@ -111,9 +100,10 @@ fi
 ASSET="ecs_linux_${ARCH}.tar.gz"
 
 # 两个目录职责分开，都在 /tmp 下，都不碰调用者的当前目录：
-#   WORK 放二进制和下载中间文件，退出时删除；
-#   OUT  放对比结果，保留。
-# 产出必须在 WORK 之外，否则会被清理逻辑一并删掉。
+#   WORK 放二进制、下载中间文件和一次性的默认 output，退出时删除；
+#   OUT  只在默认 output 实际被使用后移出 WORK 并保留。
+# 用户参数始终原样放在 wrapper 注入的默认 output 之后，由 ecs 的
+# normalizeCompareArgs 和 flag parser 决定其真正的 output；shell 不解析 compare grammar。
 WORK_ROOT="/tmp"
 if [ -n "${TMPDIR:-}" ]; then
   case "$TMPDIR" in
@@ -133,12 +123,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
-# 用户自己给了 --output 时不建这个目录：建了就是在临时目录下留一个空目录，
-# 而且随后那句“结果保留在 …”会指向一个根本没有结果的地方。
+DEFAULT_OUT="$WORK/output"
 OUT=""
-if [ "$OUTPUT_GIVEN" -eq 0 ]; then
-  OUT=$(mktemp -d "$WORK_ROOT/ecs-comparison.XXXXXX")
-fi
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -183,14 +169,26 @@ tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs || die "解包失败" "failed to extr
 chmod +x "$BINARY"
 
 say "开始对比" "starting comparison"
-if [ "$OUTPUT_GIVEN" -eq 1 ]; then
-  "$BINARY" compare "$@"
+if "$BINARY" compare --output "$DEFAULT_OUT" "$@"; then
+  compare_status=0
 else
-  "$BINARY" compare --output "$OUT" "$@"
+  compare_status=$?
 fi
 
-# 只有目录是本脚本挑的，才由本脚本负责报告它。用户自己指定 --output 时，
-# ecs 已经逐个格式打印过路径，再复述一遍只会多一个可能说错的地方。
+# 如果用户参数中有后出现且生效的 output，ecs 会把结果写到用户路径，
+# DEFAULT_OUT 不会存在；只有默认 output 真的承接了结果时才移出 WORK。
+if [ "$compare_status" -eq 0 ] && [ -d "$DEFAULT_OUT" ]; then
+  OUT=$(mktemp -d "$WORK_ROOT/ecs-comparison.XXXXXX")
+  if ! rmdir "$OUT" || ! mv "$DEFAULT_OUT" "$OUT"; then
+    rm -rf "$OUT" 2>/dev/null || :
+    die "无法保留对比结果：$OUT" "failed to retain comparison output: $OUT"
+  fi
+fi
+
+if [ "$compare_status" -ne 0 ]; then
+  exit "$compare_status"
+fi
+
 if [ -n "$OUT" ]; then
   say "对比结果保留在 $OUT" "comparison written to $OUT"
   printf '%s\n' "$OUT"
