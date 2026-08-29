@@ -178,6 +178,23 @@ func TestRunCommandReportsPreExecutionFailures(t *testing.T) {
 	}
 }
 
+func TestRunCommandUsesFormalFlagValuesConsumedByName(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "profile-looking value", args: []string{"--lang", "en", "--name", "--profile=full", "--version"}},
+		{name: "config-looking value", args: []string{"--lang", "en", "--name", "--config=/definitely/not/exist", "--version"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := invokeAppMain(test.args...)
+			if status != 0 || stderr != "" || !strings.HasPrefix(stdout, "ecs ") {
+				t.Fatalf("run command status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestRunRejectsUnknownModuleBeforeRunnerAndReport(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "reports")
 	status, stdout, stderr := invokeAppMain(

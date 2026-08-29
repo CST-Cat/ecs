@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -141,6 +143,135 @@ func TestPlanJSONPreservesRevealSelection(t *testing.T) {
 				t.Fatalf("machine plan contains localized prose: %s", stdout.String())
 			}
 		})
+	}
+}
+
+func TestPlanCommandUsesFormalParserForFlagAsValue(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"plan", "--lang", "en", "--name", "--profile=full", "--only", "system",
+	}, &stdout, &stderr)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("plan status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	var plan struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Profile != config.ProfileStandard {
+		t.Fatalf("--profile=full consumed as --name value changed profile to %q", plan.Profile)
+	}
+}
+
+func TestPlanCommandPreservesConfigAndCLIPrecedence(t *testing.T) {
+	root := t.TempDir()
+	configs := map[string]string{
+		"full":     `{"profile":"full","exposure":"local","reveal":true}`,
+		"standard": `{"profile":"standard","exposure":"any","reveal":true}`,
+	}
+	paths := make(map[string]string, len(configs))
+	for name, content := range configs {
+		path := filepath.Join(root, name+".json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths[name] = path
+	}
+
+	for _, test := range []struct {
+		name        string
+		configArg   []string
+		profileArg  []string
+		exposure    string
+		wantProfile string
+		wantReveal  bool
+	}{
+		{
+			name:        "space config and equals profile",
+			configArg:   []string{"--config", paths["full"]},
+			profileArg:  []string{"--profile=standard"},
+			exposure:    "any",
+			wantProfile: config.ProfileStandard,
+			wantReveal:  false,
+		},
+		{
+			name:        "equals config and space profile",
+			configArg:   []string{"--config=" + paths["standard"]},
+			profileArg:  []string{"--profile", "full"},
+			exposure:    "any",
+			wantProfile: config.ProfileFull,
+			wantReveal:  false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := []string{"plan", "--lang", "en"}
+			args = append(args, test.configArg...)
+			args = append(args, test.profileArg...)
+			args = append(args, "--exposure", test.exposure, "--reveal=false", "--only", "system")
+			var stdout, stderr bytes.Buffer
+			status := Main(context.Background(), args, &stdout, &stderr)
+			if status != 0 || stderr.Len() != 0 {
+				t.Fatalf("plan status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+			}
+			var plan struct {
+				Profile  string `json:"profile"`
+				Exposure string `json:"exposure"`
+				Reveal   bool   `json:"reveal"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+				t.Fatal(err)
+			}
+			if plan.Profile != test.wantProfile || plan.Exposure != test.exposure || plan.Reveal != test.wantReveal {
+				t.Fatalf("resolved plan = %#v, want profile=%q exposure=%q reveal=%t", plan, test.wantProfile, test.exposure, test.wantReveal)
+			}
+		})
+	}
+}
+
+func TestPlanCommandKeepsLastExplicitProfileAndConfig(t *testing.T) {
+	root := t.TempDir()
+	firstConfig := filepath.Join(root, "first.json")
+	secondConfig := filepath.Join(root, "second.json")
+	if err := os.WriteFile(firstConfig, []byte(`{"profile":"standard"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondConfig, []byte(`{"profile":"full"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{
+		"plan", "--lang", "en", "--config", firstConfig, "--config=" + secondConfig,
+	}, &stdout, &stderr)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("repeated config plan status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	var plan struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Profile != config.ProfileFull {
+		t.Fatalf("last config profile = %q, want %q", plan.Profile, config.ProfileFull)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	status = Main(context.Background(), []string{
+		"plan", "--lang", "en", "--profile", "full", "--profile=standard", "--only", "system",
+	}, &stdout, &stderr)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("repeated profile plan status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	plan.Profile = ""
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Profile != config.ProfileStandard {
+		t.Fatalf("last CLI profile = %q, want %q", plan.Profile, config.ProfileStandard)
 	}
 }
 

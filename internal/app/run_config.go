@@ -30,64 +30,40 @@ func (e runFlagParseError) Unwrap() error { return e.err }
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
 func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error) {
-	configPath, profileFromCLI := preparse(args)
-	var fileConfig config.File
-	var err error
-	if configPath != "" {
-		fileConfig, err = config.LoadFile(configPath)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-		}
-	}
-	profile := profileFromCLI
-	if profile == "" {
-		profile = fileConfig.Profile
-	}
-	cfg, err := config.Defaults(profile)
-	if err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-	}
-	if err := config.ApplyFile(&cfg, fileConfig); err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-	}
-	if cfg.Output == "" {
-		cfg.Output = "./reports"
-	}
-
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	profileFlag := flags.String("profile", cfg.Profile, i18n.T("flag.profile"))
-	flags.String("config", configPath, i18n.T("flag.config"))
+	profileFlag := flags.String("profile", "", i18n.T("flag.profile"))
+	configFlag := flags.String("config", "", i18n.T("flag.config"))
 	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
 	skipFlag := flags.String("skip", "", i18n.T("flag.skip"))
-	exposureFlag := flags.String("exposure", cfg.Exposure.String(), i18n.T("flag.exposure"))
-	revealFlag := flags.Bool("reveal", cfg.Reveal, i18n.T("flag.reveal"))
-	ipVersionFlag := flags.String("ip-version", cfg.IPVersion, i18n.T("flag.ipVersion"))
+	exposureFlag := flags.String("exposure", "", i18n.T("flag.exposure"))
+	revealFlag := flags.Bool("reveal", false, i18n.T("flag.reveal"))
+	ipVersionFlag := flags.String("ip-version", "", i18n.T("flag.ipVersion"))
 	ipv4Flag := flags.Bool("4", false, i18n.T("flag.ipv4"))
 	ipv6Flag := flags.Bool("6", false, i18n.T("flag.ipv6"))
-	ipSourcesFlag := flags.String("ip-quality-sources", strings.Join(cfg.IPQualitySources, ","), i18n.T("flag.ipQualitySources"))
-	formatsFlag := flags.String("format", strings.Join(cfg.Formats, ","), i18n.T("flag.format"))
-	outputFlag := flags.String("output", cfg.Output, i18n.T("flag.output"))
+	ipSourcesFlag := flags.String("ip-quality-sources", "", i18n.T("flag.ipQualitySources"))
+	formatsFlag := flags.String("format", "", i18n.T("flag.format"))
+	outputFlag := flags.String("output", "", i18n.T("flag.output"))
 	nameFlag := flags.String("name", "", i18n.T("flag.name"))
-	noColorFlag := flags.Bool("no-color", cfg.NoColor, i18n.T("flag.noColor"))
+	noColorFlag := flags.Bool("no-color", false, i18n.T("flag.noColor"))
 	colorFlag := flags.String("color", "auto", i18n.T("flag.color"))
 	baselineFlag := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
-	cpuTimeFlag := flags.Duration("cpu-time", cfg.CPUTime, i18n.T("flag.cpuTime"))
-	diskFlag := flags.Int("disk-mib", cfg.DiskMiB, i18n.T("flag.diskMiB"))
-	diskPathFlag := flags.String("disk-path", cfg.DiskPath, i18n.T("flag.diskPath"))
-	diskMultiFlag := flags.Bool("disk-multi", cfg.DiskMulti, i18n.T("flag.diskMulti"))
-	diskMatrixModeFlag := flags.String("disk-matrix-mode", cfg.DiskMatrixMode, i18n.T("flag.diskMatrixMode"))
-	iperfDurationFlag := flags.Duration("iperf-duration", cfg.IPerfDuration, i18n.T("flag.iperfDuration"))
-	threadsFlag := flags.Int("speed-threads", cfg.SpeedThreads, i18n.T("flag.speedThreads"))
-	timeoutFlag := flags.Duration("timeout", cfg.HTTPTimeout, i18n.T("flag.timeout"))
-	dnsAttemptsFlag := flags.Int("dns-attempts", cfg.DNSAttempts, i18n.T("flag.dnsAttempts"))
-	latencyAttemptsFlag := flags.Int("latency-attempts", cfg.LatencyAttempts, i18n.T("flag.latencyAttempts"))
+	cpuTimeFlag := flags.Duration("cpu-time", 0, i18n.T("flag.cpuTime"))
+	diskFlag := flags.Int("disk-mib", 0, i18n.T("flag.diskMiB"))
+	diskPathFlag := flags.String("disk-path", "", i18n.T("flag.diskPath"))
+	diskMultiFlag := flags.Bool("disk-multi", false, i18n.T("flag.diskMulti"))
+	diskMatrixModeFlag := flags.String("disk-matrix-mode", "", i18n.T("flag.diskMatrixMode"))
+	iperfDurationFlag := flags.Duration("iperf-duration", 0, i18n.T("flag.iperfDuration"))
+	threadsFlag := flags.Int("speed-threads", 0, i18n.T("flag.speedThreads"))
+	timeoutFlag := flags.Duration("timeout", 0, i18n.T("flag.timeout"))
+	dnsAttemptsFlag := flags.Int("dns-attempts", 0, i18n.T("flag.dnsAttempts"))
+	latencyAttemptsFlag := flags.Int("latency-attempts", 0, i18n.T("flag.latencyAttempts"))
 	dnsResolversFlag := flags.String("dns-resolvers", "", i18n.T("flag.dnsResolvers"))
 	latencyTargetsFlag := flags.String("latency-targets", "", i18n.T("flag.latencyTargets"))
 	routeTargetsFlag := flags.String("route-targets", "", i18n.T("flag.routeTargets"))
 	stunServersFlag := flags.String("stun-servers", "", i18n.T("flag.stunServers"))
 	iperfTargetsFlag := flags.String("iperf-targets", "", i18n.T("flag.iperfTargets"))
-	mediaRegionFlag := flags.String("media-region", strings.Join(cfg.MediaRegions, ","), i18n.T("flag.mediaRegion"))
+	mediaRegionFlag := flags.String("media-region", "", i18n.T("flag.mediaRegion"))
 	backtraceCityFlag := flags.String("backtrace-city", "", i18n.T("flag.backtraceCity"))
 	backtraceTargetsFlag := flags.String("backtrace-targets", "", i18n.T("flag.backtraceTargets"))
 	ooklaServersFlag := flags.String("ookla-servers", "", i18n.T("flag.ooklaServers"))
@@ -99,24 +75,66 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	if err := flags.Parse(args); err != nil {
 		return resolvedRunConfig{}, runFlagParseError{err: err}
 	}
+	explicit := make(map[string]bool)
+	flags.Visit(func(flag *flag.Flag) { explicit[flag.Name] = true })
+
+	configPath := ""
+	if explicit["config"] {
+		configPath = *configFlag
+	}
+	var fileConfig config.File
+	var err error
+	if configPath != "" {
+		fileConfig, err = config.LoadFile(configPath)
+		if err != nil {
+			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+		}
+	}
+	profile := fileConfig.Profile
+	if explicit["profile"] {
+		profile = *profileFlag
+	}
+	// Keep one precedence pipeline: built-in defaults selected by profile, then
+	// config-file values, then only explicitly supplied CLI values. Callers
+	// apply the final Runtime validation after this resolver returns.
+	cfg, err := config.Defaults(profile)
+	if err != nil {
+		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	if err := config.ApplyFile(&cfg, fileConfig); err != nil {
+		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	if cfg.Output == "" {
+		cfg.Output = "./reports"
+	}
 	// Preserve the historical CLI contract: --version short-circuits before
 	// positional-argument and run-specific override validation.
 	if *versionFlag {
-		cfg.NoColor = *noColorFlag
+		if explicit["no-color"] {
+			cfg.NoColor = *noColorFlag
+		}
 		return resolvedRunConfig{Runtime: cfg, Color: *colorFlag, Version: true}, nil
 	}
 	if flags.NArg() != 0 {
 		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
 	}
 
-	cfg.Profile = *profileFlag
-	exposure, err := config.ParseExposure(*exposureFlag)
-	if err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: --exposure: %v", i18n.T("cli.error"), err)
+	if explicit["profile"] {
+		cfg.Profile = *profileFlag
 	}
-	cfg.Exposure = exposure
-	cfg.Reveal = *revealFlag
-	cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
+	if explicit["exposure"] {
+		exposure, err := config.ParseExposure(*exposureFlag)
+		if err != nil {
+			return resolvedRunConfig{}, fmt.Errorf("%s: --exposure: %v", i18n.T("cli.error"), err)
+		}
+		cfg.Exposure = exposure
+	}
+	if explicit["reveal"] {
+		cfg.Reveal = *revealFlag
+	}
+	if explicit["ip-version"] {
+		cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
+	}
 	if *ipv4Flag && *ipv6Flag {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), i18n.Errorf("err.ipv4AndIPv6"))
 	}
@@ -126,24 +144,53 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	if *ipv6Flag {
 		cfg.IPVersion = config.IPVersion6
 	}
-	cfg.IPQualitySources = config.ParseList(*ipSourcesFlag)
-	cfg.Formats = config.ParseList(*formatsFlag)
-	cfg.Output = *outputFlag
-	cfg.NoColor = *noColorFlag
-	cfg.CPUTime = *cpuTimeFlag
-	cfg.DiskMiB = *diskFlag
-	cfg.DiskPath = *diskPathFlag
-	cfg.DiskMulti = *diskMultiFlag
-	diskMatrixMode, err := config.ParseDiskMatrixMode(*diskMatrixModeFlag)
-	if err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: --disk-matrix-mode: %v", i18n.T("cli.error"), err)
+	if explicit["ip-quality-sources"] {
+		cfg.IPQualitySources = config.ParseList(*ipSourcesFlag)
 	}
-	cfg.DiskMatrixMode = diskMatrixMode
-	cfg.IPerfDuration = *iperfDurationFlag
-	cfg.SpeedThreads = *threadsFlag
-	cfg.HTTPTimeout = *timeoutFlag
-	cfg.DNSAttempts = *dnsAttemptsFlag
-	cfg.LatencyAttempts = *latencyAttemptsFlag
+	cfg.Formats = config.ParseList(strings.Join(cfg.Formats, ","))
+	if explicit["format"] {
+		cfg.Formats = config.ParseList(*formatsFlag)
+	}
+	if explicit["output"] {
+		cfg.Output = *outputFlag
+	}
+	if explicit["no-color"] {
+		cfg.NoColor = *noColorFlag
+	}
+	if explicit["cpu-time"] {
+		cfg.CPUTime = *cpuTimeFlag
+	}
+	if explicit["disk-mib"] {
+		cfg.DiskMiB = *diskFlag
+	}
+	if explicit["disk-path"] {
+		cfg.DiskPath = *diskPathFlag
+	}
+	if explicit["disk-multi"] {
+		cfg.DiskMulti = *diskMultiFlag
+	}
+	if explicit["disk-matrix-mode"] {
+		diskMatrixMode, err := config.ParseDiskMatrixMode(*diskMatrixModeFlag)
+		if err != nil {
+			return resolvedRunConfig{}, fmt.Errorf("%s: --disk-matrix-mode: %v", i18n.T("cli.error"), err)
+		}
+		cfg.DiskMatrixMode = diskMatrixMode
+	}
+	if explicit["iperf-duration"] {
+		cfg.IPerfDuration = *iperfDurationFlag
+	}
+	if explicit["speed-threads"] {
+		cfg.SpeedThreads = *threadsFlag
+	}
+	if explicit["timeout"] {
+		cfg.HTTPTimeout = *timeoutFlag
+	}
+	if explicit["dns-attempts"] {
+		cfg.DNSAttempts = *dnsAttemptsFlag
+	}
+	if explicit["latency-attempts"] {
+		cfg.LatencyAttempts = *latencyAttemptsFlag
+	}
 	for _, override := range []struct {
 		raw         string
 		requirePort bool
@@ -219,21 +266,6 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		Strict:        *strictFlag,
 		Version:       false,
 	}, nil
-}
-
-func preparse(args []string) (configPath, profile string) {
-	for _, occurrence := range scanEarlyFlags(args, "config", "profile") {
-		if !occurrence.HasValue || occurrence.Value == "" {
-			continue
-		}
-		switch occurrence.Name {
-		case "config":
-			configPath = occurrence.Value
-		case "profile":
-			profile = occurrence.Value
-		}
-	}
-	return configPath, profile
 }
 
 func printRunHelp(writer io.Writer, flags *flag.FlagSet) {

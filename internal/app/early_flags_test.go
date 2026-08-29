@@ -69,15 +69,7 @@ func TestScanEarlyFlagsDistinguishesEmptySeparateValues(t *testing.T) {
 	}
 }
 
-func TestEarlyFlagsKeepLastValueAndLanguageCanSurroundCommand(t *testing.T) {
-	configPath, profile := preparse([]string{
-		"run", "--profile", "first", "--profile=second",
-		"-config", "first.json", "--config=second.json",
-	})
-	if configPath != "second.json" || profile != "second" {
-		t.Fatalf("last valid early values = %q/%q, want second.json/second", configPath, profile)
-	}
-
+func TestEarlyFlagsKeepLastLanguageValueAndLanguageCanSurroundCommand(t *testing.T) {
 	for _, args := range [][]string{
 		{"--lang", "zh", "run", "--lang=en"},
 		{"run", "-lang=zh", "--lang", "en"},
@@ -177,10 +169,10 @@ func TestMainRejectsInvalidLanguageAtCommandEntry(t *testing.T) {
 	}
 }
 
-func TestPreparseShortFormsAndCLIProfilePrecedence(t *testing.T) {
+func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"profile":"full"}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"profile":"full","exposure":"local","reveal":true,"formats":["md"],"output":"from-file"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,6 +186,22 @@ func TestPreparseShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	}
 	if resolved.Runtime.Profile != config.ProfileStandard {
 		t.Fatalf("CLI profile did not override config profile: %q", resolved.Runtime.Profile)
+	}
+	if resolved.Runtime.Exposure != config.ExposureLocal || !resolved.Runtime.Reveal || !reflect.DeepEqual(resolved.Runtime.Formats, []string{"md"}) || resolved.Runtime.Output != "from-file" {
+		t.Fatalf("config values were not retained under CLI profile override: exposure=%s reveal=%t formats=%v output=%q", resolved.Runtime.Exposure, resolved.Runtime.Reveal, resolved.Runtime.Formats, resolved.Runtime.Output)
+	}
+
+	var overlayStderr bytes.Buffer
+	overlay, err := resolveRunConfig([]string{
+		"--config", configPath, "--profile", config.ProfileStandard,
+		"--exposure", "any", "--reveal=false", "--format", "json", "--output", "from-cli",
+		"--only", "system",
+	}, &overlayStderr)
+	if err != nil {
+		t.Fatalf("explicit CLI overlay: %v (stderr=%q)", err, overlayStderr.String())
+	}
+	if overlay.Runtime.Exposure != config.ExposureConsent || overlay.Runtime.Reveal || !reflect.DeepEqual(overlay.Runtime.Formats, []string{"json"}) || overlay.Runtime.Output != "from-cli" {
+		t.Fatalf("explicit CLI values did not override config: exposure=%s reveal=%t formats=%v output=%q", overlay.Runtime.Exposure, overlay.Runtime.Reveal, overlay.Runtime.Formats, overlay.Runtime.Output)
 	}
 
 	var equalStderr bytes.Buffer
