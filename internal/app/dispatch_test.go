@@ -109,6 +109,14 @@ func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
 	}
 }
 
+func TestMainKeepsGlobalLanguageAfterFormalOptionValue(t *testing.T) {
+	t.Setenv("ECS_LANG", "zh")
+	status, stdout, stderr := runInformationCommand("run", "--name", "value", "--lang=en", "--help")
+	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run] [options]") || strings.Contains(stderr, "用法: ecs [run]") {
+		t.Fatalf("language after formal option value status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
 func TestMainUsesLastGlobalLanguageAndRejectsLastInvalidValue(t *testing.T) {
 	status, stdout, stderr := runInformationCommand("list", "--lang=zh", "--lang=en")
 	if status != 0 || stderr != "" || !strings.Contains(stdout, "Standard profile:") || strings.Contains(stdout, "标准配置：") {

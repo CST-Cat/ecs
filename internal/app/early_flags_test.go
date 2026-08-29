@@ -69,6 +69,18 @@ func TestScanEarlyFlagsDistinguishesEmptySeparateValues(t *testing.T) {
 	}
 }
 
+func TestScanEarlyFlagsLeavesOptionLikeValuesToFormalParser(t *testing.T) {
+	if got := scanEarlyFlags([]string{"plan", "--name", "--lang=en", "--only", "system"}, "lang"); len(got) != 0 {
+		t.Fatalf("language occurrences in --name value = %#v, want none", got)
+	}
+
+	got := scanEarlyFlags([]string{"plan", "--name", "value", "--lang=en"}, "lang")
+	want := []earlyFlagOccurrence{{Name: "lang", Value: "en", Position: 3, End: 4, HasValue: true, HasEquals: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("language after formal option value = %#v, want %#v", got, want)
+	}
+}
+
 func TestEarlyFlagsKeepLastLanguageValueAndLanguageCanSurroundCommand(t *testing.T) {
 	for _, args := range [][]string{
 		{"--lang", "zh", "run", "--lang=en"},

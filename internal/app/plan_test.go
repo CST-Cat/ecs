@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 )
 
 func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
@@ -162,6 +163,36 @@ func TestPlanCommandUsesFormalParserForFlagAsValue(t *testing.T) {
 	}
 	if plan.Profile != config.ProfileStandard {
 		t.Fatalf("--profile=full consumed as --name value changed profile to %q", plan.Profile)
+	}
+}
+
+func TestPlanCommandKeepsOptionLikeNameValueFromEarlyLanguageScan(t *testing.T) {
+	t.Setenv("ECS_LANG", "zh")
+	args := []string{"plan", "--name", "--lang=en", "--only", "system"}
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), args, &stdout, &stderr)
+	if status != 0 || strings.Contains(stderr.String(), "unexpected arguments") {
+		t.Fatalf("plan with option-like name value status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	if i18n.Current() != i18n.LangZH {
+		t.Fatalf("option-like --name value changed language to %s", i18n.Current())
+	}
+	var plan struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Profile != config.ProfileStandard {
+		t.Fatalf("plan profile = %q, want %q", plan.Profile, config.ProfileStandard)
+	}
+
+	resolved, err := resolveRunConfig(args[1:], &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("formal parser rejected option-like name value: %v", err)
+	}
+	if resolved.Name != "--lang=en" {
+		t.Fatalf("formal --name value = %q, want %q", resolved.Name, "--lang=en")
 	}
 }
 
