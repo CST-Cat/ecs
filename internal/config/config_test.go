@@ -347,6 +347,12 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		{name: "iperf network", mutate: func(r *Runtime) {
 			r.IPerfTargets = []IPerfEndpoint{{Name: "edge", Host: "example.com", PortStart: 1, PortEnd: 1, Networks: "other"}}
 		}, marker: "networks must"},
+		{name: "iperf duplicate", mutate: func(r *Runtime) {
+			r.IPerfTargets = []IPerfEndpoint{
+				{Name: "edge-a", Host: "Example.COM.", PortStart: 5201, PortEnd: 5201, Location: "one", Networks: "IPv4"},
+				{Name: "edge-b", Host: "example.com", PortStart: 5201, PortEnd: 5201, Location: "two", Networks: "IPv6"},
+			}
+		}, marker: "duplicated"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -354,6 +360,18 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 			test.mutate(&runtime)
 			requireError(t, Validate(runtime), test.marker)
 		})
+	}
+}
+
+func TestValidateAllowsSameIPerfHostWithDistinctPortRanges(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	runtime.IPerfTargets = []IPerfEndpoint{
+		{Name: "edge-a", Host: "example.com", PortStart: 5201, PortEnd: 5201},
+		{Name: "edge-b", Host: "example.com", PortStart: 5202, PortEnd: 5202},
+	}
+	if err := Validate(runtime); err != nil {
+		t.Fatalf("same host with distinct iperf port ranges rejected: %v", err)
 	}
 }
 

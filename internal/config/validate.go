@@ -142,6 +142,7 @@ func Validate(runtime Runtime) error {
 	if runtime.IPerfDuration < time.Second || runtime.IPerfDuration > 30*time.Second {
 		return i18n.Errorf("err.iperfDuration")
 	}
+	seenIPerfTargets := make(map[string]bool, len(runtime.IPerfTargets))
 	for _, endpoint := range runtime.IPerfTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || !validRouteTarget(endpoint.Host) {
 			return i18n.Errorf("err.iperfNodeName", endpoint.Host)
@@ -155,6 +156,11 @@ func Validate(runtime Runtime) error {
 		default:
 			return i18n.Errorf("err.iperfNodeNetwork", endpoint.Name)
 		}
+		key := iperfTargetKey(endpoint.Host, endpoint.PortStart, endpoint.PortEnd)
+		if seenIPerfTargets[key] {
+			return i18n.Errorf("err.endpointDuplicate", endpoint.Host)
+		}
+		seenIPerfTargets[key] = true
 	}
 	abs, err := filepath.Abs(runtime.DiskPath)
 	if err != nil {

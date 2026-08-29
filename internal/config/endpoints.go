@@ -141,6 +141,7 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 		return nil, nil
 	}
 	targets := make([]IPerfEndpoint, 0, len(items))
+	seen := make(map[string]bool, len(items))
 	for _, item := range items {
 		name, spec := "", item
 		if key, value, ok := strings.Cut(item, "="); ok {
@@ -165,6 +166,11 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 				return nil, i18n.Errorf("err.iperfNodeRange", item)
 			}
 		}
+		key := iperfTargetKey(host, start, end)
+		if seen[key] {
+			return nil, i18n.Errorf("err.endpointDuplicate", host)
+		}
+		seen[key] = true
 		if name == "" {
 			name = host
 		}
@@ -182,6 +188,14 @@ func ParseIPerfTargetList(raw string) ([]IPerfEndpoint, error) {
 		})
 	}
 	return targets, nil
+}
+
+func iperfTargetKey(host string, portStart, portEnd int) string {
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(strings.TrimSpace(host), "[]"), "."))
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	return host + "\x00" + strconv.Itoa(portStart) + "\x00" + strconv.Itoa(portEnd)
 }
 
 // splitTrimmed 按逗号切分并去掉空项。

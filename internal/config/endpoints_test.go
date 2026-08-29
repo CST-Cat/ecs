@@ -90,3 +90,27 @@ func TestParseIPerfTargetListRejectsDistinctInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseIPerfTargetListRejectsDuplicateOperationalTargets(t *testing.T) {
+	useEnglish(t)
+	for _, raw := range []string{
+		"edge-a=Example.COM:5201,edge-b=example.com.:5201",
+		"edge-a=[2001:DB8::1]:5201,edge-b=[2001:db8::1]:5201",
+	} {
+		_, err := ParseIPerfTargetList(raw)
+		if err == nil || !strings.Contains(err.Error(), "duplicated") {
+			t.Errorf("ParseIPerfTargetList(%q) = %v, want duplicate error", raw, err)
+		}
+	}
+}
+
+func TestParseIPerfTargetListAllowsDistinctPortRanges(t *testing.T) {
+	useEnglish(t)
+	targets, err := ParseIPerfTargetList("edge-a=example.com:5201,edge-b=example.com:5202")
+	if err != nil {
+		t.Fatalf("ParseIPerfTargetList returned error: %v", err)
+	}
+	if len(targets) != 2 || targets[0].Name != "edge-a" || targets[0].PortStart != 5201 || targets[1].Name != "edge-b" || targets[1].PortStart != 5202 {
+		t.Fatalf("ParseIPerfTargetList targets = %+v, want ordered distinct ranges", targets)
+	}
+}
