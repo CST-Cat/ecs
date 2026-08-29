@@ -3,7 +3,6 @@ package score
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,16 +32,37 @@ func TestDetectOutlierStates(t *testing.T) {
 	)
 
 	cases := []struct {
-		name          string
-		submissions   []Submission
-		wantOutliers  int
-		wantUndecided bool
-		markers       []string
+		name            string
+		submissions     []Submission
+		wantOutliers    int
+		wantUndecidable []Undecidable
 	}{
-		{name: "too few samples", submissions: normal[:2], wantUndecided: true, markers: []string{"4–7 vCPU", "仅 2 个样本"}},
+		{
+			name:        "too few samples",
+			submissions: normal[:2],
+			wantUndecidable: []Undecidable{
+				{TierLabel: "4–7 vCPU", MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+				{TierLabel: "4–7 vCPU", MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+			},
+		},
 		{name: "ordinary spread", submissions: normal},
-		{name: "zero dispersion", submissions: flat, wantUndecided: true, markers: []string{"样本离散度为零"}},
-		{name: "metric and tier outliers", submissions: spikes, wantOutliers: 2, wantUndecided: true, markers: []string{"8–15 vCPU"}},
+		{
+			name:        "zero dispersion",
+			submissions: flat,
+			wantUndecidable: []Undecidable{
+				{TierLabel: "4–7 vCPU", MetricKey: "cpu_single", SampleCount: 9, Required: 8, Reason: "zero_dispersion"},
+				{TierLabel: "4–7 vCPU", MetricKey: "memory_copy", SampleCount: 9, Required: 8, Reason: "zero_dispersion"},
+			},
+		},
+		{
+			name:         "metric and tier outliers",
+			submissions:  spikes,
+			wantOutliers: 2,
+			wantUndecidable: []Undecidable{
+				{TierLabel: "8–15 vCPU", MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+				{TierLabel: "8–15 vCPU", MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+			},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -54,28 +74,16 @@ func TestDetectOutlierStates(t *testing.T) {
 			if len(got.Outliers) != test.wantOutliers {
 				t.Fatalf("outliers = %+v, want %d", got.Outliers, test.wantOutliers)
 			}
-			if test.wantUndecided != (len(got.Undecidable) > 0) {
-				t.Fatalf("undecidable = %v, want present=%v", got.Undecidable, test.wantUndecided)
-			}
-			for _, marker := range test.markers {
-				found := false
-				for _, notice := range got.Undecidable {
-					if strings.Contains(notice, marker) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Fatalf("undecidable = %v, missing %q", got.Undecidable, marker)
-				}
+			if !reflect.DeepEqual(got.Undecidable, test.wantUndecidable) {
+				t.Fatalf("undecidable facts = %+v, want %+v", got.Undecidable, test.wantUndecidable)
 			}
 			if test.name != "metric and tier outliers" {
 				return
 			}
 			seen := make(map[string]bool)
 			for _, outlier := range got.Outliers {
-				if outlier.SubmissionID != "spike" || outlier.SampleCount != 9 || outlier.TierLabel != "4–7 vCPU" || outlier.Ratio <= 1 || !strings.Contains(outlier.Describe(), outlier.MetricKey) {
-					t.Fatalf("outlier = %+v, description=%q", outlier, outlier.Describe())
+				if outlier.SubmissionID != "spike" || outlier.SampleCount != 9 || outlier.TierLabel != "4–7 vCPU" || outlier.Ratio <= 1 {
+					t.Fatalf("outlier facts = %+v", outlier)
 				}
 				seen[outlier.MetricKey] = true
 			}
@@ -122,8 +130,11 @@ func TestDetectOutliersIsRepresentationInvariant(t *testing.T) {
 			t.Fatalf("outlier grouping = %+v", outlier)
 		}
 	}
-	if !strings.Contains(fromReports.Undecidable[0], "4–7 vCPU / cpu_multi") {
-		t.Fatalf("undecidable grouping = %v", fromReports.Undecidable)
+	wantUndecidable := Undecidable{
+		TierLabel: "4–7 vCPU", MetricKey: "cpu_multi", SampleCount: 1, Required: 8, Reason: "insufficient_samples",
+	}
+	if len(fromReports.Undecidable) != 1 || fromReports.Undecidable[0] != wantUndecidable {
+		t.Fatalf("undecidable facts = %+v, want %+v", fromReports.Undecidable, wantUndecidable)
 	}
 }
 

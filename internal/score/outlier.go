@@ -17,7 +17,6 @@ package score
 // 因此这里只标记与解释，是否收录由维护者决定。
 
 import (
-	"fmt"
 	"math"
 	"sort"
 )
@@ -70,24 +69,28 @@ type Outlier struct {
 	Ratio float64
 }
 
-// Describe 给出一句可读的说明。
-func (o Outlier) Describe() string {
-	direction := "高"
-	if o.ZScore < 0 {
-		direction = "低"
-	}
-	return fmt.Sprintf("%s 的 %s 比同档（%s，%d 个样本）中位数%s %.1f 倍（z=%.1f）",
-		o.SubmissionID, o.MetricKey, o.TierLabel, o.SampleCount, direction, o.Ratio, math.Abs(o.ZScore))
+// Undecidable 是无法完成离群判定的一组结构化事实。
+type Undecidable struct {
+	// TierLabel 指出比较发生在哪一档。
+	TierLabel string
+	// MetricKey 是未能判定的指标。
+	MetricKey string
+	// SampleCount 是该档该指标的实际样本数。
+	SampleCount int
+	// Required 是检测器要求的最少样本数。
+	Required int
+	// Reason 是无法判定的机器可读原因。
+	Reason string
 }
 
 // OutlierReport 是一次检测的完整结果。
 type OutlierReport struct {
 	Outliers []Outlier
-	// Undecidable 记录因样本不足而无法判定的档位与指标。
+	// Undecidable 记录无法判定的档位与指标事实。
 	//
 	// 单独列出来而不是静默跳过：读者需要知道"没报离群"是因为确实没有，
 	// 还是因为压根没查。
-	Undecidable []string
+	Undecidable []Undecidable
 }
 
 // DetectOutliers 在同档同指标内做离群检测。
@@ -131,16 +134,25 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 		for _, metricKey := range metricKeys {
 			values := entry.values[metricKey]
 			if len(values) < minOutlierSamples {
-				report.Undecidable = append(report.Undecidable, fmt.Sprintf(
-					"%s / %s：仅 %d 个样本，需要 %d 个才能判定",
-					TierLabel(tierKey), metricKey, len(values), minOutlierSamples))
+				report.Undecidable = append(report.Undecidable, Undecidable{
+					TierLabel:   TierLabel(tierKey),
+					MetricKey:   metricKey,
+					SampleCount: len(values),
+					Required:    minOutlierSamples,
+					Reason:      "insufficient_samples",
+				})
 				continue
 			}
 			median, mad := medianAndMAD(values)
 			if mad <= 0 {
 				// 所有样本几乎相同：没有离散度可言，任何偏离都会算出无穷大的 z 值。
-				report.Undecidable = append(report.Undecidable, fmt.Sprintf(
-					"%s / %s：样本离散度为零，无法判定", TierLabel(tierKey), metricKey))
+				report.Undecidable = append(report.Undecidable, Undecidable{
+					TierLabel:   TierLabel(tierKey),
+					MetricKey:   metricKey,
+					SampleCount: len(values),
+					Required:    minOutlierSamples,
+					Reason:      "zero_dispersion",
+				})
 				continue
 			}
 			for index, value := range values {

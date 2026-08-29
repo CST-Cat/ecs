@@ -344,9 +344,53 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 	if warnings := strings.Count(stdout, "::warning::"); warnings != len(expected.Outliers) {
 		t.Fatalf("annotated outlier count=%d, want %d", warnings, len(expected.Outliers))
 	}
-	for _, notice := range expected.Undecidable {
-		if !strings.Contains(stdout, notice) {
-			t.Fatalf("undecidable notice %q missing from output", notice)
+	for _, fact := range expected.Outliers {
+		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+			fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
+			if !strings.Contains(stdout, marker) {
+				t.Fatalf("outlier fact marker %q missing from output %q", marker, stdout)
+			}
+		}
+	}
+	for _, fact := range expected.Undecidable {
+		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+			fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required)} {
+			if !strings.Contains(stdout, marker) {
+				t.Fatalf("undecidable fact marker %q missing from output %q", marker, stdout)
+			}
+		}
+	}
+
+	zhOutput := filepath.Join(root, "zh-baseline.json")
+	zhArgs := []string{"leaderboard", "--lang", "zh", "--annotate", "--verbose", "--output", zhOutput}
+	zhArgs = append(zhArgs, inputs...)
+	zhStatus, zhStdout, zhStderr := invokeAppMain(zhArgs...)
+	if zhStatus != 0 || zhStderr != "" {
+		t.Fatalf("localized undecidable statistics status=%d stdout=%q stderr=%q", zhStatus, zhStdout, zhStderr)
+	}
+	if !strings.Contains(zhStdout, "离群提醒：") || !strings.Contains(zhStdout, "样本不足、未做离群判定的组合：") ||
+		!strings.Contains(zhStdout, "高") {
+		t.Fatalf("localized Chinese outlier output missing presentation text: %q", zhStdout)
+	}
+	for _, fact := range expected.Outliers {
+		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+			fmt.Sprintf("%d 个样本", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
+			if !strings.Contains(zhStdout, marker) {
+				t.Fatalf("Chinese outlier fact marker %q missing from output %q", marker, zhStdout)
+			}
+		}
+	}
+	for _, fact := range expected.Undecidable {
+		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+			fmt.Sprintf("仅 %d 个样本", fact.SampleCount), fmt.Sprintf("需要 %d 个", fact.Required)} {
+			if !strings.Contains(zhStdout, marker) {
+				t.Fatalf("Chinese undecidable fact marker %q missing from output %q", marker, zhStdout)
+			}
+		}
+	}
+	for _, forbidden := range []string{"高", "低", "个样本", "无法判定", "同档"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("English outlier output contains ECS-owned Chinese prose %q: %q", forbidden, stdout)
 		}
 	}
 }
@@ -397,14 +441,28 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 		if warnings := strings.Count(stdout, "::warning::"); warnings != len(expected.Outliers) {
 			t.Fatalf("%s representation outlier count=%d, want %d", name, warnings, len(expected.Outliers))
 		}
-		for _, outlier := range expected.Outliers {
-			if !strings.Contains(stdout, outlier.Describe()) {
-				t.Fatalf("%s representation missing outlier %q in %q", name, outlier.Describe(), stdout)
+		for _, fact := range expected.Outliers {
+			for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+				fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
+				if !strings.Contains(stdout, marker) {
+					t.Fatalf("%s representation missing outlier fact marker %q in %q", name, marker, stdout)
+				}
 			}
 		}
-		for _, notice := range expected.Undecidable {
-			if !strings.Contains(stdout, notice) {
-				t.Fatalf("%s representation missing undecidable notice %q", name, notice)
+		for _, fact := range expected.Undecidable {
+			markers := []string{fact.TierLabel, fact.MetricKey}
+			switch fact.Reason {
+			case "insufficient_samples":
+				markers = append(markers, fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required))
+			case "zero_dispersion":
+				markers = append(markers, "sample dispersion is zero", "outliers cannot be determined")
+			default:
+				t.Fatalf("unexpected undecidable reason %q", fact.Reason)
+			}
+			for _, marker := range markers {
+				if !strings.Contains(stdout, marker) {
+					t.Fatalf("%s representation missing undecidable fact marker %q in %q", name, marker, stdout)
+				}
 			}
 		}
 	}

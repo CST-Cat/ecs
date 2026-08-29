@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -251,10 +252,11 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 		if len(outliers.Outliers) > 0 {
 			fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.outliersHeader"))
 			for _, item := range outliers.Outliers {
-				fmt.Fprintf(stdout, "  %s\n", item.Describe())
+				text := formatOutlier(item)
+				fmt.Fprintf(stdout, "  %s\n", text)
 				if annotate {
 					// GitHub Actions 注解：让离群在检查页面上直接可见。
-					fmt.Fprintf(stdout, "::warning::%s\n", item.Describe())
+					fmt.Fprintf(stdout, "::warning::%s\n", text)
 				}
 			}
 			fmt.Fprintf(stdout, "  %s\n", i18n.T("baseline.outlierNote"))
@@ -262,11 +264,32 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 		if len(outliers.Undecidable) > 0 && verbose {
 			fmt.Fprintf(stdout, "\n%s\n", i18n.T("baseline.undecidableHeader"))
 			for _, item := range outliers.Undecidable {
-				fmt.Fprintf(stdout, "  %s\n", item)
+				fmt.Fprintf(stdout, "  %s\n", formatUndecidable(item))
 			}
 		}
 	}
 	return 0
+}
+
+func formatOutlier(item score.Outlier) string {
+	key := "baseline.outlierHigh"
+	if item.ZScore < 0 {
+		key = "baseline.outlierLow"
+	}
+	return fmt.Sprintf(i18n.T(key), item.SubmissionID, item.MetricKey, item.TierLabel,
+		item.SampleCount, item.Ratio, math.Abs(item.ZScore))
+}
+
+func formatUndecidable(item score.Undecidable) string {
+	switch item.Reason {
+	case "insufficient_samples":
+		return fmt.Sprintf(i18n.T("baseline.undecidableFew"),
+			item.TierLabel, item.MetricKey, item.SampleCount, item.Required)
+	case "zero_dispersion":
+		return fmt.Sprintf(i18n.T("baseline.undecidableZero"), item.TierLabel, item.MetricKey)
+	default:
+		return fmt.Sprintf(i18n.T("baseline.undecidableOther"), item.TierLabel, item.MetricKey, item.Reason)
+	}
 }
 
 func duplicateSampleIssue(sampleID, previous string) error {
