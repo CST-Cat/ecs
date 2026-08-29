@@ -168,31 +168,52 @@ func TestPlanCommandUsesFormalParserForFlagAsValue(t *testing.T) {
 
 func TestPlanCommandKeepsOptionLikeNameValueFromEarlyLanguageScan(t *testing.T) {
 	t.Setenv("ECS_LANG", "zh")
-	args := []string{"plan", "--name", "--lang=en", "--only", "system"}
-	var stdout, stderr bytes.Buffer
-	status := Main(context.Background(), args, &stdout, &stderr)
-	if status != 0 || strings.Contains(stderr.String(), "unexpected arguments") {
-		t.Fatalf("plan with option-like name value status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
-	}
-	if i18n.Current() != i18n.LangZH {
-		t.Fatalf("option-like --name value changed language to %s", i18n.Current())
-	}
-	var plan struct {
-		Profile string `json:"profile"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
-		t.Fatal(err)
-	}
-	if plan.Profile != config.ProfileStandard {
-		t.Fatalf("plan profile = %q, want %q", plan.Profile, config.ProfileStandard)
-	}
+	for _, test := range []struct {
+		name         string
+		args         []string
+		wantLanguage i18n.Lang
+		wantName     string
+	}{
+		{
+			name:         "option-like name value",
+			args:         []string{"plan", "--name", "--lang=en", "--only", "system"},
+			wantLanguage: i18n.LangZH,
+			wantName:     "--lang=en",
+		},
+		{
+			name:         "global language after completed name value",
+			args:         []string{"plan", "--name", "value", "--lang=en", "--only", "system"},
+			wantLanguage: i18n.LangEN,
+			wantName:     "value",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			status := Main(context.Background(), test.args, &stdout, &stderr)
+			if status != 0 || strings.Contains(stderr.String(), "unexpected arguments") {
+				t.Fatalf("plan status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+			}
+			if i18n.Current() != test.wantLanguage {
+				t.Fatalf("language = %s, want %s", i18n.Current(), test.wantLanguage)
+			}
+			var plan struct {
+				Profile string `json:"profile"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+				t.Fatal(err)
+			}
+			if plan.Profile != config.ProfileStandard {
+				t.Fatalf("plan profile = %q, want %q", plan.Profile, config.ProfileStandard)
+			}
 
-	resolved, err := resolveRunConfig(args[1:], &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("formal parser rejected option-like name value: %v", err)
-	}
-	if resolved.Name != "--lang=en" {
-		t.Fatalf("formal --name value = %q, want %q", resolved.Name, "--lang=en")
+			resolved, err := resolveRunConfig(test.args[1:], &bytes.Buffer{})
+			if err != nil {
+				t.Fatalf("formal parser rejected option-like name value: %v", err)
+			}
+			if resolved.Name != test.wantName {
+				t.Fatalf("formal --name value = %q, want %q", resolved.Name, test.wantName)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,12 +28,42 @@ type runFlagParseError struct{ err error }
 func (e runFlagParseError) Error() string { return e.err.Error() }
 func (e runFlagParseError) Unwrap() error { return e.err }
 
+type runLanguageFlag struct {
+	value string
+	seen  bool
+}
+
+func (f *runLanguageFlag) String() string { return f.value }
+
+func (f *runLanguageFlag) Set(value string) error {
+	f.value = value
+	f.seen = true
+	if strings.HasPrefix(value, "-") {
+		return errors.New("--lang requires a value")
+	}
+	if strings.TrimSpace(value) != "" {
+		if language, ok := i18n.Parse(value); ok {
+			i18n.Set(language)
+		}
+	}
+	return nil
+}
+
+func isMissingRunLanguageError(err error) bool {
+	return err != nil && (err.Error() == "flag needs an argument: -lang" || strings.Contains(err.Error(), "--lang requires a value"))
+}
+
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
 func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error) {
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	parseOutput := &bytes.Buffer{}
+	flags.SetOutput(parseOutput)
+	languageFlag := &runLanguageFlag{}
+	flags.Var(languageFlag, "lang", i18n.T("flag.lang"))
+	helpFlag := flags.Bool("help", false, "")
+	hFlag := flags.Bool("h", false, "")
 	profileFlag := flags.String("profile", "", i18n.T("flag.profile"))
 	configFlag := flags.String("config", "", i18n.T("flag.config"))
 	onlyFlag := flags.String("only", "", i18n.T("flag.only"))
@@ -71,9 +103,29 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	yesFlag := flags.Bool("yes", false, i18n.T("flag.yes"))
 	strictFlag := flags.Bool("strict", false, i18n.T("flag.strict"))
 	versionFlag := flags.Bool("version", false, i18n.T("flag.version"))
-	flags.Usage = func() { printRunHelp(stderr, flags) }
+	flags.Usage = func() { printRunHelp(parseOutput, flags) }
 	if err := flags.Parse(args); err != nil {
+		if isMissingRunLanguageError(err) {
+			return resolvedRunConfig{}, fmt.Errorf("%s: --lang requires a value", i18n.T("cli.error"))
+		}
+		if *helpFlag || *hFlag || errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(stderr)
+			printRunHelp(stderr, flags)
+			return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
+		}
+		_, _ = io.Copy(stderr, parseOutput)
 		return resolvedRunConfig{}, runFlagParseError{err: err}
+	}
+	if languageFlag.seen {
+		occurrence := earlyFlagOccurrence{Name: "lang", Value: languageFlag.value, HasValue: true}
+		if err := validateExplicitLanguage([]earlyFlagOccurrence{occurrence}); err != nil {
+			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+		}
+	}
+	if *helpFlag || *hFlag {
+		flags.SetOutput(stderr)
+		printRunHelp(stderr, flags)
+		return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
 	}
 	explicit := make(map[string]bool)
 	flags.Visit(func(flag *flag.Flag) { explicit[flag.Name] = true })

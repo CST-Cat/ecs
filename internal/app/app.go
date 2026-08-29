@@ -12,34 +12,40 @@ import (
 )
 
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	languageFlags := scanEarlyFlags(args, "lang")
+	command, commandArgs := dispatchCommand(args, languageFlags)
+	earlyLanguageFlags := languageFlags
+	if command == "run" || command == "plan" {
+		earlyLanguageFlags = runLikeInitialLanguageFlags(args, languageFlags)
+	}
 	// 语言要在任何输出之前定下来：帮助文本、错误信息都要用它。
 	// 显式 --lang 优先，其次看环境变量，最后回落中文。
-	languageFlags := scanEarlyFlags(args, "lang")
-	i18n.Set(resolveLanguage(languageFlags))
-	if err := validateExplicitLanguage(languageFlags); err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
-		return 1
+	i18n.Set(resolveLanguage(earlyLanguageFlags))
+	if command != "run" && command != "plan" {
+		if err := validateExplicitLanguage(languageFlags); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+			return 1
+		}
 	}
-	command, args := dispatchCommand(args, languageFlags)
 	switch command {
 	case "run":
-		return runCommand(ctx, args, stdout, stderr)
+		return runCommand(ctx, commandArgs, stdout, stderr)
 	case "plan":
-		return planCommand(args, stdout, stderr)
+		return planCommand(commandArgs, stdout, stderr)
 	case "render":
-		return renderCommand(args, stdout, stderr)
+		return renderCommand(commandArgs, stdout, stderr)
 	case "compare":
-		return compareCommand(args, stdout, stderr)
+		return compareCommand(commandArgs, stdout, stderr)
 	case "list":
-		return listCommand(args, stdout, stderr)
+		return listCommand(commandArgs, stdout, stderr)
 	case "config":
-		return configCommand(args, stdout, stderr)
+		return configCommand(commandArgs, stdout, stderr)
 	case "doctor":
 		return doctorCommand(ctx, stdout)
 	case "leaderboard":
-		return leaderboardCommand(args, stdout, stderr)
+		return leaderboardCommand(commandArgs, stdout, stderr)
 	case "submit":
-		return submitCommand(args, stdout, stderr)
+		return submitCommand(commandArgs, stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 		return 0
@@ -53,25 +59,75 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// dispatchCommand accepts the global language flag on either side of a
-// command, then hands the command-specific flag set an argv with that global
-// flag removed.  A non-language option before a command still means the
-// default run command; its value must not be mistaken for a command name.
-func dispatchCommand(args []string, languageFlags []earlyFlagOccurrence) (string, []string) {
+func leadingLanguageFlags(occurrences []earlyFlagOccurrence) []earlyFlagOccurrence {
+	// This only filters occurrences already found by the global-language scan;
+	// it does not interpret any command-specific option.
+	var leading []earlyFlagOccurrence
 	position := 0
-	for _, occurrence := range languageFlags {
+	for _, occurrence := range occurrences {
 		if occurrence.Position != position {
 			break
 		}
+		leading = append(leading, occurrence)
 		position = occurrence.End
 	}
+	return leading
+}
+
+func runLikeInitialLanguageFlags(args []string, occurrences []earlyFlagOccurrence) []earlyFlagOccurrence {
+	leading := leadingLanguageFlags(occurrences)
+	position := 0
+	if len(leading) > 0 {
+		position = leading[len(leading)-1].End
+	}
+	if position >= len(args) || args[position] == "--" || strings.HasPrefix(args[position], "-") {
+		return leading
+	}
+
+	// A language flag immediately follows an explicit run-like command before
+	// any command option. It is safe to use for help localization; all later
+	// occurrences remain with the real FlagSet, which owns their grammar.
+	next := position + 1
+	initial := append([]earlyFlagOccurrence(nil), leading...)
+	for _, occurrence := range occurrences {
+		if occurrence.Position < next {
+			continue
+		}
+		if occurrence.Position != next {
+			break
+		}
+		initial = append(initial, occurrence)
+		next = occurrence.End
+	}
+	return initial
+}
+
+// dispatchCommand accepts the global language flag on either side of a
+// command. Run-like commands receive language occurrences unchanged so their
+// real FlagSet owns option/value ambiguity; other command parsers receive an
+// argv with global language flags removed. A non-language option before a
+// command still means the default run command; its value must not be mistaken
+// for a command name.
+func dispatchCommand(args []string, languageFlags []earlyFlagOccurrence) (string, []string) {
+	leading := leadingLanguageFlags(languageFlags)
+	position := 0
+	if len(leading) > 0 {
+		position = leading[len(leading)-1].End
+	}
 	commandFound := position < len(args) && args[position] != "--" && !strings.HasPrefix(args[position], "-")
+	if !commandFound {
+		return "run", args
+	}
+	command := args[position]
+	if command == "run" || command == "plan" {
+		commandArgs := make([]string, 0, len(args)-1)
+		commandArgs = append(commandArgs, args[:position]...)
+		commandArgs = append(commandArgs, args[position+1:]...)
+		return command, commandArgs
+	}
 
 	cleaned := stripExplicitLanguage(args, languageFlags)
-	if !commandFound || len(cleaned) == 0 || strings.HasPrefix(cleaned[0], "-") {
-		return "run", cleaned
-	}
-	return cleaned[0], cleaned[1:]
+	return command, cleaned[1:]
 }
 
 // resolveLanguage 在解析命令前先从已扫描的 occurrences 取出 --lang。
