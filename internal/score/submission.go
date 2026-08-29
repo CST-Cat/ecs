@@ -304,7 +304,7 @@ func (s Submission) fingerprint() string {
 		return ""
 	}
 	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])[:12]
+	return hex.EncodeToString(sum[:sha256.Size/2])
 }
 
 // FileName 是这份提交在库里的建议文件名。

@@ -448,7 +448,7 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 可以改变 `id`，但不得改变 `sample_id`。
 
 `ecs.submission/v1` 只有一个当前 artifact 指纹算法。`id` 是除 `id`、`sample_id` 和 `ran_at`
-以外所有允许公开字段的规范 JSON SHA-256 前 12 位：同一内容在不同导出时间或 sample 标注下
+以外所有允许公开字段的规范 JSON SHA-256 前 16 字节（32 个小写 hex 字符）：同一内容在不同导出时间或 sample 标注下
 得到同一 ID，而主机规格、工具、profile、note 或任何精确浮点值的改动都会改变 ID。当前 JSON
 contract 不包含 `fingerprint_version`；旧 JSON 携带该字段会被严格加载器按未知字段拒绝，缺少
 `sample_id` 等当前必需字段的记录也会由当前校验拒绝。

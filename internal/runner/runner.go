@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -48,7 +49,16 @@ var detectNetworkCapabilities = probe.DetectNetworkCapabilities
 // family and shared capability snapshot exist before the egress stage starts.
 var discoverEgress = probe.DiscoverEgress
 
-func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.Report {
+// runIDRandomReader is the only source for benchmark run identities. It is a
+// package-local seam so failure propagation can be tested without introducing
+// an identity abstraction.
+var runIDRandomReader io.Reader = rand.Reader
+
+func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.Report, error) {
+	runID, err := newRunID()
+	if err != nil {
+		return model.Report{}, err
+	}
 	started := time.Now().UTC()
 	selected := selectBindings(bindBuiltinModules(), cfg.Modules)
 	report := model.Report{
@@ -60,7 +70,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 			BuildDate: buildinfo.BuildDate,
 		},
 		Run: model.RunInfo{
-			ID:        newRunID(),
+			ID:        runID,
 			Profile:   cfg.Profile,
 			StartedAt: started,
 			Exposure:  cfg.Exposure.String(),
@@ -179,7 +189,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) model.R
 	report.Run.CompletedAt = time.Now().UTC()
 	report.Run.DurationMS = report.Run.CompletedAt.Sub(report.Run.StartedAt).Milliseconds()
 	model.Summarize(&report)
-	return report
+	return report, nil
 }
 
 func localInterfaceIPs() []string {
@@ -324,10 +334,10 @@ func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (resu
 	return item.Run(ctx, env)
 }
 
-func newRunID() string {
-	var bytes [6]byte
-	if _, err := rand.Read(bytes[:]); err == nil {
-		return hex.EncodeToString(bytes[:])
+func newRunID() (string, error) {
+	var bytes [16]byte
+	if _, err := io.ReadFull(runIDRandomReader, bytes[:]); err != nil {
+		return "", fmt.Errorf("generate run ID: %w", err)
 	}
-	return fmt.Sprintf("%x", time.Now().UnixNano())
+	return hex.EncodeToString(bytes[:]), nil
 }

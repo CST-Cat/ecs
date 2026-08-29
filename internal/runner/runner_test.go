@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,12 +13,62 @@ import (
 	"ecs/internal/probe"
 )
 
+type runIDErrorReader struct {
+	err error
+}
+
+func (reader runIDErrorReader) Read([]byte) (int, error) {
+	return 0, reader.err
+}
+
 type runnerTestProbe struct {
 	id         string
 	title      string
 	runs       *int
 	result     model.Result
 	panicValue any
+}
+
+func TestNewRunIDHas32LowercaseHexCharactersAndDoesNotRepeat(t *testing.T) {
+	const count = 4096
+	seen := make(map[string]struct{}, count)
+	for index := 0; index < count; index++ {
+		id, err := newRunID()
+		if err != nil {
+			t.Fatalf("newRunID() error = %v", err)
+		}
+		if len(id) != 32 || id != strings.ToLower(id) {
+			t.Fatalf("newRunID() = %q, want 32 lowercase hex characters", id)
+		}
+		if _, err := hex.DecodeString(id); err != nil {
+			t.Fatalf("newRunID() = %q is not hex: %v", id, err)
+		}
+		if _, exists := seen[id]; exists {
+			t.Fatalf("newRunID() repeated identity %q at iteration %d", id, index)
+		}
+		seen[id] = struct{}{}
+	}
+}
+
+func TestRunReturnsErrorWithoutReportWhenRandomReadFails(t *testing.T) {
+	originalReader := runIDRandomReader
+	randomError := errors.New("fixture random source failure")
+	runIDRandomReader = runIDErrorReader{err: randomError}
+	t.Cleanup(func() {
+		runIDRandomReader = originalReader
+	})
+
+	cfg, err := config.Defaults(config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(context.Background(), cfg, nil)
+	if !errors.Is(err, randomError) {
+		t.Fatalf("Run() error = %v, want wrapped random source failure", err)
+	}
+	if report.Run.ID != "" || len(report.Results) != 0 {
+		t.Fatalf("Run() returned a report after identity failure: %+v", report)
+	}
 }
 
 func (p *runnerTestProbe) ID() string {

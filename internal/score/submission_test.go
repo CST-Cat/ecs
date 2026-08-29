@@ -1,6 +1,7 @@
 package score
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"os"
@@ -39,8 +40,11 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submission.Schema != SubmissionSchema || submission.ID == "" || submission.SampleID != "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5" || submission.Host.VCPU != 4 || submission.Host.MemoryGiB != 8 {
+	if submission.Schema != SubmissionSchema || len(submission.ID) != 32 || submission.ID != strings.ToLower(submission.ID) || submission.SampleID != "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5" || submission.Host.VCPU != 4 || submission.Host.MemoryGiB != 8 {
 		t.Fatalf("submission metadata = %+v", submission)
+	}
+	if _, err := hex.DecodeString(submission.ID); err != nil {
+		t.Fatalf("submission ID %q is not lowercase hex: %v", submission.ID, err)
 	}
 	if submission.Host.Region != "us-west" || submission.Host.Provider != "Fixture Cloud" || submission.Note != "diagnostic fixture" {
 		t.Fatalf("sanitized metadata = %+v", submission)
@@ -100,6 +104,30 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 		if changedMetadata.SampleID != submission.SampleID || changedMetadata.ID == submission.ID {
 			t.Fatalf("metadata identity = sample %q/%q, artifact %q/%q", changedMetadata.SampleID, submission.SampleID, changedMetadata.ID, submission.ID)
 		}
+	}
+	metadataReport := scoreReportFixture()
+	findResult(&metadataReport, "system").Fields[2].Value = model.RawValue("changed-virtualization")
+	changedMetadata, err := BuildSubmission(metadataReport, SubmissionOptions{
+		Region: "us-west", Provider: "Fixture Cloud", Note: "diagnostic fixture",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedMetadata.SampleID != submission.SampleID || changedMetadata.ID == submission.ID {
+		t.Fatalf("report metadata identity = sample %q/%q, artifact %q/%q", changedMetadata.SampleID, submission.SampleID, changedMetadata.ID, submission.ID)
+	}
+	metricReport := scoreReportFixture()
+	if !setReportMeasurement(&metricReport, "sysbench_cpu_single_events_s", 151) {
+		t.Fatal("score fixture CPU measurement missing")
+	}
+	changedMetric, err := BuildSubmission(metricReport, SubmissionOptions{
+		Region: "us-west", Provider: "Fixture Cloud", Note: "diagnostic fixture",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedMetric.SampleID != submission.SampleID || changedMetric.ID == submission.ID {
+		t.Fatalf("report metric identity = sample %q/%q, artifact %q/%q", changedMetric.SampleID, submission.SampleID, changedMetric.ID, submission.ID)
 	}
 	changed := copySubmission(submission)
 	changed.Metrics["cpu_single"]++

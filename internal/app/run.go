@@ -71,7 +71,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	terminal := ui.NewWithColor(stdout, terminalColor)
 	terminal.Header(cfg, probe.EstimateFor(cfg))
 	progress := terminal.BeginProgress(len(cfg.Modules))
-	raw := func() model.Report {
+	raw, runErr := func() (model.Report, error) {
 		defer progress.EndProgress()
 		return runner.Run(ctx, cfg, func(event runner.Progress) {
 			if event.TitleKey != "" {
@@ -82,6 +82,10 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			progress.Update(event)
 		})
 	}()
+	if runErr != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), runErr)
+		return 1
+	}
 	data := model.RedactedCopy(raw, cfg.Reveal)
 	scored := score.Compute(data, baseline)
 
