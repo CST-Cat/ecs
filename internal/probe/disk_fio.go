@@ -384,11 +384,11 @@ func appendFIOMixedResults(result *model.Result, plan []fioJobSpec, jobs map[str
 		Title: "probe.disk.table.mixed",
 		Columns: []model.TableColumn{
 			{Key: "block_size", Label: "probe.disk.column.block_size"},
-			{Key: "read_mib_s", Label: "probe.disk.column.read"},
-			{Key: "read_iops", Label: "probe.disk.column.read_iops"},
-			{Key: "write_mib_s", Label: "probe.disk.column.write"},
-			{Key: "write_iops", Label: "probe.disk.column.write_iops"},
-			{Key: "total_mib_s", Label: "probe.disk.column.total"},
+			{Key: "read_mib_s", Label: "probe.disk.column.read", Numeric: true, HigherIsBetter: true},
+			{Key: "read_iops", Label: "probe.disk.column.read_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "write_mib_s", Label: "probe.disk.column.write", Numeric: true, HigherIsBetter: true},
+			{Key: "write_iops", Label: "probe.disk.column.write_iops", Numeric: true, HigherIsBetter: true},
+			{Key: "total_mib_s", Label: "probe.disk.column.total", Numeric: true, HigherIsBetter: true},
 		},
 		RowIdentity: "block_size",
 	}

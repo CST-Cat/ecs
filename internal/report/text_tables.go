@@ -325,39 +325,11 @@ func visibleTableColumns(table model.Table) model.Table {
 
 func normalizeMatrixTable(table model.Table) model.Table {
 	kind := matrixKindForTable(table.Key)
-	if kind == "" {
-		return table
-	}
-	if kind == matrixCrystal {
-		table.Title = "Crystal"
-	}
-	if kind == matrixATTO {
-		table.Title = "ATTO"
-	}
-	table.Columns = append([]model.TableColumn(nil), table.Columns...)
-	columns := []string{}
 	switch kind {
 	case matrixCrystal:
-		columns = []string{
-			"probe.disk.column.workload", "probe.disk.column.read", "probe.disk.column.read_iops",
-			"probe.disk.column.write", "probe.disk.column.write_iops", "probe.disk.column.offset", "probe.disk.column.status",
-		}
+		table.Title = "Crystal"
 	case matrixATTO:
-		columns = []string{
-			"probe.disk.column.block_size", "probe.disk.column.read", "probe.disk.column.read_iops",
-			"probe.disk.column.write", "probe.disk.column.write_iops", "probe.disk.column.runtime",
-			"probe.disk.column.offset", "probe.disk.column.status",
-		}
-	case matrixMixed:
-		columns = []string{
-			"probe.disk.column.block_size", "probe.disk.column.read", "probe.disk.column.read_iops",
-			"probe.disk.column.write", "probe.disk.column.write_iops", "probe.disk.column.total",
-		}
-	}
-	for index := range table.Columns {
-		if index < len(columns) {
-			table.Columns[index].Label = displayKey(columns[index])
-		}
+		table.Title = "ATTO"
 	}
 	return table
 }

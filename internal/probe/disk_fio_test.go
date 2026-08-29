@@ -88,6 +88,19 @@ func TestFIOMatricesAndMixedResults(t *testing.T) {
 	if len(full.Tables) != 1 || full.Tables[0].Key != "disk.fio.mixed" || full.Tables[0].RowIdentity != "block_size" || len(full.Tables[0].Columns) != 6 || full.Tables[0].Rows[0][5].Text() == "—" {
 		t.Fatalf("full mixed matrix = %+v", full.Tables)
 	}
+	wantMixedColumns := []model.TableColumn{
+		{Key: "block_size", Label: "probe.disk.column.block_size"},
+		{Key: "read_mib_s", Label: "probe.disk.column.read", Numeric: true, HigherIsBetter: true},
+		{Key: "read_iops", Label: "probe.disk.column.read_iops", Numeric: true, HigherIsBetter: true},
+		{Key: "write_mib_s", Label: "probe.disk.column.write", Numeric: true, HigherIsBetter: true},
+		{Key: "write_iops", Label: "probe.disk.column.write_iops", Numeric: true, HigherIsBetter: true},
+		{Key: "total_mib_s", Label: "probe.disk.column.total", Numeric: true, HigherIsBetter: true},
+	}
+	for index, column := range full.Tables[0].Columns {
+		if column != wantMixedColumns[index] {
+			t.Fatalf("mixed column %d = %+v, want canonical metadata %+v", index, column, wantMixedColumns[index])
+		}
+	}
 	partial := model.NewResult("disk", "disk")
 	appendFIOMixedResults(&partial, fullPlan, map[string]fioJob{"mix4k": {Name: "mix4k", Read: fullJobs["mix4k"].Read}}, 64)
 	if partial.Status != model.StatusWarning || partial.Tables[0].Rows[0][5].Text() != "—" {
