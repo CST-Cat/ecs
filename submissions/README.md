@@ -58,10 +58,11 @@ ecs submit --input ./reports/ecs-report-20260813-075451.json \
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
-  --submit --profile full --yes --provider vultr --region jp-tokyo
+  --submit --provider vultr --region jp-tokyo -- \
+  --profile full --yes
 ```
 
-不指定 `--output` 时写入 `${TMPDIR:-/tmp}` 并自动命名；指定已有目录时在目录内命名；指定尚不存在的路径时使用该路径。已有文件不会覆盖，符号链接会拒绝。
+wrapper 只解释第二个精确 `--` 之前的 `--submit`、`--provider`、`--region` 和提交 `--output`；其后的 token 原样交给 `ecs run`。不指定 wrapper `--output` 时写入 `${TMPDIR:-/tmp}` 并自动命名；指定已有目录时在目录内命名；指定尚不存在的路径时使用该路径。已有文件不会覆盖，符号链接会拒绝。
 
 ## 放置路径
 

@@ -139,8 +139,11 @@ Run and submit in one step:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
-  --submit --profile full --yes --provider vultr --region jp-tokyo
+  --submit --provider vultr --region jp-tokyo -- \
+  --profile full --yes
 ```
+
+The second exact `--` separates wrapper options from `ecs run` options; every later argument is passed to `ecs` unchanged.
 
 The submission whitelist, directory rules and local validation are in [../submissions/README_EN.md](../submissions/README_EN.md); privacy and leaderboard policy are not duplicated here.
 

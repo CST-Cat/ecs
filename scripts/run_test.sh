@@ -130,15 +130,17 @@ if [ "${1:-}" = submit ]; then
 fi
 
 record_argv "$ECS_TEST_LOG_ROOT/run.argv" "$@"
-report_dir=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output ]; then
+report_dir=${ECS_TEST_REPORT_DIR:-}
+if [ -z "$report_dir" ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --output ]; then
+      shift
+      [ "$#" -gt 0 ] || exit 64
+      report_dir=$1
+    fi
     shift
-    [ "$#" -gt 0 ] || exit 64
-    report_dir=$1
-  fi
-  shift
-done
+  done
+fi
 [ -n "$report_dir" ] || exit 65
 mkdir -p "$report_dir"
 printf '{}\n' >"$report_dir/fixture.json"
@@ -235,16 +237,18 @@ mkdir -p "$boundary_help_tmp" "$boundary_help_logs"
 if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$boundary_help_tmp" PATH="$test_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_TEST_LOG_ROOT="$boundary_help_logs" \
+    ECS_TEST_REPORT_DIR="$boundary_help_output" \
     ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
-    sh "$repo_root/run.sh" --lang=en -- --help --output "$boundary_help_output" \
+    sh "$repo_root/run.sh" -- --help \
     >"$test_root/boundary-help.stdout" 2>"$test_root/boundary-help.stderr"; then
   fail "boundary --help fixture returned a failure: $(<"$test_root/boundary-help.stderr")"
 fi
 [[ -e "$boundary_help_logs/ecs.argv" ]] || fail "boundary --help did not execute the ecs fixture"
-grep -F -- '--help' "$boundary_help_logs/ecs.argv" >/dev/null ||
-  fail "boundary --help was not passed to the ecs fixture"
+mapfile -d '' -t boundary_help_argv <"$boundary_help_logs/run.argv"
+[[ "${#boundary_help_argv[@]}" -eq 13 && "${boundary_help_argv[4]}" == --help ]] ||
+  fail "boundary --help was not passed verbatim to the ecs fixture"
 if grep -F 'Usage: run.sh' "$test_root/boundary-help.stdout" >/dev/null; then
   fail "boundary --help unexpectedly printed wrapper help"
 fi
@@ -285,13 +289,59 @@ for non_early_option in --output --name --profile --config --only --disk-path; d
   [[ -e "$non_early_logs/ecs.argv" ]] ||
     fail "$non_early_option --help did not execute the ecs fixture"
   mapfile -d '' -t non_early_argv <"$non_early_logs/ecs.argv"
-  [[ "${non_early_argv[0]:-}" == "$non_early_option" &&
-     "${non_early_argv[1]:-}" == --help ]] ||
+  [[ "${#non_early_argv[@]}" -eq 16 ]] ||
+    fail "$non_early_option --help reached ecs with ${#non_early_argv[@]} arguments"
+  [[ "${non_early_argv[0]}" == --output && "${non_early_argv[1]}" == "$non_early_tmp" &&
+     "${non_early_argv[2]}" == --name && "${non_early_argv[3]}" == ecs-report-ecs-run.* ]] ||
+    fail "$non_early_option --help lost wrapper defaults"
+  [[ "${non_early_argv[4]}" == "$non_early_option" &&
+     "${non_early_argv[5]}" == --help ]] ||
     fail "$non_early_option --help was not passed to the ecs fixture"
   [[ -f "$non_early_output/fixture.json" ]] ||
     fail "$non_early_option --help fixture did not produce output"
   assert_empty_dir "$non_early_tmp" "$non_early_option --help"
 done
+
+# Wrapper submit options stop at the exact boundary. Assert every token seen
+# by the run and submit commands for the documented happy path.
+canonical_submit_tmp="$test_root/canonical-submit-tmp"
+canonical_submit_logs="$fixture_logs/canonical-submit"
+canonical_submission_output="$test_root/canonical-submission.json"
+mkdir -p "$canonical_submit_tmp" "$canonical_submit_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$canonical_submit_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$canonical_submit_logs" \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=false \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --submit --provider vultr --region jp \
+      --output "$canonical_submission_output" -- --profile full --yes \
+      >"$test_root/canonical-submit.stdout" 2>"$test_root/canonical-submit.stderr"; then
+  fail "canonical submit fixture returned a failure: $(<"$test_root/canonical-submit.stderr")"
+fi
+mapfile -d '' -t canonical_run_argv <"$canonical_submit_logs/run.argv"
+[[ "${#canonical_run_argv[@]}" -eq 7 ]] ||
+  fail "canonical submit run received ${#canonical_run_argv[@]} arguments instead of 7"
+[[ "${canonical_run_argv[0]}" == --profile && "${canonical_run_argv[1]}" == full &&
+   "${canonical_run_argv[2]}" == --yes && "${canonical_run_argv[3]}" == --format &&
+   "${canonical_run_argv[4]}" == json && "${canonical_run_argv[5]}" == --output &&
+   "${canonical_run_argv[6]}" == "$canonical_submit_tmp"/ecs-run.*/report ]] ||
+  fail "canonical submit run argv changed"
+mapfile -d '' -t canonical_submit_argv <"$canonical_submit_logs/submit.argv"
+[[ "${#canonical_submit_argv[@]}" -eq 9 ]] ||
+  fail "canonical ecs submit received ${#canonical_submit_argv[@]} arguments instead of 9"
+[[ "${canonical_submit_argv[0]}" == submit && "${canonical_submit_argv[1]}" == --input &&
+   "${canonical_submit_argv[2]}" == "${canonical_run_argv[6]}/fixture.json" &&
+   "${canonical_submit_argv[3]}" == --output &&
+   "${canonical_submit_argv[4]}" == "$canonical_submission_output" &&
+   "${canonical_submit_argv[5]}" == --provider && "${canonical_submit_argv[6]}" == vultr &&
+   "${canonical_submit_argv[7]}" == --region && "${canonical_submit_argv[8]}" == jp ]] ||
+  fail "canonical ecs submit argv changed"
+[[ ! -e "$canonical_submit_logs/unexpected-network" ]] ||
+  fail "canonical submit attempted unexpected network access"
+[[ "$(wc -l <"$canonical_submit_logs/fetch.log")" -eq 2 ]] ||
+  fail "canonical submit did not perform exactly two fixture fetches"
+assert_empty_dir "$canonical_submit_tmp" "canonical submit"
 
 # submit/provider/region/用户 output 由 wrapper 消费；普通参数和含空格值必须仍是独立 argv。
 run_tmp="$test_root/run-tmp"
@@ -302,11 +352,11 @@ mkdir -p "$run_tmp"
 if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$run_tmp" PATH="$test_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_TEST_LOG_ROOT="$submit_logs" \
-    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=false \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
-    sh "$repo_root/run.sh" --profile standard --submit --name 'node alpha' \
-      --provider 'Cloud Alpha' --yes --region='East Zone' --output "$submission_output" \
+    sh "$repo_root/run.sh" --submit --provider='Cloud Alpha' --region='East Zone' \
+      --output="$submission_output" -- --profile standard --name 'node alpha' --yes \
       >"$test_root/run.stdout" 2>"$test_root/run.stderr"; then
   fail "local submit fixture returned a failure: $(<"$test_root/run.stderr")"
 fi
@@ -330,6 +380,84 @@ mapfile -d '' -t submit_argv <"$submit_logs/submit.argv"
 [[ "${submit_argv[5]}" == --provider && "${submit_argv[6]}" == 'Cloud Alpha' ]] || fail "wrapper provider was not consumed and reconstructed correctly"
 [[ "${submit_argv[7]}" == --region && "${submit_argv[8]}" == 'East Zone' ]] || fail "wrapper region was not consumed and reconstructed correctly"
 
+# Option-looking values after the boundary belong wholly to Go.  In
+# particular, --submit must not activate wrapper mode when it is --name's
+# value, and no wrapper option may disappear from the recorded run argv.
+for boundary_value in submit output provider region; do
+  boundary_value_tmp="$test_root/boundary-value-$boundary_value-tmp"
+  boundary_value_logs="$fixture_logs/boundary-value-$boundary_value"
+  boundary_value_report="$test_root/boundary-value-$boundary_value-report"
+  mkdir -p "$boundary_value_tmp" "$boundary_value_logs" "$boundary_value_report"
+  if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$boundary_value_tmp" PATH="$test_path" \
+      ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+      ECS_TEST_LOG_ROOT="$boundary_value_logs" \
+      ECS_TEST_REPORT_DIR="$boundary_value_report" \
+      ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+      ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+      ECS_TEST_ASSET="$fixture_asset" \
+      sh "$repo_root/run.sh" -- --name "--$boundary_value" \
+      >"$test_root/boundary-value-$boundary_value.stdout" \
+      2>"$test_root/boundary-value-$boundary_value.stderr"; then
+    fail "boundary --name --$boundary_value returned a failure: $(<"$test_root/boundary-value-$boundary_value.stderr")"
+  fi
+  [[ ! -e "$boundary_value_logs/submit.argv" ]] ||
+    fail "boundary --name --$boundary_value activated submit mode"
+  mapfile -d '' -t boundary_value_argv <"$boundary_value_logs/run.argv"
+  [[ "${#boundary_value_argv[@]}" -eq 14 ]] ||
+    fail "boundary --name --$boundary_value reached ecs with ${#boundary_value_argv[@]} arguments"
+  [[ "${boundary_value_argv[0]}" == --output &&
+     "${boundary_value_argv[1]}" == "$boundary_value_tmp" &&
+     "${boundary_value_argv[2]}" == --name &&
+     "${boundary_value_argv[3]}" == ecs-report-ecs-run.* &&
+     "${boundary_value_argv[4]}" == --name &&
+     "${boundary_value_argv[5]}" == "--$boundary_value" &&
+     "${boundary_value_argv[6]}" == --profile &&
+     "${boundary_value_argv[7]}" == standard &&
+     "${boundary_value_argv[8]}" == --only &&
+     "${boundary_value_argv[9]}" == noop &&
+     "${boundary_value_argv[10]}" == --yes &&
+     "${boundary_value_argv[11]}" == --exposure &&
+     "${boundary_value_argv[12]}" == public &&
+     "${boundary_value_argv[13]}" == --reveal=true ]] ||
+    fail "boundary --name --$boundary_value argv changed"
+  assert_empty_dir "$boundary_value_tmp" "boundary --name --$boundary_value"
+done
+
+# Wrapper --output names the submission artifact. A Go --output after the
+# boundary remains in run argv, while the wrapper's forced final output keeps
+# the private intermediate report under WORK.
+dual_output_tmp="$test_root/dual-output-tmp"
+dual_output_logs="$fixture_logs/dual-output"
+dual_submission_output="$test_root/dual-submission.json"
+dual_run_output="$test_root/dual-run-output"
+mkdir -p "$dual_output_tmp" "$dual_output_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$dual_output_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$dual_output_logs" \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=false \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --submit --output "$dual_submission_output" -- \
+      --output "$dual_run_output" \
+      >"$test_root/dual-output.stdout" 2>"$test_root/dual-output.stderr"; then
+  fail "dual output fixture returned a failure: $(<"$test_root/dual-output.stderr")"
+fi
+mapfile -d '' -t dual_run_argv <"$dual_output_logs/run.argv"
+[[ "${#dual_run_argv[@]}" -eq 6 &&
+   "${dual_run_argv[0]}" == --output && "${dual_run_argv[1]}" == "$dual_run_output" &&
+   "${dual_run_argv[2]}" == --format && "${dual_run_argv[3]}" == json &&
+   "${dual_run_argv[4]}" == --output &&
+   "${dual_run_argv[5]}" == "$dual_output_tmp"/ecs-run.*/report ]] ||
+  fail "Go and wrapper output argv were not kept distinct"
+mapfile -d '' -t dual_submit_argv <"$dual_output_logs/submit.argv"
+[[ "${#dual_submit_argv[@]}" -eq 5 &&
+   "${dual_submit_argv[0]}" == submit && "${dual_submit_argv[1]}" == --input &&
+   "${dual_submit_argv[2]}" == "${dual_run_argv[5]}/fixture.json" &&
+   "${dual_submit_argv[3]}" == --output &&
+   "${dual_submit_argv[4]}" == "$dual_submission_output" ]] ||
+  fail "wrapper submission output was not isolated from Go run output"
+assert_empty_dir "$dual_output_tmp" "dual output submit"
+
 # 普通 run 必须把 plan 的 exposure/reveal 放在原始冲突参数之后，确保向导/plan
 # 的最终隐私选择由 Go flag 的 last-wins 规则生效。
 ordinary_false_logs="$fixture_logs/ordinary-false"
@@ -346,9 +474,9 @@ if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$run_tmp" PATH="$test_path" \
   fail "local ordinary false-plan fixture returned a failure: $(<"$test_root/ordinary-false.stderr")"
 fi
 mapfile -d '' -t ordinary_false_argv <"$ordinary_false_logs/run.argv"
-[[ "${#ordinary_false_argv[@]}" -eq 17 ]] || fail "ordinary false-plan run received ${#ordinary_false_argv[@]} arguments"
-[[ "${ordinary_false_argv[4]}" == --exposure && "${ordinary_false_argv[5]}" == any ]] || fail "ordinary conflict exposure was not preserved in original argv"
-[[ "${ordinary_false_argv[6]}" == --reveal=true ]] || fail "ordinary conflict reveal was not preserved in original argv"
+[[ "${#ordinary_false_argv[@]}" -eq 21 ]] || fail "ordinary false-plan run received ${#ordinary_false_argv[@]} arguments"
+[[ "${ordinary_false_argv[8]}" == --exposure && "${ordinary_false_argv[9]}" == any ]] || fail "ordinary conflict exposure was not preserved in original argv"
+[[ "${ordinary_false_argv[10]}" == --reveal=true ]] || fail "ordinary conflict reveal was not preserved in original argv"
 ordinary_false_last=$(( ${#ordinary_false_argv[@]} - 3 ))
 [[ "${ordinary_false_argv[$ordinary_false_last]}" == --exposure && "${ordinary_false_argv[$((ordinary_false_last + 1))]}" == local ]] || fail "plan exposure local was not appended last"
 [[ "${ordinary_false_argv[$((ordinary_false_last + 2))]}" == --reveal=false ]] || fail "plan reveal=false was not appended last"
@@ -368,9 +496,9 @@ if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$run_tmp" PATH="$test_path" \
   fail "local ordinary true-plan fixture returned a failure: $(<"$test_root/ordinary-true.stderr")"
 fi
 mapfile -d '' -t ordinary_true_argv <"$ordinary_true_logs/run.argv"
-[[ "${#ordinary_true_argv[@]}" -eq 17 ]] || fail "ordinary true-plan run received ${#ordinary_true_argv[@]} arguments"
-[[ "${ordinary_true_argv[4]}" == --exposure && "${ordinary_true_argv[5]}" == local ]] || fail "ordinary true-plan conflict exposure was not preserved"
-[[ "${ordinary_true_argv[6]}" == --reveal=false ]] || fail "ordinary true-plan conflict reveal was not preserved"
+[[ "${#ordinary_true_argv[@]}" -eq 21 ]] || fail "ordinary true-plan run received ${#ordinary_true_argv[@]} arguments"
+[[ "${ordinary_true_argv[8]}" == --exposure && "${ordinary_true_argv[9]}" == local ]] || fail "ordinary true-plan conflict exposure was not preserved"
+[[ "${ordinary_true_argv[10]}" == --reveal=false ]] || fail "ordinary true-plan conflict reveal was not preserved"
 ordinary_true_last=$(( ${#ordinary_true_argv[@]} - 3 ))
 [[ "${ordinary_true_argv[$ordinary_true_last]}" == --exposure && "${ordinary_true_argv[$((ordinary_true_last + 1))]}" == public ]] || fail "plan exposure public was not appended last"
 [[ "${ordinary_true_argv[$((ordinary_true_last + 2))]}" == --reveal=true ]] || fail "plan reveal=true was not appended last"
@@ -394,7 +522,7 @@ for legal_exposure in thirdparty any; do
     fail "local ordinary $legal_exposure-plan fixture returned a failure: $(<"$test_root/ordinary-$legal_exposure.stderr")"
   fi
   mapfile -d '' -t legal_argv <"$legal_logs/run.argv"
-  [[ "${#legal_argv[@]}" -eq 14 ]] || fail "ordinary $legal_exposure-plan run received ${#legal_argv[@]} arguments"
+  [[ "${#legal_argv[@]}" -eq 18 ]] || fail "ordinary $legal_exposure-plan run received ${#legal_argv[@]} arguments"
   legal_last=$(( ${#legal_argv[@]} - 3 ))
   [[ "${legal_argv[$legal_last]}" == --exposure && "${legal_argv[$((legal_last + 1))]}" == "$legal_exposure" ]] || fail "plan exposure $legal_exposure was not the final exposure value"
   [[ "${legal_argv[$((legal_last + 2))]}" == "--reveal=$legal_reveal" ]] || fail "plan reveal=$legal_reveal was not the final reveal value"
