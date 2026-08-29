@@ -249,6 +249,46 @@ fi
 [[ -f "$boundary_help_output/fixture.json" ]] || fail "boundary --help fixture did not produce output"
 assert_empty_dir "$boundary_help_tmp" "boundary --help"
 
+# Once a non-early-global token appears, a later --help belongs to ecs.  Keep
+# a second --output in the fixture invocation so the first case tests the
+# exact value-shaped boundary without creating a path named --help.
+for non_early_option in --output --name --profile --config --only --disk-path; do
+  non_early_name=${non_early_option#--}
+  non_early_tmp="$test_root/non-early-$non_early_name-tmp"
+  non_early_logs="$fixture_logs/non-early-$non_early_name"
+  non_early_output="$test_root/non-early-$non_early_name-output"
+  mkdir -p "$non_early_tmp" "$non_early_logs"
+  if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$non_early_tmp" PATH="$test_path" \
+      ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+      ECS_TEST_LOG_ROOT="$non_early_logs" \
+      ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+      ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+      ECS_TEST_ASSET="$fixture_asset" \
+      sh "$repo_root/run.sh" "$non_early_option" --help --output "$non_early_output" \
+      >"$test_root/non-early-$non_early_name.stdout" \
+      2>"$test_root/non-early-$non_early_name.stderr"; then
+    fail "$non_early_option --help fixture returned a failure: $(<"$test_root/non-early-$non_early_name.stderr")"
+  fi
+  if grep -F 'Usage: run.sh' \
+      "$test_root/non-early-$non_early_name.stdout" \
+      "$test_root/non-early-$non_early_name.stderr" >/dev/null; then
+    fail "$non_early_option --help unexpectedly printed wrapper help"
+  fi
+  [[ ! -e "$non_early_logs/unexpected-network" ]] ||
+    fail "$non_early_option --help attempted unexpected network access"
+  [[ "$(wc -l <"$non_early_logs/fetch.log")" -eq 2 ]] ||
+    fail "$non_early_option --help did not use the local fixture downloads"
+  [[ -e "$non_early_logs/ecs.argv" ]] ||
+    fail "$non_early_option --help did not execute the ecs fixture"
+  mapfile -d '' -t non_early_argv <"$non_early_logs/ecs.argv"
+  [[ "${non_early_argv[0]:-}" == "$non_early_option" &&
+     "${non_early_argv[1]:-}" == --help ]] ||
+    fail "$non_early_option --help was not passed to the ecs fixture"
+  [[ -f "$non_early_output/fixture.json" ]] ||
+    fail "$non_early_option --help fixture did not produce output"
+  assert_empty_dir "$non_early_tmp" "$non_early_option --help"
+done
+
 # submit/provider/region/用户 output 由 wrapper 消费；普通参数和含空格值必须仍是独立 argv。
 run_tmp="$test_root/run-tmp"
 submission_output="$test_root/submission file.json"

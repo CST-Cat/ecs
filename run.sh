@@ -35,8 +35,9 @@ case "$AUTO_DEPS" in
 esac
 
 # 脚本自身的提示也跟随语言：从参数里取 --lang，其次看环境变量。
-# This scanner must stop at `--`: everything after that boundary belongs to
-# ecs, including a second `--help`.  Keep it before any work-directory or
+# This scanner owns only the small early grammar needed for wrapper help:
+# help, lang (including its value), and `--`.  The first other token belongs
+# to ecs, including a later `--help`.  Keep it before any work-directory or
 # release setup so wrapper help remains entirely local and side-effect free.
 LANG_SEL=""
 LANG_EXPECTED=0
@@ -54,6 +55,7 @@ for arg in "$@"; do
     -lang=*) LANG_SEL="${arg#-lang=}" ;;
     --lang|-lang) LANG_EXPECTED=1 ;;
     -h|--help) HELP_REQUESTED=1 ;;
+    *) break ;;
   esac
 done
 [ -n "$LANG_SEL" ] || LANG_SEL="${ECS_LANG:-${LC_ALL:-${LANG:-}}}"
