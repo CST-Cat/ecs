@@ -185,7 +185,7 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 	}
 }
 
-func TestNetworkModeDerivesFromExposureAndIgnoresLegacyOfflineInput(t *testing.T) {
+func TestNetworkModeDerivesFromExposureAndRejectsLegacyOfflineInput(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
@@ -218,23 +218,8 @@ func TestNetworkModeDerivesFromExposureAndIgnoresLegacyOfflineInput(t *testing.T
 
 	path := filepath.Join(t.TempDir(), "legacy-offline.json")
 	writeReportFile(t, path, []byte(`{"schema_version":"ecs.report/v1","run":{"exposure":"public","offline":true}}`))
-	loaded, err := LoadJSON(path)
-	if err != nil {
-		t.Fatalf("LoadJSON legacy offline input: %v", err)
-	}
-	if loaded.Run.Exposure != "public" {
-		t.Fatalf("legacy input changed exposure: %q", loaded.Run.Exposure)
-	}
-	content, err := JSON(loaded)
-	if err != nil {
-		t.Fatalf("JSON loaded legacy input: %v", err)
-	}
-	if bytes.Contains(content, []byte(`"offline"`)) {
-		t.Fatalf("loaded legacy input retained derived offline field: %s", content)
-	}
-	output := Markdown(loaded, nil)
-	if !strings.Contains(output, "Online") || strings.Contains(output, "Offline") {
-		t.Fatalf("legacy offline input changed network mode: %q", output)
+	if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), `unknown field "offline"`) {
+		t.Fatalf("legacy offline input error = %v", err)
 	}
 }
 
@@ -256,8 +241,13 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 
 	unknownPath := filepath.Join(directory, "unknown.json")
 	writeReportFile(t, unknownPath, []byte(`{"schema_version":"ecs.report/v1","unknown_field":true}`))
-	if _, err := LoadJSON(unknownPath); err != nil {
-		t.Fatalf("unknown JSON field rejected: %v", err)
+	if _, err := LoadJSON(unknownPath); err == nil || !strings.Contains(err.Error(), `unknown field "unknown_field"`) {
+		t.Fatalf("top-level unknown field error = %v", err)
+	}
+	nestedTypoPath := filepath.Join(directory, "nested-typo.json")
+	writeReportFile(t, nestedTypoPath, []byte(`{"schema_version":"ecs.report/v1","run":{"duration_mss":1234}}`))
+	if _, err := LoadJSON(nestedTypoPath); err == nil || !strings.Contains(err.Error(), `unknown field "duration_mss"`) {
+		t.Fatalf("nested unknown field error = %v", err)
 	}
 	if _, err := LoadJSON(filepath.Join(directory, "missing.json")); err == nil || !strings.Contains(err.Error(), "missing.json") {
 		t.Fatalf("open failure = %v", err)

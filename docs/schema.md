@@ -524,9 +524,9 @@ CLI 的 `--reference` 从 1 开始，JSON 中的 `reference_report` 与各处 `r
 
 ## 当前 schema 规则
 
-- `ecs.report/v1` 的当前契约由当前字段与当前单位定义；beta 阶段不承诺旧 payload 在同一 v1 下继续保留语义。未知字段可被当前 JSON loader 忽略，已删除字段不会恢复语义或 fallback；缺少当前机器口径时由 compare 规则产生 issue/不可比，而不是靠版本号自动兼容。字段、单位或状态语义的 breaking change 直接原地更新 v1，不因兼容性自动升到 v2 或保留旧字段适配层；只有用户明确要求版本化时才另行改变版本标识；
+- `ecs.report/v1` 的当前契约由当前字段与当前单位定义；beta 阶段不承诺旧 payload 在同一 v1 下继续保留语义。当前 JSON loader 会在顶层和嵌套结构中拒绝未知字段，已删除字段不会恢复语义或 fallback；缺少当前机器口径时由 compare 规则产生 issue/不可比，而不是靠版本号自动兼容。字段、单位或状态语义的 breaking change 直接原地更新 v1，不因兼容性自动升到 v2 或保留旧字段适配层；只有用户明确要求版本化时才另行改变版本标识；
 - `ecs.compare/v1` 与 `ecs.plan/v1` 同样遵循 beta 原地更新纪律；结构变化不自动新增版本或兼容层；
-- `ecs render` 忽略当前实现不认识的可选字段，但不会因此改变已知字段；
+- `ecs render` 与其他报告消费命令共用同一个 strict `LoadJSON`，不忽略当前 schema 之外的可选字段；
 - 缺少/不支持 `schema_version`、存在第二个顶层值或 JSON 结构/类型错误时直接报错；
 - 工作负载变化通过 `measurement.method` 升级，即使顶层 schema 不变；
 - `ecs compare` 与其它报告消费命令一样使用当前 `LoadJSON` exact contract。输入必须声明当前 `ecs.report/v1`，缺少、未知或历史 schema 版本，以及当前 schema 的 malformed 结构，均在加载边界直接拒绝；compare 不提供旧 payload 的 migration adapter 或 legacy fallback；
