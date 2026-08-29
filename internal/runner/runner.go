@@ -34,9 +34,9 @@ type Progress struct {
 	Result   model.Result
 }
 
-// ProgressFunc receives lifecycle events without probe result details. Callers
-// must be safe for concurrent delivery so the scheduler can expose parallel
-// groups without coupling rendering to probe execution.
+// ProgressFunc receives lifecycle events. Start events contain module metadata;
+// done events also contain the completed probe result. Events are delivered
+// serially by the runner even when a schedule group runs probes in parallel.
 type ProgressFunc func(Progress)
 
 // detectNetworkCapabilities is a hook rather than a direct call so runner
@@ -148,7 +148,8 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 		}
 		if len(group.Indices) > 1 {
 			// 先统一发出开始事件，再启动 worker，进度视图不会把一个很快完成的
-			// 模块误显示成尚未开始；回调本身不携带结果，详细报告仍在最后渲染。
+			// 模块误显示成尚未开始；开始事件不携带结果，完成事件携带对应结果，
+			// 详细报告仍在最后渲染。
 			if progress != nil {
 				for _, index := range group.Indices {
 					binding := selected[index]
@@ -243,8 +244,8 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	}
 	if result.Evidence == nil {
 		// Probes normally report their real sample denominator. This fallback
-		// keeps panic, offline and legacy/custom probe results explicit without
-		// pretending that their fields are independent observations.
+		// supplies a module-level denominator when a result has no evidence,
+		// without pretending that its fields are independent observations.
 		valid := 1
 		if result.Status == model.StatusSkipped || result.Status == model.StatusError {
 			valid = 0
