@@ -1,6 +1,9 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +13,40 @@ import (
 	"ecs/internal/model"
 	"ecs/internal/score"
 )
+
+const leaderboardEnvelopeLimit int64 = 32 * 1024 * 1024
+
+type leaderboardInputEnvelope struct {
+	Schema        string `json:"schema"`
+	SchemaVersion string `json:"schema_version"`
+}
+
+// readLeaderboardSchema reads the top-level discriminant before a loader
+// validates the complete input. The size bound keeps malformed or untrusted
+// paths from turning identification into an unbounded read; the selected
+// loader retains its own, tighter contract.
+func readLeaderboardSchema(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err == nil && info.Size() > leaderboardEnvelopeLimit {
+		return "", fmt.Errorf("ECS artifact envelope exceeds the 32 MiB safety limit")
+	}
+	var envelope leaderboardInputEnvelope
+	decoder := json.NewDecoder(io.LimitReader(file, leaderboardEnvelopeLimit+1))
+	if err := decoder.Decode(&envelope); err != nil {
+		return "", fmt.Errorf("read ECS artifact schema envelope: %w", err)
+	}
+	if envelope.Schema != "" && envelope.SchemaVersion != "" && envelope.Schema != envelope.SchemaVersion {
+		return "", fmt.Errorf("unsupported ECS artifact schema: conflicting schema %q and schema_version %q", envelope.Schema, envelope.SchemaVersion)
+	}
+	if envelope.Schema != "" {
+		return envelope.Schema, nil
+	}
+	return envelope.SchemaVersion, nil
+}
 
 // validateBaselineReport rejects a syntactically valid full report that has
 // no scoreable measurements. BuildBaseline is the single source of truth for

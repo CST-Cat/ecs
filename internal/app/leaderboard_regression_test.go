@@ -109,6 +109,125 @@ func TestLeaderboardRegressionAcceptsMixedCurrentReportAndSubmissionBySchema(t *
 	}
 }
 
+func TestLeaderboardRegressionReportsSchemaSpecificInputDiagnostics(t *testing.T) {
+	validSubmissionReport := submitTestReport()
+	validSubmissionReport.Run.ID = "schema-diagnostic-submission"
+	validSubmissionPath := writeLeaderboardSubmission(t, filepath.Join(t.TempDir(), "valid-submission.json"), validSubmissionReport)
+	validSubmission, err := score.LoadSubmission(validSubmissionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validSubmission.ID = "tampered"
+	corruptedSubmission, err := validSubmission.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name      string
+		content   []byte
+		marker    string
+		secondary string
+	}{
+		{
+			name:      "corrupted submission",
+			content:   corruptedSubmission,
+			marker:    "submission validation error",
+			secondary: "does not match",
+		},
+		{
+			name: "corrupted baseline",
+			content: func() []byte {
+				baseline := score.Baseline{Schema: score.BaselineSchema, Source: "", SampleCount: 1,
+					Metrics: map[string]float64{"cpu_single": 100}}
+				content, encodeErr := baseline.Encode()
+				if encodeErr != nil {
+					t.Fatal(encodeErr)
+				}
+				return content
+			}(),
+			marker:    "baseline validation error",
+			secondary: "source must be non-empty",
+		},
+		{
+			name:      "unknown schema",
+			content:   []byte(`{"schema":"ecs.future/v99"}`),
+			marker:    "unsupported ECS artifact schema",
+			secondary: "ecs.future/v99",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			for _, strict := range []bool{false, true} {
+				mode := "default"
+				if strict {
+					mode = "strict"
+				}
+				t.Run(mode, func(t *testing.T) {
+					root := t.TempDir()
+					validReport := writeLeaderboardReport(t, filepath.Join(root, "00-valid-report.json"), "schema-diagnostic-report", 200)
+					badPath := filepath.Join(root, "01-bad-input.json")
+					if err := os.WriteFile(badPath, test.content, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					output := filepath.Join(root, "baseline.json")
+					args := []string{"leaderboard", "--lang", "en", "--output", output}
+					if strict {
+						args = append(args, "--strict")
+					}
+					args = append(args, validReport, badPath)
+					status, stdout, stderr := invokeAppMain(args...)
+					if !strings.Contains(strings.ToLower(stderr), strings.ToLower(test.marker)) ||
+						!strings.Contains(strings.ToLower(stderr), strings.ToLower(test.secondary)) {
+						t.Fatalf("schema diagnostic status=%d stdout=%q stderr=%q", status, stdout, stderr)
+					}
+					if strict {
+						if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "strict mode rejected") {
+							t.Fatalf("strict schema diagnostic status=%d stdout=%q stderr=%q", status, stdout, stderr)
+						}
+						if _, err := os.Lstat(output); !os.IsNotExist(err) {
+							t.Fatalf("strict schema diagnostic wrote output: %v", err)
+						}
+						return
+					}
+					if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(stderr, "Skipped") {
+						t.Fatalf("default schema diagnostic status=%d stdout=%q stderr=%q", status, stdout, stderr)
+					}
+					baseline, err := score.LoadBaseline(output)
+					if err != nil {
+						t.Fatalf("default schema diagnostic output is not loadable: %v", err)
+					}
+					if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 200 {
+						t.Fatalf("default schema diagnostic baseline = %+v", baseline)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestLeaderboardRegressionDoesNotParsePresentationInput(t *testing.T) {
+	root := t.TempDir()
+	validReport := writeLeaderboardReport(t, filepath.Join(root, "report.json"), "presentation-input-report", 200)
+	presentation := filepath.Join(root, "report.md")
+	if err := os.WriteFile(presentation, []byte("# report\n\n`schema_version`: `ecs.report/v1`\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(root, "baseline.json")
+	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, validReport, presentation)
+	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(stderr, "Skipped") ||
+		!strings.Contains(stderr, "read ECS artifact schema envelope") {
+		t.Fatalf("presentation input status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	baseline, err := score.LoadBaseline(output)
+	if err != nil {
+		t.Fatalf("presentation input output is not loadable: %v", err)
+	}
+	if baseline.SampleCount != 1 || baseline.Metrics["cpu_single"] != 200 {
+		t.Fatalf("presentation input baseline = %+v", baseline)
+	}
+}
+
 func TestLeaderboardRegressionReportsActiveAndFallbackStatistics(t *testing.T) {
 	root := t.TempDir()
 	inputs := make([]string, 0, 9)

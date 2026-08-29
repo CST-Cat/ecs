@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"ecs/internal/buildinfo"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	reporter "ecs/internal/report"
@@ -107,11 +108,30 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 	seenSampleIDs := make(map[string]string)
 	var outlierSamples []score.OutlierSample
 	for _, path := range paths {
-		// 目录里通常就放着上一次生成的基线，它不是输入。
-		if _, err := score.LoadBaseline(path); err == nil {
+		schema, err := readLeaderboardSchema(path)
+		if err != nil {
+			if inputIssue(path, err) {
+				return 1
+			}
 			continue
 		}
-		if submission, err := score.LoadSubmission(path); err == nil {
+		switch schema {
+		case score.BaselineSchema:
+			// 目录里通常就放着上一次生成的基线，它不是输入。
+			if _, err := score.LoadBaseline(path); err != nil {
+				if inputIssue(path, fmt.Errorf("baseline validation error: %w", err)) {
+					return 1
+				}
+			}
+			continue
+		case score.SubmissionSchema:
+			submission, err := score.LoadSubmission(path)
+			if err != nil {
+				if inputIssue(path, fmt.Errorf("submission validation error: %w", err)) {
+					return 1
+				}
+				continue
+			}
 			if previous, duplicated := seenSampleIDs[submission.SampleID]; duplicated {
 				issue := duplicateSampleIssue(submission.SampleID, previous)
 				if inputIssue(path, issue) {
@@ -124,46 +144,51 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 			recordMetadata(submission.Host.Provider, submission.Host.Region)
 			reports = append(reports, submission.AsReport())
 			continue
-		}
-		data, err := reporter.LoadJSON(path)
-		if err != nil {
-			// 一份坏输入默认不该让整批失败，但必须说出来是哪一份、为什么。
-			if inputIssue(path, err) {
+		case buildinfo.SchemaVersion:
+			data, err := reporter.LoadJSON(path)
+			if err != nil {
+				// 一份坏输入默认不该让整批失败，但必须说出来是哪一份、为什么。
+				if inputIssue(path, fmt.Errorf("report validation error: %w", err)) {
+					return 1
+				}
+				continue
+			}
+			if err := validateBaselineReport(data); err != nil {
+				if inputIssue(path, err) {
+					return 1
+				}
+				continue
+			}
+			sampleID, err := score.SampleIDForRunID(data.Run.ID)
+			if err != nil {
+				if inputIssue(path, err) {
+					return 1
+				}
+				continue
+			}
+			if previous, duplicated := seenSampleIDs[sampleID]; duplicated {
+				issue := duplicateSampleIssue(sampleID, previous)
+				if inputIssue(path, issue) {
+					return 1
+				}
+				continue
+			}
+			seenSampleIDs[sampleID] = path
+			if sample, err := score.OutlierSampleFromReport(data); err != nil {
+				if inputIssue(path, fmt.Errorf("outlier projection: %w", err)) {
+					return 1
+				}
+			} else {
+				outlierSamples = append(outlierSamples, sample)
+			}
+			provider, region := score.ExtractSubmissionMetadata(data)
+			recordMetadata(provider, region)
+			reports = append(reports, data)
+		default:
+			if inputIssue(path, fmt.Errorf("unsupported ECS artifact schema %q", schema)) {
 				return 1
 			}
-			continue
 		}
-		if err := validateBaselineReport(data); err != nil {
-			if inputIssue(path, err) {
-				return 1
-			}
-			continue
-		}
-		sampleID, err := score.SampleIDForRunID(data.Run.ID)
-		if err != nil {
-			if inputIssue(path, err) {
-				return 1
-			}
-			continue
-		}
-		if previous, duplicated := seenSampleIDs[sampleID]; duplicated {
-			issue := duplicateSampleIssue(sampleID, previous)
-			if inputIssue(path, issue) {
-				return 1
-			}
-			continue
-		}
-		seenSampleIDs[sampleID] = path
-		if sample, err := score.OutlierSampleFromReport(data); err != nil {
-			if inputIssue(path, fmt.Errorf("outlier projection: %w", err)) {
-				return 1
-			}
-		} else {
-			outlierSamples = append(outlierSamples, sample)
-		}
-		provider, region := score.ExtractSubmissionMetadata(data)
-		recordMetadata(provider, region)
-		reports = append(reports, data)
 	}
 	if len(reports) == 0 {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), i18n.Errorf("err.baselineNoReports"))
