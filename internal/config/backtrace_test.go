@@ -17,7 +17,7 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 		want   []string
 		marker string
 	}{
-		{name: "default", raw: "", want: defaultBacktraceCities},
+		{name: "default", raw: "", want: []string{"beijing", "guangzhou"}},
 		{name: "selected", raw: "shanghai", want: []string{"shanghai"}},
 		{name: "all", raw: "all", want: cityOrder},
 		{name: "unknown", raw: "unknown", marker: "unknown backtrace city"},
@@ -58,6 +58,29 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 				t.Fatalf("%s target catalog key missing: %s", language, target.Name)
 			}
 		}
+	}
+}
+
+func TestBacktraceDefaultSelectionUsesCanonicalCatalog(t *testing.T) {
+	useEnglish(t)
+	cities, err := ParseBacktraceCities("")
+	if err != nil {
+		t.Fatalf("ParseBacktraceCities(\"\") failed: %v", err)
+	}
+	wantCities := []string{"beijing", "guangzhou"}
+	if !reflect.DeepEqual(cities, wantCities) {
+		t.Fatalf("default backtrace cities = %v, want %v", cities, wantCities)
+	}
+
+	var wantTargets []Endpoint
+	for _, city := range backtraceCities {
+		if contains(cities, city.ID) {
+			wantTargets = append(wantTargets, city.Targets...)
+		}
+	}
+	gotTargets := BacktraceTargetsFor(cities)
+	if !reflect.DeepEqual(gotTargets, wantTargets) {
+		t.Fatalf("default backtrace targets = %+v, want canonical %+v", gotTargets, wantTargets)
 	}
 }
 

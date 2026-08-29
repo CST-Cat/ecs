@@ -138,7 +138,16 @@ func BacktraceCityOrder() []string {
 	return order
 }
 
-var defaultBacktraceCities = []string{"beijing", "guangzhou"}
+// defaultBacktraceCityIDs derives the default selection in canonical order.
+func defaultBacktraceCityIDs() []string {
+	defaults := make([]string, 0, 2)
+	for _, city := range backtraceCities {
+		if city.ID == "beijing" || city.ID == "guangzhou" {
+			defaults = append(defaults, city.ID)
+		}
+	}
+	return defaults
+}
 
 // BacktraceTargetsFor aggregates targets for the requested cities.
 func BacktraceTargetsFor(cities []string) []Endpoint {
@@ -178,7 +187,7 @@ func ValidateMediaRegions(regions []string) error {
 func ParseBacktraceCities(raw string) ([]string, error) {
 	items := ParseList(raw)
 	if len(items) == 0 {
-		return append([]string(nil), defaultBacktraceCities...), nil
+		return defaultBacktraceCityIDs(), nil
 	}
 	if contains(items, "all") {
 		if len(items) > 1 {

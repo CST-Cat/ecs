@@ -53,7 +53,7 @@ func Defaults(profile string) (Runtime, error) {
 			{Name: "Google", Address: "8.8.8.8", Kind: RouteTargetKindGlobal},
 			{Name: "AliDNS", Address: "223.5.5.5", Kind: RouteTargetKindMainlandChina},
 		},
-		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCities),
+		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCityIDs()),
 	}
 
 	switch profile {
