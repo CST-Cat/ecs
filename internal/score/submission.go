@@ -238,13 +238,21 @@ func OutlierSampleFromReport(data model.Report) (OutlierSample, error) {
 
 func extractToolSpec(data model.Report) ToolSpec {
 	spec := ToolSpec{ECS: data.Tool.Version}
+	dimensions := Dimensions()
+	scoreModuleIDs := make(map[string]struct{}, len(dimensions))
+	for _, dimension := range dimensions {
+		scoreModuleIDs[dimension.ModuleID] = struct{}{}
+	}
 	for _, result := range data.Results {
+		if _, ok := scoreModuleIDs[result.ID]; !ok {
+			continue
+		}
 		for _, field := range result.Fields {
 			if field.Key != "version" {
 				continue
 			}
 			descriptor, ok := config.ModuleDescriptorFor(result.ID)
-			if !ok || descriptor.ScoreKey == "" {
+			if !ok {
 				continue
 			}
 			tool := ""

@@ -135,50 +135,52 @@ func Dimensions() []Dimension {
 		dimensions[index].Metrics = append(dimensions[index].Metrics, attoScoreMetrics()...)
 	}
 
-	// A module only participates in the leaderboard when its descriptor opts in
-	// explicitly.  This keeps ordinary diagnostic modules report-only by
-	// default; adding a new score dimension therefore requires an intentional
-	// descriptor change as well as metric definitions here.
-	filtered := dimensions[:0]
-	for _, dimension := range dimensions {
-		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
-		if !ok || descriptor.ScoreKey != dimension.Key {
-			continue
-		}
-		filtered = append(filtered, dimension)
-	}
-	return filtered
+	return dimensions
 }
 
-// ValidateDimensions verifies the explicit score opt-in contract.  It is
-// called by tests and can also be used by CI or tooling before generating a
-// leaderboard.  The score package still owns metric definitions; descriptors
-// only decide which module dimensions are allowed to enter the composite.
+// ValidateDimensions verifies the score definitions before they are consumed
+// by scoring or leaderboard tooling. The score package owns the complete
+// membership and metric contract; module descriptors only need to identify
+// modules that exist in the execution catalog.
 func ValidateDimensions() error {
 	dimensions := Dimensions()
-	seen := make(map[string]bool, len(dimensions))
+	seenDimensions := make(map[string]bool, len(dimensions))
+	seenMetrics := make(map[string]string)
 	for _, dimension := range dimensions {
-		if seen[dimension.Key] {
+		if dimension.Key == "" {
+			return fmt.Errorf("score dimension has empty key")
+		}
+		if seenDimensions[dimension.Key] {
 			return fmt.Errorf("duplicate score dimension %q", dimension.Key)
 		}
-		seen[dimension.Key] = true
-		descriptor, ok := config.ModuleDescriptorFor(dimension.ModuleID)
+		seenDimensions[dimension.Key] = true
+		if dimension.ModuleID == "" {
+			return fmt.Errorf("score dimension %q has empty module ID", dimension.Key)
+		}
+		_, ok := config.ModuleDescriptorFor(dimension.ModuleID)
 		if !ok {
 			return fmt.Errorf("score dimension %q references unknown module %q", dimension.Key, dimension.ModuleID)
 		}
-		if descriptor.ScoreKey == "" {
-			return fmt.Errorf("score dimension %q is not explicitly enabled by module descriptor", dimension.Key)
+		if len(dimension.Metrics) == 0 {
+			return fmt.Errorf("score dimension %q has no metrics", dimension.Key)
 		}
-		if descriptor.ScoreKey != dimension.Key {
-			return fmt.Errorf("score dimension %q disagrees with descriptor score key %q", dimension.Key, descriptor.ScoreKey)
-		}
-	}
-	for _, descriptor := range config.ModuleDescriptors() {
-		if descriptor.ScoreKey == "" {
-			continue
-		}
-		if !seen[descriptor.ScoreKey] {
-			return fmt.Errorf("score-enabled module %q has no registered dimension %q", descriptor.ID, descriptor.ScoreKey)
+		for _, metric := range dimension.Metrics {
+			if metric.Key == "" {
+				return fmt.Errorf("score dimension %q has metric with empty key", dimension.Key)
+			}
+			if previous, ok := seenMetrics[metric.Key]; ok {
+				return fmt.Errorf("duplicate score metric %q in dimensions %q and %q", metric.Key, previous, dimension.Key)
+			}
+			seenMetrics[metric.Key] = dimension.Key
+			if metric.MeasurementKey == "" && metric.Prefix == "" && metric.Suffix == "" {
+				return fmt.Errorf("score metric %q has no measurement selector", metric.Key)
+			}
+			if metric.MeasurementKey != "" && (metric.Prefix != "" || metric.Suffix != "") {
+				return fmt.Errorf("score metric %q has both direct and pattern selectors", metric.Key)
+			}
+			if metric.Aggregate != AggregateMedian && metric.Aggregate != AggregateMax {
+				return fmt.Errorf("score metric %q has unknown aggregation %d", metric.Key, metric.Aggregate)
+			}
 		}
 	}
 	return nil

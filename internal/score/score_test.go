@@ -136,6 +136,27 @@ func dimensionScore(report *Report, key string) DimensionScore {
 	return DimensionScore{}
 }
 
+func TestDimensionsOwnScoreMembership(t *testing.T) {
+	want := []struct {
+		key      string
+		moduleID string
+	}{
+		{key: "cpu", moduleID: "cpu"},
+		{key: "memory", moduleID: "memory"},
+		{key: "disk", moduleID: "disk"},
+		{key: "bandwidth", moduleID: "speed"},
+	}
+	got := Dimensions()
+	if len(got) != len(want) {
+		t.Fatalf("score dimensions = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for index, dimension := range got {
+		if dimension.Key != want[index].key || dimension.ModuleID != want[index].moduleID {
+			t.Fatalf("dimension[%d] = %q/%q, want %q/%q", index, dimension.Key, dimension.ModuleID, want[index].key, want[index].moduleID)
+		}
+	}
+}
+
 func TestDimensionsAndComputeFullFixture(t *testing.T) {
 	if err := ValidateDimensions(); err != nil {
 		t.Fatalf("score descriptor contract = %v", err)

@@ -62,10 +62,6 @@ type ModuleDescriptor struct {
 
 	Methodology model.Methodology
 
-	// ScoreKey is non-empty for modules that contribute a score. The score
-	// package owns metric definitions and algorithms.
-	ScoreKey string
-
 	// RequiredTools lists tools relevant to the module.  The route probes have a
 	// single execution contract: NextTrace Tiny. This metadata is also consumed by
 	// doctor and the wrapper dependency planner.
@@ -95,72 +91,72 @@ type ModuleDescriptor struct {
 var moduleDescriptors = []ModuleDescriptor{
 	moduleDescriptor("system", true, ExposureLocal, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "inventory", Label: "methodology.inventory", Engine: "OS/runtime inspection", Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope"},
-		"", nil, time.Second),
+		nil, time.Second),
 	moduleDescriptor("network", false, ExposureThirdParty, true, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "provider-assessment", Label: "methodology.provider-assessment", Engine: "multi-provider IP intelligence", Profile: "probe.network.profile", ComparisonScope: "probe.network.comparison_scope"},
-		"", nil, 5*time.Second, "ipquality", "wizard.askIPQuality"),
+		nil, 5*time.Second, "ipquality", "wizard.askIPQuality"),
 	moduleDescriptor("bgp", true, ExposurePublic, true, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "provider-assessment", Label: "methodology.provider-assessment", Engine: "RouteViews current RIB API", Profile: "probe.bgp.profile", ComparisonScope: "probe.bgp.comparison_scope"},
-		"", nil, 4*time.Second),
+		nil, 4*time.Second),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("cpu", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "sysbench", Profile: "probe.cpu.profile", ComparisonScope: "probe.cpu.comparison_scope"},
-		"cpu", []string{"sysbench"}, 3*time.Second, EstimateModeCPU)),
+		[]string{"sysbench"}, 3*time.Second, EstimateModeCPU)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("zstd", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "zstd", Profile: "probe.zstd.profile", ComparisonScope: "probe.zstd.comparison_scope"},
-		"", []string{"zstd"}, 25*time.Second, EstimateModeTwoContext)),
+		[]string{"zstd"}, 25*time.Second, EstimateModeTwoContext)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("npb", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "NASA NPB-OMP", Profile: "probe.npb.profile", ComparisonScope: "probe.npb.comparison_scope"},
-		"", []string{"npb-ep", "npb-ft"}, 60*time.Second, EstimateModeTwoContext)),
+		[]string{"npb-ep", "npb-ft"}, 60*time.Second, EstimateModeTwoContext)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("memory", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "STREAM", Profile: "probe.memory.stream.profile", ComparisonScope: "probe.memory.comparison_scope"},
-		"memory", []string{"stream"}, 5*time.Second, EstimateModeMemory)),
+		[]string{"stream"}, 5*time.Second, EstimateModeMemory)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("crypto", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "OpenSSL speed", Profile: "probe.crypto.profile", ComparisonScope: "probe.crypto.comparison_scope"},
-		"", []string{"openssl"}, 45*time.Second, EstimateModeTwoContext)),
+		[]string{"openssl"}, 45*time.Second, EstimateModeTwoContext)),
 	withRetryOnInterference(moduleDescriptorWithEstimateMode("disk", true, ExposureLocal, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "fio", Profile: "probe.disk.profile", ComparisonScope: "probe.disk.comparison_scope"},
-		"disk", []string{"fio"}, 8*time.Second, EstimateModeDisk)),
+		[]string{"fio"}, 8*time.Second, EstimateModeDisk)),
 	moduleDescriptorWithEstimateMode("dns", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "DNS/UDP", Profile: "probe.dns.profile", ComparisonScope: "probe.dns.comparison_scope"},
-		"", nil, 8*time.Second, EstimateModeDNS),
+		nil, 8*time.Second, EstimateModeDNS),
 	moduleDescriptorWithEstimateMode("latency", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "TCP connect", Profile: "probe.latency.profile", ComparisonScope: "probe.latency.comparison_scope"},
-		"", []string{"ping"}, 15*time.Second, EstimateModeLatency),
+		[]string{"ping"}, 15*time.Second, EstimateModeLatency),
 	moduleDescriptorWithEstimateMode("speed", true, ExposurePublic, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "iperf3", Profile: "probe.speed.profile", ComparisonScope: "probe.speed.comparison_scope"},
-		"bandwidth", []string{"iperf3"}, 30*time.Second, EstimateModeSpeed, "throughput", "wizard.askThroughput"),
+		[]string{"iperf3"}, 30*time.Second, EstimateModeSpeed, "throughput", "wizard.askThroughput"),
 	moduleDescriptor("ports", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "TCP connect", Profile: "probe.ports.profile", ComparisonScope: "probe.ports.comparison_scope"},
-		"", nil, 4*time.Second),
+		nil, 4*time.Second),
 	moduleDescriptor("nat", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "STUN (RFC 5389/5780)", Profile: "probe.nat.profile", ComparisonScope: "probe.nat.comparison_scope"},
-		"", nil, 12*time.Second),
+		nil, 12*time.Second),
 	moduleDescriptor("blacklist", true, ExposurePublic, true, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "DNSBL over DNS A lookup", Profile: "probe.blacklist.profile", ComparisonScope: "probe.blacklist.comparison_scope"},
-		"", nil, 10*time.Second, "blacklist", "wizard.askBlacklist"),
+		nil, 10*time.Second, "blacklist", "wizard.askBlacklist"),
 	moduleDescriptor("apps", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "native TCP connect", Profile: "probe.apps.profile", ComparisonScope: "probe.apps.comparison_scope"},
-		"", nil, 8*time.Second),
+		nil, 8*time.Second),
 	moduleDescriptor("cnspeed", true, ExposurePublic, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "HTTP download against speedtest.cn nodes", Profile: "probe.cnspeed.profile", ComparisonScope: "probe.cnspeed.comparison_scope"},
-		"", nil, 40*time.Second, "throughput", "wizard.askThroughput"),
+		nil, 40*time.Second, "throughput", "wizard.askThroughput"),
 	moduleDescriptorWithPrivacyNotice("ookla", false, ExposureThirdParty, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "official Ookla Speedtest CLI", Profile: "probe.ookla.profile", ComparisonScope: "probe.ookla.comparison_scope"},
-		"", []string{"speedtest"}, 90*time.Second,
+		[]string{"speedtest"}, 90*time.Second,
 		"message.notice.ooklaPrivacy"),
 	moduleDescriptor("media", true, ExposurePublic, false, ModuleConcurrencyProbe,
 		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "public HTTP evidence", Profile: "probe.media.profile", ComparisonScope: "probe.media.comparison_scope"},
-		"", nil, 10*time.Second, "media", "wizard.askMedia"),
+		nil, 10*time.Second, "media", "wizard.askMedia"),
 	moduleDescriptorWithEstimateMode("route", true, ExposurePublic, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "NextTrace Tiny", Profile: "probe.route.profile", ComparisonScope: "probe.route.comparison_scope"},
-		"", []string{"nexttrace-tiny"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
+		[]string{"nexttrace-tiny"}, 36*time.Second, EstimateModeRoute, "routing", "wizard.askRouting"),
 	moduleDescriptor("backtrace", true, ExposurePublic, false, ModuleConcurrencyExclusive,
 		model.Methodology{Kind: "heuristic", Label: "methodology.heuristic", Engine: "probe.backtrace.methodology.engine", Profile: "probe.backtrace.profile", ComparisonScope: "probe.backtrace.comparison_scope"},
-		"", []string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"),
+		[]string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"),
 }
 
-func moduleDescriptor(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, wizard ...string) ModuleDescriptor {
-	return moduleDescriptorWithEstimateMode(id, standard, exposure, needsEgress, concurrency, methodology, scoreKey, tools, estimate, EstimateModeFixed, wizard...)
+func moduleDescriptor(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, tools []string, estimate time.Duration, wizard ...string) ModuleDescriptor {
+	return moduleDescriptorWithEstimateMode(id, standard, exposure, needsEgress, concurrency, methodology, tools, estimate, EstimateModeFixed, wizard...)
 }
 
 func withRetryOnInterference(descriptor ModuleDescriptor) ModuleDescriptor {
@@ -171,13 +167,13 @@ func withRetryOnInterference(descriptor ModuleDescriptor) ModuleDescriptor {
 // moduleDescriptorWithPrivacyNotice keeps the common descriptor constructor
 // convenient while allowing modules with an independent external privacy
 // policy to opt into a report-level notice.
-func moduleDescriptorWithPrivacyNotice(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, noticeKey string, wizard ...string) ModuleDescriptor {
-	descriptor := moduleDescriptor(id, standard, exposure, needsEgress, concurrency, methodology, scoreKey, tools, estimate, wizard...)
+func moduleDescriptorWithPrivacyNotice(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, tools []string, estimate time.Duration, noticeKey string, wizard ...string) ModuleDescriptor {
+	descriptor := moduleDescriptor(id, standard, exposure, needsEgress, concurrency, methodology, tools, estimate, wizard...)
 	descriptor.PrivacyNoticeKey = noticeKey
 	return descriptor
 }
 
-func moduleDescriptorWithEstimateMode(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, scoreKey string, tools []string, estimate time.Duration, estimateMode EstimateMode, wizard ...string) ModuleDescriptor {
+func moduleDescriptorWithEstimateMode(id string, standard bool, exposure Exposure, needsEgress bool, concurrency ModuleConcurrency, methodology model.Methodology, tools []string, estimate time.Duration, estimateMode EstimateMode, wizard ...string) ModuleDescriptor {
 	descriptor := ModuleDescriptor{
 		ID:              id,
 		ProfileStandard: standard,
@@ -185,7 +181,6 @@ func moduleDescriptorWithEstimateMode(id string, standard bool, exposure Exposur
 		NeedsEgressIP:   needsEgress,
 		Concurrency:     concurrency,
 		Methodology:     methodology,
-		ScoreKey:        scoreKey,
 		RequiredTools:   tools,
 		TitleKey:        "module." + id + ".title",
 		DescriptionKey:  "module." + id + ".desc",
