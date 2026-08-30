@@ -61,7 +61,7 @@ func compareCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	outputFormats := config.ParseList(*outputFormatsFlag)
-	if err := validateComparisonFormats(outputFormats); err != nil {
+	if err := config.ValidateFormats(outputFormats); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
@@ -125,19 +125,6 @@ func localizeComparisonError(err error) string {
 		return i18n.Errorf(validation.Key, validation.Args...).Error()
 	}
 	return err.Error()
-}
-
-func validateComparisonFormats(formats []string) error {
-	if len(formats) == 0 {
-		return i18n.Errorf("err.noFormats")
-	}
-	allowed := map[string]bool{"json": true, "md": true, "html": true}
-	for _, format := range formats {
-		if !allowed[format] {
-			return i18n.Errorf("err.unknownFormat", format)
-		}
-	}
-	return nil
 }
 
 // normalizeCompareArgs lets users put report paths before or after flags. The

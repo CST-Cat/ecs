@@ -33,6 +33,11 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, i18n.T("help.renderInputRequired"))
 		return 1
 	}
+	outputFormats := config.ParseList(*formats)
+	if err := config.ValidateFormats(outputFormats); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
+		return 1
+	}
 	data, err := reporter.LoadJSON(*input)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
@@ -54,7 +59,7 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		baseline = loaded
 	}
-	written, err := reporter.WriteFilesWithOptions(data, *output, *name, config.ParseList(*formats),
+	written, err := reporter.WriteFilesWithOptions(data, *output, *name, outputFormats,
 		reporter.Options{Score: score.Compute(data, baseline)})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)

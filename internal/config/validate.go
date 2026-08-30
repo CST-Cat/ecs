@@ -10,6 +10,23 @@ import (
 	"ecs/internal/i18n"
 )
 
+// ValidateFormats enforces the output formats supported by the current
+// report contract. Callers are responsible for parsing and normalizing user
+// input before validation.
+func ValidateFormats(formats []string) error {
+	if len(formats) == 0 {
+		return i18n.Errorf("err.noFormats")
+	}
+	for _, format := range formats {
+		switch format {
+		case "json", "md", "html":
+		default:
+			return i18n.Errorf("err.unknownFormat", format)
+		}
+	}
+	return nil
+}
+
 func Validate(runtime Runtime) error {
 	knownModules := make(map[string]bool)
 	for _, id := range ModuleIDs() {
@@ -56,14 +73,8 @@ func Validate(runtime Runtime) error {
 	if runtime.SpeedThreads < 1 || runtime.SpeedThreads > 32 {
 		return i18n.Errorf("err.threadsRange")
 	}
-	allowedFormats := map[string]bool{"json": true, "md": true, "html": true}
-	if len(runtime.Formats) == 0 {
-		return i18n.Errorf("err.noFormats")
-	}
-	for _, format := range runtime.Formats {
-		if !allowedFormats[format] {
-			return i18n.Errorf("err.unknownFormat", format)
-		}
+	if err := ValidateFormats(runtime.Formats); err != nil {
+		return err
 	}
 	if len(runtime.IPQualitySources) == 0 {
 		return i18n.Errorf("err.ipSourceEmpty")

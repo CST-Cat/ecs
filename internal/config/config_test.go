@@ -57,6 +57,19 @@ func TestDefaultsAndProfiles(t *testing.T) {
 	requireError(t, err, "unknown profile")
 }
 
+func TestValidateFormats(t *testing.T) {
+	useEnglish(t)
+	for _, formats := range [][]string{nil, {}} {
+		requireError(t, ValidateFormats(formats), "at least one output format")
+	}
+	for _, formats := range [][]string{{"json"}, {"md"}, {"html"}, {"json", "md", "html"}} {
+		if err := ValidateFormats(formats); err != nil {
+			t.Fatalf("ValidateFormats(%v) = %v", formats, err)
+		}
+	}
+	requireError(t, ValidateFormats([]string{"txt"}), `unknown output format "txt"`)
+}
+
 func TestIPQualitySourceCatalogHasStableOrderAndIdentity(t *testing.T) {
 	want := []string{
 		"maxmind", "ipinfo", "ipregistry", "ipapi", "ip2location", "abuseipdb",

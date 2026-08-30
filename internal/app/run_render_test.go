@@ -257,7 +257,7 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 			args: func(input, _, _, _ string) []string {
 				return []string{"--lang", "en", "render", "--input", input, "--format", "txt"}
 			},
-			marker: `unknown report format "txt"`,
+			marker: `unknown output format "txt"`,
 		},
 		{
 			name: "output directory",
@@ -285,5 +285,20 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestRenderRejectsEmptyFormatBeforeCreatingOutput(t *testing.T) {
+	root := t.TempDir()
+	input := writeAppRenderReport(t, root)
+	output := filepath.Join(root, "not-created")
+	status, stdout, stderr := invokeAppMain(
+		"--lang", "en", "render", "--input", input, "--output", output, "--format", "",
+	)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "at least one output format is required") {
+		t.Fatalf("empty format status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("empty format created output path: %v", err)
 	}
 }
