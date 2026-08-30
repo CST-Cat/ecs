@@ -56,9 +56,10 @@ shell 语法、发布中间目录忽略规则、工具包布局回归和各架�
 
 ## 模块扩展边界
 
-模块的跨切面元数据集中在 [`internal/config/modules.go`](internal/config/modules.go)：
-ID、配置档归属、外联级别、并发分类、方法学、依赖、文案键、估算和可选评分维度都从
-`ModuleDescriptor` 派生。探针包通过 `internal/probe.Builtins` 提供强类型内建探针，
+模块的执行与展示元数据集中在 [`internal/config/modules.go`](internal/config/modules.go)：
+模块 ID、配置档归属、外联级别、并发与调度元数据、方法学、所需工具、文案键和估算均由
+`ModuleDescriptor` 维护。评分成员资格、评分维度标识和评分指标只由
+`internal/score.Dimensions()` 拥有，不从 `ModuleDescriptor` 派生。探针包通过 `internal/probe.Builtins` 提供强类型内建探针，
 `runner` 在执行边界按 ID 显式绑定；不再维护运行时 factory、执行顺序、曝光或方法学副本。
 
 新增或删除模块后，先运行：

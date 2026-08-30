@@ -31,9 +31,6 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 	if err != nil {
 		return nil, i18n.Errorf("err.reportOutputDir", err)
 	}
-	if err := os.MkdirAll(absolute, 0o700); err != nil {
-		return nil, i18n.Errorf("err.reportCreateDir", err)
-	}
 	if baseName == "" {
 		baseName = "ecs-report-" + data.Run.StartedAt.Format("20060102-150405")
 	}
@@ -64,6 +61,9 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 		}
 		contents[format] = content
 		orderedFormats = append(orderedFormats, format)
+	}
+	if err := os.MkdirAll(absolute, 0o700); err != nil {
+		return nil, i18n.Errorf("err.reportCreateDir", err)
 	}
 	written := make(map[string]string, len(orderedFormats))
 	for _, format := range orderedFormats {

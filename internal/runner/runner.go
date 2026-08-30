@@ -258,9 +258,9 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	return result
 }
 
-// bindingTitle returns the descriptor-owned title for built-ins. A binding
-// without a descriptor falls back to its stable probe ID at this boundary;
-// an explicit result title is preserved below.
+// bindingTitle supplies the canonical descriptor title for built-ins and falls
+// back to the stable probe ID when no title key is available. runBinding
+// canonicalizes result.Title to this value after the probe completes.
 func bindingTitle(binding moduleBinding) string {
 	if binding.Descriptor.TitleKey != "" {
 		return binding.Descriptor.TitleKey

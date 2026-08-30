@@ -463,6 +463,15 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 		t.Fatalf("renderer failure left a partial JSON file: %v", statErr)
 	}
 
+	freshDirectory := filepath.Join(root, "renderer-failure-directory")
+	written, err = WriteFiles(data, freshDirectory, "report", []string{"json", "bogus"})
+	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(written) != 0 {
+		t.Fatalf("fresh-directory renderer failure = %v, %v", written, err)
+	}
+	if _, statErr := os.Stat(freshDirectory); !os.IsNotExist(statErr) {
+		t.Fatalf("renderer failure created output directory: %v", statErr)
+	}
+
 	invalid := sampleReport()
 	invalid.Results[0].Measurements[0].Value = math.Inf(1)
 	written, err = WriteFiles(invalid, t.TempDir(), "report", []string{"json"})
