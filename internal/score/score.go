@@ -360,7 +360,10 @@ func (r Report) EffectiveRankMinSamples() int {
 // 没有任何维度可算时返回 nil：与其给一个 0 分，不如明确表示"这次运行不产生
 // 评分"——仅运行 network 等单一维度本来就不该有综合分。
 func Compute(data model.Report, baseline Baseline) *Report {
-	values := collectMeasurementsByModule(data)
+	values, err := collectMeasurements(data)
+	if err != nil {
+		return nil
+	}
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status != model.StatusSkipped {
@@ -370,7 +373,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 
 	// 按被测机器的规格选档位：多线程分数几乎正比于核数，拿全体参考均值
 	// 会让小机器永远不及格、大机器永远满分。档位样本不足时自动回落到全局。
-	vcpu := hostVCPUFromModules(values)
+	vcpu := hostVCPU(values)
 	tierMetrics, tierMin, tierSamples := baseline.MetricsForHost(vcpu)
 	scoped := baseline
 	scoped.Metrics = tierMetrics
@@ -520,24 +523,30 @@ func scoreDimension(dimension Dimension, values measurementsByModule, baseline B
 
 // measured 是一条实测值连同它的展示信息。
 type measured struct {
-	value     float64
-	unit      string
-	label     string
-	ambiguous bool
+	value float64
+	unit  string
+	label string
 }
 
 // measurementsByModule preserves the owner of each measurement. A metric key
 // is only meaningful together with the Result.ID that produced it.
 type measurementsByModule map[string]map[string]measured
 
-// hostMeasurements is the narrow compatibility projection used by the
-// baseline tier helper. It is intentionally not a report-wide measurement
-// projection: only the system-owned host CPU value is retained.
-type hostMeasurements map[string]measured
-
-func collectMeasurementsByModule(data model.Report) measurementsByModule {
+func collectMeasurements(data model.Report) (measurementsByModule, error) {
 	values := make(measurementsByModule, len(data.Results))
-	for _, result := range data.Results {
+	resultIndexes := make(map[string]int, len(data.Results))
+	for resultIndex, result := range data.Results {
+		if previous, ok := resultIndexes[result.ID]; ok {
+			return nil, fmt.Errorf("report contains duplicate result ID %q at indexes %d and %d", result.ID, previous, resultIndex)
+		}
+		resultIndexes[result.ID] = resultIndex
+		measurementIndexes := make(map[string]int, len(result.Measurements))
+		for measurementIndex, item := range result.Measurements {
+			if previous, ok := measurementIndexes[item.Key]; ok {
+				return nil, fmt.Errorf("result %q contains duplicate measurement key %q at indexes %d and %d", result.ID, item.Key, previous, measurementIndex)
+			}
+			measurementIndexes[item.Key] = measurementIndex
+		}
 		if result.Status == model.StatusSkipped {
 			continue
 		}
@@ -547,59 +556,15 @@ func collectMeasurementsByModule(data model.Report) measurementsByModule {
 			values[result.ID] = moduleValues
 		}
 		for _, item := range result.Measurements {
-			if previous, ok := moduleValues[item.Key]; ok {
-				// The canonical report loader rejects this input. Keep the
-				// in-memory projection safe as well, so callers that assemble a
-				// model directly never fall back to first/last-write-wins.
-				previous.ambiguous = true
-				moduleValues[item.Key] = previous
-				continue
-			}
 			moduleValues[item.Key] = measured{value: item.Value, unit: item.Unit, label: item.Label}
 		}
 	}
-	return values
-}
-
-// collectMeasurements is retained for the baseline tier helper, which only
-// needs the system-owned host CPU measurement. Score and submission use
-// collectMeasurementsByModule above and never consume a report-wide key map.
-func collectMeasurements(data model.Report) hostMeasurements {
-	values := make(hostMeasurements)
-	for _, result := range data.Results {
-		if result.Status == model.StatusSkipped || result.ID != "system" {
-			continue
-		}
-		for _, item := range result.Measurements {
-			if item.Key != "logical_cpus" {
-				continue
-			}
-			if previous, ok := values[item.Key]; ok {
-				previous.value = 0
-				previous.ambiguous = true
-				values[item.Key] = previous
-				continue
-			}
-			values[item.Key] = measured{value: item.Value, unit: item.Unit, label: item.Label}
-		}
-	}
-	return values
-}
-
-func hostVCPUFromModules(values measurementsByModule) int {
-	if item, ok := values["system"]["logical_cpus"]; ok && !item.ambiguous && item.value > 0 {
-		return int(item.value)
-	}
-	return 0
+	return values, nil
 }
 
 // scoreableMetrics is the single report-to-leaderboard membership boundary.
 // Artifact builders may aggregate or encode the returned values differently.
-func scoreableMetrics(data model.Report, _ hostMeasurements) map[string]float64 {
-	return scoreableMetricsFromModules(data, collectMeasurementsByModule(data))
-}
-
-func scoreableMetricsFromModules(data model.Report, values measurementsByModule) map[string]float64 {
+func scoreableMetrics(data model.Report, values measurementsByModule) map[string]float64 {
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status != model.StatusSkipped {
@@ -627,10 +592,7 @@ func scoreableMetricsFromModules(data model.Report, values measurementsByModule)
 func resolveMetric(metric Metric, values map[string]measured) (float64, string, string, bool) {
 	if metric.MeasurementKey != "" {
 		item, ok := values[metric.MeasurementKey]
-		if !ok || item.ambiguous {
-			return 0, "", "", false
-		}
-		return item.value, item.unit, item.label, true
+		return item.value, item.unit, item.label, ok
 	}
 	if metric.Prefix == "" && metric.Suffix == "" {
 		return 0, "", "", false
@@ -646,7 +608,7 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 		if metric.Suffix != "" && !strings.HasSuffix(key, metric.Suffix) {
 			continue
 		}
-		if item.ambiguous || item.value <= 0 {
+		if item.value <= 0 {
 			continue
 		}
 		matchedKeys = append(matchedKeys, key)

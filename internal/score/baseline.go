@@ -191,7 +191,10 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	byTier := make(map[int]map[string][]float64)
 	tierReportCounts := make(map[int]int)
 	for _, report := range reports {
-		values := collectMeasurements(report)
+		values, err := collectMeasurements(report)
+		if err != nil {
+			return Baseline{}, err
+		}
 		tierKey := TierKeyFor(hostVCPU(values))
 		if tierKey > 0 {
 			tierReportCounts[tierKey]++
@@ -261,8 +264,8 @@ func arithmeticMean(values []float64) float64 {
 }
 
 // hostVCPU 从报告里取逻辑核数，用于归档。
-func hostVCPU(values map[string]measured) int {
-	if item, ok := values["logical_cpus"]; ok && item.value > 0 {
+func hostVCPU(values measurementsByModule) int {
+	if item, ok := values["system"]["logical_cpus"]; ok && item.value > 0 {
 		return int(item.value)
 	}
 	return 0
@@ -281,7 +284,10 @@ func (b Baseline) Encode() ([]byte, error) {
 func MetricSampleCounts(reports []model.Report) map[string]int {
 	counts := make(map[string]int)
 	for _, report := range reports {
-		values := collectMeasurements(report)
+		values, err := collectMeasurements(report)
+		if err != nil {
+			continue
+		}
 		for key := range scoreableMetrics(report, values) {
 			counts[key]++
 		}

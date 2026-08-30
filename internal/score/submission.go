@@ -116,8 +116,11 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	if err != nil {
 		return Submission{}, err
 	}
-	values := collectMeasurementsByModule(data)
-	metrics := scoreableMetricsFromModules(data, values)
+	values, err := collectMeasurements(data)
+	if err != nil {
+		return Submission{}, err
+	}
+	metrics := scoreableMetrics(data, values)
 	if len(metrics) == 0 {
 		return Submission{}, fmt.Errorf("report contains no scoreable measurements")
 	}
@@ -165,10 +168,10 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 // extractHostSpec 只读白名单字段。
 func extractHostSpec(data model.Report, values measurementsByModule) HostSpec {
 	spec := HostSpec{}
-	if item, ok := values["system"]["logical_cpus"]; ok && !item.ambiguous {
+	if item, ok := values["system"]["logical_cpus"]; ok {
 		spec.VCPU = int(item.value)
 	}
-	if item, ok := values["system"]["memory_total_bytes"]; ok && !item.ambiguous {
+	if item, ok := values["system"]["memory_total_bytes"]; ok {
 		spec.MemoryGiB = roundTo(item.value/(1<<30), 2)
 	}
 	for _, result := range data.Results {
@@ -214,7 +217,11 @@ func extractHostSpec(data model.Report, values measurementsByModule) HostSpec {
 // submission whitelist permits.  It is used by leaderboard aggregation for
 // full reports that have not yet been converted to a submission.
 func ExtractSubmissionMetadata(data model.Report) (provider, region string) {
-	spec := extractHostSpec(data, collectMeasurementsByModule(data))
+	values, err := collectMeasurements(data)
+	if err != nil {
+		return "", ""
+	}
+	spec := extractHostSpec(data, values)
 	return spec.Provider, spec.Region
 }
 
