@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -127,7 +128,32 @@ func loadJSON(path string) (model.Report, error) {
 			data.Results[index].Evidence.Normalize()
 		}
 	}
+	if err := validateReportIdentity(data); err != nil {
+		return data, err
+	}
 	return data, nil
+}
+
+// validateReportIdentity checks the canonical identity of report content.
+// Result IDs own their measurements, so a key may repeat in different Results
+// but must not be ambiguous within one Result.
+func validateReportIdentity(data model.Report) error {
+	resultIndexes := make(map[string]int, len(data.Results))
+	for resultIndex, result := range data.Results {
+		if previous, ok := resultIndexes[result.ID]; ok {
+			return fmt.Errorf("report contains duplicate result ID %q at indexes %d and %d", result.ID, previous, resultIndex)
+		}
+		resultIndexes[result.ID] = resultIndex
+
+		measurementIndexes := make(map[string]int, len(result.Measurements))
+		for measurementIndex, measurement := range result.Measurements {
+			if previous, ok := measurementIndexes[measurement.Key]; ok {
+				return fmt.Errorf("result %q contains duplicate measurement key %q at indexes %d and %d", result.ID, measurement.Key, previous, measurementIndex)
+			}
+			measurementIndexes[measurement.Key] = measurementIndex
+		}
+	}
+	return nil
 }
 
 func atomicWrite(path string, content []byte, mode os.FileMode) error {

@@ -360,7 +360,7 @@ func (r Report) EffectiveRankMinSamples() int {
 // 没有任何维度可算时返回 nil：与其给一个 0 分，不如明确表示"这次运行不产生
 // 评分"——仅运行 network 等单一维度本来就不该有综合分。
 func Compute(data model.Report, baseline Baseline) *Report {
-	values := collectMeasurements(data)
+	values := collectMeasurementsByModule(data)
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status != model.StatusSkipped {
@@ -370,7 +370,7 @@ func Compute(data model.Report, baseline Baseline) *Report {
 
 	// 按被测机器的规格选档位：多线程分数几乎正比于核数，拿全体参考均值
 	// 会让小机器永远不及格、大机器永远满分。档位样本不足时自动回落到全局。
-	vcpu := hostVCPU(values)
+	vcpu := hostVCPUFromModules(values)
 	tierMetrics, tierMin, tierSamples := baseline.MetricsForHost(vcpu)
 	scoped := baseline
 	scoped.Metrics = tierMetrics
@@ -450,13 +450,14 @@ func populateRank(out *Report, baseline Baseline) {
 	out.RankStatus = RankStatusAvailable
 }
 
-func scoreDimension(dimension Dimension, values map[string]measured, baseline Baseline, moduleRan bool) DimensionScore {
+func scoreDimension(dimension Dimension, values measurementsByModule, baseline Baseline, moduleRan bool) DimensionScore {
 	scored := DimensionScore{Key: dimension.Key}
 	if !moduleRan {
 		scored.Missing = true
 		scored.MissingReason = "moduleNotRun"
 		return scored
 	}
+	moduleValues := values[dimension.ModuleID]
 	groupScores := make(map[string][]float64)
 	for _, metric := range dimension.Metrics {
 		base, ok := baseline.Metrics[metric.Key]
@@ -464,7 +465,7 @@ func scoreDimension(dimension Dimension, values map[string]measured, baseline Ba
 			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
-		value, unit, label, found := resolveMetric(metric, values)
+		value, unit, label, found := resolveMetric(metric, moduleValues)
 		if !found || value <= 0 {
 			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
@@ -519,27 +520,86 @@ func scoreDimension(dimension Dimension, values map[string]measured, baseline Ba
 
 // measured 是一条实测值连同它的展示信息。
 type measured struct {
-	value float64
-	unit  string
-	label string
+	value     float64
+	unit      string
+	label     string
+	ambiguous bool
 }
 
-func collectMeasurements(data model.Report) map[string]measured {
-	values := make(map[string]measured, 64)
+// measurementsByModule preserves the owner of each measurement. A metric key
+// is only meaningful together with the Result.ID that produced it.
+type measurementsByModule map[string]map[string]measured
+
+// hostMeasurements is the narrow compatibility projection used by the
+// baseline tier helper. It is intentionally not a report-wide measurement
+// projection: only the system-owned host CPU value is retained.
+type hostMeasurements map[string]measured
+
+func collectMeasurementsByModule(data model.Report) measurementsByModule {
+	values := make(measurementsByModule, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status == model.StatusSkipped {
 			continue
 		}
+		moduleValues := values[result.ID]
+		if moduleValues == nil {
+			moduleValues = make(map[string]measured, len(result.Measurements))
+			values[result.ID] = moduleValues
+		}
 		for _, item := range result.Measurements {
+			if previous, ok := moduleValues[item.Key]; ok {
+				// The canonical report loader rejects this input. Keep the
+				// in-memory projection safe as well, so callers that assemble a
+				// model directly never fall back to first/last-write-wins.
+				previous.ambiguous = true
+				moduleValues[item.Key] = previous
+				continue
+			}
+			moduleValues[item.Key] = measured{value: item.Value, unit: item.Unit, label: item.Label}
+		}
+	}
+	return values
+}
+
+// collectMeasurements is retained for the baseline tier helper, which only
+// needs the system-owned host CPU measurement. Score and submission use
+// collectMeasurementsByModule above and never consume a report-wide key map.
+func collectMeasurements(data model.Report) hostMeasurements {
+	values := make(hostMeasurements)
+	for _, result := range data.Results {
+		if result.Status == model.StatusSkipped || result.ID != "system" {
+			continue
+		}
+		for _, item := range result.Measurements {
+			if item.Key != "logical_cpus" {
+				continue
+			}
+			if previous, ok := values[item.Key]; ok {
+				previous.value = 0
+				previous.ambiguous = true
+				values[item.Key] = previous
+				continue
+			}
 			values[item.Key] = measured{value: item.Value, unit: item.Unit, label: item.Label}
 		}
 	}
 	return values
 }
 
+func hostVCPUFromModules(values measurementsByModule) int {
+	if item, ok := values["system"]["logical_cpus"]; ok && !item.ambiguous && item.value > 0 {
+		return int(item.value)
+	}
+	return 0
+}
+
 // scoreableMetrics is the single report-to-leaderboard membership boundary.
 // Artifact builders may aggregate or encode the returned values differently.
-func scoreableMetrics(data model.Report, values map[string]measured) map[string]float64 {
+func scoreableMetrics(data model.Report, _ hostMeasurements) map[string]float64 {
+	return scoreableMetricsFromModules(data, collectMeasurementsByModule(data))
+}
+
+func scoreableMetricsFromModules(data model.Report, values measurementsByModule) map[string]float64 {
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status != model.StatusSkipped {
@@ -551,8 +611,9 @@ func scoreableMetrics(data model.Report, values map[string]measured) map[string]
 		if !ran[dimension.ModuleID] {
 			continue
 		}
+		moduleValues := values[dimension.ModuleID]
 		for _, metric := range dimension.Metrics {
-			value, _, _, ok := resolveMetric(metric, values)
+			value, _, _, ok := resolveMetric(metric, moduleValues)
 			if !ok || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 				continue
 			}
@@ -566,7 +627,10 @@ func scoreableMetrics(data model.Report, values map[string]measured) map[string]
 func resolveMetric(metric Metric, values map[string]measured) (float64, string, string, bool) {
 	if metric.MeasurementKey != "" {
 		item, ok := values[metric.MeasurementKey]
-		return item.value, item.unit, item.label, ok
+		if !ok || item.ambiguous {
+			return 0, "", "", false
+		}
+		return item.value, item.unit, item.label, true
 	}
 	if metric.Prefix == "" && metric.Suffix == "" {
 		return 0, "", "", false
@@ -582,7 +646,7 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 		if metric.Suffix != "" && !strings.HasSuffix(key, metric.Suffix) {
 			continue
 		}
-		if item.value <= 0 {
+		if item.ambiguous || item.value <= 0 {
 			continue
 		}
 		matchedKeys = append(matchedKeys, key)

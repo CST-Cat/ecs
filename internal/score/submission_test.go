@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -184,6 +185,34 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	longNote, err := BuildSubmission(report, SubmissionOptions{Note: strings.Repeat("n", maxNoteLength+10)})
 	if err != nil || len([]rune(longNote.Note)) != maxNoteLength {
 		t.Fatalf("long note was not bounded: len=%d err=%v", len([]rune(longNote.Note)), err)
+	}
+}
+
+func TestSubmissionHostSpecUsesSystemMeasurementOwner(t *testing.T) {
+	baseline, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := scoreReportFixture()
+	report.Results = append(report.Results, model.Result{
+		ID: "other", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "logical_cpus", Value: 128},
+			{Key: "memory_total_bytes", Value: 256 * (1 << 30)},
+			{Key: "sysbench_cpu_single_events_s", Value: 999999},
+			{Key: "sysbench_cpu_multi_events_s", Value: 999999},
+		},
+	})
+
+	submission, err := BuildSubmission(report, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submission.Host.VCPU != 4 || submission.Host.MemoryGiB != 8 {
+		t.Fatalf("host spec was polluted by other-module measurements: %+v", submission.Host)
+	}
+	if !reflect.DeepEqual(submission.Metrics, baseline.Metrics) {
+		t.Fatalf("submission metrics were polluted by other-module measurements: got=%v want=%v", submission.Metrics, baseline.Metrics)
 	}
 }
 

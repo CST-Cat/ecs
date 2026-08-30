@@ -225,17 +225,76 @@ func TestComputeMissingAndInvalidValues(t *testing.T) {
 	if gotDuplicate == nil {
 		t.Fatal("duplicate measurement report did not score")
 	}
-	var duplicateValue float64
-	for _, metric := range dimensionScore(gotDuplicate, "cpu").Metrics {
-		if metric.Key == "cpu_single" {
-			duplicateValue = metric.Value
-		}
-	}
-	if duplicateValue != 999 {
-		t.Fatalf("duplicate measurement did not use the canonical last value: %+v", gotDuplicate)
+	duplicateCPU := dimensionScore(gotDuplicate, "cpu")
+	if len(duplicateCPU.Metrics) != 1 || duplicateCPU.Metrics[0].Key != "cpu_multi" || !reflect.DeepEqual(duplicateCPU.MissingMetrics, []string{"cpu_single"}) {
+		t.Fatalf("duplicate measurement was not treated as ambiguous: %+v", duplicateCPU)
 	}
 	if got := Compute(model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}, baseline); got != nil {
 		t.Fatal("report with no scoreable dimensions should return nil")
+	}
+}
+
+func TestMeasurementLookupPreservesModuleOwner(t *testing.T) {
+	report := model.Report{Results: []model.Result{
+		{ID: "cpu", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 100, Unit: "cpu"}}},
+		{ID: "system", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 999, Unit: "system"}}},
+	}}
+	values := collectMeasurementsByModule(report)
+	dimension := Dimension{
+		Key:      "owner",
+		ModuleID: "cpu",
+		Metrics:  []Metric{{Key: "foo", MeasurementKey: "foo", HigherIsBetter: true}},
+	}
+	got := scoreDimension(dimension, values, Baseline{Metrics: map[string]float64{"foo": 100}}, true)
+	if got.Missing || len(got.Metrics) != 1 || got.Metrics[0].Value != 100 || got.Metrics[0].Unit != "cpu" {
+		t.Fatalf("module-scoped metric lookup = %+v, want cpu/foo=100", got)
+	}
+}
+
+func TestScoreIgnoresSameMetricKeyFromOtherModule(t *testing.T) {
+	baseline := baselineFixture()
+	want := Compute(scoreReportFixture(), baseline)
+	if want == nil {
+		t.Fatal("baseline fixture did not score")
+	}
+
+	withOther := scoreReportFixture()
+	withOther.Results = append(withOther.Results, model.Result{
+		ID: "other", Status: model.StatusOK,
+		Measurements: []model.Measurement{
+			{Key: "sysbench_cpu_single_events_s", Value: 999999},
+			{Key: "sysbench_cpu_multi_events_s", Value: 999999},
+		},
+	})
+	got := Compute(withOther, baseline)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("other-module CPU measurements changed score:\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestScoreAndSubmissionAreOrderInvariant(t *testing.T) {
+	first := scoreReportFixture()
+	second := scoreReportFixture()
+	for left, right := 0, len(second.Results)-1; left < right; left, right = left+1, right-1 {
+		second.Results[left], second.Results[right] = second.Results[right], second.Results[left]
+	}
+
+	baseline := baselineFixture()
+	firstScore := Compute(first, baseline)
+	secondScore := Compute(second, baseline)
+	if !reflect.DeepEqual(firstScore, secondScore) {
+		t.Fatalf("result order changed score:\n first=%+v\nsecond=%+v", firstScore, secondScore)
+	}
+	firstSubmission, err := BuildSubmission(first, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSubmission, err := BuildSubmission(second, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(firstSubmission, secondSubmission) {
+		t.Fatalf("result order changed submission:\n first=%+v\nsecond=%+v", firstSubmission, secondSubmission)
 	}
 }
 

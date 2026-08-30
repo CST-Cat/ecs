@@ -344,6 +344,47 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 	}
 }
 
+func TestLoadJSONMeasurementIdentity(t *testing.T) {
+	load := func(t *testing.T, data model.Report) error {
+		t.Helper()
+		content, err := JSON(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "report.json")
+		writeReportFile(t, path, content)
+		_, err = LoadJSON(path)
+		return err
+	}
+
+	t.Run("same key across result owners is allowed", func(t *testing.T) {
+		data := sampleReport()
+		data.Results = append(data.Results, model.Result{
+			ID: "cpu", Status: model.StatusOK,
+			Measurements: []model.Measurement{{Key: "events", Value: 999}},
+		})
+		if err := load(t, data); err != nil {
+			t.Fatalf("cross-module duplicate key was rejected: %v", err)
+		}
+	})
+
+	t.Run("duplicate measurement in one result is rejected", func(t *testing.T) {
+		data := sampleReport()
+		data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{Key: "events", Value: 999})
+		if err := load(t, data); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "events"`) {
+			t.Fatalf("duplicate measurement error = %v", err)
+		}
+	})
+
+	t.Run("duplicate result ID is rejected", func(t *testing.T) {
+		data := sampleReport()
+		data.Results = append(data.Results, model.Result{ID: "system", Status: model.StatusSkipped})
+		if err := load(t, data); err == nil || !strings.Contains(err.Error(), `duplicate result ID "system"`) {
+			t.Fatalf("duplicate result error = %v", err)
+		}
+	})
+}
+
 func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
