@@ -273,7 +273,7 @@ func bindingTitle(binding moduleBinding) string {
 
 func hasNetworkModules(selected []moduleBinding) bool {
 	for _, binding := range selected {
-		if binding.Descriptor.ID != "" && binding.Descriptor.Exposure > config.ExposureLocal {
+		if binding.Descriptor.Exposure > config.ExposureLocal {
 			return true
 		}
 	}

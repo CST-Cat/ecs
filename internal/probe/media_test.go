@@ -122,6 +122,14 @@ func TestMediaRegionSelectionUsesConfigCatalog(t *testing.T) {
 	}
 }
 
+func TestMediaRegionCatalogHasProbeImplementation(t *testing.T) {
+	for _, region := range config.MediaRegionIDs() {
+		if got := mediaChecksForRegions([]string{region}); len(got) == 0 {
+			t.Errorf("media region %q has no probe checks", region)
+		}
+	}
+}
+
 func TestMediaRegionSelectionKeepsEmptyDefaultAndRejectsUnknownExpansion(t *testing.T) {
 	all := mediaChecks()
 	if got := mediaChecksForRegions(nil); len(got) != len(all) {
