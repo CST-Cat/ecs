@@ -220,9 +220,8 @@ func localInterfaceIPs() []string {
 func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
 	item := binding.Probe
 	descriptor := binding.Descriptor
-	hasDescriptor := descriptor.ID != ""
 	canonicalTitle := bindingTitle(binding)
-	needsNetwork := hasDescriptor && descriptor.Exposure > config.ExposureLocal
+	needsNetwork := descriptor.Exposure > config.ExposureLocal
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
@@ -239,7 +238,7 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	} else {
 		result = runWithConditionalRetry(ctx, item, descriptor.RetryOnInterference, env)
 	}
-	if result.Methodology.Label == "" && hasDescriptor {
+	if result.Methodology.Label == "" {
 		result.Methodology = descriptor.Methodology
 	}
 	if result.Evidence == nil {
@@ -255,9 +254,7 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	if result.Evidence != nil {
 		result.Evidence.Normalize()
 	}
-	if hasDescriptor || result.Title == "" {
-		result.Title = canonicalTitle
-	}
+	result.Title = canonicalTitle
 	return result
 }
 

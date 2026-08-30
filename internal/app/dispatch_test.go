@@ -314,6 +314,17 @@ func TestListReportsStandardFlagErrors(t *testing.T) {
 	})
 }
 
+func TestRunReportsStandardMissingLanguageValue(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	status := Main(context.Background(), []string{"run", "--lang"}, &stdout, &stderr)
+	if status != 1 || stdout.Len() != 0 {
+		t.Fatalf("run --lang status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	if count := strings.Count(stderr.String(), "flag needs an argument: -lang"); count != 1 {
+		t.Fatalf("run --lang parser error count=%d, want one: stderr=%q", count, stderr.String())
+	}
+}
+
 func TestListShowsCanonicalIPQualitySourceIDsInStableOrder(t *testing.T) {
 	expected := "  " + strings.Join(config.IPQualitySourceIDs(), ", ") + "\n"
 	for _, language := range []string{"zh", "en"} {
