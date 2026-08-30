@@ -4,6 +4,7 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +87,12 @@ func Validate(runtime Runtime) error {
 			}
 		}
 	}
+	if err := validateEndpointDuplicates(runtime.DNSResolvers, runtime.IPVersion, true); err != nil {
+		return err
+	}
+	if err := validateEndpointDuplicates(runtime.LatencyTargets, runtime.IPVersion, true); err != nil {
+		return err
+	}
 	for _, endpoint := range runtime.RouteTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.routeNameAddress")
@@ -97,6 +104,9 @@ func Validate(runtime Runtime) error {
 			return i18n.Errorf("err.routeFamily", endpoint.Name)
 		}
 	}
+	if err := validateEndpointDuplicates(runtime.RouteTargets, runtime.IPVersion, false); err != nil {
+		return err
+	}
 	for _, endpoint := range runtime.STUNServers {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.stunNameAddress")
@@ -105,6 +115,9 @@ func Validate(runtime Runtime) error {
 		if err != nil || !validRouteTarget(host) || port == "" {
 			return i18n.Errorf("err.stunHostPort", endpoint.Address)
 		}
+	}
+	if err := validateSTUNDuplicates(runtime.STUNServers); err != nil {
+		return err
 	}
 	for _, endpoint := range runtime.BacktraceTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
@@ -119,6 +132,9 @@ func Validate(runtime Runtime) error {
 		if !ValidBacktraceCarrier(endpoint.Kind) {
 			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
 		}
+	}
+	if err := validateEndpointDuplicates(runtime.BacktraceTargets, runtime.IPVersion, false); err != nil {
+		return err
 	}
 	seenOoklaCarriers := make(map[string]bool)
 	for _, server := range runtime.OoklaServers {
@@ -186,4 +202,87 @@ func validRouteTarget(value string) bool {
 
 func validEndpointFamily(value string) bool {
 	return value == "" || value == IPVersion4 || value == IPVersion6
+}
+
+// validateEndpointDuplicates enforces the runtime endpoint contract after
+// parsing and file overlays have completed. Display names are deliberately
+// excluded: the address and the concrete execution family identify the work
+// a probe would perform.
+func validateEndpointDuplicates(endpoints []Endpoint, runtimeIPVersion string, requirePort bool) error {
+	seen := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		key := normalizedEndpointAddress(endpoint.Address, requirePort) + "\x00" + endpointExecutionFamily(endpoint, runtimeIPVersion, requirePort)
+		if _, exists := seen[key]; exists {
+			return i18n.Errorf("err.endpointDuplicate", endpoint.Address)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func validateSTUNDuplicates(servers []Endpoint) error {
+	seen := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		key := normalizedEndpointAddress(server.Address, true)
+		if _, exists := seen[key]; exists {
+			return i18n.Errorf("err.endpointDuplicate", server.Address)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+// normalizedEndpointAddress makes equivalent host spellings share one key.
+// Port numbers are normalized too, so a direct Runtime caller cannot bypass
+// the duplicate contract with a leading zero or a different hostname case.
+func normalizedEndpointAddress(address string, requirePort bool) string {
+	address = strings.TrimSpace(address)
+	if requirePort {
+		if host, port, err := net.SplitHostPort(address); err == nil {
+			if number, err := strconv.Atoi(port); err == nil {
+				port = strconv.Itoa(number)
+			}
+			return net.JoinHostPort(normalizedEndpointHost(host), port)
+		}
+	}
+	return normalizedEndpointHost(address)
+}
+
+func normalizedEndpointHost(host string) string {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+// endpointExecutionFamily mirrors the family choices made by the probes for
+// the parts that can be known at validation time. An explicit family and a
+// literal address are concrete; otherwise the Runtime mode (or auto) is the
+// operational choice. Family is part of the key only because it can change
+// which network operation is executed.
+func endpointExecutionFamily(endpoint Endpoint, runtimeIPVersion string, requirePort bool) string {
+	if endpoint.Family == IPVersion4 || endpoint.Family == IPVersion6 {
+		return endpoint.Family
+	}
+	host := strings.TrimSpace(endpoint.Address)
+	if requirePort {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() != nil {
+			return IPVersion4
+		}
+		return IPVersion6
+	}
+	if strings.Contains(strings.ToLower(host), "-v6.") {
+		return IPVersion6
+	}
+	if runtimeIPVersion == IPVersion4 || runtimeIPVersion == IPVersion6 {
+		return runtimeIPVersion
+	}
+	return IPVersionAuto
 }

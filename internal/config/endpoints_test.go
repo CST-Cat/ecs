@@ -54,6 +54,97 @@ func TestParseEndpointListRejectsDistinctInputs(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDuplicateOperationalEndpoints(t *testing.T) {
+	useEnglish(t)
+	cases := []struct {
+		name   string
+		mutate func(*Runtime)
+	}{
+		{
+			name: "DNS ignores display name and normalizes address",
+			mutate: func(runtime *Runtime) {
+				runtime.DNSResolvers = []Endpoint{
+					{Name: "primary", Address: "Example.COM.:53"},
+					{Name: "backup label", Address: "example.com:053"},
+				}
+			},
+		},
+		{
+			name: "latency ignores display name and normalizes address",
+			mutate: func(runtime *Runtime) {
+				runtime.LatencyTargets = []Endpoint{
+					{Name: "primary", Address: "Example.COM.:443"},
+					{Name: "backup label", Address: "example.com:0443"},
+				}
+			},
+		},
+		{
+			name: "route ignores display name and normalizes address",
+			mutate: func(runtime *Runtime) {
+				runtime.RouteTargets = []Endpoint{
+					{Name: "primary", Address: "Example.COM."},
+					{Name: "backup label", Address: "example.com"},
+				}
+			},
+		},
+		{
+			name: "STUN normalizes host and port",
+			mutate: func(runtime *Runtime) {
+				runtime.STUNServers = []Endpoint{
+					{Name: "primary", Address: "STUN.Example.COM.:3478"},
+					{Name: "backup label", Address: "stun.example.com:03478"},
+				}
+			},
+		},
+		{
+			name: "backtrace ignores display name and normalizes address",
+			mutate: func(runtime *Runtime) {
+				runtime.BacktraceTargets = []Endpoint{
+					{Name: "primary", Address: "Example.COM.", Kind: BacktraceCarrierTelecom},
+					{Name: "backup label", Address: "example.com", Kind: BacktraceCarrierUnicom},
+				}
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := validRuntime(t)
+			test.mutate(&runtime)
+			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
+				t.Fatalf("Validate duplicate runtime = %v, want explicit duplicate error", err)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsDistinctOperationalEndpoints(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	runtime.DNSResolvers = []Endpoint{
+		{Name: "dns-a", Address: "example.com:53"},
+		{Name: "dns-b", Address: "example.com:5353"},
+	}
+	runtime.LatencyTargets = []Endpoint{
+		{Name: "latency-a", Address: "example.com:443", Family: IPVersion4},
+		{Name: "latency-b", Address: "example.com:443", Family: IPVersion6},
+	}
+	runtime.RouteTargets = []Endpoint{
+		{Name: "route-a", Address: "example.com", Family: IPVersion4},
+		{Name: "route-b", Address: "example.com", Family: IPVersion6},
+	}
+	runtime.STUNServers = []Endpoint{
+		{Name: "stun-a", Address: "stun.example.com:3478"},
+		{Name: "stun-b", Address: "stun.example.com:5349"},
+	}
+	runtime.BacktraceTargets = []Endpoint{
+		{Name: "trace-a", Address: "example.com", Kind: BacktraceCarrierTelecom, Family: IPVersion4},
+		{Name: "trace-b", Address: "example.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
+	}
+	if err := Validate(runtime); err != nil {
+		t.Fatalf("Validate distinct operational endpoints = %v, want nil", err)
+	}
+}
+
 func TestParseIPerfTargetListSupportsForms(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {

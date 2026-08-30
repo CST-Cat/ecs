@@ -282,6 +282,26 @@ func TestApplyFileAppliesExplicitEmptyCollections(t *testing.T) {
 	requireError(t, Validate(runtime), "at least one output format")
 }
 
+func TestValidateRejectsDuplicateTargetsFromConfigFile(t *testing.T) {
+	useEnglish(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"route_targets":[{"name":"primary","address":"Example.COM."},{"name":"backup label","address":"example.com"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("Validate duplicate config targets = %v, want explicit duplicate error", err)
+	}
+}
+
 func TestApplyFileDiagnostics(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {
