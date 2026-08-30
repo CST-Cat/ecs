@@ -157,6 +157,17 @@ func TestDimensionsOwnScoreMembership(t *testing.T) {
 	}
 }
 
+func TestValidateDimensionsRejectsUnknownModule(t *testing.T) {
+	dimensions := []Dimension{{
+		Key:      "unknown-module",
+		ModuleID: "nonexistent",
+		Metrics:  []Metric{{Key: "metric", MeasurementKey: "measurement"}},
+	}}
+	if err := validateDimensions(dimensions); err == nil || !strings.Contains(err.Error(), `references unknown module "nonexistent"`) {
+		t.Fatalf("unknown module validation error = %v", err)
+	}
+}
+
 func TestDimensionsAndComputeFullFixture(t *testing.T) {
 	if err := ValidateDimensions(); err != nil {
 		t.Fatalf("score descriptor contract = %v", err)

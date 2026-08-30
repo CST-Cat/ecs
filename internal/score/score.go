@@ -143,7 +143,10 @@ func Dimensions() []Dimension {
 // membership and metric contract; module descriptors only need to identify
 // modules that exist in the execution catalog.
 func ValidateDimensions() error {
-	dimensions := Dimensions()
+	return validateDimensions(Dimensions())
+}
+
+func validateDimensions(dimensions []Dimension) error {
 	seenDimensions := make(map[string]bool, len(dimensions))
 	seenMetrics := make(map[string]string)
 	for _, dimension := range dimensions {
