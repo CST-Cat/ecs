@@ -90,7 +90,7 @@ ecs --ip-version auto
 
 `auto` 按主机和模块能力选择协议族，支持双栈的模块会分别记录 IPv4/IPv6。
 
-端点格式统一为 `[name=]address`，逗号分隔：
+大多数端点列表格式为 `[name=]address`，逗号分隔。三网回程是特例，使用 `carrier:Name=host`；`carrier` 只能是机器标识 `telecom`、`unicom` 或 `mobile`，展示名不用于推断运营商：
 
 ```sh
 ecs --only speed --iperf-targets "自建=iperf.example.net:5201-5210" --speed-threads 16
@@ -98,7 +98,7 @@ ecs --only dns --dns-resolvers "Cloudflare=1.1.1.1:53,AliDNS=223.5.5.5:53" --dns
 ecs --only latency --latency-targets "自家=api.example.com:443" --latency-attempts 20
 ecs --only route --route-targets "Google=8.8.8.8,AliDNS=223.5.5.5"
 ecs --only nat --stun-servers "Xiaomi=stun.miwifi.com:3478"
-ecs --only backtrace --backtrace-targets "上海电信=202.96.209.133"
+ecs --only backtrace --backtrace-targets "telecom:上海电信=202.96.209.133"
 ecs --only ookla --ookla-servers "电信=1234,联通=5678,移动=9012"
 ```
 

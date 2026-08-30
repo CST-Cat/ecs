@@ -90,7 +90,7 @@ ecs --ip-version auto
 
 `auto` chooses a protocol family from host and module capabilities; dual-stack modules record IPv4 and IPv6 separately.
 
-Endpoint lists use `[name=]address`, separated by commas:
+Most endpoint lists use `[name=]address`, separated by commas. Backtrace is the exception and uses `carrier:Name=host`; `carrier` must be the machine identity `telecom`, `unicom`, or `mobile`. The display name is not used to infer the carrier:
 
 ```sh
 ecs --only speed --iperf-targets "custom=iperf.example.net:5201-5210" --speed-threads 16
@@ -98,7 +98,7 @@ ecs --only dns --dns-resolvers "Cloudflare=1.1.1.1:53,AliDNS=223.5.5.5:53" --dns
 ecs --only latency --latency-targets "private=api.example.com:443" --latency-attempts 20
 ecs --only route --route-targets "Google=8.8.8.8,AliDNS=223.5.5.5"
 ecs --only nat --stun-servers "Xiaomi=stun.miwifi.com:3478"
-ecs --only backtrace --backtrace-targets "Shanghai Telecom=202.96.209.133"
+ecs --only backtrace --backtrace-targets "telecom:Shanghai Telecom=202.96.209.133"
 ecs --only ookla --ookla-servers "Telecom=1234,Unicom=5678,Mobile=9012"
 ```
 
