@@ -352,7 +352,7 @@ func TestListRejectsRemovedMachineManifestFormats(t *testing.T) {
 func TestRunConfigExplicitEmptyCLIOverridesFileCollections(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	content := `{"formats":["md"],"dns_resolvers":[{"name":"file-dns","address":"1.1.1.1:53"}],"iperf_targets":[{"name":"file-iperf","host":"example.com","port_start":5201,"port_end":5201}],"media_regions":["jp"],"ookla_servers":[{"carrier":"telecom","id":1}]}`
+	content := `{"formats":["md"],"dns_resolvers":[{"name":"file-dns","address":"1.1.1.1:53"}],"iperf_targets":[{"name":"file-iperf","host":"example.com","port_start":5201,"port_end":5201}],"media_regions":["jp"],"backtrace_targets":[{"name":"file-backtrace","address":"1.1.1.1","kind":"telecom"}],"ookla_servers":[{"carrier":"telecom","id":1}]}`
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -363,16 +363,29 @@ func TestRunConfigExplicitEmptyCLIOverridesFileCollections(t *testing.T) {
 		"--dns-resolvers", "",
 		"--iperf-targets", "",
 		"--media-region", "",
+		"--backtrace-city", "",
 		"--ookla-servers", "",
 	}, &stderr)
 	if err != nil {
 		t.Fatalf("explicit empty CLI overlay: %v (stderr=%q)", err, stderr.String())
 	}
-	if len(resolved.Runtime.DNSResolvers) != 0 || len(resolved.Runtime.IPerfTargets) != 0 || len(resolved.Runtime.MediaRegions) != 0 || len(resolved.Runtime.OoklaServers) != 0 {
-		t.Fatalf("explicit empty CLI collections were not applied: dns=%v iperf=%v media=%v ookla=%v", resolved.Runtime.DNSResolvers, resolved.Runtime.IPerfTargets, resolved.Runtime.MediaRegions, resolved.Runtime.OoklaServers)
+	if len(resolved.Runtime.DNSResolvers) != 0 || len(resolved.Runtime.IPerfTargets) != 0 || len(resolved.Runtime.MediaRegions) != 0 || len(resolved.Runtime.BacktraceTargets) != 0 || len(resolved.Runtime.OoklaServers) != 0 {
+		t.Fatalf("explicit empty CLI collections were not applied: dns=%v iperf=%v media=%v backtrace=%v ookla=%v", resolved.Runtime.DNSResolvers, resolved.Runtime.IPerfTargets, resolved.Runtime.MediaRegions, resolved.Runtime.BacktraceTargets, resolved.Runtime.OoklaServers)
 	}
 	if err := config.Validate(resolved.Runtime); err != nil {
 		t.Fatalf("valid runtime with empty optional collections rejected: %v", err)
+	}
+	for _, raw := range []string{" ", ",,"} {
+		resolved, err = resolveRunConfig([]string{
+			"--config", configPath,
+			"--backtrace-city", raw,
+		}, &stderr)
+		if err != nil {
+			t.Fatalf("explicit effectively empty backtrace city %q: %v (stderr=%q)", raw, err, stderr.String())
+		}
+		if len(resolved.Runtime.BacktraceTargets) != 0 {
+			t.Fatalf("backtrace city %q retained file targets: %v", raw, resolved.Runtime.BacktraceTargets)
+		}
 	}
 
 	resolved, err = resolveRunConfig([]string{

@@ -279,11 +279,15 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		cfg.MediaRegions = regions
 	}
 	if explicit["backtrace-city"] {
-		cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+		if len(config.ParseList(*backtraceCityFlag)) == 0 {
+			cfg.BacktraceTargets = []config.Endpoint{}
+		} else {
+			cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
+			if err != nil {
+				return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+			}
+			cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 		}
-		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 	}
 	if explicit["backtrace-targets"] {
 		targets, err := config.ParseBacktraceTargetList(*backtraceTargetsFlag)
