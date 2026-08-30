@@ -22,6 +22,17 @@ var ipQualitySourceIDs = []string{
 	"ipsb",
 }
 
+// mediaRegionIDs is the canonical set and order of configurable media-region
+// identities. Keep region-to-rule mappings in the probe package: this slice
+// owns only the configuration identity and its stable selection order.
+var mediaRegionIDs = []string{"global", "jp", "tw", "hk", "cn"}
+
+// MediaRegionIDs returns the canonical media-region IDs in stable selection
+// order. The returned slice is a copy, so callers cannot mutate the catalog.
+func MediaRegionIDs() []string {
+	return append([]string(nil), mediaRegionIDs...)
+}
+
 // IPQualitySourceIDs returns the canonical IP quality source IDs in their
 // stable display, execution, and report order. The returned slice is a copy.
 func IPQualitySourceIDs() []string {
@@ -174,9 +185,8 @@ func ValidBacktraceCarrier(carrier string) bool {
 
 // ValidateMediaRegions validates the media region selection.
 func ValidateMediaRegions(regions []string) error {
-	known := map[string]bool{"global": true, "jp": true, "tw": true, "hk": true, "cn": true}
 	for _, region := range regions {
-		if !known[region] {
+		if !contains(mediaRegionIDs, region) {
 			return i18n.Errorf("err.unknownMediaRegion", region)
 		}
 	}

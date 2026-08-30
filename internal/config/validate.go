@@ -76,6 +76,9 @@ func Validate(runtime Runtime) error {
 	if len(runtime.IPQualitySources) > 1 && (contains(runtime.IPQualitySources, "all") || contains(runtime.IPQualitySources, "none")) {
 		return i18n.Errorf("err.ipSourceCombo")
 	}
+	if err := ValidateMediaRegions(runtime.MediaRegions); err != nil {
+		return err
+	}
 	for _, group := range [][]Endpoint{runtime.DNSResolvers, runtime.LatencyTargets} {
 		for _, endpoint := range group {
 			if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {

@@ -101,6 +101,32 @@ func TestIPQualitySourceParsingDeduplicatesAndValidationRejectsUnknown(t *testin
 	requireError(t, Validate(runtime), "unknown IP quality source")
 }
 
+func TestMediaRegionCatalogHasStableOrderAndIdentity(t *testing.T) {
+	useEnglish(t)
+	want := []string{"global", "jp", "tw", "hk", "cn"}
+	got := MediaRegionIDs()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("media region IDs = %v, want %v", got, want)
+	}
+	got[0] = "mutated"
+	if !reflect.DeepEqual(MediaRegionIDs(), want) {
+		t.Fatal("media region catalog leaked mutable storage")
+	}
+	for _, region := range want {
+		if err := ValidateMediaRegions([]string{region}); err != nil {
+			t.Fatalf("canonical media region %q rejected: %v", region, err)
+		}
+	}
+	requireError(t, ValidateMediaRegions([]string{"mars"}), "unknown streaming region")
+}
+
+func TestValidateRejectsUnknownMediaRegion(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	runtime.MediaRegions = []string{"mars"}
+	requireError(t, Validate(runtime), "unknown streaming region")
+}
+
 func TestDefaultsUseStableEndpointKinds(t *testing.T) {
 	runtime, err := Defaults(ProfileStandard)
 	if err != nil {
@@ -191,6 +217,24 @@ func TestLoadApplyValidateRejectsInvalidEndpointFromConfigFile(t *testing.T) {
 	if err := Validate(runtime); err == nil {
 		t.Fatal("Validate accepted invalid endpoint loaded from config file")
 	}
+}
+
+func TestLoadApplyValidateRejectsUnknownMediaRegionFromConfigFile(t *testing.T) {
+	useEnglish(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"media_regions":["mars"]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile = %v", err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatalf("ApplyFile = %v", err)
+	}
+	requireError(t, Validate(runtime), "unknown streaming region")
 }
 
 func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {

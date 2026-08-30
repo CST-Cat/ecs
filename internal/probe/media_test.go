@@ -109,20 +109,29 @@ func TestMediaRulesCoverPlatformAndHTTPVerdicts(t *testing.T) {
 	}
 }
 
-func TestMediaRegionOrderReturnsCopy(t *testing.T) {
-	original := MediaRegionOrder()
+func TestMediaRegionSelectionUsesConfigCatalog(t *testing.T) {
+	original := config.MediaRegionIDs()
 	want := []string{"global", "jp", "tw", "hk", "cn"}
 	if !reflect.DeepEqual(original, want) {
-		t.Fatalf("MediaRegionOrder = %v, want %v", original, want)
+		t.Fatalf("config.MediaRegionIDs = %v, want %v", original, want)
 	}
 	mutated := append([]string(nil), original...)
-	if len(mutated) == 0 {
-		t.Fatal("media region order must not be empty")
-	}
 	mutated[0] = "mutated"
-	got := MediaRegionOrder()
-	if !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
-		t.Fatalf("MediaRegionOrder returned mutable canonical data: %v", got)
+	if got := config.MediaRegionIDs(); !reflect.DeepEqual(got, original) || reflect.DeepEqual(got, mutated) {
+		t.Fatalf("config.MediaRegionIDs returned mutable canonical data: %v", got)
+	}
+}
+
+func TestMediaRegionSelectionKeepsEmptyDefaultAndRejectsUnknownExpansion(t *testing.T) {
+	all := mediaChecks()
+	if got := mediaChecksForRegions(nil); len(got) != len(all) {
+		t.Fatalf("empty media region selection = %d checks, want %d", len(got), len(all))
+	}
+	if got := mediaChecksForRegions([]string{}); len(got) != len(all) {
+		t.Fatalf("explicit empty media region selection = %d checks, want %d", len(got), len(all))
+	}
+	if got := mediaChecksForRegions([]string{"mars"}); len(got) != 0 {
+		t.Fatalf("unknown-only media region selection = %d checks, want no expansion", len(got))
 	}
 }
 
