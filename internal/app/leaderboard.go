@@ -282,10 +282,10 @@ func formatOutlier(item score.Outlier) string {
 
 func formatUndecidable(item score.Undecidable) string {
 	switch item.Reason {
-	case "insufficient_samples":
+	case score.UndecidableInsufficientSamples:
 		return fmt.Sprintf(i18n.T("baseline.undecidableFew"),
 			score.TierLabel(item.TierMinVCPU), item.MetricKey, item.SampleCount, item.Required)
-	case "zero_dispersion":
+	case score.UndecidableZeroDispersion:
 		return fmt.Sprintf(i18n.T("baseline.undecidableZero"), score.TierLabel(item.TierMinVCPU), item.MetricKey)
 	default:
 		return fmt.Sprintf(i18n.T("baseline.undecidableOther"), score.TierLabel(item.TierMinVCPU), item.MetricKey, item.Reason)

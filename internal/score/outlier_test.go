@@ -41,8 +41,8 @@ func TestDetectOutlierStates(t *testing.T) {
 			name:        "too few samples",
 			submissions: normal[:2],
 			wantUndecidable: []Undecidable{
-				{TierMinVCPU: 4, MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
-				{TierMinVCPU: 4, MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+				{TierMinVCPU: 4, MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: UndecidableInsufficientSamples},
+				{TierMinVCPU: 4, MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: UndecidableInsufficientSamples},
 			},
 		},
 		{name: "ordinary spread", submissions: normal},
@@ -50,8 +50,8 @@ func TestDetectOutlierStates(t *testing.T) {
 			name:        "zero dispersion",
 			submissions: flat,
 			wantUndecidable: []Undecidable{
-				{TierMinVCPU: 4, MetricKey: "cpu_single", SampleCount: 9, Required: 8, Reason: "zero_dispersion"},
-				{TierMinVCPU: 4, MetricKey: "memory_copy", SampleCount: 9, Required: 8, Reason: "zero_dispersion"},
+				{TierMinVCPU: 4, MetricKey: "cpu_single", SampleCount: 9, Required: 8, Reason: UndecidableZeroDispersion},
+				{TierMinVCPU: 4, MetricKey: "memory_copy", SampleCount: 9, Required: 8, Reason: UndecidableZeroDispersion},
 			},
 		},
 		{
@@ -59,8 +59,8 @@ func TestDetectOutlierStates(t *testing.T) {
 			submissions:  spikes,
 			wantOutliers: 2,
 			wantUndecidable: []Undecidable{
-				{TierMinVCPU: 8, MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
-				{TierMinVCPU: 8, MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: "insufficient_samples"},
+				{TierMinVCPU: 8, MetricKey: "cpu_single", SampleCount: 2, Required: 8, Reason: UndecidableInsufficientSamples},
+				{TierMinVCPU: 8, MetricKey: "memory_copy", SampleCount: 2, Required: 8, Reason: UndecidableInsufficientSamples},
 			},
 		},
 	}
@@ -131,7 +131,7 @@ func TestDetectOutliersIsRepresentationInvariant(t *testing.T) {
 		}
 	}
 	wantUndecidable := Undecidable{
-		TierMinVCPU: 4, MetricKey: "cpu_multi", SampleCount: 1, Required: 8, Reason: "insufficient_samples",
+		TierMinVCPU: 4, MetricKey: "cpu_multi", SampleCount: 1, Required: 8, Reason: UndecidableInsufficientSamples,
 	}
 	if len(fromReports.Undecidable) != 1 || fromReports.Undecidable[0] != wantUndecidable {
 		t.Fatalf("undecidable facts = %+v, want %+v", fromReports.Undecidable, wantUndecidable)

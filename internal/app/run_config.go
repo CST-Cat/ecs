@@ -49,10 +49,6 @@ func (f *runLanguageFlag) Set(value string) error {
 	return nil
 }
 
-func isMissingRunLanguageError(err error) bool {
-	return err != nil && (err.Error() == "flag needs an argument: -lang" || strings.Contains(err.Error(), "--lang requires a value"))
-}
-
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
@@ -105,9 +101,6 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	versionFlag := flags.Bool("version", false, "flag.version")
 	flags.Usage = func() { printRunHelp(parseOutput, flags) }
 	if err := flags.Parse(args); err != nil {
-		if isMissingRunLanguageError(err) {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --lang requires a value", i18n.T("cli.error"))
-		}
 		if *helpFlag || *hFlag || errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(stderr)
 			printRunHelp(stderr, flags)

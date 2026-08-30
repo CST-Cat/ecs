@@ -24,7 +24,7 @@ set -eu
 REPO="${ECS_REPOSITORY:-CST-Cat/ecs}"
 VERSION="${ECS_VERSION:-latest}"
 
-# wrapper 自身的提示跟随环境语言；--lang 等参数原样交给 ecs compare。
+# wrapper 自身的提示跟随 ECS_LANG；二进制全局语言写作 `ecs --lang en compare ...`。
 LANG_SEL="${ECS_LANG:-${LC_ALL:-${LANG:-}}}"
 case "$LANG_SEL" in
   en*|EN*) UI=en ;;

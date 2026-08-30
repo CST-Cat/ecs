@@ -69,6 +69,14 @@ type Outlier struct {
 	Ratio float64
 }
 
+// UndecidableReason 是无法完成离群判定的机器可读原因。
+type UndecidableReason string
+
+const (
+	UndecidableInsufficientSamples UndecidableReason = "insufficient_samples"
+	UndecidableZeroDispersion      UndecidableReason = "zero_dispersion"
+)
+
 // Undecidable 是无法完成离群判定的一组结构化事实。
 type Undecidable struct {
 	// TierMinVCPU 是比较档位的 vCPU 下界。
@@ -80,7 +88,7 @@ type Undecidable struct {
 	// Required 是检测器要求的最少样本数。
 	Required int
 	// Reason 是无法判定的机器可读原因。
-	Reason string
+	Reason UndecidableReason
 }
 
 // OutlierReport 是一次检测的完整结果。
@@ -139,7 +147,7 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 					MetricKey:   metricKey,
 					SampleCount: len(values),
 					Required:    minOutlierSamples,
-					Reason:      "insufficient_samples",
+					Reason:      UndecidableInsufficientSamples,
 				})
 				continue
 			}
@@ -151,7 +159,7 @@ func DetectOutliers(samples []OutlierSample) OutlierReport {
 					MetricKey:   metricKey,
 					SampleCount: len(values),
 					Required:    minOutlierSamples,
-					Reason:      "zero_dispersion",
+					Reason:      UndecidableZeroDispersion,
 				})
 				continue
 			}
