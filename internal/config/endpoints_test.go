@@ -165,6 +165,114 @@ func TestValidateAcceptsExecutableEndpointHostPorts(t *testing.T) {
 	}
 }
 
+func TestValidateEndpointFamilyLiteralConsistency(t *testing.T) {
+	useEnglish(t)
+	groups := []struct {
+		name    string
+		address func(string) string
+		set     func(*Runtime, Endpoint)
+	}{
+		{
+			name: "DNS",
+			address: func(value string) string {
+				return value + ":53"
+			},
+			set: func(runtime *Runtime, endpoint Endpoint) {
+				runtime.DNSResolvers = []Endpoint{endpoint}
+			},
+		},
+		{
+			name: "latency",
+			address: func(value string) string {
+				return value + ":443"
+			},
+			set: func(runtime *Runtime, endpoint Endpoint) {
+				runtime.LatencyTargets = []Endpoint{endpoint}
+			},
+		},
+		{
+			name:    "route",
+			address: func(value string) string { return value },
+			set: func(runtime *Runtime, endpoint Endpoint) {
+				runtime.RouteTargets = []Endpoint{endpoint}
+			},
+		},
+		{
+			name:    "backtrace",
+			address: func(value string) string { return value },
+			set: func(runtime *Runtime, endpoint Endpoint) {
+				runtime.BacktraceTargets = []Endpoint{endpoint}
+			},
+		},
+	}
+	addresses := []struct {
+		name, value, matching, contradictory string
+	}{
+		{name: "IPv4", value: "192.0.2.1", matching: IPVersion4, contradictory: IPVersion6},
+		{name: "IPv6", value: "[2001:db8::1]", matching: IPVersion6, contradictory: IPVersion4},
+	}
+	for _, group := range groups {
+		for _, address := range addresses {
+			for _, test := range []struct {
+				name      string
+				family    string
+				wantError bool
+			}{
+				{name: "empty family", family: ""},
+				{name: "matching family", family: address.matching},
+				{name: "contradictory family", family: address.contradictory, wantError: true},
+			} {
+				t.Run(group.name+"/"+address.name+"/"+test.name, func(t *testing.T) {
+					runtime := validRuntime(t)
+					endpoint := Endpoint{Name: "target", Address: group.address(address.value), Family: test.family}
+					if group.name == "backtrace" {
+						endpoint.Kind = BacktraceCarrierTelecom
+					}
+					group.set(&runtime, endpoint)
+					err := Validate(runtime)
+					if test.wantError {
+						if err == nil || !strings.Contains(err.Error(), "contradict") {
+							t.Fatalf("Validate(%+v) = %v, want literal family contradiction", endpoint, err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("Validate(%+v) = %v, want nil", endpoint, err)
+					}
+				})
+			}
+		}
+		for _, family := range []string{IPVersion4, IPVersion6} {
+			t.Run(group.name+"/hostname/"+family, func(t *testing.T) {
+				runtime := validRuntime(t)
+				group.set(&runtime, Endpoint{Name: "target", Address: group.address("edge-v6.example.com"), Family: family, Kind: BacktraceCarrierTelecom})
+				if err := Validate(runtime); err != nil {
+					t.Fatalf("Validate hostname with family %q = %v, want nil", family, err)
+				}
+			})
+		}
+	}
+}
+
+func TestValidateRejectsSTUNEndpointFamily(t *testing.T) {
+	useEnglish(t)
+	for _, test := range []struct {
+		name, address, family string
+	}{
+		{name: "hostname", address: "stun.example.com:3478", family: IPVersion4},
+		{name: "IPv4 literal", address: "1.1.1.1:3478", family: IPVersion4},
+		{name: "IPv6 literal", address: "[2001:db8::1]:3478", family: IPVersion6},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := validRuntime(t)
+			runtime.STUNServers = []Endpoint{{Name: "stun", Address: test.address, Family: test.family}}
+			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "cannot set family") {
+				t.Fatalf("Validate(STUN endpoint %+v) = %v, want unsupported family error", runtime.STUNServers[0], err)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsDuplicateOperationalEndpoints(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {

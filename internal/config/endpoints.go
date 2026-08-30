@@ -99,20 +99,15 @@ func ParseBacktraceTargetList(raw string) ([]Endpoint, error) {
 	return targets, nil
 }
 
-// inferEndpointFamily records facts that can be established without DNS.  A
-// literal is unambiguous; the backtrace target list also uses a -v6 hostname
-// convention so an IPv6-only hostname is not accidentally routed over IPv4.
-func inferEndpointFamily(address string, requirePort bool) string {
+// literalEndpointFamily records only the protocol family intrinsic to a
+// literal address. Hostname conventions are deliberately excluded: callers
+// may use Family to pin a hostname even when its name contains a v6 hint.
+func literalEndpointFamily(address string, requirePort bool) string {
 	host := address
-	if !requirePort {
-		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
-			if ip.To4() != nil {
-				return IPVersion4
-			}
-			return IPVersion6
+	if requirePort {
+		if parsedHost, _, err := splitHostPort(address); err == nil {
+			host = parsedHost
 		}
-	} else if parsedHost, _, err := splitHostPort(address); err == nil {
-		host = parsedHost
 	}
 	host = strings.Trim(host, "[]")
 	if ip := net.ParseIP(host); ip != nil {
@@ -121,6 +116,23 @@ func inferEndpointFamily(address string, requirePort bool) string {
 		}
 		return IPVersion6
 	}
+	return ""
+}
+
+// inferEndpointFamily records facts that can be established without DNS.  A
+// literal is unambiguous; the backtrace target list also uses a -v6 hostname
+// convention so an IPv6-only hostname is not accidentally routed over IPv4.
+func inferEndpointFamily(address string, requirePort bool) string {
+	if family := literalEndpointFamily(address, requirePort); family != "" {
+		return family
+	}
+	host := address
+	if requirePort {
+		if parsedHost, _, err := splitHostPort(address); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.Trim(host, "[]")
 	if strings.Contains(strings.ToLower(host), "-v6.") {
 		return IPVersion6
 	}

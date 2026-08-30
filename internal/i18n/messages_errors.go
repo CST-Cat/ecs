@@ -49,6 +49,7 @@ var errorChinese = map[string]string{
 	"err.endpointDuplicate":      "端点 %q 重复",
 	"err.endpointNameAddress":    "自定义测试端点必须同时包含 name 和 address",
 	"err.endpointFamily":         "测试端点 %q 的 family 必须是 4、6 或空值",
+	"err.endpointFamilyMismatch": "测试端点 %q 的 family %q 与字面地址的协议族 %q 冲突",
 	"err.portMissing":            "缺少端口",
 	"err.portInvalid":            "端口无效",
 
@@ -66,14 +67,15 @@ var errorChinese = map[string]string{
 	"err.cityAllCombo":         "回程城市 all 不能与其他城市组合",
 
 	// ── STUN 与 iperf3 ──────────────────────────────────────
-	"err.stunNameAddress":  "STUN 服务器必须同时包含 name 和 address",
-	"err.stunHostPort":     "STUN 服务器 %q 必须是 host:port 形式",
-	"err.iperfNodeFormat":  "iperf3 节点 %q 必须是 host:port 或 host:start-end 形式",
-	"err.iperfNodeHost":    "iperf3 节点主机 %q 不是安全的 IP 或主机名",
-	"err.iperfNodeStart":   "iperf3 节点 %q 起始端口无效",
-	"err.iperfNodeRange":   "iperf3 节点 %q 端口范围无效",
-	"err.iperfNodeName":    "iperf3 节点名称或主机无效: %q",
-	"err.iperfNodeNetwork": "iperf3 节点 %q networks 必须是 IPv4、IPv6 或 IPv4|IPv6",
+	"err.stunNameAddress":       "STUN 服务器必须同时包含 name 和 address",
+	"err.stunHostPort":          "STUN 服务器 %q 必须是 host:port 形式",
+	"err.stunFamilyUnsupported": "STUN 服务器 %q 不支持设置 family；NAT 使用运行时 IP 协议族",
+	"err.iperfNodeFormat":       "iperf3 节点 %q 必须是 host:port 或 host:start-end 形式",
+	"err.iperfNodeHost":         "iperf3 节点主机 %q 不是安全的 IP 或主机名",
+	"err.iperfNodeStart":        "iperf3 节点 %q 起始端口无效",
+	"err.iperfNodeRange":        "iperf3 节点 %q 端口范围无效",
+	"err.iperfNodeName":         "iperf3 节点名称或主机无效: %q",
+	"err.iperfNodeNetwork":      "iperf3 节点 %q networks 必须是 IPv4、IPv6 或 IPv4|IPv6",
 
 	// ── Ookla 服务器 ────────────────────────────────────────
 	"err.ooklaFormat":       "Ookla 节点必须是 运营商=服务器ID",
@@ -148,6 +150,7 @@ var errorEnglish = map[string]string{
 	"err.endpointDuplicate":      "endpoint %q is duplicated",
 	"err.endpointNameAddress":    "custom test endpoints must have both name and address",
 	"err.endpointFamily":         "test endpoint %q family must be 4, 6, or empty",
+	"err.endpointFamilyMismatch": "test endpoint %q family %q contradicts its literal address family %q",
 	"err.portMissing":            "missing port",
 	"err.portInvalid":            "invalid port",
 
@@ -165,14 +168,15 @@ var errorEnglish = map[string]string{
 	"err.cityAllCombo":         "backtrace city all cannot be combined with other cities",
 
 	// ── STUN and iperf3 ─────────────────────────────────────
-	"err.stunNameAddress":  "STUN servers must have both name and address",
-	"err.stunHostPort":     "STUN server %q must be in host:port form",
-	"err.iperfNodeFormat":  "iperf3 node %q must be in host:port or host:start-end form",
-	"err.iperfNodeHost":    "iperf3 node host %q is not a safe IP or hostname",
-	"err.iperfNodeStart":   "iperf3 node %q has an invalid start port",
-	"err.iperfNodeRange":   "iperf3 node %q has an invalid port range",
-	"err.iperfNodeName":    "invalid iperf3 node name or host: %q",
-	"err.iperfNodeNetwork": "iperf3 node %q networks must be IPv4, IPv6, or IPv4|IPv6",
+	"err.stunNameAddress":       "STUN servers must have both name and address",
+	"err.stunHostPort":          "STUN server %q must be in host:port form",
+	"err.stunFamilyUnsupported": "STUN server %q cannot set family; NAT uses the runtime IP family",
+	"err.iperfNodeFormat":       "iperf3 node %q must be in host:port or host:start-end form",
+	"err.iperfNodeHost":         "iperf3 node host %q is not a safe IP or hostname",
+	"err.iperfNodeStart":        "iperf3 node %q has an invalid start port",
+	"err.iperfNodeRange":        "iperf3 node %q has an invalid port range",
+	"err.iperfNodeName":         "invalid iperf3 node name or host: %q",
+	"err.iperfNodeNetwork":      "iperf3 node %q networks must be IPv4, IPv6, or IPv4|IPv6",
 
 	// ── Ookla servers ───────────────────────────────────────
 	"err.ooklaFormat":       "Ookla nodes must be in carrier=server-id form",

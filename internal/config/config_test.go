@@ -232,6 +232,24 @@ func TestLoadApplyValidateRejectsInvalidEndpointFromConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadApplyValidateRejectsContradictoryEndpointFamilyFromConfigFile(t *testing.T) {
+	useEnglish(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"dns_resolvers":[{"name":"dns","address":"1.1.1.1:53","family":"6"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile = %v", err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatalf("ApplyFile = %v", err)
+	}
+	requireError(t, Validate(runtime), "contradicts")
+}
+
 func TestLoadApplyValidateRejectsUnknownMediaRegionFromConfigFile(t *testing.T) {
 	useEnglish(t)
 	path := filepath.Join(t.TempDir(), "config.json")

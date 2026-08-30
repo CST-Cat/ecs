@@ -105,6 +105,9 @@ func Validate(runtime Runtime) error {
 			if !validEndpointFamily(endpoint.Family) {
 				return i18n.Errorf("err.endpointFamily", endpoint.Name)
 			}
+			if literalFamily := literalEndpointFamily(endpoint.Address, true); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+				return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
+			}
 		}
 	}
 	if err := validateEndpointDuplicates(runtime.DNSResolvers, runtime.IPVersion, true); err != nil {
@@ -123,6 +126,9 @@ func Validate(runtime Runtime) error {
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.routeFamily", endpoint.Name)
 		}
+		if literalFamily := literalEndpointFamily(endpoint.Address, false); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
+		}
 	}
 	if err := validateEndpointDuplicates(runtime.RouteTargets, runtime.IPVersion, false); err != nil {
 		return err
@@ -134,6 +140,9 @@ func Validate(runtime Runtime) error {
 		host, _, err := splitHostPort(endpoint.Address)
 		if err != nil || host == "" || !validRouteTarget(host) {
 			return i18n.Errorf("err.stunHostPort", endpoint.Address)
+		}
+		if endpoint.Family != "" {
+			return i18n.Errorf("err.stunFamilyUnsupported", endpoint.Name)
 		}
 	}
 	if err := validateSTUNDuplicates(runtime.STUNServers); err != nil {
@@ -148,6 +157,9 @@ func Validate(runtime Runtime) error {
 		}
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.backtraceFamily", endpoint.Name)
+		}
+		if literalFamily := literalEndpointFamily(endpoint.Address, false); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 		if !ValidBacktraceCarrier(endpoint.Kind) {
 			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
