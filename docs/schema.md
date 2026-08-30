@@ -109,6 +109,10 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 示例中的 `tool_sha256` 值 `…` 仅是说明性占位，不代表真实工具摘要；该代码块仍是语法有效的 JSON，字段名、JSON tag
 和类型与当前模型一致。
 
+在当前 `ecs.report/v1` 中，`Result.id` 必须非空，并且在同一份报告内唯一。每个
+`Measurement.key` 必须非空，并且只需在其所属的 `Result` 内唯一；不同 `Result.id`
+下可以使用相同的 measurement key，因为结果 ID 是 measurement 的 owner。
+
 `status` 只有四种：
 
 - `ok`：探针按计划完成；

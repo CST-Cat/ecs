@@ -263,6 +263,16 @@ func TestComputeMissingAndInvalidValues(t *testing.T) {
 	if gotDuplicate := Compute(duplicateResultID, baseline); gotDuplicate != nil {
 		t.Fatalf("duplicate result ID report was accepted: %+v", gotDuplicate)
 	}
+	emptyResultID := scoreReportFixture()
+	emptyResultID.Results[0].ID = ""
+	if gotEmpty := Compute(emptyResultID, baseline); gotEmpty != nil {
+		t.Fatalf("empty result ID report was accepted: %+v", gotEmpty)
+	}
+	emptyMeasurementKey := scoreReportFixture()
+	emptyMeasurementKey.Results[0].Measurements[0].Key = ""
+	if gotEmpty := Compute(emptyMeasurementKey, baseline); gotEmpty != nil {
+		t.Fatalf("empty measurement key report was accepted: %+v", gotEmpty)
+	}
 	if got := Compute(model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}, baseline); got != nil {
 		t.Fatal("report with no scoreable dimensions should return nil")
 	}

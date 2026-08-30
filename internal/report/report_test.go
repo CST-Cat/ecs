@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -185,6 +186,35 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 	}
 }
 
+func TestJSONRejectsInvalidReportIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		mutate  func(*model.Report)
+		wantErr string
+	}{
+		{
+			name:    "empty result ID",
+			mutate:  func(data *model.Report) { data.Results[0].ID = "" },
+			wantErr: "empty result ID",
+		},
+		{
+			name: "duplicate measurement key",
+			mutate: func(data *model.Report) {
+				data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{Key: "events"})
+			},
+			wantErr: `duplicate measurement key "events"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := sampleReport()
+			test.mutate(&data)
+			if _, err := JSON(data); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("JSON error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestNetworkModeDerivesFromExposureAndRejectsLegacyOfflineInput(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
@@ -356,6 +386,17 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 		_, err = LoadJSON(path)
 		return err
 	}
+	loadRaw := func(t *testing.T, data model.Report) error {
+		t.Helper()
+		content, err := json.Marshal(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "report.json")
+		writeReportFile(t, path, content)
+		_, err = LoadJSON(path)
+		return err
+	}
 
 	t.Run("same key across result owners is allowed", func(t *testing.T) {
 		data := sampleReport()
@@ -371,7 +412,7 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 	t.Run("duplicate measurement in one result is rejected", func(t *testing.T) {
 		data := sampleReport()
 		data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{Key: "events", Value: 999})
-		if err := load(t, data); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "events"`) {
+		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "events"`) {
 			t.Fatalf("duplicate measurement error = %v", err)
 		}
 	})
@@ -379,8 +420,24 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 	t.Run("duplicate result ID is rejected", func(t *testing.T) {
 		data := sampleReport()
 		data.Results = append(data.Results, model.Result{ID: "system", Status: model.StatusSkipped})
-		if err := load(t, data); err == nil || !strings.Contains(err.Error(), `duplicate result ID "system"`) {
+		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), `duplicate result ID "system"`) {
 			t.Fatalf("duplicate result error = %v", err)
+		}
+	})
+
+	t.Run("empty result ID is rejected", func(t *testing.T) {
+		data := sampleReport()
+		data.Results[0].ID = ""
+		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), "empty result ID") {
+			t.Fatalf("empty result ID error = %v", err)
+		}
+	})
+
+	t.Run("empty measurement key is rejected", func(t *testing.T) {
+		data := sampleReport()
+		data.Results[0].Measurements[0].Key = ""
+		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), "empty measurement key") {
+			t.Fatalf("empty measurement key error = %v", err)
 		}
 	})
 }

@@ -538,20 +538,11 @@ type measured struct {
 type measurementsByModule map[string]map[string]measured
 
 func collectMeasurements(data model.Report) (measurementsByModule, error) {
+	if err := model.ValidateReportIdentity(data); err != nil {
+		return nil, err
+	}
 	values := make(measurementsByModule, len(data.Results))
-	resultIndexes := make(map[string]int, len(data.Results))
-	for resultIndex, result := range data.Results {
-		if previous, ok := resultIndexes[result.ID]; ok {
-			return nil, fmt.Errorf("report contains duplicate result ID %q at indexes %d and %d", result.ID, previous, resultIndex)
-		}
-		resultIndexes[result.ID] = resultIndex
-		measurementIndexes := make(map[string]int, len(result.Measurements))
-		for measurementIndex, item := range result.Measurements {
-			if previous, ok := measurementIndexes[item.Key]; ok {
-				return nil, fmt.Errorf("result %q contains duplicate measurement key %q at indexes %d and %d", result.ID, item.Key, previous, measurementIndex)
-			}
-			measurementIndexes[item.Key] = measurementIndex
-		}
+	for _, result := range data.Results {
 		if result.Status == model.StatusSkipped {
 			continue
 		}
