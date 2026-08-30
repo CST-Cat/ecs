@@ -4,7 +4,6 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -82,6 +81,13 @@ func Validate(runtime Runtime) error {
 			if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 				return i18n.Errorf("err.endpointNameAddress")
 			}
+			host, _, err := splitHostPort(endpoint.Address)
+			if err != nil || host == "" {
+				return i18n.Errorf("err.endpointNeedsHostPort", endpoint.Address)
+			}
+			if !validRouteTarget(host) {
+				return i18n.Errorf("err.endpointUnsafeHost", host)
+			}
 			if !validEndpointFamily(endpoint.Family) {
 				return i18n.Errorf("err.endpointFamily", endpoint.Name)
 			}
@@ -111,8 +117,8 @@ func Validate(runtime Runtime) error {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.stunNameAddress")
 		}
-		host, port, err := net.SplitHostPort(endpoint.Address)
-		if err != nil || !validRouteTarget(host) || port == "" {
+		host, _, err := splitHostPort(endpoint.Address)
+		if err != nil || host == "" || !validRouteTarget(host) {
 			return i18n.Errorf("err.stunHostPort", endpoint.Address)
 		}
 	}
@@ -238,10 +244,7 @@ func validateSTUNDuplicates(servers []Endpoint) error {
 func normalizedEndpointAddress(address string, requirePort bool) string {
 	address = strings.TrimSpace(address)
 	if requirePort {
-		if host, port, err := net.SplitHostPort(address); err == nil {
-			if number, err := strconv.Atoi(port); err == nil {
-				port = strconv.Itoa(number)
-			}
+		if host, port, err := splitHostPort(address); err == nil {
 			return net.JoinHostPort(normalizedEndpointHost(host), port)
 		}
 	}
@@ -265,21 +268,8 @@ func endpointExecutionFamily(endpoint Endpoint, runtimeIPVersion string, require
 	if endpoint.Family == IPVersion4 || endpoint.Family == IPVersion6 {
 		return endpoint.Family
 	}
-	host := strings.TrimSpace(endpoint.Address)
-	if requirePort {
-		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-			host = parsedHost
-		}
-	}
-	host = strings.Trim(host, "[]")
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.To4() != nil {
-			return IPVersion4
-		}
-		return IPVersion6
-	}
-	if strings.Contains(strings.ToLower(host), "-v6.") {
-		return IPVersion6
+	if inferred := inferEndpointFamily(endpoint.Address, requirePort); inferred != "" {
+		return inferred
 	}
 	if runtimeIPVersion == IPVersion4 || runtimeIPVersion == IPVersion6 {
 		return runtimeIPVersion

@@ -173,6 +173,26 @@ func TestLoadFileDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLoadApplyValidateRejectsInvalidEndpointFromConfigFile(t *testing.T) {
+	useEnglish(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"dns_resolvers":[{"name":"dns","address":"example.com:notaport"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile = %v", err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatalf("ApplyFile = %v", err)
+	}
+	if err := Validate(runtime); err == nil {
+		t.Fatal("Validate accepted invalid endpoint loaded from config file")
+	}
+}
+
 func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 	useEnglish(t)
 	example := ExampleFile()

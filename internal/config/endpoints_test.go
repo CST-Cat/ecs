@@ -54,6 +54,117 @@ func TestParseEndpointListRejectsDistinctInputs(t *testing.T) {
 	}
 }
 
+func TestParseEndpointListRequiresExecutableHostPort(t *testing.T) {
+	useEnglish(t)
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "missing port", raw: "example.com", want: false},
+		{name: "non-numeric port", raw: "example.com:notaport", want: false},
+		{name: "zero port", raw: "example.com:0", want: false},
+		{name: "port too large", raw: "example.com:65536", want: false},
+		{name: "hostname", raw: "example.com:53", want: true},
+		{name: "bracketed IPv6", raw: "[2001:db8::1]:53", want: true},
+		// net.Dialer and net.SplitHostPort require brackets around an IPv6
+		// literal when a port is present; the parser must enforce that same
+		// executable representation.
+		{name: "unbracketed IPv6", raw: "2001:db8::1:53", want: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			endpoints, err := ParseEndpointList(test.raw, true)
+			if test.want {
+				if err != nil || len(endpoints) != 1 {
+					t.Fatalf("ParseEndpointList(%q) = %+v, %v, want one endpoint", test.raw, endpoints, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ParseEndpointList(%q) = %+v, nil, want rejection", test.raw, endpoints)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsInvalidRuntimeEndpointHostPorts(t *testing.T) {
+	useEnglish(t)
+	cases := []struct {
+		name   string
+		mutate func(*Runtime)
+	}{
+		{name: "DNS missing port", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "example.com"}}
+		}},
+		{name: "DNS non-numeric port", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "example.com:notaport"}}
+		}},
+		{name: "DNS zero port", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "example.com:0"}}
+		}},
+		{name: "DNS port too large", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "example.com:65536"}}
+		}},
+		{name: "DNS unbracketed IPv6", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "2001:db8::1:53"}}
+		}},
+		{name: "DNS unsafe host", mutate: func(runtime *Runtime) {
+			runtime.DNSResolvers = []Endpoint{{Name: "dns", Address: "bad host:53"}}
+		}},
+		{name: "latency missing port", mutate: func(runtime *Runtime) {
+			runtime.LatencyTargets = []Endpoint{{Name: "latency", Address: "example.com"}}
+		}},
+		{name: "latency non-numeric port", mutate: func(runtime *Runtime) {
+			runtime.LatencyTargets = []Endpoint{{Name: "latency", Address: "example.com:notaport"}}
+		}},
+		{name: "latency port too large", mutate: func(runtime *Runtime) {
+			runtime.LatencyTargets = []Endpoint{{Name: "latency", Address: "example.com:70000"}}
+		}},
+		{name: "STUN non-numeric port", mutate: func(runtime *Runtime) {
+			runtime.STUNServers = []Endpoint{{Name: "stun", Address: "stun.example.com:notaport"}}
+		}},
+		{name: "STUN port too large", mutate: func(runtime *Runtime) {
+			runtime.STUNServers = []Endpoint{{Name: "stun", Address: "stun.example.com:70000"}}
+		}},
+		{name: "STUN unsafe host", mutate: func(runtime *Runtime) {
+			runtime.STUNServers = []Endpoint{{Name: "stun", Address: "bad host:3478"}}
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := validRuntime(t)
+			test.mutate(&runtime)
+			if err := Validate(runtime); err == nil {
+				t.Fatalf("Validate invalid endpoint runtime = nil, want rejection")
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsExecutableEndpointHostPorts(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	runtime.DNSResolvers = []Endpoint{
+		{Name: "hostname", Address: "example.com:53"},
+		{Name: "IPv4", Address: "192.0.2.1:53"},
+		{Name: "IPv6", Address: "[2001:db8::1]:53"},
+	}
+	runtime.LatencyTargets = []Endpoint{
+		{Name: "latency hostname", Address: "example.com:443"},
+		{Name: "latency IPv4", Address: "192.0.2.1:443"},
+		{Name: "latency IPv6", Address: "[2001:db8::1]:443"},
+	}
+	runtime.STUNServers = []Endpoint{
+		{Name: "stun hostname", Address: "stun.example.com:3478"},
+		{Name: "stun IPv4", Address: "192.0.2.2:3478"},
+		{Name: "stun IPv6", Address: "[2001:db8::2]:3478"},
+	}
+	if err := Validate(runtime); err != nil {
+		t.Fatalf("Validate executable endpoint runtime = %v, want nil", err)
+	}
+}
+
 func TestValidateRejectsDuplicateOperationalEndpoints(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {

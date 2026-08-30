@@ -209,18 +209,19 @@ func splitTrimmed(raw string) []string {
 	return items
 }
 
-// splitHostPort 在不依赖 net 包语义的前提下切出主机与端口。
-//
-// 需要兼容 IPv6 字面量的方括号写法，因此按最后一个冒号切分。
+// splitHostPort validates the executable host:port form used by network
+// probes. In particular, IPv6 literals must use the bracketed form accepted
+// by Go's net package (for example, [2001:db8::1]:53).
 func splitHostPort(address string) (string, string, error) {
-	host, port, ok := splitLastColon(address)
-	if !ok {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
 		return "", "", i18n.Errorf("err.portMissing")
 	}
-	if number, err := strconv.Atoi(port); err != nil || number < 1 || number > 65535 {
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
 		return "", "", i18n.Errorf("err.portInvalid")
 	}
-	return host, port, nil
+	return host, strconv.Itoa(number), nil
 }
 
 // splitLastColon 按最后一个冒号切分，并剥掉 IPv6 字面量的方括号。
