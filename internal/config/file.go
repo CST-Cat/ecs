@@ -47,14 +47,14 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if file.IPVersion != "" {
 		runtime.IPVersion = strings.ToLower(strings.TrimSpace(file.IPVersion))
 	}
-	if len(file.IPQualitySources) > 0 {
+	if file.IPQualitySources != nil {
 		runtime.IPQualitySources = normalizeList(file.IPQualitySources)
 	}
 	if file.NoColor != nil {
 		runtime.NoColor = *file.NoColor
 	}
-	if len(file.Formats) > 0 {
-		runtime.Formats = append([]string(nil), file.Formats...)
+	if file.Formats != nil {
+		runtime.Formats = append([]string{}, file.Formats...)
 	}
 	if file.Output != "" {
 		runtime.Output = file.Output
@@ -89,8 +89,8 @@ func ApplyFile(runtime *Runtime, file File) error {
 		}
 		runtime.IPerfDuration = value
 	}
-	if len(file.IPerfTargets) > 0 {
-		runtime.IPerfTargets = append([]IPerfEndpoint(nil), file.IPerfTargets...)
+	if file.IPerfTargets != nil {
+		runtime.IPerfTargets = append([]IPerfEndpoint{}, file.IPerfTargets...)
 	}
 	if file.HTTPTimeout != "" {
 		value, err := time.ParseDuration(file.HTTPTimeout)
@@ -108,26 +108,26 @@ func ApplyFile(runtime *Runtime, file File) error {
 	if file.SpeedThreads != nil {
 		runtime.SpeedThreads = *file.SpeedThreads
 	}
-	if len(file.DNSResolvers) > 0 {
-		runtime.DNSResolvers = append([]Endpoint(nil), file.DNSResolvers...)
+	if file.DNSResolvers != nil {
+		runtime.DNSResolvers = append([]Endpoint{}, file.DNSResolvers...)
 	}
-	if len(file.LatencyTargets) > 0 {
-		runtime.LatencyTargets = append([]Endpoint(nil), file.LatencyTargets...)
+	if file.LatencyTargets != nil {
+		runtime.LatencyTargets = append([]Endpoint{}, file.LatencyTargets...)
 	}
-	if len(file.RouteTargets) > 0 {
-		runtime.RouteTargets = append([]Endpoint(nil), file.RouteTargets...)
+	if file.RouteTargets != nil {
+		runtime.RouteTargets = append([]Endpoint{}, file.RouteTargets...)
 	}
-	if len(file.BacktraceTargets) > 0 {
-		runtime.BacktraceTargets = append([]Endpoint(nil), file.BacktraceTargets...)
+	if file.BacktraceTargets != nil {
+		runtime.BacktraceTargets = append([]Endpoint{}, file.BacktraceTargets...)
 	}
-	if len(file.STUNServers) > 0 {
-		runtime.STUNServers = append([]Endpoint(nil), file.STUNServers...)
+	if file.STUNServers != nil {
+		runtime.STUNServers = append([]Endpoint{}, file.STUNServers...)
 	}
-	if len(file.MediaRegions) > 0 {
+	if file.MediaRegions != nil {
 		runtime.MediaRegions = normalizeList(file.MediaRegions)
 	}
-	if len(file.OoklaServers) > 0 {
-		runtime.OoklaServers = append([]OoklaServer(nil), file.OoklaServers...)
+	if file.OoklaServers != nil {
+		runtime.OoklaServers = append([]OoklaServer{}, file.OoklaServers...)
 	}
 	// An explicit file allowlist is independent of the profile preset: callers
 	// may select any registered module, then remove entries with skip.

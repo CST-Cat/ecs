@@ -227,6 +227,61 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyFileKeepsDefaultsForMissingCollections(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	defaultsFormats := append([]string(nil), runtime.Formats...)
+	defaultsDNS := append([]Endpoint(nil), runtime.DNSResolvers...)
+	defaultsIPerf := append([]IPerfEndpoint(nil), runtime.IPerfTargets...)
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Formats != nil || file.DNSResolvers != nil || file.IPerfTargets != nil {
+		t.Fatalf("missing collection fields were not nil: formats=%#v dns=%#v iperf=%#v", file.Formats, file.DNSResolvers, file.IPerfTargets)
+	}
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(runtime.Formats, defaultsFormats) || !reflect.DeepEqual(runtime.DNSResolvers, defaultsDNS) || !reflect.DeepEqual(runtime.IPerfTargets, defaultsIPerf) {
+		t.Fatalf("missing collection fields changed defaults: formats=%v dns=%v iperf=%v", runtime.Formats, runtime.DNSResolvers, runtime.IPerfTargets)
+	}
+}
+
+func TestApplyFileAppliesExplicitEmptyCollections(t *testing.T) {
+	useEnglish(t)
+	runtime := validRuntime(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"formats":[],"dns_resolvers":[],"iperf_targets":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Formats == nil || file.DNSResolvers == nil || file.IPerfTargets == nil {
+		t.Fatalf("explicit empty collection fields lost presence: formats=%#v dns=%#v iperf=%#v", file.Formats, file.DNSResolvers, file.IPerfTargets)
+	}
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Formats == nil || len(runtime.Formats) != 0 {
+		t.Fatalf("explicit empty formats = %#v, want non-nil empty", runtime.Formats)
+	}
+	if runtime.DNSResolvers == nil || len(runtime.DNSResolvers) != 0 {
+		t.Fatalf("explicit empty DNS resolvers = %#v, want non-nil empty", runtime.DNSResolvers)
+	}
+	if runtime.IPerfTargets == nil || len(runtime.IPerfTargets) != 0 {
+		t.Fatalf("explicit empty iperf targets = %#v, want non-nil empty", runtime.IPerfTargets)
+	}
+	requireError(t, Validate(runtime), "at least one output format")
+}
+
 func TestApplyFileDiagnostics(t *testing.T) {
 	useEnglish(t)
 	cases := []struct {

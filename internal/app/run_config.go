@@ -244,17 +244,18 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		cfg.LatencyAttempts = *latencyAttemptsFlag
 	}
 	for _, override := range []struct {
+		flagName    string
 		raw         string
 		requirePort bool
 		apply       func([]config.Endpoint)
 		label       string
 	}{
-		{*dnsResolversFlag, true, func(e []config.Endpoint) { cfg.DNSResolvers = e }, "dns-resolvers"},
-		{*latencyTargetsFlag, true, func(e []config.Endpoint) { cfg.LatencyTargets = e }, "latency-targets"},
-		{*routeTargetsFlag, false, func(e []config.Endpoint) { cfg.RouteTargets = e }, "route-targets"},
-		{*stunServersFlag, true, func(e []config.Endpoint) { cfg.STUNServers = e }, "stun-servers"},
+		{"dns-resolvers", *dnsResolversFlag, true, func(e []config.Endpoint) { cfg.DNSResolvers = e }, "dns-resolvers"},
+		{"latency-targets", *latencyTargetsFlag, true, func(e []config.Endpoint) { cfg.LatencyTargets = e }, "latency-targets"},
+		{"route-targets", *routeTargetsFlag, false, func(e []config.Endpoint) { cfg.RouteTargets = e }, "route-targets"},
+		{"stun-servers", *stunServersFlag, true, func(e []config.Endpoint) { cfg.STUNServers = e }, "stun-servers"},
 	} {
-		if override.raw == "" {
+		if !explicit[override.flagName] {
 			continue
 		}
 		endpoints, err := config.ParseEndpointList(override.raw, override.requirePort)
@@ -263,34 +264,35 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		}
 		override.apply(endpoints)
 	}
-	if *iperfTargetsFlag != "" {
+	if explicit["iperf-targets"] {
 		targets, err := config.ParseIPerfTargetList(*iperfTargetsFlag)
 		if err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: --iperf-targets: %v", i18n.T("cli.error"), err)
 		}
 		cfg.IPerfTargets = targets
 	}
-	if regions := config.ParseList(*mediaRegionFlag); len(regions) > 0 {
+	if explicit["media-region"] {
+		regions := config.ParseList(*mediaRegionFlag)
 		if err := config.ValidateMediaRegions(regions); err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 		}
 		cfg.MediaRegions = regions
 	}
-	if *backtraceCityFlag != "" {
+	if explicit["backtrace-city"] {
 		cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
 		if err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 		}
 		cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
 	}
-	if *backtraceTargetsFlag != "" {
+	if explicit["backtrace-targets"] {
 		targets, err := config.ParseBacktraceTargetList(*backtraceTargetsFlag)
 		if err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: --backtrace-targets: %v", i18n.T("cli.error"), err)
 		}
 		cfg.BacktraceTargets = targets
 	}
-	if *ooklaServersFlag != "" {
+	if explicit["ookla-servers"] {
 		servers, err := config.ParseOoklaServerList(*ooklaServersFlag)
 		if err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: --ookla-servers: %v", i18n.T("cli.error"), err)
