@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -293,7 +294,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 
 	rows := make([]iperfRow, 0, len(env.Config.IPerfTargets)*2)
 	for _, target := range env.Config.IPerfTargets {
-		for _, family := range endpointFamilies(target.Networks, env.Network.IPv4Usable, env.Network.IPv6Usable, env.Config.IPVersion) {
+		for _, family := range iperfEndpointFamilies(target, env.Network.IPv4Usable, env.Network.IPv6Usable, env.Config.IPVersion) {
 			if ctx.Err() != nil {
 				break
 			}
@@ -800,6 +801,24 @@ func parseIPerfTCPJSON(raw []byte, port int, reverse bool) iperfDirectionResult 
 		sample.RemoteHost = output.Start.Connected[0].RemoteHost
 	}
 	return sample
+}
+
+// iperfEndpointFamilies preserves the existing Networks selection for
+// hostnames, while deriving the only possible family for a literal Host when
+// Networks is omitted. A literal address is already an executable fact; an
+// empty metadata field must not make it fall back to the first local family.
+func iperfEndpointFamilies(target config.IPerfEndpoint, hasIPv4, hasIPv6 bool, mode string) []string {
+	networks := target.Networks
+	if networks == "" {
+		if ip := net.ParseIP(strings.Trim(target.Host, "[]")); ip != nil {
+			if ip.To4() != nil {
+				networks = "IPv" + config.IPVersion4
+			} else {
+				networks = "IPv" + config.IPVersion6
+			}
+		}
+	}
+	return endpointFamilies(networks, hasIPv4, hasIPv6, mode)
 }
 
 func endpointFamilies(networks string, hasIPv4, hasIPv6 bool, mode string) []string {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,30 @@ import (
 	"ecs/internal/model"
 	"ecs/internal/report"
 )
+
+func TestIPerfEndpointFamiliesHonorLiteralHost(t *testing.T) {
+	cases := []struct {
+		name     string
+		host     string
+		networks string
+		want     []string
+	}{
+		{name: "IPv4 literal without networks", host: "192.0.2.1", want: []string{"IPv4"}},
+		{name: "IPv6 literal without networks", host: "2001:db8::1", want: []string{"IPv6"}},
+		{name: "hostname without networks keeps default", host: "iperf.example.com", want: []string{"IPv4"}},
+		{name: "hostname pinned IPv4", host: "iperf.example.com", networks: "IPv4", want: []string{"IPv4"}},
+		{name: "hostname pinned IPv6", host: "iperf.example.com", networks: "IPv6", want: []string{"IPv6"}},
+		{name: "hostname dual stack", host: "iperf.example.com", networks: "IPv4|IPv6", want: []string{"IPv4", "IPv6"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := iperfEndpointFamilies(config.IPerfEndpoint{Host: test.host, Networks: test.networks}, true, true, config.IPVersionAuto)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("iperfEndpointFamilies(%+v) = %v, want %v", test, got, test.want)
+			}
+		})
+	}
+}
 
 func TestSpeedMissingToolPreservesRawLookPathError(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())

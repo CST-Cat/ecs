@@ -545,6 +545,67 @@ func TestValidateAllowsSameIPerfHostWithDistinctPortRanges(t *testing.T) {
 	}
 }
 
+func TestValidateIPerfLiteralHostNetworksConsistency(t *testing.T) {
+	useEnglish(t)
+	cases := []struct {
+		name     string
+		host     string
+		networks string
+		wantErr  bool
+	}{
+		{name: "IPv4 literal with empty networks", host: "192.0.2.1"},
+		{name: "IPv4 literal with matching network", host: "192.0.2.1", networks: "IPv4"},
+		{name: "IPv4 literal with IPv6 network", host: "192.0.2.1", networks: "IPv6", wantErr: true},
+		{name: "IPv4 literal with dual network", host: "192.0.2.1", networks: "IPv4|IPv6", wantErr: true},
+		{name: "IPv6 literal with empty networks", host: "2001:db8::1"},
+		{name: "IPv6 literal with matching network", host: "2001:db8::1", networks: "IPv6"},
+		{name: "IPv6 literal with IPv4 network", host: "2001:db8::1", networks: "IPv4", wantErr: true},
+		{name: "IPv6 literal with dual network", host: "2001:db8::1", networks: "IPv4|IPv6", wantErr: true},
+		{name: "hostname with empty networks", host: "iperf.example.com"},
+		{name: "hostname with IPv4 network", host: "iperf.example.com", networks: "IPv4"},
+		{name: "hostname with IPv6 network", host: "iperf.example.com", networks: "IPv6"},
+		{name: "hostname with dual network", host: "iperf.example.com", networks: "IPv4|IPv6"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := validRuntime(t)
+			runtime.IPerfTargets = []IPerfEndpoint{{
+				Name: "edge", Host: test.host, PortStart: 5201, PortEnd: 5201, Networks: test.networks,
+			}}
+			err := Validate(runtime)
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "contradict") {
+					t.Fatalf("Validate(%+v) = %v, want literal/network contradiction", runtime.IPerfTargets[0], err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate(%+v) = %v, want nil", runtime.IPerfTargets[0], err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsIPerfLiteralNetworkMismatchFromConfigFile(t *testing.T) {
+	useEnglish(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"iperf_targets":[{"name":"edge","host":"2001:db8::1","port_start":5201,"port_end":5201,"networks":"IPv4"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile = %v", err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(&runtime, file); err != nil {
+		t.Fatalf("ApplyFile = %v", err)
+	}
+	if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "contradict") {
+		t.Fatalf("Validate config-file iperf target = %v, want literal/network contradiction", err)
+	}
+}
+
 func TestListSelectionAndIPVersionHelpers(t *testing.T) {
 	useEnglish(t)
 	if got := ParseList(" A, a, b,, "); !reflect.DeepEqual(got, []string{"a", "b"}) {

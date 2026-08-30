@@ -204,6 +204,9 @@ func Validate(runtime Runtime) error {
 		default:
 			return i18n.Errorf("err.iperfNodeNetwork", endpoint.Name)
 		}
+		if literalFamily := literalEndpointFamily(endpoint.Host, false); literalFamily != "" && endpoint.Networks != "" && endpoint.Networks != "IPv"+literalFamily {
+			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Networks, literalFamily)
+		}
 		key := iperfTargetKey(endpoint.Host, endpoint.PortStart, endpoint.PortEnd)
 		if seenIPerfTargets[key] {
 			return i18n.Errorf("err.endpointDuplicate", endpoint.Host)
