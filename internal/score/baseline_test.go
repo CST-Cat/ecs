@@ -225,6 +225,18 @@ func TestMetricSampleCountsExcludesInvalidResolvedValues(t *testing.T) {
 	}
 }
 
+func TestMetricSampleCountsRejectsDuplicateIdentity(t *testing.T) {
+	valid := scoreReportFixture()
+	duplicate := scoreReportFixture()
+	cpu := findResult(&duplicate, "cpu")
+	cpu.Measurements = append(cpu.Measurements, model.Measurement{Key: "sysbench_cpu_single_events_s", Value: 999})
+
+	counts := MetricSampleCounts([]model.Report{valid, duplicate})
+	if counts != nil {
+		t.Fatalf("duplicate identity returned partial sample counts: %v", counts)
+	}
+}
+
 func TestBaselineValidationDiagnostics(t *testing.T) {
 	cases := []struct {
 		name       string

@@ -286,7 +286,7 @@ func MetricSampleCounts(reports []model.Report) map[string]int {
 	for _, report := range reports {
 		values, err := collectMeasurements(report)
 		if err != nil {
-			continue
+			return nil
 		}
 		for key := range scoreableMetrics(report, values) {
 			counts[key]++
