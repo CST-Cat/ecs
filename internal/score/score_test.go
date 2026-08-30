@@ -3,6 +3,7 @@ package score
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -235,6 +236,82 @@ func TestComputeMissingAndInvalidValues(t *testing.T) {
 	}
 	if got := Compute(model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}, baseline); got != nil {
 		t.Fatal("report with no scoreable dimensions should return nil")
+	}
+}
+
+func TestScoreableMetricMembershipMatchesAcrossArtifacts(t *testing.T) {
+	report := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Version: "ecs-test"},
+		Run: model.RunInfo{
+			ID: "scoreable-membership", Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC(),
+		},
+		Results: []model.Result{
+			{
+				ID: "system", Status: model.StatusOK,
+				Measurements: []model.Measurement{
+					{Key: "logical_cpus", Value: 4},
+					{Key: "memory_total_bytes", Value: 8 * (1 << 30)},
+				},
+			},
+			{
+				ID: "cpu", Status: model.StatusOK,
+				Measurements: []model.Measurement{
+					{Key: "sysbench_cpu_single_events_s", Value: 100},
+					// cpu_multi is intentionally missing.
+				},
+			},
+			{
+				ID: "memory", Status: model.StatusOK,
+				Measurements: []model.Measurement{
+					{Key: "stream_copy_1t_mib_s", Value: 100},
+					{Key: "stream_copy_nt_mib_s", Value: 300},
+					{Key: "stream_scale_1t_mib_s", Value: 0},
+					{Key: "stream_add_1t_mib_s", Value: -1},
+					{Key: "stream_triad_1t_mib_s", Value: math.NaN()},
+				},
+			},
+			{
+				ID: "disk", Status: model.StatusSkipped,
+				Measurements: []model.Measurement{{Key: "fio_sequential_read_mib_s", Value: 500}},
+			},
+			{
+				ID: "speed", Status: model.StatusOK,
+				Measurements: []model.Measurement{
+					{Key: "iperf3_target_01_ipv4_download_mbps", Value: 100},
+					{Key: "iperf3_target_02_ipv4_download_mbps", Value: 300},
+					{Key: "iperf3_target_01_ipv4_upload_mbps", Value: math.Inf(1)},
+				},
+			},
+		},
+	}
+	wantMetrics := map[string]float64{
+		"cpu_single":         100,
+		"memory_copy":        200,
+		"bandwidth_download": 200,
+	}
+
+	baseline, err := BuildBaseline([]model.Report{report}, "membership fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(baseline.Metrics, wantMetrics) {
+		t.Fatalf("baseline metrics = %v, want %v", baseline.Metrics, wantMetrics)
+	}
+	wantCounts := map[string]int{
+		"cpu_single":         1,
+		"memory_copy":        1,
+		"bandwidth_download": 1,
+	}
+	if counts := MetricSampleCounts([]model.Report{report}); !reflect.DeepEqual(counts, wantCounts) {
+		t.Fatalf("metric sample counts = %v, want %v", counts, wantCounts)
+	}
+	submission, err := BuildSubmission(report, SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(submission.Metrics, wantMetrics) {
+		t.Fatalf("submission metrics = %v, want %v", submission.Metrics, wantMetrics)
 	}
 }
 

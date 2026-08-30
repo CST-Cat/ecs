@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompareHelpCallsFormatAnOutputFormat(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("compare", "--lang", "en", "--help")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "compare", "--help")
 	if status != 0 || stdout != "" {
 		t.Fatalf("compare help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -30,7 +30,7 @@ func TestCompareRejectsMarkdownAndHTMLPresentationArtifacts(t *testing.T) {
 	for _, input := range []string{markdown, html} {
 		t.Run(filepath.Ext(input), func(t *testing.T) {
 			status, stdout, stderr := invokeAppMain(
-				"compare", input, input, "--lang", "en", "--format", "json", "--output", filepath.Join(root, "out"),
+				"--lang", "en", "compare", input, input, "--format", "json", "--output", filepath.Join(root, "out"),
 			)
 			if status != 1 || stdout != "" || !strings.Contains(stderr, "error:") {
 				t.Fatalf("presentation input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -56,7 +56,7 @@ func TestCompareAcceptsValidJSONWithoutJSONExtension(t *testing.T) {
 	}
 	output := filepath.Join(root, "comparison")
 	status, stdout, stderr := invokeAppMain(
-		"compare", first, second, "--lang", "en", "--format", "json", "--output", output, "--name", "no-extension", "--no-color",
+		"--lang", "en", "compare", first, second, "--format", "json", "--output", output, "--name", "no-extension", "--no-color",
 	)
 	if status != 0 || stdout == "" || stderr != "" {
 		t.Fatalf("extensionless JSON status=%d stdout=%q stderr=%q", status, stdout, stderr)

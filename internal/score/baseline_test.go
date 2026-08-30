@@ -1,6 +1,7 @@
 package score
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"os"
@@ -58,7 +59,7 @@ func TestBuildBaselineAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defaultSource, err := BuildBaseline(reports, "")
-	if err != nil || defaultSource.Source != "aggregated from 2 reports" {
+	if err != nil || defaultSource.Source != "aggregated" {
 		t.Fatalf("default baseline source = %q, err=%v", defaultSource.Source, err)
 	}
 	if baseline.Schema != BaselineSchema || baseline.Source != "fixture source" || baseline.SampleCount != 2 || baseline.GeneratedAt.IsZero() || baseline.GeneratedAt.Location() != time.UTC {
@@ -98,6 +99,46 @@ func TestBuildBaselineAndRoundTrip(t *testing.T) {
 	}
 	if _, err := BuildBaseline([]model.Report{{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}}, "fixture"); err == nil || !strings.Contains(err.Error(), "no scoreable measurements") {
 		t.Fatalf("unscorable baseline error = %v", err)
+	}
+}
+
+func TestBuildBaselineSourceMachineContract(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	reports := []model.Report{scoreReportFixture(), scoreReportFixture()}
+
+	i18n.Set(i18n.LangZH)
+	baseline, err := BuildBaseline(reports, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseline.Source != "aggregated" || baseline.SampleCount != len(reports) {
+		t.Fatalf("default source/count = %q/%d", baseline.Source, baseline.SampleCount)
+	}
+	zhJSON, err := baseline.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	i18n.Set(i18n.LangEN)
+	enJSON, err := baseline.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(zhJSON, enJSON) {
+		t.Fatalf("default baseline JSON changed with presentation language:\nzh=%s\nen=%s", zhJSON, enJSON)
+	}
+	if !bytes.Contains(zhJSON, []byte(`"source": "aggregated"`)) ||
+		!bytes.Contains(zhJSON, []byte(`"sample_count": 2`)) {
+		t.Fatalf("source and sample_count are not separate canonical facts: %s", zhJSON)
+	}
+
+	const customSource = "Fleet August"
+	custom, err := BuildBaseline(reports, customSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.Source != customSource {
+		t.Fatalf("custom source = %q, want %q", custom.Source, customSource)
 	}
 }
 

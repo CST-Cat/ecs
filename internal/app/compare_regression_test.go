@@ -32,7 +32,7 @@ func TestCompareCommandBuildsCurrentFixtureMetricAndRelativeResult(t *testing.T)
 	candidate := currentCompareFixturePath(t, "compare_candidate.json")
 	output := t.TempDir()
 	status, stdout, stderr := invokeAppMain(
-		"compare", reference, candidate, "--lang", "en", "--format", "json", "--output", output,
+		"--lang", "en", "compare", reference, candidate, "--format", "json", "--output", output,
 		"--name", "fixture-comparison", "--reference", "1", "--no-color",
 	)
 	if status != 0 || stdout == "" || stderr != "" {

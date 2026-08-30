@@ -32,7 +32,7 @@ const DefaultRankMinSamples = 5
 // Baseline 是一份排行榜参考。
 type Baseline struct {
 	Schema string `json:"schema"`
-	// Source 说明这份基线是怎么来的，直接呈现在报告里。
+	// Source 保存 ECS 稳定来源代码或用户提供的原始说明；已知代码在展示边界翻译。
 	Source string `json:"source"`
 	// SampleCount 是聚合时的样本机器数。1 意味着这只是一台机器的快照，
 	// 报告需要据此提醒读者分数的参考价值有限。
@@ -192,32 +192,17 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	tierReportCounts := make(map[int]int)
 	for _, report := range reports {
 		values := collectMeasurements(report)
-		ran := make(map[string]bool, len(report.Results))
-		for _, result := range report.Results {
-			if result.Status != model.StatusSkipped {
-				ran[result.ID] = true
-			}
-		}
 		tierKey := TierKeyFor(hostVCPU(values))
 		if tierKey > 0 {
 			tierReportCounts[tierKey]++
 		}
-		for _, dimension := range Dimensions() {
-			if !ran[dimension.ModuleID] {
-				continue
-			}
-			for _, metric := range dimension.Metrics {
-				value, _, _, ok := resolveMetric(metric, values)
-				if !ok || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-					continue
+		for key, value := range scoreableMetrics(report, values) {
+			samples[key] = append(samples[key], value)
+			if tierKey > 0 {
+				if byTier[tierKey] == nil {
+					byTier[tierKey] = make(map[string][]float64)
 				}
-				samples[metric.Key] = append(samples[metric.Key], value)
-				if tierKey > 0 {
-					if byTier[tierKey] == nil {
-						byTier[tierKey] = make(map[string][]float64)
-					}
-					byTier[tierKey][metric.Key] = append(byTier[tierKey][metric.Key], value)
-				}
+				byTier[tierKey][key] = append(byTier[tierKey][key], value)
 			}
 		}
 	}
@@ -229,7 +214,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 		metrics[key] = arithmeticMean(values)
 	}
 	if source == "" {
-		source = fmt.Sprintf("aggregated from %d reports", len(reports))
+		source = "aggregated"
 	}
 	baseline := Baseline{
 		Schema:         BaselineSchema,
@@ -296,23 +281,9 @@ func (b Baseline) Encode() ([]byte, error) {
 func MetricSampleCounts(reports []model.Report) map[string]int {
 	counts := make(map[string]int)
 	for _, report := range reports {
-		ran := make(map[string]bool, len(report.Results))
-		for _, result := range report.Results {
-			if result.Status != model.StatusSkipped {
-				ran[result.ID] = true
-			}
-		}
 		values := collectMeasurements(report)
-		for _, dimension := range Dimensions() {
-			if !ran[dimension.ModuleID] {
-				continue
-			}
-			for _, metric := range dimension.Metrics {
-				if value, _, _, ok := resolveMetric(metric, values); ok &&
-					value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0) {
-					counts[metric.Key]++
-				}
-			}
+		for key := range scoreableMetrics(report, values) {
+			counts[key]++
 		}
 	}
 	return counts

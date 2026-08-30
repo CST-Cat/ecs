@@ -55,7 +55,7 @@ The default installation installs only `ecs`; `--with-benchmarks` is the explici
 | `ecs submit --input FILE` | Export a slim JSON suitable for public submission |
 | `ecs version` | Show the version |
 
-All commands accept `--lang zh|en`. Exit codes are `0` (success), `1` (argument or run error), `2` (warnings or failed probes with `--strict`) and `130` (interrupted).
+For non-run commands, put the interface language in the global prefix, for example `ecs --lang en compare ...`. `run` and `plan` also accept `--lang zh|en` in their own options. Exit codes are `0` (success), `1` (argument or run error), `2` (warnings or failed probes with `--strict`) and `130` (interrupted).
 
 ## Reports, rendering and comparison
 
@@ -69,7 +69,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 
 ```sh
 ecs --format json,html --output ./reports --name my-run
-ecs render --input ./reports/my-run.json --format html,md --lang en
+ecs --lang en render --input ./reports/my-run.json --format html,md
 ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```

@@ -21,7 +21,7 @@ func TestLeaderboardRegressionDeduplicatesPathsAndRunIDsWithStatistics(t *testin
 	output := filepath.Join(root, "baseline.json")
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--output", output,
+		"--lang", "en", "leaderboard", "--output", output,
 		first, copy, first, unique,
 	)
 	if status != 0 || !strings.Contains(stdout, "written") {
@@ -91,7 +91,7 @@ func TestLeaderboardRegressionAcceptsMixedCurrentReportAndSubmissionBySchema(t *
 	}
 
 	status, stdout, stderr := invokeAppMain(
-		"leaderboard", "--lang", "en", "--output", output, fullPath, submissionPath,
+		"--lang", "en", "leaderboard", "--output", output, fullPath, submissionPath,
 	)
 	if status != 0 || stdout == "" || stderr != "" {
 		t.Fatalf("mixed input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -171,7 +171,7 @@ func TestLeaderboardRegressionReportsSchemaSpecificInputDiagnostics(t *testing.T
 						t.Fatal(err)
 					}
 					output := filepath.Join(root, "baseline.json")
-					args := []string{"leaderboard", "--lang", "en", "--output", output}
+					args := []string{"--lang", "en", "leaderboard", "--output", output}
 					if strict {
 						args = append(args, "--strict")
 					}
@@ -214,7 +214,7 @@ func TestLeaderboardRegressionDoesNotParsePresentationInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(root, "baseline.json")
-	status, stdout, stderr := invokeAppMain("leaderboard", "--lang", "en", "--output", output, validReport, presentation)
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, validReport, presentation)
 	if status != 0 || !strings.Contains(stdout, "written") || !strings.Contains(stderr, "Skipped") ||
 		!strings.Contains(stderr, "read ECS artifact schema envelope") {
 		t.Fatalf("presentation input status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -243,7 +243,7 @@ func TestLeaderboardRegressionReportsActiveAndFallbackStatistics(t *testing.T) {
 	}
 	output := filepath.Join(root, "baseline.json")
 
-	args := []string{"leaderboard", "--lang", "en", "--output", output}
+	args := []string{"--lang", "en", "leaderboard", "--output", output}
 	args = append(args, inputs...)
 	status, stdout, stderr := invokeAppMain(args...)
 	if status != 0 || stderr != "" {
@@ -321,7 +321,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("fixture did not produce both outlier states: %+v", expected)
 	}
 	output := filepath.Join(root, "baseline.json")
-	args := []string{"leaderboard", "--lang", "en", "--annotate", "--verbose", "--output", output}
+	args := []string{"--lang", "en", "leaderboard", "--annotate", "--verbose", "--output", output}
 	args = append(args, inputs...)
 	status, stdout, stderr := invokeAppMain(args...)
 	if status != 0 || stderr != "" {
@@ -345,7 +345,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("annotated outlier count=%d, want %d", warnings, len(expected.Outliers))
 	}
 	for _, fact := range expected.Outliers {
-		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+		for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 			fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 			if !strings.Contains(stdout, marker) {
 				t.Fatalf("outlier fact marker %q missing from output %q", marker, stdout)
@@ -353,7 +353,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		}
 	}
 	for _, fact := range expected.Undecidable {
-		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+		for _, marker := range []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey,
 			fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required)} {
 			if !strings.Contains(stdout, marker) {
 				t.Fatalf("undecidable fact marker %q missing from output %q", marker, stdout)
@@ -362,7 +362,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 	}
 
 	zhOutput := filepath.Join(root, "zh-baseline.json")
-	zhArgs := []string{"leaderboard", "--lang", "zh", "--annotate", "--verbose", "--output", zhOutput}
+	zhArgs := []string{"--lang", "zh", "leaderboard", "--annotate", "--verbose", "--output", zhOutput}
 	zhArgs = append(zhArgs, inputs...)
 	zhStatus, zhStdout, zhStderr := invokeAppMain(zhArgs...)
 	if zhStatus != 0 || zhStderr != "" {
@@ -373,7 +373,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		t.Fatalf("localized Chinese outlier output missing presentation text: %q", zhStdout)
 	}
 	for _, fact := range expected.Outliers {
-		for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+		for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 			fmt.Sprintf("%d 个样本", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 			if !strings.Contains(zhStdout, marker) {
 				t.Fatalf("Chinese outlier fact marker %q missing from output %q", marker, zhStdout)
@@ -381,7 +381,7 @@ func TestLeaderboardRegressionPreservesUndecidableOutlierStatistics(t *testing.T
 		}
 	}
 	for _, fact := range expected.Undecidable {
-		for _, marker := range []string{fact.TierLabel, fact.MetricKey,
+		for _, marker := range []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey,
 			fmt.Sprintf("仅 %d 个样本", fact.SampleCount), fmt.Sprintf("需要 %d 个", fact.Required)} {
 			if !strings.Contains(zhStdout, marker) {
 				t.Fatalf("Chinese undecidable fact marker %q missing from output %q", marker, zhStdout)
@@ -432,7 +432,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 	run := func(name string, inputs []string) {
 		t.Helper()
 		output := filepath.Join(root, name+"-baseline.json")
-		args := []string{"leaderboard", "--lang", "en", "--annotate", "--verbose", "--output", output}
+		args := []string{"--lang", "en", "leaderboard", "--annotate", "--verbose", "--output", output}
 		args = append(args, inputs...)
 		status, stdout, stderr := invokeAppMain(args...)
 		if status != 0 || stderr != "" {
@@ -442,7 +442,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 			t.Fatalf("%s representation outlier count=%d, want %d", name, warnings, len(expected.Outliers))
 		}
 		for _, fact := range expected.Outliers {
-			for _, marker := range []string{fact.SubmissionID, fact.MetricKey, fact.TierLabel,
+			for _, marker := range []string{fact.SampleID, fact.MetricKey, score.TierLabel(fact.TierMinVCPU),
 				fmt.Sprintf("%d samples", fact.SampleCount), fmt.Sprintf("%.1f", fact.Ratio)} {
 				if !strings.Contains(stdout, marker) {
 					t.Fatalf("%s representation missing outlier fact marker %q in %q", name, marker, stdout)
@@ -450,7 +450,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 			}
 		}
 		for _, fact := range expected.Undecidable {
-			markers := []string{fact.TierLabel, fact.MetricKey}
+			markers := []string{score.TierLabel(fact.TierMinVCPU), fact.MetricKey}
 			switch fact.Reason {
 			case "insufficient_samples":
 				markers = append(markers, fmt.Sprintf("only %d samples", fact.SampleCount), fmt.Sprintf("%d are required", fact.Required))
@@ -511,7 +511,7 @@ func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := filepath.Join(root, "baseline.json")
-			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			args := []string{"--lang", "en", "leaderboard", "--output", output}
 			if test.strict {
 				args = append(args, "--strict")
 			}

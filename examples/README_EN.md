@@ -118,7 +118,7 @@ Outputs are `<prefix>.{json,md,html}`. JSON is canonical and can be rendered lat
 
 ```sh
 ecs render --input reports/ecs-report-20260813-075451.json --format html,md
-ecs render --input report.json --output /tmp/out --name renamed --lang en
+ecs --lang en render --input report.json --output /tmp/out --name renamed
 ecs compare yesterday.json today.json
 ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./compare
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
@@ -139,8 +139,11 @@ Run and submit in one step:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
-  --submit --profile full --yes --provider vultr --region jp-tokyo
+  --submit --provider vultr --region jp-tokyo -- \
+  --profile full --yes
 ```
+
+The second exact `--` separates wrapper options from `ecs run` options; every later argument is passed to `ecs` unchanged.
 
 The submission whitelist, directory rules and local validation are in [../submissions/README_EN.md](../submissions/README_EN.md); privacy and leaderboard policy are not duplicated here.
 

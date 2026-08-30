@@ -6,7 +6,7 @@
 #       └ 自动下载已校验的 ecs 和按架构匹配的工具包，把缺失组件放入临时 PATH，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后删除本次临时前缀
-#   curl -fsSL .../run.sh | sh -s -- --submit --profile full --yes
+#   curl -fsSL .../run.sh | sh -s -- --submit --provider vultr --region jp -- --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
@@ -36,9 +36,9 @@ esac
 
 # 脚本自身的提示也跟随语言：从参数里取 --lang，其次看环境变量。
 # This scanner owns only the small early grammar needed for wrapper help:
-# help, lang (including its value), and `--`.  The first other token belongs
-# to ecs, including a later `--help`.  Keep it before any work-directory or
-# release setup so wrapper help remains entirely local and side-effect free.
+# help, lang (including its value), and `--`.  The first other token prevents
+# a later `--help` from becoming wrapper help.  Keep it before any work-directory
+# or release setup so wrapper help remains entirely local and side-effect free.
 LANG_SEL=""
 LANG_EXPECTED=0
 HELP_REQUESTED=0
@@ -89,24 +89,24 @@ if [ "$HELP_REQUESTED" -eq 1 ]; then
     if [ "$UI" = "en" ]; then
       printf '%s\n' \
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
-        '       run.sh --submit [run options] [--provider NAME] [--region REGION] [--output PATH]' \
+        '       run.sh --submit [--provider NAME] [--region REGION] [--output PATH] -- [run options]' \
         '' \
         'Downloads a checksummed ecs release, then stages missing architecture-matched tools under a temporary PATH (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
         'When route/backtrace needs NextTrace Tiny, run.sh stages the official nexttrace-tiny asset; ECS_AUTO_DEPS=0 skips tool preparation.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
-        'With --submit, runs one test and writes a small ecs.submission/v1 JSON; --output chooses its file or directory.' \
+        'With --submit, wrapper options precede an exact -- and ecs run options follow it; wrapper --output chooses the submission file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
         'The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules. Explicit --only may select any module. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
-        '      run.sh --submit [测试选项] [--provider 商家] [--region 地区] [--output 路径]' \
+        '      run.sh --submit [--provider 商家] [--region 地区] [--output 路径] -- [测试选项]' \
         '' \
         '下载并校验 ecs Release，再按架构下载并校验缺失工具包，把需要的 binary 放入临时 PATH（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
         '选中 route/backtrace 时使用官方 nexttrace-tiny，缺失时跳过路由探测；ECS_AUTO_DEPS=0 会跳过依赖准备。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
-        '使用 --submit 会一次完成测试并生成精简的 ecs.submission/v1 JSON；--output 指定文件或目录。' \
+        '使用 --submit 时，wrapper 选项放在精确的 -- 之前，ecs run 选项放在其后；wrapper --output 指定提交文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
         'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
@@ -114,10 +114,9 @@ if [ "$HELP_REQUESTED" -eq 1 ]; then
     exit 0
 fi
 
-# --submit is a wrapper-only mode.  Parse and remove its options before any
-# arguments reach `ecs run`; keeping the filtering in positional parameters
-# avoids eval/string-splitting and therefore preserves spaces and shell
-# metacharacters in ordinary user arguments.
+# An exact -- activates the wrapper grammar.  Only the tokens before it may be
+# wrapper submit options; every token after it is rebuilt unchanged as ecs run
+# argv.  Without a boundary, the complete argv belongs to ecs as before.
 SUBMIT_MODE=0
 SUBMIT_PROVIDER=""
 SUBMIT_REGION=""
@@ -139,41 +138,45 @@ reject_submit_value() {
     die "--$submit_label 的值不能包含控制字符" "--$submit_label value contains a control character"
 }
 
+WRAPPER_BOUNDARY=0
 for arg in "$@"; do
-  case "$arg" in
-    --submit) SUBMIT_MODE=1 ;;
-    --submit=*) die "--submit 不接受参数" "--submit does not take a value" ;;
-  esac
+  [ "$arg" != "--" ] || {
+    WRAPPER_BOUNDARY=1
+    break
+  }
 done
-if [ "$SUBMIT_MODE" -eq 1 ]; then
-  for arg in "$@"; do
-    case "$arg" in
-      --reveal|--reveal=*)
-        die "提交模式不允许 --reveal（中间报告不会公开）" "--reveal is not allowed in submit mode (the intermediate report is private)"
-        ;;
-    esac
-  done
-fi
 
-if [ "$SUBMIT_MODE" -eq 1 ]; then
-  SUBMIT_SENTINEL="__ecs_run_submit_filter_$$__"
-  # Append a sentinel, then rotate ordinary arguments behind it.  When the
-  # sentinel reaches the front, the remaining positional parameters are the
-  # filtered argv in their original order.
-  set -- "$@" "$SUBMIT_SENTINEL"
-  while [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ]; do
+if [ "$WRAPPER_BOUNDARY" -eq 1 ]; then
+  RUN_ARGUMENTS=0
+  # Process exactly the original argc. Post-boundary tokens are rotated behind
+  # the unprocessed argv, so the loop ends with only verbatim run argv in "$@".
+  WRAPPER_REMAINING=$#
+  while [ "$WRAPPER_REMAINING" -gt 0 ]; do
     arg=$1
     shift
+    WRAPPER_REMAINING=$((WRAPPER_REMAINING - 1))
+    if [ "$RUN_ARGUMENTS" -eq 1 ]; then
+      set -- "$@" "$arg"
+      continue
+    fi
     case "$arg" in
+      --)
+        RUN_ARGUMENTS=1
+        ;;
       --submit)
+        SUBMIT_MODE=1
+        ;;
+      --submit=*)
+        die "--submit 不接受参数" "--submit does not take a value"
         ;;
       --provider)
-        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+        [ "$WRAPPER_REMAINING" -gt 0 ] && [ "$1" != "--" ] ||
           die "--provider 缺少参数" "--provider requires a value"
         [ "$SUBMIT_PROVIDER_GIVEN" -eq 0 ] ||
           die "--provider 不能重复" "--provider must not be repeated"
         SUBMIT_PROVIDER=$1
         shift
+        WRAPPER_REMAINING=$((WRAPPER_REMAINING - 1))
         reject_submit_value provider "$SUBMIT_PROVIDER"
         SUBMIT_PROVIDER_GIVEN=1
         ;;
@@ -185,12 +188,13 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
         SUBMIT_PROVIDER_GIVEN=1
         ;;
       --region)
-        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+        [ "$WRAPPER_REMAINING" -gt 0 ] && [ "$1" != "--" ] ||
           die "--region 缺少参数" "--region requires a value"
         [ "$SUBMIT_REGION_GIVEN" -eq 0 ] ||
           die "--region 不能重复" "--region must not be repeated"
         SUBMIT_REGION=$1
         shift
+        WRAPPER_REMAINING=$((WRAPPER_REMAINING - 1))
         reject_submit_value region "$SUBMIT_REGION"
         SUBMIT_REGION_GIVEN=1
         ;;
@@ -202,12 +206,13 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
         SUBMIT_REGION_GIVEN=1
         ;;
       --output)
-        [ "$#" -gt 0 ] && [ "$1" != "$SUBMIT_SENTINEL" ] ||
+        [ "$WRAPPER_REMAINING" -gt 0 ] && [ "$1" != "--" ] ||
           die "--output 缺少路径" "--output requires a path"
         [ "$SUBMIT_OUTPUT_GIVEN" -eq 0 ] ||
           die "--output 不能重复" "--output must not be repeated"
         SUBMIT_OUTPUT=$1
         shift
+        WRAPPER_REMAINING=$((WRAPPER_REMAINING - 1))
         reject_submit_value output "$SUBMIT_OUTPUT"
         SUBMIT_OUTPUT_GIVEN=1
         ;;
@@ -219,38 +224,19 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
         SUBMIT_OUTPUT_GIVEN=1
         ;;
       *)
-        set -- "$@" "$arg"
+        die "wrapper 分隔符 -- 前存在不支持的参数：$arg" "unsupported argument before the wrapper boundary --: $arg"
         ;;
     esac
   done
-  [ "$#" -gt 0 ] && [ "$1" = "$SUBMIT_SENTINEL" ] ||
-    die "提交参数解析失败" "failed to parse submit arguments"
-  shift
+  [ "$RUN_ARGUMENTS" -eq 1 ] ||
+    die "wrapper 参数边界解析失败" "failed to parse the wrapper argument boundary"
 fi
 
-OUTPUT_GIVEN=0
-EXPECT_OUTPUT=0
-NAME_GIVEN=0
-EXPECT_NAME=0
-NAME_VALUE=""
-for arg in "$@"; do
-  if [ "$EXPECT_OUTPUT" -eq 1 ]; then
-    EXPECT_OUTPUT=0
-    continue
-  fi
-  if [ "$EXPECT_NAME" -eq 1 ]; then
-    NAME_VALUE="$arg"
-    EXPECT_NAME=0
-    continue
-  fi
-  case "$arg" in
-    --output) OUTPUT_GIVEN=1; EXPECT_OUTPUT=1 ;;
-    --output=*) OUTPUT_GIVEN=1 ;;
-    --name|-name) NAME_GIVEN=1; EXPECT_NAME=1 ;;
-    --name=*|-name=*) NAME_GIVEN=1; NAME_VALUE="${arg#*=}" ;;
-  esac
-done
-[ "$SUBMIT_MODE" -eq 0 ] || OUTPUT_GIVEN=1
+if [ "$SUBMIT_MODE" -eq 0 ] &&
+    [ "$SUBMIT_PROVIDER_GIVEN:$SUBMIT_REGION_GIVEN:$SUBMIT_OUTPUT_GIVEN" != "0:0:0" ]; then
+  die "--provider、--region 和 wrapper --output 只能与 --submit 同时使用" \
+    "--provider, --region, and wrapper --output require --submit"
+fi
 
 [ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
 
@@ -287,7 +273,6 @@ fi
 WORK=$(mktemp -d "$WORK_ROOT/ecs-run.XXXXXX")
 REPORT_DIR=""
 REPORT_NAME=""
-REPORT_BEFORE=""
 SUBMIT_REPORT_DIR=""
 SUBMIT_REPORT=""
 PACKAGE_MANAGER=""
@@ -1193,32 +1178,14 @@ prepare_dependencies() {
   fi
 }
 
-snapshot_report_paths() {
-  for report_glob in "$REPORT_DIR"/*.json "$REPORT_DIR"/*.md "$REPORT_DIR"/*.html; do
-    [ -f "$report_glob" ] && printf '%s\n' "$report_glob"
-  done | sort
-}
-
-sanitize_report_name() {
-  # reporter.sanitizeBaseName 只保留 ASCII 字母、数字、点、短横线和下划线。
-  REPORT_NAME=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g; s/^[.-]*//; s/[.-]*$//')
-  [ -n "$REPORT_NAME" ] || REPORT_NAME="ecs-report"
-}
-
-if [ "$OUTPUT_GIVEN" -eq 0 ]; then
+if [ "$SUBMIT_MODE" -eq 0 ]; then
   REPORT_DIR="${TMPDIR:-/tmp}"
   [ -d "$REPORT_DIR" ] ||
     die "临时目录不存在：$REPORT_DIR" "temporary directory does not exist: $REPORT_DIR"
-  REPORT_BEFORE="$WORK/reports.before"
-  snapshot_report_paths >"$REPORT_BEFORE" ||
-    die "无法记录报告目录状态：$REPORT_DIR" "failed to record report directory state: $REPORT_DIR"
-  if [ "$NAME_GIVEN" -eq 1 ]; then
-    sanitize_report_name "$NAME_VALUE"
-  else
-    # WORK 本身由 mktemp 唯一命名；把它带入默认前缀可避免同一秒内的覆盖。
-    sanitize_report_name "ecs-report-${WORK##*/}"
-  fi
-  say "报告目录：$REPORT_DIR" "report directory: $REPORT_DIR"
+  # These defaults precede the untouched user argv in the final Go command,
+  # so an explicit Go --output or --name naturally wins without shell parsing.
+  REPORT_NAME="ecs-report-${WORK##*/}"
+  say "默认报告目录：$REPORT_DIR" "default report directory: $REPORT_DIR"
 fi
 
 if [ "$SUBMIT_MODE" -eq 1 ]; then
@@ -1323,37 +1290,12 @@ fi
 # been consumed, so the wrapper never maintains a second selection algorithm.
 load_execution_plan "$@"
 
+if [ "$SUBMIT_MODE" -eq 1 ] && [ "$PLAN_REVEAL" = true ]; then
+  die "提交模式不允许 --reveal（中间报告不会公开）" \
+    "--reveal is not allowed in submit mode (the intermediate report is private)"
+fi
+
 prepare_dependencies
-
-report_paths() {
-  REPORT_AFTER="$WORK/reports.after"
-  REPORT_MATCHES="$WORK/reports.matches"
-  REPORT_PATHS="$WORK/reports.paths"
-  snapshot_report_paths >"$REPORT_AFTER" || true
-  # 新文件来自本次运行；不会把 REPORT_DIR 中原有的无关 JSON 当成结果。
-  comm -13 "$REPORT_BEFORE" "$REPORT_AFTER" >"$REPORT_MATCHES" || true
-  # 显式 --name 可能覆盖同名旧文件，补上其实际路径；默认名称已由 WORK 唯一化。
-  for report_format in json md html; do
-    report_path="$REPORT_DIR/$REPORT_NAME.$report_format"
-    if [ -f "$report_path" ]; then
-      printf '%s\n' "$report_path" >>"$REPORT_MATCHES"
-    fi
-  done
-  sort -u "$REPORT_MATCHES" >"$REPORT_PATHS" || true
-
-  if [ -s "$REPORT_PATHS" ]; then
-    while IFS= read -r report_path; do
-      [ -n "$report_path" ] || continue
-      report_format=${report_path##*.}
-      case "$report_format" in
-        json) say "JSON 报告：$report_path" "JSON report: $report_path" ;;
-        *) say "${report_format} 报告：$report_path" "${report_format} report: $report_path" ;;
-      esac
-    done <"$REPORT_PATHS"
-  else
-    say "未找到本次生成的报告；报告目录：$REPORT_DIR" "no report generated by this run; report directory: $REPORT_DIR"
-  fi
-}
 
 # 不使用 exec：必须等 ecs 退出后运行清理逻辑，并原样保留退出码。
 if [ "$SUBMIT_MODE" -eq 1 ]; then
@@ -1366,47 +1308,18 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
     RUN_STATUS=$?
   fi
 elif [ -n "$PLAN_FILE" ]; then
-  if [ -n "$REPORT_DIR" ]; then
-    if [ "$NAME_GIVEN" -eq 1 ]; then
-      if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" \
-          --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
-        RUN_STATUS=0
-      else
-        RUN_STATUS=$?
-      fi
-    elif "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes --output "$REPORT_DIR" --name "$REPORT_NAME" \
-        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
-      RUN_STATUS=0
-    else
-      RUN_STATUS=$?
-    fi
+  if "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@" \
+      --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes \
+      --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
+    RUN_STATUS=0
   else
-    if "${WORK}/ecs" "$@" --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes \
-        --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
-      RUN_STATUS=0
-    else
-      RUN_STATUS=$?
-    fi
+    RUN_STATUS=$?
   fi
 else
-  if [ -n "$REPORT_DIR" ]; then
-    if [ "$NAME_GIVEN" -eq 1 ]; then
-      if "${WORK}/ecs" "$@" --output "$REPORT_DIR"; then
-        RUN_STATUS=0
-      else
-        RUN_STATUS=$?
-      fi
-    elif "${WORK}/ecs" "$@" --output "$REPORT_DIR" --name "$REPORT_NAME"; then
-      RUN_STATUS=0
-    else
-      RUN_STATUS=$?
-    fi
+  if "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@"; then
+    RUN_STATUS=0
   else
-    if "${WORK}/ecs" "$@"; then
-      RUN_STATUS=0
-    else
-      RUN_STATUS=$?
-    fi
+    RUN_STATUS=$?
   fi
 fi
 if [ "$SUBMIT_MODE" -eq 1 ]; then
@@ -1456,8 +1369,5 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
     SUBMIT_STATUS=$?
   fi
   exit "$SUBMIT_STATUS"
-fi
-if [ -n "$REPORT_DIR" ]; then
-  report_paths
 fi
 exit "$RUN_STATUS"

@@ -24,9 +24,9 @@ func TestInformationCommandsSucceed(t *testing.T) {
 		args   []string
 		marker string
 	}{
-		{name: "help", args: []string{"help", "--lang", "en"}, marker: "Usage:"},
+		{name: "help", args: []string{"--lang", "en", "help"}, marker: "Usage:"},
 		{name: "version", args: []string{"version"}, marker: "ecs "},
-		{name: "list", args: []string{"list", "--lang", "en"}, marker: "Profiles:"},
+		{name: "list", args: []string{"--lang", "en", "list"}, marker: "Profiles:"},
 		{name: "config example", args: []string{"config", "example"}, marker: `"profile": "standard"`},
 	}
 	for _, test := range cases {
@@ -42,7 +42,7 @@ func TestInformationCommandsSucceed(t *testing.T) {
 func TestRootHelpUsesDefaultRunCommand(t *testing.T) {
 	for _, argument := range []string{"-h", "--help"} {
 		t.Run(argument, func(t *testing.T) {
-			status, stdout, stderr := runInformationCommand(argument, "--lang=en")
+			status, stdout, stderr := runInformationCommand("--lang=en", argument)
 			if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run]") || strings.Contains(stderr, "ecs —") {
 				t.Fatalf("root %s help status=%d stdout=%q stderr=%q", argument, status, stdout, stderr)
 			}
@@ -50,7 +50,7 @@ func TestRootHelpUsesDefaultRunCommand(t *testing.T) {
 	}
 }
 
-func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
+func TestMainDispatchesGlobalLanguagePrefix(t *testing.T) {
 	cases := []struct {
 		name           string
 		args           []string
@@ -59,14 +59,14 @@ func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
 		stderrMarker   string
 	}{
 		{
-			name:           "language before list",
+			name:           "equals language before list",
 			args:           []string{"--lang=en", "list"},
 			stdoutMarker:   "Profiles:",
 			languageMarker: "Standard profile:",
 		},
 		{
-			name:           "language after list",
-			args:           []string{"list", "--lang=en"},
+			name:           "separate language before list",
+			args:           []string{"--lang", "en", "list"},
 			stdoutMarker:   "Profiles:",
 			languageMarker: "Standard profile:",
 		},
@@ -82,19 +82,14 @@ func TestMainDispatchesGlobalLanguageBeforeOrAfterCommand(t *testing.T) {
 			stdoutMarker: "ecs ",
 		},
 		{
-			name:         "language after version",
-			args:         []string{"version", "--lang=zh"},
-			stdoutMarker: "ecs ",
-		},
-		{
 			name:         "language before compare help",
 			args:         []string{"--lang=en", "compare", "--help"},
 			stderrMarker: "Usage: ecs compare",
 		},
 		{
-			name:         "language after compare help",
-			args:         []string{"compare", "--help", "--lang=en"},
-			stderrMarker: "Usage: ecs compare",
+			name:         "language before render help",
+			args:         []string{"--lang=en", "render", "--help"},
+			stderrMarker: "Usage of ecs render",
 		},
 	}
 	for _, test := range cases {
@@ -158,18 +153,32 @@ func TestMainLocalizesRunHelpAfterFormalLanguage(t *testing.T) {
 	}
 }
 
+func TestRunAndPlanFlagSetsOwnLateLanguage(t *testing.T) {
+	t.Setenv("ECS_LANG", "zh")
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "implicit run", args: []string{"--profile", "full", "--lang=en", "--help"}},
+		{name: "explicit run", args: []string{"run", "--profile", "full", "--lang=en", "--help"}},
+		{name: "plan", args: []string{"plan", "--profile", "full", "--lang=en", "--help"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := runInformationCommand(test.args...)
+			if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs [run] [options]") || strings.Contains(stderr, "用法:") {
+				t.Fatalf("late run language args=%v status=%d stdout=%q stderr=%q", test.args, status, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestMainUsesLastGlobalLanguageAndRejectsLastInvalidValue(t *testing.T) {
-	status, stdout, stderr := runInformationCommand("list", "--lang=zh", "--lang=en")
+	status, stdout, stderr := runInformationCommand("--lang=zh", "--lang=en", "list")
 	if status != 0 || stderr != "" || !strings.Contains(stdout, "Standard profile:") || strings.Contains(stdout, "标准配置：") {
-		t.Fatalf("last global language (post-command) status=%d stdout=%q stderr=%q", status, stdout, stderr)
+		t.Fatalf("last global language status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 
-	status, stdout, stderr = runInformationCommand("--lang=en", "list", "--lang=zh")
-	if status != 0 || stderr != "" || !strings.Contains(stdout, "标准配置：") || strings.Contains(stdout, "Standard profile:") {
-		t.Fatalf("last global language (pre/post-command) status=%d stdout=%q stderr=%q", status, stdout, stderr)
-	}
-
-	status, stdout, stderr = runInformationCommand("--lang=en", "list", "--lang=invalid")
+	status, stdout, stderr = runInformationCommand("--lang=en", "--lang=invalid", "list")
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "invalid --lang value \"invalid\"") {
 		t.Fatalf("last invalid global language status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -187,7 +196,7 @@ func TestMainRejectsMissingOrEmptyGlobalLanguageValues(t *testing.T) {
 		{name: "short empty", arg: "-lang=", marker: "--lang value must not be empty"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			status, stdout, stderr := runInformationCommand("list", test.arg)
+			status, stdout, stderr := runInformationCommand(test.arg)
 			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
@@ -196,9 +205,37 @@ func TestMainRejectsMissingOrEmptyGlobalLanguageValues(t *testing.T) {
 }
 
 func TestMainStopsGlobalLanguageScanAtDoubleDash(t *testing.T) {
-	status, stdout, stderr := runInformationCommand("list", "--lang=en", "--", "--lang=en")
-	if status != 1 || stdout != "" || !strings.Contains(stderr, "error: unexpected arguments") {
+	status, stdout, stderr := runInformationCommand("--lang=en", "compare", "--", "--lang", "x.json")
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "--lang") ||
+		strings.Contains(stderr, "invalid --lang") || strings.Contains(stderr, "--lang requires a value") {
 		t.Fatalf("double-dash language status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+}
+
+func TestMainDoesNotStealOptionLookingCommandValues(t *testing.T) {
+	t.Setenv("ECS_LANG", "en")
+	for _, test := range []struct {
+		name   string
+		args   []string
+		marker string
+	}{
+		{name: "compare name", args: []string{"compare", "--name", "--lang", "a.json", "b.json"}, marker: "a.json"},
+		{name: "render input", args: []string{"render", "--input", "--lang"}, marker: "open --lang"},
+		{name: "render name", args: []string{"render", "--name", "--lang"}, marker: "--input is required"},
+		{name: "submit note", args: []string{"submit", "--note", "--lang"}, marker: "--input is required"},
+		{name: "leaderboard source", args: []string{"leaderboard", "--source", "--lang"}, marker: "at least one report"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status, stdout, stderr := runInformationCommand(test.args...)
+			if status != 1 || stdout != "" || !strings.Contains(stderr, test.marker) {
+				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+			for _, forbidden := range []string{"invalid --lang", "--lang requires a value", "--lang value must not be empty"} {
+				if strings.Contains(stderr, forbidden) {
+					t.Fatalf("Main stole command value: args=%v stderr=%q", test.args, stderr)
+				}
+			}
+		})
 	}
 }
 
@@ -211,9 +248,9 @@ func TestInformationCommandsReportDistinctFailures(t *testing.T) {
 		args   []string
 		marker string
 	}{
-		{name: "unknown command", args: []string{"not-a-command", "--lang", "en"}, marker: "unknown command"},
-		{name: "list extra argument", args: []string{"list", "--lang", "en", "unexpected"}, marker: "error: unexpected arguments"},
-		{name: "config subcommand missing", args: []string{"config", "--lang", "en"}, marker: "Usage: ecs config example"},
+		{name: "unknown command", args: []string{"--lang", "en", "not-a-command"}, marker: "unknown command"},
+		{name: "list extra argument", args: []string{"--lang", "en", "list", "unexpected"}, marker: "error: unexpected arguments"},
+		{name: "config subcommand missing", args: []string{"--lang", "en", "config"}, marker: "Usage: ecs config example"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -227,7 +264,7 @@ func TestInformationCommandsReportDistinctFailures(t *testing.T) {
 
 func TestRemovedBaselineCommandIsUnknownAndDoesNotWriteOutput(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "baseline.json")
-	status, stdout, stderr := runInformationCommand("baseline", "--lang", "en", "--output", output)
+	status, stdout, stderr := runInformationCommand("--lang", "en", "baseline", "--output", output)
 	if status != 1 || stdout != "" || !strings.Contains(stderr, `unknown command "baseline"`) {
 		t.Fatalf("removed baseline command status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -246,9 +283,9 @@ func TestListUsesStandardFlagFormsAndLastValue(t *testing.T) {
 		marker         string
 		languageMarker string
 	}{
-		{name: "long equals", args: []string{"list", "--lang=en"}, marker: "Profiles:", languageMarker: "Standard profile:"},
-		{name: "short equals", args: []string{"list", "-lang=en"}, marker: "Profiles:", languageMarker: "Standard profile:"},
-		{name: "last repeated value", args: []string{"list", "--lang=zh", "-lang=en"}, marker: "Profiles:", languageMarker: "Standard profile:"},
+		{name: "long equals", args: []string{"--lang=en", "list"}, marker: "Profiles:", languageMarker: "Standard profile:"},
+		{name: "short equals", args: []string{"-lang=en", "list"}, marker: "Profiles:", languageMarker: "Standard profile:"},
+		{name: "last repeated value", args: []string{"--lang=zh", "-lang=en", "list"}, marker: "Profiles:", languageMarker: "Standard profile:"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			status, stdout, stderr := runInformationCommand(test.args...)
@@ -264,13 +301,13 @@ func TestListUsesStandardFlagFormsAndLastValue(t *testing.T) {
 
 func TestListReportsStandardFlagErrors(t *testing.T) {
 	t.Run("unknown flag", func(t *testing.T) {
-		status, stdout, stderr := runInformationCommand("list", "--unexpected", "--lang=en")
+		status, stdout, stderr := runInformationCommand("--lang=en", "list", "--unexpected")
 		if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -unexpected") {
 			t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 		}
 	})
 	t.Run("missing language value", func(t *testing.T) {
-		status, stdout, stderr := runInformationCommand("list", "--lang")
+		status, stdout, stderr := runInformationCommand("--lang")
 		if status != 1 || stdout != "" || !strings.Contains(stderr, "--lang requires a value") {
 			t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 		}
@@ -281,7 +318,7 @@ func TestListShowsCanonicalIPQualitySourceIDsInStableOrder(t *testing.T) {
 	expected := "  " + strings.Join(config.IPQualitySourceIDs(), ", ") + "\n"
 	for _, language := range []string{"zh", "en"} {
 		t.Run(language, func(t *testing.T) {
-			status, stdout, stderr := runInformationCommand("list", "--lang="+language)
+			status, stdout, stderr := runInformationCommand("--lang="+language, "list")
 			if status != 0 || stderr != "" || !strings.Contains(stdout, expected) {
 				t.Fatalf("status=%d stdout=%q stderr=%q, want canonical source list %q", status, stdout, stderr, expected)
 			}
@@ -294,11 +331,11 @@ func TestListRejectsRemovedMachineManifestFormats(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "machine flag", args: []string{"list", "--machine", "--lang", "en"}},
-		{name: "machine format value", args: []string{"list", "--format", "machine", "--lang", "en"}},
-		{name: "machine format equals", args: []string{"list", "--format=machine", "--lang", "en"}},
-		{name: "manifest format value", args: []string{"list", "--format", "manifest", "--lang", "en"}},
-		{name: "manifest format equals", args: []string{"list", "--format=manifest", "--lang", "en"}},
+		{name: "machine flag", args: []string{"--lang", "en", "list", "--machine"}},
+		{name: "machine format value", args: []string{"--lang", "en", "list", "--format", "machine"}},
+		{name: "machine format equals", args: []string{"--lang", "en", "list", "--format=machine"}},
+		{name: "manifest format value", args: []string{"--lang", "en", "list", "--format", "manifest"}},
+		{name: "manifest format equals", args: []string{"--lang", "en", "list", "--format=manifest"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			status, stdout, stderr := runInformationCommand(test.args...)

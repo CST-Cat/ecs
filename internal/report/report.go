@@ -105,6 +105,7 @@ func loadJSON(path string) (model.Report, error) {
 		return data, i18n.Errorf("err.reportTooLarge")
 	}
 	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&data); err != nil {
 		return data, err
 	}

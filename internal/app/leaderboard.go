@@ -276,7 +276,7 @@ func formatOutlier(item score.Outlier) string {
 	if item.ZScore < 0 {
 		key = "baseline.outlierLow"
 	}
-	return fmt.Sprintf(i18n.T(key), item.SubmissionID, item.MetricKey, item.TierLabel,
+	return fmt.Sprintf(i18n.T(key), item.SampleID, item.MetricKey, score.TierLabel(item.TierMinVCPU),
 		item.SampleCount, item.Ratio, math.Abs(item.ZScore))
 }
 
@@ -284,11 +284,11 @@ func formatUndecidable(item score.Undecidable) string {
 	switch item.Reason {
 	case "insufficient_samples":
 		return fmt.Sprintf(i18n.T("baseline.undecidableFew"),
-			item.TierLabel, item.MetricKey, item.SampleCount, item.Required)
+			score.TierLabel(item.TierMinVCPU), item.MetricKey, item.SampleCount, item.Required)
 	case "zero_dispersion":
-		return fmt.Sprintf(i18n.T("baseline.undecidableZero"), item.TierLabel, item.MetricKey)
+		return fmt.Sprintf(i18n.T("baseline.undecidableZero"), score.TierLabel(item.TierMinVCPU), item.MetricKey)
 	default:
-		return fmt.Sprintf(i18n.T("baseline.undecidableOther"), item.TierLabel, item.MetricKey, item.Reason)
+		return fmt.Sprintf(i18n.T("baseline.undecidableOther"), score.TierLabel(item.TierMinVCPU), item.MetricKey, item.Reason)
 	}
 }
 

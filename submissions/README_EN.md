@@ -58,10 +58,11 @@ Or do both in one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
-  --submit --profile full --yes --provider vultr --region jp-tokyo
+  --submit --provider vultr --region jp-tokyo -- \
+  --profile full --yes
 ```
 
-Without `--output` the file is written under `${TMPDIR:-/tmp}` with an automatic name; an existing directory receives a generated file; a not-yet-existing path is used as given. Existing files are never overwritten, and symlinks are rejected.
+The wrapper interprets only `--submit`, `--provider`, `--region`, and submission `--output` before the second exact `--`; every later token is passed unchanged to `ecs run`. Without wrapper `--output`, the file is written under `${TMPDIR:-/tmp}` with an automatic name; an existing directory receives a generated file; a not-yet-existing path is used as given. Existing files are never overwritten, and symlinks are rejected.
 
 ## File placement
 

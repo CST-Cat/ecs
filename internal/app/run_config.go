@@ -117,8 +117,8 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		return resolvedRunConfig{}, runFlagParseError{err: err}
 	}
 	if languageFlag.seen {
-		occurrence := earlyFlagOccurrence{Name: "lang", Value: languageFlag.value, HasValue: true}
-		if err := validateExplicitLanguage([]earlyFlagOccurrence{occurrence}); err != nil {
+		occurrence := languageFlagOccurrence{Value: languageFlag.value}
+		if err := validateExplicitLanguage([]languageFlagOccurrence{occurrence}); err != nil {
 			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 		}
 	}

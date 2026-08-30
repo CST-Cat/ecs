@@ -91,7 +91,7 @@ func TestLeaderboardHandlesNestedTraversalErrors(t *testing.T) {
 			}
 
 			output := filepath.Join(root, "baseline.json")
-			args := []string{"leaderboard", "--lang", "en", "--output", output}
+			args := []string{"--lang", "en", "leaderboard", "--output", output}
 			if test.strict {
 				args = append(args, "--strict")
 			}

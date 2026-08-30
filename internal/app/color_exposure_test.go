@@ -108,7 +108,7 @@ func TestCompareRejectsInvalidColorBeforeWriting(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(root, test.name)
 			args := []string{
-				"compare", first, second, "--lang", "en", "--format", "json",
+				"--lang", "en", "compare", first, second, "--format", "json",
 				"--output", output, "--color=" + test.color,
 			}
 			if test.noColor {
@@ -127,8 +127,8 @@ func TestCompareRejectsInvalidColorBeforeWriting(t *testing.T) {
 
 func TestCompareHelpUsesFlagSetParseResultBeforeColorValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"compare", "--lang", "en", "--help", "--color=terminal-magic"},
-		{"compare", "--lang", "en", "--help", "--no-color", "--color=terminal-magic"},
+		{"--lang", "en", "compare", "--help", "--color=terminal-magic"},
+		{"--lang", "en", "compare", "--help", "--no-color", "--color=terminal-magic"},
 	} {
 		status, stdout, stderr := invokeAppMain(args...)
 		if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs compare") || strings.Contains(stderr, "invalid terminal color mode") {
@@ -145,7 +145,7 @@ func TestCompareReportsFlagParseErrorWithoutSecondaryColorValidation(t *testing.
 	}{
 		{
 			name:   "unknown flag after invalid color",
-			args:   []string{"compare", "--lang", "en", "--color=terminal-magic", "--unknown"},
+			args:   []string{"--lang", "en", "compare", "--color=terminal-magic", "--unknown"},
 			marker: "flag provided but not defined: -unknown",
 		},
 	} {
@@ -166,7 +166,7 @@ func TestCompareAcceptsValidColorsThroughCLI(t *testing.T) {
 		t.Run(raw, func(t *testing.T) {
 			output := filepath.Join(root, raw)
 			status, stdout, stderr := invokeAppMain(
-				"compare", first, second, "--lang", "en", "--format", "json",
+				"--lang", "en", "compare", first, second, "--format", "json",
 				"--output", output, "--name", "comparison", "--color="+raw,
 			)
 			if status != 0 || stdout == "" || stderr != "" {

@@ -53,7 +53,7 @@ func TestCompareCommandWritesReadableJSONAndPreservesCanonicalValues(t *testing.
 	output := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	if status := Main(context.Background(), []string{
-		"compare", first, second, "--lang", "en", "--format", "json,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
+		"--lang", "en", "compare", first, second, "--format", "json,md,html", "--output", output, "--name", "fleet", "--reference", "2", "--no-color",
 	}, &stdout, &stderr); status != 0 {
 		t.Fatalf("compare failed: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -123,43 +123,43 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 	}{
 		{
 			name:     "too few reports",
-			args:     []string{"compare", only, "--lang", "en", "--output", filepath.Join(root, "too-few")},
+			args:     []string{"--lang", "en", "compare", only, "--output", filepath.Join(root, "too-few")},
 			marker:   "requires at least two JSON reports",
 			noOutput: filepath.Join(root, "too-few"),
 		},
 		{
 			name:   "missing normalized flag value",
-			args:   []string{"compare", "--lang", "en", "--format"},
+			args:   []string{"--lang", "en", "compare", "--format"},
 			marker: "--format requires a value",
 		},
 		{
 			name:   "load JSON",
-			args:   []string{"compare", bad, second, "--lang", "en", "--format", "json"},
+			args:   []string{"--lang", "en", "compare", bad, second, "--format", "json"},
 			marker: "error:",
 		},
 		{
 			name:   "historical schema",
-			args:   []string{"compare", legacy, second, "--lang", "en", "--format", "json"},
+			args:   []string{"--lang", "en", "compare", legacy, second, "--format", "json"},
 			marker: "unsupported schema_version",
 		},
 		{
 			name:   "invalid reference",
-			args:   []string{"compare", first, second, "--lang", "en", "--reference", "3"},
+			args:   []string{"--lang", "en", "compare", first, second, "--reference", "3"},
 			marker: "--reference must be between 1 and 2",
 		},
 		{
 			name:   "unsupported format",
-			args:   []string{"compare", first, second, "--lang", "en", "--format", "txt"},
+			args:   []string{"--lang", "en", "compare", first, second, "--format", "txt"},
 			marker: `unknown output format "txt"`,
 		},
 		{
 			name:   "no formats",
-			args:   []string{"compare", first, second, "--lang", "en", "--format", ""},
+			args:   []string{"--lang", "en", "compare", first, second, "--format", ""},
 			marker: "at least one output format is required",
 		},
 		{
 			name:   "output directory",
-			args:   []string{"compare", first, second, "--lang", "en", "--format", "json", "--output", outputFile},
+			args:   []string{"--lang", "en", "compare", first, second, "--format", "json", "--output", outputFile},
 			marker: "create output directory",
 		},
 	}
@@ -182,11 +182,11 @@ func TestCompareCommandReportsDistinctFailures(t *testing.T) {
 }
 
 func TestCompareCommandReportsHelpAndUnknownFlag(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("compare", "--lang", "en", "--help")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "compare", "--help")
 	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs compare") {
 		t.Fatalf("compare help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	status, stdout, stderr = invokeAppMain("compare", "--lang", "en", "--unknown")
+	status, stdout, stderr = invokeAppMain("--lang", "en", "compare", "--unknown")
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "flag provided but not defined") {
 		t.Fatalf("compare unknown flag status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
@@ -207,7 +207,7 @@ func TestCompareCommandRejectsEmptyOutputPath(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
 
 	status, stdout, stderr := invokeAppMain(
-		"compare", first, second, "--lang", "en", "--format", "json", "--output=",
+		"--lang", "en", "compare", first, second, "--format", "json", "--output=",
 	)
 	if status != 1 || stdout != "" || !strings.Contains(stderr, "comparison output path must not be empty") {
 		t.Fatalf("empty output status=%d stdout=%q stderr=%q", status, stdout, stderr)
@@ -239,7 +239,7 @@ func TestCompareCommandPreservesDoubleDashForOptionLikeReports(t *testing.T) {
 
 	output := t.TempDir()
 	status, stdout, stderr := invokeAppMain(
-		"compare", "--lang", "en", "--format", "json", "--output", output, "--name", "boundary", "--", "--first.json", "--second.json",
+		"--lang", "en", "compare", "--format", "json", "--output", output, "--name", "boundary", "--", "--first.json", "--second.json",
 	)
 	if status != 0 || stdout == "" || stderr != "" {
 		t.Fatalf("double-dash option-like reports status=%d stdout=%q stderr=%q", status, stdout, stderr)

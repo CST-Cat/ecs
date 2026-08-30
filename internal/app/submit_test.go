@@ -66,7 +66,7 @@ func TestSubmitCommandWritesLoadableSubmission(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output := test.path(t)
-			args := []string{"submit", "--lang", "en", "--input", input, "--region", "us", "--provider", "fixture", "--note", "diagnostic fixture"}
+			args := []string{"--lang", "en", "submit", "--input", input, "--region", "us", "--provider", "fixture", "--note", "diagnostic fixture"}
 			if output != "" {
 				args = append(args, "--output", output)
 			}
@@ -135,57 +135,57 @@ func TestSubmitCommandReportsDistinctFailures(t *testing.T) {
 	}{
 		{
 			name:   "flag parse",
-			args:   []string{"submit", "--lang", "en", "--unknown"},
+			args:   []string{"--lang", "en", "submit", "--unknown"},
 			marker: "flag provided but not defined",
 		},
 		{
 			name:   "missing input",
-			args:   []string{"submit", "--lang", "en"},
+			args:   []string{"--lang", "en", "submit"},
 			marker: "--input is required",
 		},
 		{
 			name:   "load JSON",
-			args:   []string{"submit", "--lang", "en", "--input", badJSON},
+			args:   []string{"--lang", "en", "submit", "--input", badJSON},
 			marker: "error:",
 		},
 		{
 			name:   "build submission",
-			args:   []string{"submit", "--lang", "en", "--input", noMetrics},
+			args:   []string{"--lang", "en", "submit", "--input", noMetrics},
 			marker: "no scoreable measurements",
 		},
 		{
 			name:   "existing output",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", occupied},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", occupied},
 			marker: "submission output already exists",
 		},
 		{
 			name:   "output parent",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", filepath.Join(parentFile, "submission.json")},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", filepath.Join(parentFile, "submission.json")},
 			marker: "not a directory",
 		},
 		{
 			name:   "missing output parent",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", missingParent},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", missingParent},
 			marker: "does not exist",
 		},
 		{
 			name:   "target symlink",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", targetSymlink},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", targetSymlink},
 			marker: "submission output must not be a symlink",
 		},
 		{
 			name:   "parent symlink",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", filepath.Join(parentSymlink, "submission.json")},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", filepath.Join(parentSymlink, "submission.json")},
 			marker: "submission output parent must not be a symlink",
 		},
 		{
 			name:   "empty explicit output",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", ""},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", ""},
 			marker: "submission output path must not be empty",
 		},
 		{
 			name:   "control character output",
-			args:   []string{"submit", "--lang", "en", "--input", valid, "--output", filepath.Join(root, "bad\npath")},
+			args:   []string{"--lang", "en", "submit", "--input", valid, "--output", filepath.Join(root, "bad\npath")},
 			marker: "control character",
 		},
 	}
@@ -328,7 +328,7 @@ func TestWriteSubmissionExclusiveRejectsTargetRace(t *testing.T) {
 }
 
 func TestSubmitCommandHelp(t *testing.T) {
-	status, stdout, stderr := invokeAppMain("submit", "--lang", "en", "--help")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "submit", "--help")
 	if status != 0 || stdout != "" || !strings.Contains(stderr, "Usage: ecs submit") {
 		t.Fatalf("submit help status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}

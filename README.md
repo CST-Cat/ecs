@@ -55,7 +55,7 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | `ecs submit --input FILE` | 从完整报告导出可公开提交的精简 JSON |
 | `ecs version` | 显示版本 |
 
-所有命令接受 `--lang zh|en`。退出码为 `0`（成功）、`1`（参数或运行错误）、`2`（`--strict` 下有警告或失败）、`130`（中断）。
+非运行命令的界面语言放在全局前缀中，例如 `ecs --lang en compare ...`；`run` 和 `plan` 也在自己的选项中接受 `--lang zh|en`。退出码为 `0`（成功）、`1`（参数或运行错误）、`2`（`--strict` 下有警告或失败）、`130`（中断）。
 
 ## 报告、渲染与比较
 
@@ -69,7 +69,7 @@ ecs-report-YYYYMMDD-HHMMSS.html
 
 ```sh
 ecs --format json,html --output ./reports --name my-run
-ecs render --input ./reports/my-run.json --format html,md --lang en
+ecs --lang en render --input ./reports/my-run.json --format html,md
 ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```

@@ -118,7 +118,7 @@ ecs --color always
 
 ```sh
 ecs render --input reports/ecs-report-20260813-075451.json --format html,md
-ecs render --input 报告.json --output /tmp/out --name 改个名 --lang en
+ecs --lang en render --input 报告.json --output /tmp/out --name 改个名
 ecs compare 昨天.json 今天.json
 ecs compare a.json b.json c.json --reference 2 --format json,md,html --output ./compare
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s -- yesterday.json today.json
@@ -139,8 +139,11 @@ ecs submit --input 报告.json --provider vultr --region jp-tokyo --note "常规
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- \
-  --submit --profile full --yes --provider vultr --region jp-tokyo
+  --submit --provider vultr --region jp-tokyo -- \
+  --profile full --yes
 ```
+
+第二个精确的 `--` 分隔 wrapper 选项与 `ecs run` 选项；其后的参数原样交给 `ecs`。
 
 提交 JSON 的字段白名单、目录规则和本地校验见 [../submissions/README.md](../submissions/README.md)；不要在这里重复维护隐私或排行榜政策。
 
