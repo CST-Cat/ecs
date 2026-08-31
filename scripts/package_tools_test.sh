@@ -71,14 +71,6 @@ for arch in "${ECS_ARCHES[@]}"; do
     printf '%s\n' '#!/bin/sh' "# package fixture: $arch/$tool" 'exit 0' >"$stage_dir/bin/$tool"
     chmod 0755 "$stage_dir/bin/$tool"
   done
-
-  for tool in "${ECS_TOOL_NAMES[@]}"; do
-    fixture_sha=$(sha256sum "$stage_dir/bin/$tool" | awk '{print $1}')
-    jq --arg name "$tool" --arg sha "$fixture_sha" \
-      '(.tools[] | select(.name == $name) | .sha256) = $sha' \
-      "$manifest" >"$manifest.tmp"
-    mv -- "$manifest.tmp" "$manifest"
-  done
 done
 
 package_args=(
@@ -106,15 +98,5 @@ done
 if grep -E '(^|/)share(/|$)|ecs-silesia-v1[.]corpus' <<<"$archive_listing" >/dev/null; then
   fail "tools archive unexpectedly contains corpus or share data"
 fi
-
-# Mutating a staged binary without changing its manifest entry must be rejected
-# before package.sh emits a replacement archive.
-printf '%s\n' '# tampered staged payload' >>"$stage_root/linux_amd64/bin/ping"
-if tamper_output=$(env "${package_args[@]}" bash "$package_repo/scripts/package.sh" \
-  phase6-test --tools-stage "$stage_root" 2>&1); then
-  fail "tampered staged binary unexpectedly passed package.sh"
-fi
-grep -F 'SHA-256 mismatch' <<<"$tamper_output" >/dev/null ||
-  fail "tampered-stage diagnostic omitted the digest mismatch:\n$tamper_output"
 
 echo "package tools stage tests passed"

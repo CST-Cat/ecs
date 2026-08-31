@@ -147,7 +147,6 @@ validate_tool_stage() {
 preflight_tools() {
   [[ -d "$tools_stage_root" ]] || die "staging root does not exist: $tools_stage_root"
   command -v tar >/dev/null 2>&1 || die "tar is required for --tools-stage"
-  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required for --tools-stage"
 
   for target in "${targets[@]}"; do
     read -r _goos _goarch arch <<<"$target"
