@@ -284,11 +284,11 @@ var chinese = map[string]string{
 	"estimate.route":   "路由探测时长受每跳超时影响",
 
 	// ── 通用值 ──────────────────────────────────────────────
-	"value.none":     "—",
+	"value.none": "—",
 
 	// ── 已迁移的探针提示 key ─────────────────────────────────
-	"probe.cpu.tool_missing":        "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。",
-	"probe.memory.stream_missing":   "未找到官方 STREAM 可执行文件；内存基准未运行。",
+	"probe.cpu.tool_missing":      "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。",
+	"probe.memory.stream_missing": "未找到官方 STREAM 可执行文件；内存基准未运行。",
 }
 
 var english = map[string]string{
@@ -564,9 +564,9 @@ var english = map[string]string{
 	"estimate.route":   "Route probing time depends on per-hop timeouts",
 
 	// ── Common values ───────────────────────────────────────
-	"value.none":     "—",
+	"value.none": "—",
 
 	// ── Migrated probe notice keys ─────────────────────────
-	"probe.cpu.tool_missing":        "run.sh can temporarily stage sysbench from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no in-house replacement score.",
-	"probe.memory.stream_missing":   "The official STREAM executable was not found; the memory benchmark did not run.",
+	"probe.cpu.tool_missing":      "run.sh can temporarily stage sysbench from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no in-house replacement score.",
+	"probe.memory.stream_missing": "The official STREAM executable was not found; the memory benchmark did not run.",
 }

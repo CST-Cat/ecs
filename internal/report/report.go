@@ -20,10 +20,6 @@ type Options struct {
 	Score *score.Report
 }
 
-func WriteFiles(data model.Report, directory, baseName string, formats []string) (map[string]string, error) {
-	return WriteFilesWithOptions(data, directory, baseName, formats, Options{})
-}
-
 func WriteFilesWithOptions(data model.Report, directory, baseName string, formats []string, options Options) (map[string]string, error) {
 	if directory == "" {
 		directory = "./reports"

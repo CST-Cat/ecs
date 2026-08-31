@@ -145,7 +145,7 @@ func TestWriteFilesCanonicalAndLanguageSpecificOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
-	defaultWritten, err := WriteFiles(data, "", "", []string{"json"})
+	defaultWritten, err := WriteFilesWithOptions(data, "", "", []string{"json"}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,12 +518,12 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 	root := t.TempDir()
 	parentFile := filepath.Join(root, "not-a-directory")
 	writeReportFile(t, parentFile, []byte("file"))
-	if _, err := WriteFiles(data, filepath.Join(parentFile, "child"), "report", []string{"json"}); err == nil || !strings.Contains(err.Error(), "create output directory") {
+	if _, err := WriteFilesWithOptions(data, filepath.Join(parentFile, "child"), "report", []string{"json"}, Options{}); err == nil || !strings.Contains(err.Error(), "create output directory") {
 		t.Fatalf("directory creation error = %v", err)
 	}
 
 	partialDirectory := t.TempDir()
-	written, err := WriteFiles(data, partialDirectory, "report", []string{"json", "bogus"})
+	written, err := WriteFilesWithOptions(data, partialDirectory, "report", []string{"json", "bogus"}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(written) != 0 {
 		t.Fatalf("partial unknown-format result = %v, %v", written, err)
 	}
@@ -532,7 +532,7 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 	}
 
 	freshDirectory := filepath.Join(root, "renderer-failure-directory")
-	written, err = WriteFiles(data, freshDirectory, "report", []string{"json", "bogus"})
+	written, err = WriteFilesWithOptions(data, freshDirectory, "report", []string{"json", "bogus"}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "unknown report format") || len(written) != 0 {
 		t.Fatalf("fresh-directory renderer failure = %v, %v", written, err)
 	}
@@ -542,7 +542,7 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 
 	invalid := sampleReport()
 	invalid.Results[0].Measurements[0].Value = math.Inf(1)
-	written, err = WriteFiles(invalid, t.TempDir(), "report", []string{"json"})
+	written, err = WriteFilesWithOptions(invalid, t.TempDir(), "report", []string{"json"}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "generate json report") || !strings.Contains(err.Error(), "unsupported value") || len(written) != 0 {
 		t.Fatalf("JSON generation failure = %v, %v", written, err)
 	}
@@ -551,7 +551,7 @@ func TestWriteFilesErrorsAndAtomicity(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(atomicDirectory, "report.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	written, err = WriteFiles(data, atomicDirectory, "report", []string{"json"})
+	written, err = WriteFilesWithOptions(data, atomicDirectory, "report", []string{"json"}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "write json report") || len(written) != 0 {
 		t.Fatalf("atomic write failure = %v, %v", written, err)
 	}

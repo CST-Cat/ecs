@@ -90,7 +90,6 @@ func T(key string) string {
 }
 
 // TL 按指定语言取译文，用于同时输出多语言的场景。缺失时返回稳定 key。
-func TL(lang Lang, key string) string { return translate(lang, key) }
 
 // Errorf 构造一个按当前语言渲染的错误。
 //

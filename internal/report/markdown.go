@@ -14,7 +14,8 @@ import (
 	"ecs/internal/termcolor"
 )
 
-// Markdown 渲染独立调用方传入的报告，会先做一次本地化。
+// Markdown 渲染一份人类可读的 Markdown 报告。它是 report 包对外的渲染入口，
+// 被其他包的渲染契约测试跨包使用；WriteFilesWithOptions 走内部实现。
 func Markdown(data model.Report, scored *score.Report) string {
 	return markdownReport(data, scored)
 }
