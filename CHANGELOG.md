@@ -18,6 +18,7 @@
 - 删除 Release 的 artifact attestation job 与 `id-token`/`attestations` 权限。`checksums.txt` 的生成与上传保留不变——它是 `install.sh`、`compare.sh` 和 `run.sh` 校验下载资产的依据。保留的完整性校验：第三方源码与二进制的下载校验、NextTrace 上游 digest 比对、`lock.json` 固定事实、运行时固定语料校验。
 - 报告身份契约收敛到两个入口 owner：`runner.Run` 校验自己生成的报告，`report.LoadJSON` 校验外部读入的报告；`report.JSON` 与 `score.collectMeasurements`（经 5 个调用点重复执行）不再重复校验。`run_config.go` 解析 `--media-region` 时不再重复 `config.Validate` 已无条件执行的校验。
 - 删除 34 个无引用的 i18n key（中英成对）、`i18n.TL` 与 `report.WriteFiles` 两个只服务于测试的转发包装器，并同步 `SECURITY.md`、`THIRD_PARTY.md` 中已失效的 digest 绑定与 attestation 表述。
+- 合并重复了两遍的固定语料构建：`build_corpus.sh` 与 `build_tools.sh` 此前各写一遍下载、解压、按 `lock.json` 顺序拼接和校验，现在统一由 `scripts/lib/corpus.sh` 的 `ecs_build_silesia_corpus` 实现；带重试的下载加摘要校验提到 `scripts/lib/common.sh` 的 `ecs_download_sha256`，`build_tools.sh` 不再自带一份。
 
 ## 0.7.18 — 2026-08-30
 
