@@ -11,8 +11,8 @@ set -euo pipefail
 # 本脚本被 release workflow 的 assemble job 和本地 `make release-dry-run` 共用。
 # 发布路径与本地演练路径一旦是两份实现，本地演练就失去意义。
 #
-# 输出的 checksums.txt 同时是 artifact attestation 的 subject 清单：
-# attest 按摘要绑定，因此这一份文件既给用户校验，也给 provenance 用。
+# checksums.txt 只有一个消费者：下载方。install.sh、compare.sh 和 run.sh 从
+# Release 取回它来校验刚下载的资产。发布链内部不再重算这些摘要。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"

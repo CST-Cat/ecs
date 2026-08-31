@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 )
 
 const SchemaVersion = "ecs-tools.manifest/v1"
@@ -46,8 +45,6 @@ func Architectures() []string {
 func ToolNames() []string {
 	return append([]string(nil), toolNames[:]...)
 }
-
-var sha256Pattern = regexp.MustCompile(`^[[:xdigit:]]{64}$`)
 
 // Manifest describes one Linux architecture's ecs-tools package.
 type Manifest struct {
@@ -89,7 +86,6 @@ type Tool struct {
 	DisabledFeatures []string       `json:"disabled_features"`
 	Architecture     string         `json:"architecture"`
 	License          string         `json:"license"`
-	SHA256           string         `json:"sha256"`
 	Parameters       map[string]any `json:"parameters,omitempty"`
 	Fallback         string         `json:"fallback,omitempty"`
 }
@@ -157,14 +153,14 @@ func Parse(data []byte) (Manifest, error) {
 		if err := rejectUnknownFields(toolRaw,
 			"name", "upstream", "version", "tag_or_commit", "source",
 			"build_flags", "enabled_features", "disabled_features",
-			"architecture", "license", "sha256", "parameters", "fallback",
+			"architecture", "license", "parameters", "fallback",
 		); err != nil {
 			return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
 		}
 		for _, field := range []string{
 			"name", "upstream", "version", "tag_or_commit", "source",
 			"build_flags", "enabled_features", "disabled_features",
-			"architecture", "license", "sha256", "parameters",
+			"architecture", "license", "parameters",
 		} {
 			if err := requireField(toolRaw, field); err != nil {
 				return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
@@ -311,27 +307,15 @@ func validateTool(manifestArchitecture string, tool Tool) error {
 			}
 		}
 	}
+	// manifest.Architecture 已由 Validate 确认在白名单内，这里只需确认工具声明
+	// 与 manifest 一致；再查一次白名单不可能发现新问题。
 	if tool.Architecture != manifestArchitecture {
 		return fmt.Errorf("architecture %q does not match manifest architecture %q", tool.Architecture, manifestArchitecture)
-	}
-	if !contains(architectures[:], tool.Architecture) {
-		return fmt.Errorf("unsupported architecture %q", tool.Architecture)
-	}
-	if !isSHA256(tool.SHA256) {
-		return fmt.Errorf("sha256 must be 64 hexadecimal characters or unknown/unavailable, got %q", tool.SHA256)
 	}
 	if tool.Parameters == nil {
 		return fmt.Errorf("parameters is required and must be an object")
 	}
 	return nil
-}
-
-func isSHA256(value string) bool {
-	if value == "unknown" || value == "unavailable" {
-		return true
-	}
-	// 正则已经保证是 64 个十六进制字符，再解码一遍不会发现任何新问题。
-	return sha256Pattern.MatchString(value)
 }
 
 func contains(values []string, wanted string) bool {
