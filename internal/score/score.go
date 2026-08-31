@@ -537,10 +537,9 @@ type measured struct {
 // is only meaningful together with the Result.ID that produced it.
 type measurementsByModule map[string]map[string]measured
 
+// collectMeasurements 依赖 Result.ID 唯一，否则同名模块会互相覆盖。该不变量由
+// 上游 owner 保证：runner.Run 校验生成的报告，report.LoadJSON 校验读入的报告。
 func collectMeasurements(data model.Report) (measurementsByModule, error) {
-	if err := model.ValidateReportIdentity(data); err != nil {
-		return nil, err
-	}
 	values := make(measurementsByModule, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status == model.StatusSkipped {

@@ -190,6 +190,11 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 	report.Run.CompletedAt = time.Now().UTC()
 	report.Run.DurationMS = report.Run.CompletedAt.Sub(report.Run.StartedAt).Milliseconds()
 	model.Summarize(&report)
+	// 内部生成边界的唯一身份 owner：探针在这里之后不再改动 Report，下游的评分、
+	// 序列化和比较都信任这个结果。外部输入走 report.LoadJSON，那里有另一个 owner。
+	if err := model.ValidateReportIdentity(report); err != nil {
+		return model.Report{}, err
+	}
 	return report, nil
 }
 

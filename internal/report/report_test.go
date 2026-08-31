@@ -186,7 +186,9 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 	}
 }
 
-func TestJSONRejectsInvalidReportIdentity(t *testing.T) {
+// 身份契约的 owner 是读入边界 LoadJSON，不是序列化。JSON 只负责把已经通过
+// owner 的报告写出去，因此这里从磁盘读回来验证拒绝行为。
+func TestLoadJSONRejectsInvalidReportIdentity(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		mutate  func(*model.Report)
@@ -208,8 +210,16 @@ func TestJSONRejectsInvalidReportIdentity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			data := sampleReport()
 			test.mutate(&data)
-			if _, err := JSON(data); err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("JSON error = %v, want %q", err, test.wantErr)
+			content, err := JSON(data)
+			if err != nil {
+				t.Fatalf("JSON: %v", err)
+			}
+			path := filepath.Join(t.TempDir(), "report.json")
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("LoadJSON error = %v, want %q", err, test.wantErr)
 			}
 		})
 	}
