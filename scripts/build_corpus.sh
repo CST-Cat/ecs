@@ -16,6 +16,7 @@ die() {
 }
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/corpus.sh"
 
 output=""
 while [[ "$#" -gt 0 ]]; do
@@ -47,12 +48,7 @@ for command_name in curl sha256sum stat tar unzip; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
-source_url=$(ecs_lock_corpus_field source_url)
-source_sha=$(ecs_lock_corpus_field source_sha256)
-corpus_sha=$(ecs_lock_corpus_field sha256)
-corpus_bytes=$(ecs_lock_corpus_field bytes)
 corpus_name=$(ecs_lock_corpus_field name)
-mapfile -t corpus_order < <(ecs_lock_corpus_order) || die 'could not read corpus order from tools lock'
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-corpus.XXXXXX")
 cleanup() {
@@ -63,30 +59,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-zip_path="$work/silesia.zip"
-source_dir="$work/silesia"
 corpus_path="$work/$corpus_name"
-mkdir -p "$source_dir" "$(dirname "$output")"
-
-curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 \
-  "$source_url" -o "$zip_path"
-actual_source_sha=$(sha256sum "$zip_path" | awk '{print $1}')
-[[ "$actual_source_sha" == "$source_sha" ]] ||
-  die "Silesia source ZIP SHA-256 mismatch: expected $source_sha, got $actual_source_sha"
-unzip -q "$zip_path" -d "$source_dir" ||
-  die 'Silesia download is not a valid ZIP archive'
-
-: >"$corpus_path"
-for corpus_member in "${corpus_order[@]}"; do
-  [[ -f "$source_dir/$corpus_member" ]] || die "Silesia ZIP omitted $corpus_member"
-  cat "$source_dir/$corpus_member" >>"$corpus_path"
-done
-[[ "$(stat -c %s "$corpus_path")" -eq "$corpus_bytes" ]] ||
-  die 'fixed Silesia corpus byte length mismatch'
-actual_corpus_sha=$(sha256sum "$corpus_path" | awk '{print $1}')
-[[ "$actual_corpus_sha" == "$corpus_sha" ]] ||
-  die "fixed Silesia corpus SHA-256 mismatch: expected $corpus_sha, got $actual_corpus_sha"
-chmod 0644 "$corpus_path"
+mkdir -p "$(dirname "$output")"
+ecs_build_silesia_corpus "$work" "$corpus_path" || die 'could not build the fixed Silesia corpus'
 
 source_date_epoch=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || die 'SOURCE_DATE_EPOCH must be an integer'

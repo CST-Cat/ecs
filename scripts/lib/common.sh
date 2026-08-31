@@ -193,3 +193,29 @@ ecs_devtool() {
   fi
   printf '%s\n' "$bin"
 }
+
+# ecs_download_sha256 URL EXPECTED_SHA OUTPUT LABEL
+#
+# 带重试的下载 + 摘要校验：这是跨越信任边界的那一次校验，所有从互联网取回的
+# 第三方源码与二进制都走这里。摘要不符时删除产物重试，三次都失败才失败。
+ecs_download_sha256() {
+  local url=$1 expected_sha=$2 output=$3 label=$4
+  local attempt actual_sha actual_bytes
+
+  for attempt in 1 2 3; do
+    if curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 "$url" -o "$output"; then
+      actual_sha=$(sha256sum "$output" | awk '{print $1}')
+      if [[ "$actual_sha" == "$expected_sha" ]]; then
+        return 0
+      fi
+      actual_bytes=$(stat -c %s "$output")
+      echo "ecs: $label SHA-256 mismatch on attempt $attempt/3: expected $expected_sha, got $actual_sha ($actual_bytes bytes)" >&2
+    else
+      echo "ecs: $label download failed on attempt $attempt/3" >&2
+    fi
+    rm -f -- "$output"
+  done
+
+  echo "ecs: $label did not match its pinned SHA-256 after 3 attempts" >&2
+  return 1
+}

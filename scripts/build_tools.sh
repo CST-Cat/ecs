@@ -15,6 +15,7 @@ EOF
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/stream.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/corpus.sh"
 
 die() {
   echo "build-tools: $*" >&2
@@ -232,29 +233,6 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   github_api_curl_options+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
 fi
 
-download_sha256() {
-  local url=$1
-  local expected_sha=$2
-  local output=$3
-  local label=$4
-  local attempt actual_sha actual_bytes
-
-  for attempt in 1 2 3; do
-    if curl "${curl_options[@]}" "$url" -o "$output"; then
-      actual_sha=$(sha256sum "$output" | awk '{print $1}')
-      if [[ "$actual_sha" == "$expected_sha" ]]; then
-        return 0
-      fi
-      actual_bytes=$(stat -c %s "$output")
-      echo "build-tools: $label SHA-256 mismatch on attempt $attempt/3: expected $expected_sha, got $actual_sha ($actual_bytes bytes)" >&2
-    else
-      echo "build-tools: $label download failed on attempt $attempt/3" >&2
-    fi
-    rm -f -- "$output"
-  done
-
-  die "$label did not match its pinned SHA-256 after 3 attempts"
-}
 
 github_release_by_tag() {
   local repository=$1
@@ -357,7 +335,7 @@ npb_tag=$(ecs_lock_tool_field npb-ep tag)
 npb_archive_url=$(ecs_lock_tool_field npb-ep source_url)
 npb_archive_sha=$(ecs_lock_tool_field npb-ep source_sha256)
 npb_archive="$work/${npb_tag}.tar.gz"
-download_sha256 "$npb_archive_url" "$npb_archive_sha" "$npb_archive" \
+ecs_download_sha256 "$npb_archive_url" "$npb_archive_sha" "$npb_archive" \
   "NPB ${npb_tag} source archive"
 tar -xzf "$npb_archive" -C "$work"
 npb_release_root="$work/$npb_tag"
@@ -365,32 +343,16 @@ npb_src="$npb_release_root/NPB3.4-OMP"
 [[ -d "$npb_src/EP" && -d "$npb_src/FT" ]] || die 'NPB archive omitted NPB3.4-OMP EP or FT'
 
 # The corpus is part of the benchmark contract, not an incidental input. The
-# ZIP mirror and the concatenated byte stream are both pinned. Rebuilding the
-# package therefore fails if the mirror changes any byte or file ordering.
+# 语料构建（下载、校验、按 lock.json 顺序拼接）由 lib/corpus.sh 唯一实现，
+# 独立语料发布物走同一个函数，两条路径不再各写一遍。
 zstd_corpus_url=$(ecs_lock_corpus_field source_url)
 zstd_corpus_source_sha=$(ecs_lock_corpus_field source_sha256)
 zstd_corpus_sha=$(ecs_lock_corpus_field sha256)
 zstd_corpus_bytes=$(ecs_lock_corpus_field bytes)
 zstd_corpus_name=$(ecs_lock_corpus_field name)
-mapfile -t zstd_corpus_order < <(ecs_lock_corpus_order) || die 'could not read corpus order from tools lock'
-zstd_corpus_zip="$work/silesia.zip"
-zstd_corpus_dir="$work/silesia"
 zstd_corpus_path="$stage/share/ecs/corpus/$zstd_corpus_name"
-download_sha256 "$zstd_corpus_url" "$zstd_corpus_source_sha" "$zstd_corpus_zip" \
-  'Silesia source ZIP'
-mkdir -p "$zstd_corpus_dir"
-unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir" ||
-  die 'Silesia download is not a valid ZIP archive'
-: >"$zstd_corpus_path"
-for corpus_member in "${zstd_corpus_order[@]}"; do
-  [[ -f "$zstd_corpus_dir/$corpus_member" ]] || die "Silesia ZIP omitted $corpus_member"
-  cat "$zstd_corpus_dir/$corpus_member" >>"$zstd_corpus_path"
-done
-[[ "$(stat -c %s "$zstd_corpus_path")" -eq "$zstd_corpus_bytes" ]] ||
-  die 'fixed Silesia corpus byte length mismatch'
-[[ "$(sha256sum "$zstd_corpus_path" | awk '{print $1}')" == "$zstd_corpus_sha" ]] ||
-  die 'fixed Silesia corpus SHA-256 mismatch'
-chmod 0644 "$zstd_corpus_path"
+ecs_build_silesia_corpus "$work" "$zstd_corpus_path" ||
+  die 'could not build the fixed Silesia corpus'
 
 nexttrace_asset_name="nexttrace-tiny_linux_${arch}"
 nexttrace_asset_url=$(jq -er --arg name "$nexttrace_asset_name" \
