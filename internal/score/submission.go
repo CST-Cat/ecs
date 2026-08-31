@@ -18,6 +18,8 @@ import (
 	"io"
 	"math"
 	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -34,6 +36,8 @@ const SubmissionSchema = "ecs.submission/v1"
 const (
 	memoryBackendStream = "stream"
 	sampleIDDomain      = "ecs.sample/v1\x00"
+	maxRegionLength     = 32
+	maxProviderLength   = 48
 )
 
 // Submission 是一份可公开入库的跑分记录。
@@ -142,16 +146,16 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 	// System metadata is a narrow, non-sensitive whitelist.  Explicit CLI
 	// values remain authoritative, while empty values safely leave the
 	// auto-detected metadata in place.
-	if metadata := safeMetadataValue(submission.Host.Region, 32); metadata != "" {
+	if metadata := safeMetadataValue(submission.Host.Region, maxRegionLength); metadata != "" {
 		submission.Host.Region = metadata
 	}
-	if metadata := safeMetadataValue(submission.Host.Provider, 48); metadata != "" {
+	if metadata := safeMetadataValue(submission.Host.Provider, maxProviderLength); metadata != "" {
 		submission.Host.Provider = metadata
 	}
-	if explicit := sanitizeShort(options.Region, 32); explicit != "" {
+	if explicit := sanitizeShort(options.Region, maxRegionLength); explicit != "" {
 		submission.Host.Region = explicit
 	}
-	if explicit := sanitizeShort(options.Provider, 48); explicit != "" {
+	if explicit := sanitizeShort(options.Provider, maxProviderLength); explicit != "" {
 		submission.Host.Provider = explicit
 	}
 	submission.Note = sanitizeShort(options.Note, maxNoteLength)
@@ -409,6 +413,18 @@ func (s Submission) Validate() error {
 	if s.Tool.ECS == "" {
 		return fmt.Errorf("tool version is required")
 	}
+	if len([]rune(s.Host.Region)) > maxRegionLength {
+		return fmt.Errorf("region exceeds %d characters", maxRegionLength)
+	}
+	if len([]rune(s.Host.Provider)) > maxProviderLength {
+		return fmt.Errorf("provider exceeds %d characters", maxProviderLength)
+	}
+	if s.Host.Region != "" && unsafeMetadataValue(s.Host.Region) {
+		return fmt.Errorf("host region must not be an IP address or URL")
+	}
+	if s.Host.Provider != "" && unsafeMetadataValue(s.Host.Provider) {
+		return fmt.Errorf("host provider must not be an IP address or URL")
+	}
 	if len([]rune(s.Note)) > maxNoteLength {
 		return fmt.Errorf("note exceeds %d characters", maxNoteLength)
 	}
@@ -479,13 +495,58 @@ func hasCurrentMemorySubmissionMetrics(metrics map[string]float64) bool {
 
 func safeMetadataValue(value string, limit int) string {
 	value = sanitizeShort(value, limit)
-	if value == "" || net.ParseIP(value) != nil || strings.Contains(value, "://") {
-		return ""
-	}
-	if strings.ContainsAny(value, "/\\@") {
+	if value == "" || unsafeMetadataValue(value) {
 		return ""
 	}
 	return value
+}
+
+func unsafeMetadataValue(value string) bool {
+	value = sanitizeShort(value, len([]rune(value)))
+	for attempt := 0; attempt < 8; attempt++ {
+		decoded, err := url.PathUnescape(value)
+		if err != nil || decoded == value {
+			break
+		}
+		value = decoded
+	}
+	if value == "" {
+		return false
+	}
+	if isIPAddress(value) {
+		return true
+	}
+	if strings.ContainsAny(value, "/\\@") || strings.Contains(strings.ToLower(value), "://") {
+		return true
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	if parsed.Host != "" || strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") {
+		return true
+	}
+	return false
+}
+
+func isIPAddress(value string) bool {
+	if _, err := netip.ParseAddr(value); err == nil {
+		return true
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		if _, err := netip.ParseAddr(value[1 : len(value)-1]); err == nil {
+			return true
+		}
+	}
+	host, _, err := net.SplitHostPort(value)
+	if err != nil {
+		return false
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	_, err = netip.ParseAddr(host)
+	return err == nil
 }
 
 func sortedModuleIDs(values map[string][]model.Measurement) []string {

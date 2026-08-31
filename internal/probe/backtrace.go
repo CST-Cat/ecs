@@ -238,6 +238,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	identified := 0
 	validTraces := 0
+	failedTargets := 0
 	parseFailed := false
 	for _, row := range rows {
 		// 原始路径无论识别成功与否都要保留：未识别时它恰恰是判断"线路确实没走
@@ -250,6 +251,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			})
 		}
 		if row.Err != nil {
+			failedTargets++
 			addFailure(&result, "trace", row.Target.Address, row.Err)
 			if countValidTraceHops(row.Details) == 0 {
 				table.Rows = append(table.Rows, []model.Value{
@@ -260,6 +262,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			}
 			validTraces++
 		} else if row.ParseFailed {
+			failedTargets++
 			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: row.Target.Address, Count: 1})
 			parseFailed = true
 			table.Rows = append(table.Rows, []model.Value{
@@ -268,6 +271,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 			})
 			continue
 		} else if row.NoResponsiveHops {
+			failedTargets++
 			result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "trace", Target: row.Target.Address, Count: 1})
 			table.Rows = append(table.Rows, []model.Value{
 				backtraceCarrierValue(row.Target.Kind), backtraceTargetValue(row.Target.Name), model.KeyValue(backtraceMissingValue),
@@ -340,7 +344,9 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 		},
 	}
 	result.Evidence = model.NewEvidence(validTraces, len(targets), "target")
-	if identified == 0 {
+	if validTraces == 0 {
+		result.Status = model.StatusError
+	} else if failedTargets > 0 {
 		result.Status = model.StatusWarning
 	}
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.backtrace.summary.values", identified, len(targets))}
@@ -362,6 +368,10 @@ func runBacktraceTarget(ctx context.Context, engine routeEngine, target config.E
 	defer cancel()
 	output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, backtraceMaxHops, family)
 	row.Raw = sanitizeCommandOutput(output)
+	if cause := contextCauseError(traceCtx); cause != nil {
+		row.Err = cause
+		return row
+	}
 	var parsed bool
 	row.Details, parsed = extractNextTraceDetails(row.Raw)
 	row.Hops = make([]string, len(row.Details))

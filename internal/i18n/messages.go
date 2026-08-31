@@ -12,7 +12,7 @@ package i18n
 
 var chinese = map[string]string{
 	// ── 命令行 ──────────────────────────────────────────────
-	"cli.tagline":        "无广告、默认零上传的 VPS 综合测试工具",
+	"cli.tagline":        "无广告、默认不上传报告的 VPS 综合测试工具",
 	"cli.usage":          "用法",
 	"cli.usage.run":      "运行测试（默认 standard）",
 	"cli.usage.list":     "查看配置档与模块",
@@ -71,7 +71,7 @@ var chinese = map[string]string{
 
 	// ── 报告框架 ────────────────────────────────────────────
 	"report.title":            "ecs VPS 综合测试报告",
-	"report.local":            "报告由本地生成，未自动上传。",
+	"report.local":            "报告由本地生成；报告文件未自动上传。",
 	"report.overview":         "运行概览",
 	"report.glance":           "一眼看懂",
 	"report.allModules":       "全部模块",
@@ -247,19 +247,20 @@ var chinese = map[string]string{
 	"compare.issue.missing_or_invalid_parameter_scope": "缺少或损坏机器参数口径",
 	"compare.issue.method_or_parameters_mismatch":      "method 或参数口径不一致",
 	"compare.issue.some_reports_use_different_method_or_parameters": "部分报告使用了不同 method 或参数口径",
-	"compare.notice.scope":        "只比较模块、指标 key、method、单位、方向和参数口径完全相同的数值。",
-	"compare.notice.relative":     "最佳值与高亮只在本次输入报告内有效，不代表绝对质量等级。",
-	"compare.notice.observation":  "字段和表格变化只展示事实，不推断哪个值更好。",
-	"compare.notice.toolMixed":    "输入报告来自不同的 ecs 版本（%s）：下方的模块缺失与 method 不一致多为版本差异的正常结果。",
-	"compare.flag.reference":      "基准报告序号，从 1 开始（默认 1）",
-	"compare.flag.output":         "对比报告输出目录",
-	"compare.help.usage":          "用法: ecs compare [选项] REPORT.json REPORT.json [MORE.json ...]",
-	"compare.help.inputs":         "错误: compare 至少需要两份 JSON 报告",
-	"compare.help.referenceRange": "错误: --reference 必须在 1 到 %d 之间",
-	"compare.written":             "已生成对比报告",
+	"compare.notice.scope":              "只比较模块、指标 key、method、单位、方向和参数口径完全相同的数值。",
+	"compare.notice.relative":           "最佳值与高亮只在本次输入报告内有效，不代表绝对质量等级。",
+	"compare.notice.observation":        "字段和表格变化只展示事实，不推断哪个值更好。",
+	"compare.notice.toolMixed":          "输入报告来自不同的 ecs 版本（%s）：下方的模块缺失与 method 不一致多为版本差异的正常结果。",
+	"compare.flag.reference":            "基准报告序号，从 1 开始（默认 1）",
+	"compare.flag.output":               "对比报告输出目录",
+	"compare.help.usage":                "用法: ecs compare [选项] REPORT.json REPORT.json [MORE.json ...]",
+	"compare.help.inputs":               "错误: compare 至少需要两份 JSON 报告",
+	"compare.help.referenceRange":       "错误: --reference 必须在 1 到 %d 之间",
+	"compare.help.duplicateTableSchema": "错误: 第 %d 份报告的模块 %q 重复声明表格 schema %q",
+	"compare.written":                   "已生成对比报告",
 
 	// ── 终端界面 ────────────────────────────────────────────
-	"term.subtitle":     "零广告 · 零自动上传 · 本地 JSON/Markdown/HTML",
+	"term.subtitle":     "零广告 · 报告不自动上传 · 本地 JSON/Markdown/HTML",
 	"term.profileLine":  "配置档",
 	"term.moduleCount":  "模块",
 	"term.estimate":     "预计",
@@ -270,7 +271,7 @@ var chinese = map[string]string{
 	"term.uncapped":     "iperf3 按带宽计（不封顶）",
 	"term.hint":         "提示",
 	"term.localReports": "本地报告",
-	"term.noUpload":     "未上传任何报告；分享文件前请确认敏感字段遮盖状态。",
+	"term.noUpload":     "未上传报告；网络探针可能产生必要的测量流量。分享文件前请确认敏感字段遮盖状态。",
 	"term.writeFailed":  "报告写入失败",
 
 	// ── 标点 ────────────────────────────────────────────────
@@ -316,7 +317,7 @@ var chinese = map[string]string{
 
 var english = map[string]string{
 	// ── Command line ────────────────────────────────────────
-	"cli.tagline":        "Ad-free VPS benchmark suite that never uploads by default",
+	"cli.tagline":        "Ad-free VPS benchmark suite that does not upload reports by default",
 	"cli.usage":          "Usage",
 	"cli.usage.run":      "Run tests (standard profile by default)",
 	"cli.usage.list":     "Show profiles and modules",
@@ -375,7 +376,7 @@ var english = map[string]string{
 
 	// ── Report ──────────────────────────────────────────────
 	"report.title":            "ecs VPS Benchmark Report",
-	"report.local":            "Generated locally; nothing was uploaded.",
+	"report.local":            "Generated locally; the report file was not uploaded automatically.",
 	"report.overview":         "Run Overview",
 	"report.glance":           "At a Glance",
 	"report.allModules":       "All modules",
@@ -551,19 +552,20 @@ var english = map[string]string{
 	"compare.issue.missing_or_invalid_parameter_scope": "machine parameter scope is missing or invalid",
 	"compare.issue.method_or_parameters_mismatch":      "method or parameter scope differs",
 	"compare.issue.some_reports_use_different_method_or_parameters": "some reports use a different method or parameter scope",
-	"compare.notice.scope":        "Only values with identical module, metric key, method, unit, direction and parameter scope are compared.",
-	"compare.notice.relative":     "Best-value highlights are relative to these input reports and are not absolute quality ratings.",
-	"compare.notice.observation":  "Field and table changes are factual observations; no value is judged better.",
-	"compare.notice.toolMixed":    "Input reports come from different ecs versions (%s): missing modules and method mismatches below are usually the normal result of that difference.",
-	"compare.flag.reference":      "reference report number, starting at 1 (default 1)",
-	"compare.flag.output":         "comparison report output directory",
-	"compare.help.usage":          "Usage: ecs compare [options] REPORT.json REPORT.json [MORE.json ...]",
-	"compare.help.inputs":         "error: compare requires at least two JSON reports",
-	"compare.help.referenceRange": "error: --reference must be between 1 and %d",
-	"compare.written":             "Comparison reports written",
+	"compare.notice.scope":              "Only values with identical module, metric key, method, unit, direction and parameter scope are compared.",
+	"compare.notice.relative":           "Best-value highlights are relative to these input reports and are not absolute quality ratings.",
+	"compare.notice.observation":        "Field and table changes are factual observations; no value is judged better.",
+	"compare.notice.toolMixed":          "Input reports come from different ecs versions (%s): missing modules and method mismatches below are usually the normal result of that difference.",
+	"compare.flag.reference":            "reference report number, starting at 1 (default 1)",
+	"compare.flag.output":               "comparison report output directory",
+	"compare.help.usage":                "Usage: ecs compare [options] REPORT.json REPORT.json [MORE.json ...]",
+	"compare.help.inputs":               "error: compare requires at least two JSON reports",
+	"compare.help.referenceRange":       "error: --reference must be between 1 and %d",
+	"compare.help.duplicateTableSchema": "error: report %d module %q declares table schema %q more than once",
+	"compare.written":                   "Comparison reports written",
 
 	// ── Terminal ────────────────────────────────────────────
-	"term.subtitle":     "No ads · No auto-upload · Local JSON/Markdown/HTML",
+	"term.subtitle":     "No ads · Reports are not auto-uploaded · Local JSON/Markdown/HTML",
 	"term.profileLine":  "Profile",
 	"term.moduleCount":  "Modules",
 	"term.estimate":     "ETA",
@@ -574,7 +576,7 @@ var english = map[string]string{
 	"term.uncapped":     "iperf3 saturates the link (uncapped)",
 	"term.hint":         "Note",
 	"term.localReports": "Local reports",
-	"term.noUpload":     "Nothing was uploaded; check redaction before sharing these files.",
+	"term.noUpload":     "No report was uploaded; network probes may still generate necessary measurement traffic. Check redaction before sharing these files.",
 	"term.writeFailed":  "failed to write report",
 
 	// ── Punctuation ─────────────────────────────────────────

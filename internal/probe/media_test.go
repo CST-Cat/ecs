@@ -204,7 +204,7 @@ func TestMediaPreservesTypedRequestErrorsAcrossMixedVerdicts(t *testing.T) {
 		wantMessages[request.URL] = response.Err.Error()
 	}
 	result := (mediaProbe{}).Run(context.Background(), env)
-	if result.Status != model.StatusOK {
+	if result.Status != model.StatusWarning {
 		t.Fatalf("mixed transport errors changed partial status: %s", result.Status)
 	}
 	seen := make(map[string]int)
@@ -256,8 +256,101 @@ func TestMediaVerdictCountsAndWarningThreshold(t *testing.T) {
 	result := (mediaProbe{}).Run(context.Background(), Environment{
 		Config: config.Runtime{MediaRegions: []string{"global"}}, HTTPClient: allUnknownClient, UserAgent: "media-all-unknown",
 	})
-	if result.Status != model.StatusWarning || result.SummaryMessages[0].Args[0] != "0" || result.SummaryMessages[0].Args[2] != "0" || result.SummaryMessages[0].Args[3] != "20" {
+	if result.Status != model.StatusError || result.SummaryMessages[0].Args[0] != "0" || result.SummaryMessages[0].Args[2] != "0" || result.SummaryMessages[0].Args[3] != "20" {
 		t.Fatalf("all-unknown media status/summary = %s/%v", result.Status, result.SummaryMessages)
+	}
+}
+
+func TestMediaStatusReflectsRequestFailureMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name, mode string
+		want       model.Status
+	}{
+		{name: "all success", mode: "success", want: model.StatusOK},
+		{name: "partial failure", mode: "partial", want: model.StatusWarning},
+		{name: "all failure", mode: "failure", want: model.StatusError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+				if test.mode == "failure" || (test.mode == "partial" && request.URL.Hostname() == "www.peacocktv.com") {
+					return nil, errors.New("fixture media request failure")
+				}
+				body := `{"countryCode":"US","premium":"available"}`
+				if request.URL.Hostname() == "www.tiktok.com" {
+					body = `{"region":"US"}`
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(body)),
+					Header:     make(http.Header),
+					Request:    request,
+				}, nil
+			})}
+			result := (mediaProbe{}).Run(context.Background(), Environment{
+				Config: config.Runtime{MediaRegions: []string{"global"}}, HTTPClient: client, UserAgent: "media-status-fixture",
+			})
+			if result.Status != test.want {
+				t.Fatalf("media status = %s, want %s; failures=%+v", result.Status, test.want, result.Failures)
+			}
+		})
+	}
+}
+
+func TestMediaHTTPOnlyUnknownStatusMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name, mode string
+		want       model.Status
+	}{
+		{name: "partial unknown", mode: "partial", want: model.StatusWarning},
+		{name: "all unknown", mode: "all", want: model.StatusError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+				if test.mode == "all" || request.URL.Hostname() != "www.youtube.com" {
+					return &http.Response{
+						StatusCode: http.StatusForbidden,
+						Body:       io.NopCloser(strings.NewReader("HTTP-only unknown fixture")),
+						Header:     make(http.Header),
+						Request:    request,
+					}, nil
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"countryCode":"US","premium":"available"}`)),
+					Header:     make(http.Header),
+					Request:    request,
+				}, nil
+			})}
+			result := (mediaProbe{}).Run(context.Background(), Environment{
+				Config: config.Runtime{MediaRegions: []string{"global"}}, HTTPClient: client, UserAgent: "media-http-only-unknown",
+			})
+			if len(result.Failures) != 0 {
+				t.Fatalf("HTTP-only unknown unexpectedly emitted transport failures: %+v", result.Failures)
+			}
+			if result.Status != test.want {
+				t.Fatalf("HTTP-only status = %s, want %s; evidence=%+v", result.Status, test.want, result.Evidence)
+			}
+			if test.mode == "partial" && result.Evidence.Valid == 0 {
+				t.Fatalf("partial HTTP-only unknown lost usable verdict: %+v", result.Evidence)
+			}
+			if test.mode == "all" && result.Evidence.Valid != 0 {
+				t.Fatalf("all HTTP-only unknown produced usable evidence: %+v", result.Evidence)
+			}
+		})
+	}
+}
+
+func TestMediaStatusKeepsUsableVerdictsWithPartialRequests(t *testing.T) {
+	results := make([]mediaResult, 3)
+	for index := range results {
+		results[index] = mediaResult{
+			Check:          mediaCheck{Requests: []mediaRequest{{URL: "fixture/first"}, {URL: "fixture/second"}}},
+			Verdict:        mediaVerdict{State: stateUnlocked, Evidence: mediaEvidenceAvailable},
+			ResponseErrors: []mediaResponseError{{Index: 0, Err: errors.New("fixture partial request failure")}},
+		}
+	}
+	if got := mediaStatus(results); got != model.StatusWarning {
+		t.Fatalf("all checks with partial request failures status = %s, want %s", got, model.StatusWarning)
 	}
 }
 
@@ -314,7 +407,7 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 	if result.SummaryMessages[0].Key != "probe.media.summary.values" || len(result.SummaryMessages[0].Args) != 4 {
 		t.Fatalf("media summary message = %+v", result.SummaryMessages)
 	}
-	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Expected != len(mediaChecksForRegions([]string{"global"})) {
+	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Expected != len(mediaChecksForRegions([]string{"global"})) {
 		t.Fatalf("media status/evidence = %s/%+v", result.Status, result.Evidence)
 	}
 	if got, want := result.SummaryMessages[0].Args, []string{"12", "20", "2", "6"}; !reflect.DeepEqual(got, want) {

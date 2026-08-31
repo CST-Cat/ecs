@@ -11,7 +11,7 @@
 ```json
 {
   "schema": "ecs.submission/v1",
-  "id": "ddecbbc0421f",
+  "id": "9951817b04990224ff8d05d8042d7614",
   "sample_id": "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5",
   "host": {
     "vcpu": 16,
@@ -69,8 +69,8 @@ wrapper 只解释第二个精确 `--` 之前的 `--submit`、`--provider`、`--r
 ```text
 submissions/
 ├── 2026-08/
-│   ├── ddecbbc0421f-vultr-jp-tokyo.json
-│   └── 3f9a12c4e5b7-hetzner-de-fsn.json
+│   ├── 9951817b04990224ff8d05d8042d7614-vultr-jp-tokyo.json
+│   └── 3f9a12c4e5b7a8c9d0e1f22334455667-hetzner-de-fsn.json
 ├── 2026-09/
 │   └── ...
 └── baseline.json        # CI 生成，不要手工编辑

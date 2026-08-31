@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,17 +17,42 @@ import (
 	"ecs/internal/textwidth"
 )
 
-func doctorCommand(ctx context.Context, stdout io.Writer) int {
+func doctorCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintf(stderr, "%s %s\n", i18n.T("help.extraArgs"), strings.Join(args, " "))
+		return 1
+	}
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return 130
+		}
+		return 2
+	}
 	fmt.Fprintln(stdout, i18n.T("doctor.header"))
 	tools := doctorTools()
 	missingRequired := false
+	requiredFailure := false
 	for _, tool := range tools {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return 130
+			}
+			return 2
+		}
 		path, err := lookupDoctorTool(tool)
 		if err != nil {
+			if !errors.Is(err, exec.ErrNotFound) {
+				if tool.required {
+					requiredFailure = true
+				}
+				fmt.Fprintf(stdout, "  %-11s %s %s · %v\n", tool.name, textwidth.Pad(i18n.T("doctor.failed"), 8), tool.purpose, err)
+				continue
+			}
 			label := i18n.T("doctor.optional")
 			if tool.required {
 				label = i18n.T("doctor.missing")
 				missingRequired = true
+				requiredFailure = true
 			}
 			fmt.Fprintf(stdout, "  %-11s %s %s\n", tool.name, textwidth.Pad(label, 8), tool.purpose)
 			continue
@@ -41,15 +67,41 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 			output, runErr = exec.CommandContext(versionCtx, path, tool.args...).CombinedOutput()
 			version = strings.TrimSpace(string(output))
 		}
+		versionContextErr := versionCtx.Err()
 		cancel()
 		if newline := strings.IndexByte(version, '\n'); newline >= 0 {
 			version = version[:newline]
 		}
-		if runErr != nil || version == "" {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return 130
+			}
+			return 2
+		}
+		if errors.Is(versionContextErr, context.DeadlineExceeded) || errors.Is(runErr, context.DeadlineExceeded) {
+			if tool.required {
+				requiredFailure = true
+			}
+			fmt.Fprintf(stdout, "  %-11s %s %s · %v\n", tool.name, textwidth.Pad(i18n.T("doctor.timeout"), 8), tool.purpose, runErr)
+			continue
+		}
+		if runErr != nil {
+			if errors.Is(runErr, context.Canceled) || errors.Is(versionContextErr, context.Canceled) {
+				return 130
+			}
+			if tool.required {
+				requiredFailure = true
+			}
+			fmt.Fprintf(stdout, "  %-11s %s %s · %v\n", tool.name, textwidth.Pad(i18n.T("doctor.failed"), 8), tool.purpose, runErr)
+			continue
+		}
+		if version == "" {
+			if tool.required {
+				requiredFailure = true
+			}
 			label := i18n.T("doctor.optional")
 			if tool.required {
-				label = i18n.T("doctor.missing")
-				missingRequired = true
+				label = i18n.T("doctor.unknownVersion")
 			}
 			fmt.Fprintf(stdout, "  %-11s %s %s · %s\n", tool.name, textwidth.Pad(label, 8), tool.purpose, i18n.T("doctor.unknownVersion"))
 			continue
@@ -59,6 +111,9 @@ func doctorCommand(ctx context.Context, stdout io.Writer) int {
 	if missingRequired {
 		fmt.Fprintln(stdout, "\n"+i18n.T("doctor.installHint"))
 		fmt.Fprintln(stdout, i18n.T("doctor.noSubstitute"))
+		return 2
+	}
+	if requiredFailure {
 		return 2
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("doctor.allReady"))

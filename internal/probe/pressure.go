@@ -489,14 +489,19 @@ func AppendInterferenceDiagnostics(result *model.Result, assessment model.Interf
 	}
 }
 
-func retryAttempt(number int, result model.Result, assessment model.Interference) model.RetryAttempt {
-	var evidence *model.Evidence
+func normalizeRetryResultEvidence(result model.Result) model.Result {
 	if result.Evidence != nil {
-		copy := *result.Evidence
-		evidence = &copy
+		evidence := *result.Evidence
+		evidence.Normalize()
+		result.Evidence = &evidence
 	}
+	return result
+}
+
+func retryAttempt(number int, result model.Result, assessment model.Interference) model.RetryAttempt {
+	result = normalizeRetryResultEvidence(result)
 	return model.RetryAttempt{
-		Number: number, Status: result.Status, DurationMS: result.DurationMS, Evidence: evidence,
+		Number: number, Status: result.Status, DurationMS: result.DurationMS, Evidence: result.Evidence,
 		Interference: clonePressureInterference(assessment), Measurements: clonePressureMeasurements(result.Measurements),
 	}
 }
@@ -504,6 +509,8 @@ func retryAttempt(number int, result model.Result, assessment model.Interference
 // FinalizeBenchmarkRetry chooses the less-interfered attempt, preserves the
 // other attempt's raw blocks, and stores only machine retry facts.
 func FinalizeBenchmarkRetry(first model.Result, firstInterference model.Interference, second model.Result, secondInterference model.Interference) model.Result {
+	first = normalizeRetryResultEvidence(first)
+	second = normalizeRetryResultEvidence(second)
 	selected, selectedNumber := first, 1
 	firstUsable, secondUsable := retryResultUsable(first), retryResultUsable(second)
 	if (!firstUsable && secondUsable) || (firstUsable == secondUsable && secondInterference.Score < firstInterference.Score) {

@@ -25,7 +25,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "run":
 		return runCommand(ctx, commandArgs, stdout, stderr)
 	case "plan":
-		return planCommand(commandArgs, stdout, stderr)
+		return planCommand(ctx, commandArgs, stdout, stderr)
 	case "render":
 		return renderCommand(commandArgs, stdout, stderr)
 	case "compare":
@@ -35,7 +35,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "config":
 		return configCommand(commandArgs, stdout, stderr)
 	case "doctor":
-		return doctorCommand(ctx, stdout)
+		return doctorCommand(ctx, commandArgs, stdout, stderr)
 	case "leaderboard":
 		return leaderboardCommand(commandArgs, stdout, stderr)
 	case "submit":
@@ -104,7 +104,7 @@ func validateExplicitLanguage(occurrences []languageFlagOccurrence) error {
 
 func printHelp(writer io.Writer) {
 	if i18n.Current() == i18n.LangEN {
-		fmt.Fprintln(writer, `ecs — ad-free VPS benchmark with local reports by default
+		fmt.Fprintln(writer, `ecs — Ad-free VPS benchmark suite that does not upload reports by default
 
 Usage:
   ecs [run] [options]         run tests (standard by default)
@@ -129,7 +129,7 @@ Examples:
 Run ecs run --help for all test options or ecs compare --help for comparison options.`)
 		return
 	}
-	fmt.Fprintln(writer, `ecs — 无广告、默认零上传的 VPS 综合测试工具
+	fmt.Fprintln(writer, `ecs — 无广告、默认不上传报告的 VPS 综合测试工具
 
 用法:
   ecs [run] [选项]            运行测试（默认 standard）

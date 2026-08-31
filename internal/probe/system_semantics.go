@@ -90,7 +90,7 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	}
 	missing := 0
 	for _, field := range result.Fields {
-		if field.Value.Text() == "" || field.Value.Text() == "unknown" {
+		if isUnavailableSystemValue(field.Value.Text()) {
 			missing++
 		}
 	}
@@ -101,6 +101,15 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	}
 	if snapshot.StealKnown && snapshot.StealPercent >= stealInterferenceThreshold {
 		result.Status = model.StatusWarning
+	}
+}
+
+func isUnavailableSystemValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "unknown", "unavailable", "unlimited_or_unavailable", "n/a", "none found", "not available", "not_available", "not_applicable", "—":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -254,20 +254,33 @@ func TestValidateEndpointFamilyLiteralConsistency(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsSTUNEndpointFamily(t *testing.T) {
+func TestValidateSTUNEndpointFamilyConsistency(t *testing.T) {
 	useEnglish(t)
 	for _, test := range []struct {
 		name, address, family string
+		wantError             string
 	}{
-		{name: "hostname", address: "stun.example.com:3478", family: IPVersion4},
-		{name: "IPv4 literal", address: "1.1.1.1:3478", family: IPVersion4},
-		{name: "IPv6 literal", address: "[2001:db8::1]:3478", family: IPVersion6},
+		{name: "hostname IPv4 pin", address: "stun.example.com:3478", family: IPVersion4},
+		{name: "hostname IPv6 pin", address: "stun.example.com:3478", family: IPVersion6},
+		{name: "hostname automatic", address: "stun.example.com:3478"},
+		{name: "IPv4 literal matching", address: "1.1.1.1:3478", family: IPVersion4},
+		{name: "IPv6 literal matching", address: "[2001:db8::1]:3478", family: IPVersion6},
+		{name: "IPv4 literal conflict", address: "1.1.1.1:3478", family: IPVersion6, wantError: "contradicts"},
+		{name: "IPv6 literal conflict", address: "[2001:db8::1]:3478", family: IPVersion4, wantError: "contradicts"},
+		{name: "invalid family", address: "stun.example.com:3478", family: "9", wantError: "family must be 4"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			runtime.STUNServers = []Endpoint{{Name: "stun", Address: test.address, Family: test.family}}
-			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "cannot set family") {
-				t.Fatalf("Validate(STUN endpoint %+v) = %v, want unsupported family error", runtime.STUNServers[0], err)
+			err := Validate(runtime)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("Validate(STUN endpoint %+v) = %v, want nil", runtime.STUNServers[0], err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Validate(STUN endpoint %+v) = %v, want marker %q", runtime.STUNServers[0], err, test.wantError)
 			}
 		})
 	}

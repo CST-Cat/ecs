@@ -73,7 +73,16 @@ func LoadBaseline(path string) (Baseline, error) {
 	if info, err := file.Stat(); err == nil && info.Size() > 4*1024*1024 {
 		return baseline, fmt.Errorf("baseline file exceeds the 4 MiB safety limit")
 	}
-	decoder := json.NewDecoder(file)
+	return parseBaseline(file, false)
+}
+
+// parseBaseline is the single strict decoding and validation entry point for
+// both file and embedded baselines. Embedded references may opt into the
+// intentionally empty reference, while all JSON syntax, unknown fields and
+// semantic checks remain shared.
+func parseBaseline(input io.Reader, allowEmptyMetrics bool) (Baseline, error) {
+	var baseline Baseline
+	decoder := json.NewDecoder(input)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&baseline); err != nil {
 		return baseline, err
@@ -82,7 +91,7 @@ func LoadBaseline(path string) (Baseline, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return baseline, fmt.Errorf("baseline file must contain exactly one JSON object")
 	}
-	if err := validateBaseline(baseline, false); err != nil {
+	if err := validateBaseline(baseline, allowEmptyMetrics); err != nil {
 		return baseline, err
 	}
 	return baseline, nil
@@ -113,6 +122,10 @@ func validateBaseline(baseline Baseline, allowEmptyMetrics bool) error {
 	if baseline.RankMinSamples < 0 {
 		return fmt.Errorf("baseline rank_min_samples must not be negative")
 	}
+	knownMetrics := knownScoreMetricKeys()
+	if err := validateKnownBaselineMetrics("baseline", baseline.Metrics, knownMetrics); err != nil {
+		return err
+	}
 	if err := validatePositiveMetrics("baseline", baseline.Metrics); err != nil {
 		return err
 	}
@@ -140,6 +153,9 @@ func validateBaseline(baseline Baseline, allowEmptyMetrics bool) error {
 		}
 		if len(tier.Metrics) == 0 {
 			return fmt.Errorf("baseline tier %d contains no metrics", tier.VCPUMin)
+		}
+		if err := validateKnownBaselineMetrics(fmt.Sprintf("baseline tier %d", tier.VCPUMin), tier.Metrics, knownMetrics); err != nil {
+			return err
 		}
 		if err := validatePositiveMetrics(fmt.Sprintf("baseline tier %d", tier.VCPUMin), tier.Metrics); err != nil {
 			return err
@@ -172,6 +188,25 @@ func validatePositiveMetrics(scope string, metrics map[string]float64) error {
 	for key, value := range metrics {
 		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 			return fmt.Errorf("%s metric %q must be positive and finite", scope, key)
+		}
+	}
+	return nil
+}
+
+func knownScoreMetricKeys() map[string]struct{} {
+	known := make(map[string]struct{})
+	for _, dimension := range Dimensions() {
+		for _, metric := range dimension.Metrics {
+			known[metric.Key] = struct{}{}
+		}
+	}
+	return known
+}
+
+func validateKnownBaselineMetrics(scope string, metrics map[string]float64, known map[string]struct{}) error {
+	for key := range metrics {
+		if _, ok := known[key]; !ok {
+			return fmt.Errorf("%s contains unknown metric %q not defined by Dimensions()", scope, key)
 		}
 	}
 	return nil

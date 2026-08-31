@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"net"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/failure"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/report"
@@ -41,6 +43,100 @@ func buildTestSTUNResponse(transaction [12]byte, mapped netAddr) []byte {
 	binary.BigEndian.PutUint16(attribute[2:4], 8)
 	copy(attribute[4:], value)
 	return append(packet, attribute...)
+}
+
+func TestNATParentDeadlineBeatsTransactionTimeout(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	finding := probeNATForVersion(ctx, config.Endpoint{Name: "silent", Address: server.LocalAddr().String()}, config.IPVersion4)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("parent deadline was not prompt: elapsed=%s finding=%+v", elapsed, finding)
+	}
+	if !errors.Is(finding.Err, context.DeadlineExceeded) || failure.Classify(finding.Err).Category != model.FailureTimeout {
+		t.Fatalf("parent deadline classification = %v/%+v", failure.Classify(finding.Err), finding.Err)
+	}
+}
+
+func TestNATCancelUnblocksSocketAndPreservesCause(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cause := errors.New("fixture NAT cancellation cause")
+	timer := time.AfterFunc(400*time.Millisecond, func() { cancel(cause) })
+	started := time.Now()
+	finding := probeNATForVersion(ctx, config.Endpoint{Name: "silent", Address: server.LocalAddr().String()}, config.IPVersion4)
+	timer.Stop()
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("parent cancellation did not unblock socket: elapsed=%s finding=%+v", elapsed, finding)
+	}
+	if !errors.Is(finding.Err, cause) || !errors.Is(finding.Err, context.Canceled) || failure.Classify(finding.Err).Category != model.FailureCanceled {
+		t.Fatalf("parent cancellation classification/cause = %v/%+v", failure.Classify(finding.Err), finding.Err)
+	}
+}
+
+func TestSTUNTransactionTimeoutKeepsSocketClassification(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+
+	_, err = stunTransactionWithContext(context.Background(), connection, server.LocalAddr().(*net.UDPAddr), 0, 250*time.Millisecond)
+	if err == nil {
+		t.Fatal("silent STUN server unexpectedly returned a response")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() || failure.Classify(err).Category != model.FailureTimeout {
+		t.Fatalf("socket timeout classification = %v/%v", failure.Classify(err), err)
+	}
+}
+
+func TestSTUNTransactionClosedSocketKeepsSocketError(t *testing.T) {
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = stunTransactionWithContext(context.Background(), connection, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9}, 0, time.Second)
+	if err == nil {
+		t.Fatal("closed UDP socket unexpectedly returned a response")
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("closed UDP socket error = %v, want net.ErrClosed", err)
+	}
+	classified := failure.Classify(err).Category
+	if classified == model.FailureCanceled || classified == model.FailureTimeout || classified == model.FailureParse {
+		t.Fatalf("closed UDP socket was misclassified as %s: %v", classified, err)
+	}
+}
+
+func TestContextCausePreservesDeadlineSentinelAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.DeadlineExceeded)
+
+	err := contextCauseError(ctx)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cancelled context cause = %v, want both canceled and deadline exceeded", err)
+	}
 }
 
 func TestSTUNMessageParsesMappingAndClassifiesUnknownFiltering(t *testing.T) {

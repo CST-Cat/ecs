@@ -144,6 +144,11 @@ func TestSubmitCommandReportsDistinctFailures(t *testing.T) {
 			marker: "--input is required",
 		},
 		{
+			name:   "extra argument",
+			args:   []string{"--lang", "en", "submit", "unexpected"},
+			marker: "unexpected arguments",
+		},
+		{
 			name:   "load JSON",
 			args:   []string{"--lang", "en", "submit", "--input", badJSON},
 			marker: "error:",

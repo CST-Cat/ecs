@@ -133,7 +133,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 
 - `valid`：取得可用结论或有效统计的样本数；
 - `expected`：本轮实际计划的样本数；
-- `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`。
+- `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`；`retry.attempts[].evidence` 还可使用 `attempt`。
 - 需要展示证据完整度时，由 `valid` / `expected` 在内存中调用 `DerivedGrade()` 推导稳定等级：
   - `complete`：所有计划证据均有效；
   - `partial`：至少一项有效，但未达到计划数；

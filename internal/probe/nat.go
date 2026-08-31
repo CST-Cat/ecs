@@ -249,7 +249,7 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 	}
 
 	// Test I：基础 Binding，拿到映射地址与服务器备用地址。
-	first, err := stunTransaction(connection, primary, 0, natTimeout)
+	first, err := stunTransactionWithContext(ctx, connection, primary, 0, natTimeout)
 	if err != nil {
 		finding.UDPBlocked = true
 		finding.Err = err
@@ -273,7 +273,7 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 	// stun.cloudflare.com）直接忽略 CHANGE-REQUEST 属性，照常从原地址回复。
 	// 只看"有没有响应"就会把这种忽略当成"NAT 放行了来自其他地址的包"，
 	// 把一台对称型 NAT 后的机器误报成全锥型 NAT1。
-	if second, err := stunTransaction(connection, primary, changeIP|changePort, natTimeout); err == nil {
+	if second, err := stunTransactionWithContext(ctx, connection, primary, changeIP|changePort, natTimeout); err == nil {
 		switch {
 		case second.From.valid() && second.From.IP != primary.IP.String():
 			finding.Filtering = filteringEndpointIndependent
@@ -281,9 +281,12 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 		default:
 			finding.ChangeRequestIgnored = true
 		}
+	} else if cause := contextCauseError(ctx); cause != nil {
+		finding.Err = cause
+		return finding
 	}
 	if !finding.FilteringTested {
-		if third, err := stunTransaction(connection, primary, changePort, natTimeout); err == nil {
+		if third, err := stunTransactionWithContext(ctx, connection, primary, changePort, natTimeout); err == nil {
 			switch {
 			case third.From.valid() && third.From.Port != primary.Port:
 				finding.Filtering = filteringAddressDependent
@@ -291,20 +294,23 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 			default:
 				finding.ChangeRequestIgnored = true
 			}
+		} else if cause := contextCauseError(ctx); cause != nil {
+			finding.Err = cause
+			return finding
 		}
 	}
 
 	// 映射行为：换服务器 IP 再看映射是否变化。没有真正的第二个 IP 就测不了。
 	if finding.DualStackServer {
 		alternate := &net.UDPAddr{IP: net.ParseIP(finding.Other.IP), Port: primary.Port}
-		if second, err := stunTransaction(connection, alternate, 0, natTimeout); err == nil {
+		if second, err := stunTransactionWithContext(ctx, connection, alternate, 0, natTimeout); err == nil {
 			finding.MappedAlt = second.Mapped
 			if second.Mapped == finding.Mapped {
 				finding.Mapping = mappingEndpointIndependent
 			} else {
 				// 映射随目标地址变化，再换端口区分是地址相关还是地址+端口相关。
 				alternateBoth := &net.UDPAddr{IP: net.ParseIP(finding.Other.IP), Port: finding.Other.Port}
-				if third, err := stunTransaction(connection, alternateBoth, 0, natTimeout); err == nil {
+				if third, err := stunTransactionWithContext(ctx, connection, alternateBoth, 0, natTimeout); err == nil {
 					finding.MappedAltPort = third.Mapped
 					if third.Mapped == second.Mapped {
 						finding.Mapping = mappingAddressDependent
@@ -312,9 +318,16 @@ func probeNATForVersion(ctx context.Context, server config.Endpoint, family stri
 						finding.Mapping = mappingAddressPortDependent
 					}
 				} else {
+					if cause := contextCauseError(ctx); cause != nil {
+						finding.Err = cause
+						return finding
+					}
 					finding.Mapping = mappingAddressDependent
 				}
 			}
+		} else if cause := contextCauseError(ctx); cause != nil {
+			finding.Err = cause
+			return finding
 		}
 	}
 

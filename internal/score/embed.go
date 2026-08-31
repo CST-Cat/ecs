@@ -8,8 +8,8 @@ package score
 // 加载优先级：--score-baseline 指定的文件 > 当前内嵌参考 > 无评分。
 
 import (
+	"bytes"
 	_ "embed"
-	"encoding/json"
 )
 
 //go:embed embedded/baseline.json
@@ -20,11 +20,8 @@ var embeddedBaselineJSON []byte
 // 解析失败时返回空参考而不是 panic：一份坏的内嵌文件不该让整个程序跑不起来，
 // 更不能让它退回到已删除的历史口径。
 func EmbeddedBaseline() Baseline {
-	var baseline Baseline
-	if err := json.Unmarshal(embeddedBaselineJSON, &baseline); err != nil {
-		return emptyBaseline()
-	}
-	if err := validateBaseline(baseline, true); err != nil {
+	baseline, err := parseBaseline(bytes.NewReader(embeddedBaselineJSON), true)
+	if err != nil {
 		return emptyBaseline()
 	}
 	if baseline.Metrics == nil {

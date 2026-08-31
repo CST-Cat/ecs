@@ -79,16 +79,39 @@ install_binary() {
     exit 1
   fi
   destination="${install_dir}/${program}"
-  temp_destination=$(mktemp "${install_dir}/.${program}.install.XXXXXX")
-  cp "$source_file" "$temp_destination"
-  chmod 0755 "$temp_destination"
-  mv "$temp_destination" "$destination"
+  temp_destination=""
+  temp_destination=$(mktemp "${install_dir}/.${program}.install.XXXXXX") || exit 1
+  if ! cp "$source_file" "$temp_destination"; then
+    rm -f "$temp_destination"
+    printf 'could not build install candidate: %s\n' "$temp_destination" >&2
+    exit 1
+  fi
+  if ! chmod 0755 "$temp_destination"; then
+    rm -f "$temp_destination"
+    printf 'could not set install candidate mode: %s\n' "$temp_destination" >&2
+    exit 1
+  fi
+  if [ ! -f "$temp_destination" ] || [ -L "$temp_destination" ] || [ ! -x "$temp_destination" ]; then
+    rm -f "$temp_destination"
+    printf 'install candidate is not an executable regular file: %s\n' "$temp_destination" >&2
+    exit 1
+  fi
+  if ! candidate_version=$("$temp_destination" version); then
+    rm -f "$temp_destination"
+    printf 'install candidate failed version validation: %s\n' "$temp_destination" >&2
+    exit 1
+  fi
+  if ! mv "$temp_destination" "$destination"; then
+    rm -f "$temp_destination"
+    printf 'could not publish install candidate: %s\n' "$destination" >&2
+    exit 1
+  fi
   printf 'installed %s\n' "$destination"
   case ":${PATH}:" in
     *":${install_dir}:"*) ;;
     *) printf 'note: add %s to PATH\n' "$install_dir" ;;
   esac
-  "$destination" version
+  printf '%s\n' "$candidate_version"
 }
 
 as_root() {
@@ -176,6 +199,13 @@ trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 download() {
   source_url=$1
   destination_file=$2
+  case "$source_url" in
+    https://*) ;;
+    *)
+      printf 'remote download URL must use https://: %s\n' "$source_url" >&2
+      exit 1
+      ;;
+  esac
   if command -v curl >/dev/null 2>&1; then
     curl -fL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$source_url" -o "$destination_file"
   elif command -v wget >/dev/null 2>&1; then

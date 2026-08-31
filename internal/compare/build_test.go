@@ -623,18 +623,15 @@ func TestBuildTableMatchingStaysConservative(t *testing.T) {
 			t.Fatalf("different table keys compared: %+v", changes)
 		}
 	})
-	t.Run("duplicate schema is ignored", func(t *testing.T) {
+	t.Run("duplicate schema is rejected", func(t *testing.T) {
 		left := comparisonTestReport("first", 10, "m-v1", "same", "rate", true)
 		right := comparisonTestReport("second", 10, "m-v1", "same", "rate", true)
 		left.Results[0].Tables = []model.Table{base("routes", "", rawTableRows([]string{"a", "10"})), base("routes", "", rawTableRows([]string{"duplicate", "20"}))}
 		right.Results[0].Tables = []model.Table{base("routes", "", rawTableRows([]string{"b", "11"}))}
-		data, err := Build([]model.Report{left, right}, Options{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		changes := findModule(data, "cpu").Changes
-		if len(changes) != 0 {
-			t.Fatalf("duplicate schema was compared = %+v", changes)
+		_, err := Build([]model.Report{left, right}, Options{})
+		var validation *ValidationError
+		if err == nil || !errors.As(err, &validation) || validation.Key != "compare.help.duplicateTableSchema" {
+			t.Fatalf("duplicate schema error = %v, validation = %+v", err, validation)
 		}
 	})
 }

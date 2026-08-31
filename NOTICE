@@ -16,7 +16,7 @@ bands for IP2Location, Scamalytics, AbuseIPDB, IPQualityScore, and DB-IP.
 
 ecs reimplements these capabilities in Go around a versioned report model. It
 adds official API-key routing, preserves provider failures and disagreements,
-supports local JSON/txt/Markdown/HTML rendering, and never averages unlike
+supports local JSON/Markdown/HTML rendering, and never averages unlike
 scores into an opaque overall score.
 
 The following IPQuality behavior and assets are intentionally not included:

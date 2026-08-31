@@ -195,3 +195,21 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 		t.Fatalf("config profile from equal form = %q, want %q", equalResolved.Runtime.Profile, config.ProfileFull)
 	}
 }
+
+func TestRunConfigCanonicalizesEmptyExplicitProfile(t *testing.T) {
+	for _, args := range [][]string{
+		{"--profile="},
+		{"--profile", ""},
+	} {
+		resolved, err := resolveRunConfig(args, &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("resolveRunConfig(%q) = %v, want empty profile to select standard", args, err)
+		}
+		if resolved.Runtime.Profile != config.ProfileStandard {
+			t.Fatalf("resolveRunConfig(%q) profile = %q, want %q", args, resolved.Runtime.Profile, config.ProfileStandard)
+		}
+	}
+	if _, err := resolveRunConfig([]string{"--profile=invalid"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("invalid non-empty profile error = %v, want rejection", err)
+	}
+}

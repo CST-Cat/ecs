@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -410,5 +411,127 @@ func TestBaselineLoadFileFailuresAndUnknownFields(t *testing.T) {
 	_ = file.Close()
 	if _, err := LoadBaseline(largePath); err == nil || !strings.Contains(err.Error(), "4 MiB") {
 		t.Fatalf("oversize error = %v", err)
+	}
+}
+
+func allKnownBaselineFixture() Baseline {
+	metrics := make(map[string]float64)
+	tierMetrics := make(map[string]float64)
+	metricSampleCounts := make(map[string]int)
+	for _, dimension := range Dimensions() {
+		for _, metric := range dimension.Metrics {
+			metrics[metric.Key] = 100
+			tierMetrics[metric.Key] = 100
+			metricSampleCounts[metric.Key] = 1
+		}
+	}
+	return Baseline{
+		Schema: BaselineSchema, Source: "all-known-metrics", SampleCount: 1,
+		Metrics: metrics,
+		Tiers: []Tier{{
+			VCPUMin: 4, SampleCount: 1, Metrics: tierMetrics,
+			MetricSampleCounts: metricSampleCounts,
+		}},
+	}
+}
+
+func TestBaselineLoaderAcceptsEveryKnownMetricKey(t *testing.T) {
+	baseline := allKnownBaselineFixture()
+	encoded, err := baseline.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "all-known.json")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadBaseline(path); err != nil {
+		t.Fatalf("all defined baseline metric keys rejected: %v", err)
+	}
+}
+
+func TestBaselineLoaderRejectsUnknownMetricKeys(t *testing.T) {
+	const unknown = "metric_not_in_dimensions"
+	cases := []struct {
+		name   string
+		mutate func(*Baseline)
+	}{
+		{name: "global", mutate: func(baseline *Baseline) {
+			baseline.Metrics[unknown] = 100
+		}},
+		{name: "tier", mutate: func(baseline *Baseline) {
+			baseline.Tiers[0].Metrics[unknown] = 100
+			baseline.Tiers[0].MetricSampleCounts[unknown] = 1
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			baseline := allKnownBaselineFixture()
+			test.mutate(&baseline)
+			encoded, err := baseline.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "unknown-metric.json")
+			if err := os.WriteFile(path, encoded, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = LoadBaseline(path)
+			if err == nil || !strings.Contains(err.Error(), unknown) {
+				t.Fatalf("unknown metric error = %v, want key %q", err, unknown)
+			}
+		})
+	}
+}
+
+func TestEmbeddedAndFileBaselineStrictContract(t *testing.T) {
+	valid, err := allKnownBaselineFixture().Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedFile, fileParseErr := parseBaseline(bytes.NewReader(valid), false)
+	parsedEmbedded, embeddedParseErr := parseBaseline(bytes.NewReader(valid), true)
+	if fileParseErr != nil || embeddedParseErr != nil || !reflect.DeepEqual(parsedFile, parsedEmbedded) {
+		t.Fatalf("valid shared baseline parse mismatch: file=%+v/%v embedded=%+v/%v", parsedFile, fileParseErr, parsedEmbedded, embeddedParseErr)
+	}
+	unknownField := map[string]json.RawMessage{}
+	if err := json.Unmarshal(valid, &unknownField); err != nil {
+		t.Fatal(err)
+	}
+	unknownField["future_field"] = json.RawMessage(`true`)
+	invalid, err := json.Marshal(unknownField)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedFile, fileParseErr = parseBaseline(bytes.NewReader(invalid), false)
+	parsedEmbedded, embeddedParseErr = parseBaseline(bytes.NewReader(invalid), true)
+	if fileParseErr == nil || embeddedParseErr == nil || fileParseErr.Error() != embeddedParseErr.Error() || !reflect.DeepEqual(parsedFile, parsedEmbedded) {
+		t.Fatalf("invalid shared baseline parse mismatch: file=%+v/%v embedded=%+v/%v", parsedFile, fileParseErr, parsedEmbedded, embeddedParseErr)
+	}
+
+	original := embeddedBaselineJSON
+	t.Cleanup(func() { embeddedBaselineJSON = original })
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := os.WriteFile(path, valid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileBaseline, fileErr := LoadBaseline(path)
+	if fileErr != nil {
+		t.Fatalf("valid file baseline error = %v", fileErr)
+	}
+	embeddedBaselineJSON = valid
+	if embedded := EmbeddedBaseline(); !reflect.DeepEqual(embedded, fileBaseline) {
+		t.Fatalf("embedded/file valid baseline mismatch:\nembedded=%+v\nfile=%+v", embedded, fileBaseline)
+	}
+
+	if err := os.WriteFile(path, invalid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, fileErr := LoadBaseline(path); fileErr == nil || !strings.Contains(fileErr.Error(), `unknown field "future_field"`) {
+		t.Fatalf("invalid file baseline error = %v", fileErr)
+	}
+	embeddedBaselineJSON = invalid
+	if embedded := EmbeddedBaseline(); !reflect.DeepEqual(embedded, emptyBaseline()) {
+		t.Fatalf("invalid embedded baseline was not rejected: %+v", embedded)
 	}
 }

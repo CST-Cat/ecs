@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,37 @@ func TestLeaderboardStrictRejectsInvalidInputWithoutWriting(t *testing.T) {
 				t.Fatalf("strict input wrote output: %v", err)
 			}
 		})
+	}
+}
+
+func TestLeaderboardRejectsExplicitMissingInput(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	output := filepath.Join(t.TempDir(), "baseline.json")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, missing)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "error:") || !strings.Contains(stderr, "missing.json") {
+		t.Fatalf("missing explicit input status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
+		t.Fatalf("missing explicit input wrote output: %v", err)
+	}
+}
+
+func TestLeaderboardRejectsExplicitStatErrorWithoutWriting(t *testing.T) {
+	loop := filepath.Join(t.TempDir(), "loop.json")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Skipf("symlink loop unavailable: %v", err)
+	}
+	if _, err := os.Stat(loop); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("symlink loop Stat error = %v, want a non-ENOENT error", err)
+	}
+
+	output := filepath.Join(t.TempDir(), "baseline.json")
+	status, stdout, stderr := invokeAppMain("--lang", "en", "leaderboard", "--output", output, loop)
+	if status != 1 || stdout != "" || !strings.Contains(stderr, "error:") || !strings.Contains(stderr, "loop.json") {
+		t.Fatalf("non-ENOENT Stat error status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
+		t.Fatalf("non-ENOENT Stat error wrote output: %v", err)
 	}
 }
 

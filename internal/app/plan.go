@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -49,7 +50,7 @@ type planStaging struct {
 	ZstdCorpusRequired    bool     `json:"zstd_corpus_required"`
 }
 
-func planCommand(args []string, stdout, stderr io.Writer) int {
+func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, err := resolveRunConfig(args, stderr)
 	if err != nil {
 		var parseErr runFlagParseError
@@ -68,7 +69,15 @@ func planCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	runtime := resolved.Runtime
 	if resolved.Interactive && !resolved.Yes {
-		if !runWizard(&runtime, stderr) {
+		wizardOK, wizardErr := runWizard(ctx, &runtime)
+		if wizardErr != nil {
+			if errors.Is(wizardErr, context.Canceled) {
+				return 130
+			}
+			fmt.Fprintln(stderr, i18n.T("cli.error")+": "+wizardErr.Error())
+			return 1
+		}
+		if !wizardOK {
 			return 0
 		}
 	}

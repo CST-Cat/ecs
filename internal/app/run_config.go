@@ -164,9 +164,6 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
 	}
 
-	if explicit["profile"] {
-		cfg.Profile = *profileFlag
-	}
 	if explicit["exposure"] {
 		exposure, err := config.ParseExposure(*exposureFlag)
 		if err != nil {

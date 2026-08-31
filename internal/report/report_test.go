@@ -374,6 +374,64 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 	}
 }
 
+func TestLoadJSONRejectsUnsupportedSchemaEnums(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		marker  string
+	}{
+		{
+			name:    "summary status",
+			content: `{"schema_version":"ecs.report/v1","summary":{"status":"bogus"}}`,
+			marker:  `unsupported summary.status "bogus"`,
+		},
+		{
+			name:    "result status",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","status":"bogus"}]}`,
+			marker:  `unsupported results[0].status "bogus"`,
+		},
+		{
+			name:    "run exposure",
+			content: `{"schema_version":"ecs.report/v1","run":{"exposure":"bogus"}}`,
+			marker:  `unsupported run.exposure "bogus"`,
+		},
+		{
+			name:    "methodology kind",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","methodology":{"kind":"bogus"}}]}`,
+			marker:  `unsupported results[0].methodology.kind "bogus"`,
+		},
+		{
+			name:    "evidence unit",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","evidence":{"valid":1,"expected":1,"unit":"bogus"}}]}`,
+			marker:  `unsupported results[0].evidence.unit "bogus"`,
+		},
+		{
+			name:    "failure category",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","failures":[{"category":"bogus"}]}]}`,
+			marker:  `unsupported results[0].failures[0].category "bogus"`,
+		},
+		{
+			name:    "retry attempt status",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","retry":{"attempts":[{"number":1,"status":"bogus"}]}}]}`,
+			marker:  `unsupported results[0].retry.attempts[0].status "bogus"`,
+		},
+		{
+			name:    "retry attempt evidence unit",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","retry":{"attempts":[{"number":1,"evidence":{"valid":1,"expected":1,"unit":"bogus"}}]}}]}`,
+			marker:  `unsupported results[0].retry.attempts[0].evidence.unit "bogus"`,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "report.json")
+			writeReportFile(t, path, []byte(test.content))
+			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("LoadJSON error = %v, want %q", err, test.marker)
+			}
+		})
+	}
+}
+
 func TestLoadJSONMeasurementIdentity(t *testing.T) {
 	load := func(t *testing.T, data model.Report) error {
 		t.Helper()

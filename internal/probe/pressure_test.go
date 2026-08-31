@@ -233,3 +233,24 @@ func benchmarkRetryResult(id string, value float64) model.Result {
 		TextBlocks:   []model.TextBlock{{Title: id, Content: id}},
 	}
 }
+
+func TestBenchmarkRetryNormalizesEveryEvidenceLayer(t *testing.T) {
+	first := benchmarkRetryResult("first", 100)
+	first.Evidence = &model.Evidence{Valid: 4, Expected: 2, Unit: "run"}
+	second := benchmarkRetryResult("second", 50)
+	second.Evidence = &model.Evidence{Valid: -1, Expected: 0, Unit: "run"}
+
+	selected := FinalizeBenchmarkRetry(first, model.Interference{}, second, model.Interference{})
+	if selected.Evidence == nil || selected.Evidence.Valid != 2 || selected.Evidence.Expected != 2 {
+		t.Fatalf("selected evidence = %+v", selected.Evidence)
+	}
+	if selected.Retry == nil || len(selected.Retry.Attempts) != 2 {
+		t.Fatalf("retry evidence = %+v", selected.Retry)
+	}
+	want := [][2]int{{2, 2}, {0, 0}}
+	for index, attempt := range selected.Retry.Attempts {
+		if attempt.Evidence == nil || attempt.Evidence.Valid != want[index][0] || attempt.Evidence.Expected != want[index][1] {
+			t.Fatalf("attempt %d evidence = %+v", index+1, attempt.Evidence)
+		}
+	}
+}

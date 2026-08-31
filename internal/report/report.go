@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -130,10 +131,109 @@ func loadJSON(path string) (model.Report, error) {
 			data.Results[index].Evidence.Normalize()
 		}
 	}
+	if err := validateReportSchemaValues(data); err != nil {
+		return data, err
+	}
 	if err := model.ValidateReportIdentity(data); err != nil {
 		return data, err
 	}
 	return data, nil
+}
+
+func validateReportSchemaValues(data model.Report) error {
+	if status := data.Summary.Status; status != "" && !validReportStatus(status) {
+		return fmt.Errorf("unsupported summary.status %q", status)
+	}
+	if exposure := data.Run.Exposure; exposure != "" && !validReportExposure(exposure) {
+		return fmt.Errorf("unsupported run.exposure %q", exposure)
+	}
+	for resultIndex, result := range data.Results {
+		prefix := fmt.Sprintf("results[%d]", resultIndex)
+		if status := result.Status; status != "" && !validReportStatus(status) {
+			return fmt.Errorf("unsupported %s.status %q", prefix, status)
+		}
+		if kind := result.Methodology.Kind; kind != "" && !validMethodologyKind(kind) {
+			return fmt.Errorf("unsupported %s.methodology.kind %q", prefix, kind)
+		}
+		if err := validateEvidenceUnit(prefix+".evidence", result.Evidence, false); err != nil {
+			return err
+		}
+		for failureIndex, failure := range result.Failures {
+			if category := failure.Category; category != "" && !validFailureCategory(category) {
+				return fmt.Errorf("unsupported %s.failures[%d].category %q", prefix, failureIndex, category)
+			}
+		}
+		if result.Retry == nil {
+			continue
+		}
+		for attemptIndex, attempt := range result.Retry.Attempts {
+			attemptPrefix := fmt.Sprintf("%s.retry.attempts[%d]", prefix, attemptIndex)
+			if status := attempt.Status; status != "" && !validReportStatus(status) {
+				return fmt.Errorf("unsupported %s.status %q", attemptPrefix, status)
+			}
+			if err := validateEvidenceUnit(attemptPrefix+".evidence", attempt.Evidence, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validReportStatus(status model.Status) bool {
+	switch status {
+	case model.StatusOK, model.StatusWarning, model.StatusSkipped, model.StatusError:
+		return true
+	default:
+		return false
+	}
+}
+
+func validReportExposure(exposure string) bool {
+	switch exposure {
+	case "local", "public", "thirdparty", "any":
+		return true
+	default:
+		return false
+	}
+}
+
+func validMethodologyKind(kind string) bool {
+	switch kind {
+	case "standard-benchmark", "protocol-measurement", "provider-assessment", "heuristic", "inventory":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateEvidenceUnit(path string, evidence *model.Evidence, retryAttempt bool) error {
+	if evidence == nil || evidence.Unit == "" || validEvidenceUnit(evidence.Unit, retryAttempt) {
+		return nil
+	}
+	return fmt.Errorf("unsupported %s.unit %q", path, evidence.Unit)
+}
+
+func validEvidenceUnit(unit string, retryAttempt bool) bool {
+	switch unit {
+	case "module", "run", "job", "sample", "query", "target", "operation", "source":
+		return true
+	case "attempt":
+		return retryAttempt
+	default:
+		return false
+	}
+}
+
+func validFailureCategory(category model.FailureCategory) bool {
+	switch category {
+	case model.FailureTimeout, model.FailureDNS, model.FailureConnectionRefused,
+		model.FailureNetworkUnreachable, model.FailureRateLimited, model.FailureHTTPRejected,
+		model.FailureTLS, model.FailureParse, model.FailureToolMissing, model.FailurePermissionDenied,
+		model.FailureUnsupported, model.FailureCanceled, model.FailureUnknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func atomicWrite(path string, content []byte, mode os.FileMode) error {

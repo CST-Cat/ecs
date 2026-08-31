@@ -139,10 +139,9 @@ validate_tool_stage() {
   manifest_file="$stage_dir/manifest.json"
   [[ -f "$manifest_file" && -s "$manifest_file" ]] ||
     die "missing or empty manifest for $arch: $manifest_file"
-  (
-    cd "$repo_root"
-    "$go_command" run ./cmd/tools-manifest-check --architecture "$arch" "$manifest_file"
-  ) || die "invalid manifest for $arch: $manifest_file"
+  "$repo_root/scripts/verify_tools_stage.sh" \
+    --arch "$arch" --stage-root "$tools_stage_root" --keep-corpus ||
+    die "invalid tools stage for $arch"
 
   bin_dir="$stage_dir/bin"
   [[ -d "$bin_dir" ]] || die "missing tool bin directory for $arch: $bin_dir"

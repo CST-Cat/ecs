@@ -57,15 +57,18 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 			fmt.Sprintf(i18n.T("baseline.strictFailure"), filepath.Base(path), issue))
 		return true
 	}
-	if strict {
-		// expandReportPaths deliberately ignores missing paths for the default
-		// batch workflow.  Strict mode must make those mistakes visible before
-		// any aggregation or output write can occur.
-		for _, path := range flags.Args() {
-			if _, err := os.Stat(path); err != nil {
-				inputIssue(path, err)
-				return 1
-			}
+	// expandReportPaths deliberately ignores missing paths while discovering
+	// files. A path supplied directly on the command line is not optional and
+	// must be reported before any aggregation or output write can occur.
+	for _, path := range flags.Args() {
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if strict {
+			inputIssue(path, err)
+			return 1
+		} else {
+			fmt.Fprintf(stderr, "%s: %s: %v\n", i18n.T("cli.error"), filepath.Base(path), err)
+			return 1
 		}
 	}
 	// 输入按位置参数给出，方便直接用 shell 展开：ecs leaderboard reports/*.json

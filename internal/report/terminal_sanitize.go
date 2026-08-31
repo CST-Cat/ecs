@@ -30,6 +30,9 @@ func cloneTerminalValue(value reflect.Value) reflect.Value {
 		if raw, ok := fieldValue.Raw(); ok {
 			return reflect.ValueOf(model.RawValue(sanitizeTerminalText(raw)))
 		}
+		if key, ok := fieldValue.Key(); ok {
+			return reflect.ValueOf(model.KeyValue(sanitizeTerminalText(key)))
+		}
 		return value
 	}
 

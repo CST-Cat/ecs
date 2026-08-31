@@ -28,7 +28,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 	out.WriteString("> ")
 	out.WriteString(statusIcon(data.Summary.Status))
 	out.WriteByte(' ')
-	out.WriteString(reportSummaryText(data.Summary))
+	out.WriteString(markdownMessages(data.Summary.Messages))
 	out.WriteString(i18n.T("punct.sentenceEnd") + i18n.T("report.local") + "\n\n")
 
 	out.WriteString("## " + i18n.T("report.overview") + "\n\n")
@@ -66,7 +66,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 		out.WriteString(" | ")
 		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
 		out.WriteString(" | ")
-		out.WriteString(markdownEscape(resultSummary(result)))
+		out.WriteString(markdownMessages(result.SummaryMessages))
 		out.WriteString(" | ")
 		out.WriteString(formatDurationMS(result.DurationMS))
 		out.WriteString(" |\n")
@@ -104,9 +104,9 @@ func markdownReport(data model.Report, scored *score.Report) string {
 		out.WriteString("**")
 		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
 		out.WriteString("**")
-		if summary := resultSummary(result); summary != "" {
+		if summary := markdownMessages(result.SummaryMessages); summary != "" {
 			out.WriteString(" · ")
-			out.WriteString(markdownEscape(summary))
+			out.WriteString(summary)
 		}
 		out.WriteString(" · ")
 		out.WriteString(formatDurationMS(result.DurationMS))
@@ -231,7 +231,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 	out.WriteString("## " + i18n.T("report.notices") + "\n\n")
 	for _, notice := range data.Notices {
 		out.WriteString("- ")
-		out.WriteString(markdownEscape(renderMessage(notice)))
+		out.WriteString(markdownMessage(notice))
 		out.WriteString("\n")
 	}
 	out.WriteString("\n")
@@ -298,6 +298,40 @@ func markdownEscape(value string) string {
 		value = strings.ReplaceAll(value, character, "\\"+character)
 	}
 	return value
+}
+
+func markdownEscapeMessageArg(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	for _, character := range []string{"*", "_", "`", "~"} {
+		value = strings.ReplaceAll(value, character, "\\"+character)
+	}
+	return markdownEscape(value)
+}
+
+// markdownMessage resolves a structured message and escapes only its dynamic
+// arguments. Localized format strings are trusted presentation text; report
+// data supplied through Message.Args is not.
+func markdownMessage(message model.Message) string {
+	if message.Key == "" {
+		return ""
+	}
+	format := i18n.T(message.Key)
+	if format == message.Key || len(message.Args) == 0 {
+		return format
+	}
+	args := make([]any, len(message.Args))
+	for index, arg := range message.Args {
+		args[index] = markdownEscapeMessageArg(renderMessageArg(message.Key, index, arg))
+	}
+	return fmt.Sprintf(format, args...)
+}
+
+func markdownMessages(messages []model.Message) string {
+	var builder strings.Builder
+	for _, message := range messages {
+		builder.WriteString(markdownMessage(message))
+	}
+	return builder.String()
 }
 
 var markdownLanguagePattern = regexp.MustCompile(`[^A-Za-z0-9_+.-]`)

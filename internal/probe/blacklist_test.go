@@ -99,7 +99,7 @@ func TestBlacklistProducerReportsEgressDegradation(t *testing.T) {
 				Config: config.Runtime{IPVersion: config.IPVersion4},
 				Egress: Egress{ByVersion: map[string]EgressAddress{config.IPVersion4: test.egress}},
 			})
-			if result.Status != model.StatusWarning || len(result.Failures) != 1 {
+			if result.Status != model.StatusError || len(result.Failures) != 1 {
 				t.Fatalf("blacklist egress degradation = status:%s failures:%+v", result.Status, result.Failures)
 			}
 			if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.blacklist.summary.unavailable" {
@@ -111,6 +111,51 @@ func TestBlacklistProducerReportsEgressDegradation(t *testing.T) {
 			}
 			if test.wantDetail != "" && !strings.Contains(failure.Message, test.wantDetail) {
 				t.Fatalf("blacklist validation detail = %q, want %q", failure.Message, test.wantDetail)
+			}
+		})
+	}
+}
+
+func TestBlacklistStatusReflectsQueryFailureMatrix(t *testing.T) {
+	originalQuery := dnsblQueryForProbe
+	originalReverse := appendReverseDNSForProbe
+	t.Cleanup(func() {
+		dnsblQueryForProbe = originalQuery
+		appendReverseDNSForProbe = originalReverse
+	})
+	appendReverseDNSForProbe = func(context.Context, *model.Result, string) {}
+
+	for _, test := range []struct {
+		name, mode string
+		want       model.Status
+	}{
+		{name: "all success", mode: "clean", want: model.StatusOK},
+		{name: "partial failure", mode: "partial", want: model.StatusWarning},
+		{name: "all failure", mode: "failed", want: model.StatusError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dnsblQueryForProbe = func(_ context.Context, _ *net.Resolver, _ string, zone dnsblZone) dnsblFinding {
+				finding := dnsblFinding{Zone: zone}
+				switch {
+				case test.mode == "failed":
+					finding.Outcome = dnsblFailed
+					finding.Detail = "fixture DNSBL failure"
+				case test.mode == "partial" && zone.Name == "Spamhaus ZEN":
+					finding.Outcome = dnsblFailed
+					finding.Detail = "fixture DNSBL failure"
+				default:
+					finding.Outcome = dnsblClean
+				}
+				return finding
+			}
+			result := (blacklistProbe{}).Run(context.Background(), Environment{
+				Config: config.Runtime{IPVersion: config.IPVersion4},
+				Egress: Egress{ByVersion: map[string]EgressAddress{
+					config.IPVersion4: {Version: config.IPVersion4, IP: "203.0.113.9"},
+				}},
+			})
+			if result.Status != test.want {
+				t.Fatalf("blacklist status = %s, want %s; failures=%+v", result.Status, test.want, result.Failures)
 			}
 		})
 	}

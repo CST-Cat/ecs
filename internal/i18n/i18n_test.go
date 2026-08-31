@@ -67,6 +67,55 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 	}
 }
 
+func TestPrivacyCopyDistinguishesReportUploadFromMeasurementTraffic(t *testing.T) {
+	cases := []struct {
+		lang          Lang
+		reportToken   string
+		trafficToken  string
+		forbiddenText []string
+	}{
+		{
+			lang:          LangZH,
+			reportToken:   "报告",
+			trafficToken:  "测量流量",
+			forbiddenText: []string{"全程零上传", "零上传"},
+		},
+		{
+			lang:          LangEN,
+			reportToken:   "report",
+			trafficToken:  "measurement traffic",
+			forbiddenText: []string{"nothing was uploaded", "nothing is ever uploaded", "never uploads"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(string(test.lang), func(t *testing.T) {
+			texts := []string{
+				TL(test.lang, "cli.tagline"),
+				TL(test.lang, "report.local"),
+				TL(test.lang, "term.subtitle"),
+				TL(test.lang, "term.noUpload"),
+				TL(test.lang, "wizard.subtitle"),
+				TL(test.lang, "module.ookla.desc"),
+			}
+			for _, text := range texts {
+				for _, forbidden := range test.forbiddenText {
+					if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
+						t.Fatalf("privacy copy %q contains forbidden wording %q", text, forbidden)
+					}
+				}
+			}
+			if !strings.Contains(TL(test.lang, "report.local"), test.reportToken) {
+				t.Fatalf("report.local does not identify the report file: %q", TL(test.lang, "report.local"))
+			}
+			for _, key := range []string{"term.noUpload", "wizard.subtitle", "module.ookla.desc"} {
+				if !strings.Contains(TL(test.lang, key), test.trafficToken) {
+					t.Fatalf("%s does not identify measurement traffic: %q", key, TL(test.lang, key))
+				}
+			}
+		})
+	}
+}
+
 func formatVerbCount(format string) int {
 	count := 0
 	for index := 0; index < len(format); index++ {

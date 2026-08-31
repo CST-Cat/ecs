@@ -50,10 +50,14 @@ func TestDefaultsAndProfiles(t *testing.T) {
 	}
 	standard, _ := Defaults(ProfileStandard)
 	full, _ := Defaults(ProfileFull)
+	implicit, err := Defaults("")
+	if err != nil || !reflect.DeepEqual(implicit, standard) {
+		t.Fatalf("empty profile defaults = %+v, want standard defaults %+v (err=%v)", implicit, standard, err)
+	}
 	if len(full.Modules) <= len(standard.Modules) || contains(standard.Modules, "network") || !contains(full.Modules, "network") {
 		t.Fatalf("profile module sets = standard:%v full:%v", standard.Modules, full.Modules)
 	}
-	_, err := Defaults("unknown")
+	_, err = Defaults("unknown")
 	requireError(t, err, "unknown profile")
 }
 

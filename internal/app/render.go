@@ -29,6 +29,10 @@ func renderCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "%s %s\n", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
+		return 1
+	}
 	if *input == "" {
 		fmt.Fprintln(stderr, i18n.T("help.renderInputRequired"))
 		return 1

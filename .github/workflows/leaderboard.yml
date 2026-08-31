@@ -16,6 +16,7 @@ on:
       - "submissions/**"
       - "!submissions/baseline.json"
       - "scripts/leaderboard.sh"
+      - "internal/app/leaderboard.go"
       - "internal/app/leaderboard_inputs.go"
       - "internal/config/modules.go"
       - "internal/model/**"

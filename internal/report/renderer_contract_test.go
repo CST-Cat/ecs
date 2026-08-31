@@ -152,6 +152,29 @@ func TestMarkdownRendersRichReportAndSafeLinks(t *testing.T) {
 	}
 }
 
+func TestMarkdownEscapesDynamicMessageArguments(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Run:           model.RunInfo{ID: "markdown-message", Profile: "standard"},
+		Summary: model.Summary{
+			Status:   model.StatusWarning,
+			Messages: []model.Message{model.NewMessage("message.notice.egressShared", "*dynamic* `code`")},
+		},
+	}
+
+	output := Markdown(data, nil)
+	if !strings.Contains(output, "\\*dynamic\\* \\`code\\`") {
+		t.Fatalf("Markdown did not escape dynamic message argument: %s", output)
+	}
+	if strings.Contains(output, "*dynamic* `code`") {
+		t.Fatalf("Markdown rendered dynamic message argument as structure: %s", output)
+	}
+}
+
 func TestResultSummaryDoesNotFallbackToLegacyInput(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })

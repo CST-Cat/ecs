@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 )
 
 func runInformationCommand(args ...string) (int, string, string) {
@@ -34,6 +35,46 @@ func TestInformationCommandsSucceed(t *testing.T) {
 			status, stdout, stderr := runInformationCommand(test.args...)
 			if status != 0 || stderr != "" || !strings.Contains(stdout, test.marker) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestPrintHelpTaglinesQualifyReportUploads(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	for _, test := range []struct {
+		name      string
+		language  i18n.Lang
+		qualifier string
+		forbidden []string
+	}{
+		{
+			name:      "Chinese",
+			language:  i18n.LangZH,
+			qualifier: "默认不上传报告",
+			forbidden: []string{"默认零上传", "全程零上传"},
+		},
+		{
+			name:      "English",
+			language:  i18n.LangEN,
+			qualifier: "does not upload reports by default",
+			forbidden: []string{"never uploads by default", "nothing was ever uploaded", "nothing is ever uploaded"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			i18n.Set(test.language)
+			var output bytes.Buffer
+			printHelp(&output)
+			tagline := strings.SplitN(output.String(), "\n", 2)[0]
+			if !strings.Contains(tagline, test.qualifier) {
+				t.Fatalf("help tagline = %q, want report upload qualifier %q", tagline, test.qualifier)
+			}
+			for _, forbidden := range test.forbidden {
+				if strings.Contains(tagline, forbidden) {
+					t.Fatalf("help tagline contains absolute upload wording %q: %q", forbidden, tagline)
+				}
 			}
 		})
 	}

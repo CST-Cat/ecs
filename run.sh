@@ -74,6 +74,10 @@ die() {
 
 # fetch 定义在这里而不是靠近首次下载的地方：sh 的函数定义按顺序生效。
 fetch() {
+  case "$1" in
+    https://*) ;;
+    *) die "远程下载地址必须使用 HTTPS：$1" "remote download URL must use HTTPS: $1" ;;
+  esac
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then

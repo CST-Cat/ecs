@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeDoctorToolFixture(t *testing.T, directory, name string, broken bool) {
@@ -53,7 +54,7 @@ func doctorToolFixtureBody(name string, broken bool) string {
 	}
 }
 
-func installDoctorFixtures(t *testing.T, broken string, optional ...string) {
+func installDoctorFixtures(t *testing.T, broken string, optional ...string) string {
 	t.Helper()
 	directory := t.TempDir()
 	optionalName := ""
@@ -66,6 +67,15 @@ func installDoctorFixtures(t *testing.T, broken string, optional ...string) {
 		}
 	}
 	t.Setenv("PATH", directory)
+	return directory
+}
+
+func writeDoctorSleepingToolFixture(t *testing.T, directory, name string) {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n/bin/sleep 3\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDoctorReportsMissingRequiredTools(t *testing.T) {
@@ -105,10 +115,45 @@ func TestDoctorReportsToolVersionFailure(t *testing.T) {
 			var output strings.Builder
 			status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 			text := output.String()
-			if status != 2 || !strings.Contains(text, test.broken) || !strings.Contains(text, "version unknown") {
+			if status != 2 || !strings.Contains(text, test.broken) || !strings.Contains(text, "failed") || strings.Contains(text, "version unknown") || strings.Contains(text, " missing ") {
 				t.Fatalf("doctor %s failure status=%d output=%q", test.broken, status, text)
 			}
 		})
+	}
+}
+
+func TestDoctorReportsPerToolTimeoutDistinctly(t *testing.T) {
+	directory := installDoctorFixtures(t, "")
+	writeDoctorSleepingToolFixture(t, directory, "sysbench")
+	var output strings.Builder
+	status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
+	text := output.String()
+	if status != 2 || !strings.Contains(text, "sysbench") || !strings.Contains(text, "timed out") || strings.Contains(text, "version unknown") {
+		t.Fatalf("doctor timeout status=%d output=%q", status, text)
+	}
+}
+
+func TestDoctorRejectsExtraArguments(t *testing.T) {
+	var stdout, stderr strings.Builder
+	status := Main(context.Background(), []string{"--lang", "en", "doctor", "unexpected"}, &stdout, &stderr)
+	if status != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "unexpected arguments") {
+		t.Fatalf("doctor extra argument status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+}
+
+func TestDoctorPreservesContextExitSemantics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var canceledOutput, canceledError strings.Builder
+	if status := Main(ctx, []string{"--lang", "en", "doctor"}, &canceledOutput, &canceledError); status != 130 || canceledOutput.Len() != 0 {
+		t.Fatalf("canceled doctor status=%d stdout=%q stderr=%q", status, canceledOutput.String(), canceledError.String())
+	}
+
+	deadline, stop := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer stop()
+	var deadlineOutput, deadlineError strings.Builder
+	if status := Main(deadline, []string{"--lang", "en", "doctor"}, &deadlineOutput, &deadlineError); status != 2 || deadlineOutput.Len() != 0 {
+		t.Fatalf("deadline doctor status=%d stdout=%q stderr=%q", status, deadlineOutput.String(), deadlineError.String())
 	}
 }
 
@@ -117,7 +162,7 @@ func TestDoctorReportsOptionalToolVersionFailureWithoutBlocking(t *testing.T) {
 	var output strings.Builder
 	status := Main(context.Background(), []string{"--lang", "en", "doctor"}, &output, &strings.Builder{})
 	text := output.String()
-	if status != 0 || !strings.Contains(text, "ping") || !strings.Contains(text, "optional") || !strings.Contains(text, "version unknown") {
+	if status != 0 || !strings.Contains(text, "ping") || !strings.Contains(text, "failed") || strings.Contains(text, "version unknown") {
 		t.Fatalf("doctor optional failure status=%d output=%q", status, text)
 	}
 }

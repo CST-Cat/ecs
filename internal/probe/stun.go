@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -63,6 +64,26 @@ func (a netAddr) String() string {
 		return ""
 	}
 	return net.JoinHostPort(a.IP, fmt.Sprint(a.Port))
+}
+
+// contextCauseError keeps both the standard cancellation category and a
+// caller-provided cause available to failure.Classify and errors.Is callers.
+func contextCauseError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	err := ctx.Err()
+	if err == nil {
+		if deadline, ok := ctx.Deadline(); !ok || time.Now().Before(deadline) {
+			return nil
+		}
+		err = context.DeadlineExceeded
+	}
+	cause := context.Cause(ctx)
+	if cause == nil || (cause == context.Canceled && err == context.Canceled) || (cause == context.DeadlineExceeded && err == context.DeadlineExceeded) {
+		return err
+	}
+	return errors.Join(err, cause)
 }
 
 // buildSTUNRequest 组装一个 Binding 请求。change 为 0 时不带 CHANGE-REQUEST。
@@ -198,6 +219,15 @@ func decodeAddress(value []byte, xorEncoded bool, transaction [12]byte) (netAddr
 // 复用同一个 socket 是 NAT 检测的前提：换 socket 就换了本地端口，NAT 会分配
 // 新映射，所有对比都失去意义。
 func stunTransaction(connection *net.UDPConn, target *net.UDPAddr, change uint32, timeout time.Duration) (stunResult, error) {
+	// The egress one-shot lookup has no parent context; NAT uses the context-aware
+	// variant below so its socket remains interruptible.
+	return stunTransactionWithContext(context.Background(), connection, target, change, timeout)
+}
+
+func stunTransactionWithContext(ctx context.Context, connection *net.UDPConn, target *net.UDPAddr, change uint32, timeout time.Duration) (stunResult, error) {
+	if err := contextCauseError(ctx); err != nil {
+		return stunResult{}, err
+	}
 	packet, transaction, err := buildSTUNRequest(change)
 	if err != nil {
 		return stunResult{}, err
@@ -205,20 +235,39 @@ func stunTransaction(connection *net.UDPConn, target *net.UDPAddr, change uint32
 	if _, err := connection.WriteToUDP(packet, target); err != nil {
 		return stunResult{}, err
 	}
+	if err := contextCauseError(ctx); err != nil {
+		return stunResult{}, err
+	}
 	deadline := time.Now().Add(timeout)
+	if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
 	if err := connection.SetReadDeadline(deadline); err != nil {
 		return stunResult{}, err
 	}
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = connection.SetReadDeadline(time.Now())
+	})
+	defer stopCancel()
 	buffer := make([]byte, stunMaxResponse)
 	for {
 		count, source, err := connection.ReadFromUDP(buffer)
 		if err != nil {
+			if cause := contextCauseError(ctx); cause != nil {
+				return stunResult{}, cause
+			}
 			return stunResult{}, err
+		}
+		if cause := contextCauseError(ctx); cause != nil {
+			return stunResult{}, cause
 		}
 		result, parseErr := parseSTUNResponse(buffer[:count], transaction)
 		if parseErr != nil {
 			// 事务 ID 不符的包可能是上一次测试的迟到响应，继续等真正的那个。
-			if time.Now().After(deadline) {
+			if cause := contextCauseError(ctx); cause != nil {
+				return stunResult{}, cause
+			}
+			if !time.Now().Before(deadline) {
 				return stunResult{}, parseErr
 			}
 			continue

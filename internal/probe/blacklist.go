@@ -201,7 +201,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	egressIP, err := env.Egress.IPFor(config.IPVersion4)
 	if err != nil {
-		result.Status = model.StatusWarning
+		result.Status = model.StatusError
 		addFailure(&result, "egress", "IPv4", err)
 		result.Notes = blacklistNotes()
 		result.Evidence = model.NewEvidence(0, len(zones), "query")
@@ -212,7 +212,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	ip := net.ParseIP(egressIP)
 	prefix, ok := reverseIPv4(ip)
 	if !ok {
-		result.Status = model.StatusWarning
+		result.Status = model.StatusError
 		result.AddFailure(model.Failure{
 			Category: model.FailureParse, Stage: "validate", Target: "IPv4", Count: 1,
 			Message: "egress address is not a valid IPv4 address",
@@ -305,10 +305,12 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Notes = blacklistNotes()
 	appendReverseDNSForProbe(ctx, &result, egressIP)
 
+	validOutcomes := listed + clean
+	queryFailures := refused + failed
 	switch {
-	case listed > 0:
-		result.Status = model.StatusWarning
-	case refused == len(zones):
+	case len(zones) > 0 && validOutcomes == 0:
+		result.Status = model.StatusError
+	case listed > 0 || queryFailures > 0:
 		result.Status = model.StatusWarning
 	}
 	switch {

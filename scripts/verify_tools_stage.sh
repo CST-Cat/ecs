@@ -95,7 +95,20 @@ go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
 
 # 十个工具都必须真的在 stage 里，且可执行。
 for tool in "${ECS_TOOL_NAMES[@]}"; do
-  [[ -x "$stage_dir/bin/$tool" ]] || die "$arch stage is missing an executable $tool"
+  tool_path="$stage_dir/bin/$tool"
+  [[ -x "$tool_path" ]] || die "$arch stage is missing an executable $tool"
+  expected_tool_sha=$(jq -er --arg tool "$tool" \
+    '.tools[] | select(.name == $tool) | .sha256' "$manifest" | tr '[:upper:]' '[:lower:]') ||
+    die "$arch manifest is missing a SHA-256 for $tool"
+  case "$expected_tool_sha" in
+    unknown|unavailable)
+      ;;
+    *)
+      actual_tool_sha=$(sha256sum "$tool_path" | awk '{print $1}')
+      [[ "$actual_tool_sha" == "$expected_tool_sha" ]] ||
+        die "$arch stage $tool SHA-256 mismatch: expected $expected_tool_sha, got $actual_tool_sha"
+      ;;
+  esac
 done
 [[ -d "$stage_dir/LICENSES" ]] || die "$arch stage is missing LICENSES"
 

@@ -36,6 +36,7 @@ fixture_release="$fixture_root/release"
 fixture_logs="$fixture_root/logs"
 fixture_asset="ecs_linux_${fixture_arch}.tar.gz"
 mkdir -p "$fixture_bin" "$fixture_release/archive" "$fixture_logs"
+export ECS_TEST_PLAN_TOOLS=""
 
 cat >"$fixture_release/archive/ecs" <<'EOF'
 #!/bin/sh
@@ -92,6 +93,11 @@ if [ "${1:-}" = plan ]; then
       exit 91
       ;;
   esac
+  plan_tools_json=""
+  for plan_tool in $ECS_TEST_PLAN_TOOLS; do
+    [ -n "$plan_tools_json" ] && plan_tools_json="$plan_tools_json, "
+    plan_tools_json="$plan_tools_json\"$plan_tool\""
+  done
   cat <<JSON
 {
   "schema_version": "ecs.plan/v1",
@@ -105,7 +111,9 @@ ${plan_extra_reveal_line}
   "modules": [
     {"id": "noop"}
   ],
-  "required_tools": [],
+  "required_tools": [
+    $plan_tools_json
+  ],
   "needs_egress_ip": false,
   "external_services": [],
   "staging": {
@@ -149,6 +157,17 @@ chmod 0755 "$fixture_release/archive/ecs"
 tar -czf "$fixture_release/$fixture_asset" -C "$fixture_release/archive" ecs
 fixture_digest=$(sha256sum "$fixture_release/$fixture_asset" | awk '{print $1}')
 printf '%s  %s\n' "$fixture_digest" "$fixture_asset" >"$fixture_release/checksums.txt"
+fixture_tools_asset="ecs-tools_linux_"$fixture_arch".tar.gz"
+mkdir -p "$fixture_release/tools/bin"
+cat >"$fixture_release/tools/bin/zstd" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$fixture_release/tools/bin/zstd"
+tar -czf "$fixture_release/$fixture_tools_asset" -C "$fixture_release/tools" bin
+fixture_tools_digest=$(sha256sum "$fixture_release/$fixture_tools_asset" | awk '{print $1}')
+printf '%s  %s\n' "$fixture_tools_digest" "$fixture_tools_asset" >>"$fixture_release/checksums.txt"
+export ECS_TEST_TOOLS_ASSET="$fixture_tools_asset"
 
 cat >"$fixture_bin/curl" <<'EOF'
 #!/bin/sh
@@ -158,12 +177,12 @@ url=""
 destination=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    -o)
+    -o|-O)
       shift
       [ "$#" -gt 0 ] || exit 64
       destination=$1
       ;;
-    https://*) url=$1 ;;
+    http://*|https://*) url=$1 ;;
   esac
   shift
 done
@@ -171,6 +190,7 @@ done
 case "$url" in
   "$ECS_TEST_RELEASE_URL/$ECS_TEST_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_ASSET" ;;
   "$ECS_TEST_RELEASE_URL/checksums.txt") source_path="$ECS_TEST_RELEASE_ROOT/checksums.txt" ;;
+  "$ECS_TEST_RELEASE_URL/$ECS_TEST_TOOLS_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_TOOLS_ASSET" ;;
   *)
     : >"$ECS_TEST_LOG_ROOT/unexpected-network"
     exit 90
@@ -182,15 +202,69 @@ cp "$source_path" "$destination"
 EOF
 chmod 0755 "$fixture_bin/curl"
 
-cat >"$fixture_bin/wget" <<'EOF'
-#!/bin/sh
-: >"$ECS_TEST_LOG_ROOT/unexpected-network"
-exit 90
-EOF
+cp "$fixture_bin/curl" "$fixture_bin/wget"
 chmod 0755 "$fixture_bin/wget"
 
 release_url="https://github.com/example/ecs/releases/download/v-test"
 test_path="$fixture_bin:$PATH"
+
+make_wget_only_path() {
+  local path=$1 command_name target
+  mkdir -p "$path"
+  for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm sed sort grep wc cat; do
+    target=$(command -v "$command_name") || fail "required command is missing: $command_name"
+    ln -s "$target" "$path/$command_name"
+  done
+  ln -s "$fixture_bin/wget" "$path/wget"
+}
+wget_only_path="$test_root/wget-only-path"
+make_wget_only_path "$wget_only_path"
+
+# Wget-only HTTPS success proves fetch selects wget when curl is absent.
+wget_success_tmp="$test_root/wget-success-tmp"
+wget_success_logs="$fixture_logs/wget-success"
+wget_success_output="$test_root/wget-success-output"
+mkdir -p "$wget_success_tmp" "$wget_success_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$wget_success_tmp" PATH="$wget_only_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$wget_success_logs" ECS_TEST_REPORT_DIR="$wget_success_output" \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --profile standard --only noop --output "$wget_success_output" \
+    >"$test_root/wget-success.stdout" 2>"$test_root/wget-success.stderr"; then
+  fail "wget-only HTTPS fixture returned a failure: $(<"$test_root/wget-success.stderr")"
+fi
+[[ ! -e "$wget_success_logs/unexpected-network" ]] || fail "wget-only HTTPS fixture reached unexpected network"
+[[ "$(wc -l <"$wget_success_logs/fetch.log")" -eq 2 ]] || fail "wget-only HTTPS fixture did not download twice"
+[[ -f "$wget_success_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced no report"
+
+run_http_checksum_rejection() {
+  local case_name=$1 command_path=$2
+  local case_logs="$fixture_logs/http-checksum-$case_name"
+  local case_output="$test_root/http-checksum-$case_name-output"
+  mkdir -p "$case_logs" "$case_output"
+  mkdir -p "$test_root/http-checksum-$case_name-tmp"
+  set +e
+  ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/http-checksum-$case_name-tmp" PATH="$command_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_CORPUS_BASE_URL=http://fixture.invalid/corpus \
+    ECS_TEST_LOG_ROOT="$case_logs" ECS_TEST_REPORT_DIR="$case_output" \
+    ECS_TEST_PLAN_TOOLS=zstd ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --profile standard --only noop --output "$case_output" \
+    >"$test_root/http-checksum-$case_name.stdout" 2>"$test_root/http-checksum-$case_name.stderr"
+  local case_status=$?
+  set -e
+  [[ ! -e "$case_logs/unexpected-network" ]] || fail "$case_name invoked a downloader for an HTTP checksum URL"
+  [[ "$(grep -c 'https://github.com/example/ecs/releases/download/v-test' "$case_logs/fetch.log")" -eq 3 ]] || \
+    fail "$case_name did not complete the HTTPS artifact downloads before rejecting the HTTP checksum URL"
+  [[ "$case_status" -eq 1 ]] || fail "$case_name returned $case_status instead of rejecting the HTTP checksum URL"
+}
+
+run_http_checksum_rejection curl "$test_path"
+run_http_checksum_rejection wget "$wget_only_path"
 
 # Wrapper help must be local for every supported global-language spelling. The
 # first field is the conflicting ECS_LANG fallback: lang=en cases use zh so

@@ -12,13 +12,15 @@ ecs_tool_build_stream() {
 ecs_tool_smoke_stream() {
 	stream_nt_threads=${STREAM_NT_THREADS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 	[[ "$stream_nt_threads" =~ ^[1-9][0-9]*$ ]] || die "invalid STREAM_NT_THREADS=$stream_nt_threads"
-	for stream_threads in 1 "$stream_nt_threads"; do
-		stream_context=nt
-		[[ "$stream_threads" -eq 1 ]] && stream_context=1t
+	stream_contexts=(1t)
+	[[ "$stream_nt_threads" -gt 1 ]] && stream_contexts+=(nt)
+	for stream_context in "${stream_contexts[@]}"; do
+		stream_threads=1
+		[[ "$stream_context" == nt ]] && stream_threads=$stream_nt_threads
 		OMP_NUM_THREADS="$stream_threads" run_target "$stream_bin" >"$work/stream-${stream_context}.txt"
 	done
-	cat "$work/stream-1t.txt" "$work/stream-nt.txt"
-	for stream_context in 1t nt; do
+	for stream_context in "${stream_contexts[@]}"; do
+		cat "$work/stream-${stream_context}.txt"
 		for kernel in Copy Scale Add Triad; do
 			grep -q "${kernel}:" "$work/stream-${stream_context}.txt" || die "STREAM ${stream_context} output omitted ${kernel}"
 		done

@@ -74,6 +74,9 @@ bash scripts/run_test.sh
 ecs_step "compare.sh shell 行为回归"
 bash scripts/compare_test.sh
 
+ecs_step "STREAM smoke shell 行为回归"
+bash scripts/tools/stream_test.sh
+
 # 发布过程的中间目录一旦入库，就会把 CI 产物混进正在审核的代码变更，
 # 也会让"发布源码必须洁净"的检查永远失败。
 ecs_step "发布中间目录已被忽略"

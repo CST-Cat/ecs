@@ -82,6 +82,53 @@ func TestCNSpeedNodeFixturesAndHTTPResults(t *testing.T) {
 	}
 }
 
+func TestCNSpeedNodeListSizeBoundary(t *testing.T) {
+	oldURL := cnNodeListURLForTest
+	defer func() { cnNodeListURLForTest = oldURL }()
+	cnNodeListURLForTest = "https://fixture.invalid/CN.csv"
+	base := "id,operator,province,city,host,pingUrl,downloadUrl,active\n" +
+		"1,电信,上海,上海,cn1,https://8.8.8.8/ping,https://8.8.8.8/file,1\n"
+	client := &http.Client{Transport: fixtureRoundTripper(func(_ *http.Request) (*http.Response, error) {
+		return fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(""))), nil
+	})}
+	for _, test := range []struct {
+		name      string
+		size      int
+		wantNodes bool
+	}{
+		{name: "limit minus one", size: int(cnNodeListMaxBytes - 1), wantNodes: true},
+		{name: "limit", size: int(cnNodeListMaxBytes), wantNodes: true},
+		{name: "limit plus one", size: int(cnNodeListMaxBytes + 1), wantNodes: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := base + strings.Repeat("\n", test.size-len(base))
+			client.Transport = fixtureRoundTripper(func(_ *http.Request) (*http.Response, error) {
+				response := fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(body)))
+				response.ContentLength = int64(len(body))
+				return response, nil
+			})
+			nodes, err := fetchCNNodes(context.Background(), client, "fixture")
+			if test.wantNodes {
+				if err != nil || len(nodes) != 1 {
+					t.Fatalf("node list size %d = nodes:%+v err:%v", test.size, nodes, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "清单过大") {
+				t.Fatalf("oversize node list = nodes:%+v err:%v", nodes, err)
+			}
+		})
+	}
+	client.Transport = fixtureRoundTripper(func(_ *http.Request) (*http.Response, error) {
+		response := fixtureResponse(http.StatusOK, io.NopCloser(strings.NewReader(base)))
+		response.ContentLength = int64(len(base) + 1)
+		return response, nil
+	})
+	if _, err := fetchCNNodes(context.Background(), client, "fixture"); err == nil || !strings.Contains(err.Error(), "清单读取被截断") {
+		t.Fatalf("truncated node list = %v", err)
+	}
+}
+
 func TestCNSpeedURLAndDialSafety(t *testing.T) {
 	for _, test := range []struct {
 		name string

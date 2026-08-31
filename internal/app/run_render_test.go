@@ -83,7 +83,7 @@ func TestRenderLoadsScoreBaseline(t *testing.T) {
 		Schema:      score.BaselineSchema,
 		Source:      "fixture",
 		SampleCount: 1,
-		Metrics:     map[string]float64{"sysbench_cpu_single_events_s": 1},
+		Metrics:     map[string]float64{"cpu_single": 1},
 	}).Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +237,11 @@ func TestRenderCommandReportsInputAndOutputFailures(t *testing.T) {
 			name:   "input required",
 			args:   func(string, string, string, string) []string { return []string{"--lang", "en", "render"} },
 			marker: "error: --input is required",
+		},
+		{
+			name:   "extra argument",
+			args:   func(string, string, string, string) []string { return []string{"--lang", "en", "render", "unexpected"} },
+			marker: "unexpected arguments",
 		},
 		{
 			name: "load JSON",

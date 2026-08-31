@@ -141,8 +141,11 @@ func Validate(runtime Runtime) error {
 		if err != nil || host == "" || !validRouteTarget(host) {
 			return i18n.Errorf("err.stunHostPort", endpoint.Address)
 		}
-		if endpoint.Family != "" {
-			return i18n.Errorf("err.stunFamilyUnsupported", endpoint.Name)
+		if !validEndpointFamily(endpoint.Family) {
+			return i18n.Errorf("err.endpointFamily", endpoint.Name)
+		}
+		if literalFamily := literalEndpointFamily(endpoint.Address, true); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 	}
 	if err := validateSTUNDuplicates(runtime.STUNServers); err != nil {

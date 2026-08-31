@@ -2,10 +2,13 @@ package app
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
@@ -24,21 +27,28 @@ type prompter struct {
 	out    io.Writer
 	closer io.Closer
 	color  bool
+	close  sync.Once
+}
+
+var openWizardTTY = func() (io.ReadWriteCloser, error) {
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
 }
 
 // newPrompter 打开终端。第二个返回值为 false 表示当前环境无法交互。
-func newPrompter(out io.Writer, color bool) (*prompter, bool) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+func newPrompter(color bool) (*prompter, bool) {
+	tty, err := openWizardTTY()
 	if err != nil {
 		return nil, false
 	}
-	return &prompter{in: bufio.NewReader(tty), out: out, closer: tty, color: color}, true
+	return &prompter{in: bufio.NewReader(tty), out: tty, closer: tty, color: color}, true
 }
 
 func (p *prompter) Close() {
-	if p.closer != nil {
-		_ = p.closer.Close()
-	}
+	p.close.Do(func() {
+		if p.closer != nil {
+			_ = p.closer.Close()
+		}
+	})
 }
 
 func (p *prompter) style(code, value string) string {
@@ -52,39 +62,48 @@ func (p *prompter) line(format string, values ...any) {
 	fmt.Fprintf(p.out, format+"\n", values...)
 }
 
-// ask 读一行输入；EOF 或读取失败时返回空串，由调用方回落到默认值。
-func (p *prompter) ask(question string) string {
+// ask 读一行输入；EOF 回落到默认值，其他读取错误交给向导调用方处理。
+func (p *prompter) ask(question string) (string, error) {
 	fmt.Fprint(p.out, question)
 	text, err := p.in.ReadString('\n')
-	if err != nil && text == "" {
-		fmt.Fprintln(p.out)
-		return ""
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			if text == "" {
+				fmt.Fprintln(p.out)
+			}
+			return strings.TrimSpace(text), nil
+		}
+		return "", err
 	}
-	return strings.TrimSpace(text)
+	return strings.TrimSpace(text), nil
 }
 
 // confirm 询问是/否，defaultYes 决定直接回车时的取值。
-func (p *prompter) confirm(question string, defaultYes bool) bool {
+func (p *prompter) confirm(question string, defaultYes bool) (bool, error) {
 	hint := "[y/N]"
 	if defaultYes {
 		hint = "[Y/n]"
 	}
 	for {
-		answer := strings.ToLower(p.ask(question + " " + p.style("2", hint) + " "))
+		answer, err := p.ask(question + " " + p.style("2", hint) + " ")
+		if err != nil {
+			return false, err
+		}
+		answer = strings.ToLower(answer)
 		switch answer {
 		case "":
-			return defaultYes
+			return defaultYes, nil
 		case "y", "yes", "是":
-			return true
+			return true, nil
 		case "n", "no", "否":
-			return false
+			return false, nil
 		}
 		p.line("  %s", p.style("33", i18n.T("wizard.invalidYesNo")))
 	}
 }
 
 // choose 让用户从编号选项里选一个，返回下标。
-func (p *prompter) choose(title string, options []string, defaultIndex int) int {
+func (p *prompter) choose(title string, options []string, defaultIndex int) (int, error) {
 	p.line("%s", p.style("1", title))
 	for index, option := range options {
 		marker := "  "
@@ -94,13 +113,16 @@ func (p *prompter) choose(title string, options []string, defaultIndex int) int 
 		p.line("%s%d) %s", marker, index+1, option)
 	}
 	for {
-		answer := p.ask(fmt.Sprintf("%s [%d] ", i18n.T("wizard.selectPrompt"), defaultIndex+1))
+		answer, err := p.ask(fmt.Sprintf("%s [%d] ", i18n.T("wizard.selectPrompt"), defaultIndex+1))
+		if err != nil {
+			return 0, err
+		}
 		if answer == "" {
-			return defaultIndex
+			return defaultIndex, nil
 		}
 		var choice int
 		if _, err := fmt.Sscanf(answer, "%d", &choice); err == nil && choice >= 1 && choice <= len(options) {
-			return choice - 1
+			return choice - 1, nil
 		}
 		p.line("  %s", p.style("33", i18n.T("wizard.invalidChoice")))
 	}
@@ -139,14 +161,35 @@ func wizardModules() []wizardModule {
 	return groups
 }
 
-// runWizard 引导用户调整配置。返回 false 表示用户放弃本次运行。
-func runWizard(cfg *config.Runtime, out io.Writer) bool {
-	prompt, ok := newPrompter(out, !cfg.NoColor)
+// runWizard 引导用户调整配置。返回 false 表示用户放弃本次运行；读取错误
+// （包括因 ctx 取消而关闭终端产生的错误）通过 error 返回，EOF 仍使用默认值。
+func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	prompt, ok := newPrompter(!cfg.NoColor)
 	if !ok {
 		// 没有可用终端：保持默认配置直接跑，不阻塞自动化场景。
-		return true
+		return true, nil
 	}
-	defer prompt.Close()
+	stopCancellation := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			prompt.Close()
+		case <-stopCancellation:
+		}
+	}()
+	defer func() {
+		close(stopCancellation)
+		prompt.Close()
+	}()
+	wizardError := func(err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
 
 	prompt.line("")
 	prompt.line("%s", prompt.style("1;36", i18n.T("wizard.title")))
@@ -163,18 +206,17 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 			defaultIndex = index
 		}
 	}
-	chosen := profiles[prompt.choose(i18n.T("wizard.profileTitle"), labels, defaultIndex)]
+	profileChoice, err := prompt.choose(i18n.T("wizard.profileTitle"), labels, defaultIndex)
+	if err != nil {
+		return false, wizardError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	chosen := profiles[profileChoice]
 	if chosen != cfg.Profile {
-		updated, err := config.Defaults(chosen)
-		if err == nil {
-			// 保留用户已经通过命令行指定的输出与协议族偏好。
-			updated.Output, updated.Formats = cfg.Output, cfg.Formats
-			updated.NoColor, updated.Reveal = cfg.NoColor, cfg.Reveal
-			updated.IPVersion = cfg.IPVersion
-			// 外联设置同样是用户的显式选择：换档位不该悄悄把它放宽回默认值。
-			updated.Exposure = cfg.Exposure
-			*cfg = updated
-		}
+		cfg.Profile = chosen
+		cfg.Modules = config.ModulesForProfile(chosen)
 	}
 	prompt.line("")
 
@@ -191,7 +233,14 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 			exposureDefault = index
 		}
 	}
-	chosenExposure, err := config.ParseExposure(levels[prompt.choose(i18n.T("wizard.exposureTitle"), exposureLabels, exposureDefault)])
+	exposureChoice, err := prompt.choose(i18n.T("wizard.exposureTitle"), exposureLabels, exposureDefault)
+	if err != nil {
+		return false, wizardError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	chosenExposure, err := config.ParseExposure(levels[exposureChoice])
 	if err == nil {
 		cfg.Exposure = chosenExposure
 	}
@@ -199,7 +248,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	if len(cfg.Modules) == 0 {
 		prompt.line("")
 		prompt.line("%s", prompt.style("33", i18n.T("wizard.noModules")))
-		return false
+		return false, nil
 	}
 	prompt.line("")
 
@@ -220,7 +269,14 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 		if !present {
 			continue
 		}
-		if !prompt.confirm(i18n.T(group.QuestionKey), group.DefaultOn) {
+		answer, err := prompt.confirm(i18n.T(group.QuestionKey), group.DefaultOn)
+		if err != nil {
+			return false, wizardError(err)
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if !answer {
 			for _, id := range group.Modules {
 				delete(selected, id)
 			}
@@ -228,7 +284,14 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	}
 
 	// 四、隐私
-	cfg.Reveal = prompt.confirm(i18n.T("wizard.askReveal"), cfg.Reveal)
+	reveal, err := prompt.confirm(i18n.T("wizard.askReveal"), cfg.Reveal)
+	if err != nil {
+		return false, wizardError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	cfg.Reveal = reveal
 
 	modules := make([]string, 0, len(selected))
 	for _, id := range config.ModuleIDs() {
@@ -239,7 +302,7 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 	if len(modules) == 0 {
 		prompt.line("")
 		prompt.line("%s", prompt.style("33", i18n.T("wizard.noModules")))
-		return false
+		return false, nil
 	}
 	cfg.Modules = modules
 
@@ -258,10 +321,17 @@ func runWizard(cfg *config.Runtime, out io.Writer) bool {
 		prompt.line("  %s", prompt.style("33", i18n.T("wizard.revealWarning")))
 	}
 	prompt.line("")
-	if !prompt.confirm(i18n.T("wizard.askStart"), true) {
+	start, err := prompt.confirm(i18n.T("wizard.askStart"), true)
+	if err != nil {
+		return false, wizardError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !start {
 		prompt.line("%s", i18n.T("wizard.aborted"))
-		return false
+		return false, nil
 	}
 	prompt.line("")
-	return true
+	return true, nil
 }

@@ -105,9 +105,16 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		traceStart := time.Now()
 		output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, routeSnapshotHops, endpointFamily(target, env.Config.IPVersion))
 		elapsed := time.Since(traceStart)
-		cancel()
 		clean := sanitizeCommandOutput(output)
-		slots, visible, timeouts, parsed := routeHopSummary(engine.Name, clean)
+		contextErr := contextCauseError(traceCtx)
+		if contextErr != nil {
+			err = contextErr
+		}
+		slots, visible, timeouts, parsed := 0, 0, 0, false
+		if contextErr == nil {
+			slots, visible, timeouts, parsed = routeHopSummary(engine.Name, clean)
+		}
+		cancel()
 		status := routeStatusComplete
 		switch {
 		case err != nil:
@@ -234,6 +241,9 @@ func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target st
 	command.Stderr = &buffer
 	err := command.Run()
 	output := buffer.Bytes()
+	if cause := contextCauseError(ctx); cause != nil {
+		return output, cause
+	}
 	if len(output) > 256*1024 {
 		output = output[:256*1024]
 	}

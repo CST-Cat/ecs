@@ -26,6 +26,9 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	if reference < 0 || reference >= len(reports) {
 		return Report{}, newValidationError("compare.help.referenceRange", len(reports))
 	}
+	if err := validateTableSchemas(reports); err != nil {
+		return Report{}, err
+	}
 	out := Report{
 		SchemaVersion: SchemaVersion, Tool: options.Tool, GeneratedAt: time.Now().UTC(), Reference: reference,
 		Notices: []Notice{
@@ -91,6 +94,28 @@ func Build(reports []model.Report, options Options) (Report, error) {
 	out.Summary.Modules = len(out.Modules)
 	out.Summary.Comparability = overallComparability(out)
 	return out, nil
+}
+
+// validateTableSchemas rejects an ambiguous table declaration before the
+// observation builder can silently discard it. A table schema is the table
+// key together with its ordered column keys, matching tableSchemaKey.
+func validateTableSchemas(reports []model.Report) error {
+	for reportIndex, report := range reports {
+		for _, result := range report.Results {
+			seen := make(map[string]bool)
+			for _, table := range result.Tables {
+				schema := tableSchemaKey(table)
+				if schema == "" {
+					continue
+				}
+				if seen[schema] {
+					return newValidationError("compare.help.duplicateTableSchema", reportIndex+1, result.ID, table.Key)
+				}
+				seen[schema] = true
+			}
+		}
+	}
+	return nil
 }
 
 // prependToolVersionNotice puts a note about producer-version differences

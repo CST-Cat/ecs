@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -67,8 +68,9 @@ const cnNodeListCommit = "fbc05248d2e106f7ef14f3ce7e037bc9976b58bb"
 const cnNodeListURL = "https://raw.githubusercontent.com/spiritLHLS/speedtest.cn-CN-ID/" + cnNodeListCommit + "/CN.csv"
 
 const (
-	cnSpeedDuration       = 8 * time.Second
-	cnSpeedMaxBytes int64 = 100 * 1024 * 1024
+	cnSpeedDuration          = 8 * time.Second
+	cnSpeedMaxBytes    int64 = 100 * 1024 * 1024
+	cnNodeListMaxBytes int64 = 2 * 1024 * 1024
 )
 
 func cnSpeedBudget() (time.Duration, int64) {
@@ -121,7 +123,17 @@ func fetchCNNodes(ctx context.Context, client *http.Client, userAgent string) ([
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", response.StatusCode)
 	}
-	reader := csv.NewReader(io.LimitReader(response.Body, 2*1024*1024))
+	body, err := io.ReadAll(io.LimitReader(response.Body, cnNodeListMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("清单读取失败: %w", err)
+	}
+	if int64(len(body)) > cnNodeListMaxBytes || response.ContentLength > cnNodeListMaxBytes {
+		return nil, fmt.Errorf("清单过大")
+	}
+	if response.ContentLength > 0 && int64(len(body)) < response.ContentLength {
+		return nil, fmt.Errorf("清单读取被截断")
+	}
+	reader := csv.NewReader(bytes.NewReader(body))
 	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil || len(records) < 2 {

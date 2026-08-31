@@ -260,6 +260,22 @@ func TestSystemDirectResultRendersBilingualWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestSystemEvidenceExcludesUnavailablePlaceholders(t *testing.T) {
+	result := model.NewResult("system", "system")
+	result.Fields = []model.Field{
+		systemField("available", "fixture"),
+		systemField("unavailable", "unavailable"),
+		systemField("known_unlimited", "unlimited"),
+		systemField("unlimited_or_unavailable", "unlimited_or_unavailable"),
+		systemField("not_applicable", "n/a"),
+		systemField("unknown", "unknown"),
+	}
+	finalizeSystemResult(&result, systemSnapshot{})
+	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 6 || result.Status != model.StatusWarning {
+		t.Fatalf("placeholder evidence/status = %+v/%s", result.Evidence, result.Status)
+	}
+}
+
 func TestSystemBuiltinUsesDirectProbeAndLiveResultHasNoDuplicateFacts(t *testing.T) {
 	systemCount := 0
 	for _, builtin := range Builtins() {

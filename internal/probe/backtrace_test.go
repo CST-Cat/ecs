@@ -218,7 +218,7 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 	if result.SummaryMessages[0].Key != "probe.backtrace.summary.values" || !reflect.DeepEqual(result.SummaryMessages[0].Args, []string{"2", "9"}) {
 		t.Fatalf("summary = %+v", result.SummaryMessages)
 	}
-	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 6 || result.Evidence.Expected != 9 {
+	if result.Status != model.StatusWarning || result.Evidence == nil || result.Evidence.Valid != 6 || result.Evidence.Expected != 9 {
 		t.Fatalf("status/evidence = %s/%+v", result.Status, result.Evidence)
 	}
 	if len(result.Failures) != 5 {
@@ -286,6 +286,35 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 		if block.Title != "probe.backtrace.raw_output" || block.Language != "text" || block.Content == "" {
 			t.Fatalf("raw block metadata = %+v", block)
 		}
+	}
+}
+
+func TestBacktraceStatusReflectsTargetFailureMatrix(t *testing.T) {
+	fixturePath := writeBacktraceFixture(t)
+	t.Setenv("PATH", fixturePath)
+	allTargets := backtraceFixtureTargets()
+	cases := []struct {
+		name    string
+		targets []config.Endpoint
+		status  model.Status
+	}{
+		{name: "all success", targets: allTargets[:4], status: model.StatusOK},
+		{name: "all partial results", targets: allTargets[4:6], status: model.StatusWarning},
+		{name: "partial failure", targets: allTargets[:5], status: model.StatusWarning},
+		{name: "all failure", targets: allTargets[6:], status: model.StatusError},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			runtime, err := config.Defaults(config.ProfileStandard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime.BacktraceTargets = test.targets
+			result := (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime})
+			if result.Status != test.status {
+				t.Fatalf("backtrace status = %s, want %s; failures=%+v", result.Status, test.status, result.Failures)
+			}
+		})
 	}
 }
 

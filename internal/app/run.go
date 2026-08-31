@@ -46,7 +46,15 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if resolved.Interactive && !resolved.Yes {
-		if !runWizard(&cfg, stdout) {
+		wizardOK, wizardErr := runWizard(ctx, &cfg)
+		if wizardErr != nil {
+			if errors.Is(wizardErr, context.Canceled) {
+				return 130
+			}
+			fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), wizardErr)
+			return 1
+		}
+		if !wizardOK {
 			return 0
 		}
 	}

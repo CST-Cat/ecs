@@ -1,10 +1,47 @@
 package probe
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
+
+func TestOoklaContextCausePrecedesExecuteAndParseClassification(t *testing.T) {
+	missingPath := t.TempDir() + "/missing-speedtest"
+	cancelCause := errors.New("fixture Ookla cancellation cause")
+	cancelled, cancel := context.WithCancelCause(context.Background())
+	cancel(cancelCause)
+	_, runErr, parseErr, contextDone := runOfficialOokla(cancelled, missingPath, nil)
+	if !contextDone || parseErr != nil || !errors.Is(runErr, cancelCause) || !errors.Is(runErr, context.Canceled) {
+		t.Fatalf("cancelled Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	}
+	if classified := failure.Classify(runErr); classified.Category != model.FailureCanceled {
+		t.Fatalf("cancelled Ookla category = %+v", classified)
+	}
+
+	deadline, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer deadlineCancel()
+	_, runErr, parseErr, contextDone = runOfficialOokla(deadline, missingPath, nil)
+	if !contextDone || parseErr != nil || !errors.Is(runErr, context.DeadlineExceeded) {
+		t.Fatalf("deadline Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	}
+	if classified := failure.Classify(runErr); classified.Category != model.FailureTimeout {
+		t.Fatalf("deadline Ookla category = %+v", classified)
+	}
+
+	path := writeThroughputExecutable(t, "speedtest", "#!/bin/sh\nprintf '%s' '{bad}'\n")
+	_, runErr, parseErr, contextDone = runOfficialOokla(context.Background(), path, nil)
+	if contextDone || runErr != nil || parseErr == nil {
+		t.Fatalf("parse Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	}
+	if classified := failure.Classify(parseErr); classified.Category != model.FailureParse {
+		t.Fatalf("parse Ookla category = %+v", classified)
+	}
+}
 
 func TestOoklaJSONFixturesAndMeasurements(t *testing.T) {
 	full, err := parseOoklaJSON([]byte(`{

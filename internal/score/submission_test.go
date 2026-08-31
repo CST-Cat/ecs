@@ -1,6 +1,8 @@
 package score
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"math"
@@ -345,5 +347,196 @@ func TestSubmissionLoadAndValidationDiagnostics(t *testing.T) {
 	noHost.Results = noHost.Results[1:]
 	if _, err := BuildSubmission(noHost, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "host vcpu must be positive") {
 		t.Fatalf("missing-host report error = %v", err)
+	}
+}
+
+func TestSubmissionValidatorLengthBoundaries(t *testing.T) {
+	base, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setAndFingerprint := func(set func(*Submission, string), value string) Submission {
+		submission := copySubmission(base)
+		set(&submission, value)
+		submission.ID = submission.fingerprint()
+		return submission
+	}
+	cases := []struct {
+		name  string
+		limit int
+		set   func(*Submission, string)
+	}{
+		{name: "provider", limit: 48, set: func(submission *Submission, value string) {
+			submission.Host.Provider = value
+		}},
+		{name: "region", limit: 32, set: func(submission *Submission, value string) {
+			submission.Host.Region = value
+		}},
+		{name: "note", limit: maxNoteLength, set: func(submission *Submission, value string) {
+			submission.Note = value
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			valid := setAndFingerprint(test.set, strings.Repeat("x", test.limit))
+			if err := valid.Validate(); err != nil {
+				t.Fatalf("%s at limit %d rejected: %v", test.name, test.limit, err)
+			}
+			over := setAndFingerprint(test.set, strings.Repeat("x", test.limit+1))
+			if err := over.Validate(); err == nil || !strings.Contains(err.Error(), test.name) {
+				t.Fatalf("%s at limit %d+1 error = %v", test.name, test.limit, err)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name  string
+		value string
+		set   func(*Submission, string)
+	}{
+		{name: "sample_id at limit", value: strings.Repeat("a", 64), set: func(submission *Submission, value string) {
+			submission.SampleID = value
+		}},
+		{name: "sample_id below limit", value: strings.Repeat("a", 63), set: func(submission *Submission, value string) {
+			submission.SampleID = value
+		}},
+		{name: "sample_id above limit", value: strings.Repeat("a", 65), set: func(submission *Submission, value string) {
+			submission.SampleID = value
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			submission := setAndFingerprint(test.set, test.value)
+			err := submission.Validate()
+			if strings.Contains(test.name, "at limit") && err != nil {
+				t.Fatalf("sample_id at 64 rejected: %v", err)
+			}
+			if strings.Contains(test.name, "below") && err == nil {
+				t.Fatal("sample_id below 64 was accepted")
+			}
+			if strings.Contains(test.name, "above") && err == nil {
+				t.Fatal("sample_id above 64 was accepted")
+			}
+		})
+	}
+}
+
+func TestSubmissionValidatorRejectsIPAndURLMetadata(t *testing.T) {
+	base, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		value string
+		set   func(*Submission, string)
+	}{
+		{name: "ipv4", value: "203.0.113.10", set: func(submission *Submission, value string) {
+			submission.Host.Provider = value
+		}},
+		{name: "ipv6", value: "2001:db8::10", set: func(submission *Submission, value string) {
+			submission.Host.Region = value
+		}},
+		{name: "bracketed ipv6", value: "[2001:db8::10]", set: func(submission *Submission, value string) {
+			submission.Host.Provider = value
+		}},
+		{name: "url", value: "https://example.com", set: func(submission *Submission, value string) {
+			submission.Host.Region = value
+		}},
+		{name: "uppercase url", value: "HTTPS://EXAMPLE.COM", set: func(submission *Submission, value string) {
+			submission.Host.Provider = value
+		}},
+		{name: "encoded url", value: "https%3A%2F%2Fexample.com", set: func(submission *Submission, value string) {
+			submission.Host.Region = value
+		}},
+		{name: "double encoded url", value: "https%253A%252F%252Fexample.com", set: func(submission *Submission, value string) {
+			submission.Host.Provider = value
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			submission := copySubmission(base)
+			test.set(&submission, test.value)
+			submission.ID = submission.fingerprint()
+			if err := submission.Validate(); err == nil || !strings.Contains(err.Error(), "host") {
+				t.Fatalf("unsafe metadata %q error = %v", test.value, err)
+			}
+		})
+	}
+
+	for _, value := range []string{"fixture-cloud", "US West 2", "Hetzner: Cloud"} {
+		submission := copySubmission(base)
+		submission.Host.Provider = value
+		submission.ID = submission.fingerprint()
+		if err := submission.Validate(); err != nil {
+			t.Fatalf("ordinary metadata %q was rejected: %v", value, err)
+		}
+	}
+}
+
+func TestSubmissionJSONSizeBoundary(t *testing.T) {
+	submission, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := submission.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maxJSONSize = 256 * 1024
+	if len(content) >= maxJSONSize {
+		t.Fatalf("fixture unexpectedly exceeds size boundary: %d", len(content))
+	}
+	exact := append(append([]byte(nil), content...), bytes.Repeat([]byte{' '}, maxJSONSize-len(content))...)
+	over := append(append([]byte(nil), exact...), ' ')
+	directory := t.TempDir()
+	validPath := filepath.Join(directory, "exact.json")
+	if err := os.WriteFile(validPath, exact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSubmission(validPath); err != nil {
+		t.Fatalf("submission at 256 KiB rejected: %v", err)
+	}
+	overPath := filepath.Join(directory, "over.json")
+	if err := os.WriteFile(overPath, over, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSubmission(overPath); err == nil || !strings.Contains(err.Error(), "256 KiB") {
+		t.Fatalf("submission over 256 KiB error = %v", err)
+	}
+}
+
+func TestSubmissionDocumentationExamplesValidate(t *testing.T) {
+	repositoryRoot, err := findSubmissionRepositoryRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"README.md", "README_EN.md"} {
+		t.Run(name, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join(repositoryRoot, "submissions", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(content)
+			startMarker := "```json\n"
+			start := strings.Index(text, startMarker)
+			if start < 0 {
+				t.Fatalf("%s has no JSON example", name)
+			}
+			start += len(startMarker)
+			end := strings.Index(text[start:], "\n```")
+			if end < 0 {
+				t.Fatalf("%s JSON example is not closed", name)
+			}
+			var submission Submission
+			if err := json.Unmarshal([]byte(text[start:start+end]), &submission); err != nil {
+				t.Fatalf("%s JSON example decode = %v", name, err)
+			}
+			if err := submission.Validate(); err != nil {
+				t.Fatalf("%s JSON example validation = %v", name, err)
+			}
+			if len(submission.ID) != sha256.Size/2*2 || submission.ID != strings.ToLower(submission.ID) {
+				t.Fatalf("%s example ID = %q, want 32 lowercase hex characters", name, submission.ID)
+			}
+		})
 	}
 }

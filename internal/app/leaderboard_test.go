@@ -69,7 +69,7 @@ func TestLeaderboardCommandsWriteReadableResults(t *testing.T) {
 	previousPath := filepath.Join(root, "previous-baseline.json")
 	previous, err := (score.Baseline{
 		Schema: score.BaselineSchema, Source: "previous", SampleCount: 1,
-		Metrics: map[string]float64{"sysbench_cpu_single_events_s": 1},
+		Metrics: map[string]float64{"cpu_single": 1},
 	}).Encode()
 	if err != nil {
 		t.Fatal(err)

@@ -328,6 +328,9 @@ func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaRes
 	command := exec.CommandContext(runCtx, path, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	output, runErr := command.CombinedOutput()
+	if cause := contextCauseError(runCtx); cause != nil {
+		return parsed, cause, nil, true
+	}
 	if len(output) > 512*1024 {
 		output = output[:512*1024]
 	}

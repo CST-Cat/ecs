@@ -3,6 +3,7 @@ package probe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,28 @@ import (
 	"ecs/internal/report"
 	"ecs/internal/termcolor"
 )
+
+func TestNextTraceCancellationPrecedesExecuteAndParseClassification(t *testing.T) {
+	path := writeRouteFixtureBinary(t)
+	engine := routeEngine{Name: routeEngineTiny, Path: path}
+	cause := errors.New("fixture NextTrace cancellation cause")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	output, err := runRouteCommandForFamily(ctx, engine, "complete", routeSnapshotHops, config.IPVersionAuto)
+	if !errors.Is(err, cause) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled NextTrace command = output:%q err:%v", output, err)
+	}
+
+	result := (routeProbe{}).Run(ctx, routeTestEnvironment([]config.Endpoint{{Name: "Cancelled", Address: "complete"}}, config.IPVersionAuto))
+	if len(result.Failures) != 1 || result.Failures[0].Category != model.FailureCanceled || result.Failures[0].Stage != "trace" {
+		t.Fatalf("cancelled NextTrace result failures = %+v", result.Failures)
+	}
+	for _, failure := range result.Failures {
+		if failure.Stage == "parse" {
+			t.Fatalf("cancelled NextTrace was classified as parse failure: %+v", result.Failures)
+		}
+	}
+}
 
 const (
 	routeCompleteFixtureOutput = `{"Hops":[[{"Address":{"IP":"203.0.113.1"}}]],"provider":"原始汉字"}`

@@ -114,9 +114,7 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 
 	total := len(checks)
-	if total > 0 && unknown == total {
-		result.Status = model.StatusWarning
-	}
+	result.Status = mediaStatus(results)
 	result.Measurements = []model.Measurement{
 		{
 			Key: "media_unlocked", Label: "probe.media.metric.unlocked",
@@ -142,6 +140,28 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Finish(start)
 	return result
+}
+
+// mediaStatus distinguishes an unavailable verdict from a failed request. A
+// check may still produce usable evidence when one of its requests fails.
+func mediaStatus(results []mediaResult) model.Status {
+	_, _, unknown := mediaVerdictCounts(results)
+	usable := len(results) - unknown
+	requestFailure := false
+	for _, item := range results {
+		if len(item.ResponseErrors) > 0 || len(item.Check.Requests) == 0 {
+			requestFailure = true
+			break
+		}
+	}
+	switch {
+	case len(results) > 0 && usable == 0:
+		return model.StatusError
+	case usable < len(results) || requestFailure:
+		return model.StatusWarning
+	default:
+		return model.StatusOK
+	}
 }
 
 // runMediaCheck 执行一条规则的全部请求并给出结论。
