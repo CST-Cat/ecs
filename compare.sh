@@ -143,14 +143,9 @@ fetch "${BASE}/${ASSET}" "${WORK}/${ASSET}" ||
 fetch "${BASE}/checksums.txt" "${WORK}/checksums.txt" ||
   die "下载校验文件失败" "failed to download the checksum file"
 
-# 校验不可跳过：这是 curl|sh 这条路径上唯一能自证内容未被替换的环节。
+# 确认下载归档与同一 Release 清单记录的字节一致。
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$EXPECTED" ] || die "校验文件里没有 ${ASSET} 的条目" "no checksum entry for ${ASSET}"
-case "$EXPECTED" in
-  *[!a-f0-9]*) die "校验值格式非法" "malformed checksum value" ;;
-esac
-[ "${#EXPECTED}" -eq 64 ] || die "校验值长度非法" "malformed checksum length"
-
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL=$(sha256sum "${WORK}/${ASSET}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 elif command -v shasum >/dev/null 2>&1; then

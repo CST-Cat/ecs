@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,8 +64,8 @@ func selectedValueRows(rows [][]model.Value, columns ...int) [][]model.Value {
 	return selected
 }
 
-func selectedValueHash(table model.Table, columns ...int) string {
-	return comparisonParameterHash(selectedValueRows(table.Rows, columns...))
+func selectedValueJSON(table model.Table, columns ...int) string {
+	return comparisonParameterJSON(selectedValueRows(table.Rows, columns...))
 }
 
 func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
@@ -77,7 +78,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (networkProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, IPQualitySources: []string{"source-a", "source-b"}, HTTPTimeout: time.Second,
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "ip_quality_sources_sha256", "http_timeout")
+		assertProducerParameterScope(t, result, "ip_version", "ip_quality_sources", "http_timeout")
 	})
 
 	t.Run("bgp", func(t *testing.T) {
@@ -102,8 +103,8 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (npbProbe{}).Run(context.Background(), Environment{})
 		assertProducerParameterScope(t, result,
 			"tool_version", "method_version", "problem_class", "threads", "implementation",
-			"compiler_flags", "random_generator", "ep_sha256", "ft_sha256",
-			"environment_1t_sha256", "environment_nt_sha256",
+			"compiler_flags", "random_generator",
+			"environment_1t", "environment_nt",
 		)
 	})
 
@@ -131,14 +132,14 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (dnsProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, DNSAttempts: 2,
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "query_name", "attempts", "resolvers_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "query_name", "attempts", "resolvers")
 	})
 
 	t.Run("latency skipped without targets", func(t *testing.T) {
 		result := (latencyProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, LatencyAttempts: 2,
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "attempts", "targets_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "attempts", "targets")
 	})
 
 	t.Run("speed tool missing", func(t *testing.T) {
@@ -146,7 +147,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (speedProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, IPerfDuration: time.Second, SpeedThreads: 2,
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "configured_duration", "configured_threads", "targets_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "configured_duration", "configured_threads", "targets")
 	})
 
 	t.Run("ports canceled", func(t *testing.T) {
@@ -158,7 +159,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 
 	t.Run("nat skipped without servers", func(t *testing.T) {
 		result := (natProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
-		assertProducerParameterScope(t, result, "ip_version", "servers_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "servers")
 	})
 
 	t.Run("blacklist skipped for IPv6", func(t *testing.T) {
@@ -190,7 +191,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 			})}
 		}
 		result := (cnSpeedProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
-		assertProducerParameterScope(t, result, "ip_version", "download_budget_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "download_budget")
 	})
 
 	t.Run("ookla exposure skipped", func(t *testing.T) {
@@ -198,7 +199,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 			IPVersion: config.IPVersion4, Exposure: config.ExposureLocal,
 			OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "server_configuration_sha256")
+		assertProducerParameterScope(t, result, "ip_version", "server_configuration")
 	})
 
 	t.Run("media requests fail through fixture transport", func(t *testing.T) {
@@ -208,7 +209,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (mediaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersionAuto, HTTPTimeout: time.Second, MediaRegions: []string{"jp"},
 		}, HTTPClient: client})
-		assertProducerParameterScope(t, result, "ip_version", "regions_sha256", "http_timeout")
+		assertProducerParameterScope(t, result, "ip_version", "regions", "http_timeout")
 	})
 
 	t.Run("route tool missing", func(t *testing.T) {
@@ -216,7 +217,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, RouteTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops")
+		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops")
 	})
 
 	t.Run("backtrace tool missing", func(t *testing.T) {
@@ -224,26 +225,26 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 		result := (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 			IPVersion: config.IPVersion4, BacktraceTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
 		}})
-		assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops", "signature_set")
+		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "signature_set")
 	})
 }
 
-func TestProducerComparisonHashesAreStableOrderedAndTagged(t *testing.T) {
+func TestProducerComparisonJSONIsStableOrderedAndTagged(t *testing.T) {
 	ordered := []string{"source-a", "source-b"}
-	if got, want := comparisonParameterHash(ordered), comparisonParameterHash([]string{"source-a", "source-b"}); got != want {
-		t.Fatalf("same ordered input hash changed: %q != %q", got, want)
+	if got, want := comparisonParameterJSON(ordered), comparisonParameterJSON([]string{"source-a", "source-b"}); got != want {
+		t.Fatalf("same ordered input JSON changed: %q != %q", got, want)
 	}
-	if comparisonParameterHash(ordered) == comparisonParameterHash([]string{"source-b", "source-a"}) {
-		t.Fatal("reordered input retained the same comparison hash")
+	if comparisonParameterJSON(ordered) == comparisonParameterJSON([]string{"source-b", "source-a"}) {
+		t.Fatal("reordered input retained the same comparison JSON")
 	}
 
 	raw := [][]model.Value{{model.RawValue("x")}}
 	key := [][]model.Value{{model.KeyValue("x")}}
-	if comparisonParameterHash(raw) == comparisonParameterHash(key) {
-		t.Fatal("raw and key Value variants share a comparison hash")
+	if comparisonParameterJSON(raw) == comparisonParameterJSON(key) {
+		t.Fatal("raw and key Value variants share comparison JSON")
 	}
-	if comparisonParameterHash(raw) != comparisonParameterHash([][]model.Value{{model.RawValue("x")}}) {
-		t.Fatal("same raw Value variant/text did not retain a stable hash")
+	if comparisonParameterJSON(raw) != comparisonParameterJSON([][]model.Value{{model.RawValue("x")}}) {
+		t.Fatal("same raw Value variant/text did not retain stable JSON")
 	}
 }
 
@@ -253,13 +254,13 @@ func TestNetworkProducerComparisonScopeTracksOrderedSources(t *testing.T) {
 	}
 	first := (networkProbe{}).Run(context.Background(), Environment{Config: base})
 	same := (networkProbe{}).Run(context.Background(), Environment{Config: base})
-	if first.Methodology.Parameters["ip_quality_sources_sha256"] != same.Methodology.Parameters["ip_quality_sources_sha256"] {
+	if first.Methodology.Parameters["ip_quality_sources"] != same.Methodology.Parameters["ip_quality_sources"] {
 		t.Fatal("same network source order changed producer comparison scope")
 	}
 	reordered := base
 	reordered.IPQualitySources = []string{"source-b", "source-a"}
 	third := (networkProbe{}).Run(context.Background(), Environment{Config: reordered})
-	if first.Methodology.Parameters["ip_quality_sources_sha256"] == third.Methodology.Parameters["ip_quality_sources_sha256"] {
+	if first.Methodology.Parameters["ip_quality_sources"] == third.Methodology.Parameters["ip_quality_sources"] {
 		t.Fatal("network source order did not change producer comparison scope")
 	}
 }
@@ -267,11 +268,11 @@ func TestNetworkProducerComparisonScopeTracksOrderedSources(t *testing.T) {
 func TestZstdComparisonArgumentsIgnoreOnlyTemporaryCorpusPath(t *testing.T) {
 	argsA := []string{"-q", "-b3", "-i1", "-T1", "/tmp/ecs-run-a/corpus"}
 	argsB := []string{"-q", "-b3", "-i1", "-T1", "/tmp/ecs-run-b/corpus"}
-	if got, want := comparisonParameterHash(zstdComparisonArguments(argsA)), comparisonParameterHash(zstdComparisonArguments(argsB)); got != want {
+	if got, want := strings.Join(zstdComparisonArguments(argsA), " "), strings.Join(zstdComparisonArguments(argsB), " "); got != want {
 		t.Fatalf("temporary corpus path changed zstd scope: %q != %q", got, want)
 	}
 	changed := []string{"-q", "-b4", "-i1", "-T1", "/tmp/ecs-run-b/corpus"}
-	if comparisonParameterHash(zstdComparisonArguments(argsA)) == comparisonParameterHash(zstdComparisonArguments(changed)) {
+	if strings.Join(zstdComparisonArguments(argsA), " ") == strings.Join(zstdComparisonArguments(changed), " ") {
 		t.Fatal("non-path zstd argument change did not change scope")
 	}
 }
@@ -294,11 +295,11 @@ printf '%s\n' '{"fio version":"fio-fixture","jobs":[{"jobname":"seqwrite","write
 		DiskPath: t.TempDir(), DiskMiB: 128,
 	}})
 	assertProducerParameterScope(t, result,
-		"configured_file_mib", "multi_mount", "tool_version", "tool_sha256", "actual_file_size",
+		"configured_file_mib", "multi_mount", "tool_version", "actual_file_size",
 		"direct_io", "ioengine", "jobs", "job_duration",
 	)
 	parameters := result.Methodology.Parameters
-	if parameters["configured_file_mib"] != "128" || parameters["multi_mount"] != "false" || parameters["tool_version"] != "fio-fixture" || parameters["tool_sha256"] != binarySHA256(path) || parameters["direct_io"] != "1" || parameters["ioengine"] != "psync" || parameters["jobs"] != strconv.Itoa(len(fioJobPlan())) || parameters["job_duration"] != fioPlanDuration(fioJobPlan()).String() {
+	if parameters["configured_file_mib"] != "128" || parameters["multi_mount"] != "false" || parameters["tool_version"] != "fio-fixture" || parameters["direct_io"] != "1" || parameters["ioengine"] != "psync" || parameters["jobs"] != strconv.Itoa(len(fioJobPlan())) || parameters["job_duration"] != fioPlanDuration(fioJobPlan()).String() {
 		t.Fatalf("disk comparison parameters = %v", parameters)
 	}
 	fileSize := ""

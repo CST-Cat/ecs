@@ -47,7 +47,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameter(result.Methodology.Parameters, "query_name", dnsQueryName)
 	addComparisonParameter(result.Methodology.Parameters, "attempts", strconv.Itoa(env.Config.DNSAttempts))
-	addComparisonParameterHash(result.Methodology.Parameters, "resolvers_sha256", env.Config.DNSResolvers)
+	addComparisonParameterJSON(result.Methodology.Parameters, "resolvers", env.Config.DNSResolvers)
 	result.Notes = []string{"probe.dns.note.warmup", "probe.dns.note.udp_scope"}
 
 	attempts := env.Config.DNSAttempts

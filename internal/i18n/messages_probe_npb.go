@@ -3,7 +3,7 @@ package i18n
 var probeNPBChinese = map[string]string{
 	"probe.npb.description":      "NASA NPB-OMP Class A：EP 覆盖浮点与多核吞吐，FT 覆盖 3D FFT、浮点和 cache/memory access",
 	"probe.npb.profile":          "NPB 3.4.4 · EP + FT · Class A · 1T/NT",
-	"probe.npb.comparison_scope": "相同 NPB 版本、EP/FT Class A、OpenMP 编译参数、线程环境、binary SHA-256 与 method version",
+	"probe.npb.comparison_scope": "相同 NPB 版本、EP/FT Class A、OpenMP 编译参数、线程环境与 method version",
 	"probe.npb.summary.values":   "结果：%s",
 	"probe.npb.summary.none":     "NPB EP/FT 未产出有效 Class A Mop/s",
 
@@ -21,9 +21,7 @@ var probeNPBChinese = map[string]string{
 	"probe.npb.field.environment_1t":   "完整环境（1T）",
 	"probe.npb.field.environment_nt":   "完整环境（全线程）",
 	"probe.npb.field.binary_ep":        "EP binary",
-	"probe.npb.field.binary_ep_sha256": "EP SHA-256",
 	"probe.npb.field.binary_ft":        "FT binary",
-	"probe.npb.field.binary_ft_sha256": "FT SHA-256",
 
 	"probe.npb.metric.npb_ep_1t_mops":       "NPB EP 1T 浮点计算吞吐",
 	"probe.npb.metric.npb_ep_nt_mops":       "NPB EP NT 浮点计算吞吐",
@@ -62,7 +60,7 @@ var probeNPBChinese = map[string]string{
 var probeNPBEnglish = map[string]string{
 	"probe.npb.description":      "NASA NPB-OMP Class A: EP covers floating-point and multicore throughput; FT covers 3D FFT, floating-point, and cache/memory access",
 	"probe.npb.profile":          "NPB 3.4.4 · EP + FT · Class A · 1T/NT",
-	"probe.npb.comparison_scope": "Same NPB version, EP/FT Class A, OpenMP compile flags, thread environment, binary SHA-256, and method version",
+	"probe.npb.comparison_scope": "Same NPB version, EP/FT Class A, OpenMP compile flags, thread environment, and method version",
 	"probe.npb.summary.values":   "Results: %s",
 	"probe.npb.summary.none":     "NPB EP/FT produced no valid Class A Mop/s",
 
@@ -80,9 +78,7 @@ var probeNPBEnglish = map[string]string{
 	"probe.npb.field.environment_1t":   "Full environment (1T)",
 	"probe.npb.field.environment_nt":   "Full environment (all threads)",
 	"probe.npb.field.binary_ep":        "EP binary",
-	"probe.npb.field.binary_ep_sha256": "EP SHA-256",
 	"probe.npb.field.binary_ft":        "FT binary",
-	"probe.npb.field.binary_ft_sha256": "FT SHA-256",
 
 	"probe.npb.metric.npb_ep_1t_mops":       "NPB EP 1T floating-point throughput",
 	"probe.npb.metric.npb_ep_nt_mops":       "NPB EP NT floating-point throughput",

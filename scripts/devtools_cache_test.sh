@@ -11,7 +11,7 @@ fake_binary="$test_root/staticcheck"
 fake_lock="$test_root/staticcheck.lock"
 printf '#!/bin/sh\nexit 0\n' >"$fake_binary"
 chmod 0755 "$fake_binary"
-printf '%s\n' "$(ecs_devtools_lock_hash)" >"$fake_lock"
+printf '%s\n' "$(ecs_devtools_lock_state)" >"$fake_lock"
 
 ecs_devtool_cache_valid staticcheck "$fake_binary" "$fake_lock" ||
   { echo "devtools-cache: matching module lock was rejected" >&2; exit 1; }

@@ -274,7 +274,8 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	duration, maxBytes := cnSpeedBudget()
-	addComparisonParameterHash(result.Methodology.Parameters, "download_budget_sha256", fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024))
+	downloadBudget := fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024)
+	addComparisonParameter(result.Methodology.Parameters, "download_budget", downloadBudget)
 	client := cnspeedHTTPClientFactory(env.Config.HTTPTimeout, env.Config.IPVersion, nil, nil)
 	defer client.CloseIdleConnections()
 	env.HTTPClient = client
@@ -375,9 +376,9 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Fields = []model.Field{
 		{Key: "node_list", Label: "probe.cnspeed.field.node_list", Value: model.RawValue("speedtest.cn-CN-ID@audited-commit")},
 		{Key: "nodes_available", Label: "probe.cnspeed.field.nodes_available", Value: model.RawValue(fmt.Sprintf("%d", len(nodes)))},
-		{Key: "download_budget", Label: "probe.cnspeed.field.download_budget", Value: model.RawValue(fmt.Sprintf("%s 或 %d MiB", duration, maxBytes/1024/1024))},
+		{Key: "download_budget", Label: "probe.cnspeed.field.download_budget", Value: model.RawValue(downloadBudget)},
 	}
-	addComparisonParameterHash(result.Methodology.Parameters, "selected_nodes_sha256", selectedNodes)
+	addComparisonParameterJSON(result.Methodology.Parameters, "selected_nodes", selectedNodes)
 	result.Sources = []model.Source{
 		{Name: "speedtest.cn-CN-ID", URL: "https://github.com/spiritLHLS/speedtest.cn-CN-ID",
 			Purpose: "probe.cnspeed.source.nodes"},

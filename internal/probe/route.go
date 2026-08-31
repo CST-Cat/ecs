@@ -22,7 +22,6 @@ type routeEngine struct {
 	Name    string
 	Path    string
 	Version string
-	SHA256  string
 }
 
 const (
@@ -47,7 +46,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.RouteTargets)
+	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.RouteTargets)
 	addComparisonParameter(result.Methodology.Parameters, "max_hops", strconv.Itoa(routeSnapshotHops))
 
 	engine := detectRouteEngine(ctx)
@@ -69,15 +68,14 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
+	commandArguments := strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.route.field.engine", Value: model.RawValue(engine.Name)},
 		{Key: "version", Label: "probe.route.field.version", Value: model.RawValue(fallback(engine.Version, "unknown"))},
-		{Key: "binary_sha256", Label: "probe.route.field.binary_sha256", Value: model.RawValue(fallback(engine.SHA256, "unavailable"))},
-		{Key: "arguments", Label: "probe.route.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))},
+		{Key: "arguments", Label: "probe.route.field.arguments", Value: model.RawValue(commandArguments)},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(engine.Version, "unknown"))
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(engine.SHA256, "unavailable"))
-	addComparisonParameterHash(result.Methodology.Parameters, "arguments_sha256", strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))
+	addComparisonParameter(result.Methodology.Parameters, "arguments", commandArguments)
 	result.Sources = append(result.Sources, model.Source{
 		Name: "probe.route.source.nexttrace.name", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "probe.route.source.nexttrace",
 	})
@@ -215,7 +213,6 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 		Name:    routeEngineTiny,
 		Path:    path,
 		Version: commandVersion(ctx, path),
-		SHA256:  binarySHA256(path),
 	}
 }
 

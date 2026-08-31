@@ -149,13 +149,12 @@ func TestZstdEnvironmentAndMeasurements(t *testing.T) {
 func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
 	data := []byte("fixture corpus")
 	contract := zstdBenchmarkContract{
-		Version:          "1.5.7",
-		Level:            3,
-		Seconds:          1,
-		CorpusName:       "fixture.corpus",
-		CorpusBytes:      int64(len(data)),
-		CorpusSHA256:     fmt.Sprintf("%x", sha256.Sum256(data)),
-		CorpusSourceHash: "fixture-source-sha256",
+		Version:      "1.5.7",
+		Level:        3,
+		Seconds:      1,
+		CorpusName:   "fixture.corpus",
+		CorpusBytes:  int64(len(data)),
+		CorpusSHA256: fmt.Sprintf("%x", sha256.Sum256(data)),
 	}
 	directory := t.TempDir()
 	corpus := filepath.Join(directory, contract.CorpusName)
@@ -175,20 +174,20 @@ func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
 		t.Fatalf("zstd evidence = %+v", result.Evidence)
 	}
 	assertProducerParameterScope(t, result,
-		"tool_version", "tool_sha256", "method_version", "compression_level", "threads", "duration",
-		"corpus_bytes", "corpus_sha256", "corpus_source_sha256", "arguments_1t_sha256", "arguments_nt_sha256",
+		"tool_version", "method_version", "compression_level", "threads", "duration",
+		"corpus_bytes", "arguments_1t", "arguments_nt",
 	)
 	parameters := result.Methodology.Parameters
-	if parameters["tool_version"] != "zstd v1.5.7" || parameters["tool_sha256"] != binarySHA256(tool) {
+	if parameters["tool_version"] != "zstd v1.5.7" {
 		t.Fatalf("zstd tool comparison parameters = %v", parameters)
 	}
-	if parameters["method_version"] != zstdMethodVersion || parameters["compression_level"] != "3" || parameters["threads"] != "1 / 2" || parameters["duration"] != "1s" || parameters["corpus_bytes"] != "14 bytes" || parameters["corpus_sha256"] != contract.CorpusSHA256 || parameters["corpus_source_sha256"] != contract.CorpusSourceHash {
+	if parameters["method_version"] != zstdMethodVersion || parameters["compression_level"] != "3" || parameters["threads"] != "1 / 2" || parameters["duration"] != "1s" || parameters["corpus_bytes"] != "14 bytes" {
 		t.Fatalf("zstd stable comparison parameters = %v", parameters)
 	}
-	if got, want := parameters["arguments_1t_sha256"], comparisonParameterHash([]string{"-q", "-b3", "-i1", "-T1"}); got != want {
+	if got, want := parameters["arguments_1t"], "-q -b3 -i1 -T1"; got != want {
 		t.Fatalf("zstd 1T argument scope = %q, want %q", got, want)
 	}
-	if got, want := parameters["arguments_nt_sha256"], comparisonParameterHash([]string{"-q", "-b3", "-i1", "-T2"}); got != want {
+	if got, want := parameters["arguments_nt"], "-q -b3 -i1 -T2"; got != want {
 		t.Fatalf("zstd NT argument scope = %q, want %q", got, want)
 	}
 

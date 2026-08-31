@@ -416,7 +416,7 @@ func TestMediaProducerEmitsMachineSemanticsAndLocalizedRenderers(t *testing.T) {
 	if result.Measurements[0].Display.Text() != "12/20" || result.Measurements[1].Display.Text() != "6/20" || result.Evidence.Valid != 14 {
 		t.Fatalf("media count/evidence consistency = measurements=%+v evidence=%+v", result.Measurements, result.Evidence)
 	}
-	if result.Methodology.Parameters["scope_revision"] != "1" || result.Methodology.Parameters["regions_sha256"] == "" || result.Measurements[0].Method != "media-rules-"+mediaRulesVersion {
+	if result.Methodology.Parameters["scope_revision"] != comparisonParameterRevision || result.Methodology.Parameters["regions"] == "" || result.Measurements[0].Method != "media-rules-"+mediaRulesVersion {
 		t.Fatalf("media method metadata = methodology=%+v measurement=%+v", result.Methodology, result.Measurements[0])
 	}
 	finiteStates := map[string]bool{

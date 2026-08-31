@@ -42,11 +42,12 @@ When run.sh needs pinned zstd, NPB EP/FT, pinned OpenSSL, official STREAM,
 fio, iperf3, NextTrace Tiny, or ping, it uses the architecture-matched
 ecs-tools tar.gz artifact for fixed-contract components and for any missing
 general tool. The artifact is accepted only after checks against
-checksums.txt, manifest.json, and binary digests, then is unpacked into the
-temporary run directory and exposed through the temporary PATH. When the zstd
-benchmark is selected, run.sh separately downloads the standalone corpus
-Release asset, checks its Release checksum, and verifies its fixed size and
-SHA-256. APT/Packagecloud is reserved for an explicitly selected Ookla
+checksums.txt, then only the requested regular executable members are unpacked
+into the temporary run directory and exposed through the temporary PATH.
+Stage verification and packaging separately bind manifest digests to the
+actual binaries. When the zstd benchmark is selected, run.sh downloads and
+extracts the standalone corpus Release asset; the zstd probe verifies its
+fixed size and SHA-256 immediately before use. APT/Packagecloud is reserved for an explicitly selected Ookla
 adapter and is not a source for these general missing tools.
 
 The ecs-tools set intentionally excludes the Ookla speedtest client. Ookla is

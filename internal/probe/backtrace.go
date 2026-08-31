@@ -167,7 +167,7 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.BacktraceTargets)
+	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.BacktraceTargets)
 	addComparisonParameter(result.Methodology.Parameters, "max_hops", strconv.Itoa(backtraceMaxHops))
 	addComparisonParameter(result.Methodology.Parameters, "signature_set", "china-backbone-v2")
 
@@ -203,11 +203,9 @@ func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Fields = []model.Field{
 		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: model.RawValue(engine.Name)},
 		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: model.RawValue(fallback(engine.Version, "unknown"))},
-		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256", Value: model.RawValue(fallback(engine.SHA256, "unavailable"))},
 		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(engine, "<target>", backtraceMaxHops, endpointFamily(targets[0], env.Config.IPVersion)), " "))},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(engine.Version, "unknown"))
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(engine.SHA256, "unavailable"))
 
 	rows := make([]backtraceRow, len(targets))
 	semaphore := make(chan struct{}, backtraceConcurrency)

@@ -239,14 +239,14 @@ fi
 [[ "$(wc -l <"$wget_success_logs/fetch.log")" -eq 2 ]] || fail "wget-only HTTPS fixture did not download twice"
 [[ -f "$wget_success_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced no report"
 
-run_http_checksum_rejection() {
+run_http_corpus_rejection() {
   local case_name=$1 command_path=$2
-  local case_logs="$fixture_logs/http-checksum-$case_name"
-  local case_output="$test_root/http-checksum-$case_name-output"
+  local case_logs="$fixture_logs/http-corpus-$case_name"
+  local case_output="$test_root/http-corpus-$case_name-output"
   mkdir -p "$case_logs" "$case_output"
-  mkdir -p "$test_root/http-checksum-$case_name-tmp"
+  mkdir -p "$test_root/http-corpus-$case_name-tmp"
   set +e
-  ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/http-checksum-$case_name-tmp" PATH="$command_path" \
+  ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/http-corpus-$case_name-tmp" PATH="$command_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_CORPUS_BASE_URL=http://fixture.invalid/corpus \
     ECS_TEST_LOG_ROOT="$case_logs" ECS_TEST_REPORT_DIR="$case_output" \
@@ -254,17 +254,17 @@ run_http_checksum_rejection() {
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
     sh "$repo_root/run.sh" --profile standard --only noop --output "$case_output" \
-    >"$test_root/http-checksum-$case_name.stdout" 2>"$test_root/http-checksum-$case_name.stderr"
+    >"$test_root/http-corpus-$case_name.stdout" 2>"$test_root/http-corpus-$case_name.stderr"
   local case_status=$?
   set -e
-  [[ ! -e "$case_logs/unexpected-network" ]] || fail "$case_name invoked a downloader for an HTTP checksum URL"
+  [[ ! -e "$case_logs/unexpected-network" ]] || fail "$case_name invoked a downloader for an HTTP corpus URL"
   [[ "$(grep -c 'https://github.com/example/ecs/releases/download/v-test' "$case_logs/fetch.log")" -eq 3 ]] || \
-    fail "$case_name did not complete the HTTPS artifact downloads before rejecting the HTTP checksum URL"
-  [[ "$case_status" -eq 1 ]] || fail "$case_name returned $case_status instead of rejecting the HTTP checksum URL"
+    fail "$case_name did not complete the HTTPS artifact downloads before rejecting the HTTP corpus URL"
+  [[ "$case_status" -eq 1 ]] || fail "$case_name returned $case_status instead of rejecting the HTTP corpus URL"
 }
 
-run_http_checksum_rejection curl "$test_path"
-run_http_checksum_rejection wget "$wget_only_path"
+run_http_corpus_rejection curl "$test_path"
+run_http_corpus_rejection wget "$wget_only_path"
 
 # Wrapper help must be local for every supported global-language spelling. The
 # first field is the conflicting ECS_LANG fallback: lang=en cases use zh so

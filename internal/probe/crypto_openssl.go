@@ -127,10 +127,8 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 			{Key: "engine", Label: "probe.crypto.field.engine", Value: model.RawValue("OpenSSL speed")},
 			{Key: "version", Label: "probe.crypto.field.version", Value: model.RawValue(fallback(versionOutput, "unknown"))},
 			{Key: "required_version", Label: "probe.crypto.field.required_version", Value: model.RawValue(openSSLExpectedVersion)},
-			{Key: "binary_sha256", Label: "probe.crypto.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		}
 		addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(versionOutput, "unknown"))
-		addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 		result.Evidence = model.NewEvidence(0, len(specs)*len(threadCounts), "run")
 		result.Notes = cryptoNotes(result, allowance)
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.version_mismatch", fallback(versionOutput, "unknown"), openSSLExpectedVersion)}
@@ -167,7 +165,6 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.crypto.field.engine", Value: model.RawValue("OpenSSL speed")},
 		{Key: "version", Label: "probe.crypto.field.version", Value: model.RawValue(versionOutput)},
-		{Key: "binary_sha256", Label: "probe.crypto.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		{Key: "method_version", Label: "probe.crypto.field.method_version", Value: model.RawValue(openSSLMethodVersion)},
 		{Key: "algorithms", Label: "probe.crypto.field.algorithms", Value: model.RawValue("AES-256-GCM / ChaCha20-Poly1305 / SHA-256")},
 		{Key: "block_size", Label: "probe.crypto.field.block_size", Value: model.RawValue(strconv.Itoa(openSSLBlockBytes) + " bytes")},
@@ -179,7 +176,6 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 		{Key: "configuration", Label: "probe.crypto.field.configuration", Value: model.RawValue("OPENSSL_CONF=/dev/null；空 modules/engines 目录；CPU capability 自动探测")},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", versionOutput)
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 	addComparisonParameter(result.Methodology.Parameters, "method_version", openSSLMethodVersion)
 	addComparisonParameter(result.Methodology.Parameters, "algorithms", "AES-256-GCM / ChaCha20-Poly1305 / SHA-256")
 	addComparisonParameter(result.Methodology.Parameters, "block_size", strconv.Itoa(openSSLBlockBytes)+" bytes")
@@ -193,13 +189,14 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 			if index == 1 {
 				contextKey = "nw"
 			}
+			arguments := strings.Join(sample.Args, " ")
 			result.Fields = append(result.Fields, model.Field{
 				Key:   "arguments_" + spec.Key + "_" + contextKey,
 				Label: "probe.crypto.field.arguments",
-				Value: model.RawValue(strings.Join(sample.Args, " ")),
+				Value: model.RawValue(arguments),
 			})
 			if len(sample.Args) > 0 {
-				addComparisonParameter(result.Methodology.Parameters, "arguments_"+spec.Key+"_"+contextKey+"_sha256", comparisonParameterHash(strings.Join(sample.Args, " ")))
+				addComparisonParameter(result.Methodology.Parameters, "arguments_"+spec.Key+"_"+contextKey, arguments)
 			}
 			if sample.Output != "" && !(singleCore && index > 0) {
 				result.TextBlocks = append(result.TextBlocks, model.TextBlock{

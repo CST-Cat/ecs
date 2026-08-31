@@ -16,14 +16,14 @@ CI 产出的工具版本、发布资产或许可证正文。
 
 | 程序 | 用途 | 可核对来源/许可证 | ecs 行为 |
 | --- | --- | --- | --- |
-| `sysbench` | CPU 标准基准 | [上游仓库](https://github.com/akopytov/sysbench) · [LICENSE](https://github.com/akopytov/sysbench/blob/master/LICENSE) · GPL-2.0-only | 只运行 CPU 单线程/多线程工作负载；记录版本和 SHA-256 |
-| `zstd` | 固定 Silesia corpus 的 level 3 压缩/解压吞吐；5s，1/全 worker | [Zstandard v1.5.7](https://github.com/facebook/zstd/tree/v1.5.7) · [LICENSE](https://github.com/facebook/zstd/blob/v1.5.7/LICENSE) · BSD-3-Clause/GPL-2.0-only 双许可 | 只构建含 benchmark/压缩/解压/多线程的 CLI，裁掉字典训练、trace、legacy 与 zlib/lzma/lz4 格式；校验 binary SHA-256，固定 corpus 由独立 Release 资产按长度与 SHA-256 校验；保留原始输出 |
+| `sysbench` | CPU 标准基准 | [上游仓库](https://github.com/akopytov/sysbench) · [LICENSE](https://github.com/akopytov/sysbench/blob/master/LICENSE) · GPL-2.0-only | 只运行 CPU 单线程/多线程工作负载；报告记录版本，包内 manifest 绑定 binary digest |
+| `zstd` | 固定 Silesia corpus 的 level 3 压缩/解压吞吐；5s，1/全 worker | [Zstandard v1.5.7](https://github.com/facebook/zstd/tree/v1.5.7) · [LICENSE](https://github.com/facebook/zstd/blob/v1.5.7/LICENSE) · BSD-3-Clause/GPL-2.0-only 双许可 | 只构建含 benchmark/压缩/解压/多线程的 CLI，裁掉字典训练、trace、legacy 与 zlib/lzma/lz4 格式；package 校验 binary digest，probe 在使用前校验固定 corpus 长度与 SHA-256；保留原始输出 |
 | `npb-ep` / `npb-ft` | NPB-OMP EP + FT Class A，1T/全线程 Mop/s | [NASA NPB 3.4.4](https://www.nas.nasa.gov/software/npb.html) · 上游源文件的 NASA NPB permissive notice | 发布包只编译 EP/FT Class A，裁掉其余 kernel/class/MPI；固定 `-O3 -fopenmp -static`、`randi8` 和 OpenMP 环境；Verification 失败不采纳 Mop/s |
-| `openssl` | AES-256-GCM、ChaCha20-Poly1305、SHA-256；16 KiB、5s、1/全 worker | [OpenSSL 3.5.7](https://github.com/openssl/openssl/tree/openssl-3.5.7) · [LICENSE](https://github.com/openssl/openssl/blob/openssl-3.5.7/LICENSE.txt) · Apache-2.0 | 只构建官方 `apps/openssl` 及依赖，关闭 TLS/网络、动态组件和无关算法族；记录 binary SHA-256、完整 `speed` 参数、`-mr` 原始输出和扩展倍率 |
+| `openssl` | AES-256-GCM、ChaCha20-Poly1305、SHA-256；16 KiB、5s、1/全 worker | [OpenSSL 3.5.7](https://github.com/openssl/openssl/tree/openssl-3.5.7) · [LICENSE](https://github.com/openssl/openssl/blob/openssl-3.5.7/LICENSE.txt) · Apache-2.0 | 只构建官方 `apps/openssl` 及依赖，关闭 TLS/网络、动态组件和无关算法族；manifest 绑定 binary digest，报告保留完整 `speed` 参数、`-mr` 原始输出和扩展倍率 |
 | `stream` | 官方 STREAM 内存带宽：10,000,000 elements、10 iterations；`1T`/`NT` × `Copy`/`Scale`/`Add`/`Triad` | [官方来源与 Run Rules](https://www.cs.virginia.edu/stream/ref.html) · 具体许可证文本/版本待 CI 产物填充 | 只调用官方二进制并保留四 kernel、线程和原始单位；缺失时内存基准明确未运行 |
-| `fio` | Direct I/O 磁盘基础项、混合/Crystal/ATTO 矩阵和 4KiB QD1 latency | [上游仓库](https://github.com/axboe/fio) · [COPYING](https://github.com/axboe/fio/blob/master/COPYING) · GPL-2.0-only | 磁盘结果统一来自 fio JSON；记录版本和 SHA-256；QD1 延迟也由 fio 产生 |
+| `fio` | Direct I/O 磁盘基础项、混合/Crystal/ATTO 矩阵和 4KiB QD1 latency | [上游仓库](https://github.com/axboe/fio) · [COPYING](https://github.com/axboe/fio/blob/master/COPYING) · GPL-2.0-only | 磁盘结果统一来自 fio JSON；报告记录版本，包内 manifest 绑定 binary digest；QD1 延迟也由 fio 产生 |
 | `iperf3` | TCP 多流双方向与 UDP 丢包/抖动 | [上游仓库](https://github.com/esnet/iperf) · [LICENSE](https://github.com/esnet/iperf/blob/master/LICENSE) · BSD-3-Clause | 网络吞吐唯一标准工具；逐节点、逐方向保留 JSON 原值，不跨节点求平均 |
-| `nexttrace-tiny` | 路由和回程追踪 | [上游仓库](https://github.com/nxtrace/NTrace-core) · [LICENSE](https://github.com/nxtrace/NTrace-core/blob/main/LICENSE) · GPL-3.0-only | 只使用官方 Tiny 资产；实际版本和 SHA-256 由 manifest/报告记录 |
+| `nexttrace-tiny` | 路由和回程追踪 | [上游仓库](https://github.com/nxtrace/NTrace-core) · [LICENSE](https://github.com/nxtrace/NTrace-core/blob/main/LICENSE) · GPL-3.0-only | 只使用官方 Tiny 资产；manifest 记录 binary digest，报告记录实际版本与完整参数 |
 | `ping` | 系统 ICMP 往返与丢包 | [iputils](https://github.com/iputils/iputils) 或发行版提供；许可证随实际发行版包 | 系统 ping 优先；兼容 busybox 等精简 ping 的三段统计行；完全不可用时只保留 TCP 并明确说明 |
 
 上表中带 1T/NT 或 1/全 worker 口径的五个本地基准（sysbench、zstd、NPB、STREAM、OpenSSL）在有效 CPU allowance 为 1 时只执行一次参数相同的官方工具命令。报告保留 1T/NT 逻辑原始指标以兼容现有 schema，但不伪造第二个独立样本，也不生成扩展倍率。
@@ -39,7 +39,7 @@ Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政�
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
 `run.sh` 优先使用符合口径的系统程序；需要临时工具时选择当前 Linux 架构匹配的 `ecs-tools`
-`tar.gz`，先核对 Release `checksums.txt`，再只解包本次实际请求且确实存在、为普通可执行文件的成员到本次运行的 `$WORK`；Go 入口负责 manifest 的结构、字段和 digest 格式，`build_tools.sh` 在构建时另将生成 manifest 中的 digest 与实际 binary 对照，发布归档整体完整性由 `checksums.txt` 校验。选中 zstd 时，另从独立 Release 资产核对 checksum、长度和 SHA-256 后解包 corpus。
+`tar.gz`，先核对 Release `checksums.txt`，再只解包本次实际请求且确实存在、为普通可执行文件的成员到本次运行的 `$WORK`；Go 入口负责 manifest 的结构、字段和 digest 格式，stage verifier 与 package 在跨阶段消费时将 manifest digest 绑定到实际 binary，发布归档整体完整性由 `checksums.txt` 校验。选中 zstd 时，从独立 Release 资产精确解包 corpus；实际 zstd probe 在使用前校验其固定长度和 SHA-256，不在 wrapper 中重复读取 200 MiB 文件。
 APT/Packagecloud 不用于这些通用缺失工具。Ookla 缺失且模块被 profile 选中或被 `--only` 显式选中时，才走独立的官方 Packagecloud 源、固定指纹的 GPG
 公钥、索引和缓存路径；由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 安装脚本。
 `full` 缺失 `speedtest` 时走该独立官方签名源，`standard` 只有显式 `--only ookla` 时走该路径；Ookla 永不进入

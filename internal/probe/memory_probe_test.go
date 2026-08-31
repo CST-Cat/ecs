@@ -97,9 +97,9 @@ func TestStreamProducerSuccessfulMultiThreadResult(t *testing.T) {
 	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "run" {
 		t.Fatalf("STREAM successful evidence = %+v", result.Evidence)
 	}
-	assertProducerParameterScope(t, result, "tool_version", "tool_sha256", "threads", "kernel_order")
+	assertProducerParameterScope(t, result, "tool_version", "threads", "kernel_order")
 	parameters := result.Methodology.Parameters
-	if parameters["tool_version"] != "STREAM version 5.10" || parameters["tool_sha256"] != binarySHA256(path) || parameters["threads"] != "1 / 4" || parameters["kernel_order"] != "Copy / Scale / Add / Triad" {
+	if parameters["tool_version"] != "STREAM version 5.10" || parameters["threads"] != "1 / 4" || parameters["kernel_order"] != "Copy / Scale / Add / Triad" {
 		t.Fatalf("STREAM comparison parameters = %v", parameters)
 	}
 	if got, err := os.ReadFile(logPath); err != nil || strings.TrimSpace(string(got)) != "1\n4" {
@@ -132,7 +132,7 @@ func TestStreamProducerSuccessfulMultiThreadResult(t *testing.T) {
 		t.Fatalf("STREAM measurement labels = %+v", result.Measurements)
 	}
 
-	for _, key := range []string{"engine", "version", "binary_sha256", "threads", "cpu_allowance", "kernel_order", "thread_control", "rate_unit"} {
+	for _, key := range []string{"engine", "version", "threads", "cpu_allowance", "kernel_order", "thread_control", "rate_unit"} {
 		field := findMemoryField(result, key)
 		if field.Key == "" {
 			t.Fatalf("STREAM successful field %q is missing", key)

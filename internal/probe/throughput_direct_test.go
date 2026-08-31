@@ -55,7 +55,7 @@ fi
 `
 
 func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
-	path := writeThroughputExecutable(t, "iperf3", fakeIPerfExecutable)
+	writeThroughputExecutable(t, "iperf3", fakeIPerfExecutable)
 	env := Environment{
 		Config: config.Runtime{
 			IPVersion:     config.IPVersion4,
@@ -102,7 +102,7 @@ func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if raw, ok := result.Measurements[0].Display.Raw(); !ok || raw == "" {
 		t.Fatalf("speed measurement display = %#v", result.Measurements[0].Display)
 	}
-	if len(result.Fields) != 8 || result.Fields[0].Label != "probe.speed.field.engine" {
+	if len(result.Fields) != 7 || result.Fields[0].Label != "probe.speed.field.engine" {
 		t.Fatalf("speed fields = %#v", result.Fields)
 	}
 	if len(result.Sources) != 2 || result.Sources[0].Purpose != "probe.speed.source.iperf3" {
@@ -115,11 +115,11 @@ func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 		t.Fatalf("speed evidence = %+v", result.Evidence)
 	}
 	assertProducerParameterScope(t, result,
-		"ip_version", "configured_duration", "configured_threads", "targets_sha256",
-		"tool_version", "tool_sha256", "threads", "duration",
+		"ip_version", "configured_duration", "configured_threads", "targets",
+		"tool_version", "threads", "duration",
 	)
 	parameters := result.Methodology.Parameters
-	if parameters["ip_version"] != config.IPVersion4 || parameters["configured_duration"] != "1s" || parameters["configured_threads"] != "2" || parameters["targets_sha256"] != comparisonParameterHash(env.Config.IPerfTargets) || parameters["tool_version"] != "iperf 3.16" || parameters["tool_sha256"] != binarySHA256(path) || parameters["threads"] != "2" || parameters["duration"] != "1s" {
+	if parameters["ip_version"] != config.IPVersion4 || parameters["configured_duration"] != "1s" || parameters["configured_threads"] != "2" || parameters["targets"] != comparisonParameterJSON(env.Config.IPerfTargets) || parameters["tool_version"] != "iperf 3.16" || parameters["threads"] != "2" || parameters["duration"] != "1s" {
 		t.Fatalf("speed comparison parameters = %v", parameters)
 	}
 }
@@ -153,8 +153,8 @@ func TestSpeedProducerBuildsStablePartialStatusDirectly(t *testing.T) {
 		t.Fatalf("speed partial measurements/summary = %#v/%#v", result.Measurements, result.SummaryMessages)
 	}
 	assertProducerParameterScope(t, result,
-		"ip_version", "configured_duration", "configured_threads", "targets_sha256",
-		"tool_version", "tool_sha256", "threads", "duration",
+		"ip_version", "configured_duration", "configured_threads", "targets",
+		"tool_version", "threads", "duration",
 	)
 }
 
@@ -211,9 +211,9 @@ func TestCNSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if len(result.Notes) != 5 || result.SummaryMessages[0].Key != "probe.cnspeed.summary.values" {
 		t.Fatalf("cnspeed notes/summary = %#v/%#v", result.Notes, result.SummaryMessages)
 	}
-	assertProducerParameterScope(t, result, "ip_version", "download_budget_sha256", "selected_nodes_sha256")
+	assertProducerParameterScope(t, result, "ip_version", "download_budget", "selected_nodes")
 	parameters := result.Methodology.Parameters
-	if parameters["ip_version"] != config.IPVersion4 || parameters["download_budget_sha256"] != comparisonParameterHash("8s 或 100 MiB") || parameters["selected_nodes_sha256"] != selectedValueHash(result.Tables[0], 0, 1, 2) {
+	if parameters["ip_version"] != config.IPVersion4 || parameters["download_budget"] != "8s 或 100 MiB" || parameters["selected_nodes"] != selectedValueJSON(result.Tables[0], 0, 1, 2) {
 		t.Fatalf("cnspeed comparison parameters = %v", parameters)
 	}
 }
@@ -249,25 +249,25 @@ func TestCNSpeedProducerSelectedNodeComparisonScope(t *testing.T) {
 		"2,联通,北京,北京,cn2,https://8.8.4.4/ping,https://8.8.4.4/file,1\n" +
 		"3,移动,广州,广州,cn3,https://1.1.1.1/ping,https://1.1.1.1/file,1\n"
 	base := runCNSpeedComparisonFixture(t, csvBody, "abcdefgh", http.StatusOK)
-	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_nodes_sha256"] == "" {
+	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_nodes"] == "" {
 		t.Fatalf("cnspeed producer omitted selected-node scope: %+v", base.Methodology.Parameters)
 	}
-	if got, want := base.Methodology.Parameters["selected_nodes_sha256"], selectedValueHash(base.Tables[0], 0, 1, 2); got != want {
-		t.Fatalf("cnspeed selected-node hash = %q, want %q", got, want)
+	if got, want := base.Methodology.Parameters["selected_nodes"], selectedValueJSON(base.Tables[0], 0, 1, 2); got != want {
+		t.Fatalf("cnspeed selected-node JSON = %q, want %q", got, want)
 	}
 
 	differentDownload := runCNSpeedComparisonFixture(t, csvBody, strings.Repeat("x", 4096), http.StatusOK)
-	if base.Methodology.Parameters["selected_nodes_sha256"] != differentDownload.Methodology.Parameters["selected_nodes_sha256"] {
+	if base.Methodology.Parameters["selected_nodes"] != differentDownload.Methodology.Parameters["selected_nodes"] {
 		t.Fatal("cnspeed download result changed selected-node comparison scope")
 	}
 	differentStatus := runCNSpeedComparisonFixture(t, csvBody, "download failed", http.StatusServiceUnavailable)
-	if base.Methodology.Parameters["selected_nodes_sha256"] != differentStatus.Methodology.Parameters["selected_nodes_sha256"] {
+	if base.Methodology.Parameters["selected_nodes"] != differentStatus.Methodology.Parameters["selected_nodes"] {
 		t.Fatal("cnspeed status change changed selected-node comparison scope")
 	}
 
 	changedCSV := strings.Replace(csvBody, "1,电信,上海,上海,cn1", "1b,电信,浙江,杭州,cn1b", 1)
 	changedNode := runCNSpeedComparisonFixture(t, changedCSV, "abcdefgh", http.StatusOK)
-	if base.Methodology.Parameters["selected_nodes_sha256"] == changedNode.Methodology.Parameters["selected_nodes_sha256"] {
+	if base.Methodology.Parameters["selected_nodes"] == changedNode.Methodology.Parameters["selected_nodes"] {
 		t.Fatal("cnspeed selected node identity change was omitted from comparison scope")
 	}
 
@@ -277,8 +277,8 @@ func TestCNSpeedProducerSelectedNodeComparisonScope(t *testing.T) {
 		rawCarrier[index] = append([]model.Value(nil), row...)
 	}
 	rawCarrier[0][0] = model.RawValue(selected[0][0].Text())
-	if comparisonParameterHash(selected) == comparisonParameterHash(rawCarrier) {
-		t.Fatal("cnspeed selected-node hash ignored a raw/key Value tag change")
+	if comparisonParameterJSON(selected) == comparisonParameterJSON(rawCarrier) {
+		t.Fatal("cnspeed selected-node JSON ignored a raw/key Value tag change")
 	}
 }
 
@@ -387,8 +387,8 @@ func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
 	if len(result.Fields) < 8 || result.Fields[0].Label != "probe.ookla.field.engine" {
 		t.Fatalf("Ookla fields = %#v", result.Fields)
 	}
-	if key, ok := result.Fields[6].Value.Key(); !ok || key != "probe.ookla.server_selection.configured" {
-		t.Fatalf("Ookla server selection variant = %#v", result.Fields[6].Value)
+	if key, ok := result.Fields[5].Value.Key(); !ok || key != "probe.ookla.server_selection.configured" {
+		t.Fatalf("Ookla server selection variant = %#v", result.Fields[5].Value)
 	}
 	if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.ookla.metric.latency" {
 		t.Fatalf("Ookla measurements = %#v", result.Measurements)
@@ -414,14 +414,14 @@ func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
 func TestOoklaProducerSelectedServerComparisonScope(t *testing.T) {
 	basePayload := `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`
 	base := runOoklaFixture(t, basePayload)
-	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_servers_sha256"] == "" {
+	if len(base.Tables) != 1 || base.Methodology.Parameters["selected_servers"] == "" {
 		t.Fatalf("Ookla producer omitted selected-server scope: %+v", base.Methodology.Parameters)
 	}
-	if got, want := base.Methodology.Parameters["selected_servers_sha256"], selectedValueHash(base.Tables[0], 0, 1); got != want {
-		t.Fatalf("Ookla selected-server hash = %q, want %q", got, want)
+	if got, want := base.Methodology.Parameters["selected_servers"], selectedValueJSON(base.Tables[0], 0, 1); got != want {
+		t.Fatalf("Ookla selected-server JSON = %q, want %q", got, want)
 	}
-	assertProducerParameterScope(t, base, "server_configuration_sha256", "tool_version", "tool_sha256", "arguments_sha256", "selected_servers_sha256")
-	if got, want := base.Methodology.Parameters["server_configuration_sha256"], comparisonParameterHash([]config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}}); got != want {
+	assertProducerParameterScope(t, base, "server_configuration", "tool_version", "arguments", "selected_servers")
+	if got, want := base.Methodology.Parameters["server_configuration"], comparisonParameterJSON([]config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}}); got != want {
 		t.Fatalf("Ookla server configuration scope = %q, want %q", got, want)
 	}
 	argumentsField := ""
@@ -431,21 +431,21 @@ func TestOoklaProducerSelectedServerComparisonScope(t *testing.T) {
 			break
 		}
 	}
-	if argumentsField == "" || base.Methodology.Parameters["arguments_sha256"] != comparisonParameterHash(argumentsField) {
-		t.Fatalf("Ookla argument scope = %q, field arguments = %q", base.Methodology.Parameters["arguments_sha256"], argumentsField)
+	if argumentsField == "" || base.Methodology.Parameters["arguments"] != argumentsField {
+		t.Fatalf("Ookla argument scope = %q, field arguments = %q", base.Methodology.Parameters["arguments"], argumentsField)
 	}
 
 	changedMetrics := runOoklaFixture(t, `{"ping":{"jitter":9,"latency":99},"download":{"bandwidth":25000000},"upload":{"bandwidth":5000000},"packetLoss":10,"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
-	if base.Methodology.Parameters["selected_servers_sha256"] != changedMetrics.Methodology.Parameters["selected_servers_sha256"] {
+	if base.Methodology.Parameters["selected_servers"] != changedMetrics.Methodology.Parameters["selected_servers"] {
 		t.Fatal("Ookla metric/result columns changed selected-server comparison scope")
 	}
 	changedStatus := runOoklaFixture(t, `{"ping":{"latency":8.5},"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
-	if base.Methodology.Parameters["selected_servers_sha256"] != changedStatus.Methodology.Parameters["selected_servers_sha256"] {
+	if base.Methodology.Parameters["selected_servers"] != changedStatus.Methodology.Parameters["selected_servers"] {
 		t.Fatal("Ookla status change changed selected-server comparison scope")
 	}
 
 	changedServer := runOoklaFixture(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"server":{"id":42,"name":"Other","location":"Paris","country":"FR"}}`)
-	if base.Methodology.Parameters["selected_servers_sha256"] == changedServer.Methodology.Parameters["selected_servers_sha256"] {
+	if base.Methodology.Parameters["selected_servers"] == changedServer.Methodology.Parameters["selected_servers"] {
 		t.Fatal("Ookla selected server identity change was omitted from comparison scope")
 	}
 
@@ -455,8 +455,8 @@ func TestOoklaProducerSelectedServerComparisonScope(t *testing.T) {
 		rawCarrier[index] = append([]model.Value(nil), row...)
 	}
 	rawCarrier[0][0] = model.RawValue(selected[0][0].Text())
-	if comparisonParameterHash(selected) == comparisonParameterHash(rawCarrier) {
-		t.Fatal("Ookla selected-server hash ignored a raw/key Value tag change")
+	if comparisonParameterJSON(selected) == comparisonParameterJSON(rawCarrier) {
+		t.Fatal("Ookla selected-server JSON ignored a raw/key Value tag change")
 	}
 }
 

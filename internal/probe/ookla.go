@@ -88,7 +88,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	result := newOoklaProbeResult()
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "server_configuration_sha256", env.Config.OoklaServers)
+	addComparisonParameterJSON(result.Methodology.Parameters, "server_configuration", env.Config.OoklaServers)
 
 	if !config.AllowsModule(env.Config.Exposure, "ookla") {
 		result.Skip(model.NewMessage("probe.ookla.summary.skipped"))
@@ -113,17 +113,17 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	if env.Config.IPVersion == config.IPVersion4 || env.Config.IPVersion == config.IPVersion6 {
 		args = append(args, "--ip-version", env.Config.IPVersion)
 	}
+	version := commandVersion(ctx, path)
+	commandArguments := strings.Join(args, " ")
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.ookla.field.engine", Value: model.RawValue("official speedtest")},
-		{Key: "speedtest_version", Label: "probe.ookla.field.speedtest_version", Value: model.RawValue(commandVersion(ctx, path))},
+		{Key: "speedtest_version", Label: "probe.ookla.field.speedtest_version", Value: model.RawValue(version)},
 		{Key: "binary", Label: "probe.ookla.field.binary", Value: model.RawValue(path)},
-		{Key: "binary_sha256", Label: "probe.ookla.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
-		{Key: "arguments", Label: "probe.ookla.field.arguments", Value: model.RawValue(strings.Join(args, " "))},
+		{Key: "arguments", Label: "probe.ookla.field.arguments", Value: model.RawValue(commandArguments)},
 		{Key: "external_service", Label: "probe.ookla.field.external_service", Value: model.RawValue("Ookla")},
 	}
-	addComparisonParameter(result.Methodology.Parameters, "tool_version", commandVersion(ctx, path))
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
-	addComparisonParameterHash(result.Methodology.Parameters, "arguments_sha256", strings.Join(args, " "))
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
+	addComparisonParameter(result.Methodology.Parameters, "arguments", commandArguments)
 	servers := append([]config.OoklaServer(nil), env.Config.OoklaServers...)
 	if len(servers) == 0 {
 		servers = []config.OoklaServer{{Carrier: config.OoklaCarrierAuto, ID: 0}}
@@ -241,7 +241,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 	}
 	result.Tables = []model.Table{table}
-	addComparisonParameterHash(result.Methodology.Parameters, "selected_servers_sha256", selectedServers)
+	addComparisonParameterJSON(result.Methodology.Parameters, "selected_servers", selectedServers)
 	result.Evidence = model.NewEvidence(validResults, len(servers), "run")
 	if successes == 0 && validResults == 0 {
 		markOoklaWarning(&result, &warningMessages, model.NewMessage("probe.ookla.summary.warn.no_result"))

@@ -508,10 +508,6 @@ func displayParameterScope(profile string, parameters map[string]string) string 
 	for _, key := range keys {
 		value := parameters[key]
 		displayKey := key
-		if strings.HasSuffix(key, "_sha256") && len(value) > 12 {
-			value = value[:12]
-			displayKey = strings.TrimSuffix(key, "_sha256") + "#"
-		}
 		if key == "scope_revision" {
 			displayKey = "scope"
 			value = "v" + value

@@ -1,8 +1,6 @@
 package probe
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"strings"
 )
@@ -10,7 +8,7 @@ import (
 // comparisonParameterRevision changes only when the rules used to build a
 // module's machine comparison scope change. Measurement.Method remains the
 // version for the workload itself.
-const comparisonParameterRevision = "1"
+const comparisonParameterRevision = "2"
 
 // newComparisonParameters creates the language-independent scope map owned by
 // a producer. The helper deliberately contains no module schema: producers
@@ -26,18 +24,16 @@ func addComparisonParameter(parameters map[string]string, key, value string) {
 	}
 }
 
-// comparisonParameterHash is the one canonical hash for ordered runtime
-// inputs and tagged model.Value selections. encoding/json preserves Value's
-// raw/key tag, so equal display text with different variants remains distinct.
-func comparisonParameterHash(value any) string {
+// comparisonParameterJSON preserves ordered runtime inputs and tagged
+// model.Value selections without hiding already-public values behind a hash.
+func comparisonParameterJSON(value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])
+	return string(encoded)
 }
 
-func addComparisonParameterHash(parameters map[string]string, key string, value any) {
-	addComparisonParameter(parameters, key, comparisonParameterHash(value))
+func addComparisonParameterJSON(parameters map[string]string, key string, value any) {
+	addComparisonParameter(parameters, key, comparisonParameterJSON(value))
 }

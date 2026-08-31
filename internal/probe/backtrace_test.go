@@ -371,21 +371,20 @@ func runBacktraceFixtureResultWithPath(t *testing.T) (model.Result, string) {
 }
 
 func TestBacktraceProducerDirectShapeContract(t *testing.T) {
-	result, fixturePath := runBacktraceFixtureResultWithPath(t)
+	result, _ := runBacktraceFixtureResultWithPath(t)
 	if result.Methodology.Kind != "heuristic" || result.Methodology.Label != "methodology.heuristic" ||
 		result.Methodology.Engine != "probe.backtrace.methodology.engine" || result.Methodology.Profile != "probe.backtrace.profile" ||
 		result.Methodology.ComparisonScope != "probe.backtrace.comparison_scope" {
 		t.Fatalf("methodology = %#v", result.Methodology)
 	}
-	assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops", "signature_set", "tool_version", "tool_sha256")
+	assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "signature_set", "tool_version")
 	parameters := result.Methodology.Parameters
-	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets_sha256"] != comparisonParameterHash(backtraceFixtureTargets()) || parameters["max_hops"] != strconv.Itoa(backtraceMaxHops) || parameters["signature_set"] != "china-backbone-v2" || parameters["tool_version"] != "backtrace-fixture 1" || parameters["tool_sha256"] != binarySHA256(fixturePath) {
+	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets"] != comparisonParameterJSON(backtraceFixtureTargets()) || parameters["max_hops"] != strconv.Itoa(backtraceMaxHops) || parameters["signature_set"] != "china-backbone-v2" || parameters["tool_version"] != "backtrace-fixture 1" {
 		t.Fatalf("backtrace comparison parameters = %v", parameters)
 	}
 	wantFields := []model.Field{
 		{Key: "nexttrace_binary", Label: "probe.backtrace.field.nexttrace_binary", Value: model.RawValue(routeEngineTiny)},
 		{Key: "nexttrace_version", Label: "probe.backtrace.field.nexttrace_version", Value: model.RawValue("backtrace-fixture 1")},
-		{Key: "nexttrace_binary_sha256", Label: "probe.backtrace.field.nexttrace_binary_sha256"},
 		{Key: "arguments", Label: "probe.backtrace.field.arguments", Value: model.RawValue(strings.Join(routeCommandArgsForFamily(routeEngine{Name: routeEngineTiny}, "<target>", backtraceMaxHops, config.IPVersionAuto), " "))},
 	}
 	if len(result.Fields) != len(wantFields) {
@@ -396,9 +395,6 @@ func TestBacktraceProducerDirectShapeContract(t *testing.T) {
 		if got.Key != want.Key || got.Label != want.Label || (want.Value.Text() != "" && got.Value.Text() != want.Value.Text()) {
 			t.Fatalf("field %d = %#v, want key/label/value %#v", index, got, want)
 		}
-	}
-	if len(result.Fields[2].Value.Text()) != 64 {
-		t.Fatalf("binary SHA-256 field = %q, want a 64-character machine digest", result.Fields[2].Value.Text())
 	}
 	measurement := result.Measurements[0]
 	if measurement.Key != "backtrace_identified" || measurement.Label != "probe.backtrace.metric.identified" || measurement.Unit != "count" || measurement.Display.Text() != "2/9" || measurement.Method != "china-backbone-signature-v1" || measurement.Value != 2 {
@@ -437,7 +433,7 @@ func TestBacktraceProductionCatalogKeysRegisteredInBothLanguages(t *testing.T) {
 	keys := []string{
 		"module.backtrace.title", "probe.backtrace.description", "probe.backtrace.methodology.engine", "probe.backtrace.profile", "probe.backtrace.comparison_scope",
 		"probe.backtrace.summary.tool_missing", "probe.backtrace.summary.no_targets", "probe.backtrace.summary.no_family_targets", "probe.backtrace.summary.values",
-		"probe.backtrace.field.nexttrace_binary", "probe.backtrace.field.nexttrace_version", "probe.backtrace.field.nexttrace_binary_sha256", "probe.backtrace.field.arguments", "probe.backtrace.metric.identified",
+		"probe.backtrace.field.nexttrace_binary", "probe.backtrace.field.nexttrace_version", "probe.backtrace.field.arguments", "probe.backtrace.metric.identified",
 		"probe.backtrace.table.summary", "probe.backtrace.table.hops", "probe.backtrace.column.provider", "probe.backtrace.column.target", "probe.backtrace.column.line", "probe.backtrace.column.hit_hop", "probe.backtrace.column.hit_ip", "probe.backtrace.column.status", "probe.backtrace.column.reason", "probe.backtrace.column.hop", "probe.backtrace.column.latency", "probe.backtrace.column.ip", "probe.backtrace.column.asn", "probe.backtrace.column.network", "probe.backtrace.column.location",
 		backtraceStatusFailed, backtraceStatusIdentified, backtraceStatusUnidentified, "probe.backtrace.hop.responded", "probe.backtrace.hop.no_response", "probe.backtrace.carrier.telecom", "probe.backtrace.carrier.unicom", "probe.backtrace.carrier.mobile", backtraceReasonSignatureMatch, backtraceReasonForeignOnly, backtraceReasonNoKnownSignature, backtraceReasonLimitedOrFiltered, backtraceReasonTraceError, backtraceReasonParseFailed, backtraceReasonNoResponsiveHops,
 		backtraceLineTelecomCN2, backtraceLineTelecomCN2GIA, backtraceLineTelecomCN2GT, backtraceLineTelecom163, backtraceLineUnicomCUII, backtraceLineUnicom169, backtraceLineMobileCMI, backtraceLineMobileCMNET, backtraceLineTelecomIPv6, backtraceLineUnicomCUIIIPv6, backtraceLineUnicom169IPv6, backtraceLineMobileCMNETIPv6, backtraceMissingValue,

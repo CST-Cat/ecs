@@ -145,7 +145,7 @@ func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "ip_quality_sources_sha256", env.Config.IPQualitySources)
+	addComparisonParameterJSON(result.Methodology.Parameters, "ip_quality_sources", env.Config.IPQualitySources)
 	addComparisonParameter(result.Methodology.Parameters, "http_timeout", env.Config.HTTPTimeout.String())
 
 	versions := config.IPVersions(env.Config.IPVersion)

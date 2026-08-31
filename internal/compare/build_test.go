@@ -305,8 +305,8 @@ func TestBuildReferenceNoReferenceAndParameterScope(t *testing.T) {
 	second := comparisonTestReport("second", 120, "m-v1", "profile-a", "rate", true)
 	third := comparisonTestReport("third", 130, "m-v1", "profile-a", "rate", true)
 	third.Results[0].Measurements = nil
-	first.Results[0].Methodology.Parameters["build_sha256"] = "1234567890abcdef"
-	second.Results[0].Methodology.Parameters["build_sha256"] = "1234567890abcdef"
+	first.Results[0].Methodology.Parameters["build"] = "fixture-build"
+	second.Results[0].Methodology.Parameters["build"] = "fixture-build"
 	data, err := Build([]model.Report{first, second, third}, Options{Reference: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestBuildReferenceNoReferenceAndParameterScope(t *testing.T) {
 	if metric == nil || metric.Values[0].Outcome != OutcomeRegressed || metric.Values[2].Available || metric.Values[2].Outcome != OutcomeNoReference {
 		t.Fatalf("alternate reference/no reference = %+v", metric)
 	}
-	if !strings.Contains(metric.ParameterScope, "profile-a") || !strings.Contains(metric.ParameterScope, "scope=v1") || !strings.Contains(metric.ParameterScope, "build#=1234567890ab") || strings.Contains(metric.ParameterScope, "1234567890abcdef") {
+	if !strings.Contains(metric.ParameterScope, "profile-a") || !strings.Contains(metric.ParameterScope, "scope=v1") || !strings.Contains(metric.ParameterScope, "build=fixture-build") {
 		t.Fatalf("parameter scope = %q", metric.ParameterScope)
 	}
 	first.Results[0].Methodology.Parameters["workload"] = "mutated"

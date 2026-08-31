@@ -92,7 +92,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	result := newNATResult()
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "servers_sha256", env.Config.STUNServers)
+	addComparisonParameterJSON(result.Methodology.Parameters, "servers", env.Config.STUNServers)
 
 	servers := env.Config.STUNServers
 	if len(servers) == 0 {

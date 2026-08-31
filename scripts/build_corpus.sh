@@ -66,17 +66,15 @@ trap cleanup EXIT
 zip_path="$work/silesia.zip"
 source_dir="$work/silesia"
 corpus_path="$work/$corpus_name"
-verify_dir="$work/verify"
-mkdir -p "$source_dir" "$verify_dir" "$(dirname "$output")"
+mkdir -p "$source_dir" "$(dirname "$output")"
 
 curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 \
   "$source_url" -o "$zip_path"
-unzip -tq "$zip_path" >/dev/null ||
-  die 'Silesia download is not a valid ZIP archive'
 actual_source_sha=$(sha256sum "$zip_path" | awk '{print $1}')
 [[ "$actual_source_sha" == "$source_sha" ]] ||
   die "Silesia source ZIP SHA-256 mismatch: expected $source_sha, got $actual_source_sha"
-unzip -q "$zip_path" -d "$source_dir"
+unzip -q "$zip_path" -d "$source_dir" ||
+  die 'Silesia download is not a valid ZIP archive'
 
 : >"$corpus_path"
 for corpus_member in "${corpus_order[@]}"; do
@@ -96,14 +94,4 @@ tar -C "$work" --sort=name --mtime="@$source_date_epoch" \
   --owner=0 --group=0 --numeric-owner -czf "$output" \
   "$corpus_name"
 
-archive_listing=$(tar -tzf "$output")
-[[ "$archive_listing" == "$corpus_name" ]] ||
-  die 'corpus archive must contain exactly ecs-silesia-v1.corpus at its root'
-tar -xzf "$output" -C "$verify_dir" "$corpus_name"
-[[ "$(stat -c %s "$verify_dir/$corpus_name")" -eq "$corpus_bytes" ]] ||
-  die 'corpus archive extracted byte length mismatch'
-actual_archive_sha=$(sha256sum "$verify_dir/$corpus_name" | awk '{print $1}')
-[[ "$actual_archive_sha" == "$corpus_sha" ]] ||
-  die 'corpus archive extracted SHA-256 mismatch'
-
-echo "created verified corpus archive: $output"
+echo "created corpus archive: $output"

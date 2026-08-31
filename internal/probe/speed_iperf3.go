@@ -209,7 +209,7 @@ func speedComparisonParameters(env Environment) map[string]string {
 	addComparisonParameter(parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameter(parameters, "configured_duration", env.Config.IPerfDuration.String())
 	addComparisonParameter(parameters, "configured_threads", strconv.Itoa(env.Config.SpeedThreads))
-	addComparisonParameterHash(parameters, "targets_sha256", env.Config.IPerfTargets)
+	addComparisonParameterJSON(parameters, "targets", env.Config.IPerfTargets)
 	return parameters
 }
 
@@ -453,18 +453,17 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	if failures > 0 {
 		result.Status = model.StatusWarning
 	}
+	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.speed.field.engine", Value: model.RawValue("iperf3")},
-		{Key: "version", Label: "probe.speed.field.version", Value: model.RawValue(commandVersion(ctx, path))},
-		{Key: "binary_sha256", Label: "probe.speed.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
+		{Key: "version", Label: "probe.speed.field.version", Value: model.RawValue(version)},
 		{Key: "threads", Label: "probe.speed.field.threads", Value: model.RawValue(strconv.Itoa(threads))},
 		{Key: "duration", Label: "probe.speed.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", seconds))},
 		{Key: "targets", Label: "probe.speed.field.targets", Value: model.RawValue(strconv.Itoa(len(env.Config.IPerfTargets)))},
 		{Key: "actual_traffic", Label: "probe.speed.field.actual_traffic", Value: model.RawValue(model.FormatBytes(uint64(max64(transferred, 0))))},
 		{Key: "arguments", Label: "probe.speed.field.arguments", Value: model.RawValue("iperf3 -4|-6 -c HOST -p PORT -P N -t S -J [-R]")},
 	}
-	addComparisonParameter(result.Methodology.Parameters, "tool_version", commandVersion(ctx, path))
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
 	addComparisonParameter(result.Methodology.Parameters, "threads", strconv.Itoa(threads))
 	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", seconds))
 	result.Sources = []model.Source{

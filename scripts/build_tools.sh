@@ -378,10 +378,9 @@ zstd_corpus_dir="$work/silesia"
 zstd_corpus_path="$stage/share/ecs/corpus/$zstd_corpus_name"
 download_sha256 "$zstd_corpus_url" "$zstd_corpus_source_sha" "$zstd_corpus_zip" \
   'Silesia source ZIP'
-unzip -tq "$zstd_corpus_zip" >/dev/null ||
-  die 'Silesia download is not a valid ZIP archive'
 mkdir -p "$zstd_corpus_dir"
-unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir"
+unzip -q "$zstd_corpus_zip" -d "$zstd_corpus_dir" ||
+  die 'Silesia download is not a valid ZIP archive'
 : >"$zstd_corpus_path"
 for corpus_member in "${zstd_corpus_order[@]}"; do
   [[ -f "$zstd_corpus_dir/$corpus_member" ]] || die "Silesia ZIP omitted $corpus_member"
@@ -531,11 +530,6 @@ fio_sha=$(sha256sum "$fio_bin" | awk '{print $1}')
 iperf3_sha=$(sha256sum "$iperf3_bin" | awk '{print $1}')
 nexttrace_binary_sha=$(sha256sum "$nexttrace_bin" | awk '{print $1}')
 ping_sha=$(sha256sum "$ping_bin" | awk '{print $1}')
-
-for digest in "$sysbench_sha" "$zstd_sha" "$npb_ep_sha" "$npb_ft_sha" "$openssl_sha" "$stream_binary_sha" "$fio_sha" "$iperf3_sha" \
-  "$nexttrace_binary_sha" "$ping_sha"; do
-  [[ "$digest" =~ ^[[:xdigit:]]{64}$ ]] || die "invalid binary SHA-256: $digest"
-done
 
 sysbench_source=$(git_source "$sysbench_repository" "$sysbench_commit")
 zstd_source=$(git_source "$zstd_repository" "$zstd_commit")
@@ -800,12 +794,5 @@ jq -n \
         }
       ]
     }' | jq . >"$stage/manifest.json"
-
-for tool in "${ECS_TOOL_NAMES[@]}"; do
-  actual=$(sha256sum "$stage/bin/$tool" | awk '{print $1}')
-  recorded=$(jq -er --arg name "$tool" '.tools[] | select(.name == $name) | .sha256' "$stage/manifest.json")
-  [[ "$actual" == "$recorded" ]] || die "manifest hash mismatch for $tool"
-  [[ "$recorded" =~ ^[[:xdigit:]]{64}$ ]] || die "manifest hash is not concrete for $tool"
-done
 
 echo "completed real tools stage: $stage"

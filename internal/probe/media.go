@@ -45,7 +45,7 @@ func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
-	addComparisonParameterHash(result.Methodology.Parameters, "regions_sha256", env.Config.MediaRegions)
+	addComparisonParameterJSON(result.Methodology.Parameters, "regions", env.Config.MediaRegions)
 	addComparisonParameter(result.Methodology.Parameters, "http_timeout", env.Config.HTTPTimeout.String())
 	client, closeClient := httpClientForMode(env)
 	defer closeClient()

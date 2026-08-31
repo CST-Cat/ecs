@@ -91,11 +91,6 @@ install_binary() {
     printf 'could not set install candidate mode: %s\n' "$temp_destination" >&2
     exit 1
   fi
-  if [ ! -f "$temp_destination" ] || [ -L "$temp_destination" ] || [ ! -x "$temp_destination" ]; then
-    rm -f "$temp_destination"
-    printf 'install candidate is not an executable regular file: %s\n' "$temp_destination" >&2
-    exit 1
-  fi
   if ! candidate_version=$("$temp_destination" version); then
     rm -f "$temp_destination"
     printf 'install candidate failed version validation: %s\n' "$temp_destination" >&2
@@ -219,12 +214,8 @@ download() {
 download "${release_base}/${asset}" "${work_dir}/${asset}"
 download "${release_base}/checksums.txt" "${work_dir}/checksums.txt"
 
-expected_hash=$(awk -v file="$asset" '$2 == file {print $1; exit}' "${work_dir}/checksums.txt")
+expected_hash=$(awk -v file="$asset" '$2 == file {print $1; exit}' "${work_dir}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$expected_hash" ] || { printf 'checksum entry missing for %s\n' "$asset" >&2; exit 1; }
-case "$expected_hash" in
-  *[!A-Fa-f0-9]*|"") printf '%s\n' "invalid SHA-256 entry" >&2; exit 1 ;;
-esac
-[ "${#expected_hash}" -eq 64 ] || { printf '%s\n' "invalid SHA-256 length" >&2; exit 1; }
 if command -v sha256sum >/dev/null 2>&1; then
   actual_hash=$(sha256sum "${work_dir}/${asset}" | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then

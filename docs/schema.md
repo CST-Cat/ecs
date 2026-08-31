@@ -78,11 +78,10 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
     "profile": "probe.disk.profile",
     "comparison_scope": "probe.disk.comparison_scope",
     "parameters": {
-      "scope_revision": "1",
+      "scope_revision": "2",
       "configured_file_mib": "2048",
       "multi_mount": "false",
       "tool_version": "fio-3.39",
-      "tool_sha256": "…",
       "actual_file_size": "2.00 GiB",
       "direct_io": "1",
       "ioengine": "io_uring",
@@ -106,8 +105,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 }
 ```
 
-示例中的 `tool_sha256` 值 `…` 仅是说明性占位，不代表真实工具摘要；该代码块仍是语法有效的 JSON，字段名、JSON tag
-和类型与当前模型一致。
+该代码块是语法有效的 JSON，字段名、JSON tag 和类型与当前模型一致。
 
 在当前 `ecs.report/v1` 中，`Result.id` 必须非空，并且在同一份报告内唯一。每个
 `Measurement.key` 必须非空，并且只需在其所属的 `Result` 内唯一；不同 `Result.id`
@@ -285,7 +283,7 @@ manifest 的 `corpus_path` 表示运行时路径；选中 zstd 时，`run.sh` �
 - `npb` 只保留 NASA NPB-OMP 3.4.4 的 EP/FT Class A，固定 `-O3 -fopenmp -static`、`randi8`、OpenMP 环境与 1T/全线程。指标为 `npb_{ep,ft}_{1t,nt}_mops` 和 `npb_{ep,ft}_scaling_ratio`；表格同时保留官方 `Mop/s/thread`、耗时与 Verification。只有尺寸/迭代数、线程数、版本、编译参数和 Verification 全部通过才采纳 Mop/s。
 - `crypto` 固定 OpenSSL 3.5.7、16 KiB、5s、`-elapsed -mr -multi` 与 1/全 worker，分别测 AES-256-GCM、ChaCha20-Poly1305 和 SHA-256。指标为 `openssl_{aes_256_gcm,chacha20_poly1305,sha_256}_{1w,nw}_mb_s` 和对应 `*_scaling_ratio`；表格保留 `+F` 行的原始 bytes/s，MB/s 是除以 1,000,000 的可复算表示。
 
-三个模块的 `methodology.parameters` 都包含 method version、实际线程/worker、固定时长和工具二进制 SHA-256。zstd 另包含 corpus 长度/两级 SHA-256 与完整参数指纹；NPB 包含 EP/FT 各自 SHA-256、problem class、编译参数和环境指纹；crypto 包含算法、block、计时/输出模式和六组完整参数指纹。任一口径不同时 `compare` 将其分组，不强行排名。
+三个模块的 `methodology.parameters` 都使用可读的 method version、实际线程/worker、固定时长和规范化参数。zstd 另包含 corpus 长度与两组命令参数；NPB 包含 problem class、编译参数和线程环境；crypto 包含算法、block、计时/输出模式和六组完整参数。结构化列表使用规范 JSON 明文保存，不再用摘要隐藏公开口径；任一口径不同时 `compare` 将其分组，不强行排名。
 
 当 CPU allowance 只有 1 核时，sysbench、zstd、NPB、STREAM 与 OpenSSL 的“单线程”和“全线程”命令参数完全相同。这种情况只物理运行一次，然后将同一原始样本写入既有 1T/NT（或 1W/NW）指标键，以保持机器字段兼容。扩展倍率和每 worker/线程效率不生成；表格显示“不适用”，`evidence.expected` 计物理执行数而不是逻辑字段数，原始输出也只保留一份。
 

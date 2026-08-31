@@ -72,13 +72,13 @@ func TestCryptoProducerOwnsAllComparisonParameters(t *testing.T) {
 	path := fakeOpenSSLBinary(t)
 	result := runOpenSSLSpeedWithAllowance(context.Background(), Environment{}, path, openSSLAlgorithmSpecs, cpuAllowance{Visible: 2, Threads: 2})
 	assertProducerParameterScope(t, result,
-		"tool_version", "tool_sha256", "method_version", "algorithms", "block_size", "duration", "workers", "timing", "machine_output",
-		"arguments_aes_256_gcm_1w_sha256", "arguments_aes_256_gcm_nw_sha256",
-		"arguments_chacha20_poly1305_1w_sha256", "arguments_chacha20_poly1305_nw_sha256",
-		"arguments_sha_256_1w_sha256", "arguments_sha_256_nw_sha256",
+		"tool_version", "method_version", "algorithms", "block_size", "duration", "workers", "timing", "machine_output",
+		"arguments_aes_256_gcm_1w", "arguments_aes_256_gcm_nw",
+		"arguments_chacha20_poly1305_1w", "arguments_chacha20_poly1305_nw",
+		"arguments_sha_256_1w", "arguments_sha_256_nw",
 	)
 	parameters := result.Methodology.Parameters
-	if parameters["tool_version"] != "OpenSSL 3.5.7" || parameters["tool_sha256"] != binarySHA256(path) || parameters["method_version"] != openSSLMethodVersion || parameters["algorithms"] != "AES-256-GCM / ChaCha20-Poly1305 / SHA-256" || parameters["block_size"] != "16384 bytes" || parameters["duration"] != "5s" || parameters["workers"] != "1 / 2" || parameters["timing"] != "-elapsed (wall clock)" || parameters["machine_output"] != "-mr" {
+	if parameters["tool_version"] != "OpenSSL 3.5.7" || parameters["method_version"] != openSSLMethodVersion || parameters["algorithms"] != "AES-256-GCM / ChaCha20-Poly1305 / SHA-256" || parameters["block_size"] != "16384 bytes" || parameters["duration"] != "5s" || parameters["workers"] != "1 / 2" || parameters["timing"] != "-elapsed (wall clock)" || parameters["machine_output"] != "-mr" {
 		t.Fatalf("crypto comparison parameters = %v", parameters)
 	}
 	for _, spec := range openSSLAlgorithmSpecs {
@@ -88,9 +88,8 @@ func TestCryptoProducerOwnsAllComparisonParameters(t *testing.T) {
 			if !ok || value == "" {
 				t.Fatalf("crypto argument field %q missing from producer result", fieldKey)
 			}
-			parameterKey := fieldKey + "_sha256"
-			if parameters[parameterKey] != comparisonParameterHash(value) {
-				t.Fatalf("crypto argument parameter %q = %q, want hash of %q", parameterKey, parameters[parameterKey], value)
+			if parameters[fieldKey] != value {
+				t.Fatalf("crypto argument parameter %q = %q, want %q", fieldKey, parameters[fieldKey], value)
 			}
 		}
 	}
@@ -125,8 +124,8 @@ func TestCryptoProducerVersionMismatchKeepsStableContract(t *testing.T) {
 	if result.Title != "module.crypto.title" || result.Description != "probe.crypto.description" || result.Status != model.StatusWarning {
 		t.Fatalf("crypto version mismatch metadata/status = %+v", result)
 	}
-	assertProducerParameterScope(t, result, "tool_version", "tool_sha256")
-	if result.Methodology.Parameters["tool_version"] != "OpenSSL 3.4.0" || result.Methodology.Parameters["tool_sha256"] != binarySHA256(path) {
+	assertProducerParameterScope(t, result, "tool_version")
+	if result.Methodology.Parameters["tool_version"] != "OpenSSL 3.4.0" {
 		t.Fatalf("crypto version mismatch comparison parameters = %v", result.Methodology.Parameters)
 	}
 	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.crypto.profile" || result.Methodology.ComparisonScope != "probe.crypto.comparison_scope" {
@@ -141,7 +140,7 @@ func TestCryptoProducerVersionMismatchKeepsStableContract(t *testing.T) {
 	if !containsString(result.Notes, "probe.crypto.note.version_mismatch") {
 		t.Fatalf("crypto version mismatch notes = %v", result.Notes)
 	}
-	if len(result.Fields) != 4 {
+	if len(result.Fields) != 3 {
 		t.Fatalf("crypto version mismatch fields = %+v", result.Fields)
 	}
 	for _, field := range result.Fields {

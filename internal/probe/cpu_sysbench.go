@@ -134,7 +134,6 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.cpu.field.engine", Value: model.RawValue("sysbench")},
 		{Key: "version", Label: "probe.cpu.field.version", Value: model.RawValue(version)},
-		{Key: "binary_sha256", Label: "probe.cpu.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		{Key: "threads", Label: "probe.cpu.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
 		{Key: "cpu_allowance", Label: "probe.cpu.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
 		{Key: "duration", Label: "probe.cpu.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", seconds))},
@@ -143,7 +142,6 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 		{Key: "multi_events", Label: "probe.cpu.field.multi_events", Value: model.RawValue(formatSysbenchEvents(multi))},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
 	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", seconds))
 	addComparisonParameter(result.Methodology.Parameters, "prime", "20000")

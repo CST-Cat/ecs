@@ -306,7 +306,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	result.Fields = []model.Field{
 		{Key: "engine", Label: diskFieldLabel("engine"), Value: model.RawValue("fio")},
 		{Key: "version", Label: diskFieldLabel("version"), Value: model.RawValue(fallback(output.Version, "unknown"))},
-		{Key: "binary_sha256", Label: diskFieldLabel("binary_sha256"), Value: model.RawValue(fallback(binarySHA256(fioPath), "unavailable"))},
 		{Key: "disk_device", Label: diskFieldLabel("disk_device"), Value: model.RawValue(fallback(disk.DiskDevice, "unavailable"))},
 		{Key: "path", Label: diskFieldLabel("path"), Value: model.RawValue(diskPath)},
 		{Key: "mount", Label: diskFieldLabel("mount"), Value: model.RawValue(fallback(disk.DiskMount, diskPath))},
@@ -326,7 +325,6 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		{Key: "matrix_mode", Label: diskFieldLabel("matrix_mode"), Value: model.RawValue(matrixMode)},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(output.Version, "unknown"))
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(fioPath), "unavailable"))
 	addComparisonParameter(result.Methodology.Parameters, "actual_file_size", model.FormatBytes(uint64(actualBytes)))
 	addComparisonParameter(result.Methodology.Parameters, "direct_io", "1")
 	addComparisonParameter(result.Methodology.Parameters, "ioengine", engine.Name)

@@ -154,21 +154,24 @@ ecs_release_binaries() {
 #
 # 先构建再从仓库根运行，而不是 `go tool ...`：go tool 的工作目录与包模式
 # `./...` 的解析基准会随调用位置漂移，构建出独立二进制则没有这种歧义。
-ecs_devtools_lock_hash() {
+ecs_devtools_lock_state() {
   local module_dir="$ECS_REPO_ROOT/devtools"
   [[ -f "$module_dir/go.mod" && -f "$module_dir/go.sum" ]] || return 1
-  (cd "$module_dir" && sha256sum go.mod go.sum) | sha256sum | awk '{print $1}'
+  printf '%s\n' 'go.mod:'
+  cat "$module_dir/go.mod"
+  printf '%s\n' 'go.sum:'
+  cat "$module_dir/go.sum"
 }
 
 ecs_devtool_cache_valid() {
   local name=$1 bin=$2 lock_file=$3 expected
   [[ -x "$bin" && -s "$lock_file" ]] || return 1
-  expected=$(ecs_devtools_lock_hash) || return 1
+  expected=$(ecs_devtools_lock_state) || return 1
   [[ "$(<"$lock_file")" == "$expected" ]]
 }
 
 ecs_devtool() {
-  local name=$1 bin package lock_file lock_hash
+  local name=$1 bin package lock_file lock_state
   bin="$ECS_REPO_ROOT/.devtools-bin/$name"
   lock_file="$ECS_REPO_ROOT/.devtools-bin/$name.lock"
 
@@ -185,8 +188,8 @@ ecs_devtool() {
     mkdir -p "$ECS_REPO_ROOT/.devtools-bin"
     echo "devtools: building $name from devtools/go.mod + go.sum" >&2
     (cd "$ECS_REPO_ROOT/devtools" && go build -o "$bin" "$package") || return 1
-    lock_hash=$(ecs_devtools_lock_hash) || return 1
-    printf '%s\n' "$lock_hash" >"$lock_file"
+    lock_state=$(ecs_devtools_lock_state) || return 1
+    printf '%s\n' "$lock_state" >"$lock_file"
   fi
   printf '%s\n' "$bin"
 }

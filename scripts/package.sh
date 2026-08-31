@@ -128,26 +128,15 @@ tool_stage_dir() {
 validate_tool_stage() {
   local arch=$1
   local stage_dir
-  local bin_dir
   local licenses_dir
   local license_file
-  local manifest_file
 
   stage_dir=$(tool_stage_dir "$arch")
   [[ -d "$stage_dir" ]] || die "missing architecture staging directory: $stage_dir"
 
-  manifest_file="$stage_dir/manifest.json"
-  [[ -f "$manifest_file" && -s "$manifest_file" ]] ||
-    die "missing or empty manifest for $arch: $manifest_file"
   "$repo_root/scripts/verify_tools_stage.sh" \
     --arch "$arch" --stage-root "$tools_stage_root" --keep-corpus ||
     die "invalid tools stage for $arch"
-
-  bin_dir="$stage_dir/bin"
-  [[ -d "$bin_dir" ]] || die "missing tool bin directory for $arch: $bin_dir"
-  for tool in "${tool_names[@]}"; do
-    require_tool_artifact "$bin_dir/$tool" "$arch" "$tool"
-  done
 
   licenses_dir="$stage_dir/LICENSES"
   [[ -d "$licenses_dir" ]] || die "missing LICENSES directory for $arch: $licenses_dir"

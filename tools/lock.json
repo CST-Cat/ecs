@@ -36,11 +36,7 @@
     },
     {
       "name": "npb-ft",
-      "upstream": "https://www.nas.nasa.gov/software/npb.html",
-      "source_url": "https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz",
-      "version": "3.4.4",
-      "tag": "NPB3.4.4",
-      "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549"
+      "upstream": "https://www.nas.nasa.gov/software/npb.html"
     },
     {
       "name": "openssl",

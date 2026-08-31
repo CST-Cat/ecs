@@ -68,7 +68,6 @@ type npbBenchmarkSample struct {
 	Output        string
 	Environment   []string
 	Binary        string
-	BinarySHA256  string
 }
 
 type npbProbe struct{}
@@ -140,6 +139,8 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	}
 
 	appendNPBMeasurements(&result, specs, runs, workers)
+	environment1T := strings.Join(npbEnvironmentParameters(1), " ")
+	environmentNT := strings.Join(npbEnvironmentParameters(workers), " ")
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.npb.field.engine", Value: model.RawValue("NASA NPB-OMP")},
 		{Key: "version", Label: "probe.npb.field.version", Value: model.RawValue(npbExpectedVersion)},
@@ -152,15 +153,12 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 		{Key: "compiler_flags", Label: "probe.npb.field.compiler_flags", Value: model.RawValue(npbCompileFlags)},
 		{Key: "random_generator", Label: "probe.npb.field.random_generator", Value: model.RawValue(npbRandomGenerator)},
 		{Key: "arguments", Label: "probe.npb.field.arguments", Value: model.RawValue("(none)")},
-		{Key: "environment_1t", Label: "probe.npb.field.environment_1t", Value: model.RawValue(strings.Join(npbEnvironmentParameters(1), " "))},
-		{Key: "environment_nt", Label: "probe.npb.field.environment_nt", Value: model.RawValue(strings.Join(npbEnvironmentParameters(workers), " "))},
+		{Key: "environment_1t", Label: "probe.npb.field.environment_1t", Value: model.RawValue(environment1T)},
+		{Key: "environment_nt", Label: "probe.npb.field.environment_nt", Value: model.RawValue(environmentNT)},
 	}
 	for _, spec := range specs {
 		path := paths[spec.Name]
-		result.Fields = append(result.Fields,
-			model.Field{Key: "binary_" + strings.ToLower(spec.Name), Label: "probe.npb.field.binary_" + strings.ToLower(spec.Name), Value: model.RawValue(fallback(path, "unavailable"))},
-			model.Field{Key: "binary_" + strings.ToLower(spec.Name) + "_sha256", Label: "probe.npb.field.binary_" + strings.ToLower(spec.Name) + "_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
-		)
+		result.Fields = append(result.Fields, model.Field{Key: "binary_" + strings.ToLower(spec.Name), Label: "probe.npb.field.binary_" + strings.ToLower(spec.Name), Value: model.RawValue(fallback(path, "unavailable"))})
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", npbExpectedVersion)
 	addComparisonParameter(result.Methodology.Parameters, "method_version", npbMethodVersion)
@@ -169,17 +167,8 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	addComparisonParameter(result.Methodology.Parameters, "implementation", "NPB3.4-OMP")
 	addComparisonParameter(result.Methodology.Parameters, "compiler_flags", npbCompileFlags)
 	addComparisonParameter(result.Methodology.Parameters, "random_generator", npbRandomGenerator)
-	for _, spec := range specs {
-		path := paths[spec.Name]
-		if strings.EqualFold(spec.Name, "EP") {
-			addComparisonParameter(result.Methodology.Parameters, "ep_sha256", fallback(binarySHA256(path), "unavailable"))
-		}
-		if strings.EqualFold(spec.Name, "FT") {
-			addComparisonParameter(result.Methodology.Parameters, "ft_sha256", fallback(binarySHA256(path), "unavailable"))
-		}
-	}
-	addComparisonParameterHash(result.Methodology.Parameters, "environment_1t_sha256", strings.Join(npbEnvironmentParameters(1), " "))
-	addComparisonParameterHash(result.Methodology.Parameters, "environment_nt_sha256", strings.Join(npbEnvironmentParameters(workers), " "))
+	addComparisonParameter(result.Methodology.Parameters, "environment_1t", environment1T)
+	addComparisonParameter(result.Methodology.Parameters, "environment_nt", environmentNT)
 	for _, spec := range specs {
 		for index, sample := range runs[spec.Name] {
 			if singleCore && index > 0 {
@@ -208,7 +197,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 }
 
 func executeNPBBenchmark(ctx context.Context, path string, spec npbBenchmarkSpec, threads int) (npbBenchmarkSample, error) {
-	sample := npbBenchmarkSample{Benchmark: spec.Name, Threads: threads, Binary: path, BinarySHA256: binarySHA256(path)}
+	sample := npbBenchmarkSample{Benchmark: spec.Name, Threads: threads, Binary: path}
 	if threads < 1 {
 		return sample, fmt.Errorf("NPB 线程数必须为正数")
 	}
@@ -243,7 +232,6 @@ func executeNPBBenchmark(ctx context.Context, path string, spec npbBenchmarkSpec
 	parsed.Output = sample.Output
 	parsed.Environment = sample.Environment
 	parsed.Binary = path
-	parsed.BinarySHA256 = sample.BinarySHA256
 	if err != nil {
 		return parsed, err
 	}

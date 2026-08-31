@@ -109,14 +109,10 @@ fi
 echo "release-build: 构建独立语料发布物 $ECS_CORPUS_ARCHIVE" >&2
 scripts/build_corpus.sh --output "$dist/$ECS_CORPUS_ARCHIVE"
 
-echo "release-build: 生成 checksums.txt" >&2
+echo "release-build: 将独立语料加入 checksums.txt" >&2
 (
   cd "$dist"
-  if [[ -n "$tools_stage" ]]; then
-    sha256sum ecs_*.tar.gz ecs-tools_*.tar.gz "$ECS_CORPUS_ARCHIVE" >checksums.txt
-  else
-    sha256sum ecs_*.tar.gz "$ECS_CORPUS_ARCHIVE" >checksums.txt
-  fi
+  sha256sum "$ECS_CORPUS_ARCHIVE" >>checksums.txt
 )
 
 echo "release-build: $version 组装完成，共 $(wc -l <"$dist/checksums.txt") 个发布物" >&2

@@ -373,7 +373,6 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.memory.stream.field.engine", Value: model.RawValue("STREAM")},
 		{Key: "version", Label: "probe.memory.stream.field.version", Value: model.RawValue(version)},
-		{Key: "binary_sha256", Label: "probe.memory.stream.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		{Key: "threads", Label: "probe.memory.stream.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
 		{Key: "cpu_allowance", Label: "probe.memory.stream.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
 		{Key: "kernel_order", Label: "probe.memory.stream.field.kernel_order", Value: model.RawValue("Copy / Scale / Add / Triad")},
@@ -381,7 +380,6 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 		{Key: "rate_unit", Label: "probe.memory.stream.field.rate_unit", Value: model.RawValue("MiB/s")},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
 	addComparisonParameter(result.Methodology.Parameters, "kernel_order", "Copy / Scale / Add / Triad")
 	if len(units) > 0 {

@@ -2,10 +2,6 @@ package probe
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -32,19 +28,6 @@ func commandVersion(ctx context.Context, path string) string {
 		}
 	}
 	return "unknown"
-}
-
-func binarySHA256(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 func sanitizeCommandOutput(output []byte) string {

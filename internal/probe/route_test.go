@@ -74,7 +74,7 @@ func TestRouteSummaryArgumentsAndFailures(t *testing.T) {
 }
 
 func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
-	fixturePath := writeRouteFixtureBinary(t)
+	writeRouteFixtureBinary(t)
 	targets := []config.Endpoint{
 		{Name: "Complete", Address: "complete", Kind: config.RouteTargetKindGlobal},
 		{Name: "NoResponse", Address: "zero", Kind: config.RouteTargetKindMainlandChina},
@@ -91,20 +91,19 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 		result.Methodology.ComparisonScope != "probe.route.comparison_scope" {
 		t.Fatalf("route methodology = %#v", result.Methodology)
 	}
-	assertProducerParameterScope(t, result, "ip_version", "targets_sha256", "max_hops", "tool_version", "tool_sha256", "arguments_sha256")
+	assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "tool_version", "arguments")
 	parameters := result.Methodology.Parameters
-	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets_sha256"] != comparisonParameterHash(targets) || parameters["max_hops"] != strconv.Itoa(routeSnapshotHops) || parameters["tool_version"] != "fixture-nexttrace" || parameters["tool_sha256"] != binarySHA256(fixturePath) {
+	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets"] != comparisonParameterJSON(targets) || parameters["max_hops"] != strconv.Itoa(routeSnapshotHops) || parameters["tool_version"] != "fixture-nexttrace" {
 		t.Fatalf("route comparison parameters = %v", parameters)
 	}
 	arguments := routeTestFieldValue(result, "arguments")
-	if arguments == "" || parameters["arguments_sha256"] != comparisonParameterHash(arguments) {
-		t.Fatalf("route argument scope = %q, field arguments = %q", parameters["arguments_sha256"], arguments)
+	if arguments == "" || parameters["arguments"] != arguments {
+		t.Fatalf("route argument scope = %q, field arguments = %q", parameters["arguments"], arguments)
 	}
 	wantFieldLabels := map[string]string{
-		"engine":        "probe.route.field.engine",
-		"version":       "probe.route.field.version",
-		"binary_sha256": "probe.route.field.binary_sha256",
-		"arguments":     "probe.route.field.arguments",
+		"engine":    "probe.route.field.engine",
+		"version":   "probe.route.field.version",
+		"arguments": "probe.route.field.arguments",
 	}
 	if len(result.Fields) != len(wantFieldLabels) {
 		t.Fatalf("route fields = %#v", result.Fields)

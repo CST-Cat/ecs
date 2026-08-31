@@ -2,7 +2,9 @@ package probe
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -16,15 +18,14 @@ import (
 )
 
 const (
-	zstdMethodVersion            = "zstd-silesia-l3-v1"
-	zstdExpectedVersion          = "1.5.7"
-	zstdCompressionLevel         = 3
-	zstdEvaluationSeconds        = 5
-	zstdCorpusName               = "ecs-silesia-v1.corpus"
-	zstdCorpusSHA256             = "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0"
-	zstdCorpusSourceSHA256       = "0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af"
-	zstdCorpusBytes        int64 = 211938580
-	zstdRunTimeout               = 3 * time.Minute
+	zstdMethodVersion           = "zstd-silesia-l3-v1"
+	zstdExpectedVersion         = "1.5.7"
+	zstdCompressionLevel        = 3
+	zstdEvaluationSeconds       = 5
+	zstdCorpusName              = "ecs-silesia-v1.corpus"
+	zstdCorpusSHA256            = "8df8cf2a9456a3765834b7cd8b7c1114df9dca708dd505e4d37bc12e536395b0"
+	zstdCorpusBytes       int64 = 211938580
+	zstdRunTimeout              = 3 * time.Minute
 )
 
 var (
@@ -34,23 +35,21 @@ var (
 )
 
 type zstdBenchmarkContract struct {
-	Version          string
-	Level            int
-	Seconds          int
-	CorpusName       string
-	CorpusSHA256     string
-	CorpusSourceHash string
-	CorpusBytes      int64
+	Version      string
+	Level        int
+	Seconds      int
+	CorpusName   string
+	CorpusSHA256 string
+	CorpusBytes  int64
 }
 
 var defaultZstdContract = zstdBenchmarkContract{
-	Version:          zstdExpectedVersion,
-	Level:            zstdCompressionLevel,
-	Seconds:          zstdEvaluationSeconds,
-	CorpusName:       zstdCorpusName,
-	CorpusSHA256:     zstdCorpusSHA256,
-	CorpusSourceHash: zstdCorpusSourceSHA256,
-	CorpusBytes:      zstdCorpusBytes,
+	Version:      zstdExpectedVersion,
+	Level:        zstdCompressionLevel,
+	Seconds:      zstdEvaluationSeconds,
+	CorpusName:   zstdCorpusName,
+	CorpusSHA256: zstdCorpusSHA256,
+	CorpusBytes:  zstdCorpusBytes,
 }
 
 type zstdBenchmarkSample struct {
@@ -150,11 +149,24 @@ func verifyZstdCorpus(path string, contract zstdBenchmarkContract) error {
 	if info.Size() != contract.CorpusBytes {
 		return fmt.Errorf("corpus 大小为 %d bytes，期望 %d: %s", info.Size(), contract.CorpusBytes, path)
 	}
-	actual := binarySHA256(path)
+	actual := zstdCorpusDigest(path)
 	if !strings.EqualFold(actual, contract.CorpusSHA256) {
 		return fmt.Errorf("corpus SHA-256 为 %s，期望 %s: %s", fallback(actual, "unavailable"), contract.CorpusSHA256, path)
 	}
 	return nil
+}
+
+func zstdCorpusDigest(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 func runZstdBenchmark(ctx context.Context, env Environment, path, corpus string, contract zstdBenchmarkContract) model.Result {
@@ -180,12 +192,9 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		result.Fields = []model.Field{
 			{Key: "engine", Label: "probe.zstd.field.engine", Value: model.RawValue("zstd")},
 			{Key: "version", Label: "probe.zstd.field.version", Value: model.RawValue(versionLine)},
-			{Key: "binary_sha256", Label: "probe.zstd.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 			{Key: "required_version", Label: "probe.zstd.field.required_version", Value: model.RawValue(contract.Version)},
-			{Key: "corpus_sha256", Label: "probe.zstd.field.corpus_sha256", Value: model.RawValue(contract.CorpusSHA256)},
 		}
 		addComparisonParameter(result.Methodology.Parameters, "tool_version", versionLine)
-		addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
 		finalizeZstdResult(&result, allowance)
 		result.Finish(start)
@@ -233,7 +242,6 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.zstd.field.engine", Value: model.RawValue("zstd")},
 		{Key: "version", Label: "probe.zstd.field.version", Value: model.RawValue(versionLine)},
-		{Key: "binary_sha256", Label: "probe.zstd.field.binary_sha256", Value: model.RawValue(fallback(binarySHA256(path), "unavailable"))},
 		{Key: "method_version", Label: "probe.zstd.field.method_version", Value: model.RawValue(zstdMethodVersion)},
 		{Key: "compression_level", Label: "probe.zstd.field.compression_level", Value: model.RawValue(strconv.Itoa(contract.Level))},
 		{Key: "threads", Label: "probe.zstd.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
@@ -241,26 +249,21 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		{Key: "duration", Label: "probe.zstd.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", contract.Seconds))},
 		{Key: "corpus", Label: "probe.zstd.field.corpus", Value: model.RawValue(contract.CorpusName)},
 		{Key: "corpus_bytes", Label: "probe.zstd.field.corpus_bytes", Value: model.RawValue(strconv.FormatInt(contract.CorpusBytes, 10) + " bytes")},
-		{Key: "corpus_sha256", Label: "probe.zstd.field.corpus_sha256", Value: model.RawValue(contract.CorpusSHA256)},
-		{Key: "corpus_source_sha256", Label: "probe.zstd.field.corpus_source_sha256", Value: model.RawValue(contract.CorpusSourceHash)},
 		{Key: "corpus_construction", Label: "probe.zstd.field.corpus_construction", Value: model.RawValue("dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml")},
 		{Key: "arguments_1t", Label: "probe.zstd.field.arguments_1t", Value: model.RawValue(strings.Join(runs[0].Args, " "))},
 		{Key: "arguments_nt", Label: "probe.zstd.field.arguments_nt", Value: model.RawValue(strings.Join(runs[1].Args, " "))},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", versionLine)
-	addComparisonParameter(result.Methodology.Parameters, "tool_sha256", fallback(binarySHA256(path), "unavailable"))
 	addComparisonParameter(result.Methodology.Parameters, "method_version", zstdMethodVersion)
 	addComparisonParameter(result.Methodology.Parameters, "compression_level", strconv.Itoa(contract.Level))
 	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
 	addComparisonParameter(result.Methodology.Parameters, "duration", fmt.Sprintf("%ds", contract.Seconds))
 	addComparisonParameter(result.Methodology.Parameters, "corpus_bytes", strconv.FormatInt(contract.CorpusBytes, 10)+" bytes")
-	addComparisonParameter(result.Methodology.Parameters, "corpus_sha256", contract.CorpusSHA256)
-	addComparisonParameter(result.Methodology.Parameters, "corpus_source_sha256", contract.CorpusSourceHash)
 	if len(runs[0].Args) > 0 {
-		addComparisonParameter(result.Methodology.Parameters, "arguments_1t_sha256", comparisonParameterHash(zstdComparisonArguments(runs[0].Args)))
+		addComparisonParameter(result.Methodology.Parameters, "arguments_1t", strings.Join(zstdComparisonArguments(runs[0].Args), " "))
 	}
 	if len(runs[1].Args) > 0 {
-		addComparisonParameter(result.Methodology.Parameters, "arguments_nt_sha256", comparisonParameterHash(zstdComparisonArguments(runs[1].Args)))
+		addComparisonParameter(result.Methodology.Parameters, "arguments_nt", strings.Join(zstdComparisonArguments(runs[1].Args), " "))
 	}
 	for index, sample := range runs {
 		if singleCore && index > 0 {

@@ -10,7 +10,6 @@ var probeRouteChinese = map[string]string{
 	"probe.route.summary.values":             "%s/%s 个目标完成",
 	"probe.route.field.engine":               "引擎",
 	"probe.route.field.version":              "NextTrace Tiny 版本",
-	"probe.route.field.binary_sha256":        "NextTrace Tiny SHA-256",
 	"probe.route.field.arguments":            "命令参数",
 	"probe.route.metric.hop_slots":           "探测跳位",
 	"probe.route.metric.visible_hops":        "可见跳点",
@@ -37,7 +36,7 @@ var probeRouteChinese = map[string]string{
 	"probe.route.note.no_targets":            "当前协议族没有匹配的路由目标，因此跳过探测。",
 	"probe.route.note.parse_failed":          "一个或多个路由目标的 NextTrace 输出无法解析。",
 	"probe.route.note.forward_path":          "这是从 VPS 到目标的正向路径，不等同于去程或三网回程。",
-	"probe.route.note.execution":             "外部程序通过参数数组启动，不经过 shell；报告记录可安全读取的版本和 SHA-256。",
+	"probe.route.note.execution":             "外部程序通过参数数组启动，不经过 shell；报告记录可安全读取的版本与完整参数。",
 	"probe.route.note.json":                  "NextTrace 使用纯 JSON 模式并关闭地图 URL，不调用推广界面。",
 }
 
@@ -51,7 +50,6 @@ var probeRouteEnglish = map[string]string{
 	"probe.route.summary.values":             "%s/%s targets completed",
 	"probe.route.field.engine":               "Engine",
 	"probe.route.field.version":              "NextTrace Tiny version",
-	"probe.route.field.binary_sha256":        "NextTrace Tiny SHA-256",
 	"probe.route.field.arguments":            "Arguments",
 	"probe.route.metric.hop_slots":           "Probed hop slots",
 	"probe.route.metric.visible_hops":        "Visible hops",
@@ -78,6 +76,6 @@ var probeRouteEnglish = map[string]string{
 	"probe.route.note.no_targets":            "No route targets match the selected IP family, so tracing was skipped.",
 	"probe.route.note.parse_failed":          "NextTrace output for one or more route targets could not be parsed.",
 	"probe.route.note.forward_path":          "This is the forward path from the VPS to the target, not the access or China-carrier return path.",
-	"probe.route.note.execution":             "The external program is started with argument arrays rather than a shell; safe version and SHA-256 facts are recorded.",
+	"probe.route.note.execution":             "The external program is started with argument arrays rather than a shell; its readable version and full arguments are recorded.",
 	"probe.route.note.json":                  "NextTrace runs in pure JSON mode with map URLs disabled and no promotional interface.",
 }

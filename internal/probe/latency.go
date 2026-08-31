@@ -132,7 +132,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameter(result.Methodology.Parameters, "attempts", strconv.Itoa(env.Config.LatencyAttempts))
-	addComparisonParameterHash(result.Methodology.Parameters, "targets_sha256", env.Config.LatencyTargets)
+	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.LatencyTargets)
 
 	attempts := env.Config.LatencyAttempts
 	capacity := 0

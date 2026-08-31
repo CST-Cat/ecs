@@ -120,10 +120,9 @@ func TestCurrentCompareFixturesBuildMetricsChangesAndRelativeResults(t *testing.
 	}
 	metric := module.Metrics[0]
 	wantParameters := map[string]string{
-		"scope_revision":      "1",
+		"scope_revision":      "2",
 		"configured_duration": "5s",
 		"tool_version":        "sysbench-fixture",
-		"tool_sha256":         "fixture-sha256",
 		"threads":             "1 / 2",
 		"duration":            "5s",
 		"prime":               "20000",

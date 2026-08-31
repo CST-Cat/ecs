@@ -185,18 +185,15 @@ func TestNPBProducerEmitsStableMachineResult(t *testing.T) {
 	}
 	assertProducerParameterScope(t, result,
 		"tool_version", "method_version", "problem_class", "threads", "implementation",
-		"compiler_flags", "random_generator", "ep_sha256", "ft_sha256",
-		"environment_1t_sha256", "environment_nt_sha256",
+		"compiler_flags", "random_generator",
+		"environment_1t", "environment_nt",
 	)
 	parameters := result.Methodology.Parameters
 	if parameters["tool_version"] != npbExpectedVersion || parameters["method_version"] != npbMethodVersion || parameters["problem_class"] != npbExpectedClass || parameters["threads"] != "1 / 2" || parameters["implementation"] != "NPB3.4-OMP" || parameters["compiler_flags"] != npbCompileFlags || parameters["random_generator"] != npbRandomGenerator {
 		t.Fatalf("NPB stable comparison parameters = %v", parameters)
 	}
-	if parameters["environment_1t_sha256"] != comparisonParameterHash(strings.Join(npbEnvironmentParameters(1), " ")) || parameters["environment_nt_sha256"] != comparisonParameterHash(strings.Join(npbEnvironmentParameters(2), " ")) {
+	if parameters["environment_1t"] != strings.Join(npbEnvironmentParameters(1), " ") || parameters["environment_nt"] != strings.Join(npbEnvironmentParameters(2), " ") {
 		t.Fatalf("NPB environment comparison parameters = %v", parameters)
-	}
-	if parameters["ep_sha256"] != binarySHA256(filepath.Join(directory, npbBenchmarkSpecs[0].Binary)) || parameters["ft_sha256"] != binarySHA256(filepath.Join(directory, npbBenchmarkSpecs[1].Binary)) {
-		t.Fatalf("NPB binary comparison parameters = %v", parameters)
 	}
 	for _, field := range result.Fields {
 		if !strings.HasPrefix(field.Label, "probe.npb.field.") {
