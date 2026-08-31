@@ -14,16 +14,7 @@ var chinese = map[string]string{
 	// ── 命令行 ──────────────────────────────────────────────
 	"cli.tagline":        "无广告、默认不上传报告的 VPS 综合测试工具",
 	"cli.usage":          "用法",
-	"cli.usage.run":      "运行测试（默认 standard）",
-	"cli.usage.list":     "查看配置档与模块",
-	"cli.usage.render":   "从 JSON 重新导出 JSON/Markdown/HTML 三种格式",
-	"cli.usage.config":   "输出配置文件示例",
-	"cli.usage.doctor":   "检查标准基准工具",
-	"cli.usage.version":  "显示版本",
-	"cli.examples":       "常用示例",
-	"cli.more":           "运行 ecs run --help 查看全部参数。",
 	"cli.modules":        "模块",
-	"cli.profiles":       "配置档",
 	"cli.sources":        "IP 质量数据源",
 	"cli.unknownCommand": "未知命令",
 	"cli.error":          "错误",
@@ -284,7 +275,6 @@ var chinese = map[string]string{
 	"summary.withErrors":   "%d 项成功，%d 项异常",
 	"summary.withWarnings": "%d 项成功，%d 项需留意",
 	"summary.allOK":        "%d 项测试完成",
-	"summary.skipped":      "，%d 项跳过",
 
 	// ── 预估 ────────────────────────────────────────────────
 	"estimate.seconds": "约 %d–%d 秒",
@@ -294,41 +284,18 @@ var chinese = map[string]string{
 	"estimate.route":   "路由探测时长受每跳超时影响",
 
 	// ── 通用值 ──────────────────────────────────────────────
-	"value.yes":      "是",
-	"value.no":       "否",
-	"value.unknown":  "未知",
 	"value.none":     "—",
-	"value.enabled":  "已启用",
-	"value.disabled": "未启用",
-	"value.success":  "成功",
-	"value.failed":   "失败",
-	"value.partial":  "部分",
 
 	// ── 已迁移的探针提示 key ─────────────────────────────────
 	"probe.cpu.tool_missing":        "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 sysbench，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供自研替代分数。",
-	"probe.disk.tool_missing":       "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 fio，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供缓存 I/O 或自研替代分数。",
-	"probe.speed.tool_missing":      "可用 run.sh 从当前架构的已校验 ecs-tools 包临时提供 iperf3，或运行 install.sh --with-benchmarks 持久安装。ecs 不提供 HTTP 或自研替代分数。",
 	"probe.memory.stream_missing":   "未找到官方 STREAM 可执行文件；内存基准未运行。",
-	"probe.memory.stream_invalid":   "PATH 中的 stream 不是官方 STREAM 可执行文件；内存基准未运行。",
-	"probe.zstd.tool_missing":       "请使用 run.sh；它会从已校验的 ecs-tools 包提供固定 zstd binary，并从独立 Release 资产准备固定 corpus。ecs 不生成自定义压缩综合分。",
-	"probe.crypto.tool_missing":     "请使用 run.sh；它会提供版本与哈希经过 ecs-tools manifest 校验的固定 OpenSSL binary。crypto 不并入 CPU 综合结果。",
-	"probe.crypto.version_mismatch": "请使用 run.sh 提供固定 OpenSSL 3.5.7 static binary；不接受系统中其他版本生成可比较成绩。",
 }
 
 var english = map[string]string{
 	// ── Command line ────────────────────────────────────────
 	"cli.tagline":        "Ad-free VPS benchmark suite that does not upload reports by default",
 	"cli.usage":          "Usage",
-	"cli.usage.run":      "Run tests (standard profile by default)",
-	"cli.usage.list":     "Show profiles and modules",
-	"cli.usage.render":   "Re-export JSON/Markdown/HTML from a JSON report",
-	"cli.usage.config":   "Print a sample configuration file",
-	"cli.usage.doctor":   "Check the standard benchmark tools",
-	"cli.usage.version":  "Show version",
-	"cli.examples":       "Examples",
-	"cli.more":           "Run 'ecs run --help' for the full option list.",
 	"cli.modules":        "Modules",
-	"cli.profiles":       "Profiles",
 	"cli.sources":        "IP quality sources",
 	"cli.unknownCommand": "unknown command",
 	"cli.error":          "error",
@@ -588,7 +555,6 @@ var english = map[string]string{
 	"summary.withErrors":   "%d passed, %d failed",
 	"summary.withWarnings": "%d passed, %d need attention",
 	"summary.allOK":        "%d checks completed",
-	"summary.skipped":      ", %d skipped",
 
 	// ── Estimates ───────────────────────────────────────────
 	"estimate.seconds": "about %d-%d s",
@@ -598,23 +564,9 @@ var english = map[string]string{
 	"estimate.route":   "Route probing time depends on per-hop timeouts",
 
 	// ── Common values ───────────────────────────────────────
-	"value.yes":      "yes",
-	"value.no":       "no",
-	"value.unknown":  "unknown",
 	"value.none":     "—",
-	"value.enabled":  "enabled",
-	"value.disabled": "disabled",
-	"value.success":  "success",
-	"value.failed":   "failed",
-	"value.partial":  "partial",
 
 	// ── Migrated probe notice keys ─────────────────────────
 	"probe.cpu.tool_missing":        "run.sh can temporarily stage sysbench from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no in-house replacement score.",
-	"probe.disk.tool_missing":       "run.sh can temporarily stage fio from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no cached-I/O or in-house replacement score.",
-	"probe.speed.tool_missing":      "run.sh can temporarily stage iperf3 from the verified architecture-matched ecs-tools package, or install it persistently with install.sh --with-benchmarks. ecs provides no HTTP or in-house replacement score.",
 	"probe.memory.stream_missing":   "The official STREAM executable was not found; the memory benchmark did not run.",
-	"probe.memory.stream_invalid":   "The stream found in PATH is not the official STREAM executable; the memory benchmark did not run.",
-	"probe.zstd.tool_missing":       "Use run.sh; it stages the pinned zstd binary from the verified ecs-tools package and prepares the fixed corpus from the standalone Release asset. ecs does not produce a custom compression score.",
-	"probe.crypto.tool_missing":     "Use run.sh; it provides the pinned OpenSSL binary after version and hash verification by the ecs-tools manifest. crypto is not included in the CPU composite.",
-	"probe.crypto.version_mismatch": "Use run.sh to provide the pinned static OpenSSL 3.5.7 binary; results from other system versions are not accepted as comparable.",
 }
