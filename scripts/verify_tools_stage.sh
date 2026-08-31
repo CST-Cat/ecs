@@ -83,8 +83,8 @@ npb_class=$(awk -F= '$1 == "npb_ci_smoke_class" { print $2 }' <<<"$params")
 
 echo "verify-tools-stage: $arch mode=$toolchain_mode runner=$target_runner npb_class=$npb_class" >&2
 
-# Canonical parser/validator owns manifest structure, fields, tool set, hashes,
-# and architecture semantics. The expected build mode, smoke runner, and NPB
+# Canonical parser/validator owns manifest structure, fields, tool set, and
+# architecture semantics. The expected build mode, smoke runner, and NPB
 # class are stage-specific values supplied by the build container, so they are
 # checked by the same Go entry point rather than duplicated in jq.
 go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
