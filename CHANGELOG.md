@@ -1,11 +1,23 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.7.18` 及后续 `Unreleased` 的主要变化。
+`v0.1.0` 到 `v0.7.20` 及后续 `Unreleased` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
 - `Unreleased` 用于后续维护；发布新版本时，应先补充该节，再移动为带日期的版本节。
+
+## Unreleased
+
+- 后续变更待记录。
+
+## 0.7.20 — 2026-08-31
+
+- 完整性校验收敛到信任边界：删除发布链内部对自己刚产出字节的重复哈希——`release/verify.sh` 对 `package.sh` 刚生成的 `checksums.txt` 的四步重验（非空、行数、逐条比对、`sha256sum -c`）与语料摘要重算、`verify_tools_stage.sh` 的工具二进制 SHA-256 比对与语料摘要重算、`build_tools.sh` 对自建的 10 个工具二进制的摘要计算。同一份固定语料此前在构建、stage、发布三处各校验一次，现在只保留下载入口那一次。
+- `ecs-tools.manifest/v1` 删除 `tools[].sha256` 字段：该字段唯一的完整性消费者是已删除的 stage 比对，Go 侧仅做格式校验且从不进入报告。连带删除 `toolsmanifest` 的 `sha256Pattern`、`isSHA256` 与 `validateTool` 中不可能触发的架构白名单二次检查。
+- 删除 Release 的 artifact attestation job 与 `id-token`/`attestations` 权限。`checksums.txt` 的生成与上传保留不变——它是 `install.sh`、`compare.sh` 和 `run.sh` 校验下载资产的依据。保留的完整性校验：第三方源码与二进制的下载校验、NextTrace 上游 digest 比对、`lock.json` 固定事实、运行时固定语料校验。
+- 报告身份契约收敛到两个入口 owner：`runner.Run` 校验自己生成的报告，`report.LoadJSON` 校验外部读入的报告；`report.JSON` 与 `score.collectMeasurements`（经 5 个调用点重复执行）不再重复校验。`run_config.go` 解析 `--media-region` 时不再重复 `config.Validate` 已无条件执行的校验。
+- 删除 34 个无引用的 i18n key（中英成对）、`i18n.TL` 与 `report.WriteFiles` 两个只服务于测试的转发包装器，并同步 `SECURITY.md`、`THIRD_PARTY.md` 中已失效的 digest 绑定与 attestation 表述。
 
 ## 0.7.18 — 2026-08-30
 
@@ -13,10 +25,6 @@
 - 收敛排行榜提交的 artifact 指纹为单一当前规范 JSON 算法：投影排除 `id`、`sample_id` 和 `ran_at`，保留其余允许公开字段及精确浮点值；提交 JSON 不再接受 `fingerprint_version`，旧格式需按当前 v1 contract 重新导出。
 - 修复已确认的配置、交互、取消传播、探针状态、报告校验、提交校验和工具阶段缺陷，并补充对应的失败路径与边界测试。
 - 删除运行时工具二进制 SHA、公开比较参数哈希和无消费者的重复 checksum 读取；保留下载、源码、固定 corpus、stage/package 和 Release 交接边界的必要完整性校验。
-
-## Unreleased
-
-- 后续变更待记录。
 
 ## 0.7.10 — 2026-08-27
 

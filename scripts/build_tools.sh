@@ -520,17 +520,6 @@ ecs_tool_smoke_iperf3
 ecs_tool_smoke_nexttrace
 ecs_tool_smoke_ping
 
-sysbench_sha=$(sha256sum "$sysbench_bin" | awk '{print $1}')
-zstd_sha=$(sha256sum "$zstd_bin" | awk '{print $1}')
-npb_ep_sha=$(sha256sum "$npb_ep_bin" | awk '{print $1}')
-npb_ft_sha=$(sha256sum "$npb_ft_bin" | awk '{print $1}')
-openssl_sha=$(sha256sum "$openssl_bin" | awk '{print $1}')
-stream_binary_sha=$(sha256sum "$stream_bin" | awk '{print $1}')
-fio_sha=$(sha256sum "$fio_bin" | awk '{print $1}')
-iperf3_sha=$(sha256sum "$iperf3_bin" | awk '{print $1}')
-nexttrace_binary_sha=$(sha256sum "$nexttrace_bin" | awk '{print $1}')
-ping_sha=$(sha256sum "$ping_bin" | awk '{print $1}')
-
 sysbench_source=$(git_source "$sysbench_repository" "$sysbench_commit")
 zstd_source=$(git_source "$zstd_repository" "$zstd_commit")
 openssl_source=$(git_source "$openssl_repository" "$openssl_commit")
@@ -564,7 +553,6 @@ jq -n \
   --arg sysbench_version "$sysbench_version" \
   --arg sysbench_tag "$sysbench_tag" \
   --arg sysbench_source "$sysbench_source" \
-  --arg sysbench_sha "$sysbench_sha" \
   --arg sysbench_commit "$sysbench_commit" \
   --arg sysbench_luajit_version "$sysbench_luajit_version" \
   --arg sysbench_ck_version "$sysbench_ck_version" \
@@ -573,7 +561,6 @@ jq -n \
   --arg zstd_version "$zstd_version" \
   --arg zstd_tag "$zstd_tag" \
   --arg zstd_source "$zstd_source" \
-  --arg zstd_sha "$zstd_sha" \
   --arg zstd_commit "$zstd_commit" \
   --argjson zstd_build_flags "$zstd_build_flags_json" \
   --arg zstd_corpus_url "$zstd_corpus_url" \
@@ -585,8 +572,6 @@ jq -n \
   --arg npb_tag "$npb_tag" \
   --arg npb_archive_url "$npb_archive_url" \
   --arg npb_archive_sha "$npb_archive_sha" \
-  --arg npb_ep_sha "$npb_ep_sha" \
-  --arg npb_ft_sha "$npb_ft_sha" \
   --arg npb_gfortran_version "$npb_gfortran_version" \
   --arg npb_compile_date "$npb_compile_date" \
   --arg npb_flags "$npb_flags" \
@@ -595,25 +580,21 @@ jq -n \
   --arg openssl_version "$openssl_version" \
   --arg openssl_tag "$openssl_tag" \
   --arg openssl_source "$openssl_source" \
-  --arg openssl_sha "$openssl_sha" \
   --arg openssl_commit "$openssl_commit" \
   --arg openssl_target "$openssl_target" \
   --argjson openssl_build_flags "$openssl_build_flags_json" \
   --arg fio_version "$fio_version" \
   --arg fio_tag "$fio_tag" \
   --arg fio_source "$fio_source" \
-  --arg fio_sha "$fio_sha" \
   --arg fio_commit "$fio_commit" \
   --arg iperf3_version "$iperf3_version" \
   --arg iperf3_tag "$iperf3_tag" \
   --arg iperf3_source "$iperf3_source" \
-  --arg iperf3_sha "$iperf3_sha" \
   --arg iperf3_commit "$iperf3_commit" \
   --arg stream_version "$stream_version" \
   --arg stream_revision "$stream_revision" \
   --arg stream_url "$stream_url" \
   --arg stream_sha "$stream_sha" \
-  --arg stream_binary_sha "$stream_binary_sha" \
   --argjson stream_build_flags "$stream_build_flags_json" \
   --argjson stream_array_size "$stream_array_size" \
   --argjson stream_ntimes "$stream_ntimes" \
@@ -627,13 +608,11 @@ jq -n \
   --arg nexttrace_asset_source "$nexttrace_asset_url" \
   --arg nexttrace_version "$nexttrace_version" \
   --arg nexttrace_tag "$nexttrace_tag" \
-  --arg nexttrace_sha "$nexttrace_binary_sha" \
   --arg nexttrace_release_digest "$nexttrace_asset_digest" \
   --arg nexttrace_commit "$nexttrace_commit" \
   --arg iputils_version "$iputils_version" \
   --arg iputils_tag "$iputils_tag" \
   --arg iputils_source "$iputils_source" \
-  --arg iputils_sha "$ping_sha" \
   --arg iputils_commit "$iputils_commit" \
   --arg iputils_upstream "$iputils_upstream" \
   --arg nexttrace_upstream "$nexttrace_upstream" \
@@ -663,7 +642,6 @@ jq -n \
           disabled_features: $sysbench_disabled_features,
           architecture: $architecture,
           license: "GPL-2.0-only",
-          sha256: $sysbench_sha,
           parameters: {source_commit: $sysbench_commit, configure_supported_flags: $sysbench_build_flags, system_luajit_version: $sysbench_luajit_version, system_ck_version: $sysbench_ck_version, fully_static: true, stripped: true}
         },
         {
@@ -677,7 +655,6 @@ jq -n \
           disabled_features: ["zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace"],
           architecture: $architecture,
           license: "BSD-3-Clause OR GPL-2.0-only",
-          sha256: $zstd_sha,
           parameters: {source_commit: $zstd_commit, level: 3, evaluation_seconds: 5, thread_modes: ["1T", "NT"], corpus_name: $zstd_corpus_name, corpus_path: ("runtime/" + $zstd_corpus_name), corpus_bytes: $zstd_corpus_bytes, corpus_sha256: $zstd_corpus_sha, corpus_source: $zstd_corpus_url, corpus_source_url: $zstd_corpus_url, corpus_source_sha256: $zstd_corpus_source_sha, corpus_construction: "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml", fully_static: true, stripped: true}
         },
         {
@@ -691,7 +668,6 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          sha256: $npb_ep_sha,
           parameters: {source_sha256: $npb_archive_sha, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler: $npb_gfortran_version, compiler_flags: $npb_flags, linker_flags: $npb_flags, random_generator: "randi8", compile_date: $npb_compile_date, thread_modes: ["1T", "NT"], ci_smoke_class: $npb_smoke_class, ci_smoke_scope: (if $npb_smoke_class == "A" then "release Class A binary" else "transient Class S binary from identical source and target toolchain; release Class A ELF statically validated" end), fully_static: true, stripped: true}
         },
         {
@@ -705,7 +681,6 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          sha256: $npb_ft_sha,
           parameters: {source_sha256: $npb_archive_sha, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler: $npb_gfortran_version, compiler_flags: $npb_flags, linker_flags: $npb_flags, random_generator: "randi8", compile_date: $npb_compile_date, thread_modes: ["1T", "NT"], ci_smoke_class: $npb_smoke_class, ci_smoke_scope: (if $npb_smoke_class == "A" then "release Class A binary" else "transient Class S binary from identical source and target toolchain; release Class A ELF statically validated" end), fully_static: true, stripped: true}
         },
         {
@@ -719,7 +694,6 @@ jq -n \
           disabled_features: ["TLS/DTLS/QUIC", "network/HTTP", "shared libraries/modules/engines", "EC/DH/DSA/PQ families", "unrequested cipher/digest families", "tests/documentation"],
           architecture: $architecture,
           license: "Apache-2.0",
-          sha256: $openssl_sha,
           parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], block_bytes: 16384, duration_seconds: 5, worker_modes: [1, "detected_cpu_allowance"], elapsed_wall_clock: true, machine_readable: true, capability_detection: "automatic with override environment removed", fully_static: true, stripped: true}
         },
         {
@@ -733,7 +707,6 @@ jq -n \
           disabled_features: [],
           architecture: $architecture,
           license: "STREAM-custom",
-          sha256: $stream_binary_sha,
           parameters: {source_sha256: $stream_sha, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], run_rules: "official STREAM 5.10 defaults; each array must exceed cache as required; NT uses runtime CPU allowance", fully_static: true, stripped: true}
         },
         {
@@ -747,7 +720,6 @@ jq -n \
           disabled_features: ["ceph", "rbd", "rados", "gluster", "gfapi", "rdma", "posix-aio"],
           architecture: $architecture,
           license: "GPL-2.0-only",
-          sha256: $fio_sha,
           parameters: {source_commit: $fio_commit, qd: 1, fully_static: true, stripped: true}
         },
         {
@@ -761,7 +733,6 @@ jq -n \
           disabled_features: ["sctp", "openssl/auth"],
           architecture: $architecture,
           license: "BSD-3-Clause",
-          sha256: $iperf3_sha,
           parameters: {source_commit: $iperf3_commit, fully_static: true, stripped: true}
         },
         {
@@ -775,7 +746,6 @@ jq -n \
           disabled_features: ["full", "mtr", "globalping", "webui"],
           architecture: $architecture,
           license: "GPL-3.0-only",
-          sha256: $nexttrace_sha,
           parameters: {release_commit: $nexttrace_commit, github_asset_digest: $nexttrace_release_digest}
         },
         {
@@ -789,7 +759,6 @@ jq -n \
           disabled_features: ["arping", "clockdiff", "tracepath", "capabilities", "idn", "gettext", "setcap"],
           architecture: $architecture,
           license: "GPL-2.0-or-later",
-          sha256: $iputils_sha,
           parameters: {source_commit: $iputils_commit, fully_static: true, stripped: true}
         }
       ]

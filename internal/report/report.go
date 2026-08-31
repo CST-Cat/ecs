@@ -20,10 +20,6 @@ type Options struct {
 	Score *score.Report
 }
 
-func WriteFiles(data model.Report, directory, baseName string, formats []string) (map[string]string, error) {
-	return WriteFilesWithOptions(data, directory, baseName, formats, Options{})
-}
-
 func WriteFilesWithOptions(data model.Report, directory, baseName string, formats []string, options Options) (map[string]string, error) {
 	if directory == "" {
 		directory = "./reports"
@@ -78,10 +74,9 @@ func WriteFilesWithOptions(data model.Report, directory, baseName string, format
 	return written, nil
 }
 
+// JSON 序列化一份报告。身份契约由上游 owner 保证：runner.Run 校验自己生成的
+// 报告，LoadJSON 校验外部读入的报告，这里不再重复检查。
 func JSON(data model.Report) ([]byte, error) {
-	if err := model.ValidateReportIdentity(data); err != nil {
-		return nil, err
-	}
 	content, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return nil, err

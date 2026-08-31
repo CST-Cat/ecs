@@ -90,12 +90,12 @@ func TestPrivacyCopyDistinguishesReportUploadFromMeasurementTraffic(t *testing.T
 	for _, test := range cases {
 		t.Run(string(test.lang), func(t *testing.T) {
 			texts := []string{
-				TL(test.lang, "cli.tagline"),
-				TL(test.lang, "report.local"),
-				TL(test.lang, "term.subtitle"),
-				TL(test.lang, "term.noUpload"),
-				TL(test.lang, "wizard.subtitle"),
-				TL(test.lang, "module.ookla.desc"),
+				translate(test.lang, "cli.tagline"),
+				translate(test.lang, "report.local"),
+				translate(test.lang, "term.subtitle"),
+				translate(test.lang, "term.noUpload"),
+				translate(test.lang, "wizard.subtitle"),
+				translate(test.lang, "module.ookla.desc"),
 			}
 			for _, text := range texts {
 				for _, forbidden := range test.forbiddenText {
@@ -104,12 +104,12 @@ func TestPrivacyCopyDistinguishesReportUploadFromMeasurementTraffic(t *testing.T
 					}
 				}
 			}
-			if !strings.Contains(TL(test.lang, "report.local"), test.reportToken) {
-				t.Fatalf("report.local does not identify the report file: %q", TL(test.lang, "report.local"))
+			if !strings.Contains(translate(test.lang, "report.local"), test.reportToken) {
+				t.Fatalf("report.local does not identify the report file: %q", translate(test.lang, "report.local"))
 			}
 			for _, key := range []string{"term.noUpload", "wizard.subtitle", "module.ookla.desc"} {
-				if !strings.Contains(TL(test.lang, key), test.trafficToken) {
-					t.Fatalf("%s does not identify measurement traffic: %q", key, TL(test.lang, key))
+				if !strings.Contains(translate(test.lang, key), test.trafficToken) {
+					t.Fatalf("%s does not identify measurement traffic: %q", key, translate(test.lang, key))
 				}
 			}
 		})
@@ -186,7 +186,7 @@ func TestTranslationHelpersExposeMissingKeysWithoutCrossLanguageFallback(t *test
 	original := Current()
 	t.Cleanup(func() { Set(original) })
 	Set(LangEN)
-	if Current() != LangEN || T("cli.usage") == "cli.usage" || TL(LangZH, "cli.usage") == "cli.usage" {
+	if Current() != LangEN || T("cli.usage") == "cli.usage" || translate(LangZH, "cli.usage") == "cli.usage" {
 		t.Fatal("language selection did not resolve known translations")
 	}
 	if got := Errorf("err.unknownProfile", "demo").Error(); !strings.Contains(got, "unknown profile") || !strings.Contains(got, "demo") {
@@ -202,16 +202,16 @@ func TestTranslationHelpersExposeMissingKeysWithoutCrossLanguageFallback(t *test
 	const key = "test.only.chinese"
 	chinese[key] = "只有中文"
 	t.Cleanup(func() { delete(chinese, key) })
-	if got := TL(LangEN, key); got != key {
+	if got := translate(LangEN, key); got != key {
 		t.Fatalf("missing English translation must expose key, got %q", got)
 	}
 	if Has(LangEN, key) {
 		t.Fatal("English catalog must not claim a Chinese-only key")
 	}
-	if got := TL(LangZH, key); got != "只有中文" || !Has(LangZH, key) {
+	if got := translate(LangZH, key); got != "只有中文" || !Has(LangZH, key) {
 		t.Fatalf("Chinese catalog lookup = %q, Has=%v", got, Has(LangZH, key))
 	}
-	if got := TL(LangEN, "missing.test.key"); got != "missing.test.key" {
+	if got := translate(LangEN, "missing.test.key"); got != "missing.test.key" {
 		t.Fatalf("missing key = %q", got)
 	}
 }

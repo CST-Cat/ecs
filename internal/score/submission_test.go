@@ -218,21 +218,6 @@ func TestSubmissionHostSpecUsesSystemMeasurementOwner(t *testing.T) {
 	}
 }
 
-func TestBuildSubmissionRejectsDuplicateIdentity(t *testing.T) {
-	duplicateMeasurement := scoreReportFixture()
-	cpu := findResult(&duplicateMeasurement, "cpu")
-	cpu.Measurements = append(cpu.Measurements, model.Measurement{Key: "sysbench_cpu_single_events_s", Value: 999})
-	if _, err := BuildSubmission(duplicateMeasurement, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "sysbench_cpu_single_events_s"`) {
-		t.Fatalf("duplicate measurement submission error = %v", err)
-	}
-
-	duplicateResult := scoreReportFixture()
-	duplicateResult.Results = append(duplicateResult.Results, model.Result{ID: "cpu", Status: model.StatusOK})
-	if _, err := BuildSubmission(duplicateResult, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), `duplicate result ID "cpu"`) {
-		t.Fatalf("duplicate result submission error = %v", err)
-	}
-}
-
 func TestSubmissionLoadAndValidationDiagnostics(t *testing.T) {
 	submission, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
 	if err != nil {

@@ -24,12 +24,13 @@ type htmlTableCell struct {
 	Class string
 }
 
-// HTML renders the machine report directly; stable keys are resolved by the
-// template functions at the individual presentation fields.
+// HTML 渲染一份自包含的 HTML 报告。与 Markdown 一样是对外渲染入口。
 func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 	return htmlReport(data, scored)
 }
 
+// htmlReport renders the machine report directly; stable keys are resolved by
+// the template functions at the individual presentation fields.
 func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 	functions := template.FuncMap{
 		"t":             i18n.T,

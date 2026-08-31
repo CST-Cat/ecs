@@ -16,7 +16,8 @@ set -euo pipefail
 # 中记录的值与这份解析结果比对。
 #
 # 语料是独立发布物：它 200 MB 出头，七个架构各带一份会让 Release 膨胀到没有
-# 必要的体积。摘除前先核对尺寸与摘要，确认摘掉的确实是那一份。
+# 必要的体积。它的内容在下载入口（build_tools.sh）已按 lock.json 校验过，这里
+# 只负责把它从 stage 中摘出去。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -82,8 +83,8 @@ npb_class=$(awk -F= '$1 == "npb_ci_smoke_class" { print $2 }' <<<"$params")
 
 echo "verify-tools-stage: $arch mode=$toolchain_mode runner=$target_runner npb_class=$npb_class" >&2
 
-# Canonical parser/validator owns manifest structure, fields, tool set, hashes,
-# and architecture semantics. The expected build mode, smoke runner, and NPB
+# Canonical parser/validator owns manifest structure, fields, tool set, and
+# architecture semantics. The expected build mode, smoke runner, and NPB
 # class are stage-specific values supplied by the build container, so they are
 # checked by the same Go entry point rather than duplicated in jq.
 go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
@@ -97,18 +98,6 @@ go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
 for tool in "${ECS_TOOL_NAMES[@]}"; do
   tool_path="$stage_dir/bin/$tool"
   [[ -x "$tool_path" ]] || die "$arch stage is missing an executable $tool"
-  expected_tool_sha=$(jq -er --arg tool "$tool" \
-    '.tools[] | select(.name == $tool) | .sha256' "$manifest" | tr '[:upper:]' '[:lower:]') ||
-    die "$arch manifest is missing a SHA-256 for $tool"
-  case "$expected_tool_sha" in
-    unknown|unavailable)
-      ;;
-    *)
-      actual_tool_sha=$(sha256sum "$tool_path" | awk '{print $1}')
-      [[ "$actual_tool_sha" == "$expected_tool_sha" ]] ||
-        die "$arch stage $tool SHA-256 mismatch: expected $expected_tool_sha, got $actual_tool_sha"
-      ;;
-  esac
 done
 [[ -d "$stage_dir/LICENSES" ]] || die "$arch stage is missing LICENSES"
 
@@ -119,12 +108,6 @@ if [[ "$keep_corpus" -eq 1 ]]; then
 fi
 
 [[ -f "$corpus" ]] || die "$arch stage is missing the Silesia corpus"
-actual_bytes=$(stat -c %s "$corpus")
-[[ "$actual_bytes" -eq "$ECS_CORPUS_BYTES" ]] ||
-  die "corpus size = $actual_bytes, want $ECS_CORPUS_BYTES"
-actual_sha=$(sha256sum "$corpus" | awk '{print $1}')
-[[ "$actual_sha" == "$ECS_CORPUS_SHA256" ]] ||
-  die "corpus sha256 = $actual_sha, want $ECS_CORPUS_SHA256"
 
 # 容器以 root 写出这些文件，宿主上的普通用户需要 sudo 才能删。
 remove() {

@@ -14,8 +14,9 @@ set -euo pipefail
 #   - vcs.revision 必须等于冻结的发布 SHA；
 #   - vcs.modified 必须为 false，否则构建时工作区是脏的。
 #
-# 此外校验固定语料的尺寸与摘要、主程序归档数量、预期发布物是否齐全、
-# checksums 行数/条目/摘要与发布物是否一一对应，以及工具包里没有混进语料。
+# 此外校验语料归档结构、主程序归档数量、预期发布物是否齐全，以及工具包里
+# 没有混进语料。checksums.txt 由 package.sh 在同一次构建中生成，不在此重算：
+# 它的消费者是下载方（install.sh、compare.sh、run.sh）。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
@@ -127,11 +128,7 @@ corpus_archive="$dist/$ECS_CORPUS_ARCHIVE"
 [[ -s "$corpus_archive" ]] || die "缺少语料发布物"
 corpus_listing=$(tar -tzf "$corpus_archive")
 [[ "$corpus_listing" == "$ECS_CORPUS_NAME" ]] || die "语料归档内容异常：$corpus_listing"
-tar -xzf "$corpus_archive" -C "$verify_root"
-corpus="$verify_root/$ECS_CORPUS_NAME"
-[[ "$(stat -c %s "$corpus")" -eq "$ECS_CORPUS_BYTES" ]] || die "语料尺寸不符"
-[[ "$(sha256sum "$corpus" | awk '{print $1}')" == "$ECS_CORPUS_SHA256" ]] || die "语料摘要不符"
-echo "release-verify: 语料尺寸与摘要一致" >&2
+echo "release-verify: 语料归档结构一致" >&2
 
 # ---- 发布物清单 ----
 assets=()
@@ -158,16 +155,5 @@ if [[ "$with_tools" -eq 1 ]]; then
   done
   echo "release-verify: ${#ECS_ARCHES[@]} 个工具包都不含语料" >&2
 fi
-
-# ---- checksums ----
-checksums="$dist/checksums.txt"
-[[ -s "$checksums" ]] || die "缺少 checksums.txt"
-[[ "$(wc -l <"$checksums")" -eq "${#assets[@]}" ]] ||
-  die "checksums 行数 = $(wc -l <"$checksums")，want ${#assets[@]}"
-for asset in "${assets[@]}"; do
-  grep -F "  $asset" "$checksums" >/dev/null || die "checksums 缺少 $asset"
-done
-(cd "$dist" && sha256sum -c checksums.txt >/dev/null)
-echo "release-verify: checksums 与 ${#assets[@]} 个发布物一一对应" >&2
 
 echo "release-verify: 全部校验通过"

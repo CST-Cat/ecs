@@ -365,10 +365,7 @@ func (r Report) EffectiveRankMinSamples() int {
 // 没有任何维度可算时返回 nil：与其给一个 0 分，不如明确表示"这次运行不产生
 // 评分"——仅运行 network 等单一维度本来就不该有综合分。
 func Compute(data model.Report, baseline Baseline) *Report {
-	values, err := collectMeasurements(data)
-	if err != nil {
-		return nil
-	}
+	values := collectMeasurements(data)
 	ran := make(map[string]bool, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status != model.StatusSkipped {
@@ -537,10 +534,9 @@ type measured struct {
 // is only meaningful together with the Result.ID that produced it.
 type measurementsByModule map[string]map[string]measured
 
-func collectMeasurements(data model.Report) (measurementsByModule, error) {
-	if err := model.ValidateReportIdentity(data); err != nil {
-		return nil, err
-	}
+// collectMeasurements 依赖 Result.ID 唯一，否则同名模块会互相覆盖。该不变量由
+// 上游 owner 保证：runner.Run 校验生成的报告，report.LoadJSON 校验读入的报告。
+func collectMeasurements(data model.Report) measurementsByModule {
 	values := make(measurementsByModule, len(data.Results))
 	for _, result := range data.Results {
 		if result.Status == model.StatusSkipped {
@@ -555,7 +551,7 @@ func collectMeasurements(data model.Report) (measurementsByModule, error) {
 			moduleValues[item.Key] = measured{value: item.Value, unit: item.Unit, label: item.Label}
 		}
 	}
-	return values, nil
+	return values
 }
 
 // scoreableMetrics is the single report-to-leaderboard membership boundary.

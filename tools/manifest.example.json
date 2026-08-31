@@ -48,7 +48,6 @@
       ],
       "architecture": "amd64",
       "license": "GPL-2.0-only",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown",
@@ -91,7 +90,6 @@
       ],
       "architecture": "amd64",
       "license": "BSD-3-Clause OR GPL-2.0-only",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
@@ -139,7 +137,6 @@
       ],
       "architecture": "amd64",
       "license": "NASA-NPB-permissive",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549",
@@ -188,7 +185,6 @@
       ],
       "architecture": "amd64",
       "license": "NASA-NPB-permissive",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_sha256": "1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549",
@@ -295,7 +291,6 @@
       ],
       "architecture": "amd64",
       "license": "Apache-2.0",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "8cf17aaeb4599f8af87fefd810b5b5fee90fe69e",
@@ -343,7 +338,6 @@
       "disabled_features": [],
       "architecture": "amd64",
       "license": "STREAM-custom (illustrative)",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "kernels": [
@@ -406,7 +400,6 @@
       ],
       "architecture": "amd64",
       "license": "GPL-2.0-only",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown",
@@ -442,7 +435,6 @@
       ],
       "architecture": "amd64",
       "license": "BSD-3-Clause",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown"
@@ -470,7 +462,6 @@
       ],
       "architecture": "amd64",
       "license": "GPL-3.0-only",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "asset_digest": "unknown"
@@ -512,7 +503,6 @@
       ],
       "architecture": "amd64",
       "license": "GPL-2.0-or-later",
-      "sha256": "unknown",
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown"

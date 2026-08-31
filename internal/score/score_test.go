@@ -251,28 +251,8 @@ func TestComputeMissingAndInvalidValues(t *testing.T) {
 	if got := Compute(warningError, baseline); got == nil || dimensionScore(got, "cpu").Missing || dimensionScore(got, "disk").Missing {
 		t.Fatalf("warning/error modules should still score: %+v", got)
 	}
-	duplicate := scoreReportFixture()
-	cpu := findResult(&duplicate, "cpu")
-	cpu.Measurements = append(cpu.Measurements, model.Measurement{Key: "sysbench_cpu_single_events_s", Value: 999})
-	gotDuplicate := Compute(duplicate, baseline)
-	if gotDuplicate != nil {
-		t.Fatalf("duplicate measurement report was accepted: %+v", gotDuplicate)
-	}
-	duplicateResultID := scoreReportFixture()
-	duplicateResultID.Results = append(duplicateResultID.Results, model.Result{ID: "cpu", Status: model.StatusOK})
-	if gotDuplicate := Compute(duplicateResultID, baseline); gotDuplicate != nil {
-		t.Fatalf("duplicate result ID report was accepted: %+v", gotDuplicate)
-	}
-	emptyResultID := scoreReportFixture()
-	emptyResultID.Results[0].ID = ""
-	if gotEmpty := Compute(emptyResultID, baseline); gotEmpty != nil {
-		t.Fatalf("empty result ID report was accepted: %+v", gotEmpty)
-	}
-	emptyMeasurementKey := scoreReportFixture()
-	emptyMeasurementKey.Results[0].Measurements[0].Key = ""
-	if gotEmpty := Compute(emptyMeasurementKey, baseline); gotEmpty != nil {
-		t.Fatalf("empty measurement key report was accepted: %+v", gotEmpty)
-	}
+	// 身份契约（result ID / measurement key 非空且唯一）的 owner 是 runner.Run
+	// 与 report.LoadJSON，Compute 信任其调用方，不再重复拒绝。
 	if got := Compute(model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}, baseline); got != nil {
 		t.Fatal("report with no scoreable dimensions should return nil")
 	}
@@ -283,10 +263,7 @@ func TestMeasurementLookupPreservesModuleOwner(t *testing.T) {
 		{ID: "cpu", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 100, Unit: "cpu"}}},
 		{ID: "system", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 999, Unit: "system"}}},
 	}}
-	values, err := collectMeasurements(report)
-	if err != nil {
-		t.Fatal(err)
-	}
+	values := collectMeasurements(report)
 	dimension := Dimension{
 		Key:      "owner",
 		ModuleID: "cpu",
@@ -342,21 +319,6 @@ func TestScoreAndSubmissionAreOrderInvariant(t *testing.T) {
 	}
 	if !reflect.DeepEqual(firstSubmission, secondSubmission) {
 		t.Fatalf("result order changed submission:\n first=%+v\nsecond=%+v", firstSubmission, secondSubmission)
-	}
-}
-
-func TestBuildBaselineRejectsDuplicateIdentity(t *testing.T) {
-	duplicateMeasurement := scoreReportFixture()
-	cpu := findResult(&duplicateMeasurement, "cpu")
-	cpu.Measurements = append(cpu.Measurements, model.Measurement{Key: "sysbench_cpu_single_events_s", Value: 999})
-	if _, err := BuildBaseline([]model.Report{duplicateMeasurement}, "duplicate measurement"); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "sysbench_cpu_single_events_s"`) {
-		t.Fatalf("duplicate measurement baseline error = %v", err)
-	}
-
-	duplicateResult := scoreReportFixture()
-	duplicateResult.Results = append(duplicateResult.Results, model.Result{ID: "cpu", Status: model.StatusOK})
-	if _, err := BuildBaseline([]model.Report{duplicateResult}, "duplicate result"); err == nil || !strings.Contains(err.Error(), `duplicate result ID "cpu"`) {
-		t.Fatalf("duplicate result baseline error = %v", err)
 	}
 }
 

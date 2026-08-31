@@ -143,7 +143,6 @@ func TestManifestParsingAndValidationDiagnostics(t *testing.T) {
 		{name: "required array", mutate: func(object map[string]any) { delete(firstManifestTool(t, object), "build_flags") }, marker: `missing required field "build_flags"`},
 		{name: "empty array element", mutate: func(object map[string]any) { firstManifestTool(t, object)["build_flags"] = []any{""} }, marker: "build_flags[0]"},
 		{name: "tool architecture", mutate: func(object map[string]any) { firstManifestTool(t, object)["architecture"] = "arm64" }, marker: "does not match manifest architecture"},
-		{name: "sha", mutate: func(object map[string]any) { firstManifestTool(t, object)["sha256"] = "bad" }, marker: "sha256"},
 		{name: "parameters object", mutate: func(object map[string]any) { firstManifestTool(t, object)["parameters"] = "bad" }, marker: "parameters"},
 		{name: "fallback", mutate: func(object map[string]any) { firstManifestTool(t, object)["fallback"] = "" }, marker: "fallback must be a non-empty string"},
 	} {

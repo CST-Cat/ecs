@@ -262,11 +262,8 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		cfg.IPerfTargets = targets
 	}
 	if explicit["media-region"] {
-		regions := config.ParseList(*mediaRegionFlag)
-		if err := config.ValidateMediaRegions(regions); err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-		}
-		cfg.MediaRegions = regions
+		// 合法性由 config.Validate 无条件校验，这里只负责解析。
+		cfg.MediaRegions = config.ParseList(*mediaRegionFlag)
 	}
 	if explicit["backtrace-city"] {
 		if len(config.ParseList(*backtraceCityFlag)) == 0 {

@@ -3,13 +3,12 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# preflight → tools×7 → assemble → verify → attest → publish。
+# preflight → tools×7 → assemble → verify → publish。
 #
 #   preflight  contents: read    冻结 SHA，跑确定性源码检查
 #   tools × 7  contents: read    七架构完整构建工具包
 #   assemble   contents: read    组装全部发布物，记录实测工具链版本
 #   verify     contents: read    校验解包出来的实际二进制
-#   attest     id-token: write   为最终制品生成 provenance
 #   publish    contents: write   唯一持有写权限的 job
 #
 # 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release。
@@ -22,7 +21,7 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 preflight → tools×7 → assemble → verify → attest
+  # 手动触发是发布演练：走完 preflight → tools×7 → assemble → verify
   # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
   # 没有 rebuild_tools 之类的开关——每次都完整构建七架构，没有可跳过的选项。
   workflow_dispatch:
@@ -250,33 +249,11 @@ jobs:
             --build-go-version "$BUILD_GO_VERSION" \
             --revision "$REVISION"
 
-  # provenance：这些字节由哪个仓库、哪个 workflow、哪个提交产出。
-  #
-  # checksums.txt 本来就是发给用户校验的清单，这里直接把它当作 attestation 的
-  # subject 列表——同一份事实只写一次。attestation 按摘要绑定，因此 job 之间
-  # 传递制品不影响绑定关系。
-  attest:
-    needs: [preflight, assemble, verify]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: release-dist
-          path: dist
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-checksums: dist/checksums.txt
-
   # 唯一持有 contents: write 的 job。它只做上传：到这一步为止，制品已经被
-  # verify 校验并由 attest 生成 provenance。
+  # verify 校验过。
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [preflight, assemble, verify, attest]
+    needs: [preflight, assemble, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
