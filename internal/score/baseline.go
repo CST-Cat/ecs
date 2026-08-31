@@ -226,10 +226,7 @@ func BuildBaseline(reports []model.Report, source string) (Baseline, error) {
 	byTier := make(map[int]map[string][]float64)
 	tierReportCounts := make(map[int]int)
 	for _, report := range reports {
-		values, err := collectMeasurements(report)
-		if err != nil {
-			return Baseline{}, err
-		}
+		values := collectMeasurements(report)
 		tierKey := TierKeyFor(hostVCPU(values))
 		if tierKey > 0 {
 			tierReportCounts[tierKey]++
@@ -319,10 +316,7 @@ func (b Baseline) Encode() ([]byte, error) {
 func MetricSampleCounts(reports []model.Report) map[string]int {
 	counts := make(map[string]int)
 	for _, report := range reports {
-		values, err := collectMeasurements(report)
-		if err != nil {
-			return nil
-		}
+		values := collectMeasurements(report)
 		for key := range scoreableMetrics(report, values) {
 			counts[key]++
 		}

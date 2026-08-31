@@ -263,10 +263,7 @@ func TestMeasurementLookupPreservesModuleOwner(t *testing.T) {
 		{ID: "cpu", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 100, Unit: "cpu"}}},
 		{ID: "system", Status: model.StatusOK, Measurements: []model.Measurement{{Key: "foo", Value: 999, Unit: "system"}}},
 	}}
-	values, err := collectMeasurements(report)
-	if err != nil {
-		t.Fatal(err)
-	}
+	values := collectMeasurements(report)
 	dimension := Dimension{
 		Key:      "owner",
 		ModuleID: "cpu",
