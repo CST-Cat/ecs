@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,7 +75,7 @@ func TestBacktraceDefaultSelectionUsesCanonicalCatalog(t *testing.T) {
 
 	var wantTargets []Endpoint
 	for _, city := range backtraceCities {
-		if contains(cities, city.ID) {
+		if slices.Contains(cities, city.ID) {
 			wantTargets = append(wantTargets, city.Targets...)
 		}
 	}

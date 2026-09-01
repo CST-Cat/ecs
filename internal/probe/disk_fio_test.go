@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ func TestFIOPlanAndDiskSafety(t *testing.T) {
 	}
 	timeArgs := fioArgumentsForMode("/tmp/file", 128, fioEngine{Name: "psync"}, plan, "time")
 	fixedArgs := fioArgumentsForMode("/tmp/file", 128, fioEngine{Name: "psync"}, plan, "fixed")
-	if !containsString(timeArgs, "--runtime=2") || !containsString(timeArgs, "--time_based=1") || !containsString(timeArgs, "--rwmixread=50") || !containsString(timeArgs, "--end_fsync=1") || !containsString(timeArgs, "--stonewall=1") || !containsString(fixedArgs, "--io_size=256m") || !containsString(fixedArgs, "--runtime=2") || !containsString(timeArgs, "--iodepth=1") || strings.Count(strings.Join(fixedArgs, "\x00"), "--io_size=256m") != 1 || strings.Count(strings.Join(fixedArgs, "\x00"), "--time_based=1") != 2 {
+	if !slices.Contains(timeArgs, "--runtime=2") || !slices.Contains(timeArgs, "--time_based=1") || !slices.Contains(timeArgs, "--rwmixread=50") || !slices.Contains(timeArgs, "--end_fsync=1") || !slices.Contains(timeArgs, "--stonewall=1") || !slices.Contains(fixedArgs, "--io_size=256m") || !slices.Contains(fixedArgs, "--runtime=2") || !slices.Contains(timeArgs, "--iodepth=1") || strings.Count(strings.Join(fixedArgs, "\x00"), "--io_size=256m") != 1 || strings.Count(strings.Join(fixedArgs, "\x00"), "--time_based=1") != 2 {
 		t.Fatalf("fio arguments = time:%v fixed:%v", timeArgs, fixedArgs)
 	}
 	if len(fioJobPlan()) < 10 || FIOPlanDuration() <= 0 {

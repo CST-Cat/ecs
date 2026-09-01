@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	}
 	standard := ModulesForProfile(ProfileStandard)
 	full := ModulesForProfile(ProfileFull)
-	if len(standard) == 0 || len(full) != len(descriptors) || contains(standard, "network") || !contains(full, "network") {
+	if len(standard) == 0 || len(full) != len(descriptors) || slices.Contains(standard, "network") || !slices.Contains(full, "network") {
 		t.Fatalf("profile module sets = standard:%v full:%v", standard, full)
 	}
 }

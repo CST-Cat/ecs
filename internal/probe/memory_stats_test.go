@@ -3,6 +3,7 @@ package probe
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 		"probe.memory.note.balloon_reclaim_unavailable",
 		"probe.memory.note.ksm_unavailable",
 	} {
-		if !containsString(degraded.Notes, want) {
+		if !slices.Contains(degraded.Notes, want) {
 			t.Fatalf("degraded memory inventory missing note %q: %v", want, degraded.Notes)
 		}
 	}

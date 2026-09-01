@@ -602,13 +602,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func maxDuration(left, right time.Duration) time.Duration {
-	if left > right {
-		return left
-	}
-	return right
-}
-
 func firstMatch(pattern *regexp.Regexp, value string) string {
 	match := pattern.FindStringSubmatch(value)
 	if len(match) < 2 {

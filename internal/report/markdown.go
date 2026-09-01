@@ -126,7 +126,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			for _, failure := range result.Failures {
 				values := []string{
 					failureCategoryLabel(failure.Category), fallbackReport(failure.Stage, "—"),
-					fallbackReport(failure.Target, "—"), fmt.Sprintf("%d", maxInt(failure.Count, 1)),
+					fallbackReport(failure.Target, "—"), fmt.Sprintf("%d", max(failure.Count, 1)),
 					failureRetryableLabel(failure.Retryable), fallbackReport(failure.Message, "—"),
 				}
 				out.WriteString("| ")

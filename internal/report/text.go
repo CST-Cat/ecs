@@ -113,7 +113,7 @@ func adaptiveBarWidth(reportWidth, preferred int) int {
 	case reportWidth < 96:
 		limit = 14
 	}
-	return minInt(preferred, limit)
+	return min(preferred, limit)
 }
 
 func (r *textRenderer) render(data model.Report) string {
@@ -321,7 +321,7 @@ func (r *textRenderer) resultFailures(failures []model.Failure) {
 			failureCategoryLabel(failure.Category),
 			fallbackReport(failure.Stage, "—"),
 			fallbackReport(failure.Target, "—"),
-			strconv.Itoa(maxInt(failure.Count, 1)),
+			strconv.Itoa(max(failure.Count, 1)),
 			failureRetryableLabel(failure.Retryable),
 			fallbackReport(failure.Message, "—"),
 		})
@@ -352,9 +352,9 @@ func (r *textRenderer) resultEvidenceCoverage(evidence *model.Evidence) {
 	// Nesting a colored bar inside another style would reset the outer color on
 	// basic and 256-color terminals after the first filled cell.
 	prefix := "  " + style(line)
-	barSize := minInt(16, adaptiveBarWidth(r.width, 16))
+	barSize := min(16, adaptiveBarWidth(r.width, 16))
 	if available := r.width - textwidth.Width(prefix) - 2; available < barSize {
-		barSize = maxInt(0, available)
+		barSize = max(0, available)
 	}
 	if barSize >= 4 {
 		r.linef("%s  %s", prefix, r.palette.Bar(ratio, barSize))
@@ -491,7 +491,7 @@ func (r *textRenderer) textBlock(block model.TextBlock) {
 		r.indented(title, true)
 	}
 	for _, line := range strings.Split(strings.TrimRight(block.Content, "\n"), "\n") {
-		for _, wrapped := range wrapText(line, maxInt(1, r.width-6)) {
+		for _, wrapped := range wrapText(line, max(1, r.width-6)) {
 			r.linef("    %s", wrapped)
 		}
 	}
@@ -503,7 +503,7 @@ func (r *textRenderer) note(text string) {
 	//
 	// 只有第一行带项目符号，续行对齐缩进：每行都带 "·" 会让一条折了行的说明
 	// 看起来像三条独立说明，而说明里本来就常含逗号和顿号，读者无从分辨。
-	for index, line := range wrapText(text, maxInt(1, r.width-6)) {
+	for index, line := range wrapText(text, max(1, r.width-6)) {
 		if index == 0 {
 			r.linef("  %s %s", r.palette.Dim("·"), r.palette.Dim(line))
 			continue

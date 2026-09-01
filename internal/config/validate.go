@@ -4,6 +4,7 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -84,7 +85,7 @@ func Validate(runtime Runtime) error {
 			return i18n.Errorf("err.ipSourceUnknown", source)
 		}
 	}
-	if len(runtime.IPQualitySources) > 1 && (contains(runtime.IPQualitySources, "all") || contains(runtime.IPQualitySources, "none")) {
+	if len(runtime.IPQualitySources) > 1 && (slices.Contains(runtime.IPQualitySources, "all") || slices.Contains(runtime.IPQualitySources, "none")) {
 		return i18n.Errorf("err.ipSourceCombo")
 	}
 	if err := ValidateMediaRegions(runtime.MediaRegions); err != nil {

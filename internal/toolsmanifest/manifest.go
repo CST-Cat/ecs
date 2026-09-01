@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 )
 
 const SchemaVersion = "ecs-tools.manifest/v1"
@@ -78,6 +79,22 @@ type Tool struct {
 	Fallback         string         `json:"fallback,omitempty"`
 }
 
+// Field lists mirror the json tags of the types below. They stay explicit
+// rather than using encoding/json's DisallowUnknownFields because the standard
+// decoder reports every nesting level as a bare `unknown field "x"`, which does
+// not tell a CI operator which object of a three-level manifest is wrong.
+// TestFieldListsMatchStructTags keeps them from drifting away from the structs.
+var (
+	manifestFields   = []string{"schema_version", "architecture", "supported_architectures", "build", "tools"}
+	buildFields      = []string{"toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"}
+	validationFields = []string{"scope", "performance_valid"}
+	toolFields       = []string{
+		"name", "upstream", "version", "tag_or_commit", "source",
+		"build_flags", "enabled_features", "disabled_features",
+		"architecture", "license", "parameters", "fallback",
+	}
+)
+
 // Parse decodes and validates one manifest.  Required JSON keys are checked
 // before unmarshalling so an omitted array cannot be confused with an
 // intentionally empty array.
@@ -97,7 +114,7 @@ func Parse(data []byte) (Manifest, error) {
 	if raw == nil {
 		return Manifest{}, fmt.Errorf("manifest must be a JSON object")
 	}
-	if err := rejectUnknownFields(raw, "schema_version", "architecture", "supported_architectures", "build", "tools"); err != nil {
+	if err := rejectUnknownFields(raw, manifestFields...); err != nil {
 		return Manifest{}, err
 	}
 	for _, field := range []string{"schema_version", "architecture", "build", "tools"} {
@@ -112,7 +129,7 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	if err := rejectUnknownFields(buildRaw, "toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"); err != nil {
+	if err := rejectUnknownFields(buildRaw, buildFields...); err != nil {
 		return Manifest{}, fmt.Errorf("build: %w", err)
 	}
 	for _, field := range []string{"toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"} {
@@ -124,7 +141,7 @@ func Parse(data []byte) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	if err := rejectUnknownFields(validationRaw, "scope", "performance_valid"); err != nil {
+	if err := rejectUnknownFields(validationRaw, validationFields...); err != nil {
 		return Manifest{}, fmt.Errorf("build.validation: %w", err)
 	}
 	for _, field := range []string{"scope", "performance_valid"} {
@@ -138,11 +155,7 @@ func Parse(data []byte) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("decode manifest: %w", err)
 	}
 	for index, toolRaw := range rawTools(raw["tools"]) {
-		if err := rejectUnknownFields(toolRaw,
-			"name", "upstream", "version", "tag_or_commit", "source",
-			"build_flags", "enabled_features", "disabled_features",
-			"architecture", "license", "parameters", "fallback",
-		); err != nil {
+		if err := rejectUnknownFields(toolRaw, toolFields...); err != nil {
 			return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
 		}
 		for _, field := range []string{
@@ -196,7 +209,7 @@ func requireField(fields map[string]json.RawMessage, field string) error {
 
 func rejectUnknownFields(fields map[string]json.RawMessage, allowed ...string) error {
 	for field := range fields {
-		if !contains(allowed, field) {
+		if !slices.Contains(allowed, field) {
 			return fmt.Errorf("unknown field %q", field)
 		}
 	}
@@ -209,7 +222,7 @@ func Validate(manifest Manifest) error {
 	if manifest.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("schema_version must be %q, got %q", SchemaVersion, manifest.SchemaVersion)
 	}
-	if !contains(architectures[:], manifest.Architecture) {
+	if !slices.Contains(architectures[:], manifest.Architecture) {
 		return fmt.Errorf("unsupported architecture %q", manifest.Architecture)
 	}
 	if manifest.Build.ToolchainMode != "native" && manifest.Build.ToolchainMode != "cross" {
@@ -236,7 +249,7 @@ func Validate(manifest Manifest) error {
 		}
 		seen := make(map[string]bool, len(manifest.SupportedArchitectures))
 		for _, architecture := range manifest.SupportedArchitectures {
-			if !contains(architectures[:], architecture) || seen[architecture] {
+			if !slices.Contains(architectures[:], architecture) || seen[architecture] {
 				return fmt.Errorf("invalid supported architecture %q", architecture)
 			}
 			seen[architecture] = true
@@ -252,7 +265,7 @@ func Validate(manifest Manifest) error {
 	}
 	seenTools := make(map[string]bool, len(manifest.Tools))
 	for index, tool := range manifest.Tools {
-		if !contains(toolNames[:], tool.Name) {
+		if !slices.Contains(toolNames[:], tool.Name) {
 			return fmt.Errorf("tool %d has unsupported name %q", index, tool.Name)
 		}
 		if seenTools[tool.Name] {
@@ -304,13 +317,4 @@ func validateTool(manifestArchitecture string, tool Tool) error {
 		return fmt.Errorf("parameters is required and must be an object")
 	}
 	return nil
-}
-
-func contains(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }

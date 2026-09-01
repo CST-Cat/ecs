@@ -1,6 +1,10 @@
 package config
 
-import "ecs/internal/i18n"
+import (
+	"slices"
+
+	"ecs/internal/i18n"
+)
 
 // ipQualitySourceIDs is the canonical set and order of configurable IP
 // quality source identities. Keep presentation names and provider URLs out of
@@ -164,7 +168,7 @@ func defaultBacktraceCityIDs() []string {
 func BacktraceTargetsFor(cities []string) []Endpoint {
 	var targets []Endpoint
 	for _, city := range backtraceCities {
-		if !contains(cities, city.ID) {
+		if !slices.Contains(cities, city.ID) {
 			continue
 		}
 		targets = append(targets, city.Targets...)
@@ -186,7 +190,7 @@ func validBacktraceCarrier(carrier string) bool {
 // ValidateMediaRegions validates the media region selection.
 func ValidateMediaRegions(regions []string) error {
 	for _, region := range regions {
-		if !contains(mediaRegionIDs, region) {
+		if !slices.Contains(mediaRegionIDs, region) {
 			return i18n.Errorf("err.unknownMediaRegion", region)
 		}
 	}
@@ -199,7 +203,7 @@ func ParseBacktraceCities(raw string) ([]string, error) {
 	if len(items) == 0 {
 		return defaultBacktraceCityIDs(), nil
 	}
-	if contains(items, "all") {
+	if slices.Contains(items, "all") {
 		if len(items) > 1 {
 			return nil, i18n.Errorf("err.cityAllCombo")
 		}

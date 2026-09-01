@@ -2,6 +2,7 @@ package probe
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -329,7 +330,7 @@ func parseOSRelease(path string) map[string]string {
 	if err != nil {
 		return values
 	}
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		key, value, ok := strings.Cut(scanner.Text(), "=")
 		if !ok {
@@ -346,7 +347,7 @@ func parseMemInfo(path string) map[string]uint64 {
 	if err != nil {
 		return values
 	}
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) < 2 {

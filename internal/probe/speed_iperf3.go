@@ -460,7 +460,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 		{Key: "threads", Label: "probe.speed.field.threads", Value: model.RawValue(strconv.Itoa(threads))},
 		{Key: "duration", Label: "probe.speed.field.duration", Value: model.RawValue(fmt.Sprintf("%ds", seconds))},
 		{Key: "targets", Label: "probe.speed.field.targets", Value: model.RawValue(strconv.Itoa(len(env.Config.IPerfTargets)))},
-		{Key: "actual_traffic", Label: "probe.speed.field.actual_traffic", Value: model.RawValue(model.FormatBytes(uint64(max64(transferred, 0))))},
+		{Key: "actual_traffic", Label: "probe.speed.field.actual_traffic", Value: model.RawValue(model.FormatBytes(uint64(max(transferred, 0))))},
 		{Key: "arguments", Label: "probe.speed.field.arguments", Value: model.RawValue("iperf3 -4|-6 -c HOST -p PORT -P N -t S -J [-R]")},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", version)
@@ -883,11 +883,4 @@ func formatIPerfPorts(upload, download int) string {
 	default:
 		return "—"
 	}
-}
-
-func max64(left, right int64) int64 {
-	if left > right {
-		return left
-	}
-	return right
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestMemoryProbeMissingStreamReturnsStableResult(t *testing.T) {
 	if result.StartedAt.IsZero() {
 		t.Fatal("missing STREAM result was not finished by memoryProbe.Run")
 	}
-	if !containsString(result.Notes, "probe.memory.stream_missing") {
+	if !slices.Contains(result.Notes, "probe.memory.stream_missing") {
 		t.Fatalf("missing STREAM notes = %v", result.Notes)
 	}
 }
@@ -56,7 +57,7 @@ func TestStreamProducerFailureEmitsStableResultDirectly(t *testing.T) {
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.memory.stream.summary.none" {
 		t.Fatalf("STREAM failure summary = %+v", result.SummaryMessages)
 	}
-	if !containsString(result.Notes, "probe.memory.stream.note.run_failed.1t") || !containsString(result.Notes, "probe.memory.stream.note.single_core") {
+	if !slices.Contains(result.Notes, "probe.memory.stream.note.run_failed.1t") || !slices.Contains(result.Notes, "probe.memory.stream.note.single_core") {
 		t.Fatalf("STREAM failure notes = %v", result.Notes)
 	}
 	for _, table := range result.Tables {
@@ -159,7 +160,7 @@ func TestStreamProducerSuccessfulMultiThreadResult(t *testing.T) {
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.memory.stream.summary.values" || len(result.SummaryMessages[0].Args) != 1 {
 		t.Fatalf("STREAM successful summary = %+v", result.SummaryMessages)
 	}
-	if !containsString(result.Notes, "probe.memory.stream.note.separate_runs") || !containsString(result.Notes, "probe.memory.stream.note.units_normalized") {
+	if !slices.Contains(result.Notes, "probe.memory.stream.note.separate_runs") || !slices.Contains(result.Notes, "probe.memory.stream.note.units_normalized") {
 		t.Fatalf("STREAM successful notes = %v", result.Notes)
 	}
 
@@ -225,7 +226,7 @@ func TestStreamProducerSuccessfulSingleCoreReuse(t *testing.T) {
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.memory.stream.summary.values" {
 		t.Fatalf("STREAM single-core summary = %+v", result.SummaryMessages)
 	}
-	if !containsString(result.Notes, "probe.memory.stream.note.single_core") || !containsString(result.Notes, "probe.memory.stream.note.units_normalized") || containsString(result.Notes, "probe.memory.stream.note.separate_runs") {
+	if !slices.Contains(result.Notes, "probe.memory.stream.note.single_core") || !slices.Contains(result.Notes, "probe.memory.stream.note.units_normalized") || slices.Contains(result.Notes, "probe.memory.stream.note.separate_runs") {
 		t.Fatalf("STREAM single-core notes = %v", result.Notes)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestReverseDNSFixturesPreserveLookupDiagnoses(t *testing.T) {
 			check := checkReverseDNS(context.Background(), test.resolver, ip)
 			result := model.NewResult("rdns", "module.blacklist.title")
 			appendReverseDNSResult(&result, check)
-			if result.Status != test.status || result.Fields[0].Value.Text() != test.ptr || result.Fields[1].Value.Text() != test.fcrdns || len(result.Failures) != test.failures || !containsString(result.Notes, test.note) || test.detail != "" && (len(result.Failures) == 0 || result.Failures[0].Stage != test.stage || !strings.Contains(result.Failures[0].Message, test.detail)) {
+			if result.Status != test.status || result.Fields[0].Value.Text() != test.ptr || result.Fields[1].Value.Text() != test.fcrdns || len(result.Failures) != test.failures || !slices.Contains(result.Notes, test.note) || test.detail != "" && (len(result.Failures) == 0 || result.Failures[0].Stage != test.stage || !strings.Contains(result.Failures[0].Message, test.detail)) {
 				t.Fatalf("rDNS result = status:%s fields:%v failures:%v notes:%v", result.Status, result.Fields, result.Failures, result.Notes)
 			}
 			if len(result.Tables) != 1 || result.Tables[0].RowIdentity != "item" || result.Tables[0].Title != "probe.rdns.table.title" || len(result.Measurements) != 1 || result.Measurements[0].Value != boolValue(check.Confirmed) || result.Measurements[0].Label != "probe.rdns.metric.fcrdns_passed" {

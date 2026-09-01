@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ func LoadFile(path string) (File, error) {
 	if err != nil {
 		return cfg, i18n.Errorf("err.configRead", err)
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, i18n.Errorf("err.configParse", err)
@@ -235,15 +236,6 @@ func ExampleFile() File {
 		IPerfDuration:    "5s",
 		HTTPTimeout:      "10s",
 	}
-}
-
-func contains(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizeList(items []string) []string {

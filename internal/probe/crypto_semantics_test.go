@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestCryptoProducerSingleCoreAndFailureContracts(t *testing.T) {
 	if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 {
 		t.Fatalf("single-core crypto result = status:%s evidence:%+v failures:%+v", result.Status, result.Evidence, result.Failures)
 	}
-	if !containsString(result.Notes, "probe.crypto.note.single_core") || len(result.Tables) != 1 || result.Tables[0].Rows[1][1].Text() != "NW(1W-reused)" || result.Tables[0].Rows[0][5].Text() != "na" {
+	if !slices.Contains(result.Notes, "probe.crypto.note.single_core") || len(result.Tables) != 1 || result.Tables[0].Rows[1][1].Text() != "NW(1W-reused)" || result.Tables[0].Rows[0][5].Text() != "na" {
 		t.Fatalf("single-core crypto contract = notes:%v table:%+v", result.Notes, result.Tables)
 	}
 	if len(result.TextBlocks) != 1 {
@@ -112,7 +113,7 @@ func TestCryptoProducerSingleCoreAndFailureContracts(t *testing.T) {
 	if missing.Title != "module.crypto.title" || missing.Status != model.StatusWarning || len(missing.Failures) != 1 || missing.Failures[0].Category != model.FailureToolMissing || len(missing.SummaryMessages) != 1 || missing.SummaryMessages[0].Key != "probe.crypto.summary.none" {
 		t.Fatalf("missing crypto result = %+v", missing)
 	}
-	if !containsString(missing.Notes, "probe.crypto.note.tool_missing") {
+	if !slices.Contains(missing.Notes, "probe.crypto.note.tool_missing") {
 		t.Fatalf("missing crypto notes = %v", missing.Notes)
 	}
 }
@@ -137,7 +138,7 @@ func TestCryptoProducerVersionMismatchKeepsStableContract(t *testing.T) {
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.crypto.summary.version_mismatch" {
 		t.Fatalf("crypto version mismatch summary = %+v", result.SummaryMessages)
 	}
-	if !containsString(result.Notes, "probe.crypto.note.version_mismatch") {
+	if !slices.Contains(result.Notes, "probe.crypto.note.version_mismatch") {
 		t.Fatalf("crypto version mismatch notes = %v", result.Notes)
 	}
 	if len(result.Fields) != 3 {

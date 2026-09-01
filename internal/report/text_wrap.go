@@ -88,17 +88,3 @@ func formatFloat(value float64) string {
 		return fmt.Sprintf("%.2f", value)
 	}
 }
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

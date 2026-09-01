@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -364,7 +365,7 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 
 	units := make([]string, 0, 2)
 	for _, run := range runs {
-		if run.Sample.Unit == "" || containsString(units, run.Sample.Unit) {
+		if run.Sample.Unit == "" || slices.Contains(units, run.Sample.Unit) {
 			continue
 		}
 		units = append(units, run.Sample.Unit)
@@ -597,13 +598,4 @@ func streamVersion(runs []streamMemoryRun) string {
 		}
 	}
 	return "unknown"
-}
-
-func containsString(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
 }

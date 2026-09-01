@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestDefaultsAndProfiles(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(implicit, standard) {
 		t.Fatalf("empty profile defaults = %+v, want standard defaults %+v (err=%v)", implicit, standard, err)
 	}
-	if len(full.Modules) <= len(standard.Modules) || contains(standard.Modules, "network") || !contains(full.Modules, "network") {
+	if len(full.Modules) <= len(standard.Modules) || slices.Contains(standard.Modules, "network") || !slices.Contains(full.Modules, "network") {
 		t.Fatalf("profile module sets = standard:%v full:%v", standard.Modules, full.Modules)
 	}
 	_, err = Defaults("unknown")

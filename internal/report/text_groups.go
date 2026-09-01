@@ -26,7 +26,7 @@ func (r *textRenderer) renderGroup(group textGroup) {
 		heading = fmt.Sprintf("%d. %s", r.subsectionNo, group.title)
 	}
 	r.line(r.palette.AccentBold("  " + heading))
-	r.line(r.palette.Dim("  " + strings.Repeat("-", maxInt(0, r.width-2))))
+	r.line(r.palette.Dim("  " + strings.Repeat("-", max(0, r.width-2))))
 	fields := group.fields
 	measurements := group.measurements
 	if len(fields) > 0 {
@@ -227,13 +227,13 @@ func defaultResultGroup(resultTitle string) string {
 
 // fields 渲染 label: value 列表。
 func (r *textRenderer) fields(items []model.Field) {
-	labelLimit := minInt(28, maxInt(6, r.width/3))
+	labelLimit := min(28, max(6, r.width/3))
 	width := 0
 	for _, rawItem := range items {
 		item := displayField(rawItem)
-		width = maxInt(width, textwidth.Width(item.Label))
+		width = max(width, textwidth.Width(item.Label))
 	}
-	width = minInt(width, labelLimit)
+	width = min(width, labelLimit)
 	for _, rawItem := range items {
 		item := displayField(rawItem)
 		value := displayValue(item.Value)
@@ -241,7 +241,7 @@ func (r *textRenderer) fields(items []model.Field) {
 		prefix := "  " + r.palette.Label(label) + "  "
 		available := r.width - textwidth.Width(prefix)
 		if available < 1 {
-			available = maxInt(1, r.width-2)
+			available = max(1, r.width-2)
 		}
 		valueLines := wrapText(value, available)
 		if len(valueLines) == 0 {

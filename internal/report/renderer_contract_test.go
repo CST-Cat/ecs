@@ -576,7 +576,7 @@ func assertTextTokenStyle(t *testing.T, output, token string, wantStyled bool) {
 		}
 		index := offset + relative
 		if ansiActiveAt(output[:index]) != wantStyled {
-			t.Fatalf("text token %q styled=%v, want %v in %q", token, ansiActiveAt(output[:index]), wantStyled, output[index:minInt(len(output), index+len(token)+8)])
+			t.Fatalf("text token %q styled=%v, want %v in %q", token, ansiActiveAt(output[:index]), wantStyled, output[index:min(len(output), index+len(token)+8)])
 		}
 		found = true
 		offset = index + len(token)

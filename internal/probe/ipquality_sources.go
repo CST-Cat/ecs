@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -563,7 +564,7 @@ func fetchIPQS(ctx context.Context, env Environment, communityClient *http.Clien
 	readerClient := env.HTTPClient
 	readerAccess := networkChannelJina
 	if proxyEnvironmentEnabled() {
-		readerClient = newProxyFallbackHTTPClient(maxDuration(env.Config.HTTPTimeout, 25*time.Second))
+		readerClient = newProxyFallbackHTTPClient(max(env.Config.HTTPTimeout, 25*time.Second))
 		defer readerClient.CloseIdleConnections()
 		readerAccess = networkChannelJinaProxy
 	}
@@ -1036,7 +1037,7 @@ func hostAllowed(host string, allowed []string) bool {
 }
 
 func decodeJSON(body []byte, destination any) error {
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(destination); err != nil {
 		return errors.New("响应不是有效 JSON")
 	}

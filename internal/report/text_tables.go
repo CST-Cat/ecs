@@ -17,17 +17,17 @@ import (
 // 毫无意义，单独一项也没有"相对"可言。
 func (r *textRenderer) measurements(items []model.Measurement) {
 	groups := groupComparable(items)
-	labelLimit := minInt(30, maxInt(6, r.width*3/10))
-	valueLimit := minInt(26, maxInt(6, r.width/4))
+	labelLimit := min(30, max(6, r.width*3/10))
+	valueLimit := min(26, max(6, r.width/4))
 	labelWidth, valueWidth := 0, 0
 	for _, rawItem := range items {
 		item := displayMeasurement(rawItem)
 		display := displayValue(item.Display)
-		labelWidth = maxInt(labelWidth, textwidth.Width(item.Label))
-		valueWidth = maxInt(valueWidth, textwidth.Width(display))
+		labelWidth = max(labelWidth, textwidth.Width(item.Label))
+		valueWidth = max(valueWidth, textwidth.Width(display))
 	}
-	labelWidth = minInt(labelWidth, labelLimit)
-	valueWidth = minInt(valueWidth, valueLimit)
+	labelWidth = min(labelWidth, labelLimit)
+	valueWidth = min(valueWidth, valueLimit)
 	for _, rawItem := range items {
 		item := displayMeasurement(rawItem)
 		display := displayValue(item.Display)
@@ -45,11 +45,11 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		bar := ""
 		if group, ok := groups[item.Key]; ok {
 			available := r.width - textwidth.Width(base) - 2
-			barSize := minInt(adaptiveBarWidth(r.width, barWidth), maxInt(0, available-textwidth.Width(rating)))
+			barSize := min(adaptiveBarWidth(r.width, barWidth), max(0, available-textwidth.Width(rating)))
 			if rating != "" && barSize < 4 {
 				separateRating = true
 				rating = ""
-				barSize = minInt(adaptiveBarWidth(r.width, barWidth), maxInt(0, available))
+				barSize = min(adaptiveBarWidth(r.width, barWidth), max(0, available))
 			}
 			if barSize >= 2 {
 				bar = "  " + r.palette.BarRelativeRange(comparableValue(item, group), group.min, group.max, barSize)
@@ -74,7 +74,7 @@ func (r *textRenderer) measurements(items []model.Measurement) {
 		// be audited against the structured JSON artifact.
 		if !r.compact && item.Method != "" {
 			prefix := "      " + i18n.T("report.method") + i18n.T("punct.colon")
-			available := maxInt(1, r.width-textwidth.Width(prefix))
+			available := max(1, r.width-textwidth.Width(prefix))
 			lines := wrapText(item.Method, available)
 			for index, methodLine := range lines {
 				if index == 0 {
@@ -486,7 +486,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 				continue
 			}
 			group := tableBarGroup{semantic: semantics[column], unit: unit, higher: higher}
-			valueWidths[column] = maxInt(valueWidths[column], textwidth.Width(row[column]))
+			valueWidths[column] = max(valueWidths[column], textwidth.Width(row[column]))
 			if value == 0 {
 				entry := stats[group]
 				entry.zero = true
@@ -517,7 +517,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 	}
 	cellBarWidth := 8
 	if len(requestedBarWidth) > 0 {
-		cellBarWidth = maxInt(0, requestedBarWidth[0])
+		cellBarWidth = max(0, requestedBarWidth[0])
 	}
 	barRows := make([][]string, len(rows))
 	for rowIndex, original := range rows {
@@ -703,7 +703,7 @@ func (r *textRenderer) tableWithStyles(columns []string, rows [][]string, rightA
 	for _, row := range rows {
 		for index, cell := range row {
 			if index < len(widths) {
-				widths[index] = maxInt(widths[index], textwidth.Width(cell))
+				widths[index] = max(widths[index], textwidth.Width(cell))
 			}
 		}
 	}
@@ -727,7 +727,7 @@ func (r *textRenderer) tableWithStyles(columns []string, rows [][]string, rightA
 			total += 2
 		}
 	}
-	r.line(r.palette.Dim("  " + strings.Repeat("─", maxInt(0, minInt(total-2, r.width-2)))))
+	r.line(r.palette.Dim("  " + strings.Repeat("─", max(0, min(total-2, r.width-2)))))
 
 	for rowIndex, row := range rows {
 		var line strings.Builder
@@ -776,10 +776,10 @@ func tableNeedsStackedLayout(width, columns int) bool {
 }
 
 func (r *textRenderer) stackedTableWithStyles(columns []string, rows [][]string, styles [][]func(string) string) {
-	valueWidth := maxInt(1, r.width-4)
+	valueWidth := max(1, r.width-4)
 	for rowIndex, row := range rows {
 		if rowIndex > 0 {
-			r.line(r.palette.Dim("  " + strings.Repeat("·", maxInt(1, minInt(8, r.width-2)))))
+			r.line(r.palette.Dim("  " + strings.Repeat("·", max(1, min(8, r.width-2)))))
 		}
 		for columnIndex, column := range columns {
 			value := ""
@@ -804,7 +804,7 @@ func shrinkColumns(widths []int, budget int) {
 	}
 	minimum := 4
 	if budget < len(widths)*minimum && len(widths) > 0 {
-		minimum = maxInt(1, budget/len(widths))
+		minimum = max(1, budget/len(widths))
 	}
 	total := 0
 	for _, width := range widths {

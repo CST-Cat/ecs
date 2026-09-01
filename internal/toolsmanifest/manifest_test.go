@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -144,4 +145,42 @@ func TestManifestParsingAndValidationDiagnostics(t *testing.T) {
 			t.Errorf("%s error = %v, want %q", test.name, err, test.marker)
 		}
 	}
+}
+
+// TestFieldListsMatchStructTags keeps the allowlists used by Parse in sync with
+// the struct definitions. The lists exist so a rejected field can name the
+// object it belongs to; this test removes the risk that a new struct field is
+// silently accepted (or an old one silently rejected) because only one of the
+// two places was edited.
+func TestFieldListsMatchStructTags(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		sample any
+		fields []string
+	}{
+		{name: "manifest", sample: Manifest{}, fields: manifestFields},
+		{name: "build", sample: BuildMetadata{}, fields: buildFields},
+		{name: "build.validation", sample: ValidationMetadata{}, fields: validationFields},
+		{name: "tool", sample: Tool{}, fields: toolFields},
+	} {
+		want := jsonTagNames(reflect.TypeOf(test.sample))
+		got := append([]string(nil), test.fields...)
+		sort.Strings(want)
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s field list = %v, struct tags = %v", test.name, got, want)
+		}
+	}
+}
+
+func jsonTagNames(structType reflect.Type) []string {
+	names := make([]string, 0, structType.NumField())
+	for index := 0; index < structType.NumField(); index++ {
+		tag := structType.Field(index).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		names = append(names, strings.Split(tag, ",")[0])
+	}
+	return names
 }
