@@ -1,7 +1,7 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.7.20` 及后续 `Unreleased` 的主要变化。
+`v0.1.0` 到 `v0.7.21` 及后续 `Unreleased` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -9,7 +9,14 @@
 
 ## Unreleased
 
+## 0.7.21 — 2026-09-01
+
 - 合并重复了两遍的固定语料构建：`build_corpus.sh` 与 `build_tools.sh` 此前各写一遍下载、解压、按 `lock.json` 顺序拼接和校验，现在统一由 `scripts/lib/corpus.sh` 的 `ecs_build_silesia_corpus` 实现；带重试的下载加摘要校验提到 `scripts/lib/common.sh` 的 `ecs_download_sha256`，`build_tools.sh` 不再自带一份。
+- 清理失效注释与死代码：删除指向已不存在机制的 NOTICE 承诺（manifest SHA-256 字段、stage digest 绑定）、指向不存在 `BarRelative` 的 scale 注释、游离的已删 TL 函数注释等；删除生产零调用的 `Architectures`/`ToolNames`、`MaskIPsInText` 及其级联死代码、`describeCPUAllowance`、三个零引用导出常量、从不读取的 `appCategory.Label` 等，仅包内使用的符号降为未导出。
+- 修复报告文本的语言边界泄漏并加回归测试：生产端多处把该用 `KeyValue` 的地方写成 `RawValue`，导致中文原样出现在英文报告；`Measurement.Unit` 7 处「项」改为机器单位 `count`，`dnsblZone.Purpose`/`appTarget.Note` 等改为稳定 key，`latency.go` 用 `i18n.JoinList` 替换硬编码顿号。新增 `i18n_contract_test.go` 以 AST 扫描全部探针源码，拒绝中文 `RawValue` 与非白名单机器单位，新增探针自动被覆盖；i18n catalog 由 1808 增至 1842 个 key，中英仍完全对齐。
+- 统一到仓库里已有的写法：`bytes.NewReader` 替换会完整复制输入的 `strings.NewReader(string(data))`，Go 内建 `max/min` 替换早期手写的 `max64`/`minInt` 等 helper，`slices.Contains` 替换三份逐字相同的线性查找；`toolsmanifest` 未知字段检查保持手工实现以保证报错指出具体层级，四个字段列表提成具名变量并用反射测试锁定与 struct tag 一致。
+- 让清洗与着色覆盖各自声称的全部边界：清洗此前只在 text/compare_text 上调用，markdown/html 完全没走，残留 ESC 与 C0/C1 会随 `.md`/`.html` 被 `cat` 直接输出到终端——改为在 `markdownReport`/`htmlReport` 内部调用，并新增 `TestAllRenderersStripControlSequences` 锁住三种格式；`Terminal` 改存 `termcolor.Palette` 档位信息，六处硬编码裸 ANSI 换成语义色，抬头与正文走同一条量化路径。
+- 消除结构性冗余，把维护性隐患变成机器可验证：删除 `*url.Error` 分支等不可达代码、termcolor 两份 escape 拷贝、重复分支体；`RedactedCopy` 手工枚举的 15 处深拷贝改为反射测试遍历整棵报告比对底层内存，`tailText`/`compactError` 字节截断改为退到 rune 边界，`toolsmanifest` 校验的 map 遍历改切片保证报错字段名确定，删除生产代码从不产出的 `isUnavailableSystemValue` 并加 AST 测试锁定；`config.inferEndpointFamily` 导出为 `InferEndpointFamily`，probe 改为委托，地址→协议族判定只在一处定义。
 
 ## 0.7.20 — 2026-08-31
 
