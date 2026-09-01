@@ -62,8 +62,8 @@ func Text(data model.Report, options TextOptions) string {
 }
 
 func textReport(data model.Report, options TextOptions) string {
-	data = terminalSafeCopy(data)
-	options.Score = terminalSafeCopy(options.Score)
+	data = sanitizedCopy(data)
+	options.Score = sanitizedCopy(options.Score)
 	renderer := &textRenderer{
 		palette: termcolor.Palette{Level: options.Color},
 		score:   options.Score,

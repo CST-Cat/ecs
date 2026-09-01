@@ -24,6 +24,8 @@ func Markdown(data model.Report, scored *score.Report) string {
 // keys are resolved at the individual output boundary; raw evidence is not
 // copied through a localized report tree.
 func markdownReport(data model.Report, scored *score.Report) string {
+	data = sanitizedCopy(data)
+	scored = sanitizedCopy(scored)
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")

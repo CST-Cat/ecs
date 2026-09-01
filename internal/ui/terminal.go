@@ -22,7 +22,7 @@ import (
 
 type Terminal struct {
 	out              io.Writer
-	color            bool
+	palette          termcolor.Palette
 	tty              bool
 	progressTTY      bool
 	progressInterval time.Duration
@@ -47,13 +47,14 @@ func New(out io.Writer, noColor bool) *Terminal {
 }
 
 // NewWithColor 创建一个终端，显式指定终端报告的颜色能力。
-// Header/Error 使用一致的 ANSI 层次样式；完整报告由 reporter.Text 按
-// termcolor.Level 渲染，因此 --color 的层级不会在摘要和正文之间分叉。
+// 抬头、错误与完整报告共用同一个 termcolor.Palette，因此 --color 的层级不会
+// 在摘要和正文之间分叉：真彩色终端上两边都是 24 位色，256 色终端上都会量化
+// 到调色板，无色时都只剩文本。
 func NewWithColor(out io.Writer, level termcolor.Level) *Terminal {
 	tty := isTerminal(out)
 	return &Terminal{
 		out:              out,
-		color:            level != termcolor.LevelNone,
+		palette:          termcolor.Palette{Level: level},
 		tty:              tty,
 		progressTTY:      progressTTYFromEnvironment(tty),
 		progressInterval: time.Second,
@@ -372,8 +373,8 @@ func formatElapsed(elapsed time.Duration) string {
 }
 
 func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
-	terminal.line(terminal.style("1;36", "ecs") + " " + terminal.style("2", buildinfo.Version) + "  " + i18n.T("cli.tagline"))
-	terminal.line(terminal.style("2", i18n.T("term.subtitle")))
+	terminal.line(terminal.palette.AccentBold("ecs") + " " + terminal.palette.Dim(buildinfo.Version) + "  " + i18n.T("cli.tagline"))
+	terminal.line(terminal.palette.Dim(i18n.T("term.subtitle")))
 	terminal.line("")
 	terminal.line(fmt.Sprintf("%s %-10s  %s %d  %s %s", i18n.T("term.profileLine"), cfg.Profile, i18n.T("term.moduleCount"), len(cfg.Modules), i18n.T("term.estimate"), estimate.DurationText))
 	ipVersion := cfg.IPVersion
@@ -387,7 +388,7 @@ func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
 	}
 	terminal.line(fmt.Sprintf("%s  %s %d MiB  %s %s", i18n.T("term.budget"), i18n.T("term.tempDisk"), estimate.DiskMiB, i18n.T("term.networkUsage"), networkBudget))
 	for _, note := range estimate.Notes {
-		terminal.line(terminal.style("33", i18n.T("term.hint")) + " " + note)
+		terminal.line(terminal.palette.Warning(i18n.T("term.hint")) + " " + note)
 	}
 	terminal.line("")
 }
@@ -396,10 +397,10 @@ func (terminal *Terminal) Header(cfg config.Runtime, estimate config.Estimate) {
 // data 是机器报告；结构化 measurements、fields 和 tables 由 reporter.Text 在
 // 输出边界解析稳定 key。终端文本报告有意隐藏原始 text blocks、冗余 notes 与
 // 方法学长说明，避免把实现细节混入模板正文。
-func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report, color termcolor.Level) {
+func (terminal *Terminal) FullReport(data model.Report, files map[string]string, scored *score.Report) {
 	terminal.line("")
 	text := reporter.Text(data, reporter.TextOptions{
-		Color: color, Score: scored, Compact: true,
+		Color: terminal.palette.Level, Score: scored, Compact: true,
 		Width: terminal.progressColumns(),
 	})
 	_, _ = io.WriteString(terminal.out, text)
@@ -415,7 +416,7 @@ func (terminal *Terminal) printFiles(files map[string]string) {
 		return
 	}
 	terminal.line("")
-	terminal.line(terminal.style("1", i18n.T("term.localReports")))
+	terminal.line(terminal.palette.Bold(i18n.T("term.localReports")))
 	formats := make([]string, 0, len(files))
 	for format := range files {
 		formats = append(formats, format)
@@ -442,7 +443,7 @@ func (terminal *Terminal) printFiles(files map[string]string) {
 func (terminal *Terminal) printNoUpload() {
 	terminal.line("")
 	for _, line := range wrapTerminalText(i18n.T("term.noUpload"), terminal.progressColumns()) {
-		terminal.line(terminal.style("2", line))
+		terminal.line(terminal.palette.Dim(line))
 	}
 }
 
@@ -477,18 +478,11 @@ func wrapTerminalText(value string, width int) []string {
 }
 
 func (terminal *Terminal) Error(format string, values ...any) {
-	terminal.line(terminal.style("31", i18n.T("cli.error")) + " " + fmt.Sprintf(format, values...))
+	terminal.line(terminal.palette.Error(i18n.T("cli.error")) + " " + fmt.Sprintf(format, values...))
 }
 
 func (terminal *Terminal) line(value string) {
 	fmt.Fprintln(terminal.out, value)
-}
-
-func (terminal *Terminal) style(code, value string) string {
-	if !terminal.color {
-		return value
-	}
-	return "\x1b[" + code + "m" + value + "\x1b[0m"
 }
 
 func isTerminal(writer io.Writer) bool {

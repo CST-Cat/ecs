@@ -18,7 +18,7 @@ const comparisonBarWidth = 12
 // report.  The layout grows from a paired table to a matrix, then to ranked
 // vertical blocks when column count would stop being readable.
 func ComparisonText(data comparison.Report, color termcolor.Level) string {
-	data = terminalSafeCopy(data)
+	data = sanitizedCopy(data)
 	r := &comparisonTextRenderer{
 		textRenderer: textRenderer{palette: termcolor.Palette{Level: color}, width: textWidth},
 		data:         data,
@@ -327,7 +327,7 @@ func (r *comparisonTextRenderer) issues(issues []comparison.MetricIssue) {
 func (r *comparisonTextRenderer) noticeBlock() {
 	r.prefaceTitle(i18n.T("report.notices"))
 	for _, notice := range r.data.Notices {
-		// Dynamic canonical notice arguments are decoded after terminalSafeCopy;
+		// Dynamic canonical notice arguments are decoded after sanitizedCopy;
 		// sanitize the localized result once more so untrusted version text cannot
 		// reintroduce terminal controls.
 		r.note(sanitizeTerminalText(localizeComparisonNotice(notice)))

@@ -27,7 +27,7 @@ func TestTextSanitizesRepresentativeControlWithoutMutatingInput(t *testing.T) {
 	}) {
 		t.Fatalf("terminal output retained a control character:\n%s", output)
 	}
-	safe := terminalSafeCopy(data)
+	safe := sanitizedCopy(data)
 	if raw, ok := safe.Results[0].Fields[0].Value.Raw(); !ok || raw != sanitized {
 		t.Fatalf("sanitized raw value variant = %q, %v; want %q, raw variant", raw, ok, sanitized)
 	}

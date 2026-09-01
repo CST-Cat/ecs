@@ -7,12 +7,18 @@ import (
 	"ecs/internal/model"
 )
 
-// terminalSafeCopy returns a deep copy whose strings cannot carry terminal
+// sanitizedCopy returns a deep copy whose strings cannot carry terminal
 // control sequences. Report fields can contain command output, remote labels,
-// URLs and file names, so none of them are trusted at the text-rendering
-// boundary. Map keys are sanitized as well because some renderers display
-// parameter names.
-func terminalSafeCopy[T any](value T) T {
+// URLs and file names, so none of them are trusted at any rendering boundary.
+// Map keys are sanitized as well because some renderers display parameter
+// names.
+//
+// Every renderer runs this, not just the terminal one: a Markdown or HTML
+// report is routinely read with cat or grep, where a surviving escape sequence
+// executes just as it would in the text report. html/template escapes HTML
+// metacharacters and markdownEscape escapes Markdown ones, but neither removes
+// ESC or the remaining C0/C1 controls.
+func sanitizedCopy[T any](value T) T {
 	cloned := cloneTerminalValue(reflect.ValueOf(value))
 	if !cloned.IsValid() {
 		var zero T

@@ -32,6 +32,8 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 // htmlReport renders the machine report directly; stable keys are resolved by
 // the template functions at the individual presentation fields.
 func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
+	data = sanitizedCopy(data)
+	scored = sanitizedCopy(scored)
 	functions := template.FuncMap{
 		"t":             i18n.T,
 		"displayKey":    displayKey,

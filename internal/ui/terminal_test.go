@@ -53,7 +53,7 @@ func TestTerminalGlueAndProgressPolicy(t *testing.T) {
 	terminal := NewWithColor(&output, termcolor.LevelNone)
 	terminal.Header(config.Runtime{Profile: "standard", IPVersion: config.IPVersionAuto, Modules: []string{"system"}}, config.Estimate{DurationText: "1s", DiskMiB: 2, NetworkMiB: -1})
 	report := model.Report{Summary: model.Summary{Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}}}
-	terminal.FullReport(report, map[string]string{"md": "/tmp/z-report.md", "json": "/tmp/a-report.json"}, nil, termcolor.LevelNone)
+	terminal.FullReport(report, map[string]string{"md": "/tmp/z-report.md", "json": "/tmp/a-report.json"}, nil)
 	terminal.Error("failed: %s", "fixture")
 	text := output.String()
 	for _, marker := range []string{"standard", "1s", "1 tests completed", "a-report.json", "z-report.md", "fixture", i18n.T("term.noUpload")} {

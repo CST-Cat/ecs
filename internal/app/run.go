@@ -99,7 +99,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		terminal.Error("%s: %v", i18n.T("term.writeFailed"), writeErr)
 		return 1
 	}
-	terminal.FullReport(data, files, scored, terminalColor)
+	terminal.FullReport(data, files, scored)
 	if data.Run.Canceled {
 		return 130
 	}
