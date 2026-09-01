@@ -19,6 +19,8 @@ var probeBGPChinese = map[string]string{
 	"probe.bgp.note.longest_match":           "查询按出口 IP 的最长匹配前缀返回；精确 /32 或 /128 没有单独观测时可能显示已发布的父前缀。",
 	"probe.bgp.note.as_path_scope":           "AS_PATH 中的 ASN 来自公开样本，不代表 VPS 与这些 ASN 直接互联；观测 peer 也不等于提供商直接互联。",
 	"probe.bgp.note.no_observation":          "没有公共观测不等于前缀没有发布，可能由查询、RIB 收敛、过滤或覆盖范围造成。",
+	"probe.bgp.value.egress_unavailable":     "出口 IP 不可用",
+	"probe.bgp.value.no_prefix":              "未找到匹配前缀",
 }
 
 var probeBGPEnglish = map[string]string{
@@ -40,4 +42,6 @@ var probeBGPEnglish = map[string]string{
 	"probe.bgp.note.longest_match":           "The query returns the longest matching prefix for the egress IP; when no exact /32 or /128 observation exists, a published parent prefix may be shown.",
 	"probe.bgp.note.as_path_scope":           "ASNs in AS_PATH come from public samples and do not prove direct peering with the VPS; an observing peer is not the provider's direct peer either.",
 	"probe.bgp.note.no_observation":          "No public observation does not prove that a prefix is unpublished; query errors, RIB convergence, filtering, or coverage may be responsible.",
+	"probe.bgp.value.egress_unavailable":     "Egress IP unavailable",
+	"probe.bgp.value.no_prefix":              "No matching prefix found",
 }

@@ -51,6 +51,7 @@ var probeCryptoChinese = map[string]string{
 	"probe.crypto.note.tool_missing":                "固定 OpenSSL binary 缺失；缺失目标与诊断保存在结构化 failure evidence。",
 	"probe.crypto.note.version_mismatch":            "检测到的 OpenSSL 版本不符合固定口径；检测值与要求版本见结构化字段。",
 	"probe.crypto.note.run_failure":                 "至少一个 OpenSSL speed benchmark 运行或解析失败；worker 上下文与原始诊断保存在结构化 failure evidence。",
+	"probe.crypto.value.configuration":              "OPENSSL_CONF=/dev/null；空 modules/engines 目录；CPU capability 自动探测",
 }
 
 var probeCryptoEnglish = map[string]string{
@@ -104,4 +105,5 @@ var probeCryptoEnglish = map[string]string{
 	"probe.crypto.note.tool_missing":                "The fixed OpenSSL binary is missing; the missing target and diagnostic are preserved in structured failure evidence.",
 	"probe.crypto.note.version_mismatch":            "The detected OpenSSL version does not match the fixed contract; the detected and required versions are stored in structured fields.",
 	"probe.crypto.note.run_failure":                 "At least one OpenSSL speed benchmark failed to run or parse; worker context and raw diagnostics are preserved in structured failure evidence.",
+	"probe.crypto.value.configuration":              "OPENSSL_CONF=/dev/null; empty modules/engines directories; CPU capability auto-detected",
 }

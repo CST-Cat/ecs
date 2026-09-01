@@ -173,7 +173,7 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 		{Key: "cpu_allowance", Label: "probe.crypto.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
 		{Key: "timing", Label: "probe.crypto.field.timing", Value: model.RawValue("-elapsed (wall clock)")},
 		{Key: "machine_output", Label: "probe.crypto.field.machine_output", Value: model.RawValue("-mr")},
-		{Key: "configuration", Label: "probe.crypto.field.configuration", Value: model.RawValue("OPENSSL_CONF=/dev/null；空 modules/engines 目录；CPU capability 自动探测")},
+		{Key: "configuration", Label: "probe.crypto.field.configuration", Value: model.KeyValue("probe.crypto.value.configuration")},
 	}
 	addComparisonParameter(result.Methodology.Parameters, "tool_version", versionOutput)
 	addComparisonParameter(result.Methodology.Parameters, "method_version", openSSLMethodVersion)

@@ -193,11 +193,13 @@ func TestBGPProducerCachedFailureAndNoObservationContracts(t *testing.T) {
 		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.bgp.summary.values" || result.SummaryMessages[0].Args[0] != "0" {
 			t.Fatalf("BGP no-observation summary = %+v", result.SummaryMessages)
 		}
-		if len(result.Tables[0].Rows) != 1 || result.Tables[0].Rows[0][0].Text() != "IPv4" || result.Tables[0].Rows[0][1].Text() != "未找到匹配前缀" {
+		if len(result.Tables[0].Rows) != 1 || result.Tables[0].Rows[0][0].Text() != "IPv4" || result.Tables[0].Rows[0][1].Text() != "probe.bgp.value.no_prefix" {
 			t.Fatalf("BGP no-observation table rows = %+v", result.Tables[0].Rows)
 		}
-		if _, ok := result.Tables[0].Rows[0][1].Raw(); !ok {
-			t.Fatalf("BGP no-observation row should remain raw = %+v", result.Tables[0].Rows[0])
+		// "no matching prefix" is an ECS conclusion, not provider output, so it
+		// carries a stable key that the renderer resolves per language.
+		if _, ok := result.Tables[0].Rows[0][1].Key(); !ok {
+			t.Fatalf("BGP no-observation row should carry a stable key = %+v", result.Tables[0].Rows[0])
 		}
 	})
 }

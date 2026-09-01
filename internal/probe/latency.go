@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
 
@@ -320,7 +321,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 		// 既无法翻译也无法在不同机器之间对照。
 		result.Fields = append(result.Fields, model.Field{
 			Key: "tcp_intercepted_targets", Label: "probe.latency.field.tcp_intercepted_targets",
-			Value: model.RawValue(strings.Join(intercepted, "、")),
+			Value: model.RawValue(i18n.JoinList(intercepted)),
 		})
 	}
 	result.Notes = latencyNotes(result)

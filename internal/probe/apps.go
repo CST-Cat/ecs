@@ -74,26 +74,26 @@ type appTarget struct {
 // 其余条目全部于 2026-08-01 实测可解析、可建连。
 func appTargets() []appTarget {
 	return []appTarget{
-		{Category: appCategoryTelegram, Name: "DC1 Miami", Host: "pluto.web.telegram.org", Port: 443, Note: "美洲"},
-		{Category: appCategoryTelegram, Name: "DC2 Amsterdam", Host: "venus.web.telegram.org", Port: 443, Note: "欧洲"},
-		{Category: appCategoryTelegram, Name: "DC3 Miami", Host: "aurora.web.telegram.org", Port: 443, Note: "美洲"},
-		{Category: appCategoryTelegram, Name: "DC4 Amsterdam", Host: "vesta.web.telegram.org", Port: 443, Note: "欧洲"},
-		{Category: appCategoryTelegram, Name: "DC5 Singapore", Host: "flora.web.telegram.org", Port: 443, Note: "亚洲"},
+		{Category: appCategoryTelegram, Name: "DC1 Miami", Host: "pluto.web.telegram.org", Port: 443, Note: "probe.apps.note.region_americas"},
+		{Category: appCategoryTelegram, Name: "DC2 Amsterdam", Host: "venus.web.telegram.org", Port: 443, Note: "probe.apps.note.region_europe"},
+		{Category: appCategoryTelegram, Name: "DC3 Miami", Host: "aurora.web.telegram.org", Port: 443, Note: "probe.apps.note.region_americas"},
+		{Category: appCategoryTelegram, Name: "DC4 Amsterdam", Host: "vesta.web.telegram.org", Port: 443, Note: "probe.apps.note.region_europe"},
+		{Category: appCategoryTelegram, Name: "DC5 Singapore", Host: "flora.web.telegram.org", Port: 443, Note: "probe.apps.note.region_asia"},
 
-		{Category: appCategoryCodeAndImages, Name: "GitHub", Host: "github.com", Port: 443, Note: "git 与发布下载"},
-		{Category: appCategoryCodeAndImages, Name: "GitHub Raw", Host: "raw.githubusercontent.com", Port: 443, Note: "脚本与原始文件"},
-		{Category: appCategoryCodeAndImages, Name: "Docker Hub", Host: "registry-1.docker.io", Port: 443, Note: "容器镜像"},
-		{Category: appCategoryCodeAndImages, Name: "Google GCR", Host: "gcr.io", Port: 443, Note: "容器镜像"},
+		{Category: appCategoryCodeAndImages, Name: "GitHub", Host: "github.com", Port: 443, Note: "probe.apps.note.git_and_releases"},
+		{Category: appCategoryCodeAndImages, Name: "GitHub Raw", Host: "raw.githubusercontent.com", Port: 443, Note: "probe.apps.note.raw_files"},
+		{Category: appCategoryCodeAndImages, Name: "Docker Hub", Host: "registry-1.docker.io", Port: 443, Note: "probe.apps.note.container_images"},
+		{Category: appCategoryCodeAndImages, Name: "Google GCR", Host: "gcr.io", Port: 443, Note: "probe.apps.note.container_images"},
 
-		{Category: appCategoryRepositories, Name: "npm", Host: "registry.npmjs.org", Port: 443, Note: "Node 包"},
-		{Category: appCategoryRepositories, Name: "PyPI", Host: "pypi.org", Port: 443, Note: "Python 包"},
-		{Category: appCategoryRepositories, Name: "Go Proxy", Host: "proxy.golang.org", Port: 443, Note: "Go 模块"},
-		{Category: appCategoryRepositories, Name: "Debian", Host: "deb.debian.org", Port: 443, Note: "APT 源"},
-		{Category: appCategoryRepositories, Name: "Ubuntu", Host: "archive.ubuntu.com", Port: 80, Note: "APT 源"},
-		{Category: appCategoryRepositories, Name: "Alpine", Host: "dl-cdn.alpinelinux.org", Port: 443, Note: "APK 源"},
+		{Category: appCategoryRepositories, Name: "npm", Host: "registry.npmjs.org", Port: 443, Note: "probe.apps.note.node_packages"},
+		{Category: appCategoryRepositories, Name: "PyPI", Host: "pypi.org", Port: 443, Note: "probe.apps.note.python_packages"},
+		{Category: appCategoryRepositories, Name: "Go Proxy", Host: "proxy.golang.org", Port: 443, Note: "probe.apps.note.go_modules"},
+		{Category: appCategoryRepositories, Name: "Debian", Host: "deb.debian.org", Port: 443, Note: "probe.apps.note.apt_repository"},
+		{Category: appCategoryRepositories, Name: "Ubuntu", Host: "archive.ubuntu.com", Port: 80, Note: "probe.apps.note.apt_repository"},
+		{Category: appCategoryRepositories, Name: "Alpine", Host: "dl-cdn.alpinelinux.org", Port: 443, Note: "probe.apps.note.apk_repository"},
 
-		{Category: appCategoryInfrastructure, Name: "Let's Encrypt", Host: "acme-v02.api.letsencrypt.org", Port: 443, Note: "免费证书签发"},
-		{Category: appCategoryInfrastructure, Name: "Cloudflare", Host: "cloudflare.com", Port: 443, Note: "CDN 与 DNS"},
+		{Category: appCategoryInfrastructure, Name: "Let's Encrypt", Host: "acme-v02.api.letsencrypt.org", Port: 443, Note: "probe.apps.note.certificate_issuance"},
+		{Category: appCategoryInfrastructure, Name: "Cloudflare", Host: "cloudflare.com", Port: 443, Note: "probe.apps.note.cdn_and_dns"},
 	}
 }
 
@@ -180,7 +180,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 			table.Rows = append(table.Rows, []model.Value{
 				model.RawValue(item.Target.Name),
 				model.RawValue(fmt.Sprintf("%s:%d", item.Target.Host, item.Target.Port)),
-				model.RawValue(item.Target.Note),
+				model.KeyValue(item.Target.Note),
 				model.KeyValue(status),
 				model.RawValue(detail),
 			})
@@ -192,7 +192,7 @@ func (appsProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Measurements = []model.Measurement{
 		{
 			Key: "apps_reachable", Label: "probe.apps.metric.apps_reachable",
-			Value: float64(reachable), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", reachable, total)),
+			Value: float64(reachable), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", reachable, total)),
 			Method: "tcp-connect-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}

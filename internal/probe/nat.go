@@ -196,7 +196,7 @@ func (natProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Measurements = []model.Measurement{
 		{
 			Key: "udp_stun_reachable", Label: "probe.nat.metric.udp_stun_reachable",
-			Value: 1, Unit: "项", Display: model.KeyValue("probe.nat.boolean.yes"),
+			Value: 1, Unit: "count", Display: model.KeyValue("probe.nat.boolean.yes"),
 			Method: "stun-binding-rfc5389-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 	}

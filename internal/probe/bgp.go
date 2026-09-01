@@ -99,7 +99,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 			result.Fields = append(result.Fields, model.Field{
 				Key:   "ipv" + version + "_error",
 				Label: bgpFieldLabel("ipv" + version + "_error"),
-				Value: model.RawValue("出口 IP 不可用"),
+				Value: model.KeyValue("probe.bgp.value.egress_unavailable"),
 			})
 			continue
 		}
@@ -124,7 +124,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 		}
 		if len(observations) == 0 {
 			table.Rows = append(table.Rows, []model.Value{
-				model.RawValue("IPv" + version), model.RawValue("未找到匹配前缀"), model.RawValue("—"),
+				model.RawValue("IPv" + version), model.KeyValue("probe.bgp.value.no_prefix"), model.RawValue("—"),
 				model.RawValue("—"), model.RawValue("—"), model.RawValue("—"),
 			})
 			continue
@@ -155,7 +155,7 @@ func (bgpProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	result.Tables = []model.Table{table}
 	result.Measurements = append(result.Measurements, model.Measurement{
-		Key: "bgp_families_observed", Label: "probe.bgp.metric.bgp_families_observed", Value: float64(successes), Unit: "项",
+		Key: "bgp_families_observed", Label: "probe.bgp.metric.bgp_families_observed", Value: float64(successes), Unit: "count",
 		Display: model.RawValue(fmt.Sprintf("%d/%d", successes, len(versions))), Method: "routeviews-current-rib-v1", HigherIsBetter: model.BoolPtr(true),
 	})
 	result.Evidence = model.NewEvidence(successes, len(versions), "target")

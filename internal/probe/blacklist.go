@@ -66,23 +66,23 @@ type dnsblZone struct {
 //	hostkarma.junkemailfilter.com           对干净地址也返回记录，语义不符
 func dnsblZones() []dnsblZone {
 	return []dnsblZone{
-		{Zone: "zen.spamhaus.org", Name: "Spamhaus ZEN", Purpose: "综合名单，邮件服务商采用最广"},
-		{Zone: "bl.spamcop.net", Name: "SpamCop", Purpose: "基于用户举报的垃圾邮件源"},
-		{Zone: "b.barracudacentral.org", Name: "Barracuda", Purpose: "梭子鱼信誉库"},
-		{Zone: "cbl.abuseat.org", Name: "CBL/abuseat", Purpose: "被感染主机与僵尸网络出口"},
-		{Zone: "psbl.surriel.com", Name: "PSBL", Purpose: "被动式垃圾邮件蜜罐"},
-		{Zone: "bl.blocklist.de", Name: "blocklist.de", Purpose: "被举报的攻击源（SSH/邮件爆破等）"},
-		{Zone: "dnsbl-1.uceprotect.net", Name: "UCEPROTECT L1", Purpose: "单个 IP 的发信滥用"},
-		{Zone: "dnsbl-2.uceprotect.net", Name: "UCEPROTECT L2", Purpose: "整段/ASN 连带收录，常误伤邻居"},
-		{Zone: "dnsbl.dronebl.org", Name: "DroneBL", Purpose: "开放代理与被控主机"},
-		{Zone: "all.s5h.net", Name: "s5h", Purpose: "综合滥用名单"},
-		{Zone: "spam.spamrats.com", Name: "SpamRats SPAM", Purpose: "确认的垃圾邮件行为"},
-		{Zone: "noptr.spamrats.com", Name: "SpamRats NoPtr", Purpose: "缺少反向解析的发信主机"},
-		{Zone: "dyna.spamrats.com", Name: "SpamRats Dyna", Purpose: "疑似动态住宅地址段"},
-		{Zone: "truncate.gbudb.net", Name: "GBUdb Truncate", Purpose: "只发垃圾邮件的来源"},
-		{Zone: "z.mailspike.net", Name: "Mailspike Z", Purpose: "垃圾邮件发送信誉"},
-		{Zone: "bl.mailspike.net", Name: "Mailspike BL", Purpose: "综合黑名单"},
-		{Zone: "ips.backscatterer.org", Name: "Backscatterer", Purpose: "回退散射（伪造退信）来源"},
+		{Zone: "zen.spamhaus.org", Name: "Spamhaus ZEN", Purpose: "probe.blacklist.zone.spamhaus_zen.purpose"},
+		{Zone: "bl.spamcop.net", Name: "SpamCop", Purpose: "probe.blacklist.zone.spamcop.purpose"},
+		{Zone: "b.barracudacentral.org", Name: "Barracuda", Purpose: "probe.blacklist.zone.barracuda.purpose"},
+		{Zone: "cbl.abuseat.org", Name: "CBL/abuseat", Purpose: "probe.blacklist.zone.cbl_abuseat.purpose"},
+		{Zone: "psbl.surriel.com", Name: "PSBL", Purpose: "probe.blacklist.zone.psbl.purpose"},
+		{Zone: "bl.blocklist.de", Name: "blocklist.de", Purpose: "probe.blacklist.zone.blocklist_de.purpose"},
+		{Zone: "dnsbl-1.uceprotect.net", Name: "UCEPROTECT L1", Purpose: "probe.blacklist.zone.uceprotect_l1.purpose"},
+		{Zone: "dnsbl-2.uceprotect.net", Name: "UCEPROTECT L2", Purpose: "probe.blacklist.zone.uceprotect_l2.purpose"},
+		{Zone: "dnsbl.dronebl.org", Name: "DroneBL", Purpose: "probe.blacklist.zone.dronebl.purpose"},
+		{Zone: "all.s5h.net", Name: "s5h", Purpose: "probe.blacklist.zone.s5h.purpose"},
+		{Zone: "spam.spamrats.com", Name: "SpamRats SPAM", Purpose: "probe.blacklist.zone.spamrats_spam.purpose"},
+		{Zone: "noptr.spamrats.com", Name: "SpamRats NoPtr", Purpose: "probe.blacklist.zone.spamrats_noptr.purpose"},
+		{Zone: "dyna.spamrats.com", Name: "SpamRats Dyna", Purpose: "probe.blacklist.zone.spamrats_dyna.purpose"},
+		{Zone: "truncate.gbudb.net", Name: "GBUdb Truncate", Purpose: "probe.blacklist.zone.gbudb_truncate.purpose"},
+		{Zone: "z.mailspike.net", Name: "Mailspike Z", Purpose: "probe.blacklist.zone.mailspike_z.purpose"},
+		{Zone: "bl.mailspike.net", Name: "Mailspike BL", Purpose: "probe.blacklist.zone.mailspike_bl.purpose"},
+		{Zone: "ips.backscatterer.org", Name: "Backscatterer", Purpose: "probe.blacklist.zone.backscatterer.purpose"},
 	}
 }
 
@@ -283,7 +283,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 			model.RawValue(finding.Zone.Name),
 			dnsblOutcomeValue(finding.Outcome),
 			model.RawValue(codes),
-			model.RawValue(finding.Zone.Purpose),
+			model.KeyValue(finding.Zone.Purpose),
 			model.RawValue(formatMilliseconds(finding.Duration)),
 		})
 	}
@@ -292,7 +292,7 @@ func (blacklistProbe) Run(ctx context.Context, env Environment) model.Result {
 	result.Fields = []model.Field{
 		{Key: "queried_ip", Label: "probe.blacklist.field.queried_ip", Value: model.RawValue(egressIP), Sensitive: true},
 		{Key: "zones_total", Label: "probe.blacklist.field.zones_total", Value: model.RawValue(fmt.Sprintf("%d", len(zones)))},
-		{Key: "resolver", Label: "probe.blacklist.field.resolver", Value: model.RawValue("系统默认（部分名单拒绝公共解析器查询）")},
+		{Key: "resolver", Label: "probe.blacklist.field.resolver", Value: model.KeyValue("probe.blacklist.value.resolver_default")},
 	}
 	clean := len(zones) - listed - refused - failed
 	result.Measurements = dnsblCountMeasurements(listed, clean, refused, failed, len(zones))
@@ -352,22 +352,22 @@ func dnsblCountMeasurements(listed, clean, refused, failed, total int) []model.M
 	return []model.Measurement{
 		{
 			Key: "dnsbl_listed_count", Label: "probe.blacklist.metric.dnsbl_listed_count",
-			Value: float64(listed), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", listed, total)),
+			Value: float64(listed), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", listed, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 		{
 			Key: "dnsbl_clean_count", Label: "probe.blacklist.metric.dnsbl_clean_count",
-			Value: float64(clean), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", clean, total)),
+			Value: float64(clean), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", clean, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(true),
 		},
 		{
 			Key: "dnsbl_refused_count", Label: "probe.blacklist.metric.dnsbl_refused_count",
-			Value: float64(refused), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", refused, total)),
+			Value: float64(refused), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", refused, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 		{
 			Key: "dnsbl_failed_count", Label: "probe.blacklist.metric.dnsbl_failed_count",
-			Value: float64(failed), Unit: "项", Display: model.RawValue(fmt.Sprintf("%d/%d", failed, total)),
+			Value: float64(failed), Unit: "count", Display: model.RawValue(fmt.Sprintf("%d/%d", failed, total)),
 			Method: "dnsbl-a-lookup-v1", HigherIsBetter: model.BoolPtr(false),
 		},
 	}
