@@ -337,7 +337,7 @@ func (r *textRenderer) resultEvidenceCoverage(evidence *model.Evidence) {
 	if evidence == nil {
 		return
 	}
-	ratio := evidence.EvidenceRatio()
+	ratio := evidence.Ratio()
 	label := evidenceText(*evidence)
 	line := fmt.Sprintf("%s%s%s", i18n.T("report.evidence"), i18n.T("punct.colon"), label)
 	style := r.palette.WarningBold
@@ -380,7 +380,7 @@ func evidenceText(evidence model.Evidence) string {
 		return count + " · " + i18n.T("evidence.notPlanned")
 	}
 	state := i18n.T("evidence." + string(evidence.DerivedGrade()))
-	return fmt.Sprintf("%s · %.0f%% · %s", count, evidence.EvidenceRatio()*100, state)
+	return fmt.Sprintf("%s · %.0f%% · %s", count, evidence.Ratio()*100, state)
 }
 
 // resultEvidence is rendered in file txt output but intentionally omitted from

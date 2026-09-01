@@ -197,14 +197,29 @@ func moduleDescriptorWithEstimateMode(id string, standard bool, exposure Exposur
 }
 
 // ModuleDescriptors returns the canonical descriptors in execution order.
-// Slices are copied so callers cannot mutate the registry through metadata.
+// Reference-typed metadata is copied so callers cannot mutate the registry
+// through a returned descriptor.
 func ModuleDescriptors() []ModuleDescriptor {
 	out := make([]ModuleDescriptor, len(moduleDescriptors))
 	for i, descriptor := range moduleDescriptors {
-		out[i] = descriptor
-		out[i].RequiredTools = append([]string(nil), descriptor.RequiredTools...)
+		out[i] = copyDescriptor(descriptor)
 	}
 	return out
+}
+
+// copyDescriptor detaches every reference-typed field of a descriptor. Methodology
+// carries a Parameters map, so copying only RequiredTools would leave callers
+// sharing the registry's map.
+func copyDescriptor(descriptor ModuleDescriptor) ModuleDescriptor {
+	descriptor.RequiredTools = append([]string(nil), descriptor.RequiredTools...)
+	if descriptor.Methodology.Parameters != nil {
+		parameters := make(map[string]string, len(descriptor.Methodology.Parameters))
+		for key, value := range descriptor.Methodology.Parameters {
+			parameters[key] = value
+		}
+		descriptor.Methodology.Parameters = parameters
+	}
+	return descriptor
 }
 
 // ModuleDescriptorFor returns one descriptor by ID.  The returned value is a
@@ -212,8 +227,7 @@ func ModuleDescriptors() []ModuleDescriptor {
 func ModuleDescriptorFor(id string) (ModuleDescriptor, bool) {
 	for _, descriptor := range moduleDescriptors {
 		if descriptor.ID == id {
-			descriptor.RequiredTools = append([]string(nil), descriptor.RequiredTools...)
-			return descriptor, true
+			return copyDescriptor(descriptor), true
 		}
 	}
 	return ModuleDescriptor{}, false

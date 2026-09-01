@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -87,12 +86,8 @@ func Classify(err error) Classified {
 	if errors.As(err, &hostnameError) {
 		return Classified{Category: model.FailureTLS}
 	}
-	var urlError *url.Error
-	if errors.As(err, &urlError) {
-		if urlError.Timeout() {
-			return Classified{Category: model.FailureTimeout, Retryable: true}
-		}
-	}
+	// *url.Error implements net.Error, so the interface check below already
+	// covers it; a separate branch would be the same test written twice.
 	var netError net.Error
 	if errors.As(err, &netError) && netError.Timeout() {
 		return Classified{Category: model.FailureTimeout, Retryable: true}
@@ -128,7 +123,8 @@ func classifyText(message string) Classified {
 		return Classified{Category: model.FailureNetworkUnreachable, Retryable: true}
 	case containsAny(text, "no such host", "server misbehaving", "temporary failure in name resolution", "name or service not known", "dns rcode", "dns 响应", "dns 事务", "dns 无应答", "域名解析失败", "dns 解析失败"):
 		return Classified{Category: model.FailureDNS, Retryable: true}
-	case containsAny(text, "http 401", "http 403", "status 401", "status 403", "unauthorized", "forbidden", "访问被拒", "http 拒绝"):
+	// Numeric forms such as "http 401" are already handled by statusCode above.
+	case containsAny(text, "unauthorized", "forbidden", "访问被拒", "http 拒绝"):
 		return Classified{Category: model.FailureHTTPRejected}
 	case containsAny(text, "tls", "x509", "certificate", "handshake failure", "证书", "握手失败"):
 		return Classified{Category: model.FailureTLS}

@@ -13,6 +13,10 @@ func Defaults(profile string) (Runtime, error) {
 	if profile == "" {
 		profile = ProfileStandard
 	}
+	modules := ModulesForProfile(profile)
+	if modules == nil {
+		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
+	}
 	base := Runtime{
 		Profile:          profile,
 		Exposure:         ExposureThirdParty,
@@ -55,14 +59,6 @@ func Defaults(profile string) (Runtime, error) {
 		},
 		BacktraceTargets: BacktraceTargetsFor(defaultBacktraceCityIDs()),
 	}
-
-	switch profile {
-	case ProfileStandard:
-		base.Modules = ModulesForProfile(ProfileStandard)
-	case ProfileFull:
-		base.Modules = ModulesForProfile(ProfileFull)
-	default:
-		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
-	}
+	base.Modules = modules
 	return base, nil
 }

@@ -314,7 +314,7 @@ func (r *textRenderer) resultTable(table model.Table) {
 		// wrapping harder. Preserve the exact numeric text in this layout.
 		cellBarWidth = 0
 	}
-	r.tableWithStyles(displayTableLabels(table.Columns), tableRowsWithBars(table, r.palette, cellBarWidth), nil, r.tableValueStyles(table))
+	r.tableWithStyles(columnLabels(table.Columns), tableRowsWithBars(table, r.palette, cellBarWidth), nil, r.tableValueStyles(table))
 	r.blank()
 }
 

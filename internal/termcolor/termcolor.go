@@ -331,34 +331,30 @@ func (p Palette) WrapRatio(text string, ratio float64) string {
 	return p.Wrap(text, Color(ratio))
 }
 
-func (p Palette) escape(color RGB) string {
+func (p Palette) escape(color RGB) string { return p.escapeWeight(color, false) }
+
+func (p Palette) escapeBold(color RGB) string { return p.escapeWeight(color, true) }
+
+// escapeWeight builds one SGR sequence. On 8-colour terminals bold doubles as
+// the bright bit, so an already-bright colour and an explicit bold request
+// produce the same sequence.
+func (p Palette) escapeWeight(color RGB, bold bool) string {
+	weight := ""
+	if bold {
+		weight = "1;"
+	}
 	switch p.Level {
 	case LevelTrueColor:
-		return "\x1b[38;2;" + strconv.Itoa(int(color.R)) + ";" +
+		return "\x1b[" + weight + "38;2;" + strconv.Itoa(int(color.R)) + ";" +
 			strconv.Itoa(int(color.G)) + ";" + strconv.Itoa(int(color.B)) + "m"
 	case LevelANSI256:
-		return "\x1b[38;5;" + strconv.Itoa(ansi256(color)) + "m"
+		return "\x1b[" + weight + "38;5;" + strconv.Itoa(ansi256(color)) + "m"
 	case LevelBasic:
 		code, bright := basicANSI(color)
-		if bright {
+		if bold || bright {
 			return "\x1b[1;" + strconv.Itoa(code) + "m"
 		}
 		return "\x1b[" + strconv.Itoa(code) + "m"
-	default:
-		return ""
-	}
-}
-
-func (p Palette) escapeBold(color RGB) string {
-	switch p.Level {
-	case LevelTrueColor:
-		return "\x1b[1;38;2;" + strconv.Itoa(int(color.R)) + ";" +
-			strconv.Itoa(int(color.G)) + ";" + strconv.Itoa(int(color.B)) + "m"
-	case LevelANSI256:
-		return "\x1b[1;38;5;" + strconv.Itoa(ansi256(color)) + "m"
-	case LevelBasic:
-		code, _ := basicANSI(color)
-		return "\x1b[1;" + strconv.Itoa(code) + "m"
 	default:
 		return ""
 	}

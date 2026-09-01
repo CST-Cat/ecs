@@ -103,23 +103,15 @@ func endpointsForIPVersion(endpoints []config.Endpoint, mode string) []config.En
 // intentionally kept at the last possible moment: auto mode can test both
 // families, while a target marked family=6 must still reach an IPv6 hostname
 // with an explicit -6 NextTrace flag.
+//
+// The address inspection itself lives in config.InferEndpointFamily so the
+// literal and -v6 hostname rules are defined once for parsing and execution.
 func endpointFamily(endpoint config.Endpoint, fallback string) string {
 	if endpoint.Family == config.IPVersion4 || endpoint.Family == config.IPVersion6 {
 		return endpoint.Family
 	}
-	host := endpoint.Address
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
-	}
-	host = strings.Trim(host, "[]")
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.To4() != nil {
-			return config.IPVersion4
-		}
-		return config.IPVersion6
-	}
-	if strings.Contains(strings.ToLower(host), "-v6.") {
-		return config.IPVersion6
+	if inferred := config.InferEndpointFamily(endpoint.Address, true); inferred != "" {
+		return inferred
 	}
 	if fallback == config.IPVersion4 || fallback == config.IPVersion6 {
 		return fallback

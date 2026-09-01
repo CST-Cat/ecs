@@ -84,6 +84,12 @@ func buildSystemResult(start time.Time, snapshot systemSnapshot, resources Envir
 	return result
 }
 
+// maxMissingSystemFields is how many unavailable inventory fields are tolerated
+// before the module is downgraded. A handful of gaps is normal (no DMI inside a
+// container, no cgroup limits on bare metal); more than that usually means the
+// host is denying reads and the inventory should not be read as complete.
+const maxMissingSystemFields = 3
+
 func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	if result == nil {
 		return
@@ -95,7 +101,7 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 		}
 	}
 	result.Evidence = model.NewEvidence(len(result.Fields)-missing, len(result.Fields), "sample")
-	if missing > 3 {
+	if missing > maxMissingSystemFields {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "probe.system.note.partial_inventory")
 	}
@@ -104,13 +110,28 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	}
 }
 
+// unavailableSystemValues are the placeholders a system field may carry when a
+// fact could not be established. They are not interchangeable: "unknown" means
+// the value was not determined, "unavailable" that the interface is absent,
+// "none found" that evidence was searched for and not present, and
+// "unlimited_or_unavailable" that zero is ambiguous between the two. Keeping
+// them distinct is what makes the report honest about why a value is missing.
+//
+// TestUnavailablePlaceholdersAreRecognised keeps this set aligned with the
+// literals the probes actually emit: a placeholder missing from here would be
+// counted as valid evidence and inflate the coverage ratio.
+var unavailableSystemValues = map[string]bool{
+	"":                         true,
+	"unknown":                  true,
+	"unavailable":              true,
+	"unlimited_or_unavailable": true,
+	"n/a":                      true,
+	"none found":               true,
+	"—":                        true,
+}
+
 func isUnavailableSystemValue(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "unknown", "unavailable", "unlimited_or_unavailable", "n/a", "none found", "not available", "not_available", "not_applicable", "—":
-		return true
-	default:
-		return false
-	}
+	return unavailableSystemValues[strings.ToLower(strings.TrimSpace(value))]
 }
 
 func systemField(key, value string) model.Field {

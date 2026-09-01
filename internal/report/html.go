@@ -78,7 +78,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 			if value == nil {
 				return 0
 			}
-			return value.EvidenceRatio()
+			return value.Ratio()
 		},
 		"evidenceColor":      evidenceHTMLColor,
 		"evidenceLabelColor": evidenceHTMLLabelColor,
@@ -439,7 +439,7 @@ func evidenceHTMLColor(evidence *model.Evidence) template.CSS {
 	if evidence == nil || evidence.Expected <= 0 {
 		return template.CSS("var(--skip)")
 	}
-	color := termcolor.Color(evidence.EvidenceRatio())
+	color := termcolor.Color(evidence.Ratio())
 	return template.CSS(fmt.Sprintf("#%02x%02x%02x", color.R, color.G, color.B))
 }
 

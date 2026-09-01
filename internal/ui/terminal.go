@@ -201,10 +201,6 @@ func (view *ProgressView) Stop() {
 	}
 }
 
-// EndProgress is the descriptive alias used by callers that treat progress as
-// a begin/end scope. It shares Stop's idempotent shutdown behavior.
-func (view *ProgressView) EndProgress() { view.Stop() }
-
 func (view *ProgressView) renderErrorLocked(title string) {
 	if view.total <= 0 {
 		return

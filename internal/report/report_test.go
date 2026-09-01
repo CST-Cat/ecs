@@ -65,7 +65,7 @@ func sampleReport() model.Report {
 				Triggered: true, SelectedAttempt: 1, SelectionRule: model.NewMessage("probe.retry.selection_rule.interference_score"), TriggerReasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory"), model.NewMessage("probe.network.status.ok")},
 				Attempts: []model.RetryAttempt{{
 					Number: 1, Status: model.StatusWarning, DurationMS: 5,
-					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "attempt"},
+					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "run"},
 					Interference: model.Interference{
 						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
 						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: model.RawValue("1"), HigherIsBetter: &lower}},

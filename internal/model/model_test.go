@@ -3,6 +3,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -139,7 +140,7 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 
 func TestEvidenceNormalizationAndCoverageGrades(t *testing.T) {
 	unnormalized := Evidence{Valid: 9, Expected: 2}
-	if got := unnormalized.EvidenceRatio(); got != 1 {
+	if got := unnormalized.Ratio(); got != 1 {
 		t.Fatalf("unnormalized EvidenceRatio = %v, want 1", got)
 	}
 	if got := unnormalized.DerivedGrade(); got != EvidenceComplete {
@@ -162,8 +163,8 @@ func TestEvidenceNormalizationAndCoverageGrades(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evidence := NewEvidence(test.valid, test.expected, "sample")
-			if evidence.Valid != test.wantValid || evidence.Expected != test.wantExpect || evidence.DerivedGrade() != test.grade || evidence.EvidenceRatio() != test.ratio {
-				t.Fatalf("evidence = %+v ratio=%v", evidence, evidence.EvidenceRatio())
+			if evidence.Valid != test.wantValid || evidence.Expected != test.wantExpect || evidence.DerivedGrade() != test.grade || evidence.Ratio() != test.ratio {
+				t.Fatalf("evidence = %+v ratio=%v", evidence, evidence.Ratio())
 			}
 		})
 	}
@@ -338,5 +339,100 @@ func TestMaskAndFormattingCategories(t *testing.T) {
 	}
 	if BoolPtr(true) == nil || !*BoolPtr(true) || BoolPtr(false) == nil || *BoolPtr(false) {
 		t.Fatal("BoolPtr did not preserve both boolean values")
+	}
+}
+
+// TestRedactedCopyDetachesEveryReferenceField walks the report with reflection
+// and asserts that no slice or map in the copy shares backing memory with the
+// original. RedactedCopy enumerates the fields to clone by hand, so a field
+// added to Result later would silently alias instead of failing loudly; this
+// test turns that into a red build.
+func TestRedactedCopyDetachesEveryReferenceField(t *testing.T) {
+	original := sampleReportForAliasing()
+	copied := RedactedCopy(original, true)
+	shared := sharedBackingArrays(reflect.ValueOf(original), reflect.ValueOf(copied), "Report")
+	for _, path := range shared {
+		t.Errorf("RedactedCopy shares backing memory at %s", path)
+	}
+}
+
+// sharedBackingArrays reports paths where a non-empty slice or map in both
+// values points at the same underlying storage.
+func sharedBackingArrays(left, right reflect.Value, path string) []string {
+	var shared []string
+	if !left.IsValid() || !right.IsValid() || left.Type() != right.Type() {
+		return nil
+	}
+	switch left.Kind() {
+	case reflect.Slice:
+		if left.IsNil() || right.IsNil() || left.Len() == 0 {
+			return nil
+		}
+		if left.UnsafePointer() == right.UnsafePointer() {
+			return []string{path}
+		}
+		for index := 0; index < left.Len() && index < right.Len(); index++ {
+			shared = append(shared, sharedBackingArrays(left.Index(index), right.Index(index), fmt.Sprintf("%s[%d]", path, index))...)
+		}
+	case reflect.Map:
+		if left.IsNil() || right.IsNil() || left.Len() == 0 {
+			return nil
+		}
+		if left.UnsafePointer() == right.UnsafePointer() {
+			return []string{path}
+		}
+	case reflect.Pointer:
+		if left.IsNil() || right.IsNil() {
+			return nil
+		}
+		if left.Pointer() == right.Pointer() {
+			return []string{path}
+		}
+		shared = append(shared, sharedBackingArrays(left.Elem(), right.Elem(), path+".*")...)
+	case reflect.Struct:
+		for index := 0; index < left.NumField(); index++ {
+			if left.Type().Field(index).PkgPath != "" {
+				continue
+			}
+			shared = append(shared, sharedBackingArrays(left.Field(index), right.Field(index), path+"."+left.Type().Field(index).Name)...)
+		}
+	}
+	return shared
+}
+
+func sampleReportForAliasing() Report {
+	evidence := &Evidence{Valid: 1, Expected: 2, Unit: "sample"}
+	return Report{
+		SchemaVersion: "ecs.report/v1",
+		SensitiveIPs:  []string{"192.0.2.10"},
+		Notices:       []Message{NewMessage("n", "a")},
+		Run:           RunInfo{Requested: []string{"system"}, OutputFormats: []string{"json"}},
+		Summary:       Summary{Messages: []Message{NewMessage("s", "b")}},
+		Results: []Result{{
+			ID: "system", Title: "t", Status: StatusOK,
+			SummaryMessages: []Message{NewMessage("m", "c")},
+			Methodology:     Methodology{Parameters: map[string]string{"k": "v"}},
+			Fields:          []Field{{Key: "f", Value: RawValue("x")}},
+			Measurements:    []Measurement{{Key: "m", HigherIsBetter: BoolPtr(true)}},
+			Tables: []Table{{
+				Key: "tb", Columns: []TableColumn{{Key: "c"}},
+				Rows: [][]Value{{RawValue("cell")}}, RowIdentity: "c",
+			}},
+			TextBlocks:   []TextBlock{{Content: "raw"}},
+			Notes:        []string{"note"},
+			Sources:      []Source{{Name: "s"}},
+			Evidence:     evidence,
+			Failures:     []Failure{{Category: FailureUnknown, Count: 1}},
+			Interference: &Interference{Reasons: []Message{NewMessage("i")}, Measurements: []Measurement{{Key: "im"}}},
+			Retry: &RetryInfo{
+				SelectionRule:  NewMessage("r", "d"),
+				TriggerReasons: []Message{NewMessage("tr")},
+				Attempts: []RetryAttempt{{
+					Number: 1, Evidence: evidence,
+					Interference: Interference{Reasons: []Message{NewMessage("ai")}},
+					Measurements: []Measurement{{Key: "am"}},
+				}},
+			},
+		}},
 	}
 }

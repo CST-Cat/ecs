@@ -150,7 +150,7 @@ func validateReportSchemaValues(data model.Report) error {
 		if kind := result.Methodology.Kind; kind != "" && !validMethodologyKind(kind) {
 			return fmt.Errorf("unsupported %s.methodology.kind %q", prefix, kind)
 		}
-		if err := validateEvidenceUnit(prefix+".evidence", result.Evidence, false); err != nil {
+		if err := validateEvidenceUnit(prefix+".evidence", result.Evidence); err != nil {
 			return err
 		}
 		for failureIndex, failure := range result.Failures {
@@ -166,7 +166,7 @@ func validateReportSchemaValues(data model.Report) error {
 			if status := attempt.Status; status != "" && !validReportStatus(status) {
 				return fmt.Errorf("unsupported %s.status %q", attemptPrefix, status)
 			}
-			if err := validateEvidenceUnit(attemptPrefix+".evidence", attempt.Evidence, true); err != nil {
+			if err := validateEvidenceUnit(attemptPrefix+".evidence", attempt.Evidence); err != nil {
 				return err
 			}
 		}
@@ -201,19 +201,20 @@ func validMethodologyKind(kind string) bool {
 	}
 }
 
-func validateEvidenceUnit(path string, evidence *model.Evidence, retryAttempt bool) error {
-	if evidence == nil || evidence.Unit == "" || validEvidenceUnit(evidence.Unit, retryAttempt) {
+func validateEvidenceUnit(path string, evidence *model.Evidence) error {
+	if evidence == nil || evidence.Unit == "" || validEvidenceUnit(evidence.Unit) {
 		return nil
 	}
 	return fmt.Errorf("unsupported %s.unit %q", path, evidence.Unit)
 }
 
-func validEvidenceUnit(unit string, retryAttempt bool) bool {
+// validEvidenceUnit mirrors the evidence.unit(s).* catalog entries. Every value
+// here has a translation; admitting one without a key would render the key
+// itself once i18n.Has stopped covering for it.
+func validEvidenceUnit(unit string) bool {
 	switch unit {
 	case "module", "run", "job", "sample", "query", "target", "operation", "source":
 		return true
-	case "attempt":
-		return retryAttempt
 	default:
 		return false
 	}

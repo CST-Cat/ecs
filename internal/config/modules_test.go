@@ -81,3 +81,32 @@ func TestModuleDescriptorsDeclareInterferenceRetryPolicy(t *testing.T) {
 		}
 	}
 }
+
+// TestModuleDescriptorsDetachReferenceFields covers every reference-typed field
+// of a returned descriptor. RequiredTools was already copied; Methodology
+// carries a Parameters map that a caller could otherwise use to write into the
+// canonical registry.
+func TestModuleDescriptorsDetachReferenceFields(t *testing.T) {
+	first := ModuleDescriptors()[0]
+	first.RequiredTools = append(first.RequiredTools, "injected")
+	if first.Methodology.Parameters == nil {
+		first.Methodology.Parameters = map[string]string{}
+	}
+	first.Methodology.Parameters["injected"] = "1"
+
+	second := ModuleDescriptors()[0]
+	if slices.Contains(second.RequiredTools, "injected") {
+		t.Error("RequiredTools is shared with the registry")
+	}
+	if _, ok := second.Methodology.Parameters["injected"]; ok {
+		t.Error("Methodology.Parameters is shared with the registry")
+	}
+	if single, ok := ModuleDescriptorFor(second.ID); ok {
+		if slices.Contains(single.RequiredTools, "injected") {
+			t.Error("ModuleDescriptorFor shares RequiredTools with the registry")
+		}
+		if _, ok := single.Methodology.Parameters["injected"]; ok {
+			t.Error("ModuleDescriptorFor shares Methodology.Parameters with the registry")
+		}
+	}
+}

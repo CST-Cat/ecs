@@ -228,13 +228,15 @@ func Validate(manifest Manifest) error {
 	if manifest.Build.ToolchainMode != "native" && manifest.Build.ToolchainMode != "cross" {
 		return fmt.Errorf("build.toolchain_mode must be %q or %q, got %q", "native", "cross", manifest.Build.ToolchainMode)
 	}
-	for field, value := range map[string]string{
-		"build_triplet":  manifest.Build.BuildTriplet,
-		"target_triplet": manifest.Build.TargetTriplet,
-		"smoke_runner":   manifest.Build.SmokeRunner,
+	// A slice, not a map: Go randomises map iteration, so two empty fields would
+	// name a different one on each run and make the failure hard to reproduce.
+	for _, required := range []struct{ field, value string }{
+		{"build_triplet", manifest.Build.BuildTriplet},
+		{"target_triplet", manifest.Build.TargetTriplet},
+		{"smoke_runner", manifest.Build.SmokeRunner},
 	} {
-		if value == "" {
-			return fmt.Errorf("build.%s must be a non-empty string", field)
+		if required.value == "" {
+			return fmt.Errorf("build.%s must be a non-empty string", required.field)
 		}
 	}
 	if manifest.Build.Validation.Scope != "functional" {
@@ -282,29 +284,32 @@ func Validate(manifest Manifest) error {
 }
 
 func validateTool(manifestArchitecture string, tool Tool) error {
-	for field, value := range map[string]string{
-		"name":          tool.Name,
-		"upstream":      tool.Upstream,
-		"version":       tool.Version,
-		"tag_or_commit": tool.TagOrCommit,
-		"source":        tool.Source,
-		"license":       tool.License,
+	for _, required := range []struct{ field, value string }{
+		{"name", tool.Name},
+		{"upstream", tool.Upstream},
+		{"version", tool.Version},
+		{"tag_or_commit", tool.TagOrCommit},
+		{"source", tool.Source},
+		{"license", tool.License},
 	} {
-		if value == "" {
-			return fmt.Errorf("%s must be a non-empty string", field)
+		if required.value == "" {
+			return fmt.Errorf("%s must be a non-empty string", required.field)
 		}
 	}
-	for field, values := range map[string][]string{
-		"build_flags":       tool.BuildFlags,
-		"enabled_features":  tool.EnabledFeatures,
-		"disabled_features": tool.DisabledFeatures,
+	for _, required := range []struct {
+		field  string
+		values []string
+	}{
+		{"build_flags", tool.BuildFlags},
+		{"enabled_features", tool.EnabledFeatures},
+		{"disabled_features", tool.DisabledFeatures},
 	} {
-		if values == nil {
-			return fmt.Errorf("%s is required and must be an array", field)
+		if required.values == nil {
+			return fmt.Errorf("%s is required and must be an array", required.field)
 		}
-		for index, value := range values {
+		for index, value := range required.values {
 			if value == "" {
-				return fmt.Errorf("%s[%d] must be a non-empty string", field, index)
+				return fmt.Errorf("%s[%d] must be a non-empty string", required.field, index)
 			}
 		}
 	}

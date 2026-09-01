@@ -150,3 +150,63 @@ func TestProbeTargetCatalogsUseStableKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestUnavailablePlaceholdersAreRecognised checks the placeholders that reach a
+// system field, because finalizeSystemResult counts any field it does not
+// recognise as unavailable towards valid evidence. Only systemField call sites
+// matter: fallback is a package-wide helper and its other callers feed error
+// messages, which are diagnostics rather than counted observations.
+func TestUnavailablePlaceholdersAreRecognised(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob probe sources: %v", err)
+	}
+	fileSet := token.NewFileSet()
+	seen := 0
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			outer, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if identifier, ok := outer.Fun.(*ast.Ident); !ok || identifier.Name != "systemField" {
+				return true
+			}
+			for _, argument := range outer.Args {
+				inner, ok := argument.(*ast.CallExpr)
+				if !ok {
+					continue
+				}
+				identifier, ok := inner.Fun.(*ast.Ident)
+				if !ok || identifier.Name != "fallback" || len(inner.Args) != 2 {
+					continue
+				}
+				literal, ok := inner.Args[1].(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					continue
+				}
+				text, err := strconv.Unquote(literal.Value)
+				if err != nil {
+					continue
+				}
+				seen++
+				if !isUnavailableSystemValue(text) {
+					t.Errorf("%s: system field placeholder %q is not recognised as unavailable; finalizeSystemResult would count it as a real observation",
+						fileSet.Position(literal.Pos()), text)
+				}
+			}
+			return true
+		})
+	}
+	if seen == 0 {
+		t.Fatal("found no system-field placeholders to check; the scan is no longer effective")
+	}
+	t.Logf("checked %d system-field placeholders", seen)
+}

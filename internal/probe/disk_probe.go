@@ -86,12 +86,7 @@ func finalizeDiskResult(result *model.Result) {
 
 func diskTableStatusKey(tableKey string, complete bool) string {
 	switch tableKey {
-	case "disk.fio.crystal", "disk.fio.atto":
-		if complete {
-			return "probe.disk.status.complete"
-		}
-		return "probe.disk.status.missing"
-	case "disk.fio.mounts":
+	case "disk.fio.crystal", "disk.fio.atto", "disk.fio.mounts":
 		if complete {
 			return "probe.disk.status.complete"
 		}

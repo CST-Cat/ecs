@@ -45,8 +45,6 @@ func relativeRatio(value, groupMin, groupMax float64) float64 {
 // BarRelativeRange renders a relative bar with both endpoints available for
 // choosing a stable scale.
 func (p Palette) BarRelativeRange(value, groupMin, groupMax float64, width int) string {
-	if groupMax <= 0 || math.IsNaN(groupMax) {
-		return p.Bar(0, width)
-	}
+	// relativeRatio already returns 0 for a non-positive or NaN maximum.
 	return p.Bar(relativeRatio(value, groupMin, groupMax), width)
 }

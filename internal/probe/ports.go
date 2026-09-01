@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"ecs/internal/config"
 	"ecs/internal/model"
@@ -152,8 +153,16 @@ func compactError(err error) string {
 		return "timeout"
 	}
 	text := err.Error()
-	if len(text) > 100 {
-		return text[:100] + "…"
+	if len(text) <= compactErrorLimit {
+		return text
 	}
-	return text
+	cut := compactErrorLimit
+	// Retreat to a rune boundary so a multi-byte character is not cut in half.
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "…"
 }
+
+// compactErrorLimit bounds a diagnostic message in bytes.
+const compactErrorLimit = 100

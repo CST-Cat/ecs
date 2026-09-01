@@ -216,7 +216,7 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 			e.Normalize()
 			evidence = EvidenceValue{
 				Report: inputIndex, Available: true, Valid: e.Valid, Expected: e.Expected,
-				Unit: e.Unit, Ratio: e.EvidenceRatio(),
+				Unit: e.Unit, Ratio: e.Ratio(),
 			}
 		}
 		module.Statuses = append(module.Statuses, status)

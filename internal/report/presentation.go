@@ -69,7 +69,9 @@ func displayTableColumnLabel(column model.TableColumn) string {
 	return displayTableColumn(column).Label
 }
 
-func displayTableLabels(columns []model.TableColumn) []string {
+// columnLabels extracts labels that displayTable has already resolved. It does
+// not translate; callers pass the result of displayTable.
+func columnLabels(columns []model.TableColumn) []string {
 	labels := make([]string, len(columns))
 	for index, column := range columns {
 		labels[index] = column.Label

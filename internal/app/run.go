@@ -76,7 +76,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	terminal.Header(cfg, probe.EstimateFor(cfg))
 	progress := terminal.BeginProgress(len(cfg.Modules))
 	raw, runErr := func() (model.Report, error) {
-		defer progress.EndProgress()
+		defer progress.Stop()
 		return runner.Run(ctx, cfg, func(event runner.Progress) {
 			if event.TitleKey != "" {
 				if title := i18n.T(event.TitleKey); title != event.TitleKey {

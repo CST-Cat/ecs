@@ -66,11 +66,11 @@ func TierLabel(vcpuMin int) string {
 		if index == len(tierBounds)-1 {
 			return fmt.Sprintf("%d+ vCPU", bound)
 		}
-		if next := tierBounds[index+1]; next == bound+1 {
+		next := tierBounds[index+1]
+		if next == bound+1 {
 			return fmt.Sprintf("%d vCPU", bound)
-		} else {
-			return fmt.Sprintf("%d–%d vCPU", bound, tierBounds[index+1]-1)
 		}
+		return fmt.Sprintf("%d–%d vCPU", bound, next-1)
 	}
 	return fmt.Sprintf("%d vCPU", vcpuMin)
 }

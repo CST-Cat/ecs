@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
@@ -36,10 +37,17 @@ func sanitizeCommandOutput(output []byte) string {
 	return strings.TrimSpace(text)
 }
 
+// tailText keeps the last limit bytes, advancing to the next rune boundary so a
+// multi-byte character is never cut in half. Probe diagnostics are frequently
+// Chinese, where a byte-exact cut would emit a replacement character.
 func tailText(text string, limit int) string {
 	text = strings.TrimSpace(text)
 	if len(text) <= limit {
 		return text
 	}
-	return text[len(text)-limit:]
+	tail := text[len(text)-limit:]
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return tail
 }

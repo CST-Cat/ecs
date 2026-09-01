@@ -106,15 +106,15 @@ func Validate(runtime Runtime) error {
 			if !validEndpointFamily(endpoint.Family) {
 				return i18n.Errorf("err.endpointFamily", endpoint.Name)
 			}
-			if literalFamily := literalEndpointFamily(endpoint.Address, true); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+			if literalFamily := literalEndpointFamily(endpoint.Address, requirePort); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
 				return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 			}
 		}
 	}
-	if err := validateEndpointDuplicates(runtime.DNSResolvers, runtime.IPVersion, true); err != nil {
+	if err := validateEndpointDuplicates(runtime.DNSResolvers, runtime.IPVersion, requirePort); err != nil {
 		return err
 	}
-	if err := validateEndpointDuplicates(runtime.LatencyTargets, runtime.IPVersion, true); err != nil {
+	if err := validateEndpointDuplicates(runtime.LatencyTargets, runtime.IPVersion, requirePort); err != nil {
 		return err
 	}
 	for _, endpoint := range runtime.RouteTargets {
@@ -127,11 +127,11 @@ func Validate(runtime Runtime) error {
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.routeFamily", endpoint.Name)
 		}
-		if literalFamily := literalEndpointFamily(endpoint.Address, false); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+		if literalFamily := literalEndpointFamily(endpoint.Address, noPort); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 	}
-	if err := validateEndpointDuplicates(runtime.RouteTargets, runtime.IPVersion, false); err != nil {
+	if err := validateEndpointDuplicates(runtime.RouteTargets, runtime.IPVersion, noPort); err != nil {
 		return err
 	}
 	for _, endpoint := range runtime.STUNServers {
@@ -145,7 +145,7 @@ func Validate(runtime Runtime) error {
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.endpointFamily", endpoint.Name)
 		}
-		if literalFamily := literalEndpointFamily(endpoint.Address, true); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+		if literalFamily := literalEndpointFamily(endpoint.Address, requirePort); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 	}
@@ -162,14 +162,14 @@ func Validate(runtime Runtime) error {
 		if !validEndpointFamily(endpoint.Family) {
 			return i18n.Errorf("err.backtraceFamily", endpoint.Name)
 		}
-		if literalFamily := literalEndpointFamily(endpoint.Address, false); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
+		if literalFamily := literalEndpointFamily(endpoint.Address, noPort); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 		if !validBacktraceCarrier(endpoint.Kind) {
 			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
 		}
 	}
-	if err := validateEndpointDuplicates(runtime.BacktraceTargets, runtime.IPVersion, false); err != nil {
+	if err := validateEndpointDuplicates(runtime.BacktraceTargets, runtime.IPVersion, noPort); err != nil {
 		return err
 	}
 	seenOoklaCarriers := make(map[string]bool)
@@ -208,7 +208,7 @@ func Validate(runtime Runtime) error {
 		default:
 			return i18n.Errorf("err.iperfNodeNetwork", endpoint.Name)
 		}
-		if literalFamily := literalEndpointFamily(endpoint.Host, false); literalFamily != "" && endpoint.Networks != "" && endpoint.Networks != "IPv"+literalFamily {
+		if literalFamily := literalEndpointFamily(endpoint.Host, noPort); literalFamily != "" && endpoint.Networks != "" && endpoint.Networks != "IPv"+literalFamily {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Networks, literalFamily)
 		}
 		key := iperfTargetKey(endpoint.Host, endpoint.PortStart, endpoint.PortEnd)
@@ -262,7 +262,7 @@ func validateEndpointDuplicates(endpoints []Endpoint, runtimeIPVersion string, r
 func validateSTUNDuplicates(servers []Endpoint) error {
 	seen := make(map[string]struct{}, len(servers))
 	for _, server := range servers {
-		key := normalizedEndpointAddress(server.Address, true)
+		key := normalizedEndpointAddress(server.Address, requirePort)
 		if _, exists := seen[key]; exists {
 			return i18n.Errorf("err.endpointDuplicate", server.Address)
 		}
@@ -301,7 +301,7 @@ func endpointExecutionFamily(endpoint Endpoint, runtimeIPVersion string, require
 	if endpoint.Family == IPVersion4 || endpoint.Family == IPVersion6 {
 		return endpoint.Family
 	}
-	if inferred := inferEndpointFamily(endpoint.Address, requirePort); inferred != "" {
+	if inferred := InferEndpointFamily(endpoint.Address, requirePort); inferred != "" {
 		return inferred
 	}
 	if runtimeIPVersion == IPVersion4 || runtimeIPVersion == IPVersion6 {

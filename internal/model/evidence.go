@@ -32,8 +32,8 @@ func (e *Evidence) Normalize() {
 	}
 }
 
-// EvidenceRatio returns a renderer-safe coverage ratio in [0, 1].
-func (e Evidence) EvidenceRatio() float64 {
+// Ratio returns a renderer-safe coverage ratio in [0, 1].
+func (e Evidence) Ratio() float64 {
 	if e.Expected <= 0 || e.Valid <= 0 {
 		return 0
 	}

@@ -8,6 +8,13 @@ import (
 	"ecs/internal/i18n"
 )
 
+// requirePort / noPort name the boolean argument shared by the address helpers
+// below. A bare true/false at a call site says nothing about what it selects.
+const (
+	requirePort = true
+	noPort      = false
+)
+
 // 命令行端点解析。
 //
 // 让每一项配置都能只靠命令行调节：容器与一次性排查场景下写配置文件很别扭，
@@ -53,7 +60,7 @@ func ParseEndpointList(raw string, requirePort bool) ([]Endpoint, error) {
 		}
 		endpoints = append(endpoints, Endpoint{
 			Name: name, Address: address,
-			Family: inferEndpointFamily(address, requirePort),
+			Family: InferEndpointFamily(address, requirePort),
 		})
 	}
 	return endpoints, nil
@@ -93,7 +100,7 @@ func ParseBacktraceTargetList(raw string) ([]Endpoint, error) {
 		seen[address] = true
 		targets = append(targets, Endpoint{
 			Name: name, Address: address, Kind: carrier,
-			Family: inferEndpointFamily(address, false),
+			Family: InferEndpointFamily(address, noPort),
 		})
 	}
 	return targets, nil
@@ -119,10 +126,14 @@ func literalEndpointFamily(address string, requirePort bool) string {
 	return ""
 }
 
-// inferEndpointFamily records facts that can be established without DNS.  A
+// InferEndpointFamily records facts that can be established without DNS.  A
 // literal is unambiguous; the backtrace target list also uses a -v6 hostname
 // convention so an IPv6-only hostname is not accidentally routed over IPv4.
-func inferEndpointFamily(address string, requirePort bool) string {
+//
+// It is exported because probe needs the same answer when it picks a concrete
+// family per target. Keeping one implementation means the -v6 convention is
+// defined in exactly one place.
+func InferEndpointFamily(address string, requirePort bool) string {
 	if family := literalEndpointFamily(address, requirePort); family != "" {
 		return family
 	}
