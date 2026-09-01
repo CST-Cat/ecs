@@ -54,7 +54,7 @@ func Validate(runtime Runtime) error {
 	// cannot bypass the external-contact limit.
 	for _, id := range runtime.Modules {
 		if !AllowsModule(runtime.Exposure, id) {
-			info := ExposureFor(id)
+			info := exposureFor(id)
 			return i18n.Errorf("err.moduleAboveLimitFix", id, info.Level.String(), runtime.Exposure.String())
 		}
 	}
@@ -164,7 +164,7 @@ func Validate(runtime Runtime) error {
 		if literalFamily := literalEndpointFamily(endpoint.Address, false); literalFamily != "" && endpoint.Family != "" && endpoint.Family != literalFamily {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
-		if !ValidBacktraceCarrier(endpoint.Kind) {
+		if !validBacktraceCarrier(endpoint.Kind) {
 			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
 		}
 	}

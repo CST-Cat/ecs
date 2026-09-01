@@ -89,8 +89,6 @@ func T(key string) string {
 	return translate(lang, key)
 }
 
-// TL 按指定语言取译文，用于同时输出多语言的场景。缺失时返回稳定 key。
-
 // Errorf 构造一个按当前语言渲染的错误。
 //
 // 校验错误在命令行上立即打印，因此在 CLI presentation 边界直接用稳定 key 选取

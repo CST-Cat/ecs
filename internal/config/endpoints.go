@@ -76,7 +76,7 @@ func ParseBacktraceTargetList(raw string) ([]Endpoint, error) {
 		if !ok || carrier == "" || specification == "" {
 			return nil, i18n.Errorf("err.backtraceFormat", item)
 		}
-		if !ValidBacktraceCarrier(carrier) {
+		if !validBacktraceCarrier(carrier) {
 			return nil, i18n.Errorf("err.backtraceCarrier", item, carrier)
 		}
 		name, address, ok := strings.Cut(specification, "=")

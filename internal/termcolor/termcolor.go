@@ -205,8 +205,8 @@ func lerp(from, to uint8, position float64) uint8 {
 // 这四个字符在等宽字体里同宽，且在纯文本、日志、被 grep 过的输出里都保留层次。
 var densityRunes = []rune{'░', '▒', '▓', '█'}
 
-// Density 返回该比例对应的密度字符。
-func Density(ratio float64) rune {
+// density 返回该比例对应的密度字符。
+func density(ratio float64) rune {
 	switch {
 	case ratio < 0.35:
 		return densityRunes[0]

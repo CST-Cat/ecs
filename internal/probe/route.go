@@ -217,11 +217,7 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 }
 
 // routeSnapshotHops 是路径快照的跳数上限。
-// RouteSnapshotHops 供 runner 组装比较签名，避免把 12 抄成第二份。
 const routeSnapshotHops = 12
-
-// RouteSnapshotHops 是 route 模块实际使用的跳数上限。
-const RouteSnapshotHops = routeSnapshotHops
 
 func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
 	if !isNextTraceEngine(engine.Name) || engine.Path == "" {

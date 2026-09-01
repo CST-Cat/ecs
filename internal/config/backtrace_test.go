@@ -50,7 +50,7 @@ func TestBacktraceCitySelectionAndTargets(t *testing.T) {
 		t.Fatalf("built-in backtrace target count = %d, want 24", len(all))
 	}
 	for _, target := range all {
-		if !strings.HasPrefix(target.Name, "probe.backtrace.target.") || !ValidBacktraceCarrier(target.Kind) {
+		if !strings.HasPrefix(target.Name, "probe.backtrace.target.") || !validBacktraceCarrier(target.Kind) {
 			t.Fatalf("built-in target is not machine-shaped: %+v", target)
 		}
 		for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {

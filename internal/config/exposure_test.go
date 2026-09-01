@@ -32,8 +32,8 @@ func TestExposureFilteringAndEgressSemantics(t *testing.T) {
 		t.Fatalf("public modules = %v", got)
 	}
 	if !AllowsModule(ExposurePublic, "dns") || AllowsModule(ExposurePublic, "network") ||
-		ExposureFor("network").Level != ExposureThirdParty || !ExposureFor("network").NeedsEgressIP ||
-		ExposureFor("unknown").Level != ExposureConsent {
+		exposureFor("network").Level != ExposureThirdParty || !exposureFor("network").NeedsEgressIP ||
+		exposureFor("unknown").Level != ExposureConsent {
 		t.Fatal("exposure boundary or unknown-module safety is incorrect")
 	}
 	if !RequiresEgressIP([]string{"network"}) || RequiresEgressIP([]string{"system"}) {

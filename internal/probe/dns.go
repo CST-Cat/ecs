@@ -22,9 +22,6 @@ func (dnsProbe) ID() string { return "dns" }
 // dnsQueryName 是固定的探测域名，各解析器都能递归到且 TTL 稳定。
 const dnsQueryName = "www.cloudflare.com"
 
-// DNSQueryName 是 dns 模块实际查询的域名，供比较签名引用。
-const DNSQueryName = dnsQueryName
-
 const (
 	dnsStatusOK      = "ok"
 	dnsStatusFailed  = "failed"

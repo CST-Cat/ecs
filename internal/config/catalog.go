@@ -172,9 +172,9 @@ func BacktraceTargetsFor(cities []string) []Endpoint {
 	return targets
 }
 
-// ValidBacktraceCarrier reports whether a backtrace target has one of the
+// validBacktraceCarrier reports whether a backtrace target has one of the
 // machine carrier identities understood by the probe.
-func ValidBacktraceCarrier(carrier string) bool {
+func validBacktraceCarrier(carrier string) bool {
 	switch carrier {
 	case BacktraceCarrierTelecom, BacktraceCarrierUnicom, BacktraceCarrierMobile:
 		return true

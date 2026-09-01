@@ -44,19 +44,18 @@ func appsStableNotes() []string {
 	}
 }
 
-// appCategory keeps the machine identity and display title together. The
-// machine key is declared at the target descriptor, never recovered from a
-// localized title at render time.
+// appCategory is the machine identity of a target group. Display titles are
+// stable presentation keys resolved at render time ("probe.apps.table."+Key),
+// never recovered from a localized string here.
 type appCategory struct {
-	Key   string
-	Label string
+	Key string
 }
 
 var (
-	appCategoryTelegram       = appCategory{Key: "telegram", Label: "Telegram"}
-	appCategoryCodeAndImages  = appCategory{Key: "code_and_images", Label: "代码与镜像"}
-	appCategoryRepositories   = appCategory{Key: "software_repositories", Label: "软件源"}
-	appCategoryInfrastructure = appCategory{Key: "infrastructure", Label: "基础设施"}
+	appCategoryTelegram       = appCategory{Key: "telegram"}
+	appCategoryCodeAndImages  = appCategory{Key: "code_and_images"}
+	appCategoryRepositories   = appCategory{Key: "software_repositories"}
+	appCategoryInfrastructure = appCategory{Key: "infrastructure"}
 )
 
 // appTarget 是一个待测服务端点。

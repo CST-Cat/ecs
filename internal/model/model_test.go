@@ -311,10 +311,6 @@ func TestMaskAndFormattingCategories(t *testing.T) {
 			t.Errorf("Mask(%q) = %q, want %q", test.value, got, test.want)
 		}
 	}
-	text := MaskIPsInText("local 192.0.2.10 and 2001:db8::10; remote 198.51.100.2")
-	if text != "local 192.0.x.x and 2001:db8:x:x:x:x:x:x; remote 198.51.x.x" {
-		t.Fatalf("MaskIPsInText = %q", text)
-	}
 	for _, test := range []struct {
 		value uint64
 		want  string

@@ -52,11 +52,11 @@ type ModuleExposure struct {
 	NeedsEgressIP bool
 }
 
-// ExposureFor 返回模块的外联性质。
+// exposureFor 返回模块的外联性质。
 //
 // 未登记的模块按最高级处理：新增模块时漏配只会让它默认不跑，
 // 而不会悄悄把数据发出去。
-func ExposureFor(id string) ModuleExposure {
+func exposureFor(id string) ModuleExposure {
 	for _, descriptor := range moduleDescriptors {
 		if descriptor.ID == id {
 			return ModuleExposure{Level: descriptor.Exposure, NeedsEgressIP: descriptor.NeedsEgressIP}
@@ -115,7 +115,7 @@ func AllowsModule(limit Exposure, id string) bool {
 	if !validExposure(limit) {
 		return false
 	}
-	info := ExposureFor(id)
+	info := exposureFor(id)
 	return info.Level <= limit
 }
 
@@ -136,7 +136,7 @@ func FilterModulesByExposure(modules []string, limit Exposure) []string {
 // RequiresEgressIP 判断这批模块里有没有人需要出口 IP。
 func RequiresEgressIP(modules []string) bool {
 	for _, id := range modules {
-		if ExposureFor(id).NeedsEgressIP {
+		if exposureFor(id).NeedsEgressIP {
 			return true
 		}
 	}
@@ -152,7 +152,7 @@ func EgressNeedsIPIntel(modules []string, limit Exposure) bool {
 		return false
 	}
 	for _, id := range modules {
-		if ExposureFor(id).Level >= ExposureThirdParty && ExposureFor(id).NeedsEgressIP {
+		if exposureFor(id).Level >= ExposureThirdParty && exposureFor(id).NeedsEgressIP {
 			return true
 		}
 	}
@@ -174,7 +174,7 @@ func CheckModuleExposure(named []string, limit Exposure) error {
 		if AllowsModule(limit, id) {
 			continue
 		}
-		info := ExposureFor(id)
+		info := exposureFor(id)
 		return i18n.Errorf("err.moduleAboveLimit",
 			id, info.Level.String(), limit.String(), info.Level.String())
 	}

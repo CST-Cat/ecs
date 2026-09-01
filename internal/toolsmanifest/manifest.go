@@ -34,18 +34,6 @@ var toolNames = [...]string{
 	"ping",
 }
 
-// Architectures returns the supported Linux architecture order.
-// The returned slice is a copy, so callers cannot mutate the manifest contract.
-func Architectures() []string {
-	return append([]string(nil), architectures[:]...)
-}
-
-// ToolNames returns the manifest tool allowlist order.
-// The returned slice is a copy, so callers cannot mutate the manifest contract.
-func ToolNames() []string {
-	return append([]string(nil), toolNames[:]...)
-}
-
 // Manifest describes one Linux architecture's ecs-tools package.
 type Manifest struct {
 	SchemaVersion          string        `json:"schema_version"`

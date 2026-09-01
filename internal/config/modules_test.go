@@ -11,7 +11,7 @@ func TestModuleDescriptorsAreCanonicalAndComplete(t *testing.T) {
 	if len(descriptors) == 0 || len(descriptors) != len(order) || len(ModuleIDs()) != len(descriptors) {
 		t.Fatalf("descriptor/order sizes = %d/%d", len(descriptors), len(order))
 	}
-	if err := ValidateModuleDescriptors(); err != nil {
+	if err := validateModuleDescriptors(); err != nil {
 		t.Fatal(err)
 	}
 	for index, descriptor := range descriptors {

@@ -106,9 +106,6 @@ var chinaRouteSignatures = []routeSignature{
 // 在必然无响应的尾部；12 跳的路径快照上限则会让特征来不及出现。
 const backtraceMaxHops = 20
 
-// BacktraceMaxHops 是 backtrace 模块实际使用的跳数上限，供比较签名引用。
-const BacktraceMaxHops = backtraceMaxHops
-
 // backtraceConcurrency 限制同时进行的追踪数量。
 //
 // 运营商与中间设备普遍对 ICMP/UDP 探测限速：实测中并发 6 个追踪会让关键跳全部

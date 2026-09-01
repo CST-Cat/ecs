@@ -120,11 +120,12 @@ func TestProbeFormattingAndParsingHelpers(t *testing.T) {
 
 func TestContainerResourcePureSemantics(t *testing.T) {
 	limited := cpuAllowance{Visible: 4, Quota: 2.5, Threads: 3, Source: "fixture quota"}
-	if !limited.Limited() || !strings.Contains(describeCPUAllowance(limited), "fixture quota") {
+	if !limited.Limited() || !strings.Contains(cpuAllowanceMachineValue(limited), "fixture quota") {
 		t.Fatalf("limited CPU allowance = %+v", limited)
 	}
-	if (cpuAllowance{Visible: 4, Threads: 4}).Limited() || !strings.Contains(describeCPUAllowance(cpuAllowance{Visible: 4, Threads: 4}), "无 cgroup 配额限制") {
-		t.Fatal("unlimited CPU allowance description failed")
+	unlimited := cpuAllowance{Visible: 4, Threads: 4}
+	if unlimited.Limited() || !strings.Contains(cpuAllowanceMachineValue(unlimited), "quota=unlimited") {
+		t.Fatal("unlimited CPU allowance machine value failed")
 	}
 	if !reflect.DeepEqual(distinctBenchmarkThreadCounts(0), []int{1}) || !reflect.DeepEqual(distinctBenchmarkThreadCounts(1), []int{1}) || !reflect.DeepEqual(distinctBenchmarkThreadCounts(4), []int{1, 4}) {
 		t.Fatal("benchmark thread contexts are incorrect")

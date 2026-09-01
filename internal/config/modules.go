@@ -271,10 +271,10 @@ func ModulesForProfile(profile string) []string {
 	return out
 }
 
-// ValidateModuleDescriptors checks invariants shared by config, probe and
-// runner.  Keeping this check public lets package-level tests and integrations
-// fail close to the source when a new module is added incompletely.
-func ValidateModuleDescriptors() error {
+// validateModuleDescriptors checks invariants shared by config, probe and
+// runner. init runs it at startup so an incompletely added module fails the
+// process immediately rather than at the moment that module executes.
+func validateModuleDescriptors() error {
 	seen := make(map[string]bool, len(moduleDescriptors))
 	for index, descriptor := range moduleDescriptors {
 		if descriptor.ID == "" {
@@ -307,7 +307,7 @@ func ValidateModuleDescriptors() error {
 }
 
 func init() {
-	if err := ValidateModuleDescriptors(); err != nil {
+	if err := validateModuleDescriptors(); err != nil {
 		panic(err)
 	}
 }

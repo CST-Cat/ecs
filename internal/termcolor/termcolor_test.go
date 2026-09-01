@@ -109,8 +109,8 @@ func TestPaletteBarsAndRelativeScales(t *testing.T) {
 		{ratio: .8, want: '▓'},
 		{ratio: .9, want: '█'},
 	} {
-		if got := Density(test.ratio); got != test.want {
-			t.Errorf("Density(%v) = %q, want %q", test.ratio, got, test.want)
+		if got := density(test.ratio); got != test.want {
+			t.Errorf("density(%v) = %q, want %q", test.ratio, got, test.want)
 		}
 	}
 	palette := Palette{Level: LevelNone}
@@ -132,10 +132,10 @@ func TestPaletteBarsAndRelativeScales(t *testing.T) {
 	if palette.Bar(.5, 0) != "" {
 		t.Fatal("zero-width bar was not empty")
 	}
-	if RelativeRatio(5, 0, 10) != .5 || RelativeRatio(0, 1, 10) != 0 || RelativeRatio(math.NaN(), 1, 10) != 0 {
+	if relativeRatio(5, 0, 10) != .5 || relativeRatio(0, 1, 10) != 0 || relativeRatio(math.NaN(), 1, 10) != 0 {
 		t.Fatalf("linear/invalid relative ratio failed")
 	}
-	if mid := RelativeRatio(100, 1, 10000); math.Abs(mid-.5) > 1e-9 {
+	if mid := relativeRatio(100, 1, 10000); math.Abs(mid-.5) > 1e-9 {
 		t.Fatalf("wide relative range midpoint = %v, want .5", mid)
 	}
 	if got := palette.BarRelativeRange(5, 0, 10, 4); got == "····" {

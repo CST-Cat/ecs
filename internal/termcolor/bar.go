@@ -43,7 +43,7 @@ func (p Palette) Bar(ratio float64, width int) string {
 		filled = width
 	}
 
-	solid := string(Density(ratio))
+	solid := string(density(ratio))
 	body := p.WrapRatio(strings.Repeat(solid, filled), ratio)
 	if rest := width - filled; rest > 0 {
 		body += p.Dim(strings.Repeat("·", rest))

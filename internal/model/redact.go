@@ -109,15 +109,6 @@ var (
 	textIPv6Pattern = regexp.MustCompile(`(?i)[0-9a-f:]{2,}(?:/\d{1,3})?`)
 )
 
-// MaskIPsInText masks every IP in explicitly sensitive free text.
-func MaskIPsInText(text string) string {
-	if text == "" {
-		return text
-	}
-	masked := textIPv4Pattern.ReplaceAllStringFunc(text, maskIPToken)
-	return textIPv6Pattern.ReplaceAllStringFunc(masked, maskIPToken)
-}
-
 func Mask(value string) string {
 	value = strings.TrimSpace(value)
 	if ip := net.ParseIP(value); ip != nil {
@@ -160,21 +151,6 @@ func maskCIDR(network *net.IPNet) string {
 		return "hidden"
 	}
 	return fmt.Sprintf("%s/%d", maskIP(network.IP), ones)
-}
-
-func maskIPToken(token string) string {
-	base := token
-	suffix := ""
-	if slash := strings.IndexByte(token, '/'); slash >= 0 {
-		base, suffix = token[:slash], token[slash:]
-	}
-	if ip := net.ParseIP(base); ip != nil {
-		return maskIP(ip) + suffix
-	}
-	if _, network, err := net.ParseCIDR(token); err == nil {
-		return maskCIDR(network)
-	}
-	return token
 }
 
 func collectSensitiveIPs(report Report) map[string]struct{} {

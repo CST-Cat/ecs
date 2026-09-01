@@ -46,15 +46,6 @@ func (a cpuAllowance) Limited() bool {
 	return a.Quota > 0 && a.Threads < a.Visible
 }
 
-// describeCPUAllowance 给出可读的可用 CPU 描述，用于报告字段。
-func describeCPUAllowance(a cpuAllowance) string {
-	if !a.Limited() {
-		return strconv.Itoa(a.Visible) + " 逻辑核（无 cgroup 配额限制）"
-	}
-	return strconv.FormatFloat(a.Quota, 'f', 2, 64) + " 核配额 / " +
-		strconv.Itoa(a.Visible) + " 逻辑核可见（" + a.Source + "）"
-}
-
 // detectCPUAllowance 计算基准应当使用的线程数。
 //
 // 取 min(可见核数, ceil(cgroup 配额))：向上取整与 Go 运行时对 GOMAXPROCS 的
@@ -252,7 +243,6 @@ func selfCgroupPaths() []string {
 type cpuTimeSample struct {
 	Total uint64
 	Steal uint64
-	Idle  uint64
 }
 
 // readCPUTimes 读取 /proc/stat 的聚合 CPU 行。
@@ -276,10 +266,7 @@ func readCPUTimes() (cpuTimeSample, bool) {
 				continue
 			}
 			sample.Total += value
-			switch index {
-			case 3:
-				sample.Idle = value
-			case 7:
+			if index == 7 {
 				sample.Steal = value
 			}
 		}
