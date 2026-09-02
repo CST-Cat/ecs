@@ -14,7 +14,35 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/module"
+	"ecs/internal/tool"
 )
+
+func TestBuildExecutionPlanDerivesTypedToolStaging(t *testing.T) {
+	application := newApplication()
+	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
+		Modules: []string{"route", "backtrace", "ookla", "zstd", "cpu", "latency"},
+	})
+	if !reflect.DeepEqual(plan.RequiredTools, []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}) {
+		t.Fatalf("required tools = %v", plan.RequiredTools)
+	}
+	if !reflect.DeepEqual(plan.Staging.ToolArchiveTools, []string{"nexttrace-tiny", "zstd", "sysbench", "ping"}) {
+		t.Fatalf("archive tools = %v", plan.Staging.ToolArchiveTools)
+	}
+	if !plan.Staging.ToolArchiveRequired || !plan.Staging.ZstdCorpusRequired || !plan.Staging.NextTraceTinyRequired || !plan.Staging.OoklaPackageRequired {
+		t.Fatalf("staging flags = %+v", plan.Staging)
+	}
+	if plan.Staging.NextTraceSource != string(tool.StagingSourceNextTraceArchitecture) || plan.Staging.OoklaPackageSource != string(tool.StagingSourceOoklaSignedPackage) {
+		t.Fatalf("special staging sources = %+v", plan.Staging)
+	}
+}
+
+func TestApplyToolStagingLeavesNoCapabilityForNone(t *testing.T) {
+	var staging planStaging
+	applyToolStaging(&staging, tool.Definition{ID: "fixture", Staging: tool.StagingPolicy{Category: tool.StagingNone}})
+	if staging.ToolArchiveRequired || len(staging.ToolArchiveTools) != 0 || staging.NextTraceTinyRequired || staging.NextTraceSource != "" || staging.OoklaPackageRequired || staging.OoklaPackageSource != "" || staging.ZstdCorpusRequired {
+		t.Fatalf("none staging changed plan facts: %+v", staging)
+	}
+}
 
 func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	var stdout, stderr bytes.Buffer

@@ -61,13 +61,32 @@ func installDoctorFixtures(t *testing.T, broken string, optional ...string) stri
 	if len(optional) > 0 {
 		optionalName = optional[0]
 	}
-	for _, tool := range doctorTools(newApplication().modules) {
+	application := newApplication()
+	for _, tool := range doctorTools(application.modules, application.tools) {
 		if tool.required || tool.name == optionalName {
 			writeDoctorToolFixture(t, directory, tool.name, tool.name == broken)
 		}
 	}
 	t.Setenv("PATH", directory)
 	return directory
+}
+
+func TestDoctorDerivesCatalogOrderAndRequiredness(t *testing.T) {
+	application := newApplication()
+	tools := doctorTools(application.modules, application.tools)
+	wantNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "fio", "iperf3", "stream", "nexttrace-tiny", "ping", "speedtest"}
+	if len(tools) != len(wantNames) {
+		t.Fatalf("doctor tool count = %d, want %d", len(tools), len(wantNames))
+	}
+	for index, want := range wantNames {
+		if tools[index].name != want {
+			t.Fatalf("doctor tool order[%d] = %q, want %q", index, tools[index].name, want)
+		}
+		wantRequired := index < 8
+		if tools[index].required != wantRequired {
+			t.Fatalf("doctor tool %q required = %t, want %t", want, tools[index].required, wantRequired)
+		}
+	}
 }
 
 func writeDoctorSleepingToolFixture(t *testing.T, directory, name string) {

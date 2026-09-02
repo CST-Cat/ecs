@@ -15,6 +15,7 @@ import (
 	"ecs/internal/module"
 	"ecs/internal/probe"
 	"ecs/internal/textwidth"
+	"ecs/internal/tool"
 )
 
 func doctorCommand(app application, ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -29,7 +30,7 @@ func doctorCommand(app application, ctx context.Context, args []string, stdout, 
 		return 2
 	}
 	fmt.Fprintln(stdout, i18n.T("doctor.header"))
-	tools := doctorTools(app.modules)
+	tools := doctorTools(app.modules, app.tools)
 	missingRequired := false
 	requiredFailure := false
 	for _, tool := range tools {
@@ -60,13 +61,7 @@ func doctorCommand(app application, ctx context.Context, args []string, stdout, 
 		versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		var version string
 		var runErr error
-		if tool.check != nil {
-			version, runErr = tool.check(versionCtx, path)
-		} else {
-			var output []byte
-			output, runErr = exec.CommandContext(versionCtx, path, tool.args...).CombinedOutput()
-			version = strings.TrimSpace(string(output))
-		}
+		version, runErr = verifyDoctorTool(versionCtx, tool, path)
 		versionContextErr := versionCtx.Err()
 		cancel()
 		if newline := strings.IndexByte(version, '\n'); newline >= 0 {
@@ -121,143 +116,107 @@ func doctorCommand(app application, ctx context.Context, args []string, stdout, 
 }
 
 type doctorTool struct {
-	name     string
-	required bool
-	purpose  string
-	args     []string
-	lookup   func() (string, error)
-	check    func(context.Context, string) (string, error)
+	definition tool.Definition
+	name       string
+	required   bool
+	purpose    string
 }
 
-func lookupDoctorTool(tool doctorTool) (string, error) {
-	if tool.lookup != nil {
-		return tool.lookup()
-	}
-	return exec.LookPath(tool.name)
+func lookupDoctorTool(item doctorTool) (string, error) {
+	return exec.LookPath(item.name)
 }
 
-func lookupNextTrace() (string, error) {
-	path, err := exec.LookPath("nexttrace-tiny")
-	if err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func doctorTools(moduleCatalog module.Catalog) []doctorTool {
-	toolCatalog := []doctorTool{
-		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
-		{name: "zstd", required: true, purpose: "doctor.purpose.zstd", check: identifyPinnedZstd},
-		{name: "npb-ep", required: true, purpose: "doctor.purpose.npbEP", check: identifyNPBBinary("EP")},
-		{name: "npb-ft", required: true, purpose: "doctor.purpose.npbFT", check: identifyNPBBinary("FT")},
-		{name: "openssl", required: true, purpose: "doctor.purpose.openssl", check: identifyPinnedOpenSSL},
-		{name: "fio", required: true, purpose: "doctor.purpose.fio", args: []string{"--version"}},
-		{name: "iperf3", required: true, purpose: "doctor.purpose.iperf3", args: []string{"--version"}},
-		{name: "stream", required: true, purpose: "doctor.purpose.stream", check: identifyOfficialStream},
-		{name: "nexttrace-tiny", purpose: "doctor.purpose.nexttrace", args: []string{"--version"}, lookup: lookupNextTrace},
-		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
-		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
-	}
-	meta := make(map[string]doctorTool, len(toolCatalog))
-	for _, item := range toolCatalog {
-		meta[item.name] = item
-	}
-	descriptors := moduleCatalog.Descriptors()
-	known := make(map[string]bool)
-	toolOrder := make([]string, 0)
-	for _, descriptor := range descriptors {
-		for _, name := range descriptor.RequiredTools {
-			name = strings.TrimSpace(name)
-			if name == "" || known[name] {
-				continue
+func doctorTools(moduleCatalog module.Catalog, toolCatalog tool.Catalog) []doctorTool {
+	// Tool identity comes from module RequiredTools. The tool catalog then
+	// filters those references to its standard-doctor membership and supplies
+	// requiredness plus all verification facts. A separate standard-profile set
+	// keeps optional full-profile tools visible without
+	// making them required.
+	referencedIDs := make(map[string]struct{})
+	standardIDs := make(map[string]struct{})
+	for _, descriptor := range moduleCatalog.Descriptors() {
+		for _, id := range descriptor.RequiredTools {
+			referencedIDs[id] = struct{}{}
+			if descriptor.ProfileStandard {
+				standardIDs[id] = struct{}{}
 			}
-			known[name] = true
-			toolOrder = append(toolOrder, name)
-			if _, ok := meta[name]; ok {
-				continue
-			}
-			meta[name] = doctorTool{name: name, purpose: name, args: []string{"--version"}}
 		}
 	}
-	for _, item := range toolCatalog {
-		if item.required {
-			known[item.name] = true
-		}
-	}
-	tools := make([]doctorTool, 0, len(known))
-	for _, item := range toolCatalog {
-		if !known[item.name] {
+	definitions := toolCatalog.DoctorDefinitions()
+	tools := make([]doctorTool, 0, len(definitions))
+	for _, definition := range definitions {
+		if _, referenced := referencedIDs[definition.ID]; !referenced {
 			continue
 		}
-		item.purpose = i18n.T(item.purpose)
-		tools = append(tools, item)
-		delete(known, item.name)
-	}
-	for _, name := range toolOrder {
-		if !known[name] {
-			continue
-		}
-		item := meta[name]
-		item.purpose = i18n.T(item.purpose)
-		tools = append(tools, item)
+		_, referencedByStandard := standardIDs[definition.ID]
+		tools = append(tools, doctorTool{
+			definition: definition,
+			name:       definition.ID,
+			required:   referencedByStandard && definition.Doctor.Required,
+			purpose:    i18n.T(definition.PurposeKey),
+		})
 	}
 	return tools
 }
 
-func identifyOfficialStream(_ context.Context, path string) (string, error) {
+func verifyDoctorTool(ctx context.Context, item doctorTool, path string) (string, error) {
+	policy := item.definition.Verification
+	switch policy.Kind {
+	case tool.VerificationCommand:
+		output, err := exec.CommandContext(ctx, path, policy.Arguments...).CombinedOutput()
+		return strings.TrimSpace(string(output)), err
+	case tool.VerificationPinnedZstd, tool.VerificationPinnedOpenSSL:
+		return identifyPinnedVersion(ctx, path, policy)
+	case tool.VerificationNPB:
+		return identifyNPBBinary(ctx, path, policy)
+	case tool.VerificationOfficialStream:
+		return identifyOfficialStream(path, policy.SuccessLabel)
+	default:
+		return "", fmt.Errorf("unsupported verification kind %q", policy.Kind)
+	}
+}
+
+func identifyOfficialStream(path, successLabel string) (string, error) {
 	if !probe.IsOfficialStreamBinary(path) {
 		return "", fmt.Errorf("official STREAM markers not found in %s", path)
 	}
-	return "official STREAM", nil
+	return successLabel, nil
 }
 
-var pinnedZstdVersionPattern = regexp.MustCompile(`(?i)(^|[^0-9])v1\.5\.7([^0-9]|$)`)
-
-func identifyPinnedZstd(ctx context.Context, path string) (string, error) {
-	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+func identifyPinnedVersion(ctx context.Context, path string, policy tool.VerificationPolicy) (string, error) {
+	output, err := exec.CommandContext(ctx, path, policy.Arguments...).CombinedOutput()
 	version := strings.TrimSpace(string(output))
 	if err != nil {
 		return "", err
 	}
-	if !pinnedZstdVersionPattern.MatchString(version) {
-		return "", fmt.Errorf("zstd 1.5.7 required")
+	pattern := regexp.MustCompile(`(?i)(^|[^0-9])v` + regexp.QuoteMeta(policy.ExpectedVersion) + `([^0-9]|$)`)
+	if policy.Kind == tool.VerificationPinnedOpenSSL {
+		pattern = regexp.MustCompile(`(?m)^OpenSSL\s+` + regexp.QuoteMeta(policy.ExpectedVersion) + `(?:\s|$)`)
 	}
-	return "zstd 1.5.7", nil
+	if !pattern.MatchString(version) {
+		return "", fmt.Errorf("%s required", policy.SuccessLabel)
+	}
+	return policy.SuccessLabel, nil
 }
 
-var pinnedOpenSSLVersionPattern = regexp.MustCompile(`(?m)^OpenSSL\s+3\.5\.7(?:\s|$)`)
-
-func identifyPinnedOpenSSL(ctx context.Context, path string) (string, error) {
-	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
-	version := strings.TrimSpace(string(output))
+func identifyNPBBinary(_ context.Context, path string, policy tool.VerificationPolicy) (string, error) {
+	benchmark := string(policy.NPBVariant)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	if !pinnedOpenSSLVersionPattern.MatchString(version) {
-		return "", fmt.Errorf("OpenSSL 3.5.7 required")
-	}
-	return "OpenSSL 3.5.7", nil
-}
-
-func identifyNPBBinary(benchmark string) func(context.Context, string) (string, error) {
-	return func(_ context.Context, path string) (string, error) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
+	text := string(data)
+	for _, marker := range []string{
+		"NAS Parallel Benchmarks (NPB3.4-OMP)",
+		" - " + benchmark + " Benchmark",
+		"Benchmark Completed.",
+		"Mop/s total",
+		"Verification",
+		policy.ExpectedVersion,
+	} {
+		if !strings.Contains(text, marker) {
+			return "", fmt.Errorf("NPB %s marker %q not found", benchmark, marker)
 		}
-		text := string(data)
-		for _, marker := range []string{
-			"NAS Parallel Benchmarks (NPB3.4-OMP)",
-			" - " + benchmark + " Benchmark",
-			"Benchmark Completed.",
-			"Mop/s total",
-			"Verification",
-			"3.4.4",
-		} {
-			if !strings.Contains(text, marker) {
-				return "", fmt.Errorf("NPB %s marker %q not found", benchmark, marker)
-			}
-		}
-		return "NPB 3.4.4 " + benchmark + " (Class A verified at run)", nil
 	}
+	return policy.SuccessLabel, nil
 }

@@ -5,11 +5,16 @@ import (
 	"testing"
 
 	"ecs/internal/probe"
+	"ecs/internal/tool"
 )
 
 func TestApplicationCompositionOwnsValidatedCatalogs(t *testing.T) {
 	definitions := probe.BuiltinDefinitions()
-	application, err := composeApplication(definitions)
+	tools, err := tool.BuiltinCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := composeApplication(definitions, tools)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,11 +65,40 @@ func TestApplicationCompositionOwnsValidatedCatalogs(t *testing.T) {
 	if application.modules.IDs()[0] == "mutated" {
 		t.Fatal("application module catalog leaked IDs backing state")
 	}
+	toolDefinitions := application.tools.Definitions()
+	toolDefinitions[1].ID = "mutated-tool"
+	toolDefinitions[1].Verification.Arguments[0] = "mutated-tool"
+	freshTool, ok := application.tools.Lookup("zstd")
+	if !ok || freshTool.ID != "zstd" || freshTool.Verification.Arguments[0] != "--version" {
+		t.Fatalf("application tool catalog leaked returned state: %+v", freshTool)
+	}
 }
 
 func TestComposeApplicationRejectsMalformedDefinitions(t *testing.T) {
-	_, err := composeApplication([]probe.Definition{{}})
+	tools, err := tool.BuiltinCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = composeApplication([]probe.Definition{{}}, tools)
 	if err == nil || !strings.Contains(err.Error(), "empty ID") {
 		t.Fatalf("malformed application definitions error = %v, want empty ID", err)
+	}
+}
+
+func TestComposeApplicationRejectsMissingToolReference(t *testing.T) {
+	definitions := probe.BuiltinDefinitions()
+	definitions[3].Descriptor.RequiredTools[0] = "missing-tool"
+	tools, err := tool.BuiltinCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composeApplication(definitions, tools); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("missing tool reference error = %v", err)
+	}
+}
+
+func TestComposeApplicationRejectsUninitializedToolCatalog(t *testing.T) {
+	if _, err := composeApplication(probe.BuiltinDefinitions(), tool.Catalog{}); err == nil || !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("zero tool catalog error = %v", err)
 	}
 }

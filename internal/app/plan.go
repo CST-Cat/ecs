@@ -12,6 +12,7 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/module"
+	"ecs/internal/tool"
 )
 
 // executionPlan is deliberately language independent. It is consumed by the
@@ -87,7 +88,7 @@ func planCommand(app application, ctx context.Context, args []string, stdout, st
 		return 1
 	}
 
-	content, err := json.MarshalIndent(buildExecutionPlan(app.modules, runtime), "", "  ")
+	content, err := json.MarshalIndent(buildExecutionPlan(app.modules, app.tools, runtime), "", "  ")
 	if err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
@@ -97,7 +98,7 @@ func planCommand(app application, ctx context.Context, args []string, stdout, st
 	return 0
 }
 
-func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executionPlan {
+func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime config.Runtime) executionPlan {
 	plan := executionPlan{
 		SchemaVersion: buildinfo.PlanSchemaVersion,
 		Tool:          planTool{Name: buildinfo.Name, Version: buildinfo.Version},
@@ -125,27 +126,14 @@ func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executio
 		if descriptor.ID == "ookla" {
 			needsOokla = true
 		}
-		for _, tool := range descriptor.RequiredTools {
-			if containsPlanValue(plan.RequiredTools, tool) {
+		for _, toolID := range descriptor.RequiredTools {
+			if containsPlanValue(plan.RequiredTools, toolID) {
 				continue
 			}
-			plan.RequiredTools = append(plan.RequiredTools, tool)
-			switch tool {
-			case "speedtest":
-				plan.Staging.OoklaPackageRequired = true
-				plan.Staging.OoklaPackageSource = "official-signed-package-source"
-			case "nexttrace-tiny":
-				plan.Staging.NextTraceTinyRequired = true
-				plan.Staging.NextTraceSource = "official-architecture-asset"
-				plan.Staging.ToolArchiveRequired = true
-				plan.Staging.ToolArchiveTools = append(plan.Staging.ToolArchiveTools, tool)
-			case "zstd":
-				plan.Staging.ZstdCorpusRequired = true
-				plan.Staging.ToolArchiveRequired = true
-				plan.Staging.ToolArchiveTools = append(plan.Staging.ToolArchiveTools, tool)
-			default:
-				plan.Staging.ToolArchiveRequired = true
-				plan.Staging.ToolArchiveTools = append(plan.Staging.ToolArchiveTools, tool)
+			plan.RequiredTools = append(plan.RequiredTools, toolID)
+			definition, ok := tools.Lookup(toolID)
+			if ok {
+				applyToolStaging(&plan.Staging, definition)
 			}
 		}
 	}
@@ -159,6 +147,26 @@ func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executio
 		plan.ExternalServices = append(plan.ExternalServices, "ookla")
 	}
 	return plan
+}
+
+func applyToolStaging(staging *planStaging, definition tool.Definition) {
+	switch definition.Staging.Category {
+	case tool.StagingArchive:
+		staging.ToolArchiveRequired = true
+		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
+	case tool.StagingZstdCorpus:
+		staging.ZstdCorpusRequired = true
+		staging.ToolArchiveRequired = true
+		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
+	case tool.StagingNextTrace:
+		staging.NextTraceTinyRequired = true
+		staging.NextTraceSource = string(definition.Staging.Source)
+		staging.ToolArchiveRequired = true
+		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
+	case tool.StagingOokla:
+		staging.OoklaPackageRequired = true
+		staging.OoklaPackageSource = string(definition.Staging.Source)
+	}
 }
 
 func containsPlanValue(values []string, wanted string) bool {
