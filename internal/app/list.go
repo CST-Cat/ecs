@@ -9,6 +9,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/probe"
 )
 
 func listCommand(args []string, stdout, stderr io.Writer) int {
@@ -29,7 +30,7 @@ func listCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "  %-10s %s\n", profile, i18n.T("profile."+profile))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
-	for _, descriptor := range config.ModuleDescriptors() {
+	for _, descriptor := range config.ModuleDescriptors(probe.BuiltinCatalog()) {
 		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", descriptor.ID, descriptor.Exposure.String(), i18n.T(descriptor.DescriptionKey))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.exposureHeader"))

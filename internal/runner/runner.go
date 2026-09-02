@@ -61,7 +61,8 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 		return model.Report{}, err
 	}
 	started := time.Now().UTC()
-	selected := selectBindings(bindBuiltinModules(), cfg.Modules)
+	definitions := probe.BuiltinDefinitions()
+	selected := selectDefinitions(definitions, cfg.Modules)
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool: model.ToolInfo{
@@ -94,8 +95,9 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 	}
 	// Keep optional privacy/external-policy notices in descriptor order. The
 	// runner deliberately does not special-case a module ID here: adding an
-	// external client only requires metadata in config's registry.
-	for _, descriptor := range config.ModuleDescriptors() {
+	// external client only requires metadata in the canonical definitions.
+	for _, definition := range definitions {
+		descriptor := definition.Descriptor
 		if requested[descriptor.ID] && descriptor.PrivacyNoticeKey != "" {
 			report.Notices = append(report.Notices, model.NewMessage(descriptor.PrivacyNoticeKey))
 		}
@@ -134,9 +136,9 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 
 	titles := make([]string, len(selected))
 	titleKeys := make([]string, len(selected))
-	for index, binding := range selected {
-		titles[index] = bindingTitle(binding)
-		titleKeys[index] = binding.Descriptor.TitleKey
+	for index, definition := range selected {
+		titles[index] = definitionTitle(definition)
+		titleKeys[index] = definition.Descriptor.TitleKey
 	}
 	results := make([]model.Result, len(selected))
 	completed := 0
@@ -153,8 +155,8 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 			// 详细报告仍在最后渲染。
 			if progress != nil {
 				for _, index := range group.Indices {
-					binding := selected[index]
-					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
+					definition := selected[index]
+					progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: definition.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
 				}
 			}
 			var wg sync.WaitGroup
@@ -162,23 +164,23 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 				wg.Add(1)
 				go func(index int) {
 					defer wg.Done()
-					results[index] = runBinding(ctx, selected[index], effectiveCfg, env, networkRunnable)
+					results[index] = runDefinition(ctx, selected[index], effectiveCfg, env, networkRunnable)
 				}(index)
 			}
 			wg.Wait()
 		} else {
 			index := group.Indices[0]
-			binding := selected[index]
+			definition := selected[index]
 			if progress != nil {
-				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
+				progress(Progress{Phase: PhaseStart, Index: index + 1, Total: len(selected), ID: definition.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index]})
 			}
-			results[index] = runBinding(ctx, binding, effectiveCfg, env, networkRunnable)
+			results[index] = runDefinition(ctx, definition, effectiveCfg, env, networkRunnable)
 		}
 		for _, index := range group.Indices {
-			binding := selected[index]
+			definition := selected[index]
 			completed++
 			if progress != nil {
-				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: binding.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index], Result: results[index]})
+				progress(Progress{Phase: PhaseDone, Index: index + 1, Total: len(selected), ID: definition.Descriptor.ID, Title: titles[index], TitleKey: titleKeys[index], Result: results[index]})
 			}
 		}
 		if ctx.Err() != nil {
@@ -221,12 +223,12 @@ func localInterfaceIPs() []string {
 	return result
 }
 
-// runBinding executes one validated module binding, uniformly handling
+// runDefinition executes one validated module definition, uniformly handling
 // offline skipping and methodology completion.
-func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
-	item := binding.Probe
-	descriptor := binding.Descriptor
-	canonicalTitle := bindingTitle(binding)
+func runDefinition(ctx context.Context, definition probe.Definition, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
+	item := definition.Probe
+	descriptor := definition.Descriptor
+	canonicalTitle := definitionTitle(definition)
 	needsNetwork := descriptor.Exposure > module.ExposureLocal
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
@@ -264,22 +266,22 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	return result
 }
 
-// bindingTitle supplies the canonical descriptor title for built-ins and falls
-// back to the stable probe ID when no title key is available. runBinding
+// definitionTitle supplies the canonical descriptor title for built-ins and
+// falls back to the stable probe ID when no title key is available. runDefinition
 // canonicalizes result.Title to this value after the probe completes.
-func bindingTitle(binding moduleBinding) string {
-	if binding.Descriptor.TitleKey != "" {
-		return binding.Descriptor.TitleKey
+func definitionTitle(definition probe.Definition) string {
+	if definition.Descriptor.TitleKey != "" {
+		return definition.Descriptor.TitleKey
 	}
-	if binding.Probe != nil {
-		return binding.Probe.ID()
+	if definition.Probe != nil {
+		return definition.Probe.ID()
 	}
 	return ""
 }
 
-func hasNetworkModules(selected []moduleBinding) bool {
-	for _, binding := range selected {
-		if binding.Descriptor.Exposure > module.ExposureLocal {
+func hasNetworkModules(selected []probe.Definition) bool {
+	for _, definition := range selected {
+		if definition.Descriptor.Exposure > module.ExposureLocal {
 			return true
 		}
 	}

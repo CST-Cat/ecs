@@ -155,7 +155,7 @@ func validateSubmissionCorpus(directory string) error {
 func TestValidateSubmissionCorpus(t *testing.T) {
 	newSubmission := func(t *testing.T, options SubmissionOptions) Submission {
 		t.Helper()
-		submission, err := BuildSubmission(scoreReportFixture(), options)
+		submission, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), options)
 		if err != nil {
 			t.Fatal(err)
 		}

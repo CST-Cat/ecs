@@ -162,7 +162,7 @@ func doctorTools() []doctorTool {
 	for _, item := range catalog {
 		meta[item.name] = item
 	}
-	descriptors := config.ModuleDescriptors()
+	descriptors := config.ModuleDescriptors(probe.BuiltinCatalog())
 	known := make(map[string]bool)
 	toolOrder := make([]string, 0)
 	for _, descriptor := range descriptors {

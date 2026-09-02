@@ -47,8 +47,9 @@ func hasModule(runtime config.Runtime, id string) bool {
 
 func estimateTypicalDuration(runtime config.Runtime, workers int) time.Duration {
 	var total time.Duration
+	catalog := BuiltinCatalog()
 	for _, id := range runtime.Modules {
-		descriptor, ok := config.ModuleDescriptorFor(id)
+		descriptor, ok := catalog.Lookup(id)
 		if !ok {
 			continue
 		}

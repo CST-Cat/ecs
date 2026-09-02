@@ -70,7 +70,7 @@ func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	runtime := resolved.Runtime
 	if resolved.Interactive && !resolved.Yes {
-		wizardOK, wizardErr := runWizard(ctx, &runtime)
+		wizardOK, wizardErr := runWizard(ctx, resolved.Catalog, &runtime)
 		if wizardErr != nil {
 			if errors.Is(wizardErr, context.Canceled) {
 				return 130
@@ -82,12 +82,12 @@ func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			return 0
 		}
 	}
-	if err := config.Validate(runtime); err != nil {
+	if err := config.Validate(resolved.Catalog, runtime); err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
 	}
 
-	content, err := json.MarshalIndent(buildExecutionPlan(runtime), "", "  ")
+	content, err := json.MarshalIndent(buildExecutionPlan(resolved.Catalog, runtime), "", "  ")
 	if err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
@@ -97,7 +97,7 @@ func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	return 0
 }
 
-func buildExecutionPlan(runtime config.Runtime) executionPlan {
+func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executionPlan {
 	plan := executionPlan{
 		SchemaVersion: buildinfo.PlanSchemaVersion,
 		Tool:          planTool{Name: buildinfo.Name, Version: buildinfo.Version},
@@ -111,7 +111,7 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 	needsThirdPartyProvider := false
 	needsOokla := false
 	for _, id := range runtime.Modules {
-		descriptor, ok := config.ModuleDescriptorFor(id)
+		descriptor, ok := config.ModuleDescriptorFor(catalog, id)
 		if !ok {
 			continue
 		}

@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 
-	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 	"ecs/internal/score"
@@ -216,9 +215,6 @@ func moduleTitles(ids []string) []string {
 			continue
 		}
 		key := "module." + id + ".title"
-		if descriptor, ok := config.ModuleDescriptorFor(id); ok && descriptor.TitleKey != "" {
-			key = descriptor.TitleKey
-		}
 		if i18n.Has(i18n.Current(), key) {
 			titles = append(titles, i18n.T(key))
 		} else {

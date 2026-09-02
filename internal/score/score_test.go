@@ -9,7 +9,35 @@ import (
 	"time"
 
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
+
+func scoreTestCatalog() module.Catalog {
+	descriptors := make([]module.Descriptor, 0, 4)
+	for _, id := range []string{"cpu", "memory", "disk", "speed"} {
+		var tools []string
+		switch id {
+		case "cpu":
+			tools = []string{"sysbench"}
+		case "disk":
+			tools = []string{"fio"}
+		case "speed":
+			tools = []string{"iperf3"}
+		}
+		descriptors = append(descriptors, module.Descriptor{
+			ID: id, Exposure: module.ExposureLocal, Concurrency: module.ConcurrencyProbe,
+			RequiredTools: tools,
+			TitleKey:      "module." + id + ".title", DescriptionKey: "module." + id + ".desc",
+			Estimate: time.Second, EstimateMode: module.EstimateModeFixed,
+			Methodology: model.Methodology{Kind: "fixture", Label: "fixture.label", Engine: "fixture.engine", Profile: "fixture.profile", ComparisonScope: "fixture.scope"},
+		})
+	}
+	catalog, err := module.NewCatalog(descriptors)
+	if err != nil {
+		panic(err)
+	}
+	return catalog
+}
 
 func scoreReportFixture() model.Report {
 	started := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
@@ -163,13 +191,13 @@ func TestValidateDimensionsRejectsUnknownModule(t *testing.T) {
 		ModuleID: "nonexistent",
 		Metrics:  []Metric{{Key: "metric", MeasurementKey: "measurement"}},
 	}}
-	if err := validateDimensions(dimensions); err == nil || !strings.Contains(err.Error(), `references unknown module "nonexistent"`) {
+	if err := validateDimensions(scoreTestCatalog(), dimensions); err == nil || !strings.Contains(err.Error(), `references unknown module "nonexistent"`) {
 		t.Fatalf("unknown module validation error = %v", err)
 	}
 }
 
 func TestDimensionsAndComputeFullFixture(t *testing.T) {
-	if err := ValidateDimensions(); err != nil {
+	if err := ValidateDimensions(scoreTestCatalog()); err != nil {
 		t.Fatalf("score descriptor contract = %v", err)
 	}
 	dimensions := Dimensions()
@@ -309,11 +337,11 @@ func TestScoreAndSubmissionAreOrderInvariant(t *testing.T) {
 	if !reflect.DeepEqual(firstScore, secondScore) {
 		t.Fatalf("result order changed score:\n first=%+v\nsecond=%+v", firstScore, secondScore)
 	}
-	firstSubmission, err := BuildSubmission(first, SubmissionOptions{})
+	firstSubmission, err := BuildSubmission(scoreTestCatalog(), first, SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondSubmission, err := BuildSubmission(second, SubmissionOptions{})
+	secondSubmission, err := BuildSubmission(scoreTestCatalog(), second, SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +417,7 @@ func TestScoreableMetricMembershipMatchesAcrossArtifacts(t *testing.T) {
 	if counts := MetricSampleCounts([]model.Report{report}); !reflect.DeepEqual(counts, wantCounts) {
 		t.Fatalf("metric sample counts = %v, want %v", counts, wantCounts)
 	}
-	submission, err := BuildSubmission(report, SubmissionOptions{})
+	submission, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,7 +63,7 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	}
 	descriptor := func(id string) module.Descriptor {
 		t.Helper()
-		value, ok := config.ModuleDescriptorFor(id)
+		value, ok := config.ModuleDescriptorFor(BuiltinCatalog(), id)
 		if !ok {
 			t.Fatalf("descriptor %q missing", id)
 		}

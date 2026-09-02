@@ -147,13 +147,13 @@ func TestBacktraceCarrierValidationAndCustomNames(t *testing.T) {
 		for _, kind := range []string{"", "carrier"} {
 			runtime := validRuntime(t)
 			runtime.BacktraceTargets = []Endpoint{{Name: "custom 汉字", Address: "1.1.1.1", Kind: kind}}
-			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), test.marker) {
+			if err := Validate(testModuleCatalog(), runtime); err == nil || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("%s kind %q validation error = %v", test.language, kind, err)
 			}
 		}
 		runtime := validRuntime(t)
 		runtime.BacktraceTargets = []Endpoint{{Name: "custom 汉字", Address: "1.1.1.1", Kind: BacktraceCarrierTelecom}}
-		if err := Validate(runtime); err != nil {
+		if err := Validate(testModuleCatalog(), runtime); err != nil {
 			t.Fatalf("%s custom target with valid carrier rejected: %v", test.language, err)
 		}
 	}

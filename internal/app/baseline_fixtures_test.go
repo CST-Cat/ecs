@@ -8,6 +8,7 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/model"
+	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -51,7 +52,7 @@ func writeBaselineReport(t *testing.T, name string, report model.Report) string 
 
 func writeSubmissionFixture(t *testing.T, path string) string {
 	t.Helper()
-	submission, err := score.BuildSubmission(submitTestReport(), score.SubmissionOptions{
+	submission, err := score.BuildSubmission(probe.BuiltinCatalog(), submitTestReport(), score.SubmissionOptions{
 		Region: "us", Provider: "fixture",
 	})
 	if err != nil {
@@ -81,7 +82,7 @@ func writeOutlierSubmissionFixture(t *testing.T, path string, single float64, mu
 				model.Measurement{Key: "sysbench_cpu_multi_events_s", Value: *multi})
 		}
 	}
-	submission, err := score.BuildSubmission(report, score.SubmissionOptions{Region: "us", Provider: "fixture"})
+	submission, err := score.BuildSubmission(probe.BuiltinCatalog(), report, score.SubmissionOptions{Region: "us", Provider: "fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}

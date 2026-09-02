@@ -424,7 +424,7 @@ func TestRunConfigExplicitEmptyCLIOverridesFileCollections(t *testing.T) {
 	if len(resolved.Runtime.DNSResolvers) != 0 || len(resolved.Runtime.IPerfTargets) != 0 || len(resolved.Runtime.MediaRegions) != 0 || len(resolved.Runtime.BacktraceTargets) != 0 || len(resolved.Runtime.OoklaServers) != 0 {
 		t.Fatalf("explicit empty CLI collections were not applied: dns=%v iperf=%v media=%v backtrace=%v ookla=%v", resolved.Runtime.DNSResolvers, resolved.Runtime.IPerfTargets, resolved.Runtime.MediaRegions, resolved.Runtime.BacktraceTargets, resolved.Runtime.OoklaServers)
 	}
-	if err := config.Validate(resolved.Runtime); err != nil {
+	if err := config.Validate(resolved.Catalog, resolved.Runtime); err != nil {
 		t.Fatalf("valid runtime with empty optional collections rejected: %v", err)
 	}
 	for _, raw := range []string{" ", ",,"} {
@@ -450,7 +450,7 @@ func TestRunConfigExplicitEmptyCLIOverridesFileCollections(t *testing.T) {
 	if len(resolved.Runtime.Formats) != 0 {
 		t.Fatalf("explicit empty formats = %#v, want empty", resolved.Runtime.Formats)
 	}
-	if err := config.Validate(resolved.Runtime); err == nil || !strings.Contains(err.Error(), "at least one output format") {
+	if err := config.Validate(resolved.Catalog, resolved.Runtime); err == nil || !strings.Contains(err.Error(), "at least one output format") {
 		t.Fatalf("explicit empty format validation error = %v, want no-formats error", err)
 	}
 }

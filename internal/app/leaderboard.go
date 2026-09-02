@@ -23,6 +23,7 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -178,7 +179,7 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 				continue
 			}
 			seenSampleIDs[sampleID] = path
-			if sample, err := score.OutlierSampleFromReport(data); err != nil {
+			if sample, err := score.OutlierSampleFromReport(probe.BuiltinCatalog(), data); err != nil {
 				if inputIssue(path, fmt.Errorf("outlier projection: %w", err)) {
 					return 1
 				}

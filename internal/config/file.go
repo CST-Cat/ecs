@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func LoadFile(path string) (File, error) {
@@ -34,7 +35,7 @@ func LoadFile(path string) (File, error) {
 	return cfg, nil
 }
 
-func ApplyFile(runtime *Runtime, file File) error {
+func ApplyFile(catalog module.Catalog, runtime *Runtime, file File) error {
 	if file.Exposure != "" {
 		level, err := ParseExposure(file.Exposure)
 		if err != nil {
@@ -132,14 +133,14 @@ func ApplyFile(runtime *Runtime, file File) error {
 	}
 	// An explicit file allowlist is independent of the profile preset: callers
 	// may select any registered module, then remove entries with skip.
-	if err := ValidateModuleSelection(file.Only, file.Skip); err != nil {
+	if err := ValidateModuleSelection(catalog, file.Only, file.Skip); err != nil {
 		return err
 	}
-	runtime.Modules = SelectModules(runtime.Modules, file.Only, file.Skip)
+	runtime.Modules = SelectModules(catalog, runtime.Modules, file.Only, file.Skip)
 	return nil
 }
 
-func SelectModules(base, only, skip []string) []string {
+func SelectModules(catalog module.Catalog, base, only, skip []string) []string {
 	selected := make(map[string]bool)
 	if len(only) > 0 {
 		for _, id := range only {
@@ -154,7 +155,7 @@ func SelectModules(base, only, skip []string) []string {
 		delete(selected, id)
 	}
 	out := make([]string, 0, len(selected))
-	for _, id := range ModuleIDs() {
+	for _, id := range ModuleIDs(catalog) {
 		if selected[id] {
 			out = append(out, id)
 		}

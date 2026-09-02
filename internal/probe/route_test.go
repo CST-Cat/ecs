@@ -196,7 +196,7 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 }
 
 func TestRouteDefaultsUseMachineTargetKinds(t *testing.T) {
-	runtime, err := config.Defaults(config.ProfileStandard)
+	runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

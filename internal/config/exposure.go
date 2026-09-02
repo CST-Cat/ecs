@@ -36,8 +36,8 @@ const (
 //
 // 未登记的模块按最高级处理：新增模块时漏配只会让它默认不跑，
 // 而不会悄悄把数据发出去。
-func exposureFor(id string) module.ExposureMetadata {
-	if metadata, ok := ModuleCatalog().ExposureFor(id); ok {
+func exposureFor(catalog module.Catalog, id string) module.ExposureMetadata {
+	if metadata, ok := catalog.ExposureFor(id); ok {
 		return metadata
 	}
 	return module.ExposureMetadata{Level: module.ExposureConsent}
@@ -73,22 +73,22 @@ func exposureError(exposure module.Exposure) error {
 }
 
 // AllowsModule 判断模块是否在给定上限内。
-func AllowsModule(limit module.Exposure, id string) bool {
+func AllowsModule(catalog module.Catalog, limit module.Exposure, id string) bool {
 	if !validExposure(limit) {
 		return false
 	}
-	info := exposureFor(id)
+	info := exposureFor(catalog, id)
 	return info.Level <= limit
 }
 
 // FilterModulesByExposure 按上限裁剪模块集，保持原有顺序。
-func FilterModulesByExposure(modules []string, limit module.Exposure) []string {
+func FilterModulesByExposure(catalog module.Catalog, modules []string, limit module.Exposure) []string {
 	if !validExposure(limit) {
 		return nil
 	}
 	out := make([]string, 0, len(modules))
 	for _, id := range modules {
-		if AllowsModule(limit, id) {
+		if AllowsModule(catalog, limit, id) {
 			out = append(out, id)
 		}
 	}
@@ -96,9 +96,9 @@ func FilterModulesByExposure(modules []string, limit module.Exposure) []string {
 }
 
 // RequiresEgressIP 判断这批模块里有没有人需要出口 IP。
-func RequiresEgressIP(modules []string) bool {
+func RequiresEgressIP(catalog module.Catalog, modules []string) bool {
 	for _, id := range modules {
-		if exposureFor(id).NeedsEgressIP {
+		if exposureFor(catalog, id).NeedsEgressIP {
 			return true
 		}
 	}
@@ -109,12 +109,12 @@ func RequiresEgressIP(modules []string) bool {
 //
 // 只有真正要用 ASN、地理与公司字段的模块才值得走 ipapi.is；只需要知道
 // "我的 IP 是什么"的场景用 STUN 就够，也少交一次待查 IP 给第三方。
-func EgressNeedsIPIntel(modules []string, limit module.Exposure) bool {
+func EgressNeedsIPIntel(catalog module.Catalog, modules []string, limit module.Exposure) bool {
 	if !validExposure(limit) || limit < module.ExposureThirdParty {
 		return false
 	}
 	for _, id := range modules {
-		if exposureFor(id).Level >= module.ExposureThirdParty && exposureFor(id).NeedsEgressIP {
+		if exposureFor(catalog, id).Level >= module.ExposureThirdParty && exposureFor(catalog, id).NeedsEgressIP {
 			return true
 		}
 	}
@@ -128,15 +128,15 @@ func (r Runtime) OfflineOnly() bool { return r.Exposure == module.ExposureLocal 
 //
 // 只对 --only 点名的模块报错：档位带进来的模块被静默过滤是预期行为，
 // 而用户亲手写下的模块被悄悄丢掉不是。
-func CheckModuleExposure(named []string, limit module.Exposure) error {
+func CheckModuleExposure(catalog module.Catalog, named []string, limit module.Exposure) error {
 	if err := validateExposure(limit); err != nil {
 		return err
 	}
 	for _, id := range named {
-		if AllowsModule(limit, id) {
+		if AllowsModule(catalog, limit, id) {
 			continue
 		}
-		info := exposureFor(id)
+		info := exposureFor(catalog, id)
 		return i18n.Errorf("err.moduleAboveLimit",
 			id, info.Level.String(), limit.String(), info.Level.String())
 	}

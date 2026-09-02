@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"ecs/internal/model"
+	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -49,7 +50,7 @@ func writeLeaderboardReportWithVCPU(t *testing.T, path, runID string, vcpu int, 
 
 func writeLeaderboardSubmission(t *testing.T, path string, report model.Report) string {
 	t.Helper()
-	submission, err := score.BuildSubmission(report, score.SubmissionOptions{})
+	submission, err := score.BuildSubmission(probe.BuiltinCatalog(), report, score.SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

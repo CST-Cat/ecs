@@ -135,7 +135,7 @@ func TestValidateRejectsInvalidRuntimeEndpointHostPorts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			test.mutate(&runtime)
-			if err := Validate(runtime); err == nil {
+			if err := Validate(testModuleCatalog(), runtime); err == nil {
 				t.Fatalf("Validate invalid endpoint runtime = nil, want rejection")
 			}
 		})
@@ -160,7 +160,7 @@ func TestValidateAcceptsExecutableEndpointHostPorts(t *testing.T) {
 		{Name: "stun IPv4", Address: "192.0.2.2:3478"},
 		{Name: "stun IPv6", Address: "[2001:db8::2]:3478"},
 	}
-	if err := Validate(runtime); err != nil {
+	if err := Validate(testModuleCatalog(), runtime); err != nil {
 		t.Fatalf("Validate executable endpoint runtime = %v, want nil", err)
 	}
 }
@@ -229,7 +229,7 @@ func TestValidateEndpointFamilyLiteralConsistency(t *testing.T) {
 						endpoint.Kind = BacktraceCarrierTelecom
 					}
 					group.set(&runtime, endpoint)
-					err := Validate(runtime)
+					err := Validate(testModuleCatalog(), runtime)
 					if test.wantError {
 						if err == nil || !strings.Contains(err.Error(), "contradict") {
 							t.Fatalf("Validate(%+v) = %v, want literal family contradiction", endpoint, err)
@@ -246,7 +246,7 @@ func TestValidateEndpointFamilyLiteralConsistency(t *testing.T) {
 			t.Run(group.name+"/hostname/"+family, func(t *testing.T) {
 				runtime := validRuntime(t)
 				group.set(&runtime, Endpoint{Name: "target", Address: group.address("edge-v6.example.com"), Family: family, Kind: BacktraceCarrierTelecom})
-				if err := Validate(runtime); err != nil {
+				if err := Validate(testModuleCatalog(), runtime); err != nil {
 					t.Fatalf("Validate hostname with family %q = %v, want nil", family, err)
 				}
 			})
@@ -272,7 +272,7 @@ func TestValidateSTUNEndpointFamilyConsistency(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			runtime.STUNServers = []Endpoint{{Name: "stun", Address: test.address, Family: test.family}}
-			err := Validate(runtime)
+			err := Validate(testModuleCatalog(), runtime)
 			if test.wantError == "" {
 				if err != nil {
 					t.Fatalf("Validate(STUN endpoint %+v) = %v, want nil", runtime.STUNServers[0], err)
@@ -342,7 +342,7 @@ func TestValidateRejectsDuplicateOperationalEndpoints(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			test.mutate(&runtime)
-			if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
+			if err := Validate(testModuleCatalog(), runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
 				t.Fatalf("Validate duplicate runtime = %v, want explicit duplicate error", err)
 			}
 		})
@@ -372,7 +372,7 @@ func TestValidateAcceptsDistinctOperationalEndpoints(t *testing.T) {
 		{Name: "trace-a", Address: "example.com", Kind: BacktraceCarrierTelecom, Family: IPVersion4},
 		{Name: "trace-b", Address: "example.com", Kind: BacktraceCarrierUnicom, Family: IPVersion6},
 	}
-	if err := Validate(runtime); err != nil {
+	if err := Validate(testModuleCatalog(), runtime); err != nil {
 		t.Fatalf("Validate distinct operational endpoints = %v, want nil", err)
 	}
 }

@@ -168,12 +168,12 @@ func machineLocaleCustomIPerfResult(t *testing.T) model.Result {
 		},
 		Network: probe.NetworkCapabilities{IPv4Usable: true},
 	}
-	for _, builtin := range probe.Builtins() {
-		if builtin.ID() == "speed" {
-			return builtin.Run(context.Background(), env)
+	for _, definition := range probe.BuiltinDefinitions() {
+		if definition.Probe.ID() == "speed" {
+			return definition.Probe.Run(context.Background(), env)
 		}
 	}
-	t.Fatal("speed probe is not registered")
+	t.Fatal("speed probe is not defined")
 	return model.Result{}
 }
 

@@ -46,7 +46,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if resolved.Interactive && !resolved.Yes {
-		wizardOK, wizardErr := runWizard(ctx, &cfg)
+		wizardOK, wizardErr := runWizard(ctx, resolved.Catalog, &cfg)
 		if wizardErr != nil {
 			if errors.Is(wizardErr, context.Canceled) {
 				return 130
@@ -58,7 +58,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return 0
 		}
 	}
-	if err := config.Validate(cfg); err != nil {
+	if err := config.Validate(resolved.Catalog, cfg); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}

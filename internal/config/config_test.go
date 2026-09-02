@@ -22,7 +22,7 @@ func useEnglish(t *testing.T) {
 
 func validRuntime(t *testing.T) Runtime {
 	t.Helper()
-	runtime, err := Defaults(ProfileStandard)
+	runtime, err := Defaults(testModuleCatalog(), ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,21 +45,21 @@ func TestDefaultsAndProfiles(t *testing.T) {
 		{input: ProfileStandard, want: ProfileStandard},
 		{input: ProfileFull, want: ProfileFull},
 	} {
-		runtime, err := Defaults(test.input)
+		runtime, err := Defaults(testModuleCatalog(), test.input)
 		if err != nil || runtime.Profile != test.want || len(runtime.Modules) == 0 || !reflect.DeepEqual(runtime.Formats, []string{"json", "md", "html"}) {
 			t.Fatalf("%s defaults = %+v, %v", test.input, runtime, err)
 		}
 	}
-	standard, _ := Defaults(ProfileStandard)
-	full, _ := Defaults(ProfileFull)
-	implicit, err := Defaults("")
+	standard, _ := Defaults(testModuleCatalog(), ProfileStandard)
+	full, _ := Defaults(testModuleCatalog(), ProfileFull)
+	implicit, err := Defaults(testModuleCatalog(), "")
 	if err != nil || !reflect.DeepEqual(implicit, standard) {
 		t.Fatalf("empty profile defaults = %+v, want standard defaults %+v (err=%v)", implicit, standard, err)
 	}
 	if len(full.Modules) <= len(standard.Modules) || slices.Contains(standard.Modules, "network") || !slices.Contains(full.Modules, "network") {
 		t.Fatalf("profile module sets = standard:%v full:%v", standard.Modules, full.Modules)
 	}
-	_, err = Defaults("unknown")
+	_, err = Defaults(testModuleCatalog(), "unknown")
 	requireError(t, err, "unknown profile")
 }
 
@@ -107,17 +107,17 @@ func TestIPQualitySourceCatalogHasStableOrderAndIdentity(t *testing.T) {
 func TestIPQualitySourceParsingDeduplicatesAndValidationRejectsUnknown(t *testing.T) {
 	useEnglish(t)
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, File{IPQualitySources: []string{"IPINFO", "ipinfo", "IPAPI"}}); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, File{IPQualitySources: []string{"IPINFO", "ipinfo", "IPAPI"}}); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"ipinfo", "ipapi"}; !reflect.DeepEqual(runtime.IPQualitySources, want) {
 		t.Fatalf("normalized IP quality sources = %v, want %v", runtime.IPQualitySources, want)
 	}
-	if err := Validate(runtime); err != nil {
+	if err := Validate(testModuleCatalog(), runtime); err != nil {
 		t.Fatalf("normalized canonical sources rejected: %v", err)
 	}
 	runtime.IPQualitySources = []string{"unknown-source"}
-	requireError(t, Validate(runtime), "unknown IP quality source")
+	requireError(t, Validate(testModuleCatalog(), runtime), "unknown IP quality source")
 }
 
 func TestMediaRegionCatalogHasStableOrderAndIdentity(t *testing.T) {
@@ -143,11 +143,11 @@ func TestValidateRejectsUnknownMediaRegion(t *testing.T) {
 	useEnglish(t)
 	runtime := validRuntime(t)
 	runtime.MediaRegions = []string{"mars"}
-	requireError(t, Validate(runtime), "unknown streaming region")
+	requireError(t, Validate(testModuleCatalog(), runtime), "unknown streaming region")
 }
 
 func TestDefaultsUseStableEndpointKinds(t *testing.T) {
-	runtime, err := Defaults(ProfileStandard)
+	runtime, err := Defaults(testModuleCatalog(), ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,10 +230,10 @@ func TestLoadApplyValidateRejectsInvalidEndpointFromConfigFile(t *testing.T) {
 		t.Fatalf("LoadFile = %v", err)
 	}
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatalf("ApplyFile = %v", err)
 	}
-	if err := Validate(runtime); err == nil {
+	if err := Validate(testModuleCatalog(), runtime); err == nil {
 		t.Fatal("Validate accepted invalid endpoint loaded from config file")
 	}
 }
@@ -250,10 +250,10 @@ func TestLoadApplyValidateRejectsContradictoryEndpointFamilyFromConfigFile(t *te
 		t.Fatalf("LoadFile = %v", err)
 	}
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatalf("ApplyFile = %v", err)
 	}
-	requireError(t, Validate(runtime), "contradicts")
+	requireError(t, Validate(testModuleCatalog(), runtime), "contradicts")
 }
 
 func TestLoadApplyValidateRejectsUnknownMediaRegionFromConfigFile(t *testing.T) {
@@ -268,10 +268,10 @@ func TestLoadApplyValidateRejectsUnknownMediaRegionFromConfigFile(t *testing.T) 
 		t.Fatalf("LoadFile = %v", err)
 	}
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatalf("ApplyFile = %v", err)
 	}
-	requireError(t, Validate(runtime), "unknown streaming region")
+	requireError(t, Validate(testModuleCatalog(), runtime), "unknown streaming region")
 }
 
 func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
@@ -299,7 +299,7 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 		MediaRegions:     []string{"JP", "global", "jp"},
 		OoklaServers:     []OoklaServer{{Carrier: OoklaCarrierTelecom, ID: 1}},
 	}
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatal(err)
 	}
 	expected := validRuntime(t)
@@ -346,7 +346,7 @@ func TestApplyFileKeepsDefaultsForMissingCollections(t *testing.T) {
 	if file.Formats != nil || file.DNSResolvers != nil || file.IPerfTargets != nil {
 		t.Fatalf("missing collection fields were not nil: formats=%#v dns=%#v iperf=%#v", file.Formats, file.DNSResolvers, file.IPerfTargets)
 	}
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(runtime.Formats, defaultsFormats) || !reflect.DeepEqual(runtime.DNSResolvers, defaultsDNS) || !reflect.DeepEqual(runtime.IPerfTargets, defaultsIPerf) {
@@ -368,7 +368,7 @@ func TestApplyFileAppliesExplicitEmptyCollections(t *testing.T) {
 	if file.Formats == nil || file.DNSResolvers == nil || file.IPerfTargets == nil {
 		t.Fatalf("explicit empty collection fields lost presence: formats=%#v dns=%#v iperf=%#v", file.Formats, file.DNSResolvers, file.IPerfTargets)
 	}
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.Formats == nil || len(runtime.Formats) != 0 {
@@ -380,7 +380,7 @@ func TestApplyFileAppliesExplicitEmptyCollections(t *testing.T) {
 	if runtime.IPerfTargets == nil || len(runtime.IPerfTargets) != 0 {
 		t.Fatalf("explicit empty iperf targets = %#v, want non-nil empty", runtime.IPerfTargets)
 	}
-	requireError(t, Validate(runtime), "at least one output format")
+	requireError(t, Validate(testModuleCatalog(), runtime), "at least one output format")
 }
 
 func TestValidateRejectsDuplicateTargetsFromConfigFile(t *testing.T) {
@@ -395,10 +395,10 @@ func TestValidateRejectsDuplicateTargetsFromConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatal(err)
 	}
-	if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
+	if err := Validate(testModuleCatalog(), runtime); err == nil || !strings.Contains(err.Error(), "duplicated") {
 		t.Fatalf("Validate duplicate config targets = %v, want explicit duplicate error", err)
 	}
 }
@@ -422,7 +422,7 @@ func TestApplyFileDiagnostics(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
-			requireError(t, ApplyFile(&runtime, test.file), test.marker)
+			requireError(t, ApplyFile(testModuleCatalog(), &runtime, test.file), test.marker)
 		})
 	}
 }
@@ -439,14 +439,14 @@ func TestValidateModuleSelection(t *testing.T) {
 		{name: "skip unknown", skip: []string{"missing"}, marker: `unknown module "missing"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			requireError(t, ValidateModuleSelection(test.only, test.skip), test.marker)
+			requireError(t, ValidateModuleSelection(testModuleCatalog(), test.only, test.skip), test.marker)
 		})
 	}
 
-	if err := ValidateModuleSelection([]string{"system", "system"}, nil); err != nil {
+	if err := ValidateModuleSelection(testModuleCatalog(), []string{"system", "system"}, nil); err != nil {
 		t.Fatalf("duplicate known module rejected: %v", err)
 	}
-	if got := SelectModules(nil, []string{"system", "system"}, nil); !reflect.DeepEqual(got, []string{"system"}) {
+	if got := SelectModules(testModuleCatalog(), nil, []string{"system", "system"}, nil); !reflect.DeepEqual(got, []string{"system"}) {
 		t.Fatalf("duplicate known module selection = %v", got)
 	}
 	if got := ParseList("SYSTEM"); !reflect.DeepEqual(got, []string{"system"}) {
@@ -454,7 +454,7 @@ func TestValidateModuleSelection(t *testing.T) {
 	}
 
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, File{Only: []string{"missing"}, Exposure: ExposureNameAny}); err == nil || !strings.Contains(err.Error(), "unknown module") {
+	if err := ApplyFile(testModuleCatalog(), &runtime, File{Only: []string{"missing"}, Exposure: ExposureNameAny}); err == nil || !strings.Contains(err.Error(), "unknown module") {
 		t.Fatalf("unknown module with any exposure = %v", err)
 	}
 }
@@ -471,7 +471,7 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		t.Run("valid "+test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			test.mutate(&runtime)
-			if err := Validate(runtime); err != nil {
+			if err := Validate(testModuleCatalog(), runtime); err != nil {
 				t.Fatalf("valid runtime rejected: %v", err)
 			}
 		})
@@ -534,7 +534,7 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := validRuntime(t)
 			test.mutate(&runtime)
-			requireError(t, Validate(runtime), test.marker)
+			requireError(t, Validate(testModuleCatalog(), runtime), test.marker)
 		})
 	}
 }
@@ -546,7 +546,7 @@ func TestValidateAllowsSameIPerfHostWithDistinctPortRanges(t *testing.T) {
 		{Name: "edge-a", Host: "example.com", PortStart: 5201, PortEnd: 5201},
 		{Name: "edge-b", Host: "example.com", PortStart: 5202, PortEnd: 5202},
 	}
-	if err := Validate(runtime); err != nil {
+	if err := Validate(testModuleCatalog(), runtime); err != nil {
 		t.Fatalf("same host with distinct iperf port ranges rejected: %v", err)
 	}
 }
@@ -578,7 +578,7 @@ func TestValidateIPerfLiteralHostNetworksConsistency(t *testing.T) {
 			runtime.IPerfTargets = []IPerfEndpoint{{
 				Name: "edge", Host: test.host, PortStart: 5201, PortEnd: 5201, Networks: test.networks,
 			}}
-			err := Validate(runtime)
+			err := Validate(testModuleCatalog(), runtime)
 			if test.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "contradict") {
 					t.Fatalf("Validate(%+v) = %v, want literal/network contradiction", runtime.IPerfTargets[0], err)
@@ -604,10 +604,10 @@ func TestValidateRejectsIPerfLiteralNetworkMismatchFromConfigFile(t *testing.T) 
 		t.Fatalf("LoadFile = %v", err)
 	}
 	runtime := validRuntime(t)
-	if err := ApplyFile(&runtime, file); err != nil {
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
 		t.Fatalf("ApplyFile = %v", err)
 	}
-	if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "contradict") {
+	if err := Validate(testModuleCatalog(), runtime); err == nil || !strings.Contains(err.Error(), "contradict") {
 		t.Fatalf("Validate config-file iperf target = %v, want literal/network contradiction", err)
 	}
 }
@@ -617,13 +617,13 @@ func TestListSelectionAndIPVersionHelpers(t *testing.T) {
 	if got := ParseList(" A, a, b,, "); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("ParseList = %v", got)
 	}
-	if err := ValidateModuleSelection([]string{"network", "missing", "system", "network"}, nil); err == nil || !strings.Contains(err.Error(), "unknown module") {
+	if err := ValidateModuleSelection(testModuleCatalog(), []string{"network", "missing", "system", "network"}, nil); err == nil || !strings.Contains(err.Error(), "unknown module") {
 		t.Fatalf("unknown module selection validation = %v", err)
 	}
-	if got := SelectModules([]string{"dns", "system"}, []string{"network", "system", "network"}, nil); !reflect.DeepEqual(got, []string{"system", "network"}) {
+	if got := SelectModules(testModuleCatalog(), []string{"dns", "system"}, []string{"network", "system", "network"}, nil); !reflect.DeepEqual(got, []string{"system", "network"}) {
 		t.Fatalf("SelectModules = %v", got)
 	}
-	if got := SelectModules([]string{"dns", "system"}, nil, []string{"dns"}); !reflect.DeepEqual(got, []string{"system"}) {
+	if got := SelectModules(testModuleCatalog(), []string{"dns", "system"}, nil, []string{"dns"}); !reflect.DeepEqual(got, []string{"system"}) {
 		t.Fatalf("SelectModules skip = %v", got)
 	}
 	for _, test := range []struct {

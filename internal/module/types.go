@@ -79,9 +79,8 @@ type ExposureMetadata struct {
 //
 // It owns module identity, canonical selection metadata, exposure policy,
 // scheduler class, methodology, tool requirements, presentation keys, and a
-// rough estimate. Probe executors are deliberately not part of this contract;
-// the probe package owns their typed built-in bindings until the later
-// composition phase.
+// rough estimate. Probe executors are deliberately outside this low-level
+// contract; the probe package couples them to descriptors at composition.
 type Descriptor struct {
 	ID string
 

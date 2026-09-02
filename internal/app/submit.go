@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"ecs/internal/i18n"
+	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -58,7 +59,7 @@ func submitCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	submission, err := score.BuildSubmission(data, score.SubmissionOptions{
+	submission, err := score.BuildSubmission(probe.BuiltinCatalog(), data, score.SubmissionOptions{
 		Region: *region, Provider: *provider, Note: *note,
 	})
 	if err != nil {

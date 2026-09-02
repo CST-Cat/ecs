@@ -24,8 +24,8 @@ import (
 	"sort"
 	"strings"
 
-	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
 
 // Dimension 是一个评分维度。
@@ -142,11 +142,11 @@ func Dimensions() []Dimension {
 // by scoring or leaderboard tooling. The score package owns the complete
 // membership and metric contract; module descriptors only need to identify
 // modules that exist in the execution catalog.
-func ValidateDimensions() error {
-	return validateDimensions(Dimensions())
+func ValidateDimensions(catalog module.Catalog) error {
+	return validateDimensions(catalog, Dimensions())
 }
 
-func validateDimensions(dimensions []Dimension) error {
+func validateDimensions(catalog module.Catalog, dimensions []Dimension) error {
 	seenDimensions := make(map[string]bool, len(dimensions))
 	seenMetrics := make(map[string]string)
 	for _, dimension := range dimensions {
@@ -160,7 +160,7 @@ func validateDimensions(dimensions []Dimension) error {
 		if dimension.ModuleID == "" {
 			return fmt.Errorf("score dimension %q has empty module ID", dimension.Key)
 		}
-		_, ok := config.ModuleDescriptorFor(dimension.ModuleID)
+		_, ok := catalog.Lookup(dimension.ModuleID)
 		if !ok {
 			return fmt.Errorf("score dimension %q references unknown module %q", dimension.Key, dimension.ModuleID)
 		}

@@ -90,7 +90,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameterJSON(result.Methodology.Parameters, "server_configuration", env.Config.OoklaServers)
 
-	if !config.AllowsModule(env.Config.Exposure, "ookla") {
+	if !config.AllowsModule(BuiltinCatalog(), env.Config.Exposure, "ookla") {
 		result.Skip(model.NewMessage("probe.ookla.summary.skipped"))
 		appendOoklaSkipDetails(&result, "exposure_denied", "rerun_with_more_exposure")
 		result.Notes = ooklaStableNotes()

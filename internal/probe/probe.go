@@ -167,32 +167,3 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 		},
 	}
 }
-
-// Builtins returns fresh concrete probe values for all built-in modules.
-// Config owns module metadata and canonical order; probe only owns this typed
-// implementation list. There is no runtime registration or mutable index.
-func Builtins() []Probe {
-	return []Probe{
-		systemProbe{},
-		networkProbe{},
-		bgpProbe{},
-		cpuProbe{},
-		zstdProbe{},
-		npbProbe{},
-		memoryProbe{},
-		cryptoProbe{},
-		diskProbe{},
-		dnsProbe{},
-		latencyProbe{},
-		speedProbe{},
-		portsProbe{},
-		natProbe{},
-		blacklistProbe{},
-		appsProbe{},
-		cnSpeedProbe{},
-		ooklaProbe{},
-		mediaProbe{},
-		routeProbe{},
-		backtraceProbe{},
-	}
-}

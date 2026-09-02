@@ -5,10 +5,11 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/probe"
 )
 
 func TestModuleDescriptorsHaveLocalizedMetadata(t *testing.T) {
-	descriptors := config.ModuleDescriptors()
+	descriptors := config.ModuleDescriptors(probe.BuiltinCatalog())
 	if len(descriptors) == 0 {
 		t.Fatal("module descriptor list is empty")
 	}

@@ -59,7 +59,7 @@ func TestRunReturnsErrorWithoutReportWhenRandomReadFails(t *testing.T) {
 		runIDRandomReader = originalReader
 	})
 
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,12 +99,12 @@ func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 	return result
 }
 
-func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileStandard)
+func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
+	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor, ok := config.ModuleDescriptorFor("system")
+	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
@@ -121,8 +121,8 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 			Evidence: model.NewEvidence(1, 2, "sample"),
 		},
 	}
-	first := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
-	second := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	first := runDefinition(context.Background(), probe.Definition{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	second := runDefinition(context.Background(), probe.Definition{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("runner result changed between identical machine runs:\nfirst=%+v\nsecond=%+v", first, second)
 	}
@@ -135,16 +135,16 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 	}
 }
 
-func TestRunBindingNormalizesMalformedEvidence(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor("system")
+func TestRunDefinitionNormalizesMalformedEvidence(t *testing.T) {
+	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := runBinding(context.Background(), moduleBinding{
+	got := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusOK,
@@ -156,10 +156,10 @@ func TestRunBindingNormalizesMalformedEvidence(t *testing.T) {
 	}
 }
 
-func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
-	descriptor, _ := config.ModuleDescriptorFor("network")
-	localDescriptor, _ := config.ModuleDescriptorFor("system")
-	defaultConfig, err := config.Defaults(config.ProfileStandard)
+func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
+	descriptor, _ := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "network")
+	localDescriptor, _ := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
+	defaultConfig, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 			if test.status == model.StatusError {
 				item.result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "fixture", Target: test.descriptor.ID, Message: "fixture failure"})
 			}
-			got := runBinding(context.Background(), moduleBinding{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
+			got := runDefinition(context.Background(), probe.Definition{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
 			if got.Status != test.wantStatus || got.Evidence == nil || got.Evidence.Valid != test.wantValid || got.Evidence.Expected != 1 || runs != test.wantRuns {
 				t.Fatalf("result = %+v, want status=%s evidence=%d/1", got, test.wantStatus, test.wantValid)
 			}
@@ -211,12 +211,12 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 	}
 }
 
-func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor("system")
+func TestRunDefinitionPreservesWarningFailureOwnership(t *testing.T) {
+	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := runBinding(context.Background(), moduleBinding{
+			got := runDefinition(context.Background(), probe.Definition{
 				Descriptor: descriptor,
 				Probe:      &runnerTestProbe{result: test.result},
 			}, cfg, probe.Environment{}, true)
@@ -245,7 +245,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	wantFailure := model.Failure{
 		Category: model.FailureDNS, Stage: "query", Target: "fixture", Retryable: true, Count: 1, Message: "fixture DNS failure",
 	}
-	owned := runBinding(context.Background(), moduleBinding{
+	owned := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusWarning,
@@ -258,7 +258,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	}
 
 	wantErrorFailure := model.Failure{Category: model.FailurePermissionDenied, Count: 2}
-	ownedError := runBinding(context.Background(), moduleBinding{
+	ownedError := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusError,
