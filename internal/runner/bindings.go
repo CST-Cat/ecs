@@ -4,14 +4,15 @@ import (
 	"fmt"
 
 	"ecs/internal/config"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
-// moduleBinding is the runner's execution view of one module. Config owns the
-// descriptor and probe owns the implementation; runner joins the two once at
-// the boundary before selecting work.
+// moduleBinding is the runner's execution view of one module. Module owns the
+// descriptor contract and probe owns the implementation; runner joins the two
+// once at the boundary before selecting work.
 type moduleBinding struct {
-	Descriptor config.ModuleDescriptor
+	Descriptor module.Descriptor
 	Probe      probe.Probe
 }
 
@@ -29,7 +30,7 @@ func bindBuiltinModules() []moduleBinding {
 // inputs explicit makes the binding contract testable with small custom Probe
 // implementations without introducing a runtime registry or test hook into
 // either config or probe.
-func bindModuleProbes(descriptors []config.ModuleDescriptor, probes []probe.Probe) ([]moduleBinding, error) {
+func bindModuleProbes(descriptors []module.Descriptor, probes []probe.Probe) ([]moduleBinding, error) {
 	descriptorIDs := make(map[string]struct{}, len(descriptors))
 	for index, descriptor := range descriptors {
 		if descriptor.ID == "" {

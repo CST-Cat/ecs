@@ -13,6 +13,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
@@ -359,7 +360,7 @@ func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve run config: %v (stderr=%q)", err, stderr.String())
 	}
-	if resolved.Runtime.Exposure != config.ExposureLocal || resolved.Runtime.Reveal {
+	if resolved.Runtime.Exposure != module.ExposureLocal || resolved.Runtime.Reveal {
 		t.Fatalf("last exposure/reveal values did not win: exposure=%s reveal=%t", resolved.Runtime.Exposure, resolved.Runtime.Reveal)
 	}
 }

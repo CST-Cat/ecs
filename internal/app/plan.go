@@ -11,6 +11,7 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 // executionPlan is deliberately language independent. It is consumed by the
@@ -118,7 +119,7 @@ func buildExecutionPlan(runtime config.Runtime) executionPlan {
 			ID: descriptor.ID,
 		})
 		plan.NeedsEgressIP = plan.NeedsEgressIP || descriptor.NeedsEgressIP
-		if descriptor.Exposure == config.ExposureThirdParty {
+		if descriptor.Exposure == module.ExposureThirdParty {
 			needsThirdPartyProvider = true
 		}
 		if descriptor.ID == "ookla" {

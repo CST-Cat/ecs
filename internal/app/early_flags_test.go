@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func TestGlobalLanguagePrefixConsumesOnlyLeadingLanguageFlags(t *testing.T) {
@@ -167,7 +168,7 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	if resolved.Runtime.Profile != config.ProfileStandard {
 		t.Fatalf("CLI profile did not override config profile: %q", resolved.Runtime.Profile)
 	}
-	if resolved.Runtime.Exposure != config.ExposureLocal || !resolved.Runtime.Reveal || !reflect.DeepEqual(resolved.Runtime.Formats, []string{"md"}) || resolved.Runtime.Output != "from-file" {
+	if resolved.Runtime.Exposure != module.ExposureLocal || !resolved.Runtime.Reveal || !reflect.DeepEqual(resolved.Runtime.Formats, []string{"md"}) || resolved.Runtime.Output != "from-file" {
 		t.Fatalf("config values were not retained under CLI profile override: exposure=%s reveal=%t formats=%v output=%q", resolved.Runtime.Exposure, resolved.Runtime.Reveal, resolved.Runtime.Formats, resolved.Runtime.Output)
 	}
 
@@ -180,7 +181,7 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("explicit CLI overlay: %v (stderr=%q)", err, overlayStderr.String())
 	}
-	if overlay.Runtime.Exposure != config.ExposureConsent || overlay.Runtime.Reveal || !reflect.DeepEqual(overlay.Runtime.Formats, []string{"json"}) || overlay.Runtime.Output != "from-cli" {
+	if overlay.Runtime.Exposure != module.ExposureConsent || overlay.Runtime.Reveal || !reflect.DeepEqual(overlay.Runtime.Formats, []string{"json"}) || overlay.Runtime.Output != "from-cli" {
 		t.Fatalf("explicit CLI values did not override config: exposure=%s reveal=%t formats=%v output=%q", overlay.Runtime.Exposure, overlay.Runtime.Reveal, overlay.Runtime.Formats, overlay.Runtime.Output)
 	}
 

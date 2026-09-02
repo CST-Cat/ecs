@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"ecs/internal/config"
+	"ecs/internal/module"
 )
 
 func TestEgressRecordsAndLocalDecisionContracts(t *testing.T) {
@@ -59,7 +60,7 @@ func TestEgressRecordsAndLocalDecisionContracts(t *testing.T) {
 	if !local.ByVersion[config.IPVersion4].BGPQueried || local.ByVersion[config.IPVersion4].BGPError == nil {
 		t.Fatal("unavailable egress BGP cache state was not recorded")
 	}
-	if got := DiscoverEgress(context.Background(), Environment{Config: config.Runtime{Exposure: config.ExposureLocal}}); got.Attempted || len(got.ByVersion) != 0 {
+	if got := DiscoverEgress(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureLocal}}); got.Attempted || len(got.ByVersion) != 0 {
 		t.Fatalf("offline egress discovery = %+v", got)
 	}
 	if address := discoverEgressForVersion(context.Background(), Environment{}, config.IPVersion4, false); address.Err == nil || address.Source != "stun" {

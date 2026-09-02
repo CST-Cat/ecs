@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 const (
@@ -96,7 +97,7 @@ type Runtime struct {
 	Profile string
 	Modules []string
 	// Exposure is the maximum permitted external-contact level.
-	Exposure         Exposure
+	Exposure         module.Exposure
 	Reveal           bool
 	IPVersion        string
 	IPQualitySources []string

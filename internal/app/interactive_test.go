@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/module"
 )
 
 func TestPrompterChooseAcceptsSelection(t *testing.T) {
@@ -98,7 +99,7 @@ func TestWizardProfileSwitchOnlyChangesProfileAndModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.Exposure = config.ExposureConsent
+	runtime.Exposure = module.ExposureConsent
 	runtime.Reveal = true
 	runtime.IPVersion = config.IPVersion6
 	runtime.IPQualitySources = []string{"ipinfo"}

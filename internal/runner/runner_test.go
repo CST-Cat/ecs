@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
@@ -164,8 +165,8 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 	}
 	cases := []struct {
 		name            string
-		descriptor      config.ModuleDescriptor
-		configExposure  config.Exposure
+		descriptor      module.Descriptor
+		configExposure  module.Exposure
 		networkRunnable bool
 		status          model.Status
 		wantStatus      model.Status
@@ -175,12 +176,12 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 		wantMethodology bool
 		wantFailure     bool
 	}{
-		{name: "offline network", descriptor: descriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
-		{name: "unavailable family", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
-		{name: "network executes", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
-		{name: "ok fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
-		{name: "warning fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
-		{name: "error fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusError, wantStatus: model.StatusError, wantValid: 0, wantRuns: 1, wantFailure: true},
+		{name: "offline network", descriptor: descriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
+		{name: "unavailable family", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
+		{name: "network executes", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
+		{name: "ok fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
+		{name: "warning fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
+		{name: "error fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusError, wantStatus: model.StatusError, wantValid: 0, wantRuns: 1, wantFailure: true},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

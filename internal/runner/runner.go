@@ -14,6 +14,7 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/failure"
 	"ecs/internal/model"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
@@ -226,7 +227,7 @@ func runBinding(ctx context.Context, binding moduleBinding, cfg config.Runtime, 
 	item := binding.Probe
 	descriptor := binding.Descriptor
 	canonicalTitle := bindingTitle(binding)
-	needsNetwork := descriptor.Exposure > config.ExposureLocal
+	needsNetwork := descriptor.Exposure > module.ExposureLocal
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
@@ -278,7 +279,7 @@ func bindingTitle(binding moduleBinding) string {
 
 func hasNetworkModules(selected []moduleBinding) bool {
 	for _, binding := range selected {
-		if binding.Descriptor.Exposure > config.ExposureLocal {
+		if binding.Descriptor.Exposure > module.ExposureLocal {
 			return true
 		}
 	}

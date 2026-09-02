@@ -4,14 +4,14 @@ import (
 	"reflect"
 	"testing"
 
-	"ecs/internal/config"
+	"ecs/internal/module"
 )
 
 func TestPlanScheduleClassesAndOrder(t *testing.T) {
-	makeBindings := func(classes ...config.ModuleConcurrency) []moduleBinding {
+	makeBindings := func(classes ...module.Concurrency) []moduleBinding {
 		bindings := make([]moduleBinding, len(classes))
 		for index, class := range classes {
-			bindings[index].Descriptor = config.ModuleDescriptor{ID: string(rune('a' + index)), Concurrency: class}
+			bindings[index].Descriptor = module.Descriptor{ID: string(rune('a' + index)), Concurrency: class}
 		}
 		return bindings
 	}
@@ -21,9 +21,9 @@ func TestPlanScheduleClassesAndOrder(t *testing.T) {
 		want []scheduleGroup
 	}{
 		{name: "empty", want: nil},
-		{name: "one probe", in: makeBindings(config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0}}}},
-		{name: "continuous probes", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}}},
-		{name: "mixed groups", in: makeBindings(config.ModuleConcurrencyProbe, config.ModuleConcurrencyProbe, config.ModuleConcurrencyExclusive, config.ModuleConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}, {Indices: []int{2}}, {Indices: []int{3}}}},
+		{name: "one probe", in: makeBindings(module.ConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0}}}},
+		{name: "continuous probes", in: makeBindings(module.ConcurrencyProbe, module.ConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}}},
+		{name: "mixed groups", in: makeBindings(module.ConcurrencyProbe, module.ConcurrencyProbe, module.ConcurrencyExclusive, module.ConcurrencyProbe), want: []scheduleGroup{{Indices: []int{0, 1}}, {Indices: []int{2}}, {Indices: []int{3}}}},
 		{name: "missing descriptor is exclusive", in: []moduleBinding{{}}, want: []scheduleGroup{{Indices: []int{0}}}},
 	}
 	for _, test := range cases {

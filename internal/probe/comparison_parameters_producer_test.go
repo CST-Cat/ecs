@@ -12,6 +12,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
 
 // assertProducerParameterScope checks the contract at the producer boundary.
@@ -196,7 +197,7 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 
 	t.Run("ookla exposure skipped", func(t *testing.T) {
 		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-			IPVersion: config.IPVersion4, Exposure: config.ExposureLocal,
+			IPVersion: config.IPVersion4, Exposure: module.ExposureLocal,
 			OoklaServers: []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 42}},
 		}})
 		assertProducerParameterScope(t, result, "ip_version", "server_configuration")

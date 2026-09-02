@@ -6,6 +6,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 // EstimateFor owns the complete user-facing runtime estimate.  Keeping the
@@ -46,12 +47,12 @@ func hasModule(runtime config.Runtime, id string) bool {
 
 func estimateTypicalDuration(runtime config.Runtime, workers int) time.Duration {
 	var total time.Duration
-	for _, module := range runtime.Modules {
-		descriptor, ok := config.ModuleDescriptorFor(module)
+	for _, id := range runtime.Modules {
+		descriptor, ok := config.ModuleDescriptorFor(id)
 		if !ok {
 			continue
 		}
-		if runtime.OfflineOnly() && descriptor.Exposure > config.ExposureLocal {
+		if runtime.OfflineOnly() && descriptor.Exposure > module.ExposureLocal {
 			total += 100 * time.Millisecond
 			continue
 		}
@@ -63,20 +64,20 @@ func estimateTypicalDuration(runtime config.Runtime, workers int) time.Duration 
 	return total
 }
 
-func estimateModuleDuration(runtime config.Runtime, descriptor config.ModuleDescriptor, workers int) time.Duration {
+func estimateModuleDuration(runtime config.Runtime, descriptor module.Descriptor, workers int) time.Duration {
 	switch descriptor.EstimateMode {
-	case config.EstimateModeCPU:
+	case module.EstimateModeCPU:
 		return cpuBenchmarkEstimate(runtime, workers)
-	case config.EstimateModeMemory:
+	case module.EstimateModeMemory:
 		return streamBenchmarkEstimate(runtime, workers)
-	case config.EstimateModeDisk:
+	case module.EstimateModeDisk:
 		// Add startup and --enghelp discovery around the complete fio plan.
 		return FIOPlanDuration() + 10*time.Second
-	case config.EstimateModeDNS:
+	case module.EstimateModeDNS:
 		return time.Duration(runtime.DNSAttempts) * time.Second
-	case config.EstimateModeLatency:
+	case module.EstimateModeLatency:
 		return time.Duration(runtime.LatencyAttempts) * 1500 * time.Millisecond
-	case config.EstimateModeSpeed:
+	case module.EstimateModeSpeed:
 		// Each target/family row runs forward, reverse, and one UDP sample.
 		families := 1
 		if runtime.IPVersion == "" || runtime.IPVersion == config.IPVersionAuto {
@@ -84,15 +85,15 @@ func estimateModuleDuration(runtime config.Runtime, descriptor config.ModuleDesc
 		}
 		perRow := 2*runtime.IPerfDuration + config.IPerfUDPDuration
 		return time.Duration(len(runtime.IPerfTargets)*families) * perRow
-	case config.EstimateModeRoute:
+	case module.EstimateModeRoute:
 		return time.Duration(len(runtime.RouteTargets)) * 12 * time.Second
-	case config.EstimateModeTwoContext:
+	case module.EstimateModeTwoContext:
 		return twoContextBenchmarkEstimate(descriptor.Estimate, workers)
-	case config.EstimateModeFixed:
+	case module.EstimateModeFixed:
 		return descriptor.Estimate
 	default:
-		// ValidateModuleDescriptors rejects unknown modes. Treat a descriptor
-		// assembled by an external caller defensively as a fixed estimate.
+		// Catalog construction rejects unknown modes. Treat a descriptor assembled
+		// by an external caller defensively as a fixed estimate.
 		return descriptor.Estimate
 	}
 }

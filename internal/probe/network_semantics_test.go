@@ -15,6 +15,7 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
+	"ecs/internal/module"
 	"ecs/internal/report"
 	"ecs/internal/termcolor"
 )
@@ -564,7 +565,7 @@ func networkFixtureEnvironment(sources []string, client *http.Client) Environmen
 		Config: config.Runtime{
 			Profile:          config.ProfileFull,
 			Modules:          []string{"network"},
-			Exposure:         config.ExposureLocal,
+			Exposure:         module.ExposureLocal,
 			IPVersion:        config.IPVersion4,
 			IPQualitySources: sources,
 			HTTPTimeout:      time.Second,

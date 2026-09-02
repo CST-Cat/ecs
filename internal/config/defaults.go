@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 // Defaults builds the runtime baseline for a profile. Profiles only select
@@ -19,7 +20,7 @@ func Defaults(profile string) (Runtime, error) {
 	}
 	base := Runtime{
 		Profile:          profile,
-		Exposure:         ExposureThirdParty,
+		Exposure:         module.ExposureThirdParty,
 		Reveal:           false,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},

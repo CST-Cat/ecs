@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func useEnglish(t *testing.T) {
@@ -302,7 +303,7 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := validRuntime(t)
-	expected.Exposure = ExposureConsent
+	expected.Exposure = module.ExposureConsent
 	expected.Reveal, expected.IPVersion = true, IPVersion6
 	expected.IPQualitySources = []string{"ipinfo", "all"}
 	expected.Formats, expected.Output, expected.NoColor = []string{"json", "md"}, "./custom", true
@@ -483,7 +484,7 @@ func TestValidateReportsDistinctConfigurationErrors(t *testing.T) {
 		{name: "no modules", mutate: func(r *Runtime) { r.Modules = nil }, marker: "at least one module must be selected"},
 		{name: "IP family", mutate: func(r *Runtime) { r.IPVersion = "9" }, marker: "unknown IP family"},
 		{name: "unknown module", mutate: func(r *Runtime) { r.Modules = []string{"missing"} }, marker: "unknown module"},
-		{name: "exposure limit", mutate: func(r *Runtime) { r.Modules, r.Exposure = []string{"network"}, ExposureLocal }, marker: "above --exposure local"},
+		{name: "exposure limit", mutate: func(r *Runtime) { r.Modules, r.Exposure = []string{"network"}, module.ExposureLocal }, marker: "above --exposure local"},
 		{name: "CPU range", mutate: func(r *Runtime) { r.CPUTime = 0 }, marker: "CPU test duration"},
 		{name: "disk range", mutate: func(r *Runtime) { r.DiskMiB = 1 }, marker: "disk test size"},
 		{name: "HTTP range", mutate: func(r *Runtime) { r.HTTPTimeout = 0 }, marker: "HTTP timeout"},

@@ -7,6 +7,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
@@ -30,9 +31,9 @@ func TestBindBuiltinModulesAndSelectCanonicalOrder(t *testing.T) {
 	}
 
 	bindings := []moduleBinding{
-		{Descriptor: config.ModuleDescriptor{ID: "first"}},
-		{Descriptor: config.ModuleDescriptor{ID: "second"}},
-		{Descriptor: config.ModuleDescriptor{ID: "third"}},
+		{Descriptor: module.Descriptor{ID: "first"}},
+		{Descriptor: module.Descriptor{ID: "second"}},
+		{Descriptor: module.Descriptor{ID: "third"}},
 	}
 	selected := selectBindings(bindings, []string{"third", "first", "third", "missing"})
 	if len(selected) != 2 || selected[0].Descriptor.ID != "first" || selected[1].Descriptor.ID != "third" {
@@ -43,20 +44,20 @@ func TestBindBuiltinModulesAndSelectCanonicalOrder(t *testing.T) {
 func TestBindModuleProbesRejectsDistinctContractErrors(t *testing.T) {
 	cases := []struct {
 		name   string
-		descr  func() []config.ModuleDescriptor
+		descr  func() []module.Descriptor
 		probes func() []probe.Probe
 		marker string
 	}{
-		{name: "empty descriptor", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{}} }, probes: func() []probe.Probe { return nil }, marker: "empty ID"},
-		{name: "duplicate descriptor", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{ID: "local"}, {ID: "local"}} }, probes: func() []probe.Probe { return nil }, marker: "duplicate module descriptor"},
-		{name: "nil probe", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{nil} }, marker: "probe 0 is nil"},
-		{name: "empty probe ID", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{}} }, marker: "has empty ID"},
-		{name: "unknown probe", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{id: "other"}} }, marker: "has no module descriptor"},
-		{name: "duplicate probe", descr: func() []config.ModuleDescriptor { return []config.ModuleDescriptor{{ID: "local"}} }, probes: func() []probe.Probe {
+		{name: "empty descriptor", descr: func() []module.Descriptor { return []module.Descriptor{{}} }, probes: func() []probe.Probe { return nil }, marker: "empty ID"},
+		{name: "duplicate descriptor", descr: func() []module.Descriptor { return []module.Descriptor{{ID: "local"}, {ID: "local"}} }, probes: func() []probe.Probe { return nil }, marker: "duplicate module descriptor"},
+		{name: "nil probe", descr: func() []module.Descriptor { return []module.Descriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{nil} }, marker: "probe 0 is nil"},
+		{name: "empty probe ID", descr: func() []module.Descriptor { return []module.Descriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{}} }, marker: "has empty ID"},
+		{name: "unknown probe", descr: func() []module.Descriptor { return []module.Descriptor{{ID: "local"}} }, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{id: "other"}} }, marker: "has no module descriptor"},
+		{name: "duplicate probe", descr: func() []module.Descriptor { return []module.Descriptor{{ID: "local"}} }, probes: func() []probe.Probe {
 			return []probe.Probe{bindingTestProbe{id: "local"}, bindingTestProbe{id: "local"}}
 		}, marker: "duplicate probe ID"},
-		{name: "missing probe", descr: func() []config.ModuleDescriptor {
-			return []config.ModuleDescriptor{{ID: "local"}, {ID: "remote", Exposure: config.ExposurePublic}}
+		{name: "missing probe", descr: func() []module.Descriptor {
+			return []module.Descriptor{{ID: "local"}, {ID: "remote", Exposure: module.ExposurePublic}}
 		}, probes: func() []probe.Probe { return []probe.Probe{bindingTestProbe{id: "local"}} }, marker: "has no probe"},
 	}
 	for _, test := range cases {
@@ -70,8 +71,8 @@ func TestBindModuleProbesRejectsDistinctContractErrors(t *testing.T) {
 }
 
 func TestHasNetworkModulesUsesDescriptorExposure(t *testing.T) {
-	local := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "local", Exposure: config.ExposureLocal}, Probe: bindingTestProbe{id: "local"}}
-	remote := moduleBinding{Descriptor: config.ModuleDescriptor{ID: "remote", Exposure: config.ExposurePublic}, Probe: bindingTestProbe{id: "remote"}}
+	local := moduleBinding{Descriptor: module.Descriptor{ID: "local", Exposure: module.ExposureLocal}, Probe: bindingTestProbe{id: "local"}}
+	remote := moduleBinding{Descriptor: module.Descriptor{ID: "remote", Exposure: module.ExposurePublic}, Probe: bindingTestProbe{id: "remote"}}
 	fallback := moduleBinding{Probe: bindingTestProbe{id: "custom"}}
 	if hasNetworkModules(nil) || hasNetworkModules([]moduleBinding{local}) {
 		t.Fatal("local or empty selection unexpectedly requires network")

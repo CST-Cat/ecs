@@ -1,6 +1,6 @@
 package runner
 
-import "ecs/internal/config"
+import "ecs/internal/module"
 
 // 模块调度：按干扰特性分组，组间串行、组内并行。
 //
@@ -36,7 +36,7 @@ func planSchedule(bindings []moduleBinding) []scheduleGroup {
 		pending = nil
 	}
 	for index, binding := range bindings {
-		if binding.Descriptor.ID != "" && binding.Descriptor.Concurrency == config.ModuleConcurrencyProbe {
+		if binding.Descriptor.ID != "" && binding.Descriptor.Concurrency == module.ConcurrencyProbe {
 			pending = append(pending, index)
 			continue
 		}
