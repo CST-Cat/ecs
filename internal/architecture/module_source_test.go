@@ -14,10 +14,15 @@ import (
 )
 
 const (
-	moduleImportPath = "ecs/internal/module"
-	probeImportPath  = "ecs/internal/probe"
-	configImportPath = "ecs/internal/config"
-	runnerImportPath = "ecs/internal/runner"
+	appImportPath           = "ecs/internal/app"
+	configImportPath        = "ecs/internal/config"
+	moduleImportPath        = "ecs/internal/module"
+	probeImportPath         = "ecs/internal/probe"
+	reportImportPath        = "ecs/internal/report"
+	runnerImportPath        = "ecs/internal/runner"
+	scoreImportPath         = "ecs/internal/score"
+	toolImportPath          = "ecs/internal/tool"
+	toolsmanifestImportPath = "ecs/internal/toolsmanifest"
 )
 
 type productionSource struct {
@@ -102,7 +107,7 @@ func resolveImportBindings(file *ast.File) (map[string]string, error) {
 			localName = specification.Name.Name
 			if localName == "." {
 				switch importPath {
-				case moduleImportPath, probeImportPath, configImportPath:
+				case moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync":
 					return nil, fmt.Errorf("dot import of tracked package %q is ambiguous", importPath)
 				default:
 					continue
@@ -134,12 +139,7 @@ func hasImportedCompositeLiteral(source productionSource, importedPath, typeName
 		if !ok {
 			return true
 		}
-		selector, ok := literal.Type.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != typeName {
-			return true
-		}
-		packageIdent, ok := selector.X.(*ast.Ident)
-		if ok && bindings[packageIdent.Name] == importedPath {
+		if containsImportedType(literal.Type, bindings, importedPath, typeName) {
 			found = true
 		}
 		return !found
@@ -205,21 +205,6 @@ func hasImportedSymbol(source productionSource, importedPath, symbolName string)
 		return !found
 	})
 	return found, nil
-}
-
-func hasLocalIdentifier(source productionSource, packagePath, symbolName string) bool {
-	if source.packagePath != packagePath {
-		return false
-	}
-	found := false
-	ast.Inspect(source.file, func(node ast.Node) bool {
-		if ident, ok := node.(*ast.Ident); ok && ident.Name == symbolName {
-			found = true
-			return false
-		}
-		return !found
-	})
-	return found
 }
 
 func hasLocalFunction(source productionSource, packagePath, functionName string) bool {
@@ -368,7 +353,7 @@ func use() {
 }
 
 func TestSourceDetectorsRejectTrackedDotImports(t *testing.T) {
-	for _, importPath := range []string{moduleImportPath, probeImportPath} {
+	for _, importPath := range []string{moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync"} {
 		source := parseDetectorSnippet(t, "package consumer\n\nimport . \""+importPath+"\"\n", "ecs/internal/consumer")
 		if _, err := resolveImportBindings(source.file); err == nil {
 			t.Fatalf("dot import %q was accepted by source detector", importPath)
@@ -453,49 +438,38 @@ func TestProductionSourceHasNoRemovedModuleAdaptersOrRunnerBindings(t *testing.T
 		t.Fatalf("removed config/modules.go still exists: %v", err)
 	}
 	for _, source := range sources {
-		for _, name := range []string{"ModuleDescriptors", "ModuleDescriptorFor", "ModuleIDs", "moduleDescriptors"} {
-			uses, err := hasImportedSymbol(source, configImportPath, name)
+		for _, name := range []string{
+			"ModuleDescriptors", "ModuleDescriptorFor", "ModuleIDs", "moduleDescriptors",
+			"bindModuleProbes", "bindBuiltinModules", "moduleBinding", "selectBindings", "runBinding", "bindingTitle",
+			"moduleFactories", "moduleEstimates",
+		} {
+			if hasIdentifierNamed(source, name) {
+				t.Fatalf("production source %s still declares or references removed architecture symbol %q", source.path, name)
+			}
+		}
+		for _, name := range []string{"Builtins", "BuiltinCatalog"} {
+			uses, err := hasImportedSymbol(source, probeImportPath, name)
 			if err != nil {
-				t.Fatalf("resolve config symbol %q in %s: %v", name, source.path, err)
+				t.Fatalf("resolve removed probe symbol %q in %s: %v", name, source.path, err)
 			}
 			if uses {
-				t.Fatalf("production source %s still declares or references removed adapter %q", source.path, name)
+				t.Fatalf("production source %s still declares or references removed probe API %q", source.path, name)
 			}
-		}
-		if source.packagePath == runnerImportPath {
-			for _, name := range []string{
-				"bindModuleProbes", "bindBuiltinModules", "moduleBinding", "selectBindings", "runBinding", "bindingTitle",
-			} {
-				if hasLocalIdentifier(source, runnerImportPath, name) {
-					t.Fatalf("runner source %s still contains removed binding path %q", source.path, name)
-				}
-			}
-		}
-		if uses, err := hasImportedSymbol(source, probeImportPath, "BuiltinCatalog"); err != nil {
-			t.Fatalf("resolve BuiltinCatalog references in %s: %v", source.path, err)
-		} else if uses {
-			t.Fatalf("production source %s declares or references removed BuiltinCatalog", source.path)
 		}
 	}
 }
 
-func TestProductionConfigAndProbeHaveNoRuntimeRegistration(t *testing.T) {
+func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, source := range loadAllProductionSources(t, root) {
-		if source.packagePath != configImportPath && source.packagePath != probeImportPath {
+		if !isCompositionPackage(source.packagePath) {
 			continue
 		}
 		if hasLocalFunction(source, source.packagePath, "init") {
 			t.Fatalf("%s has runtime init registration in %s", source.packagePath, source.path)
 		}
-		for _, declaration := range source.file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			if strings.HasPrefix(function.Name.Name, "Register") || strings.HasPrefix(function.Name.Name, "registerModule") {
-				t.Fatalf("%s has registration-style API %q in %s", source.packagePath, function.Name.Name, source.path)
-			}
+		if name, ok := catalogMutationAPI(source); ok {
+			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
 		}
 	}
 }

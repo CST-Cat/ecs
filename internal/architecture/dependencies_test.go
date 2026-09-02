@@ -23,10 +23,26 @@ func TestLayerDependenciesKeepsLowLevelContractsAcyclic(t *testing.T) {
 		forbid []string
 	}{
 		{name: "module", dir: filepath.Join("internal", "module"), forbid: []string{
-			"ecs/internal/config", "ecs/internal/probe", "ecs/internal/app", "ecs/internal/runner",
+			configImportPath, probeImportPath, appImportPath, runnerImportPath, toolImportPath,
 		}},
 		{name: "config", dir: filepath.Join("internal", "config"), forbid: []string{
-			"ecs/internal/probe", "ecs/internal/runner", "ecs/internal/app",
+			probeImportPath, runnerImportPath, appImportPath,
+		}},
+		{name: "probe", dir: filepath.Join("internal", "probe"), forbid: []string{
+			appImportPath, runnerImportPath,
+		}},
+		{name: "runner", dir: filepath.Join("internal", "runner"), forbid: []string{
+			appImportPath, reportImportPath, scoreImportPath,
+		}},
+		{name: "score", dir: filepath.Join("internal", "score"), forbid: []string{
+			probeImportPath,
+		}},
+		{name: "report", dir: filepath.Join("internal", "report"), forbid: []string{
+			probeImportPath,
+		}},
+		{name: "tool", dir: filepath.Join("internal", "tool"), forbid: []string{
+			appImportPath, configImportPath, moduleImportPath, probeImportPath,
+			runnerImportPath, toolsmanifestImportPath,
 		}},
 	}
 	for _, test := range cases {
