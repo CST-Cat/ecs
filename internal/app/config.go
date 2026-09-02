@@ -9,7 +9,7 @@ import (
 	"ecs/internal/i18n"
 )
 
-func configCommand(args []string, stdout, stderr io.Writer) int {
+func configCommand(_ application, args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 || args[0] != "example" {
 		fmt.Fprintln(stderr, i18n.T("help.configUsage"))
 		return 1

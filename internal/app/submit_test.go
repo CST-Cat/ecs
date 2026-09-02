@@ -10,7 +10,6 @@ import (
 
 	"ecs/internal/buildinfo"
 	"ecs/internal/model"
-	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -76,7 +75,7 @@ func TestSubmitCommandWritesLoadableSubmission(t *testing.T) {
 				t.Fatalf("submit status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 			if test.defaultOutput {
-				submission, err := score.BuildSubmission(probe.BuiltinCatalog(), submitTestReport(), score.SubmissionOptions{Region: "us", Provider: "fixture", Note: "diagnostic fixture"})
+				submission, err := score.BuildSubmission(newApplication().modules, submitTestReport(), score.SubmissionOptions{Region: "us", Provider: "fixture", Note: "diagnostic fixture"})
 				if err != nil {
 					t.Fatal(err)
 				}

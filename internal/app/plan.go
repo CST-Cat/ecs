@@ -51,8 +51,8 @@ type planStaging struct {
 	ZstdCorpusRequired    bool     `json:"zstd_corpus_required"`
 }
 
-func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	resolved, err := resolveRunConfig(args, stderr)
+func planCommand(app application, ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	resolved, err := resolveRunConfig(app.modules, args, stderr)
 	if err != nil {
 		var parseErr runFlagParseError
 		if errors.As(err, &parseErr) {
@@ -70,7 +70,7 @@ func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	runtime := resolved.Runtime
 	if resolved.Interactive && !resolved.Yes {
-		wizardOK, wizardErr := runWizard(ctx, resolved.Catalog, &runtime)
+		wizardOK, wizardErr := runWizard(ctx, app.modules, &runtime)
 		if wizardErr != nil {
 			if errors.Is(wizardErr, context.Canceled) {
 				return 130
@@ -82,12 +82,12 @@ func planCommand(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			return 0
 		}
 	}
-	if err := config.Validate(resolved.Catalog, runtime); err != nil {
+	if err := config.Validate(app.modules, runtime); err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
 	}
 
-	content, err := json.MarshalIndent(buildExecutionPlan(resolved.Catalog, runtime), "", "  ")
+	content, err := json.MarshalIndent(buildExecutionPlan(app.modules, runtime), "", "  ")
 	if err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
@@ -111,7 +111,7 @@ func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executio
 	needsThirdPartyProvider := false
 	needsOokla := false
 	for _, id := range runtime.Modules {
-		descriptor, ok := config.ModuleDescriptorFor(catalog, id)
+		descriptor, ok := catalog.Lookup(id)
 		if !ok {
 			continue
 		}

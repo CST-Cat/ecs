@@ -206,7 +206,7 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 	}
 	t.Cleanup(func() { _ = os.Setenv("PATH", oldPath) })
 
-	runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
+	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestBacktraceStatusReflectsTargetFailureMatrix(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
+			runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +325,7 @@ func TestBacktraceSkipReasonsAreDistinctAndMachineOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Setenv("PATH", oldPath) })
-	runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
+	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func runBacktraceFixtureResultWithPath(t *testing.T) (model.Result, string) {
 	fixtureDirectory := writeBacktraceFixture(t)
 	fixturePath := filepath.Join(fixtureDirectory, routeEngineTiny)
 	t.Setenv("PATH", fixtureDirectory)
-	runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
+	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func TestBacktraceProducerPreservesLongTypedCommandError(t *testing.T) {
 	if expectedError == nil || len(expectedError.Error()) <= 100 {
 		t.Fatalf("fixture error = %v, want a long typed error", expectedError)
 	}
-	runtime, err := config.Defaults(BuiltinCatalog(), config.ProfileStandard)
+	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

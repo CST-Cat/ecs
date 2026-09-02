@@ -143,7 +143,7 @@ type wizardModule struct {
 func wizardModules(catalog module.Catalog) []wizardModule {
 	groups := make([]wizardModule, 0)
 	positions := make(map[string]int)
-	for _, descriptor := range config.ModuleDescriptors(catalog) {
+	for _, descriptor := range catalog.Descriptors() {
 		if descriptor.WizardGroup == "" {
 			continue
 		}
@@ -295,7 +295,7 @@ func runWizard(ctx context.Context, catalog module.Catalog, cfg *config.Runtime)
 	cfg.Reveal = reveal
 
 	modules := make([]string, 0, len(selected))
-	for _, id := range config.ModuleIDs(catalog) {
+	for _, id := range catalog.IDs() {
 		if selected[id] {
 			modules = append(modules, id)
 		}
@@ -309,7 +309,7 @@ func runWizard(ctx context.Context, catalog module.Catalog, cfg *config.Runtime)
 
 	// 五、确认
 	prompt.line("")
-	estimate := probe.EstimateFor(*cfg)
+	estimate := probe.EstimateFor(catalog, *cfg)
 	prompt.line("%s", prompt.style("1", i18n.T("wizard.summaryTitle")))
 	prompt.line("  %s %s", i18n.T("term.profileLine"), cfg.Profile)
 	prompt.line("  %s %s — %s", i18n.T("report.exposure"), cfg.Exposure.String(), i18n.T("exposure."+cfg.Exposure.String()))

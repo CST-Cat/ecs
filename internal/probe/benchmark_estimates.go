@@ -12,7 +12,7 @@ import (
 // EstimateFor owns the complete user-facing runtime estimate.  Keeping the
 // orchestration with the probe workload plans means allowance-sensitive
 // benchmarks and the fio plan cannot drift from the work that actually runs.
-func EstimateFor(runtime config.Runtime) config.Estimate {
+func EstimateFor(catalog module.Catalog, runtime config.Runtime) config.Estimate {
 	workers := detectCPUAllowance().Threads
 	estimate := config.Estimate{DiskMiB: runtime.DiskMiB}
 	if hasModule(runtime, "speed") {
@@ -24,7 +24,7 @@ func EstimateFor(runtime config.Runtime) config.Estimate {
 	if !hasModule(runtime, "disk") {
 		estimate.DiskMiB = 0
 	}
-	typical := estimateTypicalDuration(runtime, workers)
+	typical := estimateTypicalDuration(catalog, runtime, workers)
 	estimate.DurationText = durationEstimateText(typical*3/5, typical*2)
 	if runtime.OfflineOnly() {
 		estimate.NetworkMiB = 0
@@ -45,9 +45,8 @@ func hasModule(runtime config.Runtime, id string) bool {
 	return false
 }
 
-func estimateTypicalDuration(runtime config.Runtime, workers int) time.Duration {
+func estimateTypicalDuration(catalog module.Catalog, runtime config.Runtime, workers int) time.Duration {
 	var total time.Duration
-	catalog := BuiltinCatalog()
 	for _, id := range runtime.Modules {
 		descriptor, ok := catalog.Lookup(id)
 		if !ok {

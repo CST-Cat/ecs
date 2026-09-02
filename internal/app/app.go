@@ -18,15 +18,15 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
+	application := newApplication()
 	command, commandArgs := dispatchCommand(commandLine)
-	catalog := defaultCommandCatalog()
-	definition, ok := catalog.lookup(command)
+	definition, ok := application.commands.lookup(command)
 	if !ok {
 		fmt.Fprintf(stderr, "%s %q\n\n", i18n.T("cli.unknownCommand"), command)
-		printHelp(stderr)
+		printHelp(application.commands, stderr)
 		return 1
 	}
-	return definition.Handler(ctx, commandArgs, stdout, stderr)
+	return definition.Handler(application, ctx, commandArgs, stdout, stderr)
 }
 
 // dispatchCommand sees argv only after the global prefix has been removed. A

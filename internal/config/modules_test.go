@@ -5,22 +5,22 @@ import (
 	"testing"
 )
 
-func TestModuleCatalogAdaptersUseExplicitOrderAndProfileSemantics(t *testing.T) {
+func TestModuleCatalogUsesExplicitOrderAndProfileSemantics(t *testing.T) {
 	catalog := testModuleCatalog()
-	descriptors := ModuleDescriptors(catalog)
+	descriptors := catalog.Descriptors()
 	wantOrder := []string{"system", "network", "dns"}
-	if len(descriptors) != len(wantOrder) || !reflect.DeepEqual(ModuleIDs(catalog), wantOrder) {
-		t.Fatalf("descriptor/order = %v/%v, want %v", descriptors, ModuleIDs(catalog), wantOrder)
+	if len(descriptors) != len(wantOrder) || !reflect.DeepEqual(catalog.IDs(), wantOrder) {
+		t.Fatalf("descriptor/order = %v/%v, want %v", descriptors, catalog.IDs(), wantOrder)
 	}
 	for index, descriptor := range descriptors {
 		if descriptor.ID != wantOrder[index] {
 			t.Fatalf("descriptor[%d] = %q, want %q", index, descriptor.ID, wantOrder[index])
 		}
-		if found, ok := ModuleDescriptorFor(catalog, descriptor.ID); !ok || found.ID != descriptor.ID {
+		if found, ok := catalog.Lookup(descriptor.ID); !ok || found.ID != descriptor.ID {
 			t.Fatalf("descriptor lookup failed for %q", descriptor.ID)
 		}
 	}
-	if _, ok := ModuleDescriptorFor(catalog, "missing"); ok || ModulesForProfile(catalog, "missing") != nil {
+	if _, ok := catalog.Lookup("missing"); ok || ModulesForProfile(catalog, "missing") != nil {
 		t.Fatal("unknown descriptor/profile should not resolve")
 	}
 	standard := ModulesForProfile(catalog, ProfileStandard)
@@ -30,16 +30,16 @@ func TestModuleCatalogAdaptersUseExplicitOrderAndProfileSemantics(t *testing.T) 
 	}
 }
 
-func TestModuleCatalogAdaptersReturnDefensiveCopies(t *testing.T) {
+func TestModuleCatalogReturnsDefensiveCopies(t *testing.T) {
 	catalog := testModuleCatalog()
-	ids := ModuleIDs(catalog)
+	ids := catalog.IDs()
 	ids[0] = "mutated"
-	if !reflect.DeepEqual(ModuleIDs(catalog), []string{"system", "network", "dns"}) {
-		t.Fatal("ModuleIDs returned mutable catalog storage")
+	if !reflect.DeepEqual(catalog.IDs(), []string{"system", "network", "dns"}) {
+		t.Fatal("catalog IDs returned mutable catalog storage")
 	}
-	descriptors := ModuleDescriptors(catalog)
+	descriptors := catalog.Descriptors()
 	descriptors[0].RequiredTools[0] = "mutated"
-	fresh, ok := ModuleDescriptorFor(catalog, "system")
+	fresh, ok := catalog.Lookup("system")
 	if !ok || fresh.RequiredTools[0] != "sysinfo" {
 		t.Fatal("descriptor metadata leaked through an adapter return value")
 	}

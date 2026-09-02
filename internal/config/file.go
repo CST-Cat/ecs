@@ -155,7 +155,7 @@ func SelectModules(catalog module.Catalog, base, only, skip []string) []string {
 		delete(selected, id)
 	}
 	out := make([]string, 0, len(selected))
-	for _, id := range ModuleIDs(catalog) {
+	for _, id := range catalog.IDs() {
 		if selected[id] {
 			out = append(out, id)
 		}

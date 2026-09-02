@@ -30,6 +30,14 @@ type runnerTestProbe struct {
 	panicValue any
 }
 
+func runnerCatalog() module.Catalog {
+	catalog, err := probe.CatalogFromDefinitions(probe.BuiltinDefinitions())
+	if err != nil {
+		panic(err)
+	}
+	return catalog
+}
+
 func TestNewRunIDHas32LowercaseHexCharactersAndDoesNotRepeat(t *testing.T) {
 	const count = 4096
 	seen := make(map[string]struct{}, count)
@@ -59,11 +67,11 @@ func TestRunReturnsErrorWithoutReportWhenRandomReadFails(t *testing.T) {
 		runIDRandomReader = originalReader
 	})
 
-	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := Run(context.Background(), cfg, nil)
+	report, err := Run(context.Background(), probe.BuiltinDefinitions(), runnerCatalog(), cfg, nil)
 	if !errors.Is(err, randomError) {
 		t.Fatalf("Run() error = %v, want wrapped random source failure", err)
 	}
@@ -100,11 +108,11 @@ func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 }
 
 func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
-	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
@@ -136,11 +144,11 @@ func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
 }
 
 func TestRunDefinitionNormalizesMalformedEvidence(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,9 +165,9 @@ func TestRunDefinitionNormalizesMalformedEvidence(t *testing.T) {
 }
 
 func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
-	descriptor, _ := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "network")
-	localDescriptor, _ := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
-	defaultConfig, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
+	descriptor, _ := runnerCatalog().Lookup("network")
+	localDescriptor, _ := runnerCatalog().Lookup("system")
+	defaultConfig, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,11 +220,11 @@ func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
 }
 
 func TestRunDefinitionPreservesWarningFailureOwnership(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor(probe.BuiltinCatalog(), "system")
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(probe.BuiltinCatalog(), config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}

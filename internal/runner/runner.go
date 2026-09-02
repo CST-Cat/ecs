@@ -55,13 +55,12 @@ var discoverEgress = probe.DiscoverEgress
 // an identity abstraction.
 var runIDRandomReader io.Reader = rand.Reader
 
-func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.Report, error) {
+func Run(ctx context.Context, definitions []probe.Definition, catalog module.Catalog, cfg config.Runtime, progress ProgressFunc) (model.Report, error) {
 	runID, err := newRunID()
 	if err != nil {
 		return model.Report{}, err
 	}
 	started := time.Now().UTC()
-	definitions := probe.BuiltinDefinitions()
 	selected := selectDefinitions(definitions, cfg.Modules)
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
@@ -117,6 +116,7 @@ func Run(ctx context.Context, cfg config.Runtime, progress ProgressFunc) (model.
 	}
 	env := probe.Environment{
 		Config:     effectiveCfg,
+		Catalog:    catalog,
 		HTTPClient: httpClient,
 		UserAgent:  fmt.Sprintf("ecs/%s", buildinfo.Version),
 		Network:    capabilities,

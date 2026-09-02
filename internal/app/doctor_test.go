@@ -61,7 +61,7 @@ func installDoctorFixtures(t *testing.T, broken string, optional ...string) stri
 	if len(optional) > 0 {
 		optionalName = optional[0]
 	}
-	for _, tool := range doctorTools() {
+	for _, tool := range doctorTools(newApplication().modules) {
 		if tool.required || tool.name == optionalName {
 			writeDoctorToolFixture(t, directory, tool.name, tool.name == broken)
 		}

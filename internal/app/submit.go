@@ -10,13 +10,12 @@ import (
 	"strings"
 
 	"ecs/internal/i18n"
-	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
 
 // submitCommand 从完整报告导出一份可公开入库的瘦身提交。
-func submitCommand(args []string, stdout, stderr io.Writer) int {
+func submitCommand(app application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs submit", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	input := flags.String("input", "", i18n.T("flag.submitInput"))
@@ -59,7 +58,7 @@ func submitCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
-	submission, err := score.BuildSubmission(probe.BuiltinCatalog(), data, score.SubmissionOptions{
+	submission, err := score.BuildSubmission(app.modules, data, score.SubmissionOptions{
 		Region: *region, Provider: *provider, Note: *note,
 	})
 	if err != nil {

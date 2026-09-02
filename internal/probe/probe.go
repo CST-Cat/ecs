@@ -10,10 +10,12 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/failure"
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
 
 type Environment struct {
 	Config     config.Runtime
+	Catalog    module.Catalog
 	HTTPClient *http.Client
 	UserAgent  string
 	// Network is the one local capability snapshot for this run. It is filled

@@ -18,6 +18,14 @@ func (probe definitionTestProbe) Run(context.Context, Environment) model.Result 
 	return model.Result{ID: probe.id}
 }
 
+func testCatalog() module.Catalog {
+	catalog, err := CatalogFromDefinitions(BuiltinDefinitions())
+	if err != nil {
+		panic(err)
+	}
+	return catalog
+}
+
 func testDefinition(id string) Definition {
 	return Definition{
 		Descriptor: module.Descriptor{
@@ -59,7 +67,7 @@ func TestBuiltinDefinitionsAreCompleteAndCanonical(t *testing.T) {
 		}
 	}
 
-	catalog := BuiltinCatalog()
+	catalog := testCatalog()
 	if got := catalog.IDs(); !equalStrings(got, wantIDs) {
 		t.Fatalf("builtin catalog IDs = %v, want %v", got, wantIDs)
 	}
@@ -75,7 +83,7 @@ func TestBuiltinCatalogStandardIDsAreCanonical(t *testing.T) {
 		"system", "bgp", "cpu", "zstd", "npb", "memory", "crypto", "disk", "dns", "latency",
 		"speed", "ports", "nat", "blacklist", "apps", "cnspeed", "media", "route", "backtrace",
 	}
-	if got := BuiltinCatalog().StandardIDs(); !equalStrings(got, wantIDs) {
+	if got := testCatalog().StandardIDs(); !equalStrings(got, wantIDs) {
 		t.Fatalf("builtin catalog standard IDs = %v, want %v", got, wantIDs)
 	}
 }

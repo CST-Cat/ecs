@@ -207,7 +207,7 @@ func TestPlanCommandKeepsOptionLikeNameValueFromEarlyLanguageScan(t *testing.T) 
 				t.Fatalf("plan profile = %q, want %q", plan.Profile, config.ProfileStandard)
 			}
 
-			resolved, err := resolveRunConfig(test.args[1:], &bytes.Buffer{})
+			resolved, err := resolveRunConfig(newApplication().modules, test.args[1:], &bytes.Buffer{})
 			if err != nil {
 				t.Fatalf("formal parser rejected option-like name value: %v", err)
 			}
@@ -351,7 +351,7 @@ func TestPlanKeepsTopLevelEgressFactsWhenModulesOnlyExposeIDs(t *testing.T) {
 
 func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	var stderr bytes.Buffer
-	resolved, err := resolveRunConfig([]string{
+	resolved, err := resolveRunConfig(newApplication().modules, []string{
 		"--only", "system",
 		"--exposure", "any", "--reveal=true",
 		// The plan-derived values are appended after the original CLI values.
@@ -367,7 +367,7 @@ func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 
 func TestBacktraceCLIUsesExplicitCarrierSyntax(t *testing.T) {
 	var stderr bytes.Buffer
-	resolved, err := resolveRunConfig([]string{
+	resolved, err := resolveRunConfig(newApplication().modules, []string{
 		"--only", "backtrace", "--exposure", "public",
 		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133,unicom:IPv6 target=[2001:db8::1]",
 	}, &stderr)
@@ -398,7 +398,7 @@ func TestBacktraceCLIFailsClosedWithoutExplicitCarrier(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stderr bytes.Buffer
-			if _, err := resolveRunConfig(append([]string{"--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
+			if _, err := resolveRunConfig(newApplication().modules, append([]string{"--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
 				t.Fatalf("resolve invalid backtrace target = %v (stderr=%q)", err, stderr.String())
 			}
 		})

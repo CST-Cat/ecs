@@ -3,13 +3,16 @@ package i18n_test
 import (
 	"testing"
 
-	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/probe"
 )
 
-func TestModuleDescriptorsHaveLocalizedMetadata(t *testing.T) {
-	descriptors := config.ModuleDescriptors(probe.BuiltinCatalog())
+func TestBuiltinDescriptorsHaveLocalizedMetadata(t *testing.T) {
+	catalog, err := probe.CatalogFromDefinitions(probe.BuiltinDefinitions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptors := catalog.Descriptors()
 	if len(descriptors) == 0 {
 		t.Fatal("module descriptor list is empty")
 	}

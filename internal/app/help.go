@@ -8,10 +8,10 @@ import (
 	"ecs/internal/i18n"
 )
 
-func printHelp(writer io.Writer) {
+func printHelp(catalog commandCatalog, writer io.Writer) {
 	fmt.Fprintf(writer, "ecs — %s\n\n", i18n.T("cli.tagline"))
 	fmt.Fprintf(writer, "%s:\n", i18n.T("cli.usage"))
-	for _, definition := range defaultCommandCatalog().definitionsInOrder() {
+	for _, definition := range catalog.definitionsInOrder() {
 		fmt.Fprintf(writer, "  %s\n", commandHelpText(definition))
 	}
 	fmt.Fprintln(writer)

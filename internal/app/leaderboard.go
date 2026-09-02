@@ -23,12 +23,11 @@ import (
 	"ecs/internal/buildinfo"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
-	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
 
-func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
+func leaderboardCommand(app application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs leaderboard", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	output := flags.String("output", "ecs-baseline.json", i18n.T("flag.baselineOutput"))
@@ -179,7 +178,7 @@ func leaderboardCommand(args []string, stdout, stderr io.Writer) int {
 				continue
 			}
 			seenSampleIDs[sampleID] = path
-			if sample, err := score.OutlierSampleFromReport(probe.BuiltinCatalog(), data); err != nil {
+			if sample, err := score.OutlierSampleFromReport(app.modules, data); err != nil {
 				if inputIssue(path, fmt.Errorf("outlier projection: %w", err)) {
 					return 1
 				}

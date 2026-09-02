@@ -374,7 +374,7 @@ func runOoklaFixtureWithConfigAndExitCode(t *testing.T, payload string, runtime 
 	t.Helper()
 	writeThroughputExecutable(t, "speedtest", strings.Replace(fakeOoklaExecutable, "__PAYLOAD__", payload, 1))
 	t.Setenv("FAKE_OOKLA_EXIT_CODE", exitCode)
-	return (ooklaProbe{}).Run(context.Background(), Environment{Config: runtime})
+	return (ooklaProbe{}).Run(context.Background(), Environment{Config: runtime, Catalog: testCatalog()})
 }
 
 func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
@@ -577,7 +577,7 @@ func TestOoklaStatusKeyUsesParsedResult(t *testing.T) {
 func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 	t.Run("exposure denied", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
-		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureLocal}})
+		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureLocal}, Catalog: testCatalog()})
 		if result.Status != model.StatusSkipped || len(result.Fields) != 2 || result.SummaryMessages[0].Key != "probe.ookla.summary.skipped" {
 			t.Fatalf("Ookla exposure skip = %+v", result)
 		}
@@ -589,7 +589,7 @@ func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 	})
 	t.Run("tool missing", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
-		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureThirdParty}})
+		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureThirdParty}, Catalog: testCatalog()})
 		if result.Status != model.StatusSkipped || len(result.Failures) != 1 || result.Failures[0].Stage != "tool_lookup" {
 			t.Fatalf("Ookla tool skip = %+v", result)
 		}

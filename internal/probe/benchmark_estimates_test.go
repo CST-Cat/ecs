@@ -32,7 +32,7 @@ func TestEstimateSpeedNoteIsLocalized(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			i18n.Set(test.language)
-			notes := EstimateFor(runtime).Notes
+			notes := EstimateFor(testCatalog(), runtime).Notes
 			if len(notes) != 1 {
 				t.Fatalf("estimate notes = %#v, want one speed note", notes)
 			}
@@ -63,7 +63,7 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	}
 	descriptor := func(id string) module.Descriptor {
 		t.Helper()
-		value, ok := config.ModuleDescriptorFor(BuiltinCatalog(), id)
+		value, ok := testCatalog().Lookup(id)
 		if !ok {
 			t.Fatalf("descriptor %q missing", id)
 		}
@@ -114,24 +114,24 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	online := base
 	online.Modules = []string{"speed"}
 	online.Exposure = module.ExposureThirdParty
-	onlineEstimate := EstimateFor(online)
+	onlineEstimate := EstimateFor(testCatalog(), online)
 	if onlineEstimate.NetworkMiB != -1 || onlineEstimate.DiskMiB != 0 || onlineEstimate.DurationText == "" || !strings.Contains(strings.Join(onlineEstimate.Notes, " "), "iperf3") {
 		t.Fatalf("online estimate = %+v", onlineEstimate)
 	}
 	offline := online
 	offline.Exposure = module.ExposureLocal
-	offlineEstimate := EstimateFor(offline)
+	offlineEstimate := EstimateFor(testCatalog(), offline)
 	if offlineEstimate.NetworkMiB != 0 || !strings.Contains(strings.Join(offlineEstimate.Notes, " "), "离线") {
 		t.Fatalf("offline estimate = %+v", offlineEstimate)
 	}
-	routeEstimate := EstimateFor(config.Runtime{Modules: []string{"route"}, Exposure: module.ExposureThirdParty, RouteTargets: base.RouteTargets})
+	routeEstimate := EstimateFor(testCatalog(), config.Runtime{Modules: []string{"route"}, Exposure: module.ExposureThirdParty, RouteTargets: base.RouteTargets})
 	if !strings.Contains(strings.Join(routeEstimate.Notes, " "), "路由") || routeEstimate.DiskMiB != 0 {
 		t.Fatalf("route estimate = %+v", routeEstimate)
 	}
 	disk := online
 	disk.Modules = []string{"disk"}
 	disk.DiskMiB = 123
-	diskEstimate := EstimateFor(disk)
+	diskEstimate := EstimateFor(testCatalog(), disk)
 	if diskEstimate.DiskMiB != 123 || diskEstimate.NetworkMiB != 0 {
 		t.Fatalf("disk estimate = %+v", diskEstimate)
 	}

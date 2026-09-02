@@ -11,10 +11,9 @@ import (
 )
 
 // commandHandler is the one typed boundary between command selection and a
-// command implementation. Every command receives the same lifecycle context
-// and output writers, while commands that do not need a context are adapted
-// without weakening the type of the catalog.
-type commandHandler func(context.Context, []string, io.Writer, io.Writer) int
+// command implementation. Every command receives the per-invocation
+// application composition root, lifecycle context, and output writers.
+type commandHandler func(application, context.Context, []string, io.Writer, io.Writer) int
 
 // commandDefinition owns one command's identity, handler, and human-facing
 // help metadata. UsageKey and DescriptionKey are stable i18n keys rather than
@@ -32,6 +31,12 @@ type commandDefinition struct {
 // replacement API.
 type commandCatalog struct {
 	definitions []commandDefinition
+}
+
+func commandWithoutContext(handler func(application, []string, io.Writer, io.Writer) int) commandHandler {
+	return func(app application, _ context.Context, args []string, stdout, stderr io.Writer) int {
+		return handler(app, args, stdout, stderr)
+	}
 }
 
 // newCommandCatalog validates and copies an ordered set of command
@@ -78,43 +83,12 @@ func (catalog commandCatalog) lookup(name string) (commandDefinition, bool) {
 	return commandDefinition{}, false
 }
 
-// defaultCommandCatalog is the sole command existence/order/handler source.
-// It is rebuilt as a value for each application invocation; no runtime
-// registration or mutable package-level registry is involved.
-func defaultCommandCatalog() commandCatalog {
-	catalog, err := newCommandCatalog([]commandDefinition{
-		{Name: "run", Handler: runCommand, UsageKey: "help.usageRun"},
-		{Name: "plan", Handler: planCommand, UsageKey: "help.usagePlan"},
-		{Name: "list", Handler: commandWithoutContext(listCommand), UsageKey: "help.usageList"},
-		{Name: "render", Handler: commandWithoutContext(renderCommand), UsageKey: "help.usageRender"},
-		{Name: "compare", Handler: commandWithoutContext(compareCommand), UsageKey: "help.usageCompare"},
-		{Name: "config", Handler: commandWithoutContext(configCommand), UsageKey: "help.usageConfig"},
-		{Name: "doctor", Handler: doctorCommand, UsageKey: "help.usageDoctor"},
-		{Name: "leaderboard", Handler: commandWithoutContext(leaderboardCommand), UsageKey: "help.usageLeaderboard"},
-		{Name: "submit", Handler: commandWithoutContext(submitCommand), UsageKey: "help.usageSubmit"},
-		{Name: "version", Handler: versionCommand, UsageKey: "help.usageVersion"},
-		{Name: "help", Handler: helpCommand, UsageKey: "help.usageHelp"},
-	})
-	if err != nil {
-		// The built-in definitions are compile-time application structure. A
-		// malformed change is a programmer error, not a user input failure.
-		panic(err)
-	}
-	return catalog
-}
-
-func commandWithoutContext(handler func([]string, io.Writer, io.Writer) int) commandHandler {
-	return func(_ context.Context, args []string, stdout, stderr io.Writer) int {
-		return handler(args, stdout, stderr)
-	}
-}
-
-func versionCommand(_ context.Context, _ []string, stdout, _ io.Writer) int {
+func versionCommand(_ application, _ context.Context, _ []string, stdout, _ io.Writer) int {
 	fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 	return 0
 }
 
-func helpCommand(_ context.Context, _ []string, stdout, _ io.Writer) int {
-	printHelp(stdout)
+func helpCommand(app application, _ context.Context, _ []string, stdout, _ io.Writer) int {
+	printHelp(app.commands, stdout)
 	return 0
 }

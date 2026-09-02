@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"ecs/internal/model"
-	"ecs/internal/probe"
 	reporter "ecs/internal/report"
 	"ecs/internal/score"
 )
@@ -414,7 +413,7 @@ func TestLeaderboardRegressionOutlierRepresentationsMatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reportSample, err := score.OutlierSampleFromReport(probe.BuiltinCatalog(), report)
+		reportSample, err := score.OutlierSampleFromReport(newApplication().modules, report)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +499,7 @@ func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
 			if err := validateBaselineReport(report); err != nil {
 				t.Fatalf("projection failure fixture is not baseline-valid: %v", err)
 			}
-			if _, err := score.OutlierSampleFromReport(probe.BuiltinCatalog(), report); err == nil {
+			if _, err := score.OutlierSampleFromReport(newApplication().modules, report); err == nil {
 				t.Fatal("projection failure fixture unexpectedly produced an outlier sample")
 			}
 			input := filepath.Join(root, "projection-failure.json")

@@ -10,13 +10,13 @@ import (
 	"ecs/internal/i18n"
 )
 
-func catalogTestHandler(context.Context, []string, io.Writer, io.Writer) int {
+func catalogTestHandler(application, context.Context, []string, io.Writer, io.Writer) int {
 	return 0
 }
 
-func TestDefaultCommandCatalogInvariantsAndOrder(t *testing.T) {
+func TestApplicationCommandCatalogInvariantsAndOrder(t *testing.T) {
 	wantNames := []string{"run", "plan", "list", "render", "compare", "config", "doctor", "leaderboard", "submit", "version", "help"}
-	catalog := defaultCommandCatalog()
+	catalog := newApplication().commands
 	definitions := catalog.definitionsInOrder()
 	if got := len(definitions); got != len(wantNames) {
 		t.Fatalf("catalog definition count = %d, want %d", got, len(wantNames))
@@ -41,7 +41,7 @@ func TestDefaultCommandCatalogInvariantsAndOrder(t *testing.T) {
 		}
 	}
 
-	second := defaultCommandCatalog().definitionsInOrder()
+	second := newApplication().commands.definitionsInOrder()
 	for index := range definitions {
 		if definitions[index].Name != second[index].Name || definitions[index].UsageKey != second[index].UsageKey || definitions[index].DescriptionKey != second[index].DescriptionKey {
 			t.Fatalf("catalog order/metadata changed between constructions: first=%+v second=%+v", definitions, second)
@@ -110,7 +110,7 @@ func TestCommandCatalogCopiesDefinitionsAndLookupIsImmutable(t *testing.T) {
 }
 
 func TestCommandCatalogUnknownLookupHasNoDefaultHandler(t *testing.T) {
-	catalog := defaultCommandCatalog()
+	catalog := newApplication().commands
 	definition, ok := catalog.lookup("does-not-exist")
 	if ok {
 		t.Fatalf("unknown lookup reported a match: %+v", definition)
@@ -128,7 +128,7 @@ func TestHelpListsEachCatalogCommandExactlyOnce(t *testing.T) {
 		t.Run(string(language), func(t *testing.T) {
 			i18n.Set(language)
 			var output bytes.Buffer
-			printHelp(&output)
+			printHelp(newApplication().commands, &output)
 			text := output.String()
 			sectionStart := strings.Index(text, i18n.T("cli.usage")+":\n")
 			if sectionStart < 0 {
@@ -144,7 +144,7 @@ func TestHelpListsEachCatalogCommandExactlyOnce(t *testing.T) {
 				t.Fatalf("help is missing the examples boundary: %q", text)
 			}
 			section := text[sectionStart : sectionStart+sectionEnd+1]
-			for _, definition := range defaultCommandCatalog().definitionsInOrder() {
+			for _, definition := range newApplication().commands.definitionsInOrder() {
 				line := "  " + commandHelpText(definition) + "\n"
 				if count := strings.Count(section, line); count != 1 {
 					t.Errorf("catalog command %q appears %d times in help command list, want exactly once", definition.Name, count)
@@ -199,7 +199,7 @@ func TestHelpPreservesExistingCommandLines(t *testing.T) {
 		t.Run(string(test.language), func(t *testing.T) {
 			i18n.Set(test.language)
 			var output bytes.Buffer
-			printHelp(&output)
+			printHelp(newApplication().commands, &output)
 			for _, line := range test.lines {
 				if count := strings.Count(output.String(), "  "+line+"\n"); count != 1 {
 					t.Errorf("existing help line %q appears %d times, want exactly once; output=%q", line, count, output.String())

@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 	"ecs/internal/textwidth"
 )
 
-func doctorCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func doctorCommand(app application, ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		fmt.Fprintf(stderr, "%s %s\n", i18n.T("help.extraArgs"), strings.Join(args, " "))
 		return 1
@@ -29,7 +29,7 @@ func doctorCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 2
 	}
 	fmt.Fprintln(stdout, i18n.T("doctor.header"))
-	tools := doctorTools()
+	tools := doctorTools(app.modules)
 	missingRequired := false
 	requiredFailure := false
 	for _, tool := range tools {
@@ -144,8 +144,8 @@ func lookupNextTrace() (string, error) {
 	return path, nil
 }
 
-func doctorTools() []doctorTool {
-	catalog := []doctorTool{
+func doctorTools(moduleCatalog module.Catalog) []doctorTool {
+	toolCatalog := []doctorTool{
 		{name: "sysbench", required: true, purpose: "doctor.purpose.sysbench", args: []string{"--version"}},
 		{name: "zstd", required: true, purpose: "doctor.purpose.zstd", check: identifyPinnedZstd},
 		{name: "npb-ep", required: true, purpose: "doctor.purpose.npbEP", check: identifyNPBBinary("EP")},
@@ -158,11 +158,11 @@ func doctorTools() []doctorTool {
 		{name: "ping", purpose: "doctor.purpose.ping", args: []string{"-V"}},
 		{name: "speedtest", purpose: "doctor.purpose.speedtest", args: []string{"--version"}},
 	}
-	meta := make(map[string]doctorTool, len(catalog))
-	for _, item := range catalog {
+	meta := make(map[string]doctorTool, len(toolCatalog))
+	for _, item := range toolCatalog {
 		meta[item.name] = item
 	}
-	descriptors := config.ModuleDescriptors(probe.BuiltinCatalog())
+	descriptors := moduleCatalog.Descriptors()
 	known := make(map[string]bool)
 	toolOrder := make([]string, 0)
 	for _, descriptor := range descriptors {
@@ -179,13 +179,13 @@ func doctorTools() []doctorTool {
 			meta[name] = doctorTool{name: name, purpose: name, args: []string{"--version"}}
 		}
 	}
-	for _, item := range catalog {
+	for _, item := range toolCatalog {
 		if item.required {
 			known[item.name] = true
 		}
 	}
 	tools := make([]doctorTool, 0, len(known))
-	for _, item := range catalog {
+	for _, item := range toolCatalog {
 		if !known[item.name] {
 			continue
 		}

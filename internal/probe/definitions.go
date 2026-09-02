@@ -92,20 +92,11 @@ func BuiltinDefinitions() []Definition {
 	return copyDefinitions(definitions)
 }
 
-// BuiltinCatalog exposes the validated descriptor metadata derived from the
-// canonical definitions.  It is an explicit bridge for packages that own
-// configuration/reporting APIs; it does not retain mutable global state.
-func BuiltinCatalog() module.Catalog {
-	definitions := BuiltinDefinitions()
-	descriptors := make([]module.Descriptor, len(definitions))
-	for index, definition := range definitions {
-		descriptors[index] = definition.Descriptor
-	}
-	catalog, err := module.NewCatalog(descriptors)
-	if err != nil {
-		panic(fmt.Sprintf("invalid built-in module catalog: %v", err))
-	}
-	return catalog
+// CatalogFromDefinitions validates a definition set and derives its immutable
+// descriptor catalog. The caller supplies the definitions explicitly so this
+// boundary cannot silently fall back to built-in module state.
+func CatalogFromDefinitions(definitions []Definition) (module.Catalog, error) {
+	return validateDefinitions(definitions)
 }
 
 func validateDefinitions(definitions []Definition) (module.Catalog, error) {

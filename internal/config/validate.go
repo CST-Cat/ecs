@@ -31,7 +31,7 @@ func ValidateFormats(formats []string) error {
 
 func Validate(catalog module.Catalog, runtime Runtime) error {
 	knownModules := make(map[string]bool)
-	for _, id := range ModuleIDs(catalog) {
+	for _, id := range catalog.IDs() {
 		knownModules[id] = true
 	}
 	if len(runtime.Modules) == 0 {

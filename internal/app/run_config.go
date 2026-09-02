@@ -11,12 +11,10 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/module"
-	"ecs/internal/probe"
 )
 
 type resolvedRunConfig struct {
 	Runtime       config.Runtime
-	Catalog       module.Catalog
 	Name          string
 	Color         string
 	ScoreBaseline string
@@ -55,8 +53,7 @@ func (f *runLanguageFlag) Set(value string) error {
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
-func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error) {
-	catalog := probe.BuiltinCatalog()
+func resolveRunConfig(catalog module.Catalog, args []string, stderr io.Writer) (resolvedRunConfig, error) {
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	parseOutput := &bytes.Buffer{}
 	flags.SetOutput(parseOutput)
@@ -162,7 +159,7 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 		if explicit["no-color"] {
 			cfg.NoColor = *noColorFlag
 		}
-		return resolvedRunConfig{Runtime: cfg, Catalog: catalog, Color: *colorFlag, Version: true}, nil
+		return resolvedRunConfig{Runtime: cfg, Color: *colorFlag, Version: true}, nil
 	}
 	if flags.NArg() != 0 {
 		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
@@ -307,7 +304,6 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 
 	return resolvedRunConfig{
 		Runtime:       cfg,
-		Catalog:       catalog,
 		Name:          *nameFlag,
 		Color:         *colorFlag,
 		ScoreBaseline: *baselineFlag,
@@ -338,6 +334,6 @@ func printRunHelp(catalog module.Catalog, writer io.Writer, flags *flag.FlagSet)
 	}()
 	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
-	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleIDs(catalog), ","))
+	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(catalog.IDs(), ","))
 	fmt.Fprintln(writer, i18n.T("cli.sources")+": "+strings.Join(config.IPQualitySourceIDs(), ","))
 }
