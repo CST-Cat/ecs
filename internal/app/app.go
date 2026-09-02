@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 
-	"ecs/internal/buildinfo"
 	"ecs/internal/i18n"
 )
 
@@ -21,36 +19,14 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	command, commandArgs := dispatchCommand(commandLine)
-	switch command {
-	case "run":
-		return runCommand(ctx, commandArgs, stdout, stderr)
-	case "plan":
-		return planCommand(ctx, commandArgs, stdout, stderr)
-	case "render":
-		return renderCommand(commandArgs, stdout, stderr)
-	case "compare":
-		return compareCommand(commandArgs, stdout, stderr)
-	case "list":
-		return listCommand(commandArgs, stdout, stderr)
-	case "config":
-		return configCommand(commandArgs, stdout, stderr)
-	case "doctor":
-		return doctorCommand(ctx, commandArgs, stdout, stderr)
-	case "leaderboard":
-		return leaderboardCommand(commandArgs, stdout, stderr)
-	case "submit":
-		return submitCommand(commandArgs, stdout, stderr)
-	case "version":
-		fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
-		return 0
-	case "help":
-		printHelp(stdout)
-		return 0
-	default:
+	catalog := defaultCommandCatalog()
+	definition, ok := catalog.lookup(command)
+	if !ok {
 		fmt.Fprintf(stderr, "%s %q\n\n", i18n.T("cli.unknownCommand"), command)
 		printHelp(stderr)
 		return 1
 	}
+	return definition.Handler(ctx, commandArgs, stdout, stderr)
 }
 
 // dispatchCommand sees argv only after the global prefix has been removed. A
@@ -100,56 +76,4 @@ func validateExplicitLanguage(occurrences []languageFlagOccurrence) error {
 		return fmt.Errorf("invalid --lang value %q; choose zh or en", occurrence.Value)
 	}
 	return nil
-}
-
-func printHelp(writer io.Writer) {
-	if i18n.Current() == i18n.LangEN {
-		fmt.Fprintln(writer, `ecs — Ad-free VPS benchmark suite that does not upload reports by default
-
-Usage:
-  ecs [run] [options]         run tests (standard by default)
-  ecs plan [options]         print the resolved machine execution plan as JSON
-  ecs list                    show profiles and modules
-  ecs render --input FILE     re-export JSON/Markdown/HTML from JSON
-  ecs compare REPORTS...      compare 2 or more JSON reports safely
-  ecs config example          print a sample configuration
-  ecs doctor                  check standard benchmark tools
-  ecs leaderboard REPORTS...  aggregate a leaderboard reference
-  ecs submit --input FILE     export a minimized public submission
-  ecs version                 show version
-
-Examples:
-  ecs
-  ecs --profile standard --exposure local
-  ecs --profile full --exposure public
-  ecs --profile full --skip media --output ./reports
-  ecs --only system,cpu,memory,disk --format json,html
-  ecs compare old.json new.json --format json,md,html --output ./compare
-
-Run ecs run --help for all test options or ecs compare --help for comparison options.`)
-		return
-	}
-	fmt.Fprintln(writer, `ecs — 无广告、默认不上传报告的 VPS 综合测试工具
-
-用法:
-  ecs [run] [选项]            运行测试（默认 standard）
-  ecs plan [选项]            以 JSON 输出解析后的机器执行计划
-  ecs list                    查看配置档与模块
-  ecs render --input FILE     从 JSON 重新导出 JSON/Markdown/HTML 三种格式
-  ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告
-  ecs config example          输出配置文件示例
-  ecs doctor                  检查标准基准工具
-  ecs leaderboard REPORTS...  从多份报告聚合排行榜参考
-  ecs submit --input FILE     导出可公开入库的瘦身提交
-  ecs version                 显示版本
-
-常用示例:
-  ecs
-  ecs --profile standard --exposure local
-  ecs --profile full --exposure public
-  ecs --profile full --skip media --output ./reports
-  ecs --only system,cpu,memory,disk --format json,html
-  ecs compare old.json new.json --format json,md,html --output ./compare
-
-运行 ecs run --help 查看测试参数，或运行 ecs compare --help 查看对比参数。`)
 }
