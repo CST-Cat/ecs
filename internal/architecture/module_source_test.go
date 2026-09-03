@@ -599,6 +599,7 @@ func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 		canonicalModuleIDs[id] = struct{}{}
 	}
 	globalFacts := packageGlobalFacts(sources)
+	functionFacts := packageFunctionFacts(sources)
 	typeSpecs := packageTypeSpecs(sources)
 	for _, source := range sources {
 		// Mutation and registration APIs are forbidden wherever they appear,
@@ -608,7 +609,7 @@ func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 		if name, ok := catalogMutationAPIWithTypes(source, typeSpecs[source.packagePath]); ok {
 			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
 		}
-		if hasRuntimeRegistrationInitWithFacts(source, globalFacts[source.packagePath], canonicalModuleIDs) {
+		if hasRuntimeRegistrationInitWithFacts(source, globalFacts[source.packagePath], typeSpecs[source.packagePath], functionFacts[source.packagePath], canonicalModuleIDs) {
 			t.Fatalf("%s has runtime init registration in %s", source.packagePath, source.path)
 		}
 	}
@@ -679,6 +680,88 @@ func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
 			moduleIDs: []string{"cpu"},
 			want:      true,
 		},
+		{
+			name:      "neutral open registry with Definition",
+			source:    "package probe\nvar state = map[string]any{}\nfunc init() { state[\"cpu\"] = Definition{} }\n",
+			moduleIDs: []string{"cpu"},
+			want:      true,
+		},
+		{
+			name: "neutral open registry with typed constructor",
+			source: `package probe
+var state = map[string]any{}
+func newArchitectureFixtureProbe() Probe { return nil }
+func init() { state["cpu"] = newArchitectureFixtureProbe() }
+`,
+			moduleIDs: []string{"cpu"},
+			want:      true,
+		},
+		{
+			name:   "neutral open registry append Definition",
+			source: "package probe\nvar state = []any{}\nfunc init() { state = append(state, Definition{}) }\n",
+			want:   true,
+		},
+		{
+			name: "neutral open registry append typed constructor",
+			source: `package probe
+var state = []any{}
+func newArchitectureFixtureProbe() Probe { return nil }
+func init() { _ = append(state, newArchitectureFixtureProbe()) }
+`,
+			want: true,
+		},
+		{
+			name:   "neutral strongly typed registry",
+			source: "package probe\nvar state = map[string]Probe{}\ntype cpuProbe struct{}\nfunc init() { state[\"cpu\"] = cpuProbe{} }\n",
+			want:   true,
+		},
+		{
+			name: "neutral aliased strongly typed registry",
+			source: `package probe
+type probeAlias = Probe
+var state = map[string]probeAlias{}
+func init() { state["cpu"] = nil }
+`,
+			want: true,
+		},
+		{
+			name: "neutral alias constructor across files",
+			source: `package probe
+var state = map[string]any{}
+type probeAlias = *Probe
+func newArchitectureFixtureProbe() probeAlias { return nil }
+func init() { state["cpu"] = newArchitectureFixtureProbe() }
+`,
+			moduleIDs: []string{"cpu"},
+			want:      true,
+		},
+		{
+			name:   "ordinary open registry append",
+			source: "package config\nvar values = []any{}\nfunc init() { values = append(values, 1) }\n",
+			want:   false,
+		},
+		{
+			name:   "ordinary open registry standalone append",
+			source: "package config\nvar values = []any{}\nfunc init() { _ = append(values, 1) }\n",
+			want:   false,
+		},
+		{
+			name: "ordinary constructor call",
+			source: `package config
+type report struct{}
+func newReport() report { return report{} }
+func init() { _ = newReport() }
+`,
+			want: false,
+		},
+		{
+			name: "ordinary Probe execution call",
+			source: `package probe
+func executeProbe(value Probe) {}
+func init() { executeProbe(nil) }
+`,
+			want: false,
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -691,7 +774,9 @@ func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
 				moduleIDs[id] = struct{}{}
 			}
 			facts := packageGlobalFacts([]productionSource{source})[source.packagePath]
-			if got := hasRuntimeRegistrationInitWithFacts(source, facts, moduleIDs); got != test.want {
+			typeSpecs := packageTypeSpecs([]productionSource{source})[source.packagePath]
+			functionFacts := packageFunctionFacts([]productionSource{source})[source.packagePath]
+			if got := hasRuntimeRegistrationInitWithFacts(source, facts, typeSpecs, functionFacts, moduleIDs); got != test.want {
 				t.Fatalf("runtime init detector = %t, want %t", got, test.want)
 			}
 		})
@@ -699,8 +784,26 @@ func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
 
 	global := parseDetectorSnippet(t, "package probe\nvar state = map[string]any{}\n", probeImportPath)
 	initializer := parseDetectorSnippet(t, "package probe\ntype cpuProbe struct{}\nfunc init() { state[\"cpu\"] = cpuProbe{} }\n", probeImportPath)
-	facts := packageGlobalFacts([]productionSource{global, initializer})[probeImportPath]
-	if !hasRuntimeRegistrationInitWithFacts(initializer, facts, map[string]struct{}{"cpu": {}}) {
+	sources := []productionSource{global, initializer}
+	facts := packageGlobalFacts(sources)[probeImportPath]
+	typeSpecs := packageTypeSpecs(sources)[probeImportPath]
+	functionFacts := packageFunctionFacts(sources)[probeImportPath]
+	if !hasRuntimeRegistrationInitWithFacts(initializer, facts, typeSpecs, functionFacts, map[string]struct{}{"cpu": {}}) {
 		t.Fatal("cross-file neutral registry init was not detected")
+	}
+
+	constructor := parseDetectorSnippet(t, `package probe
+type probeAlias = *Probe
+func newArchitectureFixtureProbe() probeAlias { return nil }
+`, probeImportPath)
+	constructorInitializer := parseDetectorSnippet(t, `package probe
+func init() { state["cpu"] = newArchitectureFixtureProbe() }
+`, probeImportPath)
+	sources = []productionSource{global, constructor, constructorInitializer}
+	facts = packageGlobalFacts(sources)[probeImportPath]
+	typeSpecs = packageTypeSpecs(sources)[probeImportPath]
+	functionFacts = packageFunctionFacts(sources)[probeImportPath]
+	if !hasRuntimeRegistrationInitWithFacts(constructorInitializer, facts, typeSpecs, functionFacts, map[string]struct{}{"cpu": {}}) {
+		t.Fatal("cross-file typed constructor registry init was not detected")
 	}
 }

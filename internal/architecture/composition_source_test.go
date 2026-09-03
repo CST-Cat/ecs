@@ -31,10 +31,10 @@ func catalogMutationAPIWithTypes(source productionSource, typeSpecs map[string]*
 		switch declaration := declaration.(type) {
 		case *ast.FuncDecl:
 			if receiver := receiverBaseName(declaration.Recv); receiver != "" {
-				if (isCatalogReceiver(receiver) || receiverHasCompositionContextFrom(declaration, typeSpecs) || functionParameterTypesHaveMutationContext(declaration)) && hasMutationVerbPrefix(declaration.Name.Name) {
+				if (isCatalogReceiver(receiver) || receiverHasCompositionContextFrom(declaration, typeSpecs) || functionParameterTypesHaveMutationContext(declaration, typeSpecs)) && hasMutationVerbPrefix(declaration.Name.Name) {
 					return declaration.Name.Name, true
 				}
-			} else if isCatalogMutationName(declaration.Name.Name) || hasCatalogMutationContext(declaration) {
+			} else if isCatalogMutationName(declaration.Name.Name) || hasCatalogMutationContextWithTypes(declaration, typeSpecs) {
 				return declaration.Name.Name, true
 			}
 		case *ast.GenDecl:
@@ -44,7 +44,7 @@ func catalogMutationAPIWithTypes(source productionSource, typeSpecs map[string]*
 					continue
 				}
 				for _, name := range values.Names {
-					if isCatalogMutationName(name.Name) || hasCatalogMutationContextForValue(name.Name, values) {
+					if isCatalogMutationName(name.Name) || hasCatalogMutationContextForValue(name.Name, values, typeSpecs) {
 						return name.Name, true
 					}
 				}
@@ -86,12 +86,12 @@ func hasMutationVerbPrefix(name string) bool {
 	return false
 }
 
-func hasCatalogMutationContext(function *ast.FuncDecl) bool {
+func hasCatalogMutationContextWithTypes(function *ast.FuncDecl, typeSpecs map[string]*ast.TypeSpec) bool {
 	if !isBareMutationVerb(function.Name.Name) || function.Type == nil || function.Type.Params == nil {
 		return false
 	}
 	for _, field := range function.Type.Params.List {
-		if expressionHasMutationContext(field.Type) {
+		if expressionHasMutationContext(field.Type) || expressionHasCompositionContract(field.Type, typeSpecs, make(map[string]struct{})) {
 			return true
 		}
 		for _, name := range field.Names {
@@ -103,26 +103,26 @@ func hasCatalogMutationContext(function *ast.FuncDecl) bool {
 	return false
 }
 
-func functionParameterTypesHaveMutationContext(function *ast.FuncDecl) bool {
+func functionParameterTypesHaveMutationContext(function *ast.FuncDecl, typeSpecs map[string]*ast.TypeSpec) bool {
 	if function == nil || function.Type == nil || function.Type.Params == nil {
 		return false
 	}
 	for _, field := range function.Type.Params.List {
-		if expressionHasMutationContext(field.Type) {
+		if expressionHasMutationContext(field.Type) || expressionHasCompositionContract(field.Type, typeSpecs, make(map[string]struct{})) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasCatalogMutationContextForValue(name string, values *ast.ValueSpec) bool {
+func hasCatalogMutationContextForValue(name string, values *ast.ValueSpec, typeSpecs map[string]*ast.TypeSpec) bool {
 	if !isBareMutationVerb(name) {
 		return false
 	}
 	for _, value := range values.Values {
 		if function, ok := value.(*ast.FuncLit); ok && function.Type != nil && function.Type.Params != nil {
 			for _, field := range function.Type.Params.List {
-				if expressionHasMutationContext(field.Type) {
+				if expressionHasMutationContext(field.Type) || expressionHasCompositionContract(field.Type, typeSpecs, make(map[string]struct{})) {
 					return true
 				}
 				for _, name := range field.Names {
@@ -165,7 +165,7 @@ func expressionHasMutationContext(expression ast.Expr) bool {
 	return found
 }
 
-func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
+func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts map[string]packageGlobalFact, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact, moduleIDs map[string]struct{}) bool {
 	for _, declaration := range source.file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
 		if !ok || function.Name.Name != "init" || function.Body == nil {
@@ -178,7 +178,7 @@ func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts ma
 			}
 			switch value := node.(type) {
 			case *ast.CallExpr:
-				if runtimeRegistrationCall(value) || appendTouchesCompositionState(value, globalFacts, moduleIDs) {
+				if runtimeRegistrationCall(value) || appendTouchesCompositionState(value, globalFacts, typeSpecs, functionFacts) {
 					found = true
 				}
 			case *ast.AssignStmt:
@@ -187,13 +187,13 @@ func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts ma
 					if index < len(value.Rhs) {
 						rhs = value.Rhs[index]
 					}
-					if assignmentTouchesCompositionState(expression, rhs, globalFacts, moduleIDs) {
+					if assignmentTouchesCompositionState(expression, rhs, globalFacts, typeSpecs, functionFacts, moduleIDs) {
 						found = true
 						break
 					}
 				}
 			case *ast.IncDecStmt:
-				if assignmentTouchesCompositionState(value.X, nil, globalFacts, moduleIDs) {
+				if assignmentTouchesCompositionState(value.X, nil, globalFacts, typeSpecs, functionFacts, moduleIDs) {
 					found = true
 				}
 			}
@@ -210,6 +210,10 @@ type packageGlobalFact struct {
 	name        string
 	typeExpr    ast.Expr
 	initializer ast.Expr
+}
+
+type packageFunctionFact struct {
+	resultTypes []ast.Expr
 }
 
 // packageGlobalFacts joins package-level declarations across files. Runtime
@@ -240,6 +244,37 @@ func packageGlobalFacts(sources []productionSource) map[string]map[string]packag
 					}
 					facts[name.Name] = packageGlobalFact{name: name.Name, typeExpr: values.Type, initializer: initializer}
 				}
+			}
+		}
+	}
+	return result
+}
+
+// packageFunctionFacts joins function result signatures across files. A
+// registry can hide construction behind a neutrally named helper, so the
+// runtime-init detector needs the package's typed return facts rather than
+// relying on constructor naming conventions.
+func packageFunctionFacts(sources []productionSource) map[string]map[string]packageFunctionFact {
+	result := make(map[string]map[string]packageFunctionFact)
+	for _, source := range sources {
+		facts := result[source.packagePath]
+		if facts == nil {
+			facts = make(map[string]packageFunctionFact)
+			result[source.packagePath] = facts
+		}
+		for _, declaration := range source.file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Name == nil || function.Type == nil || function.Type.Results == nil {
+				continue
+			}
+			var resultTypes []ast.Expr
+			for _, field := range function.Type.Results.List {
+				if field != nil && field.Type != nil {
+					resultTypes = append(resultTypes, field.Type)
+				}
+			}
+			if len(resultTypes) > 0 {
+				facts[function.Name.Name] = packageFunctionFact{resultTypes: resultTypes}
 			}
 		}
 	}
@@ -278,7 +313,7 @@ func runtimeRegistrationCall(call *ast.CallExpr) bool {
 	return false
 }
 
-func appendTouchesCompositionState(call *ast.CallExpr, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
+func appendTouchesCompositionState(call *ast.CallExpr, globalFacts map[string]packageGlobalFact, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact) bool {
 	if call == nil || len(call.Args) == 0 {
 		return false
 	}
@@ -286,7 +321,65 @@ func appendTouchesCompositionState(call *ast.CallExpr, globalFacts map[string]pa
 	if !ok || function.Name != "append" {
 		return false
 	}
-	return assignmentTouchesCompositionState(call.Args[0], nil, globalFacts, moduleIDs)
+	fact, _, ok := globalFactForTarget(call.Args[0], globalFacts)
+	if !ok || !globalOpenRegistryShape(fact, typeSpecs) {
+		return false
+	}
+	if globalFactHasCompositionContract(fact, typeSpecs) {
+		return true
+	}
+	for _, value := range call.Args[1:] {
+		if expressionIsCompositionValue(value, typeSpecs, functionFacts) {
+			// A canonical key is required for an open map assignment, but an
+			// append destination has already established the collection shape;
+			// its element is the registration evidence.
+			return true
+		}
+	}
+	return false
+}
+
+func unwrapAppendCall(expression ast.Expr) *ast.CallExpr {
+	for {
+		switch value := expression.(type) {
+		case *ast.ParenExpr:
+			expression = value.X
+		case *ast.CallExpr:
+			if function, ok := value.Fun.(*ast.Ident); ok && function.Name == "append" {
+				return value
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+}
+
+func globalFactForTarget(expression ast.Expr, globalFacts map[string]packageGlobalFact) (packageGlobalFact, ast.Expr, bool) {
+	var indexKey ast.Expr
+	for {
+		switch value := expression.(type) {
+		case *ast.IndexExpr:
+			indexKey = value.Index
+			expression = value.X
+		case *ast.IndexListExpr:
+			if len(value.Indices) > 0 {
+				indexKey = value.Indices[0]
+			}
+			expression = value.X
+		case *ast.SliceExpr:
+			expression = value.X
+		case *ast.StarExpr:
+			expression = value.X
+		case *ast.ParenExpr:
+			expression = value.X
+		case *ast.Ident:
+			fact, ok := globalFacts[value.Name]
+			return fact, indexKey, ok
+		default:
+			return packageGlobalFact{}, nil, false
+		}
+	}
 }
 
 func expressionHasCatalogStateContext(expression ast.Expr) bool {
@@ -305,9 +398,12 @@ func expressionHasCatalogStateContext(expression ast.Expr) bool {
 	return found
 }
 
-func assignmentTouchesCompositionState(expression ast.Expr, rhs ast.Expr, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
+func assignmentTouchesCompositionState(expression ast.Expr, rhs ast.Expr, globalFacts map[string]packageGlobalFact, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact, moduleIDs map[string]struct{}) bool {
 	if expression == nil {
 		return false
+	}
+	if appendCall := unwrapAppendCall(rhs); appendCall != nil && appendTouchesCompositionState(appendCall, globalFacts, typeSpecs, functionFacts) {
+		return true
 	}
 	root := expression
 	var indexKey ast.Expr
@@ -335,24 +431,30 @@ func assignmentTouchesCompositionState(expression ast.Expr, rhs ast.Expr, global
 			if !global {
 				return false
 			}
-			if isCatalogStateName(value.Name) || expressionHasCompositionType(fact.typeExpr) {
+			if isCatalogStateName(value.Name) || expressionHasCompositionType(fact.typeExpr) || expressionHasCompositionContract(fact.typeExpr, typeSpecs, make(map[string]struct{})) {
 				return true
 			}
-			return globalOpenRegistryMutation(fact, indexKey, rhs, moduleIDs)
+			return globalOpenRegistryMutation(fact, indexKey, rhs, typeSpecs, functionFacts, moduleIDs)
 		default:
 			return expressionHasMutationContext(expression)
 		}
 	}
 }
 
-func globalOpenRegistryMutation(fact packageGlobalFact, indexKey, rhs ast.Expr, moduleIDs map[string]struct{}) bool {
-	if !globalOpenRegistryShape(fact) || len(moduleIDs) == 0 || !isCanonicalString(indexKey, moduleIDs) {
+func globalOpenRegistryMutation(fact packageGlobalFact, indexKey, rhs ast.Expr, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact, moduleIDs map[string]struct{}) bool {
+	if !globalOpenRegistryShape(fact, typeSpecs) {
 		return false
 	}
-	return expressionIsConcreteProbeValue(rhs)
+	if globalFactHasCompositionContract(fact, typeSpecs) {
+		return true
+	}
+	if len(moduleIDs) == 0 || !isCanonicalString(indexKey, moduleIDs) {
+		return false
+	}
+	return expressionIsCompositionValue(rhs, typeSpecs, functionFacts)
 }
 
-func globalOpenRegistryShape(fact packageGlobalFact) bool {
+func globalOpenRegistryShape(fact packageGlobalFact, typeSpecs map[string]*ast.TypeSpec) bool {
 	expression := fact.typeExpr
 	if expression == nil {
 		expression = fact.initializer
@@ -360,7 +462,12 @@ func globalOpenRegistryShape(fact packageGlobalFact) bool {
 	if !expressionIsMutable(expression) {
 		return false
 	}
-	return expressionContainsAnyOrEmptyInterface(expression)
+	return expressionContainsAnyOrEmptyInterface(expression) || expressionHasCompositionContract(expression, typeSpecs, make(map[string]struct{}))
+}
+
+func globalFactHasCompositionContract(fact packageGlobalFact, typeSpecs map[string]*ast.TypeSpec) bool {
+	return expressionHasCompositionContract(fact.typeExpr, typeSpecs, make(map[string]struct{})) ||
+		expressionHasCompositionContract(fact.initializer, typeSpecs, make(map[string]struct{}))
 }
 
 func expressionContainsAnyOrEmptyInterface(expression ast.Expr) bool {
@@ -407,7 +514,7 @@ func isCanonicalString(expression ast.Expr, canonical map[string]struct{}) bool 
 	}
 }
 
-func expressionIsConcreteProbeValue(expression ast.Expr) bool {
+func expressionIsCompositionValue(expression ast.Expr, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact) bool {
 	for {
 		switch value := expression.(type) {
 		case *ast.ParenExpr:
@@ -416,19 +523,47 @@ func expressionIsConcreteProbeValue(expression ast.Expr) bool {
 		case *ast.StarExpr:
 			expression = value.X
 			continue
-		case *ast.CompositeLit:
-			name := strings.ToLower(expressionTypeName(value.Type))
-			return strings.HasSuffix(name, "probe")
-		case *ast.CallExpr:
-			function, ok := value.Fun.(*ast.Ident)
-			if !ok || function.Name != "new" || len(value.Args) != 1 {
+		case *ast.UnaryExpr:
+			if value.Op != token.AND {
 				return false
 			}
-			name := strings.ToLower(expressionTypeName(value.Args[0]))
-			return strings.HasSuffix(name, "probe")
+			expression = value.X
+			continue
+		case *ast.CompositeLit:
+			return expressionHasCompositionContract(value.Type, typeSpecs, make(map[string]struct{}))
+		case *ast.CallExpr:
+			if functionName := calledFunctionName(value.Fun); functionName != "" {
+				if functionName == "new" && len(value.Args) == 1 {
+					return expressionHasCompositionContract(value.Args[0], typeSpecs, make(map[string]struct{}))
+				}
+				if fact, ok := functionFacts[functionName]; ok {
+					for _, resultType := range fact.resultTypes {
+						if expressionHasCompositionContract(resultType, typeSpecs, make(map[string]struct{})) {
+							return true
+						}
+					}
+				}
+			}
+			// A conversion to a tracked contract is also composition evidence.
+			return expressionHasCompositionContract(value.Fun, typeSpecs, make(map[string]struct{}))
 		default:
 			return false
 		}
+	}
+}
+
+func calledFunctionName(expression ast.Expr) string {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name
+	case *ast.IndexExpr:
+		return calledFunctionName(value.X)
+	case *ast.IndexListExpr:
+		return calledFunctionName(value.X)
+	case *ast.ParenExpr:
+		return calledFunctionName(value.X)
+	default:
+		return ""
 	}
 }
 
@@ -517,7 +652,7 @@ func sourceTypeHasCompositionContextFrom(typeSpecs map[string]*ast.TypeSpec, nam
 	if typeSpec == nil {
 		return false
 	}
-	if typeSpecHasCompositionContext(typeSpec) {
+	if typeSpecHasCompositionContextWithTypes(typeSpec, typeSpecs, seen) {
 		return true
 	}
 	return sourceTypeHasCompositionAlias(typeSpecs, typeSpec.Type, seen)
@@ -536,7 +671,7 @@ func sourceTypeHasCompositionAlias(typeSpecs map[string]*ast.TypeSpec, expressio
 	}
 }
 
-func typeSpecHasCompositionContext(typeSpec *ast.TypeSpec) bool {
+func typeSpecHasCompositionContextWithTypes(typeSpec *ast.TypeSpec, typeSpecs map[string]*ast.TypeSpec, seen map[string]struct{}) bool {
 	if typeSpec == nil {
 		return false
 	}
@@ -544,15 +679,21 @@ func typeSpecHasCompositionContext(typeSpec *ast.TypeSpec) bool {
 		return true
 	}
 	structType, ok := typeSpec.Type.(*ast.StructType)
-	return ok && structHasCompositionField(structType)
+	if ok && structHasCompositionFieldWithTypes(structType, typeSpecs, seen) {
+		return true
+	}
+	if typeSpecs == nil || typeSpec.Type == nil {
+		return false
+	}
+	return expressionHasCompositionContract(typeSpec.Type, typeSpecs, seen)
 }
 
-func structHasCompositionField(structType *ast.StructType) bool {
+func structHasCompositionFieldWithTypes(structType *ast.StructType, typeSpecs map[string]*ast.TypeSpec, seen map[string]struct{}) bool {
 	if structType == nil || structType.Fields == nil {
 		return false
 	}
 	for _, field := range structType.Fields.List {
-		if expressionHasCompositionType(field.Type) {
+		if expressionHasCompositionType(field.Type) || expressionHasCompositionContract(field.Type, typeSpecs, seen) {
 			return true
 		}
 		for _, name := range field.Names {
@@ -660,6 +801,64 @@ func functionReturnsCompositionType(function *ast.FuncDecl) bool {
 	return false
 }
 
+func expressionHasCompositionContract(expression ast.Expr, typeSpecs map[string]*ast.TypeSpec, seen map[string]struct{}) bool {
+	if expression == nil {
+		return false
+	}
+	if seen == nil {
+		seen = make(map[string]struct{})
+	}
+	switch value := expression.(type) {
+	case *ast.Ident:
+		name := strings.ToLower(value.Name)
+		if isCompositionContractName(name) {
+			return true
+		}
+		if typeSpecs == nil {
+			return false
+		}
+		if _, alreadySeen := seen[value.Name]; alreadySeen {
+			return false
+		}
+		typeSpec := typeSpecs[value.Name]
+		if typeSpec == nil {
+			return false
+		}
+		seen[value.Name] = struct{}{}
+		return typeSpecHasCompositionContextWithTypes(typeSpec, typeSpecs, seen)
+	case *ast.SelectorExpr:
+		return isCompositionContractName(value.Sel.Name)
+	case *ast.ParenExpr:
+		return expressionHasCompositionContract(value.X, typeSpecs, seen)
+	case *ast.StarExpr:
+		return expressionHasCompositionContract(value.X, typeSpecs, seen)
+	case *ast.Ellipsis:
+		return expressionHasCompositionContract(value.Elt, typeSpecs, seen)
+	case *ast.ArrayType:
+		return expressionHasCompositionContract(value.Elt, typeSpecs, seen)
+	case *ast.MapType:
+		return expressionHasCompositionContract(value.Key, typeSpecs, seen) || expressionHasCompositionContract(value.Value, typeSpecs, seen)
+	case *ast.ChanType:
+		return expressionHasCompositionContract(value.Value, typeSpecs, seen)
+	case *ast.IndexExpr:
+		return expressionHasCompositionContract(value.X, typeSpecs, seen)
+	case *ast.IndexListExpr:
+		return expressionHasCompositionContract(value.X, typeSpecs, seen)
+	case *ast.CompositeLit:
+		return expressionHasCompositionContract(value.Type, typeSpecs, seen)
+	default:
+		return false
+	}
+}
+
+func isCompositionContractName(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "probe" || strings.HasSuffix(lower, "probe") ||
+		strings.Contains(lower, "definition") || strings.Contains(lower, "descriptor") ||
+		strings.Contains(lower, "catalog") || strings.Contains(lower, "commandhandler") ||
+		strings.Contains(lower, "doctortool")
+}
+
 func expressionHasCompositionType(expression ast.Expr) bool {
 	if expression == nil {
 		return false
@@ -668,7 +867,7 @@ func expressionHasCompositionType(expression ast.Expr) bool {
 	ast.Inspect(expression, func(node ast.Node) bool {
 		if ident, ok := node.(*ast.Ident); ok {
 			name := strings.ToLower(ident.Name)
-			if strings.Contains(name, "definition") || strings.Contains(name, "descriptor") || strings.Contains(name, "catalog") || strings.Contains(name, "commandhandler") || strings.Contains(name, "doctortool") {
+			if name == "probe" || strings.Contains(name, "definition") || strings.Contains(name, "descriptor") || strings.Contains(name, "catalog") || strings.Contains(name, "commandhandler") || strings.Contains(name, "doctortool") {
 				found = true
 				return false
 			}
@@ -687,7 +886,7 @@ func weakCompositionPatternWithTypes(source productionSource, typeSpecs map[stri
 	if err != nil {
 		return err.Error()
 	}
-	if name, ok := packageLevelVariable(source); ok {
+	if name, ok := packageLevelVariableWithTypes(source, typeSpecs); ok {
 		return "package-level mutable variable " + name
 	}
 	if hasWeakAnyUsageWithTypes(source, typeSpecs) {
@@ -973,7 +1172,7 @@ func hasRegistryMutexUsageWithTypes(source productionSource, bindings map[string
 	return found
 }
 
-func packageLevelVariable(source productionSource) (string, bool) {
+func packageLevelVariableWithTypes(source productionSource, typeSpecs map[string]*ast.TypeSpec) (string, bool) {
 	for _, declaration := range source.file.Decls {
 		general, ok := declaration.(*ast.GenDecl)
 		if !ok || general.Tok != token.VAR {
@@ -985,7 +1184,7 @@ func packageLevelVariable(source productionSource) (string, bool) {
 				continue
 			}
 			for index, name := range values.Names {
-				if !isRegistryShapedVariable(name.Name, values, index) {
+				if !isRegistryShapedVariableWithTypes(name.Name, values, index, typeSpecs) {
 					continue
 				}
 				return name.Name, true
@@ -996,11 +1195,11 @@ func packageLevelVariable(source productionSource) (string, bool) {
 }
 
 func hasRegistryShapedPackageVariable(source productionSource) bool {
-	_, ok := packageLevelVariable(source)
+	_, ok := packageLevelVariableWithTypes(source, sourceTypeSpecs(source))
 	return ok
 }
 
-func isRegistryShapedVariable(name string, values *ast.ValueSpec, index int) bool {
+func isRegistryShapedVariableWithTypes(name string, values *ast.ValueSpec, index int, typeSpecs map[string]*ast.TypeSpec) bool {
 	lower := strings.ToLower(name)
 	for _, term := range []string{
 		"registry", "handler", "binding", "catalog", "definition", "estimate",
@@ -1020,7 +1219,7 @@ func isRegistryShapedVariable(name string, values *ast.ValueSpec, index int) boo
 	if !isMutableValueSpec(values, index) {
 		return false
 	}
-	return expressionHasCompositionType(valueSpecExpression(values, index))
+	return expressionHasCompositionType(valueSpecExpression(values, index)) || expressionHasCompositionContract(valueSpecExpression(values, index), typeSpecs, make(map[string]struct{}))
 }
 
 func isBasicLiteral(expression ast.Expr) bool {
@@ -1913,6 +2112,7 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "command catalog Remove", source: "package app\nfunc (c commandCatalog) Remove(name string) {}\n", want: true},
 		{name: "tool catalog Set", source: "package tool\nfunc (c *toolCatalog) Set(value Definition) {}\n", want: true},
 		{name: "neutral registry receiver Add", source: "package runner\ntype state struct { handlers map[string]commandHandler }\nfunc (s *state) Add(handler commandHandler) {}\n", want: true},
+		{name: "neutral Probe registry receiver Add", source: "package runner\ntype state struct { items map[string]Probe }\nfunc (s *state) Add(value Probe) {}\n", want: true},
 		{name: "neutral registry alias receiver Add", source: "package runner\ntype state struct { handlers map[string]commandHandler }\ntype stateAlias = state\nfunc (s (*stateAlias)) Add(handler commandHandler) {}\n", want: true},
 		{name: "free module registration", source: "package app\nfunc registerModule(definition Definition) {}\n", want: true},
 		{name: "bare registration with definition", source: "package app\nfunc Register(definition Definition) {}\n", want: true},
@@ -2220,6 +2420,7 @@ func TestWeakCompositionDetectorFindsTrackedPatterns(t *testing.T) {
 		{name: "ordinary mutex local", source: "package app\nimport \"sync\"\nfunc use() { var mu sync.Mutex; _ = mu }\n", want: ""},
 		{name: "ordinary any value", source: "package app\nfunc preservePanicValue(value any) any { return value }\n", want: ""},
 		{name: "neutral registry map any field", source: "package runner\ntype state struct { handlers map[string]any }\n", want: "any type"},
+		{name: "neutral aliased Probe registry global", source: "package runner\ntype probeAlias = Probe\nvar state = map[string]probeAlias{}\n", want: "package-level mutable variable state"},
 		{name: "neutral registry factory any field", source: "package runner\ntype state struct { factory func() any }\n", want: "any type"},
 		{name: "neutral registry empty interface field", source: "package runner\ntype state struct { handlers map[string]interface{} }\n", want: "empty interface type"},
 		{name: "neutral registry factory empty interface field", source: "package runner\ntype state struct { factory func() interface{} }\n", want: "empty interface type"},
