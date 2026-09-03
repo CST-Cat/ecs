@@ -72,27 +72,35 @@ func repositoryRoot(t *testing.T) string {
 }
 
 func packageImports(directory string) ([]string, error) {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return nil, err
-	}
 	imports := make(map[string]struct{})
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
+	err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		path := filepath.Join(directory, entry.Name())
+		if entry.IsDir() {
+			if excludedProductionDirectory(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, specification := range file.Imports {
 			importPath, err := strconv.Unquote(specification.Path.Value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			imports[importPath] = struct{}{}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	result := make([]string, 0, len(imports))
 	for importPath := range imports {
@@ -100,4 +108,34 @@ func packageImports(directory string) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
+}
+
+func TestPackageImportsScansProductionDescendants(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, source string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("root.go", "package root\nimport \"example/root\"\n")
+	if err := os.WriteFile(filepath.Join(nested, "child.go"), []byte("package child\nimport (\n\t\"ecs/internal/config\"\n\t\"example/child\"\n)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "child_test.go"), []byte("package child\nimport \"example/test-only\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	imports, err := packageImports(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ecs/internal/config", "example/child", "example/root"}
+	if strings.Join(imports, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("recursive production imports = %v, want %v", imports, want)
+	}
 }

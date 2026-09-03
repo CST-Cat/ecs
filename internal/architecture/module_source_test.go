@@ -296,6 +296,68 @@ func hasDescriptorConstructor(source productionSource) (bool, error) {
 	return false, nil
 }
 
+func builtinModuleIDs(root string, sources []productionSource) ([]string, error) {
+	for _, source := range sources {
+		if !isBuiltinDefinitionSource(root, source.path) {
+			continue
+		}
+		var ids []string
+		ast.Inspect(source.file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			function, ok := call.Fun.(*ast.Ident)
+			if !ok || !strings.HasPrefix(function.Name, "moduleDescriptor") {
+				return true
+			}
+			literal, ok := call.Args[0].(*ast.BasicLit)
+			if !ok || literal.Kind != token.STRING {
+				return true
+			}
+			id, err := strconv.Unquote(literal.Value)
+			if err == nil && strings.TrimSpace(id) != "" {
+				ids = append(ids, id)
+			}
+			return true
+		})
+		if len(ids) < 2 {
+			return nil, fmt.Errorf("builtin module source yielded %d IDs", len(ids))
+		}
+		return ids, nil
+	}
+	return nil, fmt.Errorf("builtin module definitions source was not found")
+}
+
+func hasStaticModuleIDTable(file *ast.File, canonical map[string]struct{}) bool {
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok || len(literal.Elts) < 2 || !isCollectionCompositeType(literal.Type) {
+			return true
+		}
+		entriesWithIDs := 0
+		for _, element := range literal.Elts {
+			if hasCanonicalString(element, canonical) {
+				entriesWithIDs++
+			}
+		}
+		if entriesWithIDs >= 2 && entriesWithIDs == len(literal.Elts) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func isScorePackage(packagePath string) bool {
+	return packagePath == scoreImportPath || strings.HasPrefix(packagePath, scoreImportPath+"/")
+}
+
 func parseDetectorSnippet(t *testing.T, source, packagePath string) productionSource {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "snippet.go", source, parser.ParseComments)
@@ -375,6 +437,45 @@ func TestLoadAllProductionSourcesIncludesCommandPackages(t *testing.T) {
 	}
 }
 
+func TestModuleIDTableDetectorDistinguishesCatalogFacts(t *testing.T) {
+	canonical := map[string]struct{}{"system": {}, "network": {}, "bgp": {}, "cpu": {}}
+	cases := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name: "replicated ordered module list",
+			source: `package config
+var moduleIDs = []string{"system", "network", "bgp"}
+	`,
+			want: true,
+		},
+		{
+			name: "single incidental module ID",
+			source: `package config
+var moduleIDs = []string{"system"}
+	`,
+			want: false,
+		},
+		{
+			name: "unrelated domain list",
+			source: `package config
+var regions = []string{"systematic", "networking", "bgp-like"}
+	`,
+			want: false,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			source := parseDetectorSnippet(t, test.source, configImportPath)
+			if got := hasStaticModuleIDTable(source.file, canonical); got != test.want {
+				t.Fatalf("module ID table detector = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestProductionModuleSourceHasSingleDefinitionOwner(t *testing.T) {
 	root := repositoryRoot(t)
 	sources := loadAllProductionSources(t, root)
@@ -431,6 +532,33 @@ func TestProductionModuleSourceHasSingleDefinitionOwner(t *testing.T) {
 	}
 }
 
+func TestProductionSourcesHaveNoReplicatedModuleIDTables(t *testing.T) {
+	root := repositoryRoot(t)
+	sources := loadAllProductionSources(t, root)
+	ids, err := builtinModuleIDs(root, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, exists := canonical[id]; exists {
+			t.Fatalf("builtin module source repeats ID %q", id)
+		}
+		canonical[id] = struct{}{}
+	}
+	for _, source := range sources {
+		// The Definition source is the one canonical module table. Score
+		// dimensions intentionally own their independent metric membership;
+		// they are not module catalog metadata and remain outside this guard.
+		if isBuiltinDefinitionSource(root, source.path) || isScorePackage(source.packagePath) {
+			continue
+		}
+		if hasStaticModuleIDTable(source.file, canonical) {
+			t.Fatalf("production source %s contains a replicated module ID table", source.path)
+		}
+	}
+}
+
 func TestProductionSourceHasNoRemovedModuleAdaptersOrRunnerBindings(t *testing.T) {
 	root := repositoryRoot(t)
 	sources := loadAllProductionSources(t, root)
@@ -462,14 +590,18 @@ func TestProductionSourceHasNoRemovedModuleAdaptersOrRunnerBindings(t *testing.T
 func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, source := range loadAllProductionSources(t, root) {
+		// Mutation and registration APIs are forbidden wherever they appear,
+		// including command entry points and relocated helper packages. The
+		// detector itself is receiver/context aware so unrelated domain APIs
+		// such as DeleteReport remain valid.
+		if name, ok := catalogMutationAPI(source); ok {
+			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
+		}
 		if !isCompositionPackage(source.packagePath) {
 			continue
 		}
 		if hasLocalFunction(source, source.packagePath, "init") {
 			t.Fatalf("%s has runtime init registration in %s", source.packagePath, source.path)
-		}
-		if name, ok := catalogMutationAPI(source); ok {
-			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
 		}
 	}
 }
