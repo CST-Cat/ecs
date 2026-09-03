@@ -589,15 +589,26 @@ func TestProductionSourceHasNoRemovedModuleAdaptersOrRunnerBindings(t *testing.T
 
 func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, source := range loadAllProductionSources(t, root) {
+	sources := loadAllProductionSources(t, root)
+	moduleIDs, err := builtinModuleIDs(root, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalModuleIDs := make(map[string]struct{}, len(moduleIDs))
+	for _, id := range moduleIDs {
+		canonicalModuleIDs[id] = struct{}{}
+	}
+	globalFacts := packageGlobalFacts(sources)
+	typeSpecs := packageTypeSpecs(sources)
+	for _, source := range sources {
 		// Mutation and registration APIs are forbidden wherever they appear,
 		// including command entry points and relocated helper packages. The
 		// detector itself is receiver/context aware so unrelated domain APIs
 		// such as DeleteReport remain valid.
-		if name, ok := catalogMutationAPI(source); ok {
+		if name, ok := catalogMutationAPIWithTypes(source, typeSpecs[source.packagePath]); ok {
 			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
 		}
-		if hasRuntimeRegistrationInit(source) {
+		if hasRuntimeRegistrationInitWithFacts(source, globalFacts[source.packagePath], canonicalModuleIDs) {
 			t.Fatalf("%s has runtime init registration in %s", source.packagePath, source.path)
 		}
 	}
@@ -605,9 +616,10 @@ func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 
 func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
 	cases := []struct {
-		name   string
-		source string
-		want   bool
+		name      string
+		source    string
+		moduleIDs []string
+		want      bool
 	}{
 		{
 			name:   "harmless config init",
@@ -649,13 +661,46 @@ func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
 			source: "package config\nfunc init() { registerMetrics() }\n",
 			want:   false,
 		},
+		{
+			name:      "neutral open registry with canonical probe",
+			source:    "package probe\nvar state = map[string]any{}\ntype cpuProbe struct{}\nfunc init() { state[\"cpu\"] = cpuProbe{} }\n",
+			moduleIDs: []string{"cpu"},
+			want:      true,
+		},
+		{
+			name:      "neutral open state without canonical probe",
+			source:    "package probe\nvar state = map[string]any{}\nfunc init() { state[\"other\"] = 1 }\n",
+			moduleIDs: []string{"cpu"},
+			want:      false,
+		},
+		{
+			name:      "neutral open registry with allocated probe",
+			source:    "package probe\nvar state = map[string]any{}\ntype cpuProbe struct{}\nfunc init() { state[\"cpu\"] = new(cpuProbe) }\n",
+			moduleIDs: []string{"cpu"},
+			want:      true,
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			source := parseDetectorSnippet(t, test.source, configImportPath)
-			if got := hasRuntimeRegistrationInit(source); got != test.want {
+			if test.moduleIDs != nil {
+				source.packagePath = probeImportPath
+			}
+			moduleIDs := make(map[string]struct{}, len(test.moduleIDs))
+			for _, id := range test.moduleIDs {
+				moduleIDs[id] = struct{}{}
+			}
+			facts := packageGlobalFacts([]productionSource{source})[source.packagePath]
+			if got := hasRuntimeRegistrationInitWithFacts(source, facts, moduleIDs); got != test.want {
 				t.Fatalf("runtime init detector = %t, want %t", got, test.want)
 			}
 		})
+	}
+
+	global := parseDetectorSnippet(t, "package probe\nvar state = map[string]any{}\n", probeImportPath)
+	initializer := parseDetectorSnippet(t, "package probe\ntype cpuProbe struct{}\nfunc init() { state[\"cpu\"] = cpuProbe{} }\n", probeImportPath)
+	facts := packageGlobalFacts([]productionSource{global, initializer})[probeImportPath]
+	if !hasRuntimeRegistrationInitWithFacts(initializer, facts, map[string]struct{}{"cpu": {}}) {
+		t.Fatal("cross-file neutral registry init was not detected")
 	}
 }

@@ -23,11 +23,15 @@ func hasIdentifierNamed(source productionSource, name string) bool {
 }
 
 func catalogMutationAPI(source productionSource) (string, bool) {
+	return catalogMutationAPIWithTypes(source, sourceTypeSpecs(source))
+}
+
+func catalogMutationAPIWithTypes(source productionSource, typeSpecs map[string]*ast.TypeSpec) (string, bool) {
 	for _, declaration := range source.file.Decls {
 		switch declaration := declaration.(type) {
 		case *ast.FuncDecl:
 			if receiver := receiverBaseName(declaration.Recv); receiver != "" {
-				if isCatalogReceiver(receiver) && hasMutationVerbPrefix(declaration.Name.Name) {
+				if (isCatalogReceiver(receiver) || receiverHasCompositionContextFrom(declaration, typeSpecs) || functionParameterTypesHaveMutationContext(declaration)) && hasMutationVerbPrefix(declaration.Name.Name) {
 					return declaration.Name.Name, true
 				}
 			} else if isCatalogMutationName(declaration.Name.Name) || hasCatalogMutationContext(declaration) {
@@ -99,6 +103,18 @@ func hasCatalogMutationContext(function *ast.FuncDecl) bool {
 	return false
 }
 
+func functionParameterTypesHaveMutationContext(function *ast.FuncDecl) bool {
+	if function == nil || function.Type == nil || function.Type.Params == nil {
+		return false
+	}
+	for _, field := range function.Type.Params.List {
+		if expressionHasMutationContext(field.Type) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasCatalogMutationContextForValue(name string, values *ast.ValueSpec) bool {
 	if !isBareMutationVerb(name) {
 		return false
@@ -130,6 +146,9 @@ func isBareMutationVerb(name string) bool {
 }
 
 func expressionHasMutationContext(expression ast.Expr) bool {
+	if expression == nil {
+		return false
+	}
 	found := false
 	ast.Inspect(expression, func(node ast.Node) bool {
 		ident, ok := node.(*ast.Ident)
@@ -146,8 +165,7 @@ func expressionHasMutationContext(expression ast.Expr) bool {
 	return found
 }
 
-func hasRuntimeRegistrationInit(source productionSource) bool {
-	globalNames := packageGlobalNames(source.file)
+func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
 	for _, declaration := range source.file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
 		if !ok || function.Name.Name != "init" || function.Body == nil {
@@ -160,18 +178,22 @@ func hasRuntimeRegistrationInit(source productionSource) bool {
 			}
 			switch value := node.(type) {
 			case *ast.CallExpr:
-				if runtimeRegistrationCall(value) || appendTouchesCompositionState(value, globalNames) {
+				if runtimeRegistrationCall(value) || appendTouchesCompositionState(value, globalFacts, moduleIDs) {
 					found = true
 				}
 			case *ast.AssignStmt:
-				for _, expression := range value.Lhs {
-					if assignmentTouchesCompositionState(expression, globalNames) {
+				for index, expression := range value.Lhs {
+					var rhs ast.Expr
+					if index < len(value.Rhs) {
+						rhs = value.Rhs[index]
+					}
+					if assignmentTouchesCompositionState(expression, rhs, globalFacts, moduleIDs) {
 						found = true
 						break
 					}
 				}
 			case *ast.IncDecStmt:
-				if assignmentTouchesCompositionState(value.X, globalNames) {
+				if assignmentTouchesCompositionState(value.X, nil, globalFacts, moduleIDs) {
 					found = true
 				}
 			}
@@ -184,24 +206,44 @@ func hasRuntimeRegistrationInit(source productionSource) bool {
 	return false
 }
 
-func packageGlobalNames(file *ast.File) map[string]struct{} {
-	names := make(map[string]struct{})
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.VAR {
-			continue
+type packageGlobalFact struct {
+	name        string
+	typeExpr    ast.Expr
+	initializer ast.Expr
+}
+
+// packageGlobalFacts joins package-level declarations across files. Runtime
+// registration can be split between a neutral global in one file and init in
+// another, so a same-file name check is insufficient for this guard.
+func packageGlobalFacts(sources []productionSource) map[string]map[string]packageGlobalFact {
+	result := make(map[string]map[string]packageGlobalFact)
+	for _, source := range sources {
+		facts := result[source.packagePath]
+		if facts == nil {
+			facts = make(map[string]packageGlobalFact)
+			result[source.packagePath] = facts
 		}
-		for _, specification := range general.Specs {
-			values, ok := specification.(*ast.ValueSpec)
-			if !ok {
+		for _, declaration := range source.file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.VAR {
 				continue
 			}
-			for _, name := range values.Names {
-				names[name.Name] = struct{}{}
+			for _, specification := range general.Specs {
+				values, ok := specification.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for index, name := range values.Names {
+					var initializer ast.Expr
+					if index < len(values.Values) {
+						initializer = values.Values[index]
+					}
+					facts[name.Name] = packageGlobalFact{name: name.Name, typeExpr: values.Type, initializer: initializer}
+				}
 			}
 		}
 	}
-	return names
+	return result
 }
 
 func runtimeRegistrationCall(call *ast.CallExpr) bool {
@@ -236,7 +278,7 @@ func runtimeRegistrationCall(call *ast.CallExpr) bool {
 	return false
 }
 
-func appendTouchesCompositionState(call *ast.CallExpr, globalNames map[string]struct{}) bool {
+func appendTouchesCompositionState(call *ast.CallExpr, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
 	if call == nil || len(call.Args) == 0 {
 		return false
 	}
@@ -244,7 +286,7 @@ func appendTouchesCompositionState(call *ast.CallExpr, globalNames map[string]st
 	if !ok || function.Name != "append" {
 		return false
 	}
-	return assignmentTouchesCompositionState(call.Args[0], globalNames)
+	return assignmentTouchesCompositionState(call.Args[0], nil, globalFacts, moduleIDs)
 }
 
 func expressionHasCatalogStateContext(expression ast.Expr) bool {
@@ -263,16 +305,21 @@ func expressionHasCatalogStateContext(expression ast.Expr) bool {
 	return found
 }
 
-func assignmentTouchesCompositionState(expression ast.Expr, globalNames map[string]struct{}) bool {
+func assignmentTouchesCompositionState(expression ast.Expr, rhs ast.Expr, globalFacts map[string]packageGlobalFact, moduleIDs map[string]struct{}) bool {
 	if expression == nil {
 		return false
 	}
 	root := expression
+	var indexKey ast.Expr
 	for {
 		switch value := root.(type) {
 		case *ast.IndexExpr:
+			indexKey = value.Index
 			root = value.X
 		case *ast.IndexListExpr:
+			if len(value.Indices) > 0 {
+				indexKey = value.Indices[0]
+			}
 			root = value.X
 		case *ast.SelectorExpr:
 			if isCatalogStateName(value.Sel.Name) {
@@ -284,10 +331,103 @@ func assignmentTouchesCompositionState(expression ast.Expr, globalNames map[stri
 		case *ast.ParenExpr:
 			root = value.X
 		case *ast.Ident:
-			_, global := globalNames[value.Name]
-			return global && isCatalogStateName(value.Name)
+			fact, global := globalFacts[value.Name]
+			if !global {
+				return false
+			}
+			if isCatalogStateName(value.Name) || expressionHasCompositionType(fact.typeExpr) {
+				return true
+			}
+			return globalOpenRegistryMutation(fact, indexKey, rhs, moduleIDs)
 		default:
 			return expressionHasMutationContext(expression)
+		}
+	}
+}
+
+func globalOpenRegistryMutation(fact packageGlobalFact, indexKey, rhs ast.Expr, moduleIDs map[string]struct{}) bool {
+	if !globalOpenRegistryShape(fact) || len(moduleIDs) == 0 || !isCanonicalString(indexKey, moduleIDs) {
+		return false
+	}
+	return expressionIsConcreteProbeValue(rhs)
+}
+
+func globalOpenRegistryShape(fact packageGlobalFact) bool {
+	expression := fact.typeExpr
+	if expression == nil {
+		expression = fact.initializer
+	}
+	if !expressionIsMutable(expression) {
+		return false
+	}
+	return expressionContainsAnyOrEmptyInterface(expression)
+}
+
+func expressionContainsAnyOrEmptyInterface(expression ast.Expr) bool {
+	if expression == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(expression, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		if ident, ok := node.(*ast.Ident); ok && ident.Name == "any" {
+			found = true
+			return false
+		}
+		if interfaceType, ok := node.(*ast.InterfaceType); ok && interfaceType.Methods != nil && len(interfaceType.Methods.List) == 0 {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func isCanonicalString(expression ast.Expr, canonical map[string]struct{}) bool {
+	for {
+		switch value := expression.(type) {
+		case *ast.ParenExpr:
+			expression = value.X
+			continue
+		case *ast.BasicLit:
+			if value.Kind != token.STRING {
+				return false
+			}
+			decoded, err := strconv.Unquote(value.Value)
+			if err != nil {
+				return false
+			}
+			_, ok := canonical[decoded]
+			return ok
+		default:
+			return false
+		}
+	}
+}
+
+func expressionIsConcreteProbeValue(expression ast.Expr) bool {
+	for {
+		switch value := expression.(type) {
+		case *ast.ParenExpr:
+			expression = value.X
+			continue
+		case *ast.StarExpr:
+			expression = value.X
+			continue
+		case *ast.CompositeLit:
+			name := strings.ToLower(expressionTypeName(value.Type))
+			return strings.HasSuffix(name, "probe")
+		case *ast.CallExpr:
+			function, ok := value.Fun.(*ast.Ident)
+			if !ok || function.Name != "new" || len(value.Args) != 1 {
+				return false
+			}
+			name := strings.ToLower(expressionTypeName(value.Args[0]))
+			return strings.HasSuffix(name, "probe")
+		default:
+			return false
 		}
 	}
 }
@@ -322,6 +462,108 @@ func receiverTypeBaseName(expression ast.Expr) string {
 	}
 }
 
+func sourceTypeSpecs(source productionSource) map[string]*ast.TypeSpec {
+	result := make(map[string]*ast.TypeSpec)
+	for _, declaration := range source.file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.TYPE {
+			continue
+		}
+		for _, specification := range general.Specs {
+			typeSpec, ok := specification.(*ast.TypeSpec)
+			if ok {
+				result[typeSpec.Name.Name] = typeSpec
+			}
+		}
+	}
+	return result
+}
+
+func packageTypeSpecs(sources []productionSource) map[string]map[string]*ast.TypeSpec {
+	result := make(map[string]map[string]*ast.TypeSpec)
+	for _, source := range sources {
+		typeSpecs := result[source.packagePath]
+		if typeSpecs == nil {
+			typeSpecs = make(map[string]*ast.TypeSpec)
+			result[source.packagePath] = typeSpecs
+		}
+		for name, typeSpec := range sourceTypeSpecs(source) {
+			typeSpecs[name] = typeSpec
+		}
+	}
+	return result
+}
+
+func receiverHasCompositionContextFrom(function *ast.FuncDecl, typeSpecs map[string]*ast.TypeSpec) bool {
+	if function == nil {
+		return false
+	}
+	return sourceTypeHasCompositionContextFrom(typeSpecs, receiverBaseName(function.Recv), make(map[string]struct{}))
+}
+
+func sourceTypeHasCompositionContext(source productionSource, name string) bool {
+	return sourceTypeHasCompositionContextFrom(sourceTypeSpecs(source), name, make(map[string]struct{}))
+}
+
+func sourceTypeHasCompositionContextFrom(typeSpecs map[string]*ast.TypeSpec, name string, seen map[string]struct{}) bool {
+	if name == "" {
+		return false
+	}
+	if _, alreadySeen := seen[name]; alreadySeen {
+		return false
+	}
+	seen[name] = struct{}{}
+	typeSpec := typeSpecs[name]
+	if typeSpec == nil {
+		return false
+	}
+	if typeSpecHasCompositionContext(typeSpec) {
+		return true
+	}
+	return sourceTypeHasCompositionAlias(typeSpecs, typeSpec.Type, seen)
+}
+
+func sourceTypeHasCompositionAlias(typeSpecs map[string]*ast.TypeSpec, expression ast.Expr, seen map[string]struct{}) bool {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return sourceTypeHasCompositionContextFrom(typeSpecs, value.Name, seen)
+	case *ast.ParenExpr:
+		return sourceTypeHasCompositionAlias(typeSpecs, value.X, seen)
+	case *ast.StarExpr:
+		return sourceTypeHasCompositionAlias(typeSpecs, value.X, seen)
+	default:
+		return false
+	}
+}
+
+func typeSpecHasCompositionContext(typeSpec *ast.TypeSpec) bool {
+	if typeSpec == nil {
+		return false
+	}
+	if isCompositionTypeName(typeSpec.Name.Name) {
+		return true
+	}
+	structType, ok := typeSpec.Type.(*ast.StructType)
+	return ok && structHasCompositionField(structType)
+}
+
+func structHasCompositionField(structType *ast.StructType) bool {
+	if structType == nil || structType.Fields == nil {
+		return false
+	}
+	for _, field := range structType.Fields.List {
+		if expressionHasCompositionType(field.Type) {
+			return true
+		}
+		for _, name := range field.Names {
+			if isCatalogStateName(name.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isCompositionPlumbingSource(source productionSource) bool {
 	// The app package is the composition boundary: command handlers and their
 	// helpers all receive the per-invocation application value. The module,
@@ -351,6 +593,9 @@ func isCompositionPlumbingSource(source productionSource) bool {
 }
 
 func hasProbeCompositionSignal(source productionSource) bool {
+	if hasCompositionContextType(source) {
+		return true
+	}
 	return hasIdentifierNamed(source, "Definition") ||
 		hasIdentifierNamed(source, "Descriptor") ||
 		hasIdentifierNamed(source, "BuiltinDefinitions") ||
@@ -358,7 +603,7 @@ func hasProbeCompositionSignal(source productionSource) bool {
 }
 
 func hasModuleCompositionSignal(source productionSource) bool {
-	if hasRegistryShapedPackageVariable(source) {
+	if hasRegistryShapedPackageVariable(source) || hasCompositionContextType(source) {
 		return true
 	}
 	for _, declaration := range source.file.Decls {
@@ -394,6 +639,15 @@ func hasModuleCompositionSignal(source productionSource) bool {
 	return false
 }
 
+func hasCompositionContextType(source productionSource) bool {
+	for name := range sourceTypeSpecs(source) {
+		if sourceTypeHasCompositionContext(source, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func functionReturnsCompositionType(function *ast.FuncDecl) bool {
 	if function.Type == nil || function.Type.Results == nil {
 		return false
@@ -407,6 +661,9 @@ func functionReturnsCompositionType(function *ast.FuncDecl) bool {
 }
 
 func expressionHasCompositionType(expression ast.Expr) bool {
+	if expression == nil {
+		return false
+	}
 	found := false
 	ast.Inspect(expression, func(node ast.Node) bool {
 		if ident, ok := node.(*ast.Ident); ok {
@@ -422,6 +679,10 @@ func expressionHasCompositionType(expression ast.Expr) bool {
 }
 
 func weakCompositionPattern(source productionSource) string {
+	return weakCompositionPatternWithTypes(source, sourceTypeSpecs(source))
+}
+
+func weakCompositionPatternWithTypes(source productionSource, typeSpecs map[string]*ast.TypeSpec) string {
 	bindings, err := resolveImportBindings(source.file)
 	if err != nil {
 		return err.Error()
@@ -429,16 +690,16 @@ func weakCompositionPattern(source productionSource) string {
 	if name, ok := packageLevelVariable(source); ok {
 		return "package-level mutable variable " + name
 	}
-	if hasWeakAnyUsage(source) {
+	if hasWeakAnyUsageWithTypes(source, typeSpecs) {
 		return "any type"
 	}
-	if hasWeakEmptyInterfaceUsage(source) {
+	if hasWeakEmptyInterfaceUsageWithTypes(source, typeSpecs) {
 		return "empty interface type"
 	}
-	if hasWeakReflectionUsage(source, bindings) {
+	if hasWeakReflectionUsageWithTypes(source, bindings, typeSpecs) {
 		return "reflection import"
 	}
-	if hasRegistryMutexUsage(source, bindings) {
+	if hasRegistryMutexUsageWithTypes(source, bindings, typeSpecs) {
 		return "registry mutex type"
 	}
 	finding := ""
@@ -545,19 +806,6 @@ func isCatalogStateName(name string) bool {
 	return false
 }
 
-func isCatalogTypeName(name string) bool {
-	lower := strings.ToLower(name)
-	for _, term := range []string{
-		"registry", "catalog", "definition", "descriptor", "handler", "binding",
-		"application", "composition",
-	} {
-		if strings.Contains(lower, term) {
-			return true
-		}
-	}
-	return false
-}
-
 func isCompositionTypeName(name string) bool {
 	lower := strings.ToLower(name)
 	for _, term := range []string{
@@ -609,17 +857,17 @@ func hasCompositionVerb(name string) bool {
 	return false
 }
 
-func nodeIsCompositionContext(node ast.Node, parents map[ast.Node]ast.Node) bool {
-	if function := enclosingFuncDecl(node, parents); function != nil && isCompositionFunction(function) {
+func nodeIsCompositionContextWithTypes(node ast.Node, source productionSource, parents map[ast.Node]ast.Node, typeSpecs map[string]*ast.TypeSpec) bool {
+	if function := enclosingFuncDecl(node, parents); function != nil && (isCompositionFunction(function) || receiverHasCompositionContextFrom(function, typeSpecs)) {
 		return true
 	}
-	if typeSpec := enclosingTypeSpec(node, parents); typeSpec != nil && isCompositionTypeName(typeSpec.Name.Name) {
+	if typeSpec := enclosingTypeSpec(node, parents); typeSpec != nil && sourceTypeHasCompositionContextFrom(typeSpecs, typeSpec.Name.Name, make(map[string]struct{})) {
 		return true
 	}
 	return false
 }
 
-func hasWeakAnyUsage(source productionSource) bool {
+func hasWeakAnyUsageWithTypes(source productionSource, typeSpecs map[string]*ast.TypeSpec) bool {
 	parents := astParentMap(source.file)
 	found := false
 	ast.Inspect(source.file, func(node ast.Node) bool {
@@ -627,7 +875,7 @@ func hasWeakAnyUsage(source productionSource) bool {
 			return false
 		}
 		ident, ok := node.(*ast.Ident)
-		if ok && ident.Name == "any" && nodeIsCompositionContext(ident, parents) {
+		if ok && ident.Name == "any" && nodeIsCompositionContextWithTypes(ident, source, parents, typeSpecs) {
 			found = true
 			return false
 		}
@@ -636,7 +884,7 @@ func hasWeakAnyUsage(source productionSource) bool {
 	return found
 }
 
-func hasWeakEmptyInterfaceUsage(source productionSource) bool {
+func hasWeakEmptyInterfaceUsageWithTypes(source productionSource, typeSpecs map[string]*ast.TypeSpec) bool {
 	parents := astParentMap(source.file)
 	found := false
 	ast.Inspect(source.file, func(node ast.Node) bool {
@@ -644,7 +892,7 @@ func hasWeakEmptyInterfaceUsage(source productionSource) bool {
 			return false
 		}
 		interfaceType, ok := node.(*ast.InterfaceType)
-		if ok && interfaceType.Methods != nil && len(interfaceType.Methods.List) == 0 && nodeIsCompositionContext(interfaceType, parents) {
+		if ok && interfaceType.Methods != nil && len(interfaceType.Methods.List) == 0 && nodeIsCompositionContextWithTypes(interfaceType, source, parents, typeSpecs) {
 			found = true
 			return false
 		}
@@ -653,7 +901,7 @@ func hasWeakEmptyInterfaceUsage(source productionSource) bool {
 	return found
 }
 
-func hasWeakReflectionUsage(source productionSource, bindings map[string]string) bool {
+func hasWeakReflectionUsageWithTypes(source productionSource, bindings map[string]string, typeSpecs map[string]*ast.TypeSpec) bool {
 	parents := astParentMap(source.file)
 	found := false
 	ast.Inspect(source.file, func(node ast.Node) bool {
@@ -665,7 +913,7 @@ func hasWeakReflectionUsage(source productionSource, bindings map[string]string)
 			return true
 		}
 		packageIdent, ok := selector.X.(*ast.Ident)
-		if ok && bindings[packageIdent.Name] == "reflect" && nodeIsCompositionContext(selector, parents) {
+		if ok && bindings[packageIdent.Name] == "reflect" && nodeIsCompositionContextWithTypes(selector, source, parents, typeSpecs) {
 			found = true
 			return false
 		}
@@ -686,7 +934,7 @@ func isSyncMutexType(expression ast.Expr, bindings map[string]string) bool {
 	return ok && bindings[packageIdent.Name] == "sync" && (selector.Sel.Name == "Mutex" || selector.Sel.Name == "RWMutex")
 }
 
-func hasRegistryMutexUsage(source productionSource, bindings map[string]string) bool {
+func hasRegistryMutexUsageWithTypes(source productionSource, bindings map[string]string, typeSpecs map[string]*ast.TypeSpec) bool {
 	parents := astParentMap(source.file)
 	found := false
 	ast.Inspect(source.file, func(node ast.Node) bool {
@@ -700,7 +948,7 @@ func hasRegistryMutexUsage(source productionSource, bindings map[string]string) 
 		for current := ast.Node(selector); current != nil; current = parents[current] {
 			switch value := current.(type) {
 			case *ast.TypeSpec:
-				if isCatalogTypeName(value.Name.Name) {
+				if sourceTypeHasCompositionContextFrom(typeSpecs, value.Name.Name, make(map[string]struct{})) {
 					found = true
 				}
 			case *ast.Field:
@@ -737,7 +985,7 @@ func packageLevelVariable(source productionSource) (string, bool) {
 				continue
 			}
 			for index, name := range values.Names {
-				if allowedPackageFunctionSeam(name.Name, values, index) || !isRegistryShapedVariable(name.Name, values, index) {
+				if !isRegistryShapedVariable(name.Name, values, index) {
 					continue
 				}
 				return name.Name, true
@@ -816,25 +1064,13 @@ func expressionIsMutable(expression ast.Expr) bool {
 		// Calls such as errors.New and regexp.MustCompile yield immutable
 		// domain values for this guard. A call returning a tracked type is
 		// handled by the semantic variable name/type checks instead.
+		if function, ok := value.Fun.(*ast.Ident); ok && function.Name == "make" && len(value.Args) > 0 {
+			return expressionIsMutable(value.Args[0])
+		}
 		return false
 	default:
 		return false
 	}
-}
-
-func allowedPackageFunctionSeam(name string, values *ast.ValueSpec, index int) bool {
-	if name != "openWizardTTY" {
-		return false
-	}
-	if values.Type != nil {
-		_, ok := values.Type.(*ast.FuncType)
-		return ok
-	}
-	if index >= len(values.Values) {
-		return false
-	}
-	_, ok := values.Values[index].(*ast.FuncLit)
-	return ok
 }
 
 func hasLocalCompositeType(source productionSource, typeName string) bool {
@@ -1117,26 +1353,42 @@ func hasStaticToolIDTableInSource(root string, source productionSource, canonica
 }
 
 func hasStaticCanonicalToolIDList(literal *ast.CompositeLit, canonical map[string]struct{}) bool {
-	if literal == nil || len(literal.Elts) < 2 || collectionElementTypeName(literal.Type) != "string" {
+	if literal == nil || len(literal.Elts) < 2 || !isCollectionCompositeType(literal.Type) {
 		return false
 	}
+	seen := make(map[string]struct{})
 	for _, element := range literal.Elts {
 		if keyValue, ok := element.(*ast.KeyValueExpr); ok {
-			element = keyValue.Value
+			addCanonicalString(keyValue.Key, canonical, seen)
+			addCanonicalString(keyValue.Value, canonical, seen)
+			continue
 		}
-		basic, ok := element.(*ast.BasicLit)
-		if !ok || basic.Kind != token.STRING {
-			return false
-		}
-		id, err := strconv.Unquote(basic.Value)
-		if err != nil {
-			return false
-		}
-		if _, ok := canonical[id]; !ok {
-			return false
+		addCanonicalString(element, canonical, seen)
+	}
+	return len(seen) > 1
+}
+
+func addCanonicalString(expression ast.Expr, canonical, seen map[string]struct{}) {
+	for {
+		switch value := expression.(type) {
+		case *ast.ParenExpr:
+			expression = value.X
+			continue
+		case *ast.BasicLit:
+			if value.Kind != token.STRING {
+				return
+			}
+			id, err := strconv.Unquote(value.Value)
+			if err == nil {
+				if _, ok := canonical[id]; ok {
+					seen[id] = struct{}{}
+				}
+			}
+			return
+		default:
+			return
 		}
 	}
-	return true
 }
 
 func isModuleDefinitionSet(literal *ast.CompositeLit) bool {
@@ -1349,6 +1601,7 @@ func TestProductionToolConsumersHaveNoStaticMetadataOrIDSwitch(t *testing.T) {
 		}
 		canonical[id] = struct{}{}
 	}
+	typeSpecs := packageTypeSpecs(sources)
 	for _, source := range sources {
 		// The canonical tool source, module Definition source, and release
 		// manifest are intentionally the only places where their respective
@@ -1360,7 +1613,7 @@ func TestProductionToolConsumersHaveNoStaticMetadataOrIDSwitch(t *testing.T) {
 		if hasStaticToolIDTableInSource(root, source, canonical) {
 			t.Fatalf("production source %s contains a static multi-entry tool metadata table", source.path)
 		}
-		if !isToolIDSwitchAllowed(source) && hasCommandSwitchWithMultipleCanonicalNames(source.file, canonical) {
+		if hasForbiddenToolIDSwitchWithTypeSpecs(source, canonical, typeSpecs[source.packagePath]) {
 			t.Fatalf("production source %s contains a switch with multiple canonical tool IDs", source.path)
 		}
 	}
@@ -1374,12 +1627,195 @@ func isToolMetadataSource(root string, source productionSource) bool {
 	return isToolBuiltinSource(root, source.path) || isToolsManifestPackage(source.packagePath)
 }
 
-func isToolIDSwitchAllowed(source productionSource) bool {
-	// Score owns the submission projection and its tool-field switch. It is
-	// not a tool metadata catalog and changing it would alter fingerprint
-	// semantics; keep that domain-specific projection outside this switch
-	// guard while still checking score for duplicate metadata tables.
-	return isScorePackage(source.packagePath)
+func hasForbiddenToolIDSwitch(source productionSource, canonical map[string]struct{}) bool {
+	return hasForbiddenToolIDSwitchWithTypeSpecs(source, canonical, sourceTypeSpecs(source))
+}
+
+func hasForbiddenToolIDSwitchWithTypeSpecs(source productionSource, canonical map[string]struct{}, typeSpecs map[string]*ast.TypeSpec) bool {
+	parents := astParentMap(source.file)
+	for _, node := range switchStatements(source.file) {
+		if !hasMultipleCanonicalCases(node, canonical) {
+			continue
+		}
+		if !isToolIDSwitchAllowedWithTypeSpecs(source, node, parents, typeSpecs) {
+			return true
+		}
+	}
+	return false
+}
+
+func switchStatements(file *ast.File) []*ast.SwitchStmt {
+	var result []*ast.SwitchStmt
+	ast.Inspect(file, func(node ast.Node) bool {
+		if statement, ok := node.(*ast.SwitchStmt); ok {
+			result = append(result, statement)
+		}
+		return true
+	})
+	return result
+}
+
+func hasMultipleCanonicalCases(statement *ast.SwitchStmt, canonical map[string]struct{}) bool {
+	if statement == nil || statement.Body == nil {
+		return false
+	}
+	seen := make(map[string]struct{})
+	for _, item := range statement.Body.List {
+		clause, ok := item.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		for _, expression := range clause.List {
+			if basic, ok := expression.(*ast.BasicLit); ok && basic.Kind == token.STRING {
+				name, err := strconv.Unquote(basic.Value)
+				if err == nil {
+					if _, ok := canonical[name]; ok {
+						seen[name] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	return len(seen) > 1
+}
+
+func isToolIDSwitchAllowed(source productionSource, statement *ast.SwitchStmt, parents map[ast.Node]ast.Node) bool {
+	return isToolIDSwitchAllowedWithTypeSpecs(source, statement, parents, sourceTypeSpecs(source))
+}
+
+func isToolIDSwitchAllowedWithTypeSpecs(source productionSource, statement *ast.SwitchStmt, parents map[ast.Node]ast.Node, typeSpecs map[string]*ast.TypeSpec) bool {
+	// Score's only permitted concrete-tool switch is the projection into its
+	// public ToolSpec. Structural evidence (the ToolSpec result, the
+	// RequiredTools traversal, and assignment to score-owned tool fields) keeps
+	// the exception narrow without exempting a whole package or filename.
+	if !isScorePackage(source.packagePath) || statement == nil {
+		return false
+	}
+	function := enclosingFuncDecl(statement, parents)
+	if function == nil || !functionReturnsNamedType(function, "ToolSpec") {
+		return false
+	}
+	if !functionContainsIdentifier(function, "RequiredTools") ||
+		!functionContainsSelector(function, "Lookup") ||
+		!functionContainsToolSpecField(function) {
+		return false
+	}
+	allowedIDs := toolSpecFieldIDs(typeSpecs)
+	if len(allowedIDs) == 0 {
+		return false
+	}
+	for id := range switchStringIDs(statement) {
+		if _, ok := allowedIDs[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func switchStringIDs(statement *ast.SwitchStmt) map[string]struct{} {
+	result := make(map[string]struct{})
+	if statement == nil || statement.Body == nil {
+		return result
+	}
+	for _, item := range statement.Body.List {
+		clause, ok := item.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		for _, expression := range clause.List {
+			basic, ok := expression.(*ast.BasicLit)
+			if !ok || basic.Kind != token.STRING {
+				continue
+			}
+			id, err := strconv.Unquote(basic.Value)
+			if err == nil {
+				result[id] = struct{}{}
+			}
+		}
+	}
+	return result
+}
+
+func toolSpecFieldIDs(typeSpecs map[string]*ast.TypeSpec) map[string]struct{} {
+	result := make(map[string]struct{})
+	typeSpec := typeSpecs["ToolSpec"]
+	if typeSpec == nil {
+		return result
+	}
+	structType, ok := typeSpec.Type.(*ast.StructType)
+	if !ok || structType.Fields == nil {
+		return result
+	}
+	for _, field := range structType.Fields.List {
+		for _, name := range field.Names {
+			result[strings.ToLower(name.Name)] = struct{}{}
+		}
+	}
+	return result
+}
+
+func functionReturnsNamedType(function *ast.FuncDecl, name string) bool {
+	if function == nil || function.Type == nil || function.Type.Results == nil {
+		return false
+	}
+	for _, field := range function.Type.Results.List {
+		if expressionTypeName(field.Type) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func functionContainsIdentifier(function *ast.FuncDecl, name string) bool {
+	if function == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		if ident, ok := node.(*ast.Ident); ok && ident.Name == name {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
+}
+
+func functionContainsToolSpecField(function *ast.FuncDecl) bool {
+	if function == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch selector.Sel.Name {
+		case "Sysbench", "Fio", "IPerf3":
+			found = true
+			return false
+		default:
+			return true
+		}
+	})
+	return found
+}
+
+func functionContainsSelector(function *ast.FuncDecl, name string) bool {
+	if function == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == name {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
 }
 
 func TestProductionCommandCompositionHasSingleCatalogSet(t *testing.T) {
@@ -1426,7 +1862,9 @@ func TestProductionCommandCompositionHasSingleCatalogSet(t *testing.T) {
 
 func TestProductionCompositionPlumbingHasNoWeakPatterns(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, source := range loadAllProductionSources(t, root) {
+	sources := loadAllProductionSources(t, root)
+	typeSpecs := packageTypeSpecs(sources)
+	for _, source := range sources {
 		// The release manifest intentionally uses open JSON values and owns a
 		// separate package-level tool table; it is not application composition.
 		if isToolsManifestPackage(source.packagePath) {
@@ -1437,7 +1875,7 @@ func TestProductionCompositionPlumbingHasNoWeakPatterns(t *testing.T) {
 		// mutable-global findings to composition contexts, so moving a helper
 		// to a new package or filename cannot evade the guard while ordinary
 		// domain state remains valid.
-		if finding := weakCompositionPattern(source); finding != "" {
+		if finding := weakCompositionPatternWithTypes(source, typeSpecs[source.packagePath]); finding != "" {
 			t.Fatalf("composition plumbing %s contains %s", source.path, finding)
 		}
 	}
@@ -1474,6 +1912,8 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "module catalog Add", source: "package module\nfunc (c *moduleCatalog) Add(value Definition) {}\n", want: true},
 		{name: "command catalog Remove", source: "package app\nfunc (c commandCatalog) Remove(name string) {}\n", want: true},
 		{name: "tool catalog Set", source: "package tool\nfunc (c *toolCatalog) Set(value Definition) {}\n", want: true},
+		{name: "neutral registry receiver Add", source: "package runner\ntype state struct { handlers map[string]commandHandler }\nfunc (s *state) Add(handler commandHandler) {}\n", want: true},
+		{name: "neutral registry alias receiver Add", source: "package runner\ntype state struct { handlers map[string]commandHandler }\ntype stateAlias = state\nfunc (s (*stateAlias)) Add(handler commandHandler) {}\n", want: true},
 		{name: "free module registration", source: "package app\nfunc registerModule(definition Definition) {}\n", want: true},
 		{name: "bare registration with definition", source: "package app\nfunc Register(definition Definition) {}\n", want: true},
 		{name: "command entrypoint module registration", packagePath: "ecs/cmd/ecs", source: "package main\nfunc RegisterModuleFixture() {}\n", want: true},
@@ -1483,6 +1923,7 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "unqualified Delete", source: "package report\nfunc Delete(value string) {}\n", want: false},
 		{name: "bare Add for string", source: "package report\nfunc Add(value string) {}\n", want: false},
 		{name: "other receiver Replace", source: "package report\nfunc (r Report) Replace(value string) {}\n", want: false},
+		{name: "other receiver Replace with module parameter", source: "package report\nfunc (r Report) Replace(module string) {}\n", want: false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -1495,6 +1936,18 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 				t.Fatalf("catalog mutation detector = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestReceiverContextUsesPackageTypeFacts(t *testing.T) {
+	typeSource := parseDetectorSnippet(t, "package runner\ntype state struct { handlers map[string]commandHandler }\n", runnerImportPath)
+	methodSource := parseDetectorSnippet(t, "package runner\nimport refl \"reflect\"\nfunc (s *state) Add(handler commandHandler) {}\nfunc (s *state) resolve(value any) { _ = refl.TypeOf(value) }\n", runnerImportPath)
+	typeSpecs := packageTypeSpecs([]productionSource{typeSource, methodSource})[runnerImportPath]
+	if _, ok := catalogMutationAPIWithTypes(methodSource, typeSpecs); !ok {
+		t.Fatal("receiver mutation detector missed a registry type declared in another file")
+	}
+	if got := weakCompositionPatternWithTypes(methodSource, typeSpecs); got != "any type" {
+		t.Fatalf("cross-file receiver weak detector = %q, want %q", got, "any type")
 	}
 }
 
@@ -1578,6 +2031,23 @@ var stagedToolIDs = []string{"sysbench", "zstd", "nexttrace-tiny"}
 			want: true,
 		},
 		{
+			name: "tool metadata map keys",
+			source: `package planner
+var toolLabels = map[string]string{
+		"sysbench": "cpu benchmark",
+		"zstd": "compression benchmark",
+}
+`,
+			want: true,
+		},
+		{
+			name: "mixed tool ID list",
+			source: `package planner
+var stages = []string{"prepare", "sysbench", "zstd"}
+`,
+			want: true,
+		},
+		{
 			name: "policy switch",
 			source: `package app
 func verify(kind string) {
@@ -1609,12 +2079,49 @@ func stage(id string) {
 			}
 			source := parseDetectorSnippet(t, test.source, packagePath)
 			gotTable := hasStaticToolIDTableInSource("", source, canonical)
-			gotSwitch := hasCommandSwitchWithMultipleCanonicalNames(source.file, canonical)
+			gotSwitch := hasForbiddenToolIDSwitch(source, canonical)
 			got := gotTable || gotSwitch
 			if got != test.want {
 				t.Fatalf("tool metadata detector = %t (table=%t switch=%t), want %t", got, gotTable, gotSwitch, test.want)
 			}
 		})
+	}
+
+	projection := parseDetectorSnippet(t, `package score
+type ToolSpec struct { Sysbench string; Fio string }
+func project(descriptor struct{ RequiredTools []string }) ToolSpec {
+	var spec ToolSpec
+	for _, candidate := range descriptor.RequiredTools {
+		switch candidate {
+		case "sysbench":
+		case "fio":
+		}
+	}
+	var catalog struct{}
+	_ = catalog.Lookup
+	_ = spec.Sysbench
+	_ = spec.Fio
+	return spec
+}
+`, scoreImportPath)
+	parents := astParentMap(projection.file)
+	if hasForbiddenToolIDSwitch(projection, canonical) {
+		t.Fatal("score ToolSpec projection was incorrectly rejected")
+	}
+	if !isToolIDSwitchAllowed(projection, switchStatements(projection.file)[0], parents) {
+		t.Fatal("score ToolSpec projection did not satisfy the structural allowance")
+	}
+
+	unrelatedScore := parseDetectorSnippet(t, `package score
+func unrelated(value string) {
+	switch value {
+	case "zstd":
+	case "nexttrace-tiny":
+	}
+}
+`, scoreImportPath)
+	if !hasForbiddenToolIDSwitch(unrelatedScore, canonical) {
+		t.Fatal("unrelated score tool switch was incorrectly allowed")
 	}
 }
 
@@ -1712,9 +2219,16 @@ func TestWeakCompositionDetectorFindsTrackedPatterns(t *testing.T) {
 		{name: "catalog state mutex", source: "package app\nimport \"sync\"\ntype catalogRegistry struct { mu sync.Mutex }\n", want: "registry mutex type"},
 		{name: "ordinary mutex local", source: "package app\nimport \"sync\"\nfunc use() { var mu sync.Mutex; _ = mu }\n", want: ""},
 		{name: "ordinary any value", source: "package app\nfunc preservePanicValue(value any) any { return value }\n", want: ""},
+		{name: "neutral registry map any field", source: "package runner\ntype state struct { handlers map[string]any }\n", want: "any type"},
+		{name: "neutral registry factory any field", source: "package runner\ntype state struct { factory func() any }\n", want: "any type"},
+		{name: "neutral registry empty interface field", source: "package runner\ntype state struct { handlers map[string]interface{} }\n", want: "empty interface type"},
+		{name: "neutral registry factory empty interface field", source: "package runner\ntype state struct { factory func() interface{} }\n", want: "empty interface type"},
+		{name: "neutral registry mutex sibling field", source: "package runner\nimport \"sync\"\ntype state struct { mu sync.Mutex; handlers map[string]commandHandler }\n", want: "registry mutex type"},
+		{name: "neutral registry receiver reflection", source: "package runner\nimport refl \"reflect\"\ntype state struct { handlers map[string]commandHandler }\nfunc (s *state) resolve(value any) { _ = refl.TypeOf(value) }\n", want: "any type"},
 		{name: "ordinary tool payload", source: "package app\ntype toolPayload any\n", want: ""},
 		{name: "ordinary reflection value", source: "package app\nimport refl \"reflect\"\nfunc preserveType(value refl.Type) refl.Type { return value }\n", want: ""},
 		{name: "ordinary tool reflection type", source: "package app\nimport refl \"reflect\"\ntype toolCacheType refl.Type\n", want: ""},
+		{name: "ordinary mutex sibling-free state", source: "package runner\nimport \"sync\"\ntype workQueue struct { mu sync.Mutex }\n", want: ""},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
