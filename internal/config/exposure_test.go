@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"ecs/internal/module"
 )
 
 func TestExposureParsingAndNames(t *testing.T) {
@@ -18,51 +20,48 @@ func TestExposureParsingAndNames(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
 		t.Fatalf("unknown exposure error = %v", err)
 	}
-	if Exposure(99).String() != ExposureNameInvalid {
-		t.Fatal("unknown exposure enum should use an explicit invalid marker")
-	}
 }
 
 func TestExposureFilteringAndEgressSemantics(t *testing.T) {
 	modules := []string{"system", "dns", "network"}
-	if got := FilterModulesByExposure(modules, ExposureLocal); !reflect.DeepEqual(got, []string{"system"}) {
+	if got := FilterModulesByExposure(testModuleCatalog(), modules, module.ExposureLocal); !reflect.DeepEqual(got, []string{"system"}) {
 		t.Fatalf("local modules = %v", got)
 	}
-	if got := FilterModulesByExposure(modules, ExposurePublic); !reflect.DeepEqual(got, []string{"system", "dns"}) {
+	if got := FilterModulesByExposure(testModuleCatalog(), modules, module.ExposurePublic); !reflect.DeepEqual(got, []string{"system", "dns"}) {
 		t.Fatalf("public modules = %v", got)
 	}
-	if !AllowsModule(ExposurePublic, "dns") || AllowsModule(ExposurePublic, "network") ||
-		exposureFor("network").Level != ExposureThirdParty || !exposureFor("network").NeedsEgressIP ||
-		exposureFor("unknown").Level != ExposureConsent {
+	if !AllowsModule(testModuleCatalog(), module.ExposurePublic, "dns") || AllowsModule(testModuleCatalog(), module.ExposurePublic, "network") ||
+		exposureFor(testModuleCatalog(), "network").Level != module.ExposureThirdParty || !exposureFor(testModuleCatalog(), "network").NeedsEgressIP ||
+		exposureFor(testModuleCatalog(), "unknown").Level != module.ExposureConsent {
 		t.Fatal("exposure boundary or unknown-module safety is incorrect")
 	}
-	if !RequiresEgressIP([]string{"network"}) || RequiresEgressIP([]string{"system"}) {
+	if !RequiresEgressIP(testModuleCatalog(), []string{"network"}) || RequiresEgressIP(testModuleCatalog(), []string{"system"}) {
 		t.Fatal("egress dependency classification is incorrect")
 	}
-	if EgressNeedsIPIntel([]string{"network"}, ExposurePublic) || !EgressNeedsIPIntel([]string{"network"}, ExposureThirdParty) || EgressNeedsIPIntel([]string{"system"}, ExposureThirdParty) {
+	if EgressNeedsIPIntel(testModuleCatalog(), []string{"network"}, module.ExposurePublic) || !EgressNeedsIPIntel(testModuleCatalog(), []string{"network"}, module.ExposureThirdParty) || EgressNeedsIPIntel(testModuleCatalog(), []string{"system"}, module.ExposureThirdParty) {
 		t.Fatal("IP intelligence exposure boundary is incorrect")
 	}
 	if !validRuntimeForExposure().OfflineOnly() {
 		t.Fatal("local runtime should be offline-only")
 	}
-	defaultRuntime, _ := Defaults(ProfileStandard)
+	defaultRuntime, _ := Defaults(testModuleCatalog(), ProfileStandard)
 	if defaultRuntime.OfflineOnly() {
 		t.Fatal("local runtime should be offline-only")
 	}
 }
 
 func validRuntimeForExposure() Runtime {
-	runtime, _ := Defaults(ProfileStandard)
-	runtime.Exposure = ExposureLocal
+	runtime, _ := Defaults(testModuleCatalog(), ProfileStandard)
+	runtime.Exposure = module.ExposureLocal
 	return runtime
 }
 
 func TestCheckModuleExposure(t *testing.T) {
 	useEnglish(t)
-	if err := CheckModuleExposure([]string{"system"}, ExposureLocal); err != nil {
+	if err := CheckModuleExposure(testModuleCatalog(), []string{"system"}, module.ExposureLocal); err != nil {
 		t.Fatal(err)
 	}
-	err := CheckModuleExposure([]string{"network"}, ExposureLocal)
+	err := CheckModuleExposure(testModuleCatalog(), []string{"network"}, module.ExposureLocal)
 	if err == nil || !strings.Contains(err.Error(), "above the current --exposure local") {
 		t.Fatalf("blocked module error = %v", err)
 	}
@@ -70,22 +69,22 @@ func TestCheckModuleExposure(t *testing.T) {
 
 func TestInvalidRuntimeExposureFailsClosed(t *testing.T) {
 	useEnglish(t)
-	for _, invalid := range []Exposure{-1, 4, 99} {
+	for _, invalid := range []module.Exposure{-1, 4, 99} {
 		runtime := validRuntimeForExposure()
 		runtime.Exposure = invalid
-		if err := Validate(runtime); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
+		if err := Validate(testModuleCatalog(), runtime); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
 			t.Fatalf("Validate(%d) = %v, want an invalid exposure error", invalid, err)
 		}
-		if AllowsModule(invalid, "system") {
+		if AllowsModule(testModuleCatalog(), invalid, "system") {
 			t.Fatalf("invalid exposure %d allowed a module", invalid)
 		}
-		if got := FilterModulesByExposure([]string{"system", "dns"}, invalid); got != nil {
+		if got := FilterModulesByExposure(testModuleCatalog(), []string{"system", "dns"}, invalid); got != nil {
 			t.Fatalf("invalid exposure %d filtered modules to %v", invalid, got)
 		}
-		if err := CheckModuleExposure([]string{"system"}, invalid); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
-			t.Fatalf("CheckModuleExposure(%d) = %v, want an invalid exposure error", invalid, err)
+		if err := CheckModuleExposure(testModuleCatalog(), []string{"system"}, invalid); err == nil || !strings.Contains(err.Error(), "unknown exposure level") {
+			t.Fatalf("CheckModuleExposure(testModuleCatalog(), %d) = %v, want an invalid exposure error", invalid, err)
 		}
-		if EgressNeedsIPIntel([]string{"network"}, invalid) {
+		if EgressNeedsIPIntel(testModuleCatalog(), []string{"network"}, invalid) {
 			t.Fatalf("invalid exposure %d enabled IP intelligence", invalid)
 		}
 	}

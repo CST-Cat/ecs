@@ -1,6 +1,9 @@
 package runner
 
-import "ecs/internal/config"
+import (
+	"ecs/internal/module"
+	"ecs/internal/probe"
+)
 
 // 模块调度：按干扰特性分组，组间串行、组内并行。
 //
@@ -21,11 +24,11 @@ type scheduleGroup struct {
 	Indices []int
 }
 
-// planSchedule 把已绑定的模块序列切成执行批次。
+// planSchedule 把已验证的模块定义序列切成执行批次。
 //
-// 保持绑定后的规范顺序：连续的可并行模块合成一批，遇到独占模块就单独成批。
+// 保持定义后的规范顺序：连续的可并行模块合成一批，遇到独占模块就单独成批。
 // 这样报告里的结果顺序仍与 canonical descriptor order 一致，只是执行方式变了。
-func planSchedule(bindings []moduleBinding) []scheduleGroup {
+func planSchedule(definitions []probe.Definition) []scheduleGroup {
 	var groups []scheduleGroup
 	var pending []int
 	flush := func() {
@@ -35,8 +38,8 @@ func planSchedule(bindings []moduleBinding) []scheduleGroup {
 		groups = append(groups, scheduleGroup{Indices: pending})
 		pending = nil
 	}
-	for index, binding := range bindings {
-		if binding.Descriptor.ID != "" && binding.Descriptor.Concurrency == config.ModuleConcurrencyProbe {
+	for index, definition := range definitions {
+		if definition.Descriptor.ID != "" && definition.Descriptor.Concurrency == module.ConcurrencyProbe {
 			pending = append(pending, index)
 			continue
 		}

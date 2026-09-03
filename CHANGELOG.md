@@ -9,6 +9,9 @@
 
 ## Unreleased
 
+- 内部组合架构统一为显式 bootstrap 加不可变强类型 Command、Module 和 Tool Catalog：每个内建模块的 metadata 与 executor 只在 `probe.Definition` 中声明一次，旧的 config/probe 重复模块来源与 runner binding 层已移除。
+- 本次重构不改变 CLI、config、模块 ID、档位归属、exposure、`ecs.plan/v1`、report/compare/submission schema、评分逻辑，或 benchmark 的方法、参数与测量语义。
+
 ## 0.7.21 — 2026-09-01
 
 - 合并重复了两遍的固定语料构建：`build_corpus.sh` 与 `build_tools.sh` 此前各写一遍下载、解压、按 `lock.json` 顺序拼接和校验，现在统一由 `scripts/lib/corpus.sh` 的 `ecs_build_silesia_corpus` 实现；带重试的下载加摘要校验提到 `scripts/lib/common.sh` 的 `ecs_download_sha256`，`build_tools.sh` 不再自带一份。

@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 type resolvedRunConfig struct {
@@ -52,7 +53,7 @@ func (f *runLanguageFlag) Set(value string) error {
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
-func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error) {
+func resolveRunConfig(catalog module.Catalog, args []string, stderr io.Writer) (resolvedRunConfig, error) {
 	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
 	parseOutput := &bytes.Buffer{}
 	flags.SetOutput(parseOutput)
@@ -99,11 +100,11 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	yesFlag := flags.Bool("yes", false, "flag.yes")
 	strictFlag := flags.Bool("strict", false, "flag.strict")
 	versionFlag := flags.Bool("version", false, "flag.version")
-	flags.Usage = func() { printRunHelp(parseOutput, flags) }
+	flags.Usage = func() { printRunHelp(catalog, parseOutput, flags) }
 	if err := flags.Parse(args); err != nil {
 		if *helpFlag || *hFlag || errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(stderr)
-			printRunHelp(stderr, flags)
+			printRunHelp(catalog, stderr, flags)
 			return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
 		}
 		_, _ = io.Copy(stderr, parseOutput)
@@ -117,7 +118,7 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	}
 	if *helpFlag || *hFlag {
 		flags.SetOutput(stderr)
-		printRunHelp(stderr, flags)
+		printRunHelp(catalog, stderr, flags)
 		return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
 	}
 	explicit := make(map[string]bool)
@@ -142,11 +143,11 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	// Keep one precedence pipeline: built-in defaults selected by profile, then
 	// config-file values, then only explicitly supplied CLI values. Callers
 	// apply the final Runtime validation after this resolver returns.
-	cfg, err := config.Defaults(profile)
+	cfg, err := config.Defaults(catalog, profile)
 	if err != nil {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 	}
-	if err := config.ApplyFile(&cfg, fileConfig); err != nil {
+	if err := config.ApplyFile(catalog, &cfg, fileConfig); err != nil {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 	}
 	if cfg.Output == "" {
@@ -292,14 +293,14 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	}
 	named := config.ParseList(*onlyFlag)
 	skipped := config.ParseList(*skipFlag)
-	if err := config.ValidateModuleSelection(named, skipped); err != nil {
+	if err := config.ValidateModuleSelection(catalog, named, skipped); err != nil {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 	}
-	cfg.Modules = config.SelectModules(cfg.Modules, named, skipped)
-	if err := config.CheckModuleExposure(named, cfg.Exposure); err != nil {
+	cfg.Modules = config.SelectModules(catalog, cfg.Modules, named, skipped)
+	if err := config.CheckModuleExposure(catalog, named, cfg.Exposure); err != nil {
 		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
 	}
-	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure)
+	cfg.Modules = config.FilterModulesByExposure(catalog, cfg.Modules, cfg.Exposure)
 
 	return resolvedRunConfig{
 		Runtime:       cfg,
@@ -313,7 +314,7 @@ func resolveRunConfig(args []string, stderr io.Writer) (resolvedRunConfig, error
 	}, nil
 }
 
-func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
+func printRunHelp(catalog module.Catalog, writer io.Writer, flags *flag.FlagSet) {
 	type savedUsage struct {
 		parsedFlag *flag.Flag
 		usage      string
@@ -333,6 +334,6 @@ func printRunHelp(writer io.Writer, flags *flag.FlagSet) {
 	}()
 	fmt.Fprintln(writer, i18n.T("help.runUsage"))
 	flags.PrintDefaults()
-	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(config.ModuleIDs(), ","))
+	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(catalog.IDs(), ","))
 	fmt.Fprintln(writer, i18n.T("cli.sources")+": "+strings.Join(config.IPQualitySourceIDs(), ","))
 }

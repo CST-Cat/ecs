@@ -4,22 +4,23 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 // Defaults builds the runtime baseline for a profile. Profiles only select
 // modules; probe budgets and endpoint pools remain identical for comparable
 // measurements.
-func Defaults(profile string) (Runtime, error) {
+func Defaults(catalog module.Catalog, profile string) (Runtime, error) {
 	if profile == "" {
 		profile = ProfileStandard
 	}
-	modules := ModulesForProfile(profile)
+	modules := ModulesForProfile(catalog, profile)
 	if modules == nil {
 		return Runtime{}, i18n.Errorf("err.unknownProfile", profile)
 	}
 	base := Runtime{
 		Profile:          profile,
-		Exposure:         ExposureThirdParty,
+		Exposure:         module.ExposureThirdParty,
 		Reveal:           false,
 		IPVersion:        IPVersionAuto,
 		IPQualitySources: []string{"all"},

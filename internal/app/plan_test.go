@@ -13,7 +13,36 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
+	"ecs/internal/tool"
 )
+
+func TestBuildExecutionPlanDerivesTypedToolStaging(t *testing.T) {
+	application := newApplication()
+	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
+		Modules: []string{"route", "backtrace", "ookla", "zstd", "cpu", "latency"},
+	})
+	if !reflect.DeepEqual(plan.RequiredTools, []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}) {
+		t.Fatalf("required tools = %v", plan.RequiredTools)
+	}
+	if !reflect.DeepEqual(plan.Staging.ToolArchiveTools, []string{"nexttrace-tiny", "zstd", "sysbench", "ping"}) {
+		t.Fatalf("archive tools = %v", plan.Staging.ToolArchiveTools)
+	}
+	if !plan.Staging.ToolArchiveRequired || !plan.Staging.ZstdCorpusRequired || !plan.Staging.NextTraceTinyRequired || !plan.Staging.OoklaPackageRequired {
+		t.Fatalf("staging flags = %+v", plan.Staging)
+	}
+	if plan.Staging.NextTraceSource != string(tool.StagingSourceNextTraceArchitecture) || plan.Staging.OoklaPackageSource != string(tool.StagingSourceOoklaSignedPackage) {
+		t.Fatalf("special staging sources = %+v", plan.Staging)
+	}
+}
+
+func TestApplyToolStagingLeavesNoCapabilityForNone(t *testing.T) {
+	var staging planStaging
+	applyToolStaging(&staging, tool.Definition{ID: "fixture", Staging: tool.StagingPolicy{Category: tool.StagingNone}})
+	if staging.ToolArchiveRequired || len(staging.ToolArchiveTools) != 0 || staging.NextTraceTinyRequired || staging.NextTraceSource != "" || staging.OoklaPackageRequired || staging.OoklaPackageSource != "" || staging.ZstdCorpusRequired {
+		t.Fatalf("none staging changed plan facts: %+v", staging)
+	}
+}
 
 func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -206,7 +235,7 @@ func TestPlanCommandKeepsOptionLikeNameValueFromEarlyLanguageScan(t *testing.T) 
 				t.Fatalf("plan profile = %q, want %q", plan.Profile, config.ProfileStandard)
 			}
 
-			resolved, err := resolveRunConfig(test.args[1:], &bytes.Buffer{})
+			resolved, err := resolveRunConfig(newApplication().modules, test.args[1:], &bytes.Buffer{})
 			if err != nil {
 				t.Fatalf("formal parser rejected option-like name value: %v", err)
 			}
@@ -350,7 +379,7 @@ func TestPlanKeepsTopLevelEgressFactsWhenModulesOnlyExposeIDs(t *testing.T) {
 
 func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	var stderr bytes.Buffer
-	resolved, err := resolveRunConfig([]string{
+	resolved, err := resolveRunConfig(newApplication().modules, []string{
 		"--only", "system",
 		"--exposure", "any", "--reveal=true",
 		// The plan-derived values are appended after the original CLI values.
@@ -359,14 +388,14 @@ func TestResolveRunConfigPlanOverridesAreLastWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve run config: %v (stderr=%q)", err, stderr.String())
 	}
-	if resolved.Runtime.Exposure != config.ExposureLocal || resolved.Runtime.Reveal {
+	if resolved.Runtime.Exposure != module.ExposureLocal || resolved.Runtime.Reveal {
 		t.Fatalf("last exposure/reveal values did not win: exposure=%s reveal=%t", resolved.Runtime.Exposure, resolved.Runtime.Reveal)
 	}
 }
 
 func TestBacktraceCLIUsesExplicitCarrierSyntax(t *testing.T) {
 	var stderr bytes.Buffer
-	resolved, err := resolveRunConfig([]string{
+	resolved, err := resolveRunConfig(newApplication().modules, []string{
 		"--only", "backtrace", "--exposure", "public",
 		"--backtrace-targets", "telecom:Shanghai Telecom=202.96.209.133,unicom:IPv6 target=[2001:db8::1]",
 	}, &stderr)
@@ -397,7 +426,7 @@ func TestBacktraceCLIFailsClosedWithoutExplicitCarrier(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stderr bytes.Buffer
-			if _, err := resolveRunConfig(append([]string{"--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
+			if _, err := resolveRunConfig(newApplication().modules, append([]string{"--only", "backtrace", "--exposure", "public"}, test.args...), &stderr); err == nil || !strings.Contains(err.Error(), "backtrace") {
 				t.Fatalf("resolve invalid backtrace target = %v (stderr=%q)", err, stderr.String())
 			}
 		})

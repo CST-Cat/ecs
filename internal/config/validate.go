@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 // ValidateFormats enforces the output formats supported by the current
@@ -28,9 +29,9 @@ func ValidateFormats(formats []string) error {
 	return nil
 }
 
-func Validate(runtime Runtime) error {
+func Validate(catalog module.Catalog, runtime Runtime) error {
 	knownModules := make(map[string]bool)
-	for _, id := range ModuleIDs() {
+	for _, id := range catalog.IDs() {
 		knownModules[id] = true
 	}
 	if len(runtime.Modules) == 0 {
@@ -54,8 +55,8 @@ func Validate(runtime Runtime) error {
 	// Recheck the module set here so callers constructing Runtime directly
 	// cannot bypass the external-contact limit.
 	for _, id := range runtime.Modules {
-		if !AllowsModule(runtime.Exposure, id) {
-			info := exposureFor(id)
+		if !AllowsModule(catalog, runtime.Exposure, id) {
+			info := exposureFor(catalog, id)
 			return i18n.Errorf("err.moduleAboveLimitFix", id, info.Level.String(), runtime.Exposure.String())
 		}
 	}

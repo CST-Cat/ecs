@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
@@ -27,6 +28,14 @@ type runnerTestProbe struct {
 	runs       *int
 	result     model.Result
 	panicValue any
+}
+
+func runnerCatalog() module.Catalog {
+	catalog, err := probe.CatalogFromDefinitions(probe.BuiltinDefinitions())
+	if err != nil {
+		panic(err)
+	}
+	return catalog
 }
 
 func TestNewRunIDHas32LowercaseHexCharactersAndDoesNotRepeat(t *testing.T) {
@@ -58,11 +67,11 @@ func TestRunReturnsErrorWithoutReportWhenRandomReadFails(t *testing.T) {
 		runIDRandomReader = originalReader
 	})
 
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := Run(context.Background(), cfg, nil)
+	report, err := Run(context.Background(), probe.BuiltinDefinitions(), runnerCatalog(), cfg, nil)
 	if !errors.Is(err, randomError) {
 		t.Fatalf("Run() error = %v, want wrapped random source failure", err)
 	}
@@ -98,12 +107,12 @@ func (p *runnerTestProbe) Run(context.Context, probe.Environment) model.Result {
 	return result
 }
 
-func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
-	cfg, err := config.Defaults(config.ProfileStandard)
+func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor, ok := config.ModuleDescriptorFor("system")
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
@@ -120,8 +129,8 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 			Evidence: model.NewEvidence(1, 2, "sample"),
 		},
 	}
-	first := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
-	second := runBinding(context.Background(), moduleBinding{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	first := runDefinition(context.Background(), probe.Definition{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
+	second := runDefinition(context.Background(), probe.Definition{Descriptor: descriptor, Probe: item}, cfg, probe.Environment{}, true)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("runner result changed between identical machine runs:\nfirst=%+v\nsecond=%+v", first, second)
 	}
@@ -134,16 +143,16 @@ func TestRunBindingKeepsCanonicalMachineMetadata(t *testing.T) {
 	}
 }
 
-func TestRunBindingNormalizesMalformedEvidence(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor("system")
+func TestRunDefinitionNormalizesMalformedEvidence(t *testing.T) {
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := runBinding(context.Background(), moduleBinding{
+	got := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusOK,
@@ -155,17 +164,17 @@ func TestRunBindingNormalizesMalformedEvidence(t *testing.T) {
 	}
 }
 
-func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
-	descriptor, _ := config.ModuleDescriptorFor("network")
-	localDescriptor, _ := config.ModuleDescriptorFor("system")
-	defaultConfig, err := config.Defaults(config.ProfileStandard)
+func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
+	descriptor, _ := runnerCatalog().Lookup("network")
+	localDescriptor, _ := runnerCatalog().Lookup("system")
+	defaultConfig, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
 		name            string
-		descriptor      config.ModuleDescriptor
-		configExposure  config.Exposure
+		descriptor      module.Descriptor
+		configExposure  module.Exposure
 		networkRunnable bool
 		status          model.Status
 		wantStatus      model.Status
@@ -175,12 +184,12 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 		wantMethodology bool
 		wantFailure     bool
 	}{
-		{name: "offline network", descriptor: descriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
-		{name: "unavailable family", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
-		{name: "network executes", descriptor: descriptor, configExposure: config.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
-		{name: "ok fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
-		{name: "warning fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
-		{name: "error fallback", descriptor: localDescriptor, configExposure: config.ExposureLocal, networkRunnable: true, status: model.StatusError, wantStatus: model.StatusError, wantValid: 0, wantRuns: 1, wantFailure: true},
+		{name: "offline network", descriptor: descriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
+		{name: "unavailable family", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
+		{name: "network executes", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
+		{name: "ok fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
+		{name: "warning fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
+		{name: "error fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusError, wantStatus: model.StatusError, wantValid: 0, wantRuns: 1, wantFailure: true},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -191,7 +200,7 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 			if test.status == model.StatusError {
 				item.result.AddFailure(model.Failure{Category: model.FailureUnknown, Stage: "fixture", Target: test.descriptor.ID, Message: "fixture failure"})
 			}
-			got := runBinding(context.Background(), moduleBinding{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
+			got := runDefinition(context.Background(), probe.Definition{Descriptor: test.descriptor, Probe: item}, cfg, probe.Environment{}, test.networkRunnable)
 			if got.Status != test.wantStatus || got.Evidence == nil || got.Evidence.Valid != test.wantValid || got.Evidence.Expected != 1 || runs != test.wantRuns {
 				t.Fatalf("result = %+v, want status=%s evidence=%d/1", got, test.wantStatus, test.wantValid)
 			}
@@ -210,12 +219,12 @@ func TestRunBindingSkipAndEvidenceFallback(t *testing.T) {
 	}
 }
 
-func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
-	descriptor, ok := config.ModuleDescriptorFor("system")
+func TestRunDefinitionPreservesWarningFailureOwnership(t *testing.T) {
+	descriptor, ok := runnerCatalog().Lookup("system")
 	if !ok {
 		t.Fatal("system descriptor missing")
 	}
-	cfg, err := config.Defaults(config.ProfileStandard)
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +240,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 		{name: "warning finding", result: model.Result{ID: "nat", Status: model.StatusWarning}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := runBinding(context.Background(), moduleBinding{
+			got := runDefinition(context.Background(), probe.Definition{
 				Descriptor: descriptor,
 				Probe:      &runnerTestProbe{result: test.result},
 			}, cfg, probe.Environment{}, true)
@@ -244,7 +253,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	wantFailure := model.Failure{
 		Category: model.FailureDNS, Stage: "query", Target: "fixture", Retryable: true, Count: 1, Message: "fixture DNS failure",
 	}
-	owned := runBinding(context.Background(), moduleBinding{
+	owned := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusWarning,
@@ -257,7 +266,7 @@ func TestRunBindingPreservesWarningFailureOwnership(t *testing.T) {
 	}
 
 	wantErrorFailure := model.Failure{Category: model.FailurePermissionDenied, Count: 2}
-	ownedError := runBinding(context.Background(), moduleBinding{
+	ownedError := runDefinition(context.Background(), probe.Definition{
 		Descriptor: descriptor,
 		Probe: &runnerTestProbe{result: model.Result{
 			Status:   model.StatusError,

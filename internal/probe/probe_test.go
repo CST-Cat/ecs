@@ -1,26 +1,14 @@
 package probe
 
-import (
-	"testing"
+import "testing"
 
-	"ecs/internal/config"
-)
-
-func TestBuiltinsHaveUniqueIDs(t *testing.T) {
+func TestBuiltinDefinitionsHaveUniqueIDs(t *testing.T) {
 	seen := make(map[string]bool)
-	builtins := Builtins()
-	descriptors := config.ModuleDescriptors()
-	if len(builtins) != len(descriptors) {
-		t.Fatalf("builtin count = %d, descriptor count = %d", len(builtins), len(descriptors))
-	}
-	known := make(map[string]bool, len(descriptors))
-	for _, descriptor := range descriptors {
-		known[descriptor.ID] = true
-	}
-	for _, item := range builtins {
-		if item == nil || item.ID() == "" || seen[item.ID()] || !known[item.ID()] {
-			t.Fatalf("invalid or duplicate builtin probe: %#v", item)
+	definitions := BuiltinDefinitions()
+	for _, definition := range definitions {
+		if definition.Probe == nil || definition.Probe.ID() == "" || seen[definition.Probe.ID()] || definition.Descriptor.ID != definition.Probe.ID() {
+			t.Fatalf("invalid or duplicate builtin definition: %#v", definition)
 		}
-		seen[item.ID()] = true
+		seen[definition.Probe.ID()] = true
 	}
 }

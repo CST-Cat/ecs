@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/module"
 )
 
 func TestPrompterChooseAcceptsSelection(t *testing.T) {
@@ -94,11 +95,11 @@ func TestPrompterUsesOpenedTTYForInputAndOutput(t *testing.T) {
 }
 
 func TestWizardProfileSwitchOnlyChangesProfileAndModules(t *testing.T) {
-	runtime, err := config.Defaults(config.ProfileStandard)
+	runtime, err := config.Defaults(newApplication().modules, config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.Exposure = config.ExposureConsent
+	runtime.Exposure = module.ExposureConsent
 	runtime.Reveal = true
 	runtime.IPVersion = config.IPVersion6
 	runtime.IPQualitySources = []string{"ipinfo"}
@@ -125,11 +126,11 @@ func TestWizardProfileSwitchOnlyChangesProfileAndModules(t *testing.T) {
 	runtime.OoklaServers = []config.OoklaServer{{Carrier: config.OoklaCarrierTelecom, ID: 1}}
 	want := runtime
 	want.Profile = config.ProfileFull
-	want.Modules = config.ModulesForProfile(config.ProfileFull)
+	want.Modules = config.ModulesForProfile(newApplication().modules, config.ProfileFull)
 
 	tty := newWizardTestTTY("2\n", false)
 	withWizardTTY(t, tty)
-	ok, err := runWizard(context.Background(), &runtime)
+	ok, err := runWizard(context.Background(), newApplication().modules, &runtime)
 	if err != nil || !ok {
 		t.Fatalf("runWizard = %v, %v", ok, err)
 	}
@@ -154,7 +155,7 @@ func TestWizardCancellationClosesTTYAndDiffersFromEOF(t *testing.T) {
 	}, 1)
 	var runtime config.Runtime
 	go func() {
-		ok, err := runWizard(ctx, &runtime)
+		ok, err := runWizard(ctx, newApplication().modules, &runtime)
 		result <- struct {
 			ok  bool
 			err error
@@ -183,7 +184,7 @@ func TestWizardWithoutTerminalDoesNotBlock(t *testing.T) {
 		t.Skip("当前环境有可用终端，跳过无终端路径测试")
 	}
 	var cfg config.Runtime
-	if ok, err := runWizard(context.Background(), &cfg); err != nil || !ok {
+	if ok, err := runWizard(context.Background(), newApplication().modules, &cfg); err != nil || !ok {
 		t.Fatal("无终端时向导必须放行")
 	}
 }

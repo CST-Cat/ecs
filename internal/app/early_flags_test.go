@@ -10,6 +10,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func TestGlobalLanguagePrefixConsumesOnlyLeadingLanguageFlags(t *testing.T) {
@@ -157,7 +158,8 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	resolved, err := resolveRunConfig([]string{
+	catalog := newApplication().modules
+	resolved, err := resolveRunConfig(catalog, []string{
 		"-config", configPath, "-profile", config.ProfileStandard,
 		"--only", "system",
 	}, &stderr)
@@ -167,12 +169,12 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	if resolved.Runtime.Profile != config.ProfileStandard {
 		t.Fatalf("CLI profile did not override config profile: %q", resolved.Runtime.Profile)
 	}
-	if resolved.Runtime.Exposure != config.ExposureLocal || !resolved.Runtime.Reveal || !reflect.DeepEqual(resolved.Runtime.Formats, []string{"md"}) || resolved.Runtime.Output != "from-file" {
+	if resolved.Runtime.Exposure != module.ExposureLocal || !resolved.Runtime.Reveal || !reflect.DeepEqual(resolved.Runtime.Formats, []string{"md"}) || resolved.Runtime.Output != "from-file" {
 		t.Fatalf("config values were not retained under CLI profile override: exposure=%s reveal=%t formats=%v output=%q", resolved.Runtime.Exposure, resolved.Runtime.Reveal, resolved.Runtime.Formats, resolved.Runtime.Output)
 	}
 
 	var overlayStderr bytes.Buffer
-	overlay, err := resolveRunConfig([]string{
+	overlay, err := resolveRunConfig(catalog, []string{
 		"--config", configPath, "--profile", config.ProfileStandard,
 		"--exposure", "any", "--reveal=false", "--format", "json", "--output", "from-cli",
 		"--only", "system",
@@ -180,12 +182,12 @@ func TestRunConfigShortFormsAndCLIProfilePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("explicit CLI overlay: %v (stderr=%q)", err, overlayStderr.String())
 	}
-	if overlay.Runtime.Exposure != config.ExposureConsent || overlay.Runtime.Reveal || !reflect.DeepEqual(overlay.Runtime.Formats, []string{"json"}) || overlay.Runtime.Output != "from-cli" {
+	if overlay.Runtime.Exposure != module.ExposureConsent || overlay.Runtime.Reveal || !reflect.DeepEqual(overlay.Runtime.Formats, []string{"json"}) || overlay.Runtime.Output != "from-cli" {
 		t.Fatalf("explicit CLI values did not override config: exposure=%s reveal=%t formats=%v output=%q", overlay.Runtime.Exposure, overlay.Runtime.Reveal, overlay.Runtime.Formats, overlay.Runtime.Output)
 	}
 
 	var equalStderr bytes.Buffer
-	equalResolved, err := resolveRunConfig([]string{
+	equalResolved, err := resolveRunConfig(catalog, []string{
 		"--config=" + configPath, "--only=system",
 	}, &equalStderr)
 	if err != nil {
@@ -201,7 +203,7 @@ func TestRunConfigCanonicalizesEmptyExplicitProfile(t *testing.T) {
 		{"--profile="},
 		{"--profile", ""},
 	} {
-		resolved, err := resolveRunConfig(args, &bytes.Buffer{})
+		resolved, err := resolveRunConfig(newApplication().modules, args, &bytes.Buffer{})
 		if err != nil {
 			t.Fatalf("resolveRunConfig(%q) = %v, want empty profile to select standard", args, err)
 		}
@@ -209,7 +211,7 @@ func TestRunConfigCanonicalizesEmptyExplicitProfile(t *testing.T) {
 			t.Fatalf("resolveRunConfig(%q) profile = %q, want %q", args, resolved.Runtime.Profile, config.ProfileStandard)
 		}
 	}
-	if _, err := resolveRunConfig([]string{"--profile=invalid"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "invalid") {
+	if _, err := resolveRunConfig(newApplication().modules, []string{"--profile=invalid"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid non-empty profile error = %v, want rejection", err)
 	}
 }

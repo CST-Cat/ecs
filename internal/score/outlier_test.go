@@ -105,11 +105,11 @@ func TestDetectOutliersIsRepresentationInvariant(t *testing.T) {
 			multi = &multiValue
 		}
 		report := outlierReportFixture(fmt.Sprintf("representation-%d", index), value, multi)
-		submission, err := BuildSubmission(report, SubmissionOptions{})
+		submission, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reportSample, err := OutlierSampleFromReport(report)
+		reportSample, err := OutlierSampleFromReport(scoreTestCatalog(), report)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,11 +149,11 @@ func TestDetectOutliersMixedRepresentationsAreInvariant(t *testing.T) {
 			multi = &multiValue
 		}
 		report := outlierReportFixture(fmt.Sprintf("mixed-%d", index), value, multi)
-		submission, err := BuildSubmission(report, SubmissionOptions{})
+		submission, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		reportSample, err := OutlierSampleFromReport(report)
+		reportSample, err := OutlierSampleFromReport(scoreTestCatalog(), report)
 		if err != nil {
 			t.Fatal(err)
 		}

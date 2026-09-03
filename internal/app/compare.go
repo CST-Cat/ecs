@@ -17,7 +17,7 @@ import (
 	reporter "ecs/internal/report"
 )
 
-func compareCommand(args []string, stdout, stderr io.Writer) int {
+func compareCommand(_ application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs compare", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	outputFormatsFlag := flags.String("format", "json,md,html", i18n.T("compare.flag.format"))

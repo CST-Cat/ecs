@@ -21,8 +21,8 @@ import (
 	"ecs/internal/ui"
 )
 
-func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	resolved, err := resolveRunConfig(args, stderr)
+func runCommand(app application, ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	resolved, err := resolveRunConfig(app.modules, args, stderr)
 	if err != nil {
 		var parseErr runFlagParseError
 		if errors.As(err, &parseErr) {
@@ -46,7 +46,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if resolved.Interactive && !resolved.Yes {
-		wizardOK, wizardErr := runWizard(ctx, &cfg)
+		wizardOK, wizardErr := runWizard(ctx, app.modules, &cfg)
 		if wizardErr != nil {
 			if errors.Is(wizardErr, context.Canceled) {
 				return 130
@@ -58,7 +58,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return 0
 		}
 	}
-	if err := config.Validate(cfg); err != nil {
+	if err := config.Validate(app.modules, cfg); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), err)
 		return 1
 	}
@@ -73,11 +73,11 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 
 	terminal := ui.NewWithColor(stdout, terminalColor)
-	terminal.Header(cfg, probe.EstimateFor(cfg))
+	terminal.Header(cfg, probe.EstimateFor(app.modules, cfg))
 	progress := terminal.BeginProgress(len(cfg.Modules))
 	raw, runErr := func() (model.Report, error) {
 		defer progress.Stop()
-		return runner.Run(ctx, cfg, func(event runner.Progress) {
+		return runner.Run(ctx, app.definitionsInOrder(), app.modules, cfg, func(event runner.Progress) {
 			if event.TitleKey != "" {
 				if title := i18n.T(event.TitleKey); title != event.TitleKey {
 					event.Title = title

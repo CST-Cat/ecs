@@ -278,8 +278,8 @@ func TestSystemEvidenceExcludesUnavailablePlaceholders(t *testing.T) {
 
 func TestSystemBuiltinUsesDirectProbeAndLiveResultHasNoDuplicateFacts(t *testing.T) {
 	systemCount := 0
-	for _, builtin := range Builtins() {
-		if _, ok := builtin.(systemProbe); ok {
+	for _, definition := range BuiltinDefinitions() {
+		if _, ok := definition.Probe.(systemProbe); ok {
 			systemCount++
 		}
 	}

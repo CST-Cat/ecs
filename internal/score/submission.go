@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"ecs/internal/config"
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
 
 // SubmissionSchema 是提交文件的格式标识。
@@ -115,7 +115,7 @@ func SampleIDForRunID(runID string) (string, error) {
 }
 
 // BuildSubmission 从完整报告提取一份可公开的提交。
-func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, error) {
+func BuildSubmission(catalog module.Catalog, data model.Report, options SubmissionOptions) (Submission, error) {
 	sampleID, err := SampleIDForRunID(data.Run.ID)
 	if err != nil {
 		return Submission{}, err
@@ -134,7 +134,7 @@ func BuildSubmission(data model.Report, options SubmissionOptions) (Submission, 
 		Schema:        SubmissionSchema,
 		SampleID:      sampleID,
 		Host:          extractHostSpec(data, values),
-		Tool:          extractToolSpec(data),
+		Tool:          extractToolSpec(data, catalog),
 		RanAt:         data.Run.StartedAt,
 		Metrics:       metrics,
 		Profile:       data.Run.Profile,
@@ -226,15 +226,15 @@ func ExtractSubmissionMetadata(data model.Report) (provider, region string) {
 // OutlierSampleFromReport reuses the public submission projection so a full
 // report and its derived submission expose the same ID, tier input, and metric
 // values to the artifact-independent outlier detector.
-func OutlierSampleFromReport(data model.Report) (OutlierSample, error) {
-	submission, err := BuildSubmission(data, SubmissionOptions{})
+func OutlierSampleFromReport(catalog module.Catalog, data model.Report) (OutlierSample, error) {
+	submission, err := BuildSubmission(catalog, data, SubmissionOptions{})
 	if err != nil {
 		return OutlierSample{}, err
 	}
 	return submission.OutlierSample(), nil
 }
 
-func extractToolSpec(data model.Report) ToolSpec {
+func extractToolSpec(data model.Report, catalog module.Catalog) ToolSpec {
 	spec := ToolSpec{ECS: data.Tool.Version}
 	dimensions := Dimensions()
 	scoreModuleIDs := make(map[string]struct{}, len(dimensions))
@@ -249,7 +249,7 @@ func extractToolSpec(data model.Report) ToolSpec {
 			if field.Key != "version" {
 				continue
 			}
-			descriptor, ok := config.ModuleDescriptorFor(result.ID)
+			descriptor, ok := catalog.Lookup(result.ID)
 			if !ok {
 				continue
 			}

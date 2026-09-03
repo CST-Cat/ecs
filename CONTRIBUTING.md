@@ -56,17 +56,29 @@ shell 语法、发布中间目录忽略规则、工具包布局回归和各架�
 
 ## 模块扩展边界
 
-模块的执行与展示元数据集中在 [`internal/config/modules.go`](internal/config/modules.go)：
-模块 ID、配置档归属、外联级别、并发与调度元数据、方法学、所需工具、文案键和估算均由
-`ModuleDescriptor` 维护。评分成员资格、评分维度标识和评分指标只由
-`internal/score.Dimensions()` 拥有，不从 `ModuleDescriptor` 派生。探针包通过 `internal/probe.Builtins` 提供强类型内建探针，
-`runner` 在执行边界按 ID 显式绑定；不再维护运行时 factory、执行顺序、曝光或方法学副本。
+每个内建模块的元数据与执行器只在
+[`internal/probe/definitions.go`](internal/probe/definitions.go) 中声明一次，作为强类型
+`probe.Definition`；其中的 `module.Descriptor` 保存模块 ID、档位归属、曝光、调度、方法学、所需工具、
+文案键和估算，具体探针实现与 descriptor 同处一个 Definition。每次调用
+[`internal/app/bootstrap.go`](internal/app/bootstrap.go) 的组合根都会校验这些 Definitions，构造不可变的
+Command、Module 和 Tool Catalog，并将显式 Catalog 值传给 config、runner、list、plan 和 wizard 等消费者。
 
-新增或删除模块后，先运行：
+Catalog 没有 `init` 注册或运行时 `Register`、`Delete`、`Replace` API，也没有可变全局 registry、`any`、
+反射或弱类型 factory/DI。模块的 `RequiredTools` 只引用 Tool Catalog 中的工具 ID；Tool Catalog 负责工具身份、
+doctor 用途、版本验证策略和 plan staging 能力，仍与 [`internal/toolsmanifest`](internal/toolsmanifest) 的发布包
+内容以及 `run.sh` 的下载、安装和执行事实分离。工具 URL、校验和、release asset 和 shell 下载命令不属于 Tool
+Catalog。
+
+评分成员资格、维度标识、指标和权重仍只由 `internal/score.Dimensions()` 独立维护，不从模块 Definition 派生。
+`config.Runtime` 等 flat 配置字段仍保持显式；增加模块专属选项可能需要同步修改 config 与 flags，这不提供插件式
+动态模块或动态 schema。
+
+新增或删除模块后，应在 `definitions.go` 中同时更新唯一的 Definition，并检查对应的 descriptor、探针、所需工具
+和 score 事实，再运行：
 
 ```sh
 go run ./cmd/ecs list
-go test ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./internal/app ./internal/score
+go test ./internal/module ./internal/tool ./internal/architecture ./internal/config ./internal/probe ./internal/runner ./internal/i18n ./internal/app ./internal/score ./internal/toolsmanifest
 sh -n run.sh
 ```
 

@@ -11,7 +11,7 @@ import (
 	"ecs/internal/i18n"
 )
 
-func listCommand(args []string, stdout, stderr io.Writer) int {
+func listCommand(app application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs list", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	if err := flags.Parse(args); err != nil {
@@ -29,7 +29,7 @@ func listCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "  %-10s %s\n", profile, i18n.T("profile."+profile))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.modulesHeader"))
-	for _, descriptor := range config.ModuleDescriptors() {
+	for _, descriptor := range app.modules.Descriptors() {
 		fmt.Fprintf(stdout, "  %-10s %-11s %s\n", descriptor.ID, descriptor.Exposure.String(), i18n.T(descriptor.DescriptionKey))
 	}
 	fmt.Fprintln(stdout, "\n"+i18n.T("list.exposureHeader"))

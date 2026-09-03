@@ -101,10 +101,10 @@ func (e Egress) IPFor(version string) (string, error) {
 // DiscoverEgress 按需发现出口地址，每个协议族只查一次。
 func DiscoverEgress(ctx context.Context, env Environment) Egress {
 	cfg := env.Config
-	if cfg.OfflineOnly() || !config.RequiresEgressIP(cfg.Modules) {
+	if cfg.OfflineOnly() || !config.RequiresEgressIP(env.Catalog, cfg.Modules) {
 		return Egress{}
 	}
-	useIntel := config.EgressNeedsIPIntel(cfg.Modules, cfg.Exposure)
+	useIntel := config.EgressNeedsIPIntel(env.Catalog, cfg.Modules, cfg.Exposure)
 	versions := config.IPVersions(cfg.IPVersion)
 
 	result := Egress{Attempted: true, ByVersion: make(map[string]EgressAddress, len(versions))}

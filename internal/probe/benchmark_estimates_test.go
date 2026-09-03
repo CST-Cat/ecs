@@ -8,6 +8,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 )
 
 func TestEstimateSpeedNoteIsLocalized(t *testing.T) {
@@ -16,7 +17,7 @@ func TestEstimateSpeedNoteIsLocalized(t *testing.T) {
 
 	runtime := config.Runtime{
 		Modules:       []string{"speed"},
-		Exposure:      config.ExposureThirdParty,
+		Exposure:      module.ExposureThirdParty,
 		IPerfTargets:  []config.IPerfEndpoint{{Name: "a"}, {Name: "b"}, {Name: "c"}},
 		IPerfDuration: 7 * time.Second,
 		SpeedThreads:  11,
@@ -31,7 +32,7 @@ func TestEstimateSpeedNoteIsLocalized(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			i18n.Set(test.language)
-			notes := EstimateFor(runtime).Notes
+			notes := EstimateFor(testCatalog(), runtime).Notes
 			if len(notes) != 1 {
 				t.Fatalf("estimate notes = %#v, want one speed note", notes)
 			}
@@ -60,9 +61,9 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 		IPVersion:       config.IPVersionAuto,
 		RouteTargets:    []config.Endpoint{{Name: "a"}, {Name: "b"}},
 	}
-	descriptor := func(id string) config.ModuleDescriptor {
+	descriptor := func(id string) module.Descriptor {
 		t.Helper()
-		value, ok := config.ModuleDescriptorFor(id)
+		value, ok := testCatalog().Lookup(id)
 		if !ok {
 			t.Fatalf("descriptor %q missing", id)
 		}
@@ -92,9 +93,9 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			var item config.ModuleDescriptor
+			var item module.Descriptor
 			if test.id == "future" {
-				item = config.ModuleDescriptor{ID: test.id, Estimate: 7 * time.Second, EstimateMode: "future"}
+				item = module.Descriptor{ID: test.id, Estimate: 7 * time.Second, EstimateMode: "future"}
 			} else {
 				item = descriptor(test.id)
 			}
@@ -112,25 +113,25 @@ func TestEstimatePlansAndPublicSummary(t *testing.T) {
 	i18n.Set(i18n.LangZH)
 	online := base
 	online.Modules = []string{"speed"}
-	online.Exposure = config.ExposureThirdParty
-	onlineEstimate := EstimateFor(online)
+	online.Exposure = module.ExposureThirdParty
+	onlineEstimate := EstimateFor(testCatalog(), online)
 	if onlineEstimate.NetworkMiB != -1 || onlineEstimate.DiskMiB != 0 || onlineEstimate.DurationText == "" || !strings.Contains(strings.Join(onlineEstimate.Notes, " "), "iperf3") {
 		t.Fatalf("online estimate = %+v", onlineEstimate)
 	}
 	offline := online
-	offline.Exposure = config.ExposureLocal
-	offlineEstimate := EstimateFor(offline)
+	offline.Exposure = module.ExposureLocal
+	offlineEstimate := EstimateFor(testCatalog(), offline)
 	if offlineEstimate.NetworkMiB != 0 || !strings.Contains(strings.Join(offlineEstimate.Notes, " "), "离线") {
 		t.Fatalf("offline estimate = %+v", offlineEstimate)
 	}
-	routeEstimate := EstimateFor(config.Runtime{Modules: []string{"route"}, Exposure: config.ExposureThirdParty, RouteTargets: base.RouteTargets})
+	routeEstimate := EstimateFor(testCatalog(), config.Runtime{Modules: []string{"route"}, Exposure: module.ExposureThirdParty, RouteTargets: base.RouteTargets})
 	if !strings.Contains(strings.Join(routeEstimate.Notes, " "), "路由") || routeEstimate.DiskMiB != 0 {
 		t.Fatalf("route estimate = %+v", routeEstimate)
 	}
 	disk := online
 	disk.Modules = []string{"disk"}
 	disk.DiskMiB = 123
-	diskEstimate := EstimateFor(disk)
+	diskEstimate := EstimateFor(testCatalog(), disk)
 	if diskEstimate.DiskMiB != 123 || diskEstimate.NetworkMiB != 0 {
 		t.Fatalf("disk estimate = %+v", diskEstimate)
 	}

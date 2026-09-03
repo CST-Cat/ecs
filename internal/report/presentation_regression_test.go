@@ -348,14 +348,14 @@ func runFIOProducerFixture(t *testing.T) model.Result {
 	t.Setenv("PATH", fixtureDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	var disk probe.Probe
-	for _, candidate := range probe.Builtins() {
-		if candidate.ID() == "disk" {
-			disk = candidate
+	for _, definition := range probe.BuiltinDefinitions() {
+		if definition.Probe.ID() == "disk" {
+			disk = definition.Probe
 			break
 		}
 	}
 	if disk == nil {
-		t.Fatal("probe.Builtins() did not expose the disk producer")
+		t.Fatal("probe.BuiltinDefinitions() did not expose the disk producer")
 	}
 	return disk.Run(context.Background(), probe.Environment{Config: config.Runtime{
 		DiskPath: t.TempDir(), DiskMiB: 128,

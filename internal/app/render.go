@@ -15,7 +15,7 @@ import (
 	"ecs/internal/score"
 )
 
-func renderCommand(args []string, stdout, stderr io.Writer) int {
+func renderCommand(_ application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	input := flags.String("input", "", i18n.T("flag.renderInput"))

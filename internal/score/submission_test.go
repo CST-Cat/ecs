@@ -35,7 +35,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if provider != "fixture-cloud" || region != "fixture-region" {
 		t.Fatalf("safe report metadata = %q/%q", provider, region)
 	}
-	submission, err := BuildSubmission(report, SubmissionOptions{
+	submission, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{
 		Region:   "us\x00-west",
 		Provider: "Fixture Cloud",
 		Note:     "diagnostic\x00 fixture",
@@ -105,7 +105,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 		{Provider: "different-provider"},
 		{Note: "different note"},
 	} {
-		changedMetadata, err := BuildSubmission(report, options)
+		changedMetadata, err := BuildSubmission(scoreTestCatalog(), report, options)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	}
 	metadataReport := scoreReportFixture()
 	findResult(&metadataReport, "system").Fields[2].Value = model.RawValue("changed-virtualization")
-	changedMetadata, err := BuildSubmission(metadataReport, SubmissionOptions{
+	changedMetadata, err := BuildSubmission(scoreTestCatalog(), metadataReport, SubmissionOptions{
 		Region: "us-west", Provider: "Fixture Cloud", Note: "diagnostic fixture",
 	})
 	if err != nil {
@@ -128,7 +128,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if !setReportMeasurement(&metricReport, "sysbench_cpu_single_events_s", 151) {
 		t.Fatal("score fixture CPU measurement missing")
 	}
-	changedMetric, err := BuildSubmission(metricReport, SubmissionOptions{
+	changedMetric, err := BuildSubmission(scoreTestCatalog(), metricReport, SubmissionOptions{
 		Region: "us-west", Provider: "Fixture Cloud", Note: "diagnostic fixture",
 	})
 	if err != nil {
@@ -184,14 +184,14 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if provider != "" || region != "" {
 		t.Fatalf("unsafe report metadata was retained: %q/%q", provider, region)
 	}
-	longNote, err := BuildSubmission(report, SubmissionOptions{Note: strings.Repeat("n", maxNoteLength+10)})
+	longNote, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{Note: strings.Repeat("n", maxNoteLength+10)})
 	if err != nil || len([]rune(longNote.Note)) != maxNoteLength {
 		t.Fatalf("long note was not bounded: len=%d err=%v", len([]rune(longNote.Note)), err)
 	}
 }
 
 func TestSubmissionHostSpecUsesSystemMeasurementOwner(t *testing.T) {
-	baseline, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	baseline, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestSubmissionHostSpecUsesSystemMeasurementOwner(t *testing.T) {
 		},
 	})
 
-	submission, err := BuildSubmission(report, SubmissionOptions{})
+	submission, err := BuildSubmission(scoreTestCatalog(), report, SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestSubmissionHostSpecUsesSystemMeasurementOwner(t *testing.T) {
 }
 
 func TestSubmissionLoadAndValidationDiagnostics(t *testing.T) {
-	submission, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	submission, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,23 +320,23 @@ func TestSubmissionLoadAndValidationDiagnostics(t *testing.T) {
 		})
 	}
 	noScore := model.Report{Run: model.RunInfo{ID: "no-score"}, Results: []model.Result{{ID: "system", Status: model.StatusOK}}}
-	if _, err := BuildSubmission(noScore, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "no scoreable measurements") {
+	if _, err := BuildSubmission(scoreTestCatalog(), noScore, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "no scoreable measurements") {
 		t.Fatalf("no-score report error = %v", err)
 	}
 	emptyRunID := scoreReportFixture()
 	emptyRunID.Run.ID = ""
-	if _, err := BuildSubmission(emptyRunID, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "Run.ID") {
+	if _, err := BuildSubmission(scoreTestCatalog(), emptyRunID, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "Run.ID") {
 		t.Fatalf("empty Run.ID report error = %v", err)
 	}
 	noHost := scoreReportFixture()
 	noHost.Results = noHost.Results[1:]
-	if _, err := BuildSubmission(noHost, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "host vcpu must be positive") {
+	if _, err := BuildSubmission(scoreTestCatalog(), noHost, SubmissionOptions{}); err == nil || !strings.Contains(err.Error(), "host vcpu must be positive") {
 		t.Fatalf("missing-host report error = %v", err)
 	}
 }
 
 func TestSubmissionValidatorLengthBoundaries(t *testing.T) {
-	base, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	base, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestSubmissionValidatorLengthBoundaries(t *testing.T) {
 }
 
 func TestSubmissionValidatorRejectsIPAndURLMetadata(t *testing.T) {
-	base, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	base, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestSubmissionValidatorRejectsIPAndURLMetadata(t *testing.T) {
 }
 
 func TestSubmissionJSONSizeBoundary(t *testing.T) {
-	submission, err := BuildSubmission(scoreReportFixture(), SubmissionOptions{})
+	submission, err := BuildSubmission(scoreTestCatalog(), scoreReportFixture(), SubmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

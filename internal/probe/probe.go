@@ -10,10 +10,12 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/failure"
 	"ecs/internal/model"
+	"ecs/internal/module"
 )
 
 type Environment struct {
 	Config     config.Runtime
+	Catalog    module.Catalog
 	HTTPClient *http.Client
 	UserAgent  string
 	// Network is the one local capability snapshot for this run. It is filled
@@ -165,34 +167,5 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 			}
 			return nil
 		},
-	}
-}
-
-// Builtins returns fresh concrete probe values for all built-in modules.
-// Config owns module metadata and canonical order; probe only owns this typed
-// implementation list. There is no runtime registration or mutable index.
-func Builtins() []Probe {
-	return []Probe{
-		systemProbe{},
-		networkProbe{},
-		bgpProbe{},
-		cpuProbe{},
-		zstdProbe{},
-		npbProbe{},
-		memoryProbe{},
-		cryptoProbe{},
-		diskProbe{},
-		dnsProbe{},
-		latencyProbe{},
-		speedProbe{},
-		portsProbe{},
-		natProbe{},
-		blacklistProbe{},
-		appsProbe{},
-		cnSpeedProbe{},
-		ooklaProbe{},
-		mediaProbe{},
-		routeProbe{},
-		backtraceProbe{},
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"ecs/internal/config"
 	"ecs/internal/i18n"
+	"ecs/internal/module"
 	"ecs/internal/probe"
 )
 
@@ -139,10 +140,10 @@ type wizardModule struct {
 	QuestionKey string
 }
 
-func wizardModules() []wizardModule {
+func wizardModules(catalog module.Catalog) []wizardModule {
 	groups := make([]wizardModule, 0)
 	positions := make(map[string]int)
-	for _, descriptor := range config.ModuleDescriptors() {
+	for _, descriptor := range catalog.Descriptors() {
 		if descriptor.WizardGroup == "" {
 			continue
 		}
@@ -163,7 +164,7 @@ func wizardModules() []wizardModule {
 
 // runWizard 引导用户调整配置。返回 false 表示用户放弃本次运行；读取错误
 // （包括因 ctx 取消而关闭终端产生的错误）通过 error 返回，EOF 仍使用默认值。
-func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
+func runWizard(ctx context.Context, catalog module.Catalog, cfg *config.Runtime) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -216,7 +217,7 @@ func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
 	chosen := profiles[profileChoice]
 	if chosen != cfg.Profile {
 		cfg.Profile = chosen
-		cfg.Modules = config.ModulesForProfile(chosen)
+		cfg.Modules = config.ModulesForProfile(catalog, chosen)
 	}
 	prompt.line("")
 
@@ -244,7 +245,7 @@ func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
 	if err == nil {
 		cfg.Exposure = chosenExposure
 	}
-	cfg.Modules = config.FilterModulesByExposure(cfg.Modules, cfg.Exposure)
+	cfg.Modules = config.FilterModulesByExposure(catalog, cfg.Modules, cfg.Exposure)
 	if len(cfg.Modules) == 0 {
 		prompt.line("")
 		prompt.line("%s", prompt.style("33", i18n.T("wizard.noModules")))
@@ -257,7 +258,7 @@ func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
 	for _, id := range cfg.Modules {
 		selected[id] = true
 	}
-	for _, group := range wizardModules() {
+	for _, group := range wizardModules(catalog) {
 		// 当前档位里本来就没有的模块不问——问了也没意义。
 		present := false
 		for _, id := range group.Modules {
@@ -294,7 +295,7 @@ func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
 	cfg.Reveal = reveal
 
 	modules := make([]string, 0, len(selected))
-	for _, id := range config.ModuleIDs() {
+	for _, id := range catalog.IDs() {
 		if selected[id] {
 			modules = append(modules, id)
 		}
@@ -308,7 +309,7 @@ func runWizard(ctx context.Context, cfg *config.Runtime) (bool, error) {
 
 	// 五、确认
 	prompt.line("")
-	estimate := probe.EstimateFor(*cfg)
+	estimate := probe.EstimateFor(catalog, *cfg)
 	prompt.line("%s", prompt.style("1", i18n.T("wizard.summaryTitle")))
 	prompt.line("  %s %s", i18n.T("term.profileLine"), cfg.Profile)
 	prompt.line("  %s %s — %s", i18n.T("report.exposure"), cfg.Exposure.String(), i18n.T("exposure."+cfg.Exposure.String()))
