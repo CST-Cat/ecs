@@ -107,7 +107,7 @@ func resolveImportBindings(file *ast.File) (map[string]string, error) {
 			localName = specification.Name.Name
 			if localName == "." {
 				switch importPath {
-				case moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync":
+				case moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync", "reflect":
 					return nil, fmt.Errorf("dot import of tracked package %q is ambiguous", importPath)
 				default:
 					continue
@@ -415,7 +415,7 @@ func use() {
 }
 
 func TestSourceDetectorsRejectTrackedDotImports(t *testing.T) {
-	for _, importPath := range []string{moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync"} {
+	for _, importPath := range []string{moduleImportPath, probeImportPath, configImportPath, toolImportPath, "sync", "reflect"} {
 		source := parseDetectorSnippet(t, "package consumer\n\nimport . \""+importPath+"\"\n", "ecs/internal/consumer")
 		if _, err := resolveImportBindings(source.file); err == nil {
 			t.Fatalf("dot import %q was accepted by source detector", importPath)
@@ -597,11 +597,65 @@ func TestCompositionPackagesHaveNoRuntimeRegistration(t *testing.T) {
 		if name, ok := catalogMutationAPI(source); ok {
 			t.Fatalf("%s has registration/mutation API %q in %s", source.packagePath, name, source.path)
 		}
-		if !isCompositionPackage(source.packagePath) {
-			continue
-		}
-		if hasLocalFunction(source, source.packagePath, "init") {
+		if hasRuntimeRegistrationInit(source) {
 			t.Fatalf("%s has runtime init registration in %s", source.packagePath, source.path)
 		}
+	}
+}
+
+func TestRuntimeRegistrationInitDetectorIsSemantic(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "harmless config init",
+			source: "package config\nfunc init() { _ = 1 }\n",
+			want:   false,
+		},
+		{
+			name:   "harmless domain call",
+			source: "package config\nimport \"runtime\"\nfunc init() { runtime.GOMAXPROCS(1) }\n",
+			want:   false,
+		},
+		{
+			name:   "harmless module state initialization",
+			source: "package config\nvar moduleCache int\nfunc init() { moduleCache = 1 }\n",
+			want:   false,
+		},
+		{
+			name:   "module registration call",
+			source: "package config\nfunc init() { registerModule(Definition{}) }\n",
+			want:   true,
+		},
+		{
+			name:   "registry state assignment",
+			source: "package config\nvar moduleRegistry map[string]Definition\nfunc init() { moduleRegistry[\"fixture\"] = Definition{} }\n",
+			want:   true,
+		},
+		{
+			name:   "registry state append",
+			source: "package config\nvar moduleDefinitions []Definition\nfunc init() { _ = append(moduleDefinitions, Definition{}) }\n",
+			want:   true,
+		},
+		{
+			name:   "catalog mutation call",
+			source: "package config\nfunc init() { catalog.Add(Definition{}) }\n",
+			want:   true,
+		},
+		{
+			name:   "unrelated registration name",
+			source: "package config\nfunc init() { registerMetrics() }\n",
+			want:   false,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			source := parseDetectorSnippet(t, test.source, configImportPath)
+			if got := hasRuntimeRegistrationInit(source); got != test.want {
+				t.Fatalf("runtime init detector = %t, want %t", got, test.want)
+			}
+		})
 	}
 }

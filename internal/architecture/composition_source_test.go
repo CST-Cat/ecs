@@ -10,15 +10,6 @@ import (
 	"testing"
 )
 
-func isCompositionPackage(packagePath string) bool {
-	for _, root := range []string{appImportPath, configImportPath, moduleImportPath, probeImportPath, runnerImportPath, toolImportPath} {
-		if packagePath == root || strings.HasPrefix(packagePath, root+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 func hasIdentifierNamed(source productionSource, name string) bool {
 	found := false
 	ast.Inspect(source.file, func(node ast.Node) bool {
@@ -155,8 +146,154 @@ func expressionHasMutationContext(expression ast.Expr) bool {
 	return found
 }
 
+func hasRuntimeRegistrationInit(source productionSource) bool {
+	globalNames := packageGlobalNames(source.file)
+	for _, declaration := range source.file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "init" || function.Body == nil {
+			continue
+		}
+		found := false
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if found {
+				return false
+			}
+			switch value := node.(type) {
+			case *ast.CallExpr:
+				if runtimeRegistrationCall(value) || appendTouchesCompositionState(value, globalNames) {
+					found = true
+				}
+			case *ast.AssignStmt:
+				for _, expression := range value.Lhs {
+					if assignmentTouchesCompositionState(expression, globalNames) {
+						found = true
+						break
+					}
+				}
+			case *ast.IncDecStmt:
+				if assignmentTouchesCompositionState(value.X, globalNames) {
+					found = true
+				}
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func packageGlobalNames(file *ast.File) map[string]struct{} {
+	names := make(map[string]struct{})
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.VAR {
+			continue
+		}
+		for _, specification := range general.Specs {
+			values, ok := specification.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range values.Names {
+				names[name.Name] = struct{}{}
+			}
+		}
+	}
+	return names
+}
+
+func runtimeRegistrationCall(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	var name string
+	var receiver ast.Expr
+	switch function := call.Fun.(type) {
+	case *ast.Ident:
+		name = function.Name
+	case *ast.SelectorExpr:
+		name = function.Sel.Name
+		receiver = function.X
+	default:
+		return false
+	}
+	if isCatalogMutationName(name) {
+		return true
+	}
+	if !isBareMutationVerb(name) {
+		return false
+	}
+	if receiver != nil && expressionHasCatalogStateContext(receiver) {
+		return true
+	}
+	for _, argument := range call.Args {
+		if expressionHasMutationContext(argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendTouchesCompositionState(call *ast.CallExpr, globalNames map[string]struct{}) bool {
+	if call == nil || len(call.Args) == 0 {
+		return false
+	}
+	function, ok := call.Fun.(*ast.Ident)
+	if !ok || function.Name != "append" {
+		return false
+	}
+	return assignmentTouchesCompositionState(call.Args[0], globalNames)
+}
+
+func expressionHasCatalogStateContext(expression ast.Expr) bool {
+	if expression == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(expression, func(node ast.Node) bool {
+		ident, ok := node.(*ast.Ident)
+		if ok && isCatalogStateName(ident.Name) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func assignmentTouchesCompositionState(expression ast.Expr, globalNames map[string]struct{}) bool {
+	if expression == nil {
+		return false
+	}
+	root := expression
+	for {
+		switch value := root.(type) {
+		case *ast.IndexExpr:
+			root = value.X
+		case *ast.IndexListExpr:
+			root = value.X
+		case *ast.SelectorExpr:
+			if isCatalogStateName(value.Sel.Name) {
+				return true
+			}
+			root = value.X
+		case *ast.StarExpr:
+			root = value.X
+		case *ast.ParenExpr:
+			root = value.X
+		case *ast.Ident:
+			_, global := globalNames[value.Name]
+			return global && isCatalogStateName(value.Name)
+		default:
+			return expressionHasMutationContext(expression)
+		}
+	}
+}
+
 func isCatalogReceiver(name string) bool {
-	return name == "Catalog" || name == "commandCatalog" || name == "toolCatalog"
+	return name == "Catalog" || name == "moduleCatalog" || name == "commandCatalog" || name == "toolCatalog"
 }
 
 func receiverBaseName(receiver *ast.FieldList) string {
@@ -232,6 +369,9 @@ func hasModuleCompositionSignal(source productionSource) bool {
 				(strings.Contains(name, "module") || strings.Contains(name, "command") || strings.Contains(name, "tool") || strings.Contains(name, "catalog")) {
 				return true
 			}
+			if isCompositionFunction(declaration) {
+				return true
+			}
 			if functionReturnsCompositionType(declaration) {
 				return true
 			}
@@ -286,44 +426,27 @@ func weakCompositionPattern(source productionSource) string {
 	if err != nil {
 		return err.Error()
 	}
-	for _, specification := range source.file.Imports {
-		importPath, err := strconv.Unquote(specification.Path.Value)
-		if err != nil {
-			return fmt.Sprintf("invalid import path: %v", err)
-		}
-		if importPath == "reflect" {
-			return "reflection import"
-		}
-	}
 	if name, ok := packageLevelVariable(source); ok {
 		return "package-level mutable variable " + name
 	}
-	allowedAny := allowedVariadicAnyPositions(source.file)
+	if hasWeakAnyUsage(source) {
+		return "any type"
+	}
+	if hasWeakEmptyInterfaceUsage(source) {
+		return "empty interface type"
+	}
+	if hasWeakReflectionUsage(source, bindings) {
+		return "reflection import"
+	}
+	if hasRegistryMutexUsage(source, bindings) {
+		return "registry mutex type"
+	}
 	finding := ""
 	ast.Inspect(source.file, func(node ast.Node) bool {
 		if finding != "" {
 			return false
 		}
 		switch value := node.(type) {
-		case *ast.Ident:
-			if value.Name == "any" {
-				if _, allowed := allowedAny[value.Pos()]; allowed {
-					return true
-				}
-				finding = "any type"
-				return false
-			}
-		case *ast.InterfaceType:
-			if value.Methods != nil && len(value.Methods.List) == 0 {
-				finding = "empty interface type"
-				return false
-			}
-		case *ast.SelectorExpr:
-			packageIdent, ok := value.X.(*ast.Ident)
-			if ok && bindings[packageIdent.Name] == "sync" && (value.Sel.Name == "Mutex" || value.Sel.Name == "RWMutex") {
-				finding = "registry mutex type"
-				return false
-			}
 		case *ast.FuncDecl:
 			name := strings.ToLower(value.Name.Name)
 			if isWeakFactoryRegistryName(name) {
@@ -358,29 +481,248 @@ func isWeakFactoryRegistryName(name string) bool {
 		(strings.Contains(lower, "module") || strings.Contains(lower, "command") || strings.Contains(lower, "tool") || strings.Contains(lower, "catalog") || strings.Contains(lower, "definition") || strings.HasSuffix(lower, "factories") || strings.HasSuffix(lower, "registries"))
 }
 
-func allowedVariadicAnyPositions(file *ast.File) map[token.Pos]struct{} {
-	allowed := make(map[token.Pos]struct{})
+func astParentMap(file *ast.File) map[ast.Node]ast.Node {
+	parents := make(map[ast.Node]ast.Node)
+	stack := make([]ast.Node, 0, 16)
 	ast.Inspect(file, func(node ast.Node) bool {
-		function, ok := node.(*ast.FuncDecl)
-		if !ok || function.Name.Name != "line" || function.Type == nil || function.Type.Params == nil {
-			return true
-		}
-		if receiverBaseName(function.Recv) != "prompter" {
-			return true
-		}
-		for _, field := range function.Type.Params.List {
-			ellipsis, ok := field.Type.(*ast.Ellipsis)
-			if !ok {
-				continue
+		if node == nil {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
 			}
-			ident, ok := ellipsis.Elt.(*ast.Ident)
-			if ok && ident.Name == "any" {
-				allowed[ident.Pos()] = struct{}{}
+			return true
+		}
+		if len(stack) > 0 {
+			parents[node] = stack[len(stack)-1]
+		}
+		stack = append(stack, node)
+		return true
+	})
+	return parents
+}
+
+func enclosingFuncDecl(node ast.Node, parents map[ast.Node]ast.Node) *ast.FuncDecl {
+	for current := node; current != nil; current = parents[current] {
+		if function, ok := current.(*ast.FuncDecl); ok {
+			return function
+		}
+	}
+	return nil
+}
+
+func enclosingTypeSpec(node ast.Node, parents map[ast.Node]ast.Node) *ast.TypeSpec {
+	for current := node; current != nil; current = parents[current] {
+		if typeSpec, ok := current.(*ast.TypeSpec); ok {
+			return typeSpec
+		}
+	}
+	return nil
+}
+
+func isCompositionSemanticName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, term := range []string{
+		"module", "command", "tool", "catalog", "definition", "descriptor",
+		"registry", "handler", "binding", "factory", "composition",
+		"application",
+	} {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCatalogStateName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, term := range []string{
+		"registry", "catalog", "definition", "descriptor", "handler", "binding", "factory",
+		"moduleids", "moduleorder", "moduleprofile", "modules", "commands", "tools",
+	} {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCatalogTypeName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, term := range []string{
+		"registry", "catalog", "definition", "descriptor", "handler", "binding",
+		"application", "composition",
+	} {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCompositionTypeName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, term := range []string{
+		"registry", "catalog", "definition", "descriptor", "handler", "binding", "factory",
+		"application", "composition",
+	} {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	if lower == "module" || lower == "command" || lower == "tool" {
+		return true
+	}
+	for _, feature := range []string{"module", "command", "tool"} {
+		if strings.Contains(lower, feature) && strings.Contains(lower, "option") {
+			return true
+		}
+	}
+	return false
+}
+
+func isCompositionFunction(function *ast.FuncDecl) bool {
+	if function == nil {
+		return false
+	}
+	if isCatalogReceiver(receiverBaseName(function.Recv)) {
+		return true
+	}
+	name := strings.ToLower(function.Name.Name)
+	if isWeakFactoryRegistryName(name) || isCompositionSemanticName(name) {
+		return isWeakFactoryRegistryName(name) || hasCompositionVerb(name)
+	}
+	switch name {
+	case "build", "compose", "construct", "dispatch", "register", "unregister":
+		return true
+	default:
+		return functionReturnsCompositionType(function)
+	}
+}
+
+func hasCompositionVerb(name string) bool {
+	for _, verb := range []string{
+		"build", "compose", "construct", "create", "make", "new", "dispatch", "register", "unregister", "bind",
+	} {
+		if strings.HasPrefix(name, verb) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeIsCompositionContext(node ast.Node, parents map[ast.Node]ast.Node) bool {
+	if function := enclosingFuncDecl(node, parents); function != nil && isCompositionFunction(function) {
+		return true
+	}
+	if typeSpec := enclosingTypeSpec(node, parents); typeSpec != nil && isCompositionTypeName(typeSpec.Name.Name) {
+		return true
+	}
+	return false
+}
+
+func hasWeakAnyUsage(source productionSource) bool {
+	parents := astParentMap(source.file)
+	found := false
+	ast.Inspect(source.file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		ident, ok := node.(*ast.Ident)
+		if ok && ident.Name == "any" && nodeIsCompositionContext(ident, parents) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func hasWeakEmptyInterfaceUsage(source productionSource) bool {
+	parents := astParentMap(source.file)
+	found := false
+	ast.Inspect(source.file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		interfaceType, ok := node.(*ast.InterfaceType)
+		if ok && interfaceType.Methods != nil && len(interfaceType.Methods.List) == 0 && nodeIsCompositionContext(interfaceType, parents) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func hasWeakReflectionUsage(source productionSource, bindings map[string]string) bool {
+	parents := astParentMap(source.file)
+	found := false
+	ast.Inspect(source.file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		packageIdent, ok := selector.X.(*ast.Ident)
+		if ok && bindings[packageIdent.Name] == "reflect" && nodeIsCompositionContext(selector, parents) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func isSyncMutexType(expression ast.Expr, bindings map[string]string) bool {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok {
+		if parenthesized, ok := expression.(*ast.ParenExpr); ok {
+			return isSyncMutexType(parenthesized.X, bindings)
+		}
+		return false
+	}
+	packageIdent, ok := selector.X.(*ast.Ident)
+	return ok && bindings[packageIdent.Name] == "sync" && (selector.Sel.Name == "Mutex" || selector.Sel.Name == "RWMutex")
+}
+
+func hasRegistryMutexUsage(source productionSource, bindings map[string]string) bool {
+	parents := astParentMap(source.file)
+	found := false
+	ast.Inspect(source.file, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || !isSyncMutexType(selector, bindings) {
+			return true
+		}
+		for current := ast.Node(selector); current != nil; current = parents[current] {
+			switch value := current.(type) {
+			case *ast.TypeSpec:
+				if isCatalogTypeName(value.Name.Name) {
+					found = true
+				}
+			case *ast.Field:
+				for _, name := range value.Names {
+					if isCatalogStateName(name.Name) {
+						found = true
+					}
+				}
+			case *ast.ValueSpec:
+				for _, name := range value.Names {
+					if isCatalogStateName(name.Name) {
+						found = true
+					}
+				}
+			}
+			if found {
+				return false
 			}
 		}
 		return true
 	})
-	return allowed
+	return found
 }
 
 func packageLevelVariable(source productionSource) (string, bool) {
@@ -755,6 +1097,10 @@ func hasStaticToolIDTableInSource(root string, source productionSource, canonica
 		if len(literal.Elts) < 2 || !isCollectionCompositeType(literal.Type) {
 			return true
 		}
+		if hasStaticCanonicalToolIDList(literal, canonical) {
+			found = true
+			return false
+		}
 		metadataEntriesWithIDs := 0
 		for _, element := range literal.Elts {
 			if hasCanonicalString(element, canonical) && hasToolMetadataEntry(element, literal.Type) {
@@ -768,6 +1114,29 @@ func hasStaticToolIDTableInSource(root string, source productionSource, canonica
 		return true
 	})
 	return found
+}
+
+func hasStaticCanonicalToolIDList(literal *ast.CompositeLit, canonical map[string]struct{}) bool {
+	if literal == nil || len(literal.Elts) < 2 || collectionElementTypeName(literal.Type) != "string" {
+		return false
+	}
+	for _, element := range literal.Elts {
+		if keyValue, ok := element.(*ast.KeyValueExpr); ok {
+			element = keyValue.Value
+		}
+		basic, ok := element.(*ast.BasicLit)
+		if !ok || basic.Kind != token.STRING {
+			return false
+		}
+		id, err := strconv.Unquote(basic.Value)
+		if err != nil {
+			return false
+		}
+		if _, ok := canonical[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func isModuleDefinitionSet(literal *ast.CompositeLit) bool {
@@ -985,14 +1354,14 @@ func TestProductionToolConsumersHaveNoStaticMetadataOrIDSwitch(t *testing.T) {
 		// manifest are intentionally the only places where their respective
 		// tool facts may appear as tables. A metadata table in any other
 		// first-party package is a duplicate regardless of its filename.
-		if isToolBuiltinSource(root, source.path) || isToolsManifestPackage(source.packagePath) {
+		if isToolMetadataSource(root, source) {
 			continue
 		}
 		if hasStaticToolIDTableInSource(root, source, canonical) {
 			t.Fatalf("production source %s contains a static multi-entry tool metadata table", source.path)
 		}
-		if isAppPackage(source.packagePath) && hasCommandSwitchWithMultipleCanonicalNames(source.file, canonical) {
-			t.Fatalf("app source %s contains a switch with multiple canonical tool IDs", source.path)
+		if !isToolIDSwitchAllowed(source) && hasCommandSwitchWithMultipleCanonicalNames(source.file, canonical) {
+			t.Fatalf("production source %s contains a switch with multiple canonical tool IDs", source.path)
 		}
 	}
 }
@@ -1001,8 +1370,16 @@ func isToolsManifestPackage(packagePath string) bool {
 	return packagePath == toolsmanifestImportPath || strings.HasPrefix(packagePath, toolsmanifestImportPath+"/")
 }
 
-func isAppPackage(packagePath string) bool {
-	return packagePath == appImportPath || strings.HasPrefix(packagePath, appImportPath+"/")
+func isToolMetadataSource(root string, source productionSource) bool {
+	return isToolBuiltinSource(root, source.path) || isToolsManifestPackage(source.packagePath)
+}
+
+func isToolIDSwitchAllowed(source productionSource) bool {
+	// Score owns the submission projection and its tool-field switch. It is
+	// not a tool metadata catalog and changing it would alter fingerprint
+	// semantics; keep that domain-specific projection outside this switch
+	// guard while still checking score for duplicate metadata tables.
+	return isScorePackage(source.packagePath)
 }
 
 func TestProductionCommandCompositionHasSingleCatalogSet(t *testing.T) {
@@ -1050,9 +1427,16 @@ func TestProductionCommandCompositionHasSingleCatalogSet(t *testing.T) {
 func TestProductionCompositionPlumbingHasNoWeakPatterns(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, source := range loadAllProductionSources(t, root) {
-		if !isCompositionPlumbingSource(source) {
+		// The release manifest intentionally uses open JSON values and owns a
+		// separate package-level tool table; it is not application composition.
+		if isToolsManifestPackage(source.packagePath) {
 			continue
 		}
+		// Apply the semantic detector to every first-party production source.
+		// The detector itself narrows any/interface, reflection, mutex, and
+		// mutable-global findings to composition contexts, so moving a helper
+		// to a new package or filename cannot evade the guard while ordinary
+		// domain state remains valid.
 		if finding := weakCompositionPattern(source); finding != "" {
 			t.Fatalf("composition plumbing %s contains %s", source.path, finding)
 		}
@@ -1087,6 +1471,7 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "catalog pointer Add", source: "package module\nfunc (c *Catalog) Add(value Definition) {}\n", want: true},
 		{name: "parenthesized catalog Set", source: "package module\nfunc (c (*Catalog)) Set(value Definition) {}\n", want: true},
 		{name: "qualified catalog Remove", source: "package module\nfunc (c pkg.Catalog) Remove(value Definition) {}\n", want: true},
+		{name: "module catalog Add", source: "package module\nfunc (c *moduleCatalog) Add(value Definition) {}\n", want: true},
 		{name: "command catalog Remove", source: "package app\nfunc (c commandCatalog) Remove(name string) {}\n", want: true},
 		{name: "tool catalog Set", source: "package tool\nfunc (c *toolCatalog) Set(value Definition) {}\n", want: true},
 		{name: "free module registration", source: "package app\nfunc registerModule(definition Definition) {}\n", want: true},
@@ -1168,6 +1553,27 @@ func stage(id string) {
 	case "nexttrace-tiny":
 	}
 }
+`,
+			want: true,
+		},
+		{
+			name:        "relocated planner tool switch",
+			packagePath: "ecs/internal/planner",
+			source: `package planner
+func stage(id string) {
+	switch id {
+	case "zstd":
+	case "nexttrace-tiny":
+	}
+}
+`,
+			want: true,
+		},
+		{
+			name:        "relocated planner tool ID list",
+			packagePath: "ecs/internal/planner",
+			source: `package planner
+var stagedToolIDs = []string{"sysbench", "zstd", "nexttrace-tiny"}
 `,
 			want: true,
 		},
@@ -1287,9 +1693,9 @@ func TestWeakCompositionDetectorFindsTrackedPatterns(t *testing.T) {
 		source string
 		want   string
 	}{
-		{name: "any", source: "package app\ntype value any\n", want: "any type"},
-		{name: "empty interface", source: "package app\ntype value interface{}\n", want: "empty interface type"},
-		{name: "reflection alias", source: "package app\nimport refl \"reflect\"\nvar _ = refl.TypeOf\n", want: "reflection import"},
+		{name: "any in composition type", source: "package app\ntype commandOptions any\n", want: "any type"},
+		{name: "empty interface in composition type", source: "package app\ntype commandOptions interface{}\n", want: "empty interface type"},
+		{name: "reflection in composition helper", source: "package app\nimport refl \"reflect\"\nfunc buildCatalog() { _ = refl.TypeOf }\n", want: "reflection import"},
 		{name: "factory function", source: "package app\nfunc factory() {}\n", want: "weak factory or registry function"},
 		{name: "global map", source: "package app\nvar handlers = map[string]commandHandler{}\n", want: "package-level mutable variable handlers"},
 		{name: "global slice", source: "package app\nvar definitions = []Definition{}\n", want: "package-level mutable variable definitions"},
@@ -1300,7 +1706,15 @@ func TestWeakCompositionDetectorFindsTrackedPatterns(t *testing.T) {
 		{name: "ordinary error factory", source: "package app\nvar errorFactory = errors.New(\"invalid\")\n", want: ""},
 		{name: "ordinary regexp table", source: "package app\nvar patterns = []*regexp.Regexp{}\n", want: ""},
 		{name: "local map", source: "package app\nfunc use() { handlers := map[string]commandHandler{}; _ = handlers }\n", want: ""},
-		{name: "registry mutex", source: "package app\nimport \"sync\"\nfunc use() { var mu sync.Mutex; _ = mu }\n", want: "registry mutex type"},
+		{name: "registry mutex", source: "package app\nimport \"sync\"\nfunc use() { var catalogMu sync.Mutex; _ = catalogMu }\n", want: "registry mutex type"},
+		{name: "ordinary mutex field", source: "package app\nimport \"sync\"\ntype domainState struct { mu sync.Mutex }\n", want: ""},
+		{name: "ordinary tool cache mutex", source: "package app\nimport \"sync\"\ntype toolCache struct { mu sync.Mutex }\n", want: ""},
+		{name: "catalog state mutex", source: "package app\nimport \"sync\"\ntype catalogRegistry struct { mu sync.Mutex }\n", want: "registry mutex type"},
+		{name: "ordinary mutex local", source: "package app\nimport \"sync\"\nfunc use() { var mu sync.Mutex; _ = mu }\n", want: ""},
+		{name: "ordinary any value", source: "package app\nfunc preservePanicValue(value any) any { return value }\n", want: ""},
+		{name: "ordinary tool payload", source: "package app\ntype toolPayload any\n", want: ""},
+		{name: "ordinary reflection value", source: "package app\nimport refl \"reflect\"\nfunc preserveType(value refl.Type) refl.Type { return value }\n", want: ""},
+		{name: "ordinary tool reflection type", source: "package app\nimport refl \"reflect\"\ntype toolCacheType refl.Type\n", want: ""},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -1330,7 +1744,7 @@ func TestCompositionScopeCoversRelocatedHelpersAndLegalDomainSeams(t *testing.T)
 		{
 			name:        "relocated app reflection helper",
 			packagePath: appImportPath,
-			source:      "package app\nimport refl \"reflect\"\nvar typeOf = refl.TypeOf\n",
+			source:      "package app\nimport refl \"reflect\"\nfunc buildCatalog() { _ = refl.TypeOf }\n",
 			inScope:     true,
 			finding:     "reflection import",
 		},
@@ -1387,6 +1801,26 @@ func (p *prompter) line(format string, values ...any) {}
 			source:      "package compositionhelper\nvar definitions = []Definition{}\n",
 			inScope:     true,
 			finding:     "package-level mutable variable definitions",
+		},
+		{
+			name:        "relocated internal composition reflection helper",
+			packagePath: "ecs/internal/planner",
+			source:      "package planner\nimport refl \"reflect\"\nfunc buildCatalog() { _ = refl.TypeOf }\n",
+			inScope:     true,
+			finding:     "reflection import",
+		},
+		{
+			name:        "relocated internal composition global",
+			packagePath: "ecs/internal/planner",
+			source:      "package planner\nvar handlers = map[string]commandHandler{}\n",
+			inScope:     true,
+			finding:     "package-level mutable variable handlers",
+		},
+		{
+			name:        "relocated internal ordinary any helper",
+			packagePath: "ecs/internal/planner",
+			source:      "package planner\nfunc preservePanicValue(value any) any { return value }\n",
+			inScope:     false,
 		},
 	}
 	for _, test := range cases {
