@@ -18,7 +18,7 @@ on:
       - "scripts/leaderboard.sh"
       - "internal/app/leaderboard.go"
       - "internal/app/leaderboard_inputs.go"
-      - "internal/config/modules.go"
+      - "internal/probe/definitions.go"
       - "internal/model/**"
       - "internal/score/baseline.go"
       - "internal/score/outlier.go"
