@@ -149,20 +149,76 @@ func expressionHasMutationContext(expression ast.Expr) bool {
 	if expression == nil {
 		return false
 	}
-	found := false
-	ast.Inspect(expression, func(node ast.Node) bool {
-		ident, ok := node.(*ast.Ident)
-		if !ok {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return isMutationContextName(value.Name)
+	case *ast.SelectorExpr:
+		// Selector.X is commonly an import qualifier (for example, the
+		// aliases in probe.Environment or tool.VerificationKind). Only Sel
+		// is the referenced symbol and can establish composition context.
+		return isMutationContextName(value.Sel.Name)
+	case *ast.ParenExpr:
+		return expressionHasMutationContext(value.X)
+	case *ast.StarExpr:
+		return expressionHasMutationContext(value.X)
+	case *ast.Ellipsis:
+		return expressionHasMutationContext(value.Elt)
+	case *ast.ArrayType:
+		return expressionHasMutationContext(value.Elt)
+	case *ast.MapType:
+		return expressionHasMutationContext(value.Key) || expressionHasMutationContext(value.Value)
+	case *ast.ChanType:
+		return expressionHasMutationContext(value.Value)
+	case *ast.IndexExpr:
+		return expressionHasMutationContext(value.X)
+	case *ast.IndexListExpr:
+		return expressionHasMutationContext(value.X)
+	case *ast.CompositeLit:
+		if expressionHasMutationContext(value.Type) {
 			return true
 		}
-		name := strings.ToLower(ident.Name)
-		if strings.Contains(name, "module") || strings.Contains(name, "command") || strings.Contains(name, "tool") || strings.Contains(name, "catalog") || strings.Contains(name, "definition") || strings.Contains(name, "descriptor") {
-			found = true
-			return false
+		for _, element := range value.Elts {
+			if expressionHasMutationContext(element) {
+				return true
+			}
 		}
-		return true
-	})
-	return found
+	case *ast.KeyValueExpr:
+		return expressionHasMutationContext(value.Value)
+	case *ast.UnaryExpr:
+		return expressionHasMutationContext(value.X)
+	case *ast.CallExpr:
+		if expressionHasMutationContext(value.Fun) {
+			return true
+		}
+		for _, argument := range value.Args {
+			if expressionHasMutationContext(argument) {
+				return true
+			}
+		}
+	case *ast.FuncType:
+		if value.Params != nil {
+			for _, field := range value.Params.List {
+				if expressionHasMutationContext(field.Type) {
+					return true
+				}
+			}
+		}
+		if value.Results != nil {
+			for _, field := range value.Results.List {
+				if expressionHasMutationContext(field.Type) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isMutationContextName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "module") || strings.Contains(lower, "command") ||
+		strings.Contains(lower, "tool") || strings.Contains(lower, "catalog") ||
+		strings.Contains(lower, "definition") || strings.Contains(lower, "descriptor")
 }
 
 func hasRuntimeRegistrationInitWithFacts(source productionSource, globalFacts map[string]packageGlobalFact, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact, moduleIDs map[string]struct{}) bool {
@@ -386,16 +442,25 @@ func expressionHasCatalogStateContext(expression ast.Expr) bool {
 	if expression == nil {
 		return false
 	}
-	found := false
-	ast.Inspect(expression, func(node ast.Node) bool {
-		ident, ok := node.(*ast.Ident)
-		if ok && isCatalogStateName(ident.Name) {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return isCatalogStateName(value.Name)
+	case *ast.SelectorExpr:
+		// As with type expressions, a selector's X may only be an import
+		// qualifier. The selected member is the meaningful state symbol.
+		return isCatalogStateName(value.Sel.Name)
+	case *ast.ParenExpr:
+		return expressionHasCatalogStateContext(value.X)
+	case *ast.StarExpr:
+		return expressionHasCatalogStateContext(value.X)
+	case *ast.IndexExpr:
+		return expressionHasCatalogStateContext(value.X)
+	case *ast.IndexListExpr:
+		return expressionHasCatalogStateContext(value.X)
+	case *ast.SliceExpr:
+		return expressionHasCatalogStateContext(value.X)
+	}
+	return false
 }
 
 func assignmentTouchesCompositionState(expression ast.Expr, rhs ast.Expr, globalFacts map[string]packageGlobalFact, typeSpecs map[string]*ast.TypeSpec, functionFacts map[string]packageFunctionFact, moduleIDs map[string]struct{}) bool {
@@ -863,18 +928,92 @@ func expressionHasCompositionType(expression ast.Expr) bool {
 	if expression == nil {
 		return false
 	}
-	found := false
-	ast.Inspect(expression, func(node ast.Node) bool {
-		if ident, ok := node.(*ast.Ident); ok {
-			name := strings.ToLower(ident.Name)
-			if name == "probe" || strings.Contains(name, "definition") || strings.Contains(name, "descriptor") || strings.Contains(name, "catalog") || strings.Contains(name, "commandhandler") || strings.Contains(name, "doctortool") {
-				found = true
-				return false
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return isCompositionTypeSymbol(value.Name)
+	case *ast.SelectorExpr:
+		// The package qualifier is not the type. This keeps probe.Environment
+		// and tool.VerificationKind ordinary domain types while still treating
+		// probe.Probe, probe.Definition, and module.Descriptor as contracts.
+		return isCompositionTypeSymbol(value.Sel.Name)
+	case *ast.ParenExpr:
+		return expressionHasCompositionType(value.X)
+	case *ast.StarExpr:
+		return expressionHasCompositionType(value.X)
+	case *ast.Ellipsis:
+		return expressionHasCompositionType(value.Elt)
+	case *ast.ArrayType:
+		return expressionHasCompositionType(value.Elt)
+	case *ast.MapType:
+		return expressionHasCompositionType(value.Key) || expressionHasCompositionType(value.Value)
+	case *ast.ChanType:
+		return expressionHasCompositionType(value.Value)
+	case *ast.IndexExpr:
+		return expressionHasCompositionType(value.X)
+	case *ast.IndexListExpr:
+		return expressionHasCompositionType(value.X)
+	case *ast.CompositeLit:
+		if expressionHasCompositionType(value.Type) {
+			return true
+		}
+		for _, element := range value.Elts {
+			if expressionHasCompositionType(element) {
+				return true
 			}
 		}
-		return !found
-	})
-	return found
+	case *ast.KeyValueExpr:
+		return expressionHasCompositionType(value.Value)
+	case *ast.UnaryExpr:
+		return expressionHasCompositionType(value.X)
+	case *ast.CallExpr:
+		if expressionHasCompositionType(value.Fun) {
+			return true
+		}
+		for _, argument := range value.Args {
+			if expressionHasCompositionType(argument) {
+				return true
+			}
+		}
+	case *ast.FuncType:
+		if value.Params != nil {
+			for _, field := range value.Params.List {
+				if expressionHasCompositionType(field.Type) {
+					return true
+				}
+			}
+		}
+		if value.Results != nil {
+			for _, field := range value.Results.List {
+				if expressionHasCompositionType(field.Type) {
+					return true
+				}
+			}
+		}
+	case *ast.StructType:
+		if value.Fields != nil {
+			for _, field := range value.Fields.List {
+				if expressionHasCompositionType(field.Type) {
+					return true
+				}
+			}
+		}
+	case *ast.InterfaceType:
+		if value.Methods != nil {
+			for _, field := range value.Methods.List {
+				if expressionHasCompositionType(field.Type) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isCompositionTypeSymbol(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "probe" || strings.Contains(lower, "definition") ||
+		strings.Contains(lower, "descriptor") || strings.Contains(lower, "catalog") ||
+		strings.Contains(lower, "commandhandler") || strings.Contains(lower, "doctortool")
 }
 
 func weakCompositionPattern(source productionSource) string {
@@ -2115,6 +2254,14 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "neutral Probe registry receiver Add", source: "package runner\ntype state struct { items map[string]Probe }\nfunc (s *state) Add(value Probe) {}\n", want: true},
 		{name: "neutral registry alias receiver Add", source: "package runner\ntype state struct { handlers map[string]commandHandler }\ntype stateAlias = state\nfunc (s (*stateAlias)) Add(handler commandHandler) {}\n", want: true},
 		{name: "free module registration", source: "package app\nfunc registerModule(definition Definition) {}\n", want: true},
+		{name: "free probe registration with default import", source: "package app\nimport \"ecs/internal/probe\"\nfunc register(definition probe.Definition) {}\n", want: true},
+		{name: "free probe registration with aliased import", source: "package app\nimport p \"ecs/internal/probe\"\nfunc register(definition p.Definition) {}\n", want: true},
+		{name: "free module descriptor registration with default import", source: "package app\nimport \"ecs/internal/module\"\nfunc Add(value module.Descriptor) {}\n", want: true},
+		{name: "free module descriptor registration with aliased import", source: "package app\nimport mod \"ecs/internal/module\"\nfunc Add(value mod.Descriptor) {}\n", want: true},
+		{name: "free tool definition registration with default import", source: "package app\nimport \"ecs/internal/tool\"\nfunc Add(value tool.Definition) {}\n", want: true},
+		{name: "free tool definition registration with aliased import", source: "package app\nimport tools \"ecs/internal/tool\"\nfunc Add(value tools.Definition) {}\n", want: true},
+		{name: "report Add with tool definition default import", source: "package report\nimport \"ecs/internal/tool\"\ntype architectureFixtureReport struct{}\nfunc (r architectureFixtureReport) Add(value tool.Definition) {}\n", want: true},
+		{name: "report Add with tool definition aliased import", source: "package report\nimport tools \"ecs/internal/tool\"\ntype architectureFixtureReport struct{}\nfunc (r architectureFixtureReport) Add(value tools.Definition) {}\n", want: true},
 		{name: "bare registration with definition", source: "package app\nfunc Register(definition Definition) {}\n", want: true},
 		{name: "command entrypoint module registration", packagePath: "ecs/cmd/ecs", source: "package main\nfunc RegisterModuleFixture() {}\n", want: true},
 		{name: "free tool mutation value", source: "package app\nvar SetTool = func() {}\n", want: true},
@@ -2124,6 +2271,8 @@ func TestCatalogMutationDetectorUsesReceiverAndContext(t *testing.T) {
 		{name: "bare Add for string", source: "package report\nfunc Add(value string) {}\n", want: false},
 		{name: "other receiver Replace", source: "package report\nfunc (r Report) Replace(value string) {}\n", want: false},
 		{name: "other receiver Replace with module parameter", source: "package report\nfunc (r Report) Replace(module string) {}\n", want: false},
+		{name: "report Add with verification kind default import", source: "package report\nimport \"ecs/internal/tool\"\ntype architectureFixtureReport struct{}\nfunc (r architectureFixtureReport) Add(kind tool.VerificationKind) {}\n", want: false},
+		{name: "report Add with verification kind aliased import", source: "package report\nimport tools \"ecs/internal/tool\"\ntype architectureFixtureReport struct{}\nfunc (r architectureFixtureReport) Add(kind tools.VerificationKind) {}\n", want: false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -2409,6 +2558,10 @@ func TestWeakCompositionDetectorFindsTrackedPatterns(t *testing.T) {
 		{name: "indirect global catalog", source: "package app\nvar definitions = buildDefinitions()\n", want: "package-level mutable variable definitions"},
 		{name: "config module registry", source: "package config\nvar moduleRegistryFixture = map[string]any{}\n", want: "package-level mutable variable moduleRegistryFixture"},
 		{name: "runner typed registry", source: "package runner\nvar moduleHandlers = map[string]handler{}\n", want: "package-level mutable variable moduleHandlers"},
+		{name: "probe Environment cache with default import", source: "package runner\nimport \"ecs/internal/probe\"\nvar environmentCache = map[string]probe.Environment{}\n", want: ""},
+		{name: "probe Environment cache with aliased import", source: "package runner\nimport p \"ecs/internal/probe\"\nvar environmentCache = map[string]p.Environment{}\n", want: ""},
+		{name: "probe Probe registry with default import", source: "package runner\nimport \"ecs/internal/probe\"\nvar state = map[string]probe.Probe{}\n", want: "package-level mutable variable state"},
+		{name: "probe Probe registry with aliased import", source: "package runner\nimport p \"ecs/internal/probe\"\nvar state = map[string]p.Probe{}\n", want: "package-level mutable variable state"},
 		{name: "ordinary error sentinel", source: "package app\nvar errInvalidFixture = errors.New(\"invalid\")\n", want: ""},
 		{name: "ordinary error factory", source: "package app\nvar errorFactory = errors.New(\"invalid\")\n", want: ""},
 		{name: "ordinary regexp table", source: "package app\nvar patterns = []*regexp.Regexp{}\n", want: ""},
