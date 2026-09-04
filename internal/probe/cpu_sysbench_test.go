@@ -209,18 +209,18 @@ func TestSysbenchProducerValidityAndWorkloadContracts(t *testing.T) {
 func newCPUWindowFixture(load float64, before, after cpuTimeSample) (EnvironmentSnapshot, EnvironmentSnapshot) {
 	start := time.Unix(100, 0)
 	return EnvironmentSnapshot{
-			CapturedAt: start,
-			Load1:      load,
-			LoadKnown:  true,
-			CPUTimes:   before,
-			CPUTracked: true,
-		}, EnvironmentSnapshot{
-			CapturedAt: start.Add(time.Second),
-			Load1:      load,
-			LoadKnown:  true,
-			CPUTimes:   after,
-			CPUTracked: true,
-		}
+		CapturedAt: start,
+		Load1:      load,
+		LoadKnown:  true,
+		CPUTimes:   before,
+		CPUTracked: true,
+	}, EnvironmentSnapshot{
+		CapturedAt: start.Add(time.Second),
+		Load1:      load,
+		LoadKnown:  true,
+		CPUTimes:   after,
+		CPUTracked: true,
+	}
 }
 
 func cpuSemanticResult(result model.Result) model.Result {
