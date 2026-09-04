@@ -1,13 +1,17 @@
 # Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到 `v0.7.21` 及后续 `Unreleased` 的主要变化。
+`v0.1.0` 到 `v0.7.23` 及后续 `Unreleased` 的主要变化。
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
 - `Unreleased` 用于后续维护；发布新版本时，应先补充该节，再移动为带日期的版本节。
 
 ## Unreleased
+
+后续版本的变更记录写在这里。
+
+## 0.7.23 — 2026-09-03
 
 - 内部组合架构统一为显式 bootstrap 加不可变强类型 Command、Module 和 Tool Catalog：每个内建模块的 metadata 与 executor 只在 `probe.Definition` 中声明一次，旧的 config/probe 重复模块来源与 runner binding 层已移除。
 - 本次重构不改变 CLI、config、模块 ID、档位归属、exposure、`ecs.plan/v1`、report/compare/submission schema、评分逻辑，或 benchmark 的方法、参数与测量语义。
