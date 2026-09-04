@@ -157,6 +157,7 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 		}()
 
 		t.Setenv("PATH", t.TempDir())
+		t.Setenv(ToolBinEnv, "")
 		result := (latencyProbe{}).Run(context.Background(), Environment{
 			Config: config.Runtime{
 				IPVersion:       config.IPVersion4,
@@ -224,6 +225,7 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 
 	t.Run("all failed resolution", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
+		t.Setenv(ToolBinEnv, "")
 		result := (latencyProbe{}).Run(context.Background(), Environment{
 			Config: config.Runtime{
 				IPVersion:       config.IPVersion4,
