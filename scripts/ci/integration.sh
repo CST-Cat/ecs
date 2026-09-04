@@ -257,6 +257,23 @@ for tool in fio sysbench iperf3 ping stream; do
   printf '%-10s %s\n' "$tool" "$(command -v "$tool" || echo '未安装')"
 done
 
+# Production probes intentionally do not resolve benchmark tools from PATH.
+# The CI-installed real tools are therefore exposed through an explicit,
+# private staging directory, just as run.sh does for a user invocation. The
+# symlinks preserve capabilities on tools such as ping while keeping the
+# lookup contract separate from the host PATH used by integration fixtures.
+integration_tool_bin="$stream_work/tool-bin"
+mkdir -p "$integration_tool_bin"
+for tool in fio sysbench iperf3 ping; do
+  tool_path=$(command -v "$tool") || {
+    echo "integration: $tool 未安装，无法建立显式工具 staging" >&2
+    exit 1
+  }
+  ln -s "$tool_path" "$integration_tool_bin/$tool"
+done
+ln -s "$stream_binary" "$integration_tool_bin/stream"
+export ECS_TOOL_BIN="$integration_tool_bin"
+
 ecs_step "go test -tags=integration ./... -timeout 30m -count=1"
 go test -tags=integration ./... -timeout 30m -count=1
 }
