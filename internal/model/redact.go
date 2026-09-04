@@ -21,7 +21,6 @@ func RedactedCopy(in Report, reveal bool) Report {
 		out.Results[i] = result
 		out.Results[i].SummaryMessages = cloneMessages(result.SummaryMessages)
 		out.Results[i].Methodology.Parameters = cloneStringMap(result.Methodology.Parameters)
-		out.Results[i].Interference = cloneInterference(result.Interference)
 		if result.Evidence != nil {
 			evidence := *result.Evidence
 			out.Results[i].Evidence = &evidence
@@ -29,25 +28,6 @@ func RedactedCopy(in Report, reveal bool) Report {
 		out.Results[i].Fields = append([]Field(nil), result.Fields...)
 		out.Results[i].Measurements = cloneMeasurements(result.Measurements)
 		out.Results[i].Failures = append([]Failure(nil), result.Failures...)
-		if result.Retry != nil {
-			retry := *result.Retry
-			retry.SelectionRule = cloneMessage(result.Retry.SelectionRule)
-			retry.TriggerReasons = cloneMessages(result.Retry.TriggerReasons)
-			retry.Attempts = make([]RetryAttempt, len(result.Retry.Attempts))
-			for attemptIndex, attempt := range result.Retry.Attempts {
-				retry.Attempts[attemptIndex] = attempt
-				retry.Attempts[attemptIndex].Measurements = cloneMeasurements(attempt.Measurements)
-				attemptInterference := cloneInterference(&attempt.Interference)
-				if attemptInterference != nil {
-					retry.Attempts[attemptIndex].Interference = *attemptInterference
-				}
-				if attempt.Evidence != nil {
-					evidence := *attempt.Evidence
-					retry.Attempts[attemptIndex].Evidence = &evidence
-				}
-			}
-			out.Results[i].Retry = &retry
-		}
 		out.Results[i].Notes = append([]string(nil), result.Notes...)
 		out.Results[i].Sources = append([]Source(nil), result.Sources...)
 		out.Results[i].TextBlocks = append([]TextBlock(nil), result.TextBlocks...)
@@ -92,16 +72,6 @@ func cloneMeasurements(measurements []Measurement) []Measurement {
 		}
 	}
 	return out
-}
-
-func cloneInterference(interference *Interference) *Interference {
-	if interference == nil {
-		return nil
-	}
-	out := *interference
-	out.Reasons = cloneMessages(interference.Reasons)
-	out.Measurements = cloneMeasurements(interference.Measurements)
-	return &out
 }
 
 var (

@@ -71,6 +71,94 @@ func TestMeasurementDisplayPreservesExplicitVariant(t *testing.T) {
 	}
 }
 
+func TestWindowMeasurementsUseGenericRendererContractAcrossFormats(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+
+	data := model.Report{
+		SchemaVersion: "ecs.report/v1",
+		Tool:          model.ToolInfo{Name: "ecs", Version: "fixture"},
+		Run:           model.RunInfo{ID: "window-measurement", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
+		Summary:       model.Summary{Status: model.StatusWarning, Warnings: 1},
+		Results: []model.Result{{
+			ID: "cpu", Title: "module.cpu.title", Status: model.StatusWarning,
+			Measurements: []model.Measurement{
+				{
+					Key: "cpu_steal_percent_window", Label: "probe.pressure.metric.cpu_steal_percent_window",
+					Value: 7.5, Unit: "%", Display: model.RawValue("window-steal-raw"), Method: "proc-stat-steal-window-v1",
+				},
+				{
+					Key: "ordinary_raw_measurement", Label: "ordinary metric",
+					Value: 1, Unit: "count", Display: model.RawValue("ordinary raw <payload>"), Method: "ordinary-measurement-v1",
+				},
+			},
+			TextBlocks: []model.TextBlock{{Title: "probe.cpu.raw.single", Language: "text", Content: "raw output <payload>"}},
+			Failures:   []model.Failure{{Category: model.FailureTimeout, Stage: "measure", Target: "fixture", Retryable: true, Message: "timeout"}},
+		}},
+	}
+
+	canonical, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, language := range []i18n.Lang{i18n.LangZH, i18n.LangEN} {
+		t.Run(string(language), func(t *testing.T) {
+			i18n.Set(language)
+			htmlOutput, err := HTML(data, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outputs := map[string]string{
+				"text":     Text(data, TextOptions{Color: termcolor.LevelNone, Width: 120}),
+				"markdown": Markdown(data, nil),
+				"html":     string(htmlOutput),
+			}
+			for format, output := range outputs {
+				if !strings.Contains(output, i18n.T("probe.pressure.metric.cpu_steal_percent_window")) {
+					t.Errorf("%s omitted the ordinary window measurement label: %q", format, output)
+				}
+				for _, marker := range []string{"window-steal-raw", "ordinary raw", "ordinary-measurement-v1", i18n.T("probe.cpu.raw.single"), i18n.T("failure.yes")} {
+					if !strings.Contains(output, marker) {
+						t.Errorf("%s omitted generic renderer marker %q: %q", format, marker, output)
+					}
+				}
+				if got := strings.Count(output, "window-steal-raw"); got != 1 {
+					t.Errorf("%s rendered the window measurement %d times, want once", format, got)
+				}
+				for _, marker := range []string{
+					"report.interference.", "report.retry.", "report.attempt.", "probe.retry.",
+					"Test-window interference", "Automatic retry decision", "Interference score", "Detected reasons", "Retry attempts",
+					"Automatic retry: selected attempt", "Retained for review",
+					"测试窗口资源干扰", "自动复测判定", "干扰评分", "检测原因", "复测轮次", "自动复测：采用第", "保留复核",
+				} {
+					if strings.Contains(output, marker) {
+						t.Errorf("%s retained dedicated retry/interference presentation marker %q: %q", format, marker, output)
+					}
+				}
+			}
+			textOutput := outputs["text"]
+			if !strings.Contains(textOutput, "ordinary raw <payload>") {
+				t.Errorf("Text did not preserve ordinary raw display: %q", textOutput)
+			}
+			for _, format := range []string{"markdown", "html"} {
+				if !strings.Contains(outputs[format], "ordinary raw &lt;payload&gt;") {
+					t.Errorf("%s did not escape ordinary raw display: %q", format, outputs[format])
+				}
+			}
+			if strings.Contains(outputs["html"], "<payload>") || strings.Contains(outputs["html"], "<script>") {
+				t.Fatalf("HTML rendered untrusted generic output as markup: %q", outputs["html"])
+			}
+			after, err := JSON(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(canonical, after) {
+				t.Fatal("generic renderer changed canonical report")
+			}
+		})
+	}
+}
+
 func TestTableCellDisplayPreservesExplicitVariantAndCanonicalInput(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })

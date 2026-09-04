@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"ecs/internal/config"
 	"ecs/internal/model"
@@ -289,89 +290,149 @@ func TestSafeRunIsolatePanic(t *testing.T) {
 	}
 }
 
-func TestConditionalRetryOrchestration(t *testing.T) {
-	baseResult := model.Result{Status: model.StatusOK, Evidence: model.NewEvidence(1, 1, "sample")}
-	nonBenchmarkRuns := 0
-	nonBenchmarkCaptures := 0
-	nonBenchmarkAssesses := 0
-	nonBenchmark := &runnerTestProbe{id: "network", runs: &nonBenchmarkRuns, result: baseResult}
-	_ = runWithConditionalRetryHooks(context.Background(), nonBenchmark, false, probe.Environment{}, func() probe.EnvironmentSnapshot {
-		nonBenchmarkCaptures++
-		return probe.EnvironmentSnapshot{}
-	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
-		nonBenchmarkAssesses++
-		return model.Interference{Detected: true}
-	})
-	if nonBenchmarkRuns != 1 || nonBenchmarkCaptures != 0 || nonBenchmarkAssesses != 0 {
-		t.Fatalf("non-benchmark retry hooks = runs %d/captures %d/assesses %d", nonBenchmarkRuns, nonBenchmarkCaptures, nonBenchmarkAssesses)
+func TestRunDefinitionRunsOrdinaryModuleOnceWithoutSnapshots(t *testing.T) {
+	descriptor, ok := runnerCatalog().Lookup("system")
+	if !ok {
+		t.Fatal("system descriptor missing")
+	}
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	noInterferenceRuns, captures, assesses := 0, 0, 0
-	noInterference := &runnerTestProbe{id: "fixture", runs: &noInterferenceRuns, result: baseResult}
-	noInterferenceResult := runWithConditionalRetryHooks(context.Background(), noInterference, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
-		captures++
-		return probe.EnvironmentSnapshot{}
-	}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
-		assesses++
-		return model.Interference{}
+	originalCapture := captureEnvironmentSnapshot
+	originalBuilder := buildBenchmarkWindowMeasurements
+	t.Cleanup(func() {
+		captureEnvironmentSnapshot = originalCapture
+		buildBenchmarkWindowMeasurements = originalBuilder
 	})
-	if noInterferenceRuns != 1 || captures != 2 || assesses != 1 || noInterferenceResult.Retry != nil {
-		t.Fatalf("no-interference retry = result %+v/runs %d/captures %d/assesses %d", noInterferenceResult, noInterferenceRuns, captures, assesses)
+	snapshots, builders := 0, 0
+	captureEnvironmentSnapshot = func() probe.EnvironmentSnapshot {
+		snapshots++
+		return probe.EnvironmentSnapshot{}
+	}
+	buildBenchmarkWindowMeasurements = func(probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) []model.Measurement {
+		builders++
+		return []model.Measurement{{Key: "unexpected-window"}}
 	}
 
-	rejected := []struct {
-		name     string
-		status   model.Status
-		evidence *model.Evidence
-		canceled bool
-	}{
-		{name: "canceled context", status: model.StatusOK, evidence: model.NewEvidence(1, 1, "sample"), canceled: true},
-		{name: "error result", status: model.StatusError, evidence: model.NewEvidence(1, 1, "sample")},
-		{name: "skipped result", status: model.StatusSkipped, evidence: model.NewEvidence(1, 1, "sample")},
-		{name: "no valid evidence", status: model.StatusOK, evidence: model.NewEvidence(0, 1, "sample")},
+	runs := 0
+	got := runDefinition(context.Background(), probe.Definition{
+		Descriptor: descriptor,
+		Probe: &runnerTestProbe{id: "system", runs: &runs, result: model.Result{
+			Status:       model.StatusOK,
+			Measurements: []model.Measurement{{Key: "ordinary-measurement"}},
+			Evidence:     model.NewEvidence(1, 1, "sample"),
+		}},
+	}, cfg, probe.Environment{}, true)
+	if runs != 1 || snapshots != 0 || builders != 0 {
+		t.Fatalf("ordinary module execution = runs %d/snapshots %d/builders %d, want 1/0/0", runs, snapshots, builders)
 	}
-	for _, test := range rejected {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			if test.canceled {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithCancel(ctx)
-				cancel()
-			}
-			runs := 0
-			item := &runnerTestProbe{id: "cpu", runs: &runs, result: model.Result{Status: test.status, Evidence: test.evidence}}
-			captures, assesses := 0, 0
-			got := runWithConditionalRetryHooks(ctx, item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
-				captures++
-				return probe.EnvironmentSnapshot{}
-			}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
-				assesses++
-				return model.Interference{Detected: true, Score: 4, Reasons: []model.Message{model.NewMessage("fixture.interference")}}
-			})
-			if runs != 1 || captures != 2 || assesses != 1 || got.Retry != nil {
-				t.Fatalf("rejected retry = %+v/runs %d/captures %d/assesses %d", got, runs, captures, assesses)
-			}
-		})
+	if len(got.Measurements) != 1 || got.Measurements[0].Key != "ordinary-measurement" {
+		t.Fatalf("ordinary module gained window measurements: %+v", got.Measurements)
 	}
+}
+
+func TestRunDefinitionAppendsOneBenchmarkWindowWithoutChangingResult(t *testing.T) {
+	descriptor, ok := runnerCatalog().Lookup("cpu")
+	if !ok {
+		t.Fatal("cpu descriptor missing")
+	}
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalCapture := captureEnvironmentSnapshot
+	originalBuilder := buildBenchmarkWindowMeasurements
+	t.Cleanup(func() {
+		captureEnvironmentSnapshot = originalCapture
+		buildBenchmarkWindowMeasurements = originalBuilder
+	})
 
 	for _, test := range []struct {
-		firstScore, secondScore, selected int
-		wantReasonKey                     string
-	}{{5, 1, 2, "fixture.second"}, {1, 5, 1, "fixture.first"}} {
-		runs, captures, assesses := 0, 0, 0
-		item := &runnerTestProbe{id: "cpu", runs: &runs, result: baseResult}
-		got := runWithConditionalRetryHooks(context.Background(), item, true, probe.Environment{}, func() probe.EnvironmentSnapshot {
-			captures++
-			return probe.EnvironmentSnapshot{}
-		}, func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference {
-			assesses++
-			if assesses == 1 {
-				return model.Interference{Detected: true, Score: test.firstScore, Reasons: []model.Message{model.NewMessage("fixture.first")}}
+		name       string
+		beforeLoad float64
+		afterLoad  float64
+		display    string
+	}{
+		{name: "low", beforeLoad: 0.1, afterLoad: 0.2, display: "0.10"},
+		{name: "zero", beforeLoad: 0, afterLoad: 0, display: "0.00"},
+		{name: "high", beforeLoad: 100, afterLoad: 100.1, display: "100.00"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := probe.EnvironmentSnapshot{CapturedAt: time.Unix(100, 0), Load1: test.beforeLoad, LoadKnown: true}
+			after := probe.EnvironmentSnapshot{CapturedAt: time.Unix(101, 0), Load1: test.afterLoad, LoadKnown: true}
+			runs, snapshots, assemblies := 0, 0, 0
+			captureEnvironmentSnapshot = func() probe.EnvironmentSnapshot {
+				snapshots++
+				switch snapshots {
+				case 1:
+					return before
+				case 2:
+					return after
+				default:
+					t.Fatalf("benchmark captured snapshot %d, want exactly two", snapshots)
+					return probe.EnvironmentSnapshot{}
+				}
 			}
-			return model.Interference{Detected: true, Score: test.secondScore, Reasons: []model.Message{model.NewMessage("fixture.second")}}
+			buildBenchmarkWindowMeasurements = func(gotBefore, gotAfter probe.EnvironmentSnapshot) []model.Measurement {
+				assemblies++
+				if !reflect.DeepEqual(gotBefore, before) || !reflect.DeepEqual(gotAfter, after) {
+					t.Fatalf("window assembly snapshots = before %+v/after %+v, want injected before %+v/after %+v", gotBefore, gotAfter, before, after)
+				}
+				return benchmarkWindowMeasurements(gotBefore, gotAfter)
+			}
+
+			wantSummary := []model.Message{model.NewMessage("fixture.benchmark.summary")}
+			wantFields := []model.Field{{Key: "benchmark-field", Label: "Benchmark field", Value: model.RawValue("kept")}}
+			wantTables := []model.Table{{Key: "benchmark-table", Rows: [][]model.Value{{model.RawValue("kept")}}}}
+			wantNotes := []string{"fixture.benchmark.note"}
+			wantEvidence := model.NewEvidence(2, 2, "run")
+			runsResult := model.Result{
+				Status:          model.StatusOK,
+				SummaryMessages: wantSummary,
+				Fields:          wantFields,
+				Measurements:    []model.Measurement{{Key: "benchmark-measurement"}},
+				Tables:          wantTables,
+				Notes:           wantNotes,
+				Evidence:        wantEvidence,
+			}
+			got := runDefinition(context.Background(), probe.Definition{
+				Descriptor: descriptor,
+				Probe:      &runnerTestProbe{id: "cpu", runs: &runs, result: runsResult},
+			}, cfg, probe.Environment{}, true)
+			if runs != 1 {
+				t.Fatalf("%s window probe runs = %d, want exactly one run", test.name, runs)
+			}
+			if snapshots != 2 {
+				t.Fatalf("%s window snapshot captures = %d, want exactly two", test.name, snapshots)
+			}
+			if assemblies != 1 {
+				t.Fatalf("%s window measurement assemblies = %d, want exactly one", test.name, assemblies)
+			}
+			if len(got.Measurements) != 2 || got.Measurements[0].Key != "benchmark-measurement" || got.Measurements[1].Key != "pretest_load_1m" || got.Measurements[1].Value != test.beforeLoad || got.Measurements[1].Display.Text() != test.display {
+				t.Fatalf("%s benchmark/window measurements = %+v, want original plus one %s snapshot-derived window value", test.name, got.Measurements, test.name)
+			}
+			if got.Status != model.StatusOK {
+				t.Fatalf("%s window value changed status: got %s, want %s", test.name, got.Status, model.StatusOK)
+			}
+			if !reflect.DeepEqual(got.SummaryMessages, wantSummary) || !reflect.DeepEqual(got.Fields, wantFields) || !reflect.DeepEqual(got.Tables, wantTables) || !reflect.DeepEqual(got.Notes, wantNotes) || !reflect.DeepEqual(got.Evidence, wantEvidence) {
+				t.Fatalf("%s benchmark result metadata changed: %+v", test.name, got)
+			}
 		})
-		if runs != 2 || captures != 4 || assesses != 2 || got.Retry == nil || got.Retry.SelectedAttempt != test.selected || got.Retry.TriggerReasons[0].Key != "fixture.first" || got.Interference == nil || got.Interference.Score != map[int]int{1: test.firstScore, 2: test.secondScore}[test.selected] || len(got.Notes) != 0 || len(got.Fields) != 0 || len(got.Tables) != 0 || got.Interference.Reasons[0].Key != test.wantReasonKey {
-			t.Fatalf("retry result = %+v/runs %d/captures %d/assesses %d", got, runs, captures, assesses)
-		}
+	}
+}
+
+func TestBenchmarkWindowMeasurementsPreserveRawPretestLoad(t *testing.T) {
+	before := probe.EnvironmentSnapshot{
+		CapturedAt: time.Unix(100, 0),
+		Load1:      123,
+		LoadKnown:  true,
+	}
+	after := probe.EnvironmentSnapshot{CapturedAt: time.Unix(101, 0)}
+	got := benchmarkWindowMeasurements(before, after)
+	if len(got) != 1 || got[0].Key != "pretest_load_1m" || got[0].Value != 123 || got[0].Label != "probe.pressure.metric.pretest_load_1m" {
+		t.Fatalf("pretest load measurement = %+v, want one raw measurement", got)
 	}
 }

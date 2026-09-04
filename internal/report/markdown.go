@@ -142,7 +142,6 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			}
 			out.WriteString("\n")
 		}
-		renderRetryInterferenceMarkdown(&out, result)
 		if len(result.Measurements) > 0 {
 			out.WriteString("### " + i18n.T("report.metrics") + "\n\n")
 			out.WriteString("| " + i18n.T("report.metric") + " | " + i18n.T("report.value") + " | " +
@@ -182,7 +181,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 		}
 		for _, rawBlock := range result.TextBlocks {
 			block := rawBlock
-			block.Title = displayTextBlockTitle(block)
+			block.Title = displayKey(block.Title)
 			out.WriteString("<details>\n<summary>")
 			out.WriteString(markdownEscape(block.Title))
 			out.WriteString("</summary>\n\n")

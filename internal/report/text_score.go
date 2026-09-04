@@ -180,7 +180,7 @@ func explicitValueTone(value model.Value) (termcolor.Tone, bool) {
 		"probe.speed.status.partial",
 		"probe.nat.status.udp_blocked",
 		"probe.media.verdict.originals", "probe.media.verdict.login", "probe.media.verdict.restricted",
-		"probe.cpu.validity.partial", "probe.cpu.validity.interfered",
+		"probe.cpu.validity.partial",
 		"probe.ookla.status.unparsed":
 		return termcolor.ToneWarning, true
 	case "probe.network.status.failed",

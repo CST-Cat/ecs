@@ -92,11 +92,6 @@ type Descriptor struct {
 	Exposure      Exposure
 	NeedsEgressIP bool
 	Concurrency   Concurrency
-	// RetryOnInterference marks benchmark modules whose result may be retried
-	// once when the host snapshot shows concurrent-load interference. The
-	// runner consumes this descriptor field rather than maintaining a module
-	// ID policy of its own.
-	RetryOnInterference bool
 
 	Methodology model.Methodology
 

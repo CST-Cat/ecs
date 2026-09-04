@@ -71,36 +71,6 @@ type Result struct {
 	Sources         []Source      `json:"sources,omitempty"`
 	Evidence        *Evidence     `json:"evidence,omitempty"`
 	Failures        []Failure     `json:"failures,omitempty"`
-	Interference    *Interference `json:"interference,omitempty"`
-	Retry           *RetryInfo    `json:"retry,omitempty"`
-}
-
-// RetryInfo records one interference-triggered benchmark retry.
-type RetryInfo struct {
-	Triggered       bool           `json:"triggered"`
-	SelectedAttempt int            `json:"selected_attempt"`
-	SelectionRule   Message        `json:"selection_rule"`
-	TriggerReasons  []Message      `json:"trigger_reasons,omitempty"`
-	Attempts        []RetryAttempt `json:"attempts"`
-}
-
-type RetryAttempt struct {
-	Number       int           `json:"number"`
-	Status       Status        `json:"status"`
-	DurationMS   int64         `json:"duration_ms"`
-	Evidence     *Evidence     `json:"evidence,omitempty"`
-	Interference Interference  `json:"interference"`
-	Measurements []Measurement `json:"measurements,omitempty"`
-}
-
-// Interference is a structured environment assessment for one benchmark
-// attempt. Reasons carry stable Message semantics; measurements use stable
-// machine keys and localized labels at the presentation boundary.
-type Interference struct {
-	Detected     bool          `json:"detected"`
-	Score        int           `json:"score"`
-	Reasons      []Message     `json:"reasons,omitempty"`
-	Measurements []Measurement `json:"measurements,omitempty"`
 }
 
 // FailureCategory is a stable machine-readable explanation for an operation
@@ -203,7 +173,6 @@ type TextBlock struct {
 	Language  string `json:"language,omitempty"`
 	Content   string `json:"content"`
 	Sensitive bool   `json:"sensitive,omitempty"`
-	Attempt   int    `json:"attempt,omitempty"`
 }
 
 type Source struct {

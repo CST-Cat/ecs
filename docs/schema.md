@@ -39,8 +39,8 @@
 
 ECS 自己生成的静态展示身份（`Title`、`Description`、字段/measurement label、表格标题与列名、
 source purpose、notes）在 canonical JSON 中保存为稳定 i18n key string；有限状态、类型和表格单元
-保存为稳定 machine enum/key。ECS 自己生成的动态摘要、notices、重试选择规则和重试原因都使用
-`Message{Key,Args}`，即使消息没有参数也不例外；只有需要参数时才填 `Args`，在终端文本、Markdown
+保存为稳定 machine enum/key。ECS 自己生成的动态摘要和 notices 都使用 `Message{Key,Args}`，
+即使消息没有参数也不例外；只有需要参数时才填 `Args`，在终端文本、Markdown
 或 HTML 边界按当前语言渲染：
 
 ```json
@@ -131,7 +131,7 @@ key + 固定位置下通过直接 key resolver 本地化；版本、国家、ASN
 
 - `valid`：取得可用结论或有效统计的样本数；
 - `expected`：本轮实际计划的样本数；
-- `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`；`retry.attempts[].evidence` 还可使用 `attempt`。
+- `unit`：稳定的机器单位，当前包括 `module`、`run`、`job`、`sample`、`query`、`target`、`operation` 和 `source`。
 - 需要展示证据完整度时，由 `valid` / `expected` 在内存中调用 `DerivedGrade()` 推导稳定等级：
   - `complete`：所有计划证据均有效；
   - `partial`：至少一项有效，但未达到计划数；
@@ -166,70 +166,76 @@ IP 情报返回 13/13 仍可能过期、冲突或误判。
 
 - `category` 是供机器分支的稳定枚举：`timeout`、`dns_error`、`connection_refused`、`network_unreachable`、`rate_limited`、`http_rejected`、`tls_error`、`parse_error`、`tool_missing`、`permission_denied`、`unsupported`、`cancelled`、`unknown`；
 - `stage` 和 `target` 定位失败步骤与目标；
-- `retryable` 只说明该类操作通常值得重试，不代表 ecs 会无条件重跑模块；
+- `retryable` 只说明该类操作通常值得重试；它是操作失败属性，不表示 benchmark 会自动再次执行；
 - `count` 合并同一目标、阶段、类别和消息的重复失败，避免逐样本膨胀；
 - `message` 保留原始诊断文本，消费者不得解析它来替代 `category`。
 
 JSON 保留枚举原值；终端文本、Markdown 与 HTML 使用当前语言显示类别，同时保留阶段、目标、次数、可重试性和原始信息。
 
-## cgroup、PSI 与条件复测
+## Benchmark 测试窗口系统状态测量
 
-`system` 的字段和 measurements 显式记录容器的真实 CPU quota、有效 cpuset、内存上限/当前使用、swap 上限、CPU throttle 累计值、PSI CPU/内存/I/O 的 `some` / `full` 值，以及 cgroup OOM/OOM-kill 计数。来源路径同时写入“cgroup 与 PSI 压力诊断”表；接口不存在时显示 unavailable，不按宿主机物理规格猜测。
+对每个本地、独占的 `standard-benchmark`，runner 在调用 benchmark 前读取一次只读系统状态，
+benchmark 完成后再读取一次同样的状态。两次读取之间的时间戳定义窗口的 `elapsed`；窗口状态
+追加到这一次测试所属 `Result.measurements`，不会创建额外的结果。runner 对每个 benchmark
+只调用一次探针并取得一个结果，窗口也属于同一次测试；不会自动重测，不会从多个候选成绩中选择，
+也不会维护窗口的 score、reason 或 quality 判定状态。
 
-CPU、zstd、NPB、STREAM（`memory`）、OpenSSL speed（`crypto`）和 fio（`disk`）会在测试窗口前后采样：
+两次快照读取的状态包括：
 
-- 测试前 load、PSI `avg10` 用于识别已经存在的争抢；
-- 窗口内 `/proc/stat` steal、cgroup throttle 和 OOM 增量用于识别实际干扰；
-- 工作负载自身产生的 PSI 增量仍被报告，但不会单独触发复测；
-- 只有首轮含有效证据且命中干扰条件时才再运行一次，最多两轮。
+- `/proc/loadavg` 的 1 分钟 load average；
+- `/proc/stat` 聚合 CPU 时间计数，用于取得 total 与 steal 计数；
+- 当前 cgroup 的 `cpu.stat` 计数（包括 `nr_throttled` 与 `throttled_usec`，同时读取其来源）；
+- 当前 cgroup 的 `memory.events` 计数（包括 `high`、`max`、`oom`、`oom_kill`，同时读取其来源）；
+- `cpu`、`memory`、`io` 的 PSI `some`/`full` 行，包括 `avg10`、`avg60`、`avg300` 和 `total`。
+  PSI 优先从当前 cgroup 的 `<resource>.pressure` 读取，找不到时读取 `/proc/pressure/<resource>`；
+- CPU quota、有效 cpuset、内存 limit/current 与 swap limit 等资源限制上下文。
 
-触发时 `Result.retry` 保存完整审计轨迹。`selection_rule` 是 `Message`，`trigger_reasons` 和
-每轮干扰 `reasons` 是 `Message[]`；`measurements` 保持结构化指标。发生复测时，选中与未选中
-轮次的原始 `text_blocks` 都通过 `attempt` 机器字段标记，展示层生成本地化轮次前缀，不改写
-`TextBlock.title`，也不把重试文案注入普通 Fields、Table 或 Notes：
+独立的 `system` Result 继续保存快照时的即时/累计资源事实：可用的 CPU quota、cpuset、内存
+limit/current、`cpu`/`memory`/`io` 的 PSI `some`/`full` `avg10`，以及 cgroup CPU throttle
+和 OOM/OOM-kill 的累计计数。这里的 PSI `avg10` 是读取时的十秒平均量，cgroup 值是读取时的
+累计 counter；它们不是 benchmark 窗口 delta。
 
-```json
-{
-  "triggered": true,
-  "selected_attempt": 2,
-  "selection_rule": {"key": "probe.retry.selection_rule.interference_score"},
-  "trigger_reasons": [
-    {"key": "probe.pressure.reason.cpu_steal_high", "args": ["6.20"]},
-    {"key": "probe.pressure.reason.pretest_cpu_psi_high", "args": ["21.00"]}
-  ],
-  "attempts": [
-    {
-      "number": 1,
-      "status": "ok",
-      "duration_ms": 260000,
-      "evidence": {"valid": 53, "expected": 53, "unit": "job"},
-      "interference": {
-        "detected": true,
-        "score": 5,
-        "reasons": [
-          {"key": "probe.pressure.reason.cpu_steal_high", "args": ["6.20"]},
-          {"key": "probe.pressure.reason.pretest_cpu_psi_high", "args": ["21.00"]}
-        ],
-        "measurements": [
-          {"key": "cpu_steal_percent_window", "label": "probe.pressure.metric.cpu_steal_percent_window", "value": 6.2, "unit": "%", "display": {"raw": "6.20 %"}, "method": "proc-stat-steal-window-v1", "higher_is_better": false},
-          {"key": "cpu_psi_some_avg10_pretest", "label": "probe.pressure.metric.cpu_psi_some_avg10_pretest", "value": 21, "unit": "%", "display": {"raw": "21.00 %"}, "method": "linux-psi-avg10-v1", "higher_is_better": false}
-        ]
-      },
-      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 500, "unit": "MiB/s", "display": {"raw": "500.0 MiB/s"}, "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
-    },
-    {
-      "number": 2,
-      "status": "ok",
-      "duration_ms": 260000,
-      "evidence": {"valid": 53, "expected": 53, "unit": "job"},
-      "interference": {"detected": false, "score": 0, "measurements": []},
-      "measurements": [{"key": "fio_sequential_write_mib_s", "label": "probe.disk.metric.fio_sequential_write_mib_s", "value": 510, "unit": "MiB/s", "display": {"raw": "510.0 MiB/s"}, "method": "fio-direct-1MiB-write-qd1-v1", "higher_is_better": true}]
-    }
-  ]
-}
+前后快照读取同一组状态，但窗口输出只采用下列事实：`pretest_load_1m` 是窗口前读取的
+1 分钟 load average；`{cpu,memory,io}_psi_some_avg10_pretest` 是窗口前读取的 PSI `some`
+`avg10`。这些是采样时的平均量，不是 benchmark 结果的判定值。`avg60`、`avg300` 以及
+窗口前的 PSI `full` `avg10` 会被快照读取，但不另生成窗口 measurement key。
+
+窗口 delta 的计算如下：
+
+- `cpu_steal_percent_window` 是前后 `/proc/stat` steal 计数差除以 total CPU 时间计数差，乘以 100；
+- `cgroup_cpu_throttled_events_window` 是 `cpu.stat` 的 `nr_throttled` 计数差；
+  `cgroup_cpu_throttled_time_percent_window` 是 `throttled_usec` 计数差除以窗口 elapsed 微秒，乘以 100；
+- 对 `cpu`、`memory`、`io`，PSI 的 `some`/`full` 窗口 measurement 是 `total` 微秒差除以
+  elapsed 微秒，乘以 100，并限制在 0–100%；
+- `cgroup_memory_high_events_window`、`cgroup_memory_max_events_window`、
+  `cgroup_oom_events_window` 和 `cgroup_oom_kill_events_window` 分别是对应
+  `memory.events` counter 的前后差。
+
+当前窗口 measurement key 完整清单如下；key 由对应的 `probe.pressure.metric.` 前缀生成 label：
+
+```text
+pretest_load_1m
+cpu_steal_percent_window
+cgroup_cpu_throttled_events_window
+cgroup_cpu_throttled_time_percent_window
+cpu_psi_some_avg10_pretest
+cpu_psi_some_percent_window
+cpu_psi_full_percent_window
+memory_psi_some_avg10_pretest
+memory_psi_some_percent_window
+memory_psi_full_percent_window
+io_psi_some_avg10_pretest
+io_psi_some_percent_window
+io_psi_full_percent_window
+cgroup_memory_high_events_window
+cgroup_memory_max_events_window
+cgroup_oom_events_window
+cgroup_oom_kill_events_window
 ```
 
-选择规则先排除没有有效证据的轮次，再选干扰评分较低的一轮；同分保留首轮。性能数值本身不参与选择，避免自动挑选偶然更高的成绩。三种 renderer 直接读取这些结构化 retry/interference 数据，显示复测原因、两轮干扰评分和采用轮次。
+计数器必须单调且前后接口可用才计算 delta；窗口 elapsed 不为正且前后状态不完整时，相应
+measurement 可以缺失。接口缺失不会按宿主机数据推断，也不会用 0 填充；但接口存在且前后
+计数没有变化时，0 是合法的实际 measurement value。
 
 ## Field
 
@@ -323,12 +329,14 @@ manifest 的 `corpus_path` 表示运行时路径；选中 zstd 时，`run.sh` �
 
 - CPU 保留 sysbench 单/多线程 `events/s` 与各自 P95 延迟，并由两项事件率计算
   `sysbench_cpu_scaling_ratio` 和 `sysbench_cpu_per_thread_efficiency_percent`；
-  有效性字段同时披露 CPU 配额、测试前负载与测试窗口内 steal 的干扰。
+  `result_validity` 只表达 CPU benchmark 本身的 `valid`、`quota` 或 `partial` 状态；runner
+  追加的测试窗口 `pretest_load_1m` 与 `cpu_steal_percent_window` 是普通 Measurements，
+  不参与该有效性字段。
 - STREAM 保留四个 kernel 的 1T/NT 带宽，另存 NT/1T 扩展倍率；Avg/Min/Max 时间和
   `(Max-Min)/Min` 波动率进入稳定性表，均可从同一份官方输出复核。
 - iperf3 仍逐节点、逐协议族、逐方向保存最终吞吐，不派生跨节点平均值；同时保存上传/
   下载各自的 retransmits，并从已有 `intervals[].sum` 计算分秒最低、P50 与变异系数，
-  不为稳定性统计增加第二轮流量。
+  不为稳定性统计追加额外流量。
 
 DNS 与 TCP 延迟分别为每个解析器/目标保存 P50、P95、标准差和成功率；DNSBL 分开保存
 已收录、确认干净、查询被拒、查询失败四种计数；route 为每个目标保存探测跳位、可见
@@ -386,11 +394,11 @@ IP 质量指标尤其需要保留 `method`：
 `text_blocks` 保存路由等需要原文复核的结果。JSON 按 JSON 规则编码控制字符，HTML 使用转义后的 `<pre>` 展示；终端渲染在排版前对整份报告的字符串值做副本净化，将 C0、DEL、C1（包括 OSC/CSI）替换为普通空格并合并连续控制符。净化之后只允许渲染器自己生成 SGR 颜色序列，输入 JSON 不会被改写。
 
 ```json
-{"title":"probe.cpu.raw.single","language":"text","content":"events per second: 1234.56","attempt":2}
+{"title":"probe.cpu.raw.single","language":"text","content":"events per second: 1234.56"}
 ```
 
 本机 IP 的遮盖规则为：IPv4 隐藏后两段（保留 /16），IPv6 隐藏后六组（保留 /32），`IP:port` 中的端口号保留。
-生产报告还会携带一份不写入 JSON 的本机 IP 列表，在报告 schema 的所有导出字符串值中只替换与该列表精确匹配的地址，包括失败消息、复测尝试、方法参数、表格、说明和原始输出。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
+生产报告还会携带一份不写入 JSON 的本机 IP 列表，在报告 schema 的所有导出字符串值中只替换与该列表精确匹配的地址，包括失败消息、方法参数、表格、说明和原始输出。`route` 和 `backtrace` 的远端逐跳 IP 因此保持完整，原始路径不应整块标记为敏感。
 
 遮盖不维护人工字段白名单；新增的导出字符串字段会自动进入同一 visitor。映射的稳定机器 key 保持不变，字符串 value 会遮盖。`--reveal` 关闭这次本机 IP 遮盖，且 `run.redacted` 保持 `false`。
 

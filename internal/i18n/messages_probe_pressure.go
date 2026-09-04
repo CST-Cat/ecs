@@ -18,14 +18,6 @@ var probePressureChinese = map[string]string{
 	"probe.pressure.metric.cgroup_memory_max_events_window":          "cgroup memory.max 事件",
 	"probe.pressure.metric.cgroup_oom_events_window":                 "cgroup OOM 事件",
 	"probe.pressure.metric.cgroup_oom_kill_events_window":            "cgroup OOM kill 事件",
-	"probe.pressure.reason.pretest_load_high":                        "测试前负载 %s 高于 %s CPU allowance 的 1.5 倍",
-	"probe.pressure.reason.cpu_steal_high":                           "测试窗口 CPU steal %s%%",
-	"probe.pressure.reason.cgroup_cpu_throttle_high":                 "cgroup CPU throttle %s 次，占窗口时间 %s%%",
-	"probe.pressure.reason.pretest_cpu_psi_high":                     "测试前 CPU PSI some avg10 %s%%",
-	"probe.pressure.reason.pretest_memory_psi_high":                  "测试前 memory PSI some avg10 %s%%",
-	"probe.pressure.reason.pretest_io_psi_high":                      "测试前 I/O PSI some avg10 %s%%",
-	"probe.pressure.reason.cgroup_oom_increase":                      "测试窗口 cgroup OOM 事件增加 %s",
-	"probe.pressure.reason.cgroup_oom_kill_increase":                 "测试窗口 cgroup OOM kill 事件增加 %s",
 }
 
 var probePressureEnglish = map[string]string{
@@ -46,12 +38,4 @@ var probePressureEnglish = map[string]string{
 	"probe.pressure.metric.cgroup_memory_max_events_window":          "cgroup memory.max events",
 	"probe.pressure.metric.cgroup_oom_events_window":                 "cgroup OOM events",
 	"probe.pressure.metric.cgroup_oom_kill_events_window":            "cgroup OOM kill events",
-	"probe.pressure.reason.pretest_load_high":                        "Pre-test load %s exceeds 1.5x the %s CPU allowance",
-	"probe.pressure.reason.cpu_steal_high":                           "CPU steal during the test reached %s%%",
-	"probe.pressure.reason.cgroup_cpu_throttle_high":                 "cgroup CPU throttling reached %s event(s), using %s%% of the window",
-	"probe.pressure.reason.pretest_cpu_psi_high":                     "Pre-test CPU PSI some avg10 reached %s%%",
-	"probe.pressure.reason.pretest_memory_psi_high":                  "Pre-test memory PSI some avg10 reached %s%%",
-	"probe.pressure.reason.pretest_io_psi_high":                      "Pre-test I/O PSI some avg10 reached %s%%",
-	"probe.pressure.reason.cgroup_oom_increase":                      "cgroup OOM events increased by %s during the test",
-	"probe.pressure.reason.cgroup_oom_kill_increase":                 "cgroup OOM kill events increased by %s during the test",
 }

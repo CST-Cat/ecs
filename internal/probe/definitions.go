@@ -30,24 +30,24 @@ func BuiltinDefinitions() []Definition {
 		{Descriptor: moduleDescriptor("bgp", true, module.ExposurePublic, true, module.ConcurrencyProbe,
 			model.Methodology{Kind: "provider-assessment", Label: "methodology.provider-assessment", Engine: "RouteViews current RIB API", Profile: "probe.bgp.profile", ComparisonScope: "probe.bgp.comparison_scope"},
 			nil, 4*time.Second), Probe: bgpProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("cpu", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+		{Descriptor: moduleDescriptorWithEstimateMode("cpu", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "sysbench", Profile: "probe.cpu.profile", ComparisonScope: "probe.cpu.comparison_scope"},
-			[]string{"sysbench"}, 3*time.Second, module.EstimateModeCPU)), Probe: cpuProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("zstd", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+			[]string{"sysbench"}, 3*time.Second, module.EstimateModeCPU), Probe: cpuProbe{}},
+		{Descriptor: moduleDescriptorWithEstimateMode("zstd", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "zstd", Profile: "probe.zstd.profile", ComparisonScope: "probe.zstd.comparison_scope"},
-			[]string{"zstd"}, 25*time.Second, module.EstimateModeTwoContext)), Probe: zstdProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("npb", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+			[]string{"zstd"}, 25*time.Second, module.EstimateModeTwoContext), Probe: zstdProbe{}},
+		{Descriptor: moduleDescriptorWithEstimateMode("npb", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "NASA NPB-OMP", Profile: "probe.npb.profile", ComparisonScope: "probe.npb.comparison_scope"},
-			[]string{"npb-ep", "npb-ft"}, 60*time.Second, module.EstimateModeTwoContext)), Probe: npbProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("memory", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+			[]string{"npb-ep", "npb-ft"}, 60*time.Second, module.EstimateModeTwoContext), Probe: npbProbe{}},
+		{Descriptor: moduleDescriptorWithEstimateMode("memory", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "STREAM", Profile: "probe.memory.stream.profile", ComparisonScope: "probe.memory.comparison_scope"},
-			[]string{"stream"}, 5*time.Second, module.EstimateModeMemory)), Probe: memoryProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("crypto", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+			[]string{"stream"}, 5*time.Second, module.EstimateModeMemory), Probe: memoryProbe{}},
+		{Descriptor: moduleDescriptorWithEstimateMode("crypto", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "OpenSSL speed", Profile: "probe.crypto.profile", ComparisonScope: "probe.crypto.comparison_scope"},
-			[]string{"openssl"}, 45*time.Second, module.EstimateModeTwoContext)), Probe: cryptoProbe{}},
-		{Descriptor: withRetryOnInterference(moduleDescriptorWithEstimateMode("disk", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
+			[]string{"openssl"}, 45*time.Second, module.EstimateModeTwoContext), Probe: cryptoProbe{}},
+		{Descriptor: moduleDescriptorWithEstimateMode("disk", true, module.ExposureLocal, false, module.ConcurrencyExclusive,
 			model.Methodology{Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "fio", Profile: "probe.disk.profile", ComparisonScope: "probe.disk.comparison_scope"},
-			[]string{"fio"}, 8*time.Second, module.EstimateModeDisk)), Probe: diskProbe{}},
+			[]string{"fio"}, 8*time.Second, module.EstimateModeDisk), Probe: diskProbe{}},
 		{Descriptor: moduleDescriptorWithEstimateMode("dns", true, module.ExposurePublic, false, module.ConcurrencyProbe,
 			model.Methodology{Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "DNS/UDP", Profile: "probe.dns.profile", ComparisonScope: "probe.dns.comparison_scope"},
 			nil, 8*time.Second, module.EstimateModeDNS), Probe: dnsProbe{}},
@@ -150,11 +150,6 @@ func copyDefinitions(definitions []Definition) []Definition {
 
 func moduleDescriptor(id string, standard bool, exposure module.Exposure, needsEgress bool, concurrency module.Concurrency, methodology model.Methodology, tools []string, estimate time.Duration, wizard ...string) module.Descriptor {
 	return moduleDescriptorWithEstimateMode(id, standard, exposure, needsEgress, concurrency, methodology, tools, estimate, module.EstimateModeFixed, wizard...)
-}
-
-func withRetryOnInterference(descriptor module.Descriptor) module.Descriptor {
-	descriptor.RetryOnInterference = true
-	return descriptor
 }
 
 func moduleDescriptorWithPrivacyNotice(id string, standard bool, exposure module.Exposure, needsEgress bool, concurrency module.Concurrency, methodology model.Methodology, tools []string, estimate time.Duration, noticeKey string, wizard ...string) module.Descriptor {

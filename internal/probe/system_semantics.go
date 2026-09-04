@@ -90,6 +90,8 @@ func buildSystemResult(start time.Time, snapshot systemSnapshot, resources Envir
 // host is denying reads and the inventory should not be read as complete.
 const maxMissingSystemFields = 3
 
+const systemStealWarningThreshold = 5.0
+
 func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 	if result == nil {
 		return
@@ -105,7 +107,7 @@ func finalizeSystemResult(result *model.Result, snapshot systemSnapshot) {
 		result.Status = model.StatusWarning
 		result.Notes = append(result.Notes, "probe.system.note.partial_inventory")
 	}
-	if snapshot.StealKnown && snapshot.StealPercent >= stealInterferenceThreshold {
+	if snapshot.StealKnown && snapshot.StealPercent >= systemStealWarningThreshold {
 		result.Status = model.StatusWarning
 	}
 }
@@ -309,7 +311,7 @@ func stableSystemNotes(snapshot systemSnapshot, hardware hardwareInventory) []st
 	if snapshot.MemoryLimit > 0 && snapshot.MemoryTotal > 0 && snapshot.MemoryLimit < snapshot.MemoryTotal {
 		notes = append(notes, "probe.system.note.memory_quota_limited")
 	}
-	if snapshot.StealKnown && snapshot.StealPercent >= stealInterferenceThreshold {
+	if snapshot.StealKnown && snapshot.StealPercent >= systemStealWarningThreshold {
 		notes = append(notes, "probe.system.note.steal_high")
 	}
 	if hardware.SystemVendor == "unknown" && hardware.ProductName == "unknown" && hardware.BoardName == "unknown" && hardware.BIOSVersion == "unknown" {

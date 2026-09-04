@@ -150,10 +150,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 			}
 			return fmt.Sprintf(i18n.T("score.missingMetrics"), i18n.T("score.dimension."+dimension.Key), len(dimension.MissingMetrics), strings.Join(dimension.MissingMetrics, ", "))
 		},
-		"baselineSource":   baselineSourceLabel,
-		"interferenceView": interferencePresentation,
-		"retryView":        retryPresentation,
-		"textBlockTitle":   displayTextBlockTitle,
+		"baselineSource": baselineSourceLabel,
 	}
 	parsed, err := template.New("report").Funcs(functions).Parse(htmlTemplate)
 	if err != nil {
@@ -331,33 +328,6 @@ const htmlTemplate = `<!doctype html>
 			<td>{{failureCount .Count}}</td><td class="{{if .Retryable}}retryable{{else}}muted{{end}}">{{failureRetryable .Retryable}}</td><td>{{.Message}}</td>
 		</tr>{{end}}</tbody></table></div>
 		{{end}}
-
-    {{with interferenceView .}}
-    <h3>{{.Title}}</h3>
-    <p><strong>{{.ScoreLabel}}{{t "punct.colon"}}</strong> {{.Score}}</p>
-    {{if .Measurements}}
-    <div class="table-wrap"><table><thead><tr>
-      <th>{{t "report.interference.metric"}}</th><th>{{t "report.interference.value"}}</th><th>{{t "report.interference.method"}}</th>
-    </tr></thead><tbody>{{range .Measurements}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Method}}</td></tr>{{end}}</tbody></table></div>
-    {{end}}
-    <h3>{{.ReasonsTitle}}</h3><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>
-    {{end}}
-
-    {{with retryView .}}
-    <h3>{{.Title}}</h3>
-    <p><strong>{{.SelectionRuleLabel}}{{t "punct.colon"}}</strong> {{.SelectionRule}}</p>
-    <p><strong>{{.TriggerReasonsLabel}}{{t "punct.colon"}}</strong></p>
-    <ul>{{range .TriggerReasons}}<li>{{.}}</li>{{end}}</ul>
-    <h3>{{.AttemptsLabel}}</h3>
-    <div class="table-wrap"><table><thead><tr>
-      <th>{{t "report.retry.attempt"}}</th><th>{{t "report.retry.status"}}</th><th>{{t "report.retry.evidence"}}</th>
-      <th>{{t "report.retry.score"}}</th><th>{{t "report.retry.reasons"}}</th><th>{{t "report.retry.selection"}}</th>
-    </tr></thead><tbody>{{range .Attempts}}<tr>
-      <td>{{.Number}}</td><td>{{.Status}}</td><td>{{.Evidence}}</td><td>{{.Score}}</td><td>{{.Reasons}}</td>
-      <td class="{{if .Selected}}ok{{else}}muted{{end}}">{{.Selection}}</td>
-    </tr>{{end}}</tbody></table></div>
-    {{end}}
-
     {{if .Measurements}}
     <div class="metrics">
       {{range .Measurements}}
@@ -383,7 +353,7 @@ const htmlTemplate = `<!doctype html>
     {{end}}
 
     {{range .TextBlocks}}
-    <details><summary>{{if textBlockTitle .}}{{textBlockTitle .}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
+    <details><summary>{{if .Title}}{{displayKey .Title}}{{else}}{{t "report.rawOutput"}}{{end}}</summary><pre><code>{{.Content}}</code></pre></details>
     {{end}}
 
     {{if .Notes}}<h3>{{t "report.notes"}}</h3><ul>{{range .Notes}}<li>{{displayKey .}}</li>{{end}}</ul>{{end}}

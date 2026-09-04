@@ -19,13 +19,6 @@ var (
 	sysbenchP95Pattern        = regexp.MustCompile(`(?m)^\s*95th percentile:\s*([0-9]+(?:\.[0-9]+)?)\s*$`)
 )
 
-// stealNoticeThreshold 是在报告里标注 steal 的门槛（百分比）。
-//
-// 它刻意比 stealInterferenceThreshold 低：标注只是多一行说明，代价为零，
-// 因此值得对轻微争抢也如实提示；而自动复测要把整个基准重跑一遍，代价远高，
-// 需要 steal 大到确实超过测量噪声才划算。两者不是同一个判断。
-const stealNoticeThreshold = 1.0
-
 type sysbenchCPUResult struct {
 	Rate   float64
 	Events uint64
@@ -87,11 +80,6 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	workers := allowance.Threads
 	threadCounts := distinctBenchmarkThreadCounts(workers)
 	singleCore := len(threadCounts) == 1
-	load1, loadKnown := readLoadAverage1()
-
-	// steal 只有在压满 CPU 的窗口内测才有意义：空闲时宿主机没有争抢对象，
-	// 读到的比例会偏低。这里夹住两轮 sysbench 的整个执行区间。
-	stealBefore, stealTracked := readCPUTimes()
 
 	single, err := executeSysbenchCPU(ctx, path, 1, seconds)
 	if err != nil {
@@ -115,21 +103,7 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 		}
 	}
 
-	steal, stealOK := 0.0, false
-	if stealTracked {
-		if after, ok := readCPUTimes(); ok {
-			steal, stealOK = stealPercent(stealBefore, after)
-		}
-	}
-
 	appendSysbenchCPUMeasurements(&result, single, multi, workers)
-	if stealOK {
-		result.Measurements = append(result.Measurements, model.Measurement{
-			Key: "cpu_steal_percent_during_test", Label: "probe.cpu.metric.steal",
-			Value: steal, Unit: "%", Display: model.RawValue(fmt.Sprintf("%.2f %%", steal)),
-			Method: "proc-stat-steal-delta-v1", HigherIsBetter: model.BoolPtr(false),
-		})
-	}
 	version := commandVersion(ctx, path)
 	result.Fields = []model.Field{
 		{Key: "engine", Label: "probe.cpu.field.engine", Value: model.RawValue("sysbench")},
@@ -152,15 +126,7 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	if multi.Rate <= 0 {
 		validity = "probe.cpu.validity.partial"
 	}
-	if (stealOK && steal >= stealNoticeThreshold) || (loadKnown && load1 > float64(workers)*1.5) {
-		validity = "probe.cpu.validity.interfered"
-	}
 	result.Fields = append(result.Fields, model.Field{Key: "result_validity", Label: "probe.cpu.field.result_validity", Value: model.KeyValue(validity)})
-	if loadKnown {
-		result.Fields = append(result.Fields, model.Field{
-			Key: "pretest_load_1m", Label: "probe.cpu.field.pretest_load_1m", Value: model.RawValue(fmt.Sprintf("%.2f", load1)),
-		})
-	}
 	result.TextBlocks = []model.TextBlock{
 		{Title: "probe.cpu.raw.single", Language: "text", Content: single.Output},
 	}
@@ -179,14 +145,6 @@ func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path stri
 	}
 	if allowance.Limited() && !singleCore {
 		result.Notes = append(result.Notes, "probe.cpu.note.quota_limited")
-	}
-	if stealOK && steal >= stealNoticeThreshold {
-		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "probe.cpu.note.steal")
-	}
-	if loadKnown && load1 > float64(workers)*1.5 {
-		result.Status = model.StatusWarning
-		result.Notes = append(result.Notes, "probe.cpu.note.load")
 	}
 	result.Evidence = model.NewEvidence(validRuns, len(threadCounts), "run")
 	if singleCore && multi.Rate > 0 {

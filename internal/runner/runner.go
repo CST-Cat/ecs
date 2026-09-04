@@ -55,6 +55,12 @@ var discoverEgress = probe.DiscoverEgress
 // an identity abstraction.
 var runIDRandomReader io.Reader = rand.Reader
 
+// These seams keep runner tests independent from the host's live resource
+// counters while preserving the production snapshot and measurement flow.
+var captureEnvironmentSnapshot = probe.CaptureEnvironmentSnapshot
+var benchmarkWindowMeasurements = probe.BuildPressureMeasurements
+var buildBenchmarkWindowMeasurements = benchmarkWindowMeasurements
+
 func Run(ctx context.Context, definitions []probe.Definition, catalog module.Catalog, cfg config.Runtime, progress ProgressFunc) (model.Report, error) {
 	runID, err := newRunID()
 	if err != nil {
@@ -243,8 +249,13 @@ func runDefinition(ctx context.Context, definition probe.Definition, cfg config.
 		result.Status = model.StatusSkipped
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
+	} else if isLocalStandardBenchmark(descriptor) {
+		before := captureEnvironmentSnapshot()
+		result = safeRun(ctx, item, env)
+		after := captureEnvironmentSnapshot()
+		result.Measurements = append(result.Measurements, buildBenchmarkWindowMeasurements(before, after)...)
 	} else {
-		result = runWithConditionalRetry(ctx, item, descriptor.RetryOnInterference, env)
+		result = safeRun(ctx, item, env)
 	}
 	if result.Methodology.Label == "" {
 		result.Methodology = descriptor.Methodology
@@ -288,44 +299,10 @@ func hasNetworkModules(selected []probe.Definition) bool {
 	return false
 }
 
-func runWithConditionalRetry(ctx context.Context, item probe.Probe, retryOnInterference bool, env probe.Environment) model.Result {
-	return runWithConditionalRetryHooks(ctx, item, retryOnInterference, env, probe.CaptureEnvironmentSnapshot, probe.AssessBenchmarkInterference)
-}
-
-func runWithConditionalRetryHooks(
-	ctx context.Context,
-	item probe.Probe,
-	retryOnInterference bool,
-	env probe.Environment,
-	capture func() probe.EnvironmentSnapshot,
-	assess func(string, probe.EnvironmentSnapshot, probe.EnvironmentSnapshot) model.Interference,
-) model.Result {
-	if !retryOnInterference {
-		return safeRun(ctx, item, env)
-	}
-	firstBefore := capture()
-	first := safeRun(ctx, item, env)
-	firstAfter := capture()
-	firstInterference := assess(item.ID(), firstBefore, firstAfter)
-	canRetry := firstInterference.Detected && ctx.Err() == nil &&
-		first.Status != model.StatusError && first.Status != model.StatusSkipped &&
-		first.Evidence != nil && first.Evidence.Valid > 0
-	if !canRetry {
-		probe.AppendInterferenceDiagnostics(&first, firstInterference)
-		return first
-	}
-
-	secondBefore := capture()
-	second := safeRun(ctx, item, env)
-	secondAfter := capture()
-	secondInterference := assess(item.ID(), secondBefore, secondAfter)
-	selected := probe.FinalizeBenchmarkRetry(first, firstInterference, second, secondInterference)
-	if selected.Retry != nil && selected.Retry.SelectedAttempt == 2 {
-		probe.AppendInterferenceDiagnostics(&selected, secondInterference)
-	} else {
-		probe.AppendInterferenceDiagnostics(&selected, firstInterference)
-	}
-	return selected
+func isLocalStandardBenchmark(descriptor module.Descriptor) bool {
+	return descriptor.Exposure == module.ExposureLocal &&
+		descriptor.Concurrency == module.ConcurrencyExclusive &&
+		descriptor.Methodology.Kind == "standard-benchmark"
 }
 
 func safeRun(ctx context.Context, item probe.Probe, env probe.Environment) (result model.Result) {

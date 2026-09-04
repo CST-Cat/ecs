@@ -107,14 +107,62 @@ func TestBuiltinDefinitionsReturnedStateIsDetached(t *testing.T) {
 	}
 }
 
-func TestBuiltinDefinitionsPreserveInterferenceRetryPolicy(t *testing.T) {
-	wantRetry := map[string]bool{
-		"cpu": true, "zstd": true, "npb": true, "memory": true, "crypto": true, "disk": true,
-	}
-	for _, definition := range BuiltinDefinitions() {
-		if got, want := definition.Descriptor.RetryOnInterference, wantRetry[definition.Descriptor.ID]; got != want {
-			t.Errorf("module %q RetryOnInterference=%v, want %v", definition.Descriptor.ID, got, want)
+func TestBuiltinDefinitionsIdentifyLocalStandardBenchmarksFromMetadata(t *testing.T) {
+	definitions := BuiltinDefinitions()
+	var speed, system module.Descriptor
+	var speedFound, systemFound bool
+	for _, definition := range definitions {
+		switch definition.Descriptor.ID {
+		case "speed":
+			speed = definition.Descriptor
+			speedFound = true
+		case "system":
+			system = definition.Descriptor
+			systemFound = true
 		}
+	}
+	if !speedFound || !systemFound {
+		t.Fatalf("builtin definitions missing speed/system descriptors: speed=%v system=%v", speedFound, systemFound)
+	}
+	if speed.Exposure != module.ExposurePublic {
+		t.Fatalf("speed exposure = %v, want non-local public exposure", speed.Exposure)
+	}
+	if system.Exposure != module.ExposureLocal {
+		t.Fatalf("system exposure = %v, want local exposure", system.Exposure)
+	}
+	if system.Methodology.Kind != "inventory" {
+		t.Fatalf("system methodology kind = %q, want non-benchmark inventory", system.Methodology.Kind)
+	}
+
+	isLocalStandardBenchmark := func(descriptor module.Descriptor) bool {
+		return descriptor.Exposure == module.ExposureLocal &&
+			descriptor.Concurrency == module.ConcurrencyExclusive &&
+			descriptor.Methodology.Kind == "standard-benchmark"
+	}
+
+	wantIDs := []string{"cpu", "zstd", "npb", "memory", "crypto", "disk"}
+	var gotIDs []string
+	for _, definition := range definitions {
+		descriptor := definition.Descriptor
+		selected := isLocalStandardBenchmark(descriptor)
+		if descriptor.Methodology.Kind != "standard-benchmark" && selected {
+			t.Fatalf("non-benchmark definition %q entered metadata selection", descriptor.ID)
+		}
+		if selected {
+			gotIDs = append(gotIDs, descriptor.ID)
+		}
+	}
+	if !equalStrings(gotIDs, wantIDs) {
+		t.Fatalf("metadata-selected benchmark IDs = %v, want %v", gotIDs, wantIDs)
+	}
+	if len(gotIDs) != 6 {
+		t.Fatalf("metadata-selected benchmark count = %d, want 6", len(gotIDs))
+	}
+	if isLocalStandardBenchmark(speed) {
+		t.Fatalf("speed unexpectedly matched local standard benchmark metadata")
+	}
+	if isLocalStandardBenchmark(system) {
+		t.Fatalf("system unexpectedly matched local standard benchmark metadata")
 	}
 }
 

@@ -196,7 +196,7 @@ func TestSystemDirectBuilderUsesSingleStableShape(t *testing.T) {
 		}
 	}
 	warningSnapshot := snapshot
-	warningSnapshot.StealPercent = stealInterferenceThreshold
+	warningSnapshot.StealPercent = systemStealWarningThreshold
 	warning := buildSystemResult(time.Unix(100, 0), warningSnapshot, resources, cloudIdentity{})
 	finalizeSystemResult(&warning, warningSnapshot)
 	if warning.Status != model.StatusWarning {

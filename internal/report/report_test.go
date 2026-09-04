@@ -18,7 +18,6 @@ import (
 func sampleReport() model.Report {
 	start := time.Date(2026, 7, 31, 1, 2, 3, 0, time.UTC)
 	higher := true
-	lower := false
 	return model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test", Commit: "abc"},
@@ -61,18 +60,6 @@ func sampleReport() model.Report {
 				Category: model.FailureTimeout, Stage: "fetch", Target: "api.example", Retryable: true,
 				Count: 1, Message: "raw timeout",
 			}},
-			Retry: &model.RetryInfo{
-				Triggered: true, SelectedAttempt: 1, SelectionRule: model.NewMessage("probe.retry.selection_rule.interference_score"), TriggerReasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory"), model.NewMessage("probe.network.status.ok")},
-				Attempts: []model.RetryAttempt{{
-					Number: 1, Status: model.StatusWarning, DurationMS: 5,
-					Evidence: &model.Evidence{Valid: 1, Expected: 1, Unit: "run"},
-					Interference: model.Interference{
-						Detected: true, Score: 1, Reasons: []model.Message{model.NewMessage("probe.system.note.partial_inventory")},
-						Measurements: []model.Measurement{{Key: "load", Label: "probe.system.metric.logical_cpus", Value: 1, Unit: "load", Display: model.RawValue("1"), HigherIsBetter: &lower}},
-					},
-					Measurements: []model.Measurement{{Key: "events", Label: "probe.system.metric.logical_cpus", Value: 700, Unit: "events/s", Display: model.RawValue("700"), HigherIsBetter: &higher}},
-				}},
-			},
 		}},
 	}
 }
@@ -186,6 +173,103 @@ func TestJSONCanonicalAndInvalidNumber(t *testing.T) {
 	}
 }
 
+func TestJSONSerializesWindowMeasurementWithoutRemovedStructures(t *testing.T) {
+	data := sampleReport()
+	data.SchemaVersion = "ecs.report/v1"
+	data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{
+		Key:            "cpu_steal_percent_window",
+		Label:          "probe.pressure.metric.cpu_steal_percent_window",
+		Value:          6.25,
+		Unit:           "%",
+		Display:        model.RawValue("6.25 %"),
+		Method:         "proc-stat-steal-window-v1",
+		HigherIsBetter: model.BoolPtr(false),
+	})
+
+	content, err := JSON(data)
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(content, &document); err != nil {
+		t.Fatalf("decode JSON object: %v", err)
+	}
+	var schemaVersion string
+	if err := json.Unmarshal(document["schema_version"], &schemaVersion); err != nil {
+		t.Fatalf("decode schema_version: %v", err)
+	}
+	if schemaVersion != "ecs.report/v1" {
+		t.Fatalf("schema_version = %q, want ecs.report/v1", schemaVersion)
+	}
+
+	var results []map[string]json.RawMessage
+	if err := json.Unmarshal(document["results"], &results); err != nil {
+		t.Fatalf("decode results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+	result := results[0]
+	for _, field := range []string{"retry", "interference", "selected_attempt", "selection_rule", "trigger_reasons"} {
+		if _, present := result[field]; present {
+			t.Fatalf("removed result field %q was serialized", field)
+		}
+	}
+
+	var measurements []struct {
+		Key   string  `json:"key"`
+		Value float64 `json:"value"`
+	}
+	if err := json.Unmarshal(result["measurements"], &measurements); err != nil {
+		t.Fatalf("decode measurements: %v", err)
+	}
+	var foundWindowMeasurement bool
+	for _, measurement := range measurements {
+		if measurement.Key == "cpu_steal_percent_window" {
+			if measurement.Value != 6.25 {
+				t.Fatalf("window measurement value = %v, want 6.25", measurement.Value)
+			}
+			foundWindowMeasurement = true
+		}
+	}
+	if !foundWindowMeasurement {
+		t.Fatal("JSON omitted cpu_steal_percent_window measurement")
+	}
+
+	var textBlocks []map[string]json.RawMessage
+	if err := json.Unmarshal(result["text_blocks"], &textBlocks); err != nil {
+		t.Fatalf("decode text_blocks: %v", err)
+	}
+	for index, block := range textBlocks {
+		if _, present := block["attempt"]; present {
+			t.Fatalf("removed text_blocks[%d].attempt was serialized", index)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "window.json")
+	writeReportFile(t, path, content)
+	loaded, err := LoadJSON(path)
+	if err != nil {
+		t.Fatalf("LoadJSON: %v", err)
+	}
+	if loaded.SchemaVersion != "ecs.report/v1" {
+		t.Fatalf("loaded schema_version = %q, want ecs.report/v1", loaded.SchemaVersion)
+	}
+	var loadedWindowMeasurement bool
+	for _, measurement := range loaded.Results[0].Measurements {
+		if measurement.Key == "cpu_steal_percent_window" {
+			if measurement.Value != 6.25 {
+				t.Fatalf("loaded window measurement value = %v, want 6.25", measurement.Value)
+			}
+			loadedWindowMeasurement = true
+		}
+	}
+	if !loadedWindowMeasurement {
+		t.Fatal("LoadJSON omitted cpu_steal_percent_window measurement")
+	}
+}
+
 // 身份契约的 owner 是读入边界 LoadJSON，不是序列化。JSON 只负责把已经通过
 // owner 的报告写出去，因此这里从磁盘读回来验证拒绝行为。
 func TestLoadJSONRejectsInvalidReportIdentity(t *testing.T) {
@@ -220,6 +304,39 @@ func TestLoadJSONRejectsInvalidReportIdentity(t *testing.T) {
 			}
 			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("LoadJSON error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadJSONRejectsRemovedResultFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		marker  string
+	}{
+		{
+			name:    "result retry",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","retry":{}}]}`,
+			marker:  `unknown field "retry"`,
+		},
+		{
+			name:    "result interference",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","interference":{}}]}`,
+			marker:  `unknown field "interference"`,
+		},
+		{
+			name:    "text block attempt",
+			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","text_blocks":[{"content":"raw","attempt":1}]}]}`,
+			marker:  `unknown field "attempt"`,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "report.json")
+			writeReportFile(t, path, []byte(test.content))
+			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.marker) {
+				t.Fatalf("LoadJSON error = %v, want %q", err, test.marker)
 			}
 		})
 	}
@@ -419,16 +536,6 @@ func TestLoadJSONRejectsUnsupportedSchemaEnums(t *testing.T) {
 			name:    "failure category",
 			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","failures":[{"category":"bogus"}]}]}`,
 			marker:  `unsupported results[0].failures[0].category "bogus"`,
-		},
-		{
-			name:    "retry attempt status",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","retry":{"attempts":[{"number":1,"status":"bogus"}]}}]}`,
-			marker:  `unsupported results[0].retry.attempts[0].status "bogus"`,
-		},
-		{
-			name:    "retry attempt evidence unit",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","retry":{"attempts":[{"number":1,"evidence":{"valid":1,"expected":1,"unit":"bogus"}}]}}]}`,
-			marker:  `unsupported results[0].retry.attempts[0].evidence.unit "bogus"`,
 		},
 	}
 	for _, test := range cases {

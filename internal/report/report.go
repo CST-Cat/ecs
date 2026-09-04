@@ -158,18 +158,6 @@ func validateReportSchemaValues(data model.Report) error {
 				return fmt.Errorf("unsupported %s.failures[%d].category %q", prefix, failureIndex, category)
 			}
 		}
-		if result.Retry == nil {
-			continue
-		}
-		for attemptIndex, attempt := range result.Retry.Attempts {
-			attemptPrefix := fmt.Sprintf("%s.retry.attempts[%d]", prefix, attemptIndex)
-			if status := attempt.Status; status != "" && !validReportStatus(status) {
-				return fmt.Errorf("unsupported %s.status %q", attemptPrefix, status)
-			}
-			if err := validateEvidenceUnit(attemptPrefix+".evidence", attempt.Evidence); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }

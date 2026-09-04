@@ -202,14 +202,13 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 		Results: []Result{{
 			SummaryMessages: []Message{NewMessage("message.test", local4)},
 			Evidence:        &Evidence{Valid: 1, Expected: 2},
-			Interference:    &Interference{Reasons: []Message{NewMessage("message.test", local4)}, Measurements: []Measurement{{Key: "result-interference", Display: RawValue(local4)}}},
 			Fields: []Field{
 				{Key: "secret", Value: RawValue("secret-token"), Sensitive: true},
 				{Key: "remote", Value: RawValue("198.51.100.2")},
 				{Key: "status", Value: KeyValue("probe.status.ok"), Sensitive: true},
 				{Key: "local_text", Value: RawValue("local " + local4)},
 			},
-			Measurements: []Measurement{{Key: "local", Label: local4, Display: RawValue(local4)}},
+			Measurements: []Measurement{{Key: "local", Label: "window " + local4, Value: 12.5, Unit: "ms", Display: RawValue(local4), Rating: "probe.status.ok", Method: "window-v1", HigherIsBetter: BoolPtr(true)}},
 			Methodology:  Methodology{Parameters: map[string]string{"local": local4}},
 			Tables: []Table{{
 				Columns: []TableColumn{
@@ -225,18 +224,6 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 			Notes:      []string{local4},
 			Sources:    []Source{{URL: "https://" + local4 + "/info"}},
 			Failures:   []Failure{{Message: local4}},
-			Retry: &RetryInfo{
-				SelectionRule:  NewMessage("message.test", local4),
-				TriggerReasons: []Message{NewMessage("message.test", local4)},
-				Attempts: []RetryAttempt{{
-					Evidence:     &Evidence{Valid: 1, Expected: 1},
-					Measurements: []Measurement{{Key: "attempt", Display: RawValue(local4)}},
-					Interference: Interference{
-						Reasons:      []Message{NewMessage("message.test", local4)},
-						Measurements: []Measurement{{Key: "interference", Display: RawValue(local4)}},
-					},
-				}},
-			},
 		}},
 	}
 
@@ -249,7 +236,7 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	result := hidden.Results[0]
 	statusKey, statusIsKey := result.Fields[2].Value.Key()
 	tableKey, tableKeyIsKey := result.Tables[0].Rows[1][1].Key()
-	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || result.Tables[0].Rows[0][1].Text() != maskedTableIP || result.Tables[0].Rows[1][1].Text() != local4 || !tableKeyIsKey || tableKey != local4 || hidden.Notices[0].Args[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Interference == nil || result.Interference.Reasons[0].Args[0] != masked4 || result.Interference.Measurements[0].Display.Text() != masked4 || result.Fields[0].Value.Text() != "hidden" || result.Fields[1].Value.Text() != "198.51.100.2" || result.Fields[2].Value.Text() != "probe.status.ok" || !statusIsKey || statusKey != "probe.status.ok" || result.Fields[3].Value.Text() != "local "+masked4 || result.Measurements[0].Display.Text() != masked4 || result.Methodology.Parameters["local"] != masked4 || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Retry.SelectionRule.Args[0] != masked4 || result.Retry.TriggerReasons[0].Args[0] != masked4 || result.Retry.Attempts[0].Evidence == nil || result.Retry.Attempts[0].Measurements[0].Display.Text() != masked4 || result.Retry.Attempts[0].Interference.Reasons[0].Args[0] != masked4 || result.Retry.Attempts[0].Interference.Measurements[0].Display.Text() != masked4 || result.Notes[0] != masked4 {
+	if !hidden.Run.Redacted || hidden.SensitiveIPs != nil || result.Tables[0].Rows[0][1].Text() != maskedTableIP || result.Tables[0].Rows[1][1].Text() != local4 || !tableKeyIsKey || tableKey != local4 || hidden.Notices[0].Args[0] != masked4 || hidden.Summary.Messages[0].Args[0] != masked4 || result.SummaryMessages[0].Args[0] != masked4 || result.Evidence == nil || result.Fields[0].Value.Text() != "hidden" || result.Fields[1].Value.Text() != "198.51.100.2" || result.Fields[2].Value.Text() != "probe.status.ok" || !statusIsKey || statusKey != "probe.status.ok" || result.Fields[3].Value.Text() != "local "+masked4 || result.Measurements[0].Label != "window "+masked4 || result.Measurements[0].Value != 12.5 || result.Measurements[0].Unit != "ms" || result.Measurements[0].Display.Text() != masked4 || result.Measurements[0].Rating != "probe.status.ok" || result.Measurements[0].Method != "window-v1" || result.Measurements[0].HigherIsBetter == nil || !*result.Measurements[0].HigherIsBetter || result.Methodology.Parameters["local"] != masked4 || result.TextBlocks[0].Content != "trace "+maskedTextIP || result.Sources[0].URL != "https://"+masked4+"/info" || result.Failures[0].Message != masked4 || result.Notes[0] != masked4 {
 		t.Fatalf("redacted containers = %+v", result)
 	}
 	hidden.Notices[0].Args[0] = "changed"
@@ -258,16 +245,11 @@ func TestRedactedCopyCoversReportContainersAndIsolation(t *testing.T) {
 	hidden.Results[0].SummaryMessages[0].Args[0] = "changed"
 	hidden.Results[0].Evidence.Valid = 99
 	hidden.Results[0].Fields[0].Value = RawValue("changed")
+	hidden.Results[0].Measurements[0].Label = "changed"
+	hidden.Results[0].Measurements[0].Value = 99
 	hidden.Results[0].Measurements[0].Display = RawValue("changed")
+	*hidden.Results[0].Measurements[0].HigherIsBetter = false
 	hidden.Results[0].Failures[0].Message = "changed"
-	hidden.Results[0].Interference.Reasons[0].Args[0] = "changed"
-	hidden.Results[0].Interference.Measurements[0].Display = RawValue("changed")
-	hidden.Results[0].Retry.SelectionRule.Args[0] = "changed"
-	hidden.Results[0].Retry.TriggerReasons[0].Args[0] = "changed"
-	hidden.Results[0].Retry.Attempts[0].Evidence.Valid = 99
-	hidden.Results[0].Retry.Attempts[0].Measurements[0].Display = RawValue("changed")
-	hidden.Results[0].Retry.Attempts[0].Interference.Reasons[0].Args[0] = "changed"
-	hidden.Results[0].Retry.Attempts[0].Interference.Measurements[0].Display = RawValue("changed")
 	hidden.Results[0].Notes[0] = "changed"
 	hidden.Results[0].Sources[0].URL = "changed"
 	hidden.Results[0].TextBlocks[0].Content = "changed"
@@ -418,21 +400,11 @@ func sampleReportForAliasing() Report {
 				Key: "tb", Columns: []TableColumn{{Key: "c"}},
 				Rows: [][]Value{{RawValue("cell")}}, RowIdentity: "c",
 			}},
-			TextBlocks:   []TextBlock{{Content: "raw"}},
-			Notes:        []string{"note"},
-			Sources:      []Source{{Name: "s"}},
-			Evidence:     evidence,
-			Failures:     []Failure{{Category: FailureUnknown, Count: 1}},
-			Interference: &Interference{Reasons: []Message{NewMessage("i")}, Measurements: []Measurement{{Key: "im"}}},
-			Retry: &RetryInfo{
-				SelectionRule:  NewMessage("r", "d"),
-				TriggerReasons: []Message{NewMessage("tr")},
-				Attempts: []RetryAttempt{{
-					Number: 1, Evidence: evidence,
-					Interference: Interference{Reasons: []Message{NewMessage("ai")}},
-					Measurements: []Measurement{{Key: "am"}},
-				}},
-			},
+			TextBlocks: []TextBlock{{Content: "raw"}},
+			Notes:      []string{"note"},
+			Sources:    []Source{{Name: "s"}},
+			Evidence:   evidence,
+			Failures:   []Failure{{Category: FailureUnknown, Count: 1}},
 		}},
 	}
 }
