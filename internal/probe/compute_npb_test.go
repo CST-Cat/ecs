@@ -172,6 +172,7 @@ func TestNPBProducerEmitsStableMachineResult(t *testing.T) {
 		writeNPBFixtureTool(t, directory, spec.Binary, npbOutput(spec, 1, 100), npbOutput(spec, 2, 200))
 	}
 	t.Setenv("PATH", directory)
+	t.Setenv(ToolBinEnv, directory)
 	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
 
 	if result.ID != "npb" || result.Title != "module.npb.title" || result.Description != "probe.npb.description" || result.Status != model.StatusOK {
@@ -249,6 +250,7 @@ func TestNPBProducerEmitsStableMachineResult(t *testing.T) {
 func TestNPBProducerMissingAndFailureDiagnosticsStayStructured(t *testing.T) {
 	missingDirectory := t.TempDir()
 	t.Setenv("PATH", missingDirectory)
+	t.Setenv(ToolBinEnv, "")
 	missing := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs, cpuAllowance{Visible: 1, Threads: 1})
 	if missing.Status != model.StatusWarning || len(missing.Failures) != 2 || missing.SummaryMessages[0].Key != "probe.npb.summary.none" || !containsNPBNote(missing.Notes, "probe.npb.note.tool_missing") {
 		t.Fatalf("NPB missing result = %+v", missing)
@@ -262,6 +264,7 @@ func TestNPBProducerMissingAndFailureDiagnosticsStayStructured(t *testing.T) {
 	directory := t.TempDir()
 	writeNPBFixtureTool(t, directory, npbBenchmarkSpecs[0].Binary, "malformed NPB diagnostic", "malformed NPB diagnostic")
 	t.Setenv("PATH", directory)
+	t.Setenv(ToolBinEnv, directory)
 	failure := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs[:1], cpuAllowance{Visible: 1, Threads: 1})
 	if failure.Status != model.StatusWarning || len(failure.Failures) != 1 || failure.SummaryMessages[0].Key != "probe.npb.summary.none" || !containsNPBNote(failure.Notes, "probe.npb.note.run_failure") {
 		t.Fatalf("NPB run failure result = %+v", failure)

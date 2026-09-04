@@ -2,7 +2,10 @@ package probe
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -10,6 +13,28 @@ import (
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// ToolBinEnv is set by run.sh to the private directory containing the
+// release's frozen benchmark tools.
+const ToolBinEnv = "ECS_TOOL_BIN"
+
+// LookupTool resolves a benchmark executable only from the wrapper-provided
+// staging directory. A benchmark is never selected from the host PATH.
+func LookupTool(name string) (string, error) {
+	bin := strings.TrimSpace(os.Getenv(ToolBinEnv))
+	if bin == "" {
+		return "", exec.ErrNotFound
+	}
+	return lookupToolInBin(bin, name)
+}
+
+func lookupToolInBin(bin, name string) (string, error) {
+	path, err := exec.LookPath(filepath.Join(bin, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", exec.ErrNotFound
+	}
+	return path, err
+}
 
 // commandVersion reads the first useful line from the standard version flags
 // used by the external tools. A failed version probe is intentionally rendered

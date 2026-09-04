@@ -3,7 +3,6 @@ package probe
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -78,7 +77,7 @@ func collectMemoryUsageSnapshot() memoryUsageSnapshot {
 }
 
 func officialStreamPath() string {
-	path, err := exec.LookPath("stream")
+	path, err := LookupTool("stream")
 	if err != nil || !IsOfficialStreamBinary(path) {
 		return ""
 	}

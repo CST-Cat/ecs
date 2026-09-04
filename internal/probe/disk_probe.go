@@ -2,7 +2,6 @@ package probe
 
 import (
 	"context"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +16,7 @@ func (diskProbe) ID() string { return "disk" }
 func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	var result model.Result
-	if path, err := exec.LookPath("fio"); err == nil {
+	if path, err := LookupTool("fio"); err == nil {
 		result = runFIODisk(ctx, env, path)
 	} else {
 		result = newDiskResult()
@@ -28,7 +27,7 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	// 多挂载盘默认关闭：多跑一块盘就多一份写入与时间，应由用户显式要求。
 	if env.Config.DiskMulti {
-		if fioPath, err := exec.LookPath("fio"); err == nil {
+		if fioPath, err := LookupTool("fio"); err == nil {
 			appendMultiDiskResults(ctx, &result, env, fioPath)
 		}
 	}

@@ -254,7 +254,7 @@ func speedMachineSummary(result model.Result) string {
 }
 
 func (speedProbe) Run(ctx context.Context, env Environment) model.Result {
-	path, err := exec.LookPath("iperf3")
+	path, err := LookupTool("iperf3")
 	if err == nil {
 		return runIPerfSpeed(ctx, env, path)
 	}

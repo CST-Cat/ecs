@@ -205,7 +205,7 @@ func routeTargetKindValue(kind string) model.Value {
 }
 
 func detectRouteEngine(ctx context.Context) routeEngine {
-	path, err := exec.LookPath(routeEngineTiny)
+	path, err := LookupTool(routeEngineTiny)
 	if err != nil {
 		return routeEngine{}
 	}

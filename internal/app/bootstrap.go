@@ -58,7 +58,6 @@ func composeApplication(definitions []probe.Definition, tools tool.Catalog) (app
 		{Name: "render", Handler: commandWithoutContext(renderCommand), UsageKey: "help.usageRender"},
 		{Name: "compare", Handler: commandWithoutContext(compareCommand), UsageKey: "help.usageCompare"},
 		{Name: "config", Handler: commandWithoutContext(configCommand), UsageKey: "help.usageConfig"},
-		{Name: "doctor", Handler: doctorCommand, UsageKey: "help.usageDoctor"},
 		{Name: "leaderboard", Handler: commandWithoutContext(leaderboardCommand), UsageKey: "help.usageLeaderboard"},
 		{Name: "submit", Handler: commandWithoutContext(submitCommand), UsageKey: "help.usageSubmit"},
 		{Name: "version", Handler: versionCommand, UsageKey: "help.usageVersion"},

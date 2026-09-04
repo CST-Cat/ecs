@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -39,9 +38,10 @@ func TestIPerfEndpointFamiliesHonorLiteralHost(t *testing.T) {
 	}
 }
 
-func TestSpeedMissingToolPreservesRawLookPathError(t *testing.T) {
+func TestSpeedMissingToolPreservesStagedLookupError(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, expectedErr := exec.LookPath("iperf3")
+	t.Setenv(ToolBinEnv, "")
+	_, expectedErr := LookupTool("iperf3")
 	if expectedErr == nil {
 		t.Fatal("fixture PATH unexpectedly contains iperf3")
 	}

@@ -7,7 +7,7 @@ Project boundaries:
 - no ads, sponsorships or affiliate links;
 - reports are not uploaded; `run.sh` defaults to `${TMPDIR:-/tmp}`, while a directly invoked binary defaults to `./reports`;
 - JSON is the machine truth; human-readable output includes terminal text, Markdown and HTML, all rendered from JSON; `--lang` changes only these human-readable outputs;
-- local performance uses standard benchmark tools. Missing or contract-mismatched tools are reported as not run; no substitute score is synthesized;
+- standard `run.sh` runs only after the frozen benchmark tools are staged; it does not use host substitutes or produce a missing-tool fallback report;
 - `ookla` invokes the official client and follows its independent data-handling terms; see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Quick start
@@ -33,13 +33,12 @@ Install a release binary:
 
 ```sh
 ./install.sh
-./install.sh --with-benchmarks
 # Override the default repository for a mirror or fork
 ECS_REPOSITORY=owner/ecs ./install.sh
 ./install.sh --from ./bin/ecs
 ```
 
-The default installation installs only `ecs`; `--with-benchmarks` is the explicit option that uses the system package manager for `sysbench`, `fio` and `iperf3`.
+The installer only installs `ecs`; it never uses a system package manager for benchmark tools. Test runs uniformly stage the architecture-matched frozen package through `run.sh`.
 
 ## Commands
 
@@ -47,7 +46,6 @@ The default installation installs only `ecs`; `--with-benchmarks` is the explici
 | --- | --- |
 | `ecs [run]` | Run the selected profile, defaulting to `standard` |
 | `ecs list` | List profiles, modules and exposure levels |
-| `ecs doctor` | Check external benchmark tools |
 | `ecs render --input FILE` | Re-export a report from JSON without probing again |
 | `ecs compare REPORT...` | Compare two or more reports |
 | `ecs config example` | Print a JSON configuration example |
@@ -177,7 +175,7 @@ Behavior and exit:
 | `--region NAME` | empty | Self-reported region (e.g. `jp`, `us-west`) for leaderboard grouping |
 | `--note TEXT` | empty | Free-form note, up to 200 characters |
 
-**`ecs list` / `ecs doctor` / `ecs version` / `ecs help`** take no options; **`ecs config`** accepts only the `example` subcommand.
+**`ecs list` / `ecs version` / `ecs help`** take no options; **`ecs config`** accepts only the `example` subcommand.
 
 ## Reports, rendering and comparison
 
@@ -264,7 +262,7 @@ ecs --config ecs.json
 
 ## Tools and platform boundary
 
-Local performance calls `sysbench`, pinned `zstd`, NPB-OMP, OpenSSL, official STREAM, `fio` and `iperf3`; routing uses NextTrace Tiny and Ookla uses its official client. `ecs doctor` reports missing tools. A version check failure means the benchmark did not run; no in-house benchmark replaces it.
+Each standard `run.sh` invocation stages the frozen architecture-matched `ecs-tools` for its selected modules; routing uses the pinned NextTrace Tiny asset, and Ookla uses its signed official client when selected. Tool preparation failure stops the run; it never reuses same-named host programs or produces a fallback report.
 
 The project supports Linux only and publishes `amd64`, `arm64`, `armv7`, `386`, `s390x`, `riscv64` and `ppc64le` binaries. Native probes do not require root.
 

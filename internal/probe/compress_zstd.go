@@ -69,7 +69,7 @@ type zstdProbe struct{}
 func (zstdProbe) ID() string { return "zstd" }
 
 func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
-	path, err := exec.LookPath("zstd")
+	path, err := LookupTool("zstd")
 	if err != nil {
 		return missingZstdResult("zstd", err)
 	}

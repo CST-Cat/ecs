@@ -7,7 +7,6 @@ version="${ECS_VERSION:-latest}"
 release_base="${ECS_RELEASE_BASE:-}"
 install_dir="${ECS_INSTALL_DIR:-}"
 local_binary=""
-with_benchmarks=0
 
 usage() {
   printf '%s\n' \
@@ -15,7 +14,7 @@ usage() {
     "" \
     "ecs only supports Linux (amd64, arm64, armv7, 386, s390x, riscv64, ppc64le)." \
     "" \
-    "Usage: ./install.sh [--from /path/to/ecs] [--install-dir DIR] [--version VERSION] [--with-benchmarks]" \
+    "Usage: ./install.sh [--from /path/to/ecs] [--install-dir DIR] [--version VERSION]" \
     "" \
     "Environment:" \
     "  ECS_REPOSITORY   GitHub owner/repo override (default: CST-Cat/ecs)." \
@@ -23,10 +22,9 @@ usage() {
     "  ECS_INSTALL_DIR  Destination directory." \
     "  ECS_VERSION      Release tag, or latest (default)." \
     "" \
-    "By default no package manager is changed. --with-benchmarks explicitly installs" \
-    "sysbench, fio and iperf3 through the detected system package manager." \
-    "Pinned zstd/corpus, NPB, OpenSSL, STREAM, NextTrace Tiny and ping are staged" \
-    "temporarily by run.sh/ecs-tools when required."
+    "This installer only installs the ecs release binary; it never changes a" \
+    "system package database. Benchmark tools are staged as verified frozen" \
+    "architecture-matched assets by run.sh when a test run selects them."
 }
 
 while [ "$#" -gt 0 ]; do
@@ -45,10 +43,6 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --version" >&2; exit 1; }
       version=$2
       shift 2
-      ;;
-    --with-benchmarks)
-      with_benchmarks=1
-      shift
       ;;
     -h|--help)
       usage
@@ -75,7 +69,7 @@ install_binary() {
   mkdir -p "$install_dir"
   if [ ! -w "$install_dir" ]; then
     printf 'destination is not writable: %s\n' "$install_dir" >&2
-    printf '%s\n' "Choose a writable directory with --install-dir; this script does not invoke sudo." >&2
+    printf '%s\n' "Choose a writable directory with --install-dir; this script does not invoke privileged commands." >&2
     exit 1
   fi
   destination="${install_dir}/${program}"
@@ -109,42 +103,9 @@ install_binary() {
   printf '%s\n' "$candidate_version"
 }
 
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    printf '%s\n' "benchmark dependencies require root; re-run as root or install sysbench fio iperf3 manually; fixed-release tools are provided temporarily by run.sh/ecs-tools" >&2
-    exit 1
-  fi
-}
-
-install_benchmark_tools() {
-  [ "$with_benchmarks" -eq 1 ] || return 0
-  printf '%s\n' "installing benchmark tools: sysbench fio iperf3 (fixed-release tools are provided temporarily by run.sh/ecs-tools)"
-  if command -v apt-get >/dev/null 2>&1; then
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get update
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y sysbench fio iperf3
-  elif command -v dnf >/dev/null 2>&1; then
-    as_root dnf install -y sysbench fio iperf3
-  elif command -v yum >/dev/null 2>&1; then
-    as_root yum install -y sysbench fio iperf3
-  elif command -v apk >/dev/null 2>&1; then
-    as_root apk add sysbench fio iperf3
-  elif command -v pacman >/dev/null 2>&1; then
-    as_root pacman -S --needed --noconfirm sysbench fio iperf3
-  else
-    printf '%s\n' "no supported package manager found; install sysbench fio iperf3 manually; fixed-release tools are provided temporarily by run.sh/ecs-tools" >&2
-    exit 1
-  fi
-  printf '%s\n' "standard benchmark tools installed"
-}
-
 if [ -n "$local_binary" ]; then
   [ -f "$local_binary" ] || { printf 'binary not found: %s\n' "$local_binary" >&2; exit 1; }
   install_binary "$local_binary"
-  install_benchmark_tools
   exit 0
 fi
 
@@ -230,4 +191,3 @@ printf '%s\n' "SHA-256 verified"
 tar -xzf "${work_dir}/${asset}" -C "$work_dir" "$program"
 [ -f "${work_dir}/${program}" ] && [ ! -L "${work_dir}/${program}" ] || { printf '%s\n' "release archive does not contain a regular ecs binary" >&2; exit 1; }
 install_binary "${work_dir}/${program}"
-install_benchmark_tools

@@ -3,22 +3,21 @@
 #
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
-#       └ 自动下载已校验的 ecs 和按架构匹配的工具包，把缺失组件放入临时 PATH，运行并在 ${TMPDIR:-/tmp} 生成本地报告
+#       └ 自动下载已校验的 ecs 和按架构匹配的固定工具包，把本次所需工具放入临时 PATH，运行并在 ${TMPDIR:-/tmp} 生成本地报告
 #   curl -fsSL .../run.sh | sh -s -- --profile full --lang en
 #       └ 带参数时跳过向导；组件仍会自动准备，测试结束后删除本次临时前缀
 #   curl -fsSL .../run.sh | sh -s -- --submit --provider vultr --region jp -- --profile full --yes
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 已有的通用组件优先使用；固定口径基准选中时使用发行版提供的指定版本与数据。
-#   - 缺失的随 ecs 发行的工具按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
-#     校验 checksums.txt 后，只把本次需要的 binary 放入 WORK/bin；
+#   - 所有选中的基准工具都按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
+#     校验 checksums.txt 后，只把本次需要的固定 binary 放入 WORK/bin；
 #     zstd 选中时再从独立 corpus 发行资产准备固定输入。
 #     绝不调用系统包安装器，也不改动系统数据库。
 #   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
-#     Ookla speedtest 不放入工具包；--only ookla 仍可在任意档位显式单独选择，缺失时才走独立的 Ookla
+#     Ookla speedtest 不放入工具包；--only ookla 仍可在任意档位显式单独选择，选中时走独立的 Ookla
 #     官方签名软件源路径。
-#   - ECS_AUTO_DEPS=0 可关闭自动依赖准备，让 ecs 自己报告缺失组件。
+#   - ECS_AUTO_DEPS=0 可关闭自动依赖准备；选中固定工具时会直接终止运行。
 #   - ECS_KEEP=1 只保留临时工作目录用于排障；没有系统包需要清理。
 #   - WORK 默认位于 /tmp；显式 TMPDIR 仅作为高级覆盖，必须是绝对路径。
 
@@ -105,25 +104,25 @@ if [ "$HELP_REQUESTED" -eq 1 ]; then
         'Usage: run.sh [--profile standard|full] [--only MODULES] [options]' \
         '       run.sh --submit [--provider NAME] [--region REGION] [--output PATH] -- [run options]' \
         '' \
-        'Downloads a checksummed ecs release, then stages missing architecture-matched tools under a temporary PATH (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
-        'When route/backtrace needs NextTrace Tiny, run.sh stages the official nexttrace-tiny asset; ECS_AUTO_DEPS=0 skips tool preparation.' \
+        'Downloads a checksummed ecs release, then stages the required frozen architecture-matched tools under a temporary PATH (never system-installs them), and writes reports directly to ${TMPDIR:-/tmp} by default.' \
+        'When route/backtrace needs NextTrace Tiny, run.sh stages the official nexttrace-tiny asset; disabling automatic dependency setup makes a selected-tool run fail.' \
         'No report directory is created by default; pass --output PATH to choose a destination.' \
         'With --submit, wrapper options precede an exact -- and ecs run options follow it; wrapper --output chooses the submission file or directory.' \
         'Provider and region are auto-detected from safe local report metadata when available; --provider/--region override them, otherwise they remain blank.' \
         'Common options: --profile, --only, --skip, --config, --exposure, --lang, --yes.' \
-        'The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules. Explicit --only may select any module. If speedtest is missing, run.sh uses its separate verified official package-source path under WORK.'
+        'The standard profile includes cnspeed and omits multi-source IP quality and Ookla; the full profile adds both omitted modules. Explicit --only may select any module. When Ookla is selected, run.sh uses its separate verified official package-source path under WORK.'
     else
       printf '%s\n' \
         '用法：run.sh [--profile standard|full] [--only 模块] [选项]' \
         '      run.sh --submit [--provider 商家] [--region 地区] [--output 路径] -- [测试选项]' \
         '' \
-        '下载并校验 ecs Release，再按架构下载并校验缺失工具包，把需要的 binary 放入临时 PATH（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
-        '选中 route/backtrace 时使用官方 nexttrace-tiny，缺失时跳过路由探测；ECS_AUTO_DEPS=0 会跳过依赖准备。' \
+        '下载并校验 ecs Release，再按架构下载并校验固定工具包，把本次需要的 binary 放入临时 PATH（不会安装到系统），并默认直接在 ${TMPDIR:-/tmp} 生成报告。' \
+        '选中 route/backtrace 时使用官方 nexttrace-tiny；固定工具准备失败或 ECS_AUTO_DEPS=0 时直接终止运行。' \
         '默认不会创建新的报告目录；请用 --output PATH 指定输出位置。' \
         '使用 --submit 时，wrapper 选项放在精确的 -- 之前，ecs run 选项放在其后；wrapper --output 指定提交文件或目录。' \
         '有安全的本机报告元数据时会自动识别云厂商和地区；--provider/--region 可显式覆盖，无法识别时留空。' \
         '常用选项：--profile、--only、--skip、--config、--exposure、--lang、--yes。' \
-        'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。缺少 speedtest 时，脚本会走独立的临时、已验证官方包源路径。'
+        'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。选中 Ookla 时，脚本会走独立的临时、已验证官方包源路径。'
     fi
     exit 0
 fi
@@ -303,8 +302,6 @@ APT_STATE_MODE="host"
 APT_TEMP_SOURCES=""
 MISSING_TOOLS=""
 PACKAGES=""
-NEXTTRACE_REQUESTED=0
-NEXTTRACE_FAILED=0
 OOKLA_MISSING=0
 OOKLA_REPO_READY=0
 OOKLA_KEY_ASC=""
@@ -385,37 +382,6 @@ add_missing_tool() {
   case " $MISSING_TOOLS " in
     *" $1 "*) ;;
     *) MISSING_TOOLS="${MISSING_TOOLS:+$MISSING_TOOLS }$1" ;;
-  esac
-}
-
-tool_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-nexttrace_tool_exists() {
-  tool_exists nexttrace-tiny
-}
-
-stream_is_official() {
-  stream_command=$(command -v stream 2>/dev/null || true)
-  [ -n "$stream_command" ] && [ -f "$stream_command" ] && [ -x "$stream_command" ] || return 1
-  # Do not execute a candidate `stream` merely to identify it: ImageMagick
-  # ships a command with the same name.  These strings are stable markers of
-  # the official STREAM benchmark output and are absent from that utility.
-  command -v strings >/dev/null 2>&1 || return 1
-  stream_strings=$(strings "$stream_command" 2>/dev/null || true)
-  printf '%s\n' "$stream_strings" | grep -F 'Number of Threads requested' >/dev/null || return 1
-  printf '%s\n' "$stream_strings" | grep -F 'Best Rate' >/dev/null || return 1
-  printf '%s\n' "$stream_strings" | grep -F 'Function' >/dev/null || return 1
-  printf '%s\n' "$stream_strings" | grep -F 'STREAM version' >/dev/null || return 1
-  return 0
-}
-
-tool_available() {
-  case "$1" in
-    stream) stream_is_official ;;
-    nexttrace-tiny) nexttrace_tool_exists ;;
-    *) tool_exists "$1" ;;
   esac
 }
 
@@ -596,8 +562,8 @@ apt_download_resolved() {
   APT_LOG="$WORK/package-manager.log"
   if ! (cd "$TEMP_TOOL_CACHE" && apt_temp_command download $APT_RESOLVED_PACKAGES) \
       >>"$APT_LOG" 2>&1; then
-    say "无法从测试机已配置的 apt 源下载测试组件，相关测试将跳过（日志：$APT_LOG）" \
-      "could not download the test components from the test machine's configured apt sources; related tests will be skipped (log: $APT_LOG)"
+    say "无法从测试机已配置的 apt 源准备测试组件，运行终止（日志：$APT_LOG）" \
+      "could not prepare the test components from the test machine's configured apt sources; the run will stop (log: $APT_LOG)"
     return 1
   fi
   return 0
@@ -610,7 +576,7 @@ extract_debs() {
       continue
     fi
     if ! dpkg-deb --extract "$deb" "$TEMP_TOOL_ROOT" >>"$WORK/package-manager.log" 2>&1; then
-      say "无法安全解包 $deb，相关测试将跳过" "could not safely extract $deb; related tests will be skipped"
+      say "无法安全解包 $deb，运行终止" "could not safely extract $deb; the run will stop"
       return 1
     fi
     printf '%s\n' "$deb" >>"$EXTRACTED_DEBS"
@@ -670,9 +636,9 @@ temp_library_dir_has_shared_objects() {
 
 activate_temp_tool_path() {
   [ "$TEMP_TOOL_PATH_READY" -eq 1 ] && return 0
-  # Only the explicitly staged tool links are prepended.  Keeping the rest of
-  # the host PATH intact guarantees that a pre-installed helper is never
-  # shadowed by an incidental executable shipped in a dependency package.
+  # Only the explicitly staged tool links are prepended. ECS_TOOL_BIN separately
+  # confines benchmark lookup to this directory; the host PATH remains available
+  # to ordinary system inspection and download helpers.
   TEMP_PATH="$TEMP_TOOL_BIN"
   if [ -n "$ORIGINAL_PATH" ]; then
     PATH="$TEMP_PATH:$ORIGINAL_PATH"
@@ -738,8 +704,8 @@ apt_dependency_names() {
 
 prepare_apt_tools() {
   command -v dpkg-deb >/dev/null 2>&1 || {
-    say "系统缺少 dpkg-deb，无法安全临时解包 Debian 包；相关测试将跳过" \
-      "dpkg-deb is unavailable, so Debian packages cannot be safely extracted temporarily; related tests will be skipped"
+    say "系统缺少 dpkg-deb，无法安全临时解包 Debian 包；运行终止" \
+      "dpkg-deb is unavailable, so Debian packages cannot be safely extracted temporarily; the run will stop"
     return 1
   }
   apt_update_temp || return 1
@@ -775,8 +741,8 @@ prepare_apt_tools() {
       prepared_any=1
       remove_missing_tool "$missing_tool"
     else
-      say "无法在临时前缀中找到 $missing_tool，相关测试将跳过" \
-        "could not find $missing_tool in the temporary prefix; related tests will be skipped"
+      say "无法在临时前缀中准备测试组件，运行终止" \
+        "could not prepare the test components in the temporary prefix; the run will stop"
     fi
   done
   [ "$prepared_any" -eq 1 ] && activate_temp_tool_path
@@ -871,15 +837,15 @@ prepare_ookla_apt() {
 
   OOKLA_LOG="$WORK/package-manager.log"
   if ! apt_ookla_command update >>"$OOKLA_LOG" 2>&1; then
-    say "Ookla 签名源元数据下载失败，speedtest 将跳过（日志：$OOKLA_LOG）" \
-      "Ookla signed-source metadata download failed; speedtest will be skipped (log: $OOKLA_LOG)"
+    say "Ookla 签名源元数据下载失败，运行终止（日志：$OOKLA_LOG）" \
+      "Ookla signed-source metadata download failed; the run will stop (log: $OOKLA_LOG)"
     return 1
   fi
   # Download the vendor package only.  `apt-get download` verifies the
   # Packagecloud Release metadata with the pinned key but never invokes dpkg.
   if ! (cd "$TEMP_TOOL_CACHE" && apt_ookla_command download speedtest) >>"$OOKLA_LOG" 2>&1; then
-    say "Ookla speedtest 包下载失败，相关测试将跳过（日志：$OOKLA_LOG）" \
-      "Ookla speedtest package download failed; related tests will be skipped (log: $OOKLA_LOG)"
+    say "Ookla speedtest 包下载失败，运行终止（日志：$OOKLA_LOG）" \
+      "Ookla speedtest package download failed; the run will stop (log: $OOKLA_LOG)"
     return 1
   fi
   extract_debs || return 1
@@ -891,12 +857,13 @@ prepare_ookla_apt() {
 prepare_ookla_rpm() {
   # RPM metadata can be verified without installation, but extracting an RPM
   # safely requires rpm2cpio/cpio (and dnf's download plugin).  Do not guess or
-  # install those helpers globally: report a controlled degradation instead.
+  # install those helpers globally: terminate instead of running without the
+  # selected fixed client.
   #
-  # 这里刻意不再生成 .repo 文件与导入 GPG key：既然本路径必然以跳过收尾，
-  # 提前建立仓库配置只是在 WORK 里留下用不到的产物。
-  say "当前 RPM 路径没有安全的临时解包器，speedtest 将跳过；请预先放入 PATH" \
-    "the RPM path lacks a safe temporary extractor; speedtest will be skipped (preinstall it on PATH if needed)"
+  # 这里刻意不再生成 .repo 文件与导入 GPG key：当前路径没有安全的临时
+  # 解包器，提前建立仓库配置只是在 WORK 里留下用不到的产物。
+  say "当前 RPM 路径没有安全的临时解包器，运行终止" \
+    "the RPM path lacks a safe temporary extractor; the run will stop"
   return 1
 }
 
@@ -998,45 +965,31 @@ remove_missing_tool() {
 collect_missing_tools() {
   MISSING_TOOLS=""
   TOOLS_REQUESTED=""
-  NEXTTRACE_REQUESTED=0
   # RequiredTools is metadata consumed as an execution contract. The Go plan
   # is the only source of the selected module/tool set.
   for tool in $PLAN_TOOLS; do
+    add_missing_tool "$tool"
     case "$tool" in
       zstd)
         # The benchmark contract pins both executable and corpus. An
-        # arbitrary system command named zstd is not interchangeable.
-        add_missing_tool zstd
+        # arbitrary host command named zstd is not interchangeable.
         add_tools_request zstd
         ;;
       npb-ep|npb-ft)
         # Class, OpenMP implementation and compiler flags are embedded in
         # the release binaries and verified from every benchmark output.
-        add_missing_tool "$tool"
         add_tools_request "$tool"
         ;;
       openssl)
         # Crypto results use the pinned LTS build rather than the host TLS
         # utility, whose version and Configure options are distribution-specific.
-        add_missing_tool openssl
         add_tools_request openssl
         ;;
       nexttrace-tiny)
-        NEXTTRACE_REQUESTED=1
-        if ! nexttrace_tool_exists; then
-          add_missing_tool nexttrace-tiny
-          add_tools_request nexttrace-tiny
-        fi
+        add_tools_request nexttrace-tiny
         ;;
-      *)
-        if ! tool_available "$tool"; then
-          add_missing_tool "$tool"
-          # Every non-Ookla required tool is resolved from the checksummed
-          # architecture archive. The archive extraction below accepts only
-          # the exact requested bin/<name> member.
-          [ "$tool" = speedtest ] || add_tools_request "$tool"
-        fi
-        ;;
+      speedtest) ;;
+      *) add_tools_request "$tool" ;;
     esac
   done
 }
@@ -1068,22 +1021,21 @@ install_packages() {
         fi
         ;;
       *)
-        say "speedtest 只能在 Debian/Ubuntu 临时校验解包；此处跳过" \
-          "speedtest temporary verified extraction is supported only on Debian/Ubuntu; skipping here"
+        say "speedtest 只能在 Debian/Ubuntu 临时校验解包，运行终止" \
+          "speedtest temporary verified extraction is supported only on Debian/Ubuntu; the run will stop"
         install_status=1
         ;;
     esac
   fi
-  # A failed download is a controlled degradation, not permission to fall back
-  # to a global package install.  The caller leaves unresolved tools in the
-  # missing list so ecs records the skipped modules explicitly.
+  # A failed download is not permission to fall back to a global package
+  # install. The caller leaves unresolved selected tools in the list and stops
+  # before invoking ecs.
   [ "$install_status" -eq 0 ] || return 0
   return 0
 }
 
 prepare_dependencies() {
   collect_missing_tools
-  NEXTTRACE_FAILED=0
   OOKLA_MISSING=0
   for tool in $MISSING_TOOLS; do
     [ "$tool" = speedtest ] && OOKLA_MISSING=1
@@ -1093,54 +1045,30 @@ prepare_dependencies() {
     return 0
   fi
 
-  say "缺少组件：$MISSING_TOOLS" "missing components: $MISSING_TOOLS"
+  say "准备固定测试组件" "preparing frozen test components"
   if [ "$AUTO_DEPS" -eq 0 ]; then
-    if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! nexttrace_tool_exists; then
-      NEXTTRACE_FAILED=1
-      say "已关闭自动依赖准备，NextTrace 路由模块将跳过。" "automatic dependency setup is disabled; NextTrace route modules will be skipped"
-    fi
-    say "继续运行；报告会明确标注缺少的组件。" "continuing with explicit missing-tool warnings"
-    return 0
+    die "已关闭自动依赖准备，无法使用固定测试组件" "automatic dependency setup is disabled; frozen test components are required"
   fi
 
   if [ -n "$TOOLS_REQUESTED" ]; then
-    if prepare_tools_archive; then
-      say "缺失工具已放入本次临时 PATH" "missing tools staged in this run's temporary PATH"
-    else
-      say "架构工具包下载、SHA-256 或可执行文件校验失败，相关测试将跳过" \
-        "architecture tool package download, SHA-256, or executable verification failed; related tests will be skipped"
-    fi
-  fi
-  if [ "$NEXTTRACE_REQUESTED" -eq 1 ] && ! nexttrace_tool_exists; then
-    NEXTTRACE_FAILED=1
-    say "NextTrace Tiny 不可用，路由模块将跳过" "NextTrace Tiny is unavailable; route modules will be skipped"
-  fi
-  if [ -z "$MISSING_TOOLS" ]; then
-    if [ "$NEXTTRACE_FAILED" -eq 1 ]; then
-	      say "其他测试组件已就绪；NextTrace Tiny 不可用，路由模块将跳过" "other test components are ready; NextTrace Tiny is unavailable and route modules will be skipped"
-    else
-      say "测试组件已就绪" "test components are ready"
-    fi
-    return 0
+    prepare_tools_archive ||
+      die "架构固定工具包下载、SHA-256 或可执行文件校验失败，运行终止" \
+        "frozen architecture tool package download, SHA-256, or executable verification failed; the run will stop"
   fi
   if [ "$OOKLA_MISSING" -eq 1 ]; then
     if ! select_package_manager; then
-      say "找不到 Ookla 所需的包管理器，speedtest 将跳过" \
-        "no package manager is available for the explicit Ookla path; speedtest will be skipped"
+      die "找不到 Ookla 所需的包管理器，运行终止" \
+        "no package manager is available for the explicit Ookla path; the run will stop"
     else
       install_packages
     fi
   fi
   if [ -n "$MISSING_TOOLS" ]; then
-    say "以下组件未能安全放入临时前缀，将按缺失组件降级：$MISSING_TOOLS" \
-      "the following components could not be safely staged in the temporary prefix; tests will degrade: $MISSING_TOOLS"
-  elif [ "$NEXTTRACE_FAILED" -eq 1 ]; then
-	    say "测试组件已就绪；NextTrace Tiny 不可用，路由模块将跳过" \
-	      "test components are ready; NextTrace Tiny is unavailable and route modules will be skipped"
-  else
-    say "测试组件已就绪（仅位于本次临时前缀）" \
-      "test components are ready (scoped to this run's temporary prefix)"
+    die "固定测试组件未能完成准备，运行终止" \
+      "frozen test components were not fully prepared; the run will stop"
   fi
+  say "固定测试组件已就绪（仅位于本次临时前缀）" \
+    "frozen test components are ready (scoped to this run's temporary prefix)"
 }
 
 if [ "$SUBMIT_MODE" -eq 0 ]; then
@@ -1258,13 +1186,13 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Force a JSON report in WORK.  Wrapper-only submit/provider/region/output
   # options were removed above, while every ordinary run option remains
   # quoted in "$@".
-  if "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
+  if ECS_TOOL_BIN="$TEMP_TOOL_BIN" "${WORK}/ecs" "$@" --format json --output "$SUBMIT_REPORT_DIR"; then
     RUN_STATUS=0
   else
     RUN_STATUS=$?
   fi
 elif [ -n "$PLAN_FILE" ]; then
-  if "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@" \
+  if ECS_TOOL_BIN="$TEMP_TOOL_BIN" "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@" \
       --profile "$PLAN_PROFILE" --only "$PLAN_MODULES" --yes \
       --exposure "$PLAN_EXPOSURE" --reveal="$PLAN_REVEAL"; then
     RUN_STATUS=0
@@ -1272,7 +1200,7 @@ elif [ -n "$PLAN_FILE" ]; then
     RUN_STATUS=$?
   fi
 else
-  if "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@"; then
+  if ECS_TOOL_BIN="$TEMP_TOOL_BIN" "${WORK}/ecs" --output "$REPORT_DIR" --name "$REPORT_NAME" "$@"; then
     RUN_STATUS=0
   else
     RUN_STATUS=$?

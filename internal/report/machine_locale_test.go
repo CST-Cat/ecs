@@ -159,6 +159,7 @@ func machineLocaleCustomIPerfResult(t *testing.T) model.Result {
 		t.Fatalf("write iperf3 fixture: %v", err)
 	}
 	t.Setenv("PATH", directory)
+	t.Setenv(probe.ToolBinEnv, directory)
 	env := probe.Environment{
 		Config: config.Runtime{
 			IPVersion:     config.IPVersion4,

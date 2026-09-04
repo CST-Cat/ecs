@@ -28,6 +28,7 @@ func writeThroughputExecutable(t *testing.T, name, body string) string {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory)
+	t.Setenv(ToolBinEnv, directory)
 	return path
 }
 
@@ -577,6 +578,7 @@ func TestOoklaStatusKeyUsesParsedResult(t *testing.T) {
 func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 	t.Run("exposure denied", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
+		t.Setenv(ToolBinEnv, "")
 		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureLocal}, Catalog: testCatalog()})
 		if result.Status != model.StatusSkipped || len(result.Fields) != 2 || result.SummaryMessages[0].Key != "probe.ookla.summary.skipped" {
 			t.Fatalf("Ookla exposure skip = %+v", result)
@@ -589,6 +591,7 @@ func TestOoklaProducerBuildsStableExposureAndToolStatesDirectly(t *testing.T) {
 	})
 	t.Run("tool missing", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
+		t.Setenv(ToolBinEnv, "")
 		result := (ooklaProbe{}).Run(context.Background(), Environment{Config: config.Runtime{Exposure: module.ExposureThirdParty}, Catalog: testCatalog()})
 		if result.Status != model.StatusSkipped || len(result.Failures) != 1 || result.Failures[0].Stage != "tool_lookup" {
 			t.Fatalf("Ookla tool skip = %+v", result)

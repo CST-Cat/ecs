@@ -15,7 +15,7 @@ func catalogTestHandler(application, context.Context, []string, io.Writer, io.Wr
 }
 
 func TestApplicationCommandCatalogInvariantsAndOrder(t *testing.T) {
-	wantNames := []string{"run", "plan", "list", "render", "compare", "config", "doctor", "leaderboard", "submit", "version", "help"}
+	wantNames := []string{"run", "plan", "list", "render", "compare", "config", "leaderboard", "submit", "version", "help"}
 	catalog := newApplication().commands
 	definitions := catalog.definitionsInOrder()
 	if got := len(definitions); got != len(wantNames) {
@@ -174,7 +174,6 @@ func TestHelpPreservesExistingCommandLines(t *testing.T) {
 				"ecs render --input FILE     从 JSON 重新导出 JSON/Markdown/HTML 三种格式",
 				"ecs compare REPORTS...      安全比较 2 份或更多 JSON 报告",
 				"ecs config example          输出配置文件示例",
-				"ecs doctor                  检查标准基准工具",
 				"ecs leaderboard REPORTS...  从多份报告聚合排行榜参考",
 				"ecs submit --input FILE     导出可公开入库的瘦身提交",
 				"ecs version                 显示版本",
@@ -189,7 +188,6 @@ func TestHelpPreservesExistingCommandLines(t *testing.T) {
 				"ecs render --input FILE     re-export JSON/Markdown/HTML from JSON",
 				"ecs compare REPORTS...      compare 2 or more JSON reports safely",
 				"ecs config example          print a sample configuration",
-				"ecs doctor                  check standard benchmark tools",
 				"ecs leaderboard REPORTS...  aggregate a leaderboard reference",
 				"ecs submit --input FILE     export a minimized public submission",
 				"ecs version                 show version",

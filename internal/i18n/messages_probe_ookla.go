@@ -1,7 +1,7 @@
 package i18n
 
 var probeOoklaChinese = map[string]string{
-	"probe.ookla.description":                        "调用本机已安装的官方 Ookla Speedtest CLI，记录一次外部服务测速结果",
+	"probe.ookla.description":                        "调用本次运行准备的官方 Ookla Speedtest CLI，记录一次外部服务测速结果",
 	"probe.ookla.profile":                            "JSON，一次由 Ookla 选择服务器",
 	"probe.ookla.comparison_scope":                   "相同客户端、服务器选择与协议族；外部服务数据不等同于 ecs 本地报告",
 	"probe.ookla.summary.skipped":                    "Ookla 测速未运行",
@@ -58,7 +58,7 @@ var probeOoklaChinese = map[string]string{
 }
 
 var probeOoklaEnglish = map[string]string{
-	"probe.ookla.description":                        "Run the installed official Ookla Speedtest CLI and record one external-service result",
+	"probe.ookla.description":                        "Run the official Ookla Speedtest CLI staged for this invocation and record one external-service result",
 	"probe.ookla.profile":                            "JSON, one server selected by Ookla",
 	"probe.ookla.comparison_scope":                   "Same client, server selection, and address family; external-service data is not the ecs local report",
 	"probe.ookla.summary.skipped":                    "Ookla did not run",

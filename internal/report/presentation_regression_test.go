@@ -346,6 +346,7 @@ func runFIOProducerFixture(t *testing.T) model.Result {
 		t.Fatalf("write fio producer fixture: %v", err)
 	}
 	t.Setenv("PATH", fixtureDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(probe.ToolBinEnv, fixtureDir)
 
 	var disk probe.Probe
 	for _, definition := range probe.BuiltinDefinitions() {

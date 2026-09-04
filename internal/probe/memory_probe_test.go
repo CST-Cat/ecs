@@ -13,6 +13,7 @@ import (
 
 func TestMemoryProbeMissingStreamReturnsStableResult(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv(ToolBinEnv, "")
 
 	result := (memoryProbe{}).Run(context.Background(), Environment{})
 	if result.ID != "memory" || result.Title != "module.memory.title" || result.Description != "probe.memory.description" {

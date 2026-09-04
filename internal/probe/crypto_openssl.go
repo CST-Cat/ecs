@@ -69,7 +69,7 @@ func newCryptoResult() model.Result {
 }
 
 func (cryptoProbe) Run(ctx context.Context, env Environment) model.Result {
-	path, err := exec.LookPath("openssl")
+	path, err := LookupTool("openssl")
 	if err != nil {
 		return missingOpenSSLResult(err)
 	}

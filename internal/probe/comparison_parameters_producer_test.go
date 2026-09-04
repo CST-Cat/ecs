@@ -49,6 +49,7 @@ func assertProducerParameterScope(t *testing.T, result model.Result, required ..
 func noToolPath(t *testing.T) {
 	t.Helper()
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv(ToolBinEnv, "")
 }
 
 func selectedValueRows(rows [][]model.Value, columns ...int) [][]model.Value {
@@ -292,6 +293,7 @@ printf '%s\n' '{"fio version":"fio-fixture","jobs":[{"jobname":"seqwrite","write
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory)
+	t.Setenv(ToolBinEnv, directory)
 	result := (diskProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
 		DiskPath: t.TempDir(), DiskMiB: 128,
 	}})

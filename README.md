@@ -7,7 +7,7 @@
 - 不展示广告、赞助或返利内容；
 - 默认不上传报告；`run.sh` 的报告默认写入 `${TMPDIR:-/tmp}`，直接运行二进制时默认写入 `./reports`；
 - JSON 是机器事实来源；人类可读展示包括终端文本、Markdown 和 HTML，均由 JSON 渲染；`--lang` 只改变这些人类可读展示；
-- 本地性能使用标准基准工具。工具缺失或版本不符合固定口径时明确报告未运行，不合成替代分数；
+- 标准 `run.sh` 只在冻结基准工具准备完成后运行，不使用本机替代工具或生成缺失工具的降级报告；
 - `ookla` 调用官方客户端并遵守其独立的数据处理条款，详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 快速开始
@@ -33,13 +33,12 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/compare.sh | sh -s
 
 ```sh
 ./install.sh
-./install.sh --with-benchmarks
 # 使用镜像或派生仓库时覆盖默认仓库
 ECS_REPOSITORY=owner/ecs ./install.sh
 ./install.sh --from ./bin/ecs
 ```
 
-默认安装只安装 `ecs`；只有显式使用 `--with-benchmarks` 才会通过系统包管理器安装 `sysbench`、`fio`、`iperf3`。
+安装脚本只安装 `ecs`，不会通过系统包管理器安装基准工具；测试统一由 `run.sh` 准备架构匹配的冻结工具包。
 
 ## 命令
 
@@ -47,7 +46,6 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | --- | --- |
 | `ecs [run]` | 按配置档运行测试，默认 `standard` |
 | `ecs list` | 列出配置档、模块和外联级别 |
-| `ecs doctor` | 检查外部基准工具 |
 | `ecs render --input FILE` | 从 JSON 重新导出报告，不重跑探针 |
 | `ecs compare REPORT...` | 比较两份或更多报告 |
 | `ecs config example` | 打印 JSON 配置示例 |
@@ -177,7 +175,7 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | `--region NAME` | 空 | 自报地区（如 `jp`、`us-west`），用于排行榜分组 |
 | `--note TEXT` | 空 | 备注，最多 200 字 |
 
-**`ecs list` / `ecs doctor` / `ecs version` / `ecs help`** 不接受参数；**`ecs config`** 只接受子命令 `example`。
+**`ecs list` / `ecs version` / `ecs help`** 不接受参数；**`ecs config`** 只接受子命令 `example`。
 
 ## 报告、渲染与比较
 
@@ -264,7 +262,7 @@ ecs --config ecs.json
 
 ## 工具与平台边界
 
-本地性能调用 `sysbench`、固定版本 `zstd`、NPB-OMP、OpenSSL、官方 STREAM、`fio` 和 `iperf3`；路由使用 NextTrace Tiny，Ookla 使用官方客户端。`ecs doctor` 会报告缺失工具。版本校验失败按未运行处理，不使用自研基准替代。
+标准 `run.sh` 每次都为选中的模块准备当前架构的冻结 `ecs-tools` 工具；路由使用固定 NextTrace Tiny，Ookla 选中时使用官方签名客户端。工具包准备失败时直接终止，不复用用户 `PATH` 中的同名程序或生成降级报告。
 
 项目只支持 Linux，发布架构包括 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`；原生探针不需要 root。
 

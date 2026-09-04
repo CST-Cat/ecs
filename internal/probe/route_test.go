@@ -208,6 +208,7 @@ func TestRouteDefaultsUseMachineTargetKinds(t *testing.T) {
 func TestRouteProducerSkipReasonsAreStructured(t *testing.T) {
 	t.Run("tool missing", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
+		t.Setenv(ToolBinEnv, "")
 		targets := []config.Endpoint{{Name: "One", Address: "203.0.113.1"}, {Name: "Two", Address: "198.51.100.1"}}
 		result := (routeProbe{}).Run(context.Background(), routeTestEnvironment(targets, config.IPVersionAuto))
 		if result.Status != model.StatusSkipped || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.route.summary.tool_missing" {
@@ -245,6 +246,7 @@ func TestRouteProducerPreservesLongTypedCommandError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", root)
+	t.Setenv(ToolBinEnv, root)
 	engine := routeEngine{Name: routeEngineTiny, Path: path}
 	_, expectedError := runRouteCommandForFamily(context.Background(), engine, "long", routeSnapshotHops, config.IPVersionAuto)
 	if expectedError == nil || len(expectedError.Error()) <= 100 {
@@ -348,6 +350,7 @@ func writeRouteFixtureBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory)
+	t.Setenv(ToolBinEnv, directory)
 	return path
 }
 

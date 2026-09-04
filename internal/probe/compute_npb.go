@@ -107,7 +107,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	validRuns := 0
 	expectedRuns := len(specs) * len(threadCounts)
 	for _, spec := range specs {
-		path, err := exec.LookPath(spec.Binary)
+		path, err := LookupTool(spec.Binary)
 		if err != nil {
 			message := fmt.Sprintf("未找到固定 NPB %s Class A binary，%s 未运行", spec.Name, spec.Name)
 			result.Status = model.StatusWarning

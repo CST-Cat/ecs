@@ -102,7 +102,7 @@ type Descriptor struct {
 
 	// RequiredTools lists tools relevant to the module. Route probes have a
 	// single execution contract: NextTrace Tiny. This metadata is also consumed
-	// by doctor and the wrapper dependency planner.
+	// by the wrapper dependency planner.
 	RequiredTools []string
 
 	TitleKey       string

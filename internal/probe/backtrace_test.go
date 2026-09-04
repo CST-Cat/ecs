@@ -204,6 +204,7 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 	if err := os.Setenv("PATH", fixturePath); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(ToolBinEnv, fixturePath)
 	t.Cleanup(func() { _ = os.Setenv("PATH", oldPath) })
 
 	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
@@ -292,6 +293,7 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 func TestBacktraceStatusReflectsTargetFailureMatrix(t *testing.T) {
 	fixturePath := writeBacktraceFixture(t)
 	t.Setenv("PATH", fixturePath)
+	t.Setenv(ToolBinEnv, fixturePath)
 	allTargets := backtraceFixtureTargets()
 	cases := []struct {
 		name    string
@@ -324,6 +326,7 @@ func TestBacktraceSkipReasonsAreDistinctAndMachineOnly(t *testing.T) {
 	if err := os.Setenv("PATH", empty); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(ToolBinEnv, "")
 	t.Cleanup(func() { _ = os.Setenv("PATH", oldPath) })
 	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
@@ -339,6 +342,7 @@ func TestBacktraceSkipReasonsAreDistinctAndMachineOnly(t *testing.T) {
 	if err := os.Setenv("PATH", fixturePath); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(ToolBinEnv, fixturePath)
 	runtime.BacktraceTargets = nil
 	noTargets := (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime})
 	if noTargets.SummaryMessages[0].Key != "probe.backtrace.summary.no_targets" || len(noTargets.Failures) != 0 {
@@ -362,6 +366,7 @@ func runBacktraceFixtureResultWithPath(t *testing.T) (model.Result, string) {
 	fixtureDirectory := writeBacktraceFixture(t)
 	fixturePath := filepath.Join(fixtureDirectory, routeEngineTiny)
 	t.Setenv("PATH", fixtureDirectory)
+	t.Setenv(ToolBinEnv, fixtureDirectory)
 	runtime, err := config.Defaults(testCatalog(), config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
@@ -539,6 +544,7 @@ func TestBacktraceProducerPreservesLongTypedCommandError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", root)
+	t.Setenv(ToolBinEnv, root)
 	engine := routeEngine{Name: routeEngineTiny, Path: path}
 	_, expectedError := runRouteCommandForFamily(context.Background(), engine, "long", backtraceMaxHops, config.IPVersionAuto)
 	if expectedError == nil || len(expectedError.Error()) <= 100 {

@@ -77,7 +77,7 @@ const maxStreamBinaryBytes = 64 << 20
 // IsOfficialStreamBinary identifies the upstream STREAM executable without
 // invoking it.  ImageMagick also installs a command named "stream"; running
 // that command as a benchmark can block or produce an unrelated transcript.
-// doctor 与 memory 探针共用这一份判断，避免两处各写一份标记表。
+// memory 探针统一使用这一份判断，避免重复维护标记表。
 func IsOfficialStreamBinary(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxStreamBinaryBytes {

@@ -44,7 +44,7 @@ type icmpStats struct {
 
 // icmpAvailable 报告系统是否提供 ping。
 func icmpAvailable() bool {
-	_, err := exec.LookPath(pingCommand)
+	_, err := LookupTool(pingCommand)
 	return err == nil
 }
 
@@ -65,7 +65,7 @@ func pingArgumentsForFamily(host string, count int, timeout time.Duration, famil
 
 func runICMPPingFamily(ctx context.Context, host string, count int, timeout time.Duration, family string) icmpStats {
 	stats := icmpStats{}
-	path, err := exec.LookPath(pingCommand)
+	path, err := LookupTool(pingCommand)
 	if err != nil {
 		stats.Err = err
 		return stats

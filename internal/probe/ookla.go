@@ -16,11 +16,10 @@ import (
 )
 
 // ooklaProbe runs the official Ookla CLI directly and records its structured
-// result. Direct ecs runs
-// expect the client to be installed already; run.sh may prepare it from the
-// signed official source when the selected profile/module needs it. Keeping
-// it as an explicit module matters: the client has its own licence, privacy
-// terms and measurement service, unlike ecs's local-only report.
+// result. The standard run.sh path stages it from the signed official source
+// when the selected profile/module needs it. Keeping it as an explicit module
+// matters: the client has its own licence, privacy terms and measurement
+// service, unlike ecs's local-only report.
 type ooklaProbe struct{}
 
 func (ooklaProbe) ID() string { return "ookla" }
@@ -98,7 +97,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
-	path, err := exec.LookPath("speedtest")
+	path, err := LookupTool("speedtest")
 	if err != nil {
 		result.Skip(model.NewMessage("probe.ookla.summary.skipped"))
 		addFailure(&result, "tool_lookup", "speedtest", err)

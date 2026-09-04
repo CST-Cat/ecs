@@ -236,6 +236,7 @@ func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
 
 func TestZstdProducerFailureAndMissingDiagnosticsStayStructured(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv(ToolBinEnv, "")
 	missing := (zstdProbe{}).Run(context.Background(), Environment{})
 	if missing.Status != model.StatusWarning || len(missing.Failures) != 1 || missing.Failures[0].Category != model.FailureToolMissing || missing.SummaryMessages[0].Key != "probe.zstd.summary.none" {
 		t.Fatalf("zstd missing result = %+v", missing)

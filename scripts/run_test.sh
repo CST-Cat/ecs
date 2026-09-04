@@ -164,6 +164,11 @@ cat >"$fixture_release/tools/bin/zstd" <<'EOF'
 exit 0
 EOF
 chmod 0755 "$fixture_release/tools/bin/zstd"
+cat >"$fixture_release/tools/bin/sysbench" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$fixture_release/tools/bin/sysbench"
 tar -czf "$fixture_release/$fixture_tools_asset" -C "$fixture_release/tools" bin
 fixture_tools_digest=$(sha256sum "$fixture_release/$fixture_tools_asset" | awk '{print $1}')
 printf '%s  %s\n' "$fixture_tools_digest" "$fixture_tools_asset" >>"$fixture_release/checksums.txt"
@@ -205,6 +210,14 @@ chmod 0755 "$fixture_bin/curl"
 cp "$fixture_bin/curl" "$fixture_bin/wget"
 chmod 0755 "$fixture_bin/wget"
 
+# A host tool with the same name must not suppress the frozen archive download.
+cat >"$fixture_bin/sysbench" <<'EOF'
+#!/bin/sh
+: >"$ECS_TEST_LOG_ROOT/host-sysbench-used"
+exit 91
+EOF
+chmod 0755 "$fixture_bin/sysbench"
+
 release_url="https://github.com/example/ecs/releases/download/v-test"
 test_path="$fixture_bin:$PATH"
 
@@ -238,6 +251,77 @@ fi
 [[ ! -e "$wget_success_logs/unexpected-network" ]] || fail "wget-only HTTPS fixture reached unexpected network"
 [[ "$(wc -l <"$wget_success_logs/fetch.log")" -eq 2 ]] || fail "wget-only HTTPS fixture did not download twice"
 [[ -f "$wget_success_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced no report"
+
+# Frozen tool staging is unconditional even when the host PATH already has a
+# same-named executable.
+frozen_tool_tmp="$test_root/frozen-tool-tmp"
+frozen_tool_logs="$fixture_logs/frozen-tool"
+frozen_tool_output="$test_root/frozen-tool-output"
+mkdir -p "$frozen_tool_tmp" "$frozen_tool_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$frozen_tool_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$frozen_tool_logs" ECS_TEST_REPORT_DIR="$frozen_tool_output" \
+    ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --profile standard --only noop --output "$frozen_tool_output" \
+    >"$test_root/frozen-tool.stdout" 2>"$test_root/frozen-tool.stderr"; then
+  fail "frozen tool staging fixture returned a failure: $(<"$test_root/frozen-tool.stderr")"
+fi
+[[ "$(wc -l <"$frozen_tool_logs/fetch.log")" -eq 3 ]] || fail "host sysbench suppressed the frozen tool download"
+[[ ! -e "$frozen_tool_logs/host-sysbench-used" ]] || fail "host sysbench was used"
+[[ -f "$frozen_tool_output/fixture.json" ]] || fail "frozen tool staging fixture produced no report"
+
+# Disabling dependency setup must stop a selected-tool run instead of letting
+# the downloaded ecs report a missing tool or use the host executable.
+disabled_tool_tmp="$test_root/disabled-tool-tmp"
+disabled_tool_logs="$fixture_logs/disabled-tool"
+disabled_tool_output="$test_root/disabled-tool-output"
+mkdir -p "$disabled_tool_tmp" "$disabled_tool_logs"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$disabled_tool_tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$disabled_tool_logs" ECS_TEST_REPORT_DIR="$disabled_tool_output" \
+  ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$disabled_tool_output" \
+  >"$test_root/disabled-tool.stdout" 2>"$test_root/disabled-tool.stderr"
+disabled_tool_status=$?
+set -e
+[[ "$disabled_tool_status" -eq 1 ]] || fail "disabled dependency setup returned $disabled_tool_status instead of stopping"
+[[ ! -e "$disabled_tool_output/fixture.json" ]] || fail "disabled dependency setup produced a fallback report"
+[[ ! -e "$disabled_tool_logs/run.argv" ]] || fail "disabled dependency setup invoked ecs after stopping"
+[[ ! -e "$disabled_tool_logs/host-sysbench-used" ]] || fail "disabled dependency setup used host sysbench"
+if grep -qi 'missing' "$test_root/disabled-tool.stdout" "$test_root/disabled-tool.stderr"; then
+  fail "disabled dependency setup reported a missing-tool fallback"
+fi
+
+# A failed frozen-tool download must stop before the final ecs invocation.
+archive_failure_tmp="$test_root/archive-failure-tmp"
+archive_failure_logs="$fixture_logs/archive-failure"
+archive_failure_output="$test_root/archive-failure-output"
+archive_failure_backup="$fixture_release/$fixture_tools_asset.backup"
+mkdir -p "$archive_failure_tmp" "$archive_failure_logs"
+mv "$fixture_release/$fixture_tools_asset" "$archive_failure_backup"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$archive_failure_tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$archive_failure_logs" ECS_TEST_REPORT_DIR="$archive_failure_output" \
+  ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$archive_failure_output" \
+  >"$test_root/archive-failure.stdout" 2>"$test_root/archive-failure.stderr"
+archive_failure_status=$?
+set -e
+mv "$archive_failure_backup" "$fixture_release/$fixture_tools_asset"
+[[ "$archive_failure_status" -eq 1 ]] || fail "failed frozen-tool download returned $archive_failure_status instead of stopping"
+[[ ! -e "$archive_failure_output/fixture.json" ]] || fail "failed frozen-tool download produced a fallback report"
+[[ ! -e "$archive_failure_logs/run.argv" ]] || fail "failed frozen-tool download invoked ecs after stopping"
+if grep -qi 'missing' "$test_root/archive-failure.stdout" "$test_root/archive-failure.stderr"; then
+  fail "failed frozen-tool download reported a missing-tool fallback"
+fi
 
 run_http_corpus_rejection() {
   local case_name=$1 command_path=$2

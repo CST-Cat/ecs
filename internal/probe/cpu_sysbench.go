@@ -39,7 +39,7 @@ type cpuProbe struct{}
 func (cpuProbe) ID() string { return "cpu" }
 
 func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
-	if path, err := exec.LookPath("sysbench"); err == nil {
+	if path, err := LookupTool("sysbench"); err == nil {
 		return runSysbenchCPU(ctx, env, path)
 	}
 	start := time.Now()

@@ -13,6 +13,7 @@ import (
 
 func TestDiskProbeMissingFIOEmitsStableResult(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv(ToolBinEnv, "")
 	result := (diskProbe{}).Run(context.Background(), Environment{})
 
 	if result.ID != "disk" || result.Title != "module.disk.title" || result.Description != "probe.disk.description" || result.Status != model.StatusWarning {

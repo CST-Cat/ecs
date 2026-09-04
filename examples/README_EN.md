@@ -13,7 +13,6 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s --
 ```sh
 ecs
 ecs --interactive
-ecs doctor
 ecs list
 ```
 
