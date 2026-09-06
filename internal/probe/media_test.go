@@ -545,7 +545,7 @@ func TestMediaRuleInventoryUsesFiniteMachineKeysAndCatalogParity(t *testing.T) {
 		mediaEvidenceForbiddenAmbiguous, mediaEvidenceLegalRestriction, mediaEvidenceChangedEntry,
 		mediaEvidenceHTTPRejected, mediaEvidenceServerError, mediaEvidenceRedirectLimit, mediaEvidenceNoResponse,
 		mediaEvidenceTransportError, mediaEvidenceMissingRequests, mediaEvidenceRequestCount, mediaEvidenceMissingRegion,
-		mediaEvidenceUnknownPattern, mediaEvidenceUnreachable,
+		mediaEvidenceUnknownPattern, mediaEvidenceBodyIncomplete, mediaEvidenceUnreachable,
 	}
 	for _, category := range []string{"streaming", "ai_services", "social", "music", "japan", "taiwan", "hong_kong", "mainland_china"} {
 		keys = append(keys, "probe.media.table."+category)
@@ -583,4 +583,90 @@ func containsHan(value string) bool {
 		}
 	}
 	return false
+}
+
+func TestMediaBodyLimitPreservesCompleteAndMarksIncomplete(t *testing.T) {
+	const limit = 512 * 1024
+	bodies := map[string]string{
+		"/exact": strings.Repeat("x", limit),
+		"/over":  strings.Repeat("x", limit+1),
+	}
+	client := &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+		body := bodies[request.URL.Path]
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: request, Header: make(http.Header)}, nil
+	})}
+	env := Environment{HTTPClient: client, UserAgent: "media-limit-fixture"}
+	for name, wantTruncated := range map[string]bool{"/exact": false, "/over": true} {
+		response := performMediaRequest(context.Background(), env, mediaRequest{URL: "https://fixture.invalid" + name})
+		if response.Err != nil || response.Status != http.StatusOK || len(response.Body) != limit || response.BodyTruncated != wantTruncated {
+			t.Fatalf("%s response status=%d len=%d truncated=%v err=%v", name, response.Status, len(response.Body), response.BodyTruncated, response.Err)
+		}
+	}
+	transport := &http.Client{Transport: fixtureRoundTripper(func(*http.Request) (*http.Response, error) { return nil, errors.New("fixture transport") })}
+	response := performMediaRequest(context.Background(), Environment{HTTPClient: transport}, mediaRequest{URL: "https://fixture.invalid/error"})
+	if response.Err == nil || response.BodyTruncated {
+		t.Fatalf("transport response status=%d len=%d truncated=%v err=%v", response.Status, len(response.Body), response.BodyTruncated, response.Err)
+	}
+}
+
+func TestMediaBodyIncompleteVerdictsAreUnknownExceptWeakStatus(t *testing.T) {
+	const limit = 512 * 1024
+	lockedBody := strings.Repeat("x", limit) + " Premium is not available in your country"
+	client := &http.Client{Transport: fixtureRoundTripper(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(lockedBody)), Request: request, Header: make(http.Header)}, nil
+	})}
+	response := performMediaRequest(context.Background(), Environment{HTTPClient: client}, mediaRequest{URL: "https://www.youtube.com/premium"})
+	if !response.BodyTruncated || len(response.Body) != limit {
+		t.Fatalf("youtube response status=%d len=%d truncated=%v err=%v", response.Status, len(response.Body), response.BodyTruncated, response.Err)
+	}
+	verdict := youtubePremiumCheck().Decide([]mediaResponse{response})
+	if verdict.State != stateUnknown || verdict.Evidence != mediaEvidenceBodyIncomplete {
+		t.Fatalf("truncated youtube verdict=%+v", verdict)
+	}
+	completeVerdict := youtubePremiumCheck().Decide([]mediaResponse{{Status: http.StatusOK, Body: lockedBody}})
+	if completeVerdict.State != stateLocked || completeVerdict.Evidence != mediaEvidenceCountryRestriction {
+		t.Fatalf("complete youtube verdict=%+v", completeVerdict)
+	}
+
+	weak := genericChecks()[0].Decide([]mediaResponse{{Status: http.StatusOK, BodyTruncated: true}})
+	if weak.State != stateUnlocked || weak.Evidence != mediaEvidenceAvailable {
+		t.Fatalf("weak status verdict=%+v", weak)
+	}
+}
+
+func TestMediaBodyIncompleteAllStrongRules(t *testing.T) {
+	cases := []struct {
+		name      string
+		check     mediaCheck
+		truncated []mediaResponse
+	}{
+		{
+			name: "netflix first response", check: netflixCheck(),
+			truncated: []mediaResponse{{Status: http.StatusOK, BodyTruncated: true}, {Status: http.StatusNotFound}},
+		},
+		{
+			name: "netflix second response", check: netflixCheck(),
+			truncated: []mediaResponse{{Status: http.StatusNotFound}, {Status: http.StatusNotFound, BodyTruncated: true}},
+		},
+		{
+			name: "chatgpt trace", check: chatGPTCheck(),
+			truncated: []mediaResponse{{Status: http.StatusOK, BodyTruncated: true}, {Status: http.StatusOK, Body: "home"}},
+		},
+		{
+			name: "chatgpt main", check: chatGPTCheck(),
+			truncated: []mediaResponse{{Status: http.StatusOK, Body: "loc=US\n"}, {Status: http.StatusOK, BodyTruncated: true}},
+		},
+		{
+			name: "tiktok", check: tiktokCheck(),
+			truncated: []mediaResponse{{Status: http.StatusOK, Body: `{"region":"JP"}`, BodyTruncated: true}},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			truncated := test.check.Decide(test.truncated)
+			if truncated.State != stateUnknown || truncated.Evidence != mediaEvidenceBodyIncomplete {
+				t.Fatalf("truncated verdict=%+v", truncated)
+			}
+		})
+	}
 }

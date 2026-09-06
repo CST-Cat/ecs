@@ -58,10 +58,11 @@ type mediaRequest struct {
 
 // mediaResponse 是一次请求的结果。
 type mediaResponse struct {
-	Status   int
-	Body     string
-	FinalURL string
-	Err      error
+	Status        int
+	Body          string
+	FinalURL      string
+	Err           error
+	BodyTruncated bool
 }
 
 // OK 表示拿到了 2xx 响应。
@@ -117,6 +118,7 @@ const (
 	mediaEvidenceRequestCount       = "probe.media.evidence.request_count"
 	mediaEvidenceMissingRegion      = "probe.media.evidence.missing_region"
 	mediaEvidenceUnknownPattern     = "probe.media.evidence.unknown_pattern"
+	mediaEvidenceBodyIncomplete     = "probe.media.evidence.body_incomplete"
 	mediaEvidenceUnreachable        = "probe.media.evidence.unreachable"
 )
 
@@ -232,6 +234,11 @@ func netflixCheck() mediaCheck {
 				}
 			}
 			for _, response := range responses {
+				if response.BodyTruncated {
+					return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceBodyIncomplete}
+				}
+			}
+			for _, response := range responses {
 				if response.Status == http.StatusForbidden {
 					return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceForbiddenAmbiguous}
 				}
@@ -277,6 +284,9 @@ func youtubePremiumCheck() mediaCheck {
 			if response.Err != nil {
 				return transportVerdict(region)
 			}
+			if response.BodyTruncated {
+				return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceBodyIncomplete}
+			}
 			lower := strings.ToLower(response.Body)
 			if strings.Contains(lower, "premium is not available in your country") ||
 				strings.Contains(lower, "not available in your country") {
@@ -309,6 +319,11 @@ func chatGPTCheck() mediaCheck {
 				return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceRequestCount}
 			}
 			main := responses[1]
+			for _, response := range responses {
+				if response.BodyTruncated {
+					return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceBodyIncomplete}
+				}
+			}
 			switch {
 			case main.Err != nil:
 				return transportVerdict(region)
@@ -339,6 +354,9 @@ func tiktokCheck() mediaCheck {
 			region := normalizeCountry(matchFirst(tiktokRegionPattern, response.Body))
 			if response.Err != nil {
 				return transportVerdict(region)
+			}
+			if response.BodyTruncated {
+				return mediaVerdict{State: stateUnknown, Region: region, Evidence: mediaEvidenceBodyIncomplete}
 			}
 			if response.OK() && region != "" {
 				return mediaVerdict{State: stateUnlocked, Region: region, Evidence: mediaEvidenceAvailable}
@@ -485,10 +503,15 @@ func performMediaRequest(ctx context.Context, env Environment, request mediaRequ
 	defer response.Body.Close()
 	result.Status = response.StatusCode
 	result.FinalURL = response.Request.URL.String()
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, 512*1024))
+	const bodyLimit = 512 * 1024
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, bodyLimit+1))
 	if readErr != nil {
 		result.Err = readErr
 		return result
+	}
+	if len(body) > bodyLimit {
+		result.BodyTruncated = true
+		body = body[:bodyLimit]
 	}
 	result.Body = string(body)
 	return result
