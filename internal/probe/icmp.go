@@ -12,7 +12,8 @@ import (
 // ICMP 延迟适配器。
 //
 // Go 标准库无法在不引入第三方包的情况下开非特权 ICMP socket，而本项目坚持核心
-// 零第三方依赖，因此沿用既有做法：把系统 ping 当作可关闭的外部适配器调用，
+// 零第三方依赖，因此沿用既有做法：把 ECS_TOOL_BIN 私有 staging 目录中的 ping
+// 当作可关闭的外部适配器调用，
 // 参数以数组传入、不经过 shell，并记录实际使用的命令。
 //
 // ping 不可用、被容器裁掉或被防火墙拦截时一律返回不可用，由调用方降级到 TCP
@@ -41,7 +42,7 @@ type icmpStats struct {
 	Err         error
 }
 
-// icmpAvailable 报告系统是否提供 ping。
+// icmpAvailable 报告 ECS_TOOL_BIN 私有 staging 目录是否提供 ping。
 func icmpAvailable() bool {
 	_, err := LookupTool(pingCommand)
 	return err == nil
