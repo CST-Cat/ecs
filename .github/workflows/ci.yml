@@ -105,8 +105,13 @@ jobs:
 
   # 七个发布架构现在都编得过吗。
   cross:
+    name: cross (${{ matrix.arch }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armv7, "386", s390x, riscv64, ppc64le]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -114,7 +119,9 @@ jobs:
           go-version: 'stable'
           check-latest: true
           cache: false
-      - run: ./scripts/cross.sh
+      - run: ./scripts/cross.sh --arch "$ARCH"
+        env:
+          ARCH: ${{ matrix.arch }}
 
   # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，
   # 手改数值而不重算会被当场发现。只读：写权限属于 leaderboard.yml。
