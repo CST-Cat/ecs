@@ -294,6 +294,7 @@ TEMP_TOOL_BIN="$WORK/bin"
 TEMP_TOOL_CACHE="$WORK/packages"
 ORIGINAL_PATH=${PATH:-}
 TEMP_TOOL_PATH_READY=0
+ORIGINAL_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 TEMP_PREPARED_TOOLS=""
 APT_TEMP_LISTS="$WORK/apt/lists"
 APT_TEMP_CACHE="$WORK/apt/cache"
@@ -635,17 +636,23 @@ temp_library_dir_has_shared_objects() {
 }
 
 activate_temp_tool_path() {
-  [ "$TEMP_TOOL_PATH_READY" -eq 1 ] && return 0
-  # Only the explicitly staged tool links are prepended. ECS_TOOL_BIN separately
-  # confines benchmark lookup to this directory; the host PATH remains available
-  # to ordinary system inspection and download helpers.
-  TEMP_PATH="$TEMP_TOOL_BIN"
-  if [ -n "$ORIGINAL_PATH" ]; then
-    PATH="$TEMP_PATH:$ORIGINAL_PATH"
-  else
-    PATH=$TEMP_PATH
+  if [ "$TEMP_TOOL_PATH_READY" -eq 0 ]; then
+    # Only the explicitly staged tool links are prepended. ECS_TOOL_BIN separately
+    # confines benchmark lookup to this directory; the host PATH remains available
+    # to ordinary system inspection and download helpers.
+    TEMP_PATH="$TEMP_TOOL_BIN"
+    if [ -n "$ORIGINAL_PATH" ]; then
+      PATH="$TEMP_PATH:$ORIGINAL_PATH"
+    else
+      PATH=$TEMP_PATH
+    fi
+    export PATH
+    TEMP_TOOL_PATH_READY=1
   fi
-  export PATH
+
+  # Dependencies can be extracted after PATH has already been activated. Rebuild
+  # this prefix on every call from the original user value so newly extracted
+  # libraries are visible without duplicating entries on repeated activation.
   TEMP_LIB_PATH=""
   for temp_lib_part in \
     "$TEMP_TOOL_ROOT/lib" "$TEMP_TOOL_ROOT/lib64" \
@@ -677,12 +684,17 @@ activate_temp_tool_path() {
     done
   done
   if [ -n "$TEMP_LIB_PATH" ]; then
-    if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-      LD_LIBRARY_PATH="$TEMP_LIB_PATH:$LD_LIBRARY_PATH"
+    if [ -n "$ORIGINAL_LD_LIBRARY_PATH" ]; then
+      LD_LIBRARY_PATH="$TEMP_LIB_PATH:$ORIGINAL_LD_LIBRARY_PATH"
     else
       LD_LIBRARY_PATH=$TEMP_LIB_PATH
     fi
     export LD_LIBRARY_PATH
+  elif [ -n "$ORIGINAL_LD_LIBRARY_PATH" ]; then
+    LD_LIBRARY_PATH=$ORIGINAL_LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH
+  else
+    unset LD_LIBRARY_PATH
   fi
   # A staged Ookla/dependency package may be the only trust bundle on a
   # minimal image.  Prefer it without touching the host's /etc/ssl tree.
@@ -694,7 +706,6 @@ activate_temp_tool_path() {
     SSL_CERT_DIR="$TEMP_TOOL_ROOT/etc/ssl/certs"
     export SSL_CERT_DIR
   fi
-  TEMP_TOOL_PATH_READY=1
 }
 
 apt_dependency_names() {
@@ -735,17 +746,15 @@ prepare_apt_tools() {
 
   apt_download_resolved || return 1
   extract_debs || return 1
-  prepared_any=0
   for missing_tool in $MISSING_TOOLS; do
     if stage_temp_tool "$missing_tool"; then
-      prepared_any=1
       remove_missing_tool "$missing_tool"
     else
       say "无法在临时前缀中准备测试组件，运行终止" \
         "could not prepare the test components in the temporary prefix; the run will stop"
     fi
   done
-  [ "$prepared_any" -eq 1 ] && activate_temp_tool_path
+  activate_temp_tool_path
   return 0
 }
 

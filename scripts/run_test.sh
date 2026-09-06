@@ -19,6 +19,103 @@ assert_empty_dir() {
   fi
 }
 
+# Load the production environment functions without running run.sh. The apt,
+# download, and extraction functions below are deliberately local fixtures;
+# this exercises the real prepare_apt_tools call boundary without pretending to
+# validate a package manager, Ookla, gpg, or any benchmark binary.
+run_env_functions="$test_root/run-env-functions.sh"
+sed -n '/^append_temp_library_path()/,/^apt_dependency_names()/p' "$repo_root/run.sh" |
+  sed '$d' >"$run_env_functions"
+sed -n '/^prepare_apt_tools()/,/^# Ookla publishes/p' "$repo_root/run.sh" |
+  sed '$d' >>"$run_env_functions"
+# shellcheck disable=SC1090
+source "$run_env_functions"
+
+apt_update_temp() { return 0; }
+apt_dependency_names() { return 0; }
+apt_download_resolved() { return 0; }
+extract_debs() {
+  mkdir -p "$TEMP_TOOL_ROOT/usr/lib/x86_64-linux-gnu/private" \
+    "$TEMP_TOOL_ROOT/etc/ssl/certs"
+  : >"$TEMP_TOOL_ROOT/usr/lib/x86_64-linux-gnu/libfixture.so"
+  : >"$TEMP_TOOL_ROOT/usr/lib/x86_64-linux-gnu/private/libfixture-private.so"
+  : >"$TEMP_TOOL_ROOT/etc/ssl/certs/ca-certificates.crt"
+}
+
+run_env_activation_regression() (
+  local original_ld=$1 case_name=$2 case_root
+  local original_path=$PATH path_after_prepare ld_after_prepare
+  local cert_file_after_prepare cert_dir_after_prepare
+  case_root="$test_root/env-$case_name"
+
+  mkdir -p "$case_root/bin" "$case_root/packages" "$case_root/root"
+  WORK="$case_root/work"
+  mkdir -p "$WORK"
+  TEMP_TOOL_ROOT="$case_root/root"
+  TEMP_TOOL_BIN="$case_root/bin"
+  TEMP_TOOL_CACHE="$case_root/packages"
+  ORIGINAL_PATH=$original_path
+  ORIGINAL_LD_LIBRARY_PATH=$original_ld
+  TEMP_TOOL_PATH_READY=0
+  TEMP_LIB_PATH=""
+  PACKAGES=""
+  MISSING_TOOLS=""
+  unset SSL_CERT_FILE SSL_CERT_DIR
+  if [ -n "$original_ld" ]; then
+    LD_LIBRARY_PATH=$original_ld
+    export LD_LIBRARY_PATH
+  else
+    unset LD_LIBRARY_PATH
+  fi
+
+  activate_temp_tool_path
+  [ "$PATH" = "$TEMP_TOOL_BIN:$ORIGINAL_PATH" ] || fail "$case_name first activation changed PATH unexpectedly"
+  if [ -n "$original_ld" ]; then
+    [ "$LD_LIBRARY_PATH" = "$original_ld" ] || fail "$case_name first activation did not preserve original LD_LIBRARY_PATH"
+  else
+    [ -z "${LD_LIBRARY_PATH+x}" ] || fail "$case_name first activation introduced an empty LD_LIBRARY_PATH"
+  fi
+
+  # Keep MISSING_TOOLS empty: extraction still adds runtime dependencies, and
+  # the real prepare_apt_tools must refresh activation after that extraction.
+  PACKAGES="fixture-package"
+  prepare_apt_tools || fail "$case_name empty-tool apt fixture failed"
+  case "$LD_LIBRARY_PATH" in
+    :*|*::*|*:) fail "$case_name activation introduced an empty library-path item" ;;
+  esac
+  case ":$LD_LIBRARY_PATH:" in
+    *":$TEMP_TOOL_ROOT/usr/lib/x86_64-linux-gnu:"*) ;;
+    *) fail "$case_name activation missed the extracted multi-arch library" ;;
+  esac
+  case ":$LD_LIBRARY_PATH:" in
+    *":$TEMP_TOOL_ROOT/usr/lib/x86_64-linux-gnu/private:"*) ;;
+    *) fail "$case_name activation missed the extracted private library" ;;
+  esac
+  if [ -n "$original_ld" ]; then
+    case "$LD_LIBRARY_PATH" in
+      *":$original_ld") ;;
+      *) fail "$case_name activation did not retain original LD_LIBRARY_PATH" ;;
+    esac
+  fi
+  [ "$SSL_CERT_FILE" = "$TEMP_TOOL_ROOT/etc/ssl/certs/ca-certificates.crt" ] ||
+    fail "$case_name activation missed the extracted certificate file"
+  [ "$SSL_CERT_DIR" = "$TEMP_TOOL_ROOT/etc/ssl/certs" ] ||
+    fail "$case_name activation missed the extracted certificate directory"
+
+  path_after_prepare=$PATH
+  ld_after_prepare=$LD_LIBRARY_PATH
+  cert_file_after_prepare=$SSL_CERT_FILE
+  cert_dir_after_prepare=$SSL_CERT_DIR
+  activate_temp_tool_path
+  [ "$PATH" = "$path_after_prepare" ] || fail "$case_name repeated activation duplicated PATH"
+  [ "$LD_LIBRARY_PATH" = "$ld_after_prepare" ] || fail "$case_name repeated activation changed LD_LIBRARY_PATH"
+  [ "$SSL_CERT_FILE" = "$cert_file_after_prepare" ] || fail "$case_name repeated activation changed SSL_CERT_FILE"
+  [ "$SSL_CERT_DIR" = "$cert_dir_after_prepare" ] || fail "$case_name repeated activation changed SSL_CERT_DIR"
+)
+
+run_env_activation_regression "" empty-ld
+run_env_activation_regression "/user/lib:/opt/lib" preserved-ld
+
 case "$(uname -m)" in
   x86_64|amd64) fixture_arch=amd64 ;;
   aarch64|arm64) fixture_arch=arm64 ;;
