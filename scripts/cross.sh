@@ -11,8 +11,16 @@ cd "$ECS_REPO_ROOT"
 
 go_command="${GO:-go}"
 version="${VERSION:-dev}"
+if [[ ! "$version" =~ ^[0-9A-Za-z._+-]+$ ]]; then
+  echo "VERSION may only contain letters, digits, dot, underscore, plus, and hyphen" >&2
+  exit 1
+fi
 commit="${COMMIT:-$(git -C "$ECS_REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf unknown)}"
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$ECS_REPO_ROOT" show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}"
+if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be an integer" >&2
+  exit 1
+fi
 build_date="${BUILD_DATE:-$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)}"
 output_dir="${OUTPUT_DIR:-$ECS_REPO_ROOT/dist}"
 

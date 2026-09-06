@@ -77,8 +77,14 @@ if [[ "$dry_run" -eq 0 ]]; then
   fi
 fi
 
-# 可复现构建：时间戳取自提交而不是墙上时钟，同一个提交重复构建得到同样的包。
+# 可复现构建：时间戳取自提交；同一提交、工具链和输入可得到同样的包。
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ECS_REPO_ROOT" show -s --format=%ct HEAD)}"
+
+prebuilt_dir=$(mktemp -d "${TMPDIR:-/tmp}/ecs-release-binaries.XXXXXX")
+cleanup_prebuilt() {
+  rm -rf -- "$prebuilt_dir"
+}
+trap cleanup_prebuilt EXIT
 
 if [[ -n "$tools_stage" ]]; then
   [[ "$tools_stage" == /* ]] || tools_stage="$ECS_REPO_ROOT/$tools_stage"
@@ -99,12 +105,18 @@ if [[ -n "$tools_stage" ]]; then
     [[ ! -e "$stage_dir/share/ecs/corpus/ecs-silesia-v1.corpus" ]] ||
       die "$arch stage 仍带着语料，它应当作为独立发布物"
   done
+fi
 
-  scripts/package.sh "$version" --tools-stage "$tools_stage"
+echo "release-build: 编译七架构主程序" >&2
+OUTPUT_DIR="$prebuilt_dir" VERSION="$version" scripts/cross.sh
+
+package_args=(--binaries-dir "$prebuilt_dir")
+if [[ -n "$tools_stage" ]]; then
+  package_args+=(--tools-stage "$tools_stage")
 else
   echo "release-build: 未提供工具 stage，只打包主程序" >&2
-  scripts/package.sh "$version"
 fi
+scripts/package.sh "${package_args[@]}"
 
 echo "release-build: 构建独立语料发布物 $ECS_CORPUS_ARCHIVE" >&2
 scripts/build_corpus.sh --output "$dist/$ECS_CORPUS_ARCHIVE"

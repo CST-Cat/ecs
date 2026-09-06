@@ -2,24 +2,27 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: scripts/package.sh VERSION [--tools-stage STAGE_ROOT]" >&2
+  echo "usage: scripts/package.sh [--binaries-dir BINARY_DIR] [--tools-stage STAGE_ROOT]" >&2
 }
-
-version="${1:-}"
-if [[ -z "$version" ]]; then
-  usage
-  exit 1
-fi
-shift
-if [[ ! "$version" =~ ^[0-9A-Za-z._+-]+$ ]]; then
-  echo "VERSION may only contain letters, digits, dot, underscore, plus, and hyphen" >&2
-  exit 1
-fi
 
 tools_enabled=0
 tools_stage_root=""
+binaries_dir=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    --binaries-dir)
+      [[ "$#" -ge 2 && -n "$2" ]] || {
+        echo "--binaries-dir requires BINARY_DIR" >&2
+        usage
+        exit 1
+      }
+      [[ -z "$binaries_dir" ]] || {
+        echo "--binaries-dir may only be supplied once" >&2
+        exit 1
+      }
+      binaries_dir=$2
+      shift 2
+      ;;
     --tools-stage)
       [[ "$#" -ge 2 && -n "$2" ]] || {
         echo "--tools-stage requires STAGE_ROOT" >&2
@@ -45,18 +48,18 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 repo_root=$ECS_REPO_ROOT
 dist_dir="$repo_root/dist"
-go_command="${GO:-go}"
-commit="${COMMIT:-$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}"
 if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
   echo "SOURCE_DATE_EPOCH must be an integer" >&2
   exit 1
 fi
-build_date="${BUILD_DATE:-$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)}"
-ldflags="-s -w -X ecs/internal/buildinfo.Version=${version} -X ecs/internal/buildinfo.Commit=${commit} -X ecs/internal/buildinfo.BuildDate=${build_date}"
-
 if [[ "$tools_enabled" -eq 1 && "$tools_stage_root" != /* ]]; then
   tools_stage_root="$repo_root/$tools_stage_root"
+fi
+if [[ -z "$binaries_dir" ]]; then
+  binaries_dir="$dist_dir"
+elif [[ "$binaries_dir" != /* ]]; then
+  binaries_dir="$repo_root/$binaries_dir"
 fi
 
 die() {
@@ -154,6 +157,14 @@ preflight_tools() {
   done
 }
 
+preflight_binaries() {
+  [[ -d "$binaries_dir" ]] || die "binary directory does not exist: $binaries_dir"
+  for target in "${targets[@]}"; do
+    read -r goos _goarch arch <<<"$target"
+    require_tool_artifact "$binaries_dir/ecs_${goos}_${arch}" "$arch" "ecs"
+  done
+}
+
 package_tools() {
   local arch=$1
   local stage_dir
@@ -187,25 +198,22 @@ package_tools() {
 if [[ "$tools_enabled" -eq 1 ]]; then
   preflight_tools
 fi
+preflight_binaries
 
 mkdir -p "$dist_dir"
-find "$dist_dir" -mindepth 1 -maxdepth 1 -type f -name 'ecs_*' -delete
+find "$dist_dir" -mindepth 1 -maxdepth 1 -type f \
+  \( -name 'ecs_*.tar.gz' -o -name 'ecs-tools_*.tar.gz' \) -delete
 find "$dist_dir" -mindepth 1 -maxdepth 1 -type f -name 'checksums.txt' -delete
 
 for target in "${targets[@]}"; do
-  read -r goos goarch arch <<<"$target"
-  goarm=""
-  [[ "$goarch" == "arm" ]] && goarm=7
+  read -r goos _goarch arch <<<"$target"
   suffix="${goos}_${arch}"
   new_temp_stage
   stage=$new_temp_stage_path
   binary="$stage/ecs"
-  echo "building $suffix"
-  (
-    cd "$repo_root"
-    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="${goarm:-}" \
-      "$go_command" build -trimpath -ldflags "$ldflags" -o "$binary" ./cmd/ecs
-  )
+  echo "packaging $suffix"
+  cp "$binaries_dir/ecs_${suffix}" "$binary"
+  chmod 0755 "$binary"
   cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/README_EN.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
   tar -C "$stage" --sort=name --mtime="@$source_date_epoch" \
     --owner=0 --group=0 --numeric-owner -czf "$dist_dir/ecs_${suffix}.tar.gz" \
