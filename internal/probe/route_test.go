@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,6 +40,54 @@ func TestNextTraceCancellationPrecedesExecuteAndParseClassification(t *testing.T
 		if failure.Stage == "parse" {
 			t.Fatalf("cancelled NextTrace was classified as parse failure: %+v", result.Failures)
 		}
+	}
+}
+
+func TestNextTraceSeparatesAndBoundsCommandStreams(t *testing.T) {
+	path := writeRouteFixtureBinary(t)
+	engine := routeEngine{Name: routeEngineTiny, Path: path}
+
+	output, err := runRouteCommandForFamily(context.Background(), engine, "stderr", routeSnapshotHops, config.IPVersionAuto)
+	if err != nil || string(output) != routeCompleteFixtureOutput {
+		t.Fatalf("stderr fixture = output:%q err:%v", output, err)
+	}
+	if slots, visible, _, parsed := routeHopSummary(engine.Name, string(output)); !parsed || slots != 1 || visible != 1 {
+		t.Fatalf("stderr route parse = slots:%d visible:%d parsed:%v", slots, visible, parsed)
+	}
+	row := runBacktraceTarget(context.Background(), engine, config.Endpoint{Name: "stderr", Address: "stderr"}, config.IPVersionAuto)
+	if row.Err != nil || string(row.Raw) != routeCompleteFixtureOutput || len(row.Details) != 1 {
+		t.Fatalf("stderr backtrace = raw:%q details:%d err:%v", row.Raw, len(row.Details), row.Err)
+	}
+	output, err = runRouteCommandForFamily(context.Background(), engine, "stderr_failure", routeSnapshotHops, config.IPVersionAuto)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || !strings.Contains(err.Error(), "route fixture diagnostic") || string(output) != routeCompleteFixtureOutput {
+		t.Fatalf("stderr failure = output:%q err:%v", output, err)
+	}
+
+	const overflowTimeout = 2 * time.Second
+	overflowContext, overflowCancel := context.WithTimeout(context.Background(), overflowTimeout)
+	defer overflowCancel()
+	started := time.Now()
+	output, err = runRouteCommandForFamily(overflowContext, engine, "oversized", routeSnapshotHops, config.IPVersionAuto)
+	var overflowExitErr *exec.ExitError
+	if !errors.Is(err, errRouteCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil || time.Since(started) >= overflowTimeout {
+		t.Fatalf("oversized stdout = output_nil:%v err:%v elapsed:%s", output == nil, err, time.Since(started))
+	}
+	row = runBacktraceTarget(overflowContext, engine, config.Endpoint{Name: "oversized", Address: "oversized"}, config.IPVersionAuto)
+	if !errors.Is(row.Err, errRouteCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
+		t.Fatalf("oversized backtrace = raw:%d details:%d hops:%d hits:%d err:%v", len(row.Raw), len(row.Details), len(row.Hops), len(row.Hits), row.Err)
+	}
+	result := (routeProbe{}).Run(overflowContext, routeTestEnvironment([]config.Endpoint{{Name: "Oversized", Address: "oversized"}}, config.IPVersionAuto))
+	if len(result.Measurements) != 0 || result.Evidence == nil || result.Evidence.Valid != 0 || len(result.Failures) != 1 {
+		t.Fatalf("oversized route result = measurements:%d evidence:%+v failures:%+v", len(result.Measurements), result.Evidence, result.Failures)
+	}
+	output, err = runRouteCommandForFamily(overflowContext, engine, "stderr_oversized", routeSnapshotHops, config.IPVersionAuto)
+	if !errors.Is(err, errRouteCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil {
+		t.Fatalf("oversized stderr = output_nil:%v err:%v", output == nil, err)
+	}
+	row = runBacktraceTarget(overflowContext, engine, config.Endpoint{Name: "stderr_oversized", Address: "stderr_oversized"}, config.IPVersionAuto)
+	if !errors.Is(row.Err, errRouteCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
+		t.Fatalf("oversized stderr backtrace = raw:%d details:%d hops:%d hits:%d err:%v", len(row.Raw), len(row.Details), len(row.Hops), len(row.Hits), row.Err)
 	}
 }
 
@@ -341,6 +390,33 @@ func writeRouteFixtureBinary(t *testing.T) string {
 		"partial)\n" +
 		"  printf '%s' '" + routePartialFixtureOutput + "'\n" +
 		"  exit 7\n" +
+		"  ;;\n" +
+		"stderr)\n" +
+		"  printf '%s' '" + routeCompleteFixtureOutput + "'\n" +
+		"  printf '%s\\n' 'route fixture diagnostic' >&2\n" +
+		"  ;;\n" +
+		"stderr_failure)\n" +
+		"  printf '%s' '" + routeCompleteFixtureOutput + "'\n" +
+		"  printf '%s\\n' 'route fixture diagnostic' >&2\n" +
+		"  exit 9\n" +
+		"  ;;\n" +
+		"oversized)\n" +
+		"  printf '%s' '" + routeCompleteFixtureOutput + "'\n" +
+		"  chunk=' '\n" +
+		"  i=0\n" +
+		"  while [ \"$i\" -lt 22 ]; do chunk=$chunk$chunk; i=$((i + 1)); done\n" +
+		"  printf '%s' \"$chunk\"\n" +
+		"  printf '%s' beyond-limit\n" +
+		"  while :; do :; done\n" +
+		"  ;;\n" +
+		"stderr_oversized)\n" +
+		"  printf '%s' '" + routeCompleteFixtureOutput + "'\n" +
+		"  chunk=' '\n" +
+		"  i=0\n" +
+		"  while [ \"$i\" -lt 17 ]; do chunk=$chunk$chunk; i=$((i + 1)); done\n" +
+		"  printf '%s' \"$chunk\" >&2\n" +
+		"  printf '%s' beyond-limit >&2\n" +
+		"  while :; do :; done\n" +
 		"  ;;\n" +
 		"*)\n" +
 		"  printf '%s' '{\"not_route\":true}'\n" +
