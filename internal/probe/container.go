@@ -1,9 +1,9 @@
 package probe
 
 import (
-	"bufio"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,10 +20,6 @@ import (
 // 所有读取失败都退回"无限制"，绝不猜测。
 
 const (
-	cgroupV2Root = "/sys/fs/cgroup"
-	cgroupV1CPU  = "/sys/fs/cgroup/cpu"
-	cgroupV1Mem  = "/sys/fs/cgroup/memory"
-
 	// cgroup v1 用一个接近 int64 上限的值表示"无限制"，各内核版本取值略有差异，
 	// 统一按这个量级判定。
 	cgroupV1Unlimited = uint64(1) << 62
@@ -89,154 +85,330 @@ func distinctBenchmarkThreadCounts(workers int) []int {
 
 // cgroupCPUQuota 返回 cgroup 配额折算的核数。
 func cgroupCPUQuota() (float64, string, bool) {
-	if quota, ok := cgroupV2CPUQuota(); ok {
-		return quota, "cgroup v2 cpu.max", true
-	}
-	if quota, ok := cgroupV1CPUQuota(); ok {
-		return quota, "cgroup v1 cpu.cfs_quota_us", true
-	}
-	return 0, "", false
-}
-
-// cgroupV2CPUQuota 解析 cpu.max，格式为 "<quota|max> <period>"。
-func cgroupV2CPUQuota() (float64, bool) {
-	for _, path := range cgroupCandidatePaths(cgroupV2Root, "cpu.max") {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		fields := strings.Fields(string(data))
-		if len(fields) != 2 || fields[0] == "max" {
-			continue
-		}
-		quota, quotaErr := strconv.ParseFloat(fields[0], 64)
-		period, periodErr := strconv.ParseFloat(fields[1], 64)
-		if quotaErr != nil || periodErr != nil || quota <= 0 || period <= 0 {
-			continue
-		}
-		return quota / period, true
-	}
-	return 0, false
-}
-
-// cgroupV1CPUQuota 读取 cpu.cfs_quota_us 与 cpu.cfs_period_us，配额为 -1 表示无限制。
-func cgroupV1CPUQuota() (float64, bool) {
-	for _, base := range []string{cgroupV1CPU, cgroupV2Root} {
-		for _, quotaPath := range cgroupCandidatePaths(base, "cpu.cfs_quota_us") {
-			quotaText := strings.TrimSpace(readTrimmed(quotaPath, ""))
-			if quotaText == "" || strings.HasPrefix(quotaText, "-") {
+	var best float64
+	var source string
+	for _, candidate := range cgroupLimitCandidates("cpu", "cpu.max", "cpu.cfs_quota_us") {
+		if candidate.v2 {
+			fields := strings.Fields(readTrimmed(candidate.path, ""))
+			if len(fields) != 2 || fields[0] == "max" {
 				continue
 			}
-			quota, err := strconv.ParseFloat(quotaText, 64)
-			if err != nil || quota <= 0 {
+			quota, err1 := strconv.ParseFloat(fields[0], 64)
+			period, err2 := strconv.ParseFloat(fields[1], 64)
+			if err1 != nil || err2 != nil || quota <= 0 || period <= 0 {
 				continue
 			}
-			periodPath := strings.TrimSuffix(quotaPath, "cpu.cfs_quota_us") + "cpu.cfs_period_us"
-			period, periodErr := strconv.ParseFloat(readTrimmed(periodPath, ""), 64)
-			if periodErr != nil || period <= 0 {
-				period = 100000
+			value := quota / period
+			if best == 0 || value < best {
+				best, source = value, candidate.path
 			}
-			return quota / period, true
+			continue
+		}
+		quotaText := strings.TrimSpace(readTrimmed(candidate.path, ""))
+		if quotaText == "" || strings.HasPrefix(quotaText, "-") {
+			continue
+		}
+		quota, err := strconv.ParseFloat(quotaText, 64)
+		if err != nil || quota <= 0 {
+			continue
+		}
+		periodPath := filepath.Join(filepath.Dir(candidate.path), "cpu.cfs_period_us")
+		period, err := strconv.ParseFloat(strings.TrimSpace(readTrimmed(periodPath, "")), 64)
+		if err != nil || period <= 0 {
+			continue
+		}
+		value := quota / period
+		if best == 0 || value < best {
+			best, source = value, candidate.path
 		}
 	}
-	return 0, false
+	return best, source, best > 0
 }
 
-// cgroupMemoryLimit 返回 cgroup 内存上限；0 表示没有限制或无法读取。
+type cgroupMemoryLimitCandidate struct {
+	limit uint64
+	path  string
+	v2    bool
+}
+
+func cgroupMemoryLimitCandidates() []cgroupMemoryLimitCandidate {
+	var result []cgroupMemoryLimitCandidate
+	for _, candidate := range cgroupLimitCandidates("memory", "memory.max", "memory.limit_in_bytes") {
+		value, ok := parseCgroupLimit(candidate.path, candidate.v2)
+		if ok {
+			result = append(result, cgroupMemoryLimitCandidate{limit: value, path: candidate.path, v2: candidate.v2})
+		}
+	}
+	return result
+}
+
+// cgroupMemoryLimit returns the strictest finite memory limit visible from the
+// process's cgroup.  A cgroup namespace intentionally bounds this walk at the
+// namespace's mount root.
 func cgroupMemoryLimit() (uint64, string, bool) {
-	for _, candidate := range []struct {
-		base string
-		file string
-		via  string
-	}{
-		{cgroupV2Root, "memory.max", "cgroup v2 memory.max"},
-		{cgroupV1Mem, "memory.limit_in_bytes", "cgroup v1 memory.limit_in_bytes"},
-		{cgroupV2Root, "memory.limit_in_bytes", "cgroup v1 memory.limit_in_bytes"},
-	} {
-		for _, path := range cgroupCandidatePaths(candidate.base, candidate.file) {
-			text := strings.TrimSpace(readTrimmed(path, ""))
-			if text == "" || text == "max" {
-				continue
-			}
-			value, err := strconv.ParseUint(text, 10, 64)
-			if err != nil || value == 0 || value >= cgroupV1Unlimited {
-				continue
-			}
-			return value, candidate.via, true
+	var best uint64
+	var source string
+	known := false
+	for _, candidate := range cgroupMemoryLimitCandidates() {
+		if !known || candidate.limit < best {
+			best, source, known = candidate.limit, candidate.path, true
 		}
 	}
-	return 0, "", false
+	return best, source, known && best > 0
 }
 
-// cgroupMemoryCurrent returns the bytes currently charged to this cgroup.
-// When /proc/meminfo exposes host memory, this lets the memory inventory report
-// a real effective used/available split instead of subtracting host
-// MemAvailable from a smaller container limit.
+func parseCgroupLimit(path string, v2 bool) (uint64, bool) {
+	text := strings.TrimSpace(readTrimmed(path, ""))
+	if text == "" || text == "max" {
+		return 0, false
+	}
+	value, err := strconv.ParseUint(text, 10, 64)
+	if err != nil || value == 0 || (!v2 && value >= cgroupV1Unlimited) {
+		return 0, false
+	}
+	return value, true
+}
+
+// cgroupMemoryCurrent returns usage charged to the current cgroup only.  It
+// never falls back to a mount root or an ancestor, since those values include
+// other cgroups and cannot be used as this process's leaf usage.
 func cgroupMemoryCurrent() (uint64, string, bool) {
-	for _, candidate := range []struct {
-		base string
-		file string
-		via  string
-	}{
-		{cgroupV2Root, "memory.current", "cgroup v2 memory.current"},
-		{cgroupV1Mem, "memory.usage_in_bytes", "cgroup v1 memory.usage_in_bytes"},
-		{cgroupV2Root, "memory.usage_in_bytes", "cgroup v1 memory.usage_in_bytes"},
-	} {
-		for _, path := range cgroupCandidatePaths(candidate.base, candidate.file) {
-			text := strings.TrimSpace(readTrimmed(path, ""))
-			if text == "" {
-				continue
-			}
-			value, err := strconv.ParseUint(text, 10, 64)
-			if err != nil {
-				continue
-			}
-			return value, candidate.via, true
+	for _, candidate := range cgroupCurrentCandidates("memory", "memory.current", "memory.usage_in_bytes") {
+		text := strings.TrimSpace(readTrimmed(candidate.path, ""))
+		value, err := strconv.ParseUint(text, 10, 64)
+		if err == nil {
+			return value, candidate.path, true
 		}
 	}
 	return 0, "", false
 }
 
-// cgroupCandidatePaths 给出一个 cgroup 控制文件的候选位置。
-//
-// 启用了 cgroup namespace 的容器里，挂载点根部就是该容器自身的 cgroup，直接路径
-// 即可命中。没有 namespace 时（部分 LXC、宿主机上的 Docker）需要按 /proc/self/cgroup
-// 里的相对路径拼接。
-func cgroupCandidatePaths(base, file string) []string {
-	paths := []string{base + "/" + file}
-	for _, relative := range selfCgroupPaths() {
-		if relative == "" || relative == "/" {
-			continue
-		}
-		paths = append(paths, base+relative+"/"+file)
-	}
-	return paths
+type cgroupMembership struct {
+	hierarchyID string
+	controllers map[string]bool
+	path        string
 }
 
-// selfCgroupPaths 解析 /proc/self/cgroup 中本进程所属的 cgroup 相对路径。
-func selfCgroupPaths() []string {
-	file, err := os.Open("/proc/self/cgroup")
+type cgroupMount struct {
+	root, mountPoint, fsType string
+	controllers              map[string]bool
+}
+
+type cgroupFileCandidate struct {
+	path string
+	v2   bool
+}
+
+var (
+	cgroupSelfPath      = "/proc/self/cgroup"
+	cgroupMountInfoPath = "/proc/self/mountinfo"
+)
+
+func readCgroupMemberships(path string) []cgroupMembership {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
-	seen := make(map[string]bool)
-	var paths []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		// 格式为 hierarchy-ID:controller-list:cgroup-path
-		parts := strings.SplitN(scanner.Text(), ":", 3)
+	var result []cgroupMembership
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
-		path := strings.TrimSpace(parts[2])
-		if path == "" || seen[path] {
+		controllers := make(map[string]bool)
+		for _, controller := range strings.Split(parts[1], ",") {
+			if controller != "" {
+				controllers[controller] = true
+			}
+		}
+		result = append(result, cgroupMembership{hierarchyID: parts[0], controllers: controllers, path: parts[2]})
+	}
+	return result
+}
+
+func unescapeMountInfo(value string) string {
+	// mountinfo uses octal escapes for space, tab, and backslash.
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == '\\' && i+3 < len(value) {
+			if n, err := strconv.ParseUint(value[i+1:i+4], 8, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(value[i])
+	}
+	return b.String()
+}
+
+func readCgroupMounts(path string) []cgroupMount {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var result []cgroupMount
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		separator := -1
+		for i, field := range fields {
+			if field == "-" {
+				separator = i
+				break
+			}
+		}
+		if separator < 6 || separator+3 >= len(fields) {
 			continue
 		}
-		seen[path] = true
-		paths = append(paths, path)
+		fsType := fields[separator+1]
+		if fsType != "cgroup" && fsType != "cgroup2" {
+			continue
+		}
+		mount := cgroupMount{root: unescapeMountInfo(fields[3]), mountPoint: unescapeMountInfo(fields[4]), fsType: fsType, controllers: map[string]bool{}}
+		if fsType == "cgroup" {
+			for _, options := range []string{fields[5], fields[separator+3]} {
+				for _, option := range strings.Split(options, ",") {
+					mount.controllers[option] = true
+				}
+			}
+		}
+		result = append(result, mount)
 	}
-	return paths
+	return result
+}
+
+func mountMatchesController(mount cgroupMount, controller string) bool {
+	return mount.fsType == "cgroup2" || mount.controllers[controller]
+}
+
+func validCgroupPath(value string) bool {
+	if value == "" || !filepath.IsAbs(value) {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(value), "/") {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func mapCgroupMember(mount cgroupMount, memberPath string) string {
+	if !validCgroupPath(mount.root) || !validCgroupPath(mount.mountPoint) || !validCgroupPath(memberPath) {
+		return ""
+	}
+	root := filepath.Clean(mount.root)
+	member := filepath.Clean(memberPath)
+	if root != "/" && member != root && !strings.HasPrefix(member, root+string(filepath.Separator)) {
+		return ""
+	}
+	if root != "/" {
+		member = strings.TrimPrefix(member, root)
+	}
+	return filepath.Join(mount.mountPoint, member)
+}
+
+func visibleCgroupPaths(mount cgroupMount, memberPath string) []string {
+	leaf := mapCgroupMember(mount, memberPath)
+	if leaf == "" {
+		return nil
+	}
+	mountPoint := filepath.Clean(mount.mountPoint)
+	if leaf != mountPoint && !strings.HasPrefix(leaf, mountPoint+string(filepath.Separator)) {
+		return nil
+	}
+	var result []string
+	for current := filepath.Clean(leaf); ; current = filepath.Dir(current) {
+		result = append(result, current)
+		if current == mountPoint {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return nil
+		}
+	}
+	return result
+}
+
+type cgroupPathSet struct {
+	paths []string
+	v2    bool
+}
+
+func resolveCgroupPathSets(controller string) []cgroupPathSet {
+	members := readCgroupMemberships(cgroupSelfPath)
+	mounts := readCgroupMounts(cgroupMountInfoPath)
+	var result []cgroupPathSet
+	for _, mount := range mounts {
+		if !mountMatchesController(mount, controller) {
+			continue
+		}
+		for _, member := range members {
+			if mount.fsType == "cgroup2" {
+				if member.hierarchyID != "0" || len(member.controllers) != 0 {
+					continue
+				}
+			} else if !member.controllers[controller] {
+				continue
+			}
+			paths := visibleCgroupPaths(mount, member.path)
+			if len(paths) == 0 {
+				continue
+			}
+			result = append(result, cgroupPathSet{paths: paths, v2: mount.fsType == "cgroup2"})
+		}
+	}
+	return result
+}
+
+func v1MemoryLimitPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	result := []string{paths[0]}
+	for i := 1; i < len(paths); i++ {
+		// An ancestor's flag controls whether that ancestor constrains its
+		// descendants. Once disabled, higher ancestors are not applicable.
+		if strings.TrimSpace(readTrimmed(filepath.Join(paths[i], "memory.use_hierarchy"), "")) != "1" {
+			break
+		}
+		result = append(result, paths[i])
+	}
+	return result
+}
+
+func cgroupLimitCandidates(controller, v2File, v1File string) []cgroupFileCandidate {
+	var result []cgroupFileCandidate
+	for _, set := range resolveCgroupPathSets(controller) {
+		paths := set.paths
+		if !set.v2 && controller == "memory" {
+			paths = v1MemoryLimitPaths(paths)
+		}
+		for _, path := range paths {
+			if set.v2 && v2File != "" {
+				result = append(result, cgroupFileCandidate{path: filepath.Join(path, v2File), v2: true})
+			}
+			if !set.v2 && v1File != "" {
+				result = append(result, cgroupFileCandidate{path: filepath.Join(path, v1File), v2: false})
+			}
+		}
+	}
+	return result
+}
+
+func cgroupCurrentCandidates(controller, v2File, v1File string) []cgroupFileCandidate {
+	var result []cgroupFileCandidate
+	for _, set := range resolveCgroupPathSets(controller) {
+		path := set.paths[0]
+		if set.v2 && v2File != "" {
+			result = append(result, cgroupFileCandidate{path: filepath.Join(path, v2File), v2: true})
+		}
+		if !set.v2 && v1File != "" {
+			result = append(result, cgroupFileCandidate{path: filepath.Join(path, v1File), v2: false})
+		}
+	}
+	return result
 }
 
 // cpuTimeSample 是 /proc/stat 首行聚合 CPU 时间的一次采样。

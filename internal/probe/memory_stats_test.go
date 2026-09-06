@@ -31,6 +31,10 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 	if fallback.AvailableKnown || fallback.HostAvailableBytes != 100*1024 || fallback.HostUsedBytes != 0 {
 		t.Fatalf("memory available fallback = %+v", fallback)
 	}
+	zeroAvailable := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 10, "MemAvailable": 0}, 0)
+	if !zeroAvailable.AvailableKnown || zeroAvailable.HostAvailableBytes != 0 || zeroAvailable.HostUsedBytes != 10*1024 {
+		t.Fatalf("zero MemAvailable = %+v", zeroAvailable)
+	}
 	clamped := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 10, "MemAvailable": 20}, 0)
 	if clamped.HostAvailableBytes != clamped.HostTotalBytes || clamped.HostUsedBytes != 0 {
 		t.Fatalf("memory availability clamp = %+v", clamped)
@@ -104,6 +108,30 @@ func TestMemoryInventoryAndFacilities(t *testing.T) {
 	} {
 		if !slices.Contains(degraded.Notes, want) {
 			t.Fatalf("degraded memory inventory missing note %q: %v", want, degraded.Notes)
+		}
+	}
+}
+
+func TestMemoryAncestorUsageDoesNotBecomeLeafHeadroom(t *testing.T) {
+	memory := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 1024, "MemAvailable": 256}, 512*1024)
+	memory = applyCgroupMemoryUsage(memory, "/cg/parent/child/memory.current", 123, true, []cgroupMemoryLimitCandidate{{limit: 512 * 1024, path: "/cg/parent/memory.max"}})
+	if !memory.EffectiveCurrentKnown || memory.EffectiveUsedBytes != 123 || memory.EffectiveAvailableKnown || memory.EffectiveAvailableBytes != 0 {
+		t.Fatalf("ancestor usage was used as shared headroom: %+v", memory)
+	}
+	memory = applyCgroupMemoryUsage(memory, "/cg/parent/child/memory.current", 123, true, []cgroupMemoryLimitCandidate{{limit: 512 * 1024, path: "/cg/parent/child/memory.max"}})
+	if !memory.EffectiveAvailableKnown || memory.EffectiveAvailableBytes != 256*1024 {
+		t.Fatalf("leaf usage headroom = %+v", memory)
+	}
+}
+
+func TestMemoryInventoryDisclosesUnknownAvailable(t *testing.T) {
+	memory := memoryUsageFromMemInfo(map[string]uint64{"MemTotal": 1024, "MemAvailable": 256}, 512*1024)
+	memory.EffectiveAvailableKnown = false
+	result := model.NewResult("memory", "memory")
+	appendMemoryInventory(&result, memory, memoryFacility{}, memoryFacility{})
+	for _, field := range result.Fields {
+		if field.Key == "memory_available" && field.Value.Text() != "unavailable" {
+			t.Fatalf("unknown availability rendered as %q", field.Value.Text())
 		}
 	}
 }

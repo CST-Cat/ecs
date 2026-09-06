@@ -35,12 +35,16 @@ type memoryUsageSnapshot struct {
 	AvailableKnown          bool
 	LimitApplied            bool
 	EffectiveCurrentKnown   bool
+	// EffectiveAvailableKnown is false when the effective limit belongs to a
+	// visible ancestor whose aggregate usage is not available.  Leaf usage is
+	// still reported separately, but cannot be subtracted from shared headroom.
+	EffectiveAvailableKnown bool
 }
 
 func memoryUsageFromMemInfo(mem map[string]uint64, limit uint64) memoryUsageSnapshot {
 	result := memoryUsageSnapshot{}
 	result.HostTotalBytes = mem["MemTotal"] * 1024
-	if available, ok := mem["MemAvailable"]; ok && available > 0 {
+	if available, ok := mem["MemAvailable"]; ok {
 		result.HostAvailableBytes = available * 1024
 		result.AvailableKnown = true
 	} else {
@@ -59,14 +63,20 @@ func memoryUsageFromMemInfo(mem map[string]uint64, limit uint64) memoryUsageSnap
 	}
 
 	result.EffectiveTotalBytes = result.HostTotalBytes
-	if limit > 0 && (result.EffectiveTotalBytes == 0 || limit < result.EffectiveTotalBytes) {
-		result.EffectiveTotalBytes = limit
+	if limit > 0 {
+		// Keep the finite cgroup limit in the calculation even when it is
+		// currently above host MemTotal: an ancestor's shared usage may still
+		// reduce the available headroom.
+		if result.EffectiveTotalBytes == 0 || limit < result.EffectiveTotalBytes {
+			result.EffectiveTotalBytes = limit
+		}
 		result.LimitApplied = true
 	}
 	result.EffectiveAvailableBytes = result.HostAvailableBytes
 	if result.EffectiveAvailableBytes > result.EffectiveTotalBytes && result.EffectiveTotalBytes > 0 {
 		result.EffectiveAvailableBytes = result.EffectiveTotalBytes
 	}
+	result.EffectiveAvailableKnown = result.AvailableKnown
 	if result.EffectiveTotalBytes >= result.EffectiveAvailableBytes {
 		result.EffectiveUsedBytes = result.EffectiveTotalBytes - result.EffectiveAvailableBytes
 	}

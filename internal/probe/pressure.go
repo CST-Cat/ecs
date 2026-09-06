@@ -97,22 +97,10 @@ func collectResourceLimits() resourceLimits {
 	return limits
 }
 
-func currentCgroupPaths(file string) []string {
-	seen := make(map[string]bool)
-	var paths []string
-	for _, relative := range selfCgroupPaths() {
-		if relative == "" || relative == "/" {
-			continue
-		}
-		path := filepath.Join(cgroupV2Root, relative, file)
-		if !seen[path] {
-			seen[path] = true
-			paths = append(paths, path)
-		}
-	}
-	root := filepath.Join(cgroupV2Root, file)
-	if !seen[root] {
-		paths = append(paths, root)
+func currentCgroupPaths(controller, file string) []string {
+	paths := make([]string, 0)
+	for _, candidate := range cgroupCurrentCandidates(controller, file, file) {
+		paths = append(paths, candidate.path)
 	}
 	return paths
 }
@@ -153,7 +141,7 @@ func parsePSI(data string) psiResource {
 }
 
 func readPressure(resource string) psiResource {
-	for _, path := range currentCgroupPaths(resource + ".pressure") {
+	for _, path := range currentCgroupPaths(resource, resource+".pressure") {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -190,7 +178,7 @@ func parseKeyValueCounters(data string) map[string]uint64 {
 }
 
 func readCgroupCPUStats() cgroupCPUStats {
-	for _, path := range append(currentCgroupPaths("cpu.stat"), filepath.Join(cgroupV1CPU, "cpu.stat")) {
+	for _, path := range currentCgroupPaths("cpu", "cpu.stat") {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -213,19 +201,20 @@ func readCgroupCPUStats() cgroupCPUStats {
 }
 
 func readCgroupMemoryEvents() cgroupMemoryEvents {
-	for _, path := range currentCgroupPaths("memory.events") {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
+	for _, candidate := range cgroupCurrentCandidates("memory", "memory.events", "memory.failcnt") {
+		path := candidate.path
+		if candidate.v2 {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			values := parseKeyValueCounters(string(data))
+			return cgroupMemoryEvents{
+				Low: values["low"], High: values["high"], Max: values["max"],
+				OOM: values["oom"], OOMKill: values["oom_kill"], OOMGroupKill: values["oom_group_kill"],
+				Source: path, Present: true,
+			}
 		}
-		values := parseKeyValueCounters(string(data))
-		return cgroupMemoryEvents{
-			Low: values["low"], High: values["high"], Max: values["max"],
-			OOM: values["oom"], OOMKill: values["oom_kill"], OOMGroupKill: values["oom_group_kill"],
-			Source: path, Present: true,
-		}
-	}
-	for _, path := range append(cgroupCandidatePaths(cgroupV1Mem, "memory.failcnt"), cgroupCandidatePaths(cgroupV2Root, "memory.failcnt")...) {
 		value, err := strconv.ParseUint(strings.TrimSpace(readTrimmed(path, "")), 10, 64)
 		if err == nil {
 			return cgroupMemoryEvents{FailCount: value, Source: path, Present: true}
@@ -236,7 +225,7 @@ func readCgroupMemoryEvents() cgroupMemoryEvents {
 
 func readCPUSet() (string, int, string) {
 	for _, file := range []string{"cpuset.cpus.effective", "cpuset.cpus"} {
-		for _, path := range currentCgroupPaths(file) {
+		for _, path := range currentCgroupPaths("cpuset", file) {
 			value := strings.TrimSpace(readTrimmed(path, ""))
 			if value == "" {
 				continue
@@ -272,23 +261,37 @@ func cpuSetCount(value string) int {
 }
 
 func readCgroupLimit(v2File, v1File string) (uint64, string, bool, bool) {
-	for _, path := range currentCgroupPaths(v2File) {
-		text := strings.TrimSpace(readTrimmed(path, ""))
-		if text == "max" {
-			return 0, path, true, true
+	var best uint64
+	var source, unlimitedSource string
+	finiteKnown, unlimitedKnown := false, false
+	for _, candidate := range cgroupLimitCandidates("memory", v2File, v1File) {
+		text := strings.TrimSpace(readTrimmed(candidate.path, ""))
+		if text == "max" || (!candidate.v2 && text != "" && parseUintAtLeast(text, cgroupV1Unlimited)) {
+			if !unlimitedKnown {
+				unlimitedSource, unlimitedKnown = candidate.path, true
+			}
+			continue
 		}
 		value, err := strconv.ParseUint(text, 10, 64)
-		if err == nil && value < cgroupV1Unlimited {
-			return value, path, false, true
+		if err != nil {
+			continue
+		}
+		if !finiteKnown || value < best {
+			best, source, finiteKnown = value, candidate.path, true
 		}
 	}
-	for _, path := range cgroupCandidatePaths(cgroupV1Mem, v1File) {
-		value, err := strconv.ParseUint(strings.TrimSpace(readTrimmed(path, "")), 10, 64)
-		if err == nil {
-			return value, path, value >= cgroupV1Unlimited, true
-		}
+	if finiteKnown {
+		return best, source, false, true
+	}
+	if unlimitedKnown {
+		return 0, unlimitedSource, true, true
 	}
 	return 0, "", false, false
+}
+
+func parseUintAtLeast(text string, minimum uint64) bool {
+	value, err := strconv.ParseUint(text, 10, 64)
+	return err == nil && value >= minimum
 }
 
 func counterDelta(before, after uint64) (uint64, bool) {
