@@ -128,9 +128,14 @@ OUT=""
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
+    # max-time applies per transfer; retry-max-time bounds the retry window.
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time 300 \
+      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time 300 \
+      "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+    command -v timeout >/dev/null 2>&1 ||
+      die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
+    timeout 300 wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
   else
     die "需要 curl 或 wget" "curl or wget is required"
   fi

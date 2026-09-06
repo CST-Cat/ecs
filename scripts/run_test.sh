@@ -288,6 +288,7 @@ cat >"$fixture_bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
 
+printf '%s\0' "$@" >>"$ECS_TEST_LOG_ROOT/fetch-args.log"
 url=""
 destination=""
 while [ "$#" -gt 0 ]; do
@@ -335,7 +336,7 @@ test_path="$fixture_bin:$PATH"
 make_wget_only_path() {
   local path=$1 command_name target
   mkdir -p "$path"
-  for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm sed sort grep wc cat; do
+  for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm sed sort grep wc cat timeout; do
     target=$(command -v "$command_name") || fail "required command is missing: $command_name"
     ln -s "$target" "$path/$command_name"
   done
@@ -362,6 +363,9 @@ fi
 [[ ! -e "$wget_success_logs/unexpected-network" ]] || fail "wget-only HTTPS fixture reached unexpected network"
 [[ "$(wc -l <"$wget_success_logs/fetch.log")" -eq 2 ]] || fail "wget-only HTTPS fixture did not download twice"
 [[ -f "$wget_success_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced no report"
+wget_fetch_args=$(tr '\0' '\n' <"$wget_success_logs/fetch-args.log")
+grep -F -x -- '--tries=3' <<<"$wget_fetch_args" >/dev/null || fail "run wget omitted bounded retries"
+grep -F -x -- '--timeout=20' <<<"$wget_fetch_args" >/dev/null || fail "run wget omitted per-operation timeout"
 
 # Frozen tool staging is unconditional even when the host PATH already has a
 # same-named executable.
@@ -382,6 +386,13 @@ fi
 [[ "$(wc -l <"$frozen_tool_logs/fetch.log")" -eq 3 ]] || fail "host sysbench suppressed the frozen tool download"
 [[ ! -e "$frozen_tool_logs/host-sysbench-used" ]] || fail "host sysbench was used"
 [[ -f "$frozen_tool_output/fixture.json" ]] || fail "frozen tool staging fixture produced no report"
+frozen_fetch_args=$(tr '\0' '\n' <"$frozen_tool_logs/fetch-args.log")
+grep -F -x -- '--speed-limit' <<<"$frozen_fetch_args" >/dev/null || fail "run curl omitted speed limit"
+grep -F -x -- '--speed-time' <<<"$frozen_fetch_args" >/dev/null || fail "run curl omitted speed time"
+awk '$0 == "--max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$frozen_fetch_args" || fail "run release download omitted 300-second max-time"
+awk '$0 == "--retry-max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$frozen_fetch_args" || fail "run release download omitted 300-second retry window"
+awk '$0 == "--max-time" { getline; if ($0 == "900") found=1 } END { exit !found }' <<<"$frozen_fetch_args" || fail "run tools download omitted 900-second max-time"
+awk '$0 == "--retry-max-time" { getline; if ($0 == "900") found=1 } END { exit !found }' <<<"$frozen_fetch_args" || fail "run tools download omitted 900-second retry window"
 
 # A valid local corpus member must be extracted, exported, and handed to the
 # final fixture entrypoint alongside the staged zstd tool.
@@ -404,6 +415,8 @@ fi
 [[ -s "$zstd_corpus_logs/zstd-corpus-path" ]] || fail "zstd corpus path did not reach the final fixture entrypoint"
 [[ "$(cat "$zstd_corpus_logs/zstd-corpus-path")" == *"/ecs-silesia-v1.corpus" ]] ||
   fail "zstd corpus fixture handed off the wrong corpus member"
+zstd_fetch_args=$(tr '\0' '\n' <"$zstd_corpus_logs/fetch-args.log")
+awk '$0 == "--max-time" { getline; if ($0 == "900") found=1 } END { exit !found }' <<<"$zstd_fetch_args" || fail "zstd corpus download omitted 900-second max-time"
 
 # Disabling dependency setup must stop a selected-tool run instead of letting
 # the downloaded ecs report a missing tool or use the host executable.

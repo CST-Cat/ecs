@@ -74,6 +74,9 @@ bash scripts/run_test.sh
 ecs_step "compare.sh shell 行为回归"
 bash scripts/compare_test.sh
 
+ecs_step "共享下载器 shell 行为回归"
+bash scripts/common_download_test.sh
+
 ecs_step "STREAM smoke shell 行为回归"
 bash scripts/tools/stream_test.sh
 

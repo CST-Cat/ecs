@@ -73,14 +73,20 @@ die() {
 
 # fetch 定义在这里而不是靠近首次下载的地方：sh 的函数定义按顺序生效。
 fetch() {
+  fetch_max_time=${3:-300}
   case "$1" in
     https://*) ;;
     *) die "远程下载地址必须使用 HTTPS：$1" "remote download URL must use HTTPS: $1" ;;
   esac
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$1" -o "$2"
+    # max-time applies per transfer; retry-max-time bounds the retry window.
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time "$fetch_max_time" \
+      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time "$fetch_max_time" \
+      "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+    command -v timeout >/dev/null 2>&1 ||
+      die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
+    timeout "$fetch_max_time" wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
   else
     die "需要 curl 或 wget" "curl or wget is required"
   fi
@@ -391,7 +397,7 @@ tools_tar_extract_member() {
 }
 
 prepare_zstd_corpus() {
-  fetch "${ZSTD_CORPUS_BASE}/${ZSTD_CORPUS_ASSET}" "$ZSTD_CORPUS_ARCHIVE" || return 1
+  fetch "${ZSTD_CORPUS_BASE}/${ZSTD_CORPUS_ASSET}" "$ZSTD_CORPUS_ARCHIVE" 900 || return 1
   mkdir -p "$ZSTD_CORPUS_EXTRACT_ROOT" || return 1
   tar -xzf "$ZSTD_CORPUS_ARCHIVE" -C "$ZSTD_CORPUS_EXTRACT_ROOT" "$ZSTD_CORPUS_NAME" || return 1
   zstd_corpus_path="$ZSTD_CORPUS_EXTRACT_ROOT/$ZSTD_CORPUS_NAME"
@@ -409,7 +415,7 @@ prepare_tools_archive() {
   else
     fetch "${TOOLS_BASE}/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
   fi
-  fetch "${TOOLS_BASE}/${TOOLS_ASSET}" "$TOOLS_ARCHIVE" || return 1
+  fetch "${TOOLS_BASE}/${TOOLS_ASSET}" "$TOOLS_ARCHIVE" 900 || return 1
 
   TOOLS_EXPECTED=$(awk -v f="$TOOLS_ASSET" '$2 == f {print $1; exit}' "$TOOLS_CHECKSUMS_FILE" | tr '[:upper:]' '[:lower:]')
   [ -n "$TOOLS_EXPECTED" ] || return 1

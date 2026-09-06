@@ -163,9 +163,16 @@ download() {
       ;;
   esac
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 "$source_url" -o "$destination_file"
+    # max-time applies per transfer; retry-max-time bounds the retry window.
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time 300 \
+      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time 300 \
+      "$source_url" -o "$destination_file"
   elif command -v wget >/dev/null 2>&1; then
-    wget --https-only --tries=3 --timeout=20 -O "$destination_file" "$source_url"
+    command -v timeout >/dev/null 2>&1 || {
+      printf '%s\n' "timeout is required to bound wget's total download time" >&2
+      exit 1
+    }
+    timeout 300 wget --https-only --tries=3 --timeout=20 -O "$destination_file" "$source_url"
   else
     printf '%s\n' "curl or wget is required to download a release" >&2
     exit 1

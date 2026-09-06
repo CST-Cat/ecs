@@ -203,7 +203,8 @@ ecs_download_sha256() {
   local attempt actual_sha actual_bytes
 
   for attempt in 1 2 3; do
-    if curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 "$url" -o "$output"; then
+    if curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 \
+      --max-time 900 "$url" -o "$output"; then
       actual_sha=$(sha256sum "$output" | awk '{print $1}')
       if [[ "$actual_sha" == "$expected_sha" ]]; then
         return 0

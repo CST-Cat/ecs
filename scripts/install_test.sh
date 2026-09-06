@@ -137,7 +137,7 @@ printf '%s  %s\n' "$remote_digest" "$remote_asset" >"$remote_release/checksums.t
 make_command_path() {
   local path=$1 command_name target
   mkdir -p "$path"
-  for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm; do
+  for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm timeout; do
     target=$(command -v "$command_name") || fail "required command is missing: $command_name"
     ln -s "$target" "$path/$command_name"
   done
@@ -148,6 +148,9 @@ write_downloader() {
   cat >"$path/$command_name" <<'EOF'
 #!/bin/sh
 set -eu
+if [ -n "${ECS_INSTALL_TEST_ARG_LOG:-}" ]; then
+  printf '%s\0' "$@" >>"$ECS_INSTALL_TEST_ARG_LOG"
+fi
 url=""
 destination=""
 while [ "$#" -gt 0 ]; do
@@ -214,8 +217,10 @@ set -e
 remote_install_dir="$test_root/remote-install"
 remote_log="$test_root/remote-download.log"
 remote_unexpected="$test_root/remote-unexpected"
+remote_args="$test_root/remote-download.args"
 if ! ECS_INSTALL_DIR="$remote_install_dir" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
     ECS_INSTALL_TEST_DOWNLOAD_LOG="$remote_log" ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$remote_unexpected" \
+    ECS_INSTALL_TEST_ARG_LOG="$remote_args" \
     ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" ECS_INSTALL_TEST_RELEASE_ROOT="$remote_release" \
     ECS_INSTALL_TEST_ASSET="$remote_asset" PATH="$curl_path" \
     sh "$repo_root/install.sh" \
@@ -226,6 +231,12 @@ cmp -s "$fixture_one" "$remote_install_dir/ecs" || fail "HTTPS fixture changed t
 [[ "$(stat -c '%a' "$remote_install_dir/ecs")" == 755 ]] || fail "HTTPS fixture install mode is not 0755"
 [[ "$(wc -l <"$remote_log")" -eq 2 ]] || fail "HTTPS fixture did not make exactly two downloads"
 [[ ! -e "$remote_unexpected" ]] || fail "HTTPS fixture reached an unexpected network path"
+remote_args_text=$(tr '\0' '\n' <"$remote_args")
+grep -F -x -- '--connect-timeout' <<<"$remote_args_text" >/dev/null || fail "install curl omitted connect timeout"
+grep -F -x -- '--speed-limit' <<<"$remote_args_text" >/dev/null || fail "install curl omitted speed limit"
+grep -F -x -- '--speed-time' <<<"$remote_args_text" >/dev/null || fail "install curl omitted speed time"
+awk '$0 == "--max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$remote_args_text" || fail "install curl omitted 300-second max-time"
+awk '$0 == "--retry-max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$remote_args_text" || fail "install curl omitted 300-second retry window"
 
 # A bad archive checksum must preserve an existing installation and clean the
 # work directory without touching the destination candidate path.

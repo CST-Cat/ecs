@@ -105,6 +105,9 @@ cat >"$fixture_bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
 
+if [ -n "${ECS_COMPARE_TEST_ARG_LOG:-}" ]; then
+  printf '%s\0' "$@" >>"$ECS_COMPARE_TEST_ARG_LOG"
+fi
 url=""
 destination=""
 while [ "$#" -gt 0 ]; do
@@ -393,10 +396,12 @@ assert_empty_dir "$mismatch_tmp" "checksum mismatch"
 # 成功路径下载本地 fixture，保留带空格参数，且输出目录不随 WORK 清理。
 success_tmp="$test_root/success-tmp"
 success_logs="$fixture_logs/success"
+success_args="$test_root/success-download.args"
 comparison_output="$test_root/comparison output"
 mkdir -p "$success_tmp" "$success_logs"
 if ! ECS_LANG=en TMPDIR="$success_tmp" PATH="$test_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_COMPARE_TEST_ARG_LOG="$success_args" \
     ECS_TEST_LOG_ROOT="$success_logs" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     sh "$repo_root/compare.sh" --output "$comparison_output" --format json,md \
       --name 'node alpha' "$report_one" "$report_two" \
@@ -407,6 +412,12 @@ fi
 [[ -f "$comparison_output/comparison.json" ]] || fail "fake ecs did not generate the requested output"
 [[ "$(wc -l <"$success_logs/fetch.log")" -eq 2 ]] || fail "success path did not perform exactly two local fixture fetches"
 [[ ! -e "$success_logs/unexpected-network" ]] || fail "success path attempted unexpected network access"
+success_args_text=$(tr '\0' '\n' <"$success_args")
+grep -F -x -- '--connect-timeout' <<<"$success_args_text" >/dev/null || fail "compare curl omitted connect timeout"
+grep -F -x -- '--speed-limit' <<<"$success_args_text" >/dev/null || fail "compare curl omitted speed limit"
+grep -F -x -- '--speed-time' <<<"$success_args_text" >/dev/null || fail "compare curl omitted speed time"
+awk '$0 == "--max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$success_args_text" || fail "compare curl omitted 300-second max-time"
+awk '$0 == "--retry-max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$success_args_text" || fail "compare curl omitted 300-second retry window"
 assert_empty_dir "$success_tmp" "successful comparison"
 
 assert_staged_argv "$success_logs/compare.argv" "$success_tmp" "success path" \
