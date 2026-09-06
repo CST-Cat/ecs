@@ -24,7 +24,7 @@ Go 版本按三层职责管理：
 
 1. 根 `go.mod` 的 `go 1.22` 是源码最低兼容版本，不代表当前开发工具链版本。
 2. `.github/workflows/ci.yml` 的 `compat` job 显式使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`；它是唯一的最低版本验证入口。
-3. 普通 CI、leaderboard、security 和正式 Release workflow 直接通过 `actions/setup-go@v7` 请求 `stable` 并启用 `check-latest`；Release 的 assemble 会记录实际 `GOVERSION`，再由 verify 校验。
+3. 普通 CI、leaderboard、security 和正式 Release workflow 通过固定完整 SHA 的 `actions/setup-go` v7 请求 `stable` 并启用 `check-latest`；Action 引用已固定，但编译器仍跟随当前官方稳定版本。Release 的 assemble 会记录实际 `GOVERSION`，再由 verify 校验。
 
 `devtools/go.mod` 是工具 module 的最低 Go 版本要求与工具依赖清单（用于构建 `staticcheck`/`govulncheck`），不是 compiler selector。
 主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release binary 不需要 Go。
