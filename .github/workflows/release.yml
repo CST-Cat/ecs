@@ -3,9 +3,10 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# preflight → tools×7 → assemble → verify → publish。
+# freeze → source-checks/tools×7 → assemble → verify → publish。
 #
-#   preflight  contents: read    冻结 SHA，跑确定性源码检查
+#   freeze     contents: read    冻结 SHA，校验发布说明
+#   source-checks contents: read  跑确定性源码检查
 #   tools × 7  contents: read    七架构完整构建工具包
 #   assemble   contents: read    组装全部发布物，记录实测工具链版本
 #   verify     contents: read    校验解包出来的实际二进制
@@ -21,7 +22,7 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 preflight → tools×7 → assemble → verify
+  # 手动触发是发布演练：走完 freeze → source-checks/tools×7 → assemble → verify
   # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
   # 没有 rebuild_tools 之类的开关——每次都完整构建七架构，没有可跳过的选项。
   workflow_dispatch:
@@ -29,8 +30,8 @@ on:
 permissions:
   contents: read
 
-# 正式发布的所有 job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，
-# 不从主模块 go.mod 自动选择工具链。所有 release job（包括被脚本间接调用的
+# 正式发布中需要 Go 的 job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，
+# 不从主模块 go.mod 自动选择工具链。所有会运行 Go 命令的 release job（包括被脚本间接调用的
 # go build/go test/go run）都禁止 go 命令根据 go.mod 自动切换工具链；assemble 记录
 # 实际 go env GOVERSION，并原样交给 verify 校验。
 env:
@@ -41,15 +42,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 入口资格判断 + 冻结 SHA。
+  # 发布候选冻结 + 入口变更日志校验。
   #
   # main 只在这里读一次。Release transaction 一旦开始，后续所有 job 都 checkout
   # 到这个冻结的 SHA——不再拿移动中的 main 和已经冻结的 tag 做比较。
   #
-  # 这里直接跑确定性的源码检查，而不是去轮询历史 ci.yml run 的结论：
-  # 跨 workflow 的状态耦合既脆弱（run 会过期、会被重跑），又把"发布前检查过
-  # 什么"这个问题的答案藏进了 Actions 的运行历史里。
-  preflight:
+  # 确定性的源码检查在独立的 source-checks job 中执行。
+  freeze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -59,12 +58,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: 'stable'
-          check-latest: true
-          cache: false
-
       - name: Freeze the release candidate
         id: freeze
         env:
@@ -82,6 +75,21 @@ jobs:
         env:
           VERSION: ${{ steps.freeze.outputs.version }}
         run: ./scripts/release/check_changelog.sh --version "$VERSION"
+
+  source-checks:
+    needs: freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.freeze.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
 
       - name: Deterministic source checks
         run: ./scripts/ci/check.sh
@@ -101,7 +109,7 @@ jobs:
   # 路径变了"去推断产物是否仍然等价，而这种推断错一次就是发出一个没人验证过
   # 的二进制。
   tools:
-    needs: [preflight]
+    needs: [freeze]
     name: tools (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -119,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.preflight.outputs.sha }}
+          ref: ${{ needs.freeze.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 'stable'
@@ -171,7 +179,7 @@ jobs:
   # expected_go=... 这种可能分叉的期望值。这里在 assemble 记录 setup-go 后本次构建
   # 实际的 go env GOVERSION，并原样通过 --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
-    needs: [preflight, tools]
+    needs: [freeze, source-checks, tools]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -179,7 +187,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.preflight.outputs.sha }}
+          ref: ${{ needs.freeze.outputs.sha }}
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -208,7 +216,7 @@ jobs:
       - name: Assemble release assets
         id: build
         env:
-          VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION: ${{ needs.freeze.outputs.version }}
         run: |
           set -euo pipefail
           echo "build_go_version=$(go env GOVERSION)" >>"$GITHUB_OUTPUT"
@@ -223,13 +231,13 @@ jobs:
 
   # 这组制品真的出自这次提交、这条工具链吗？
   verify:
-    needs: [preflight, assemble]
+    needs: [freeze, assemble]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.preflight.outputs.sha }}
+          ref: ${{ needs.freeze.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 'stable'
@@ -242,7 +250,7 @@ jobs:
       - name: Verify build provenance metadata
         env:
           BUILD_GO_VERSION: ${{ needs.assemble.outputs.build_go_version }}
-          REVISION: ${{ needs.preflight.outputs.sha }}
+          REVISION: ${{ needs.freeze.outputs.sha }}
         run: |
           ./scripts/release/verify.sh \
             --dist dist \
@@ -253,7 +261,7 @@ jobs:
   # verify 校验过。
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [preflight, assemble, verify]
+    needs: [freeze, assemble, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -261,7 +269,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.preflight.outputs.sha }}
+          ref: ${{ needs.freeze.outputs.sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -272,8 +280,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-          REVISION: ${{ needs.preflight.outputs.sha }}
+          VERSION: ${{ needs.freeze.outputs.version }}
+          REVISION: ${{ needs.freeze.outputs.sha }}
         run: |
           ./scripts/release/publish.sh \
             --tag "$TAG" --version "$VERSION" --revision "$REVISION" --dist dist
