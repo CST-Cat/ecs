@@ -15,6 +15,7 @@ import (
 // values are bold even in renderers that ignore emoji or HTML styling, and
 // density bars preserve the visual ranking in plain Markdown source.
 func ComparisonMarkdown(data comparison.Report) string {
+	data = sanitizedCopy(data)
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("compare.title") + "\n\n")
 	out.WriteString("> " + markdownEscape(i18n.T("compare.subtitle")) + "\n\n")

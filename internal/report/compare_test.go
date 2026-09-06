@@ -168,6 +168,61 @@ func TestComparisonRenderersCoverLayoutsAndStates(t *testing.T) {
 	}
 }
 
+func TestComparisonRenderersSanitizeNestedControlsWithoutChangingJSON(t *testing.T) {
+	originalLanguage := i18n.Current()
+	t.Cleanup(func() { i18n.Set(originalLanguage) })
+	i18n.Set(i18n.LangEN)
+	pair := comparisonReportFixture(t, 2, 0)
+	payload := "<nested>\x00\x1b[31m\x1f\x7f\u0080\u009b|[diagnostic]"
+	pair.Inputs[0].Label = payload
+	pair.Inputs[0].Profile = payload
+	pair.Modules[0].Metrics[0].Label = payload
+	pair.Modules[0].Metrics[0].Values[0].Display = payload
+	pair.Modules[0].MetricIssues = append(pair.Modules[0].MetricIssues, comparison.MetricIssue{
+		Key: "unsafe", Label: payload, Reason: payload, Reports: []int{0},
+	})
+	pair.Notices = append(pair.Notices, comparison.Notice{Key: "compare.notice.toolMixed", Args: []string{payload}})
+	rawBefore, err := ComparisonJSON(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(rawBefore, []byte(`\u001b`)) || !bytes.Contains(rawBefore, []byte("nested")) {
+		t.Fatalf("comparison JSON lost raw control-bearing facts: %s", rawBefore)
+	}
+
+	markdown := ComparisonMarkdown(pair)
+	htmlBytes, err := ComparisonHTML(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]string{
+		"markdown": markdown,
+		"html":     string(htmlBytes),
+		"text":     ComparisonText(pair, termcolor.LevelNone),
+	}
+	for name, output := range outputs {
+		if strings.ContainsFunc(output, func(character rune) bool {
+			return character != '\n' && terminalControlRune(character)
+		}) {
+			t.Errorf("comparison %s retained a terminal control character", name)
+		}
+		if !strings.Contains(output, "nested") || !strings.Contains(output, "diagnostic") {
+			t.Errorf("comparison %s lost sanitized nested diagnostic data", name)
+		}
+	}
+	if !strings.Contains(markdown, "&lt;nested&gt;") || strings.Contains(markdown, "<nested>") {
+		t.Fatalf("comparison Markdown did not retain escaped markup: %s", markdown)
+	}
+	html := string(htmlBytes)
+	if !strings.Contains(html, "&lt;nested&gt;") || strings.Contains(html, "<nested>") {
+		t.Fatalf("comparison HTML did not retain escaped markup: %s", html)
+	}
+	rawAfter, err := ComparisonJSON(pair)
+	if err != nil || !bytes.Equal(rawAfter, rawBefore) {
+		t.Fatalf("comparison renderers mutated nested input: %v", err)
+	}
+}
+
 func TestWriteComparisonFilesAndCanonicalErrors(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })

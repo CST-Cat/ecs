@@ -15,6 +15,7 @@ import (
 // document chooses paired, matrix or ranked-list CSS at generation time and
 // still collapses cleanly on narrow mobile terminals/browsers.
 func ComparisonHTML(data comparison.Report) ([]byte, error) {
+	data = sanitizedCopy(data)
 	var out strings.Builder
 	layout := comparisonLayoutFor(len(data.Inputs))
 	layoutClass := map[comparisonLayout]string{
