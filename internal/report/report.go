@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -90,10 +91,6 @@ func JSON(data model.Report) ([]byte, error) {
 // 命令走这条路，把输入当作当前 schema 的实例解释。版本不符就意味着字段语义可能已经
 // 变了，继续下去只会得到看似合理的错误结论。
 func LoadJSON(path string) (model.Report, error) {
-	return loadJSON(path)
-}
-
-func loadJSON(path string) (model.Report, error) {
 	var data model.Report
 	file, err := os.Open(path)
 	if err != nil {
@@ -103,7 +100,21 @@ func loadJSON(path string) (model.Report, error) {
 	if info, err := file.Stat(); err == nil && info.Size() > 32*1024*1024 {
 		return data, i18n.Errorf("err.reportTooLarge")
 	}
-	decoder := json.NewDecoder(file)
+	content, err := io.ReadAll(io.LimitReader(file, 32*1024*1024+1))
+	if err != nil {
+		return data, err
+	}
+	return ParseJSON(content)
+}
+
+// ParseJSON validates one complete report from cached bytes. Callers that
+// already read an artifact can use this to avoid reopening the same path.
+func ParseJSON(content []byte) (model.Report, error) {
+	var data model.Report
+	if int64(len(content)) > 32*1024*1024 {
+		return data, i18n.Errorf("err.reportTooLarge")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&data); err != nil {
 		return data, err

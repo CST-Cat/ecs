@@ -7,37 +7,37 @@ import "fmt"
 func BuiltinDefinitions() []Definition {
 	return []Definition{
 		{
-			ID: "sysbench", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "sysbench",
 		},
 		{
-			ID: "zstd", Staging: StagingPolicy{Category: StagingZstdCorpus},
+			ID: "zstd",
 		},
 		{
-			ID: "npb-ep", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "npb-ep",
 		},
 		{
-			ID: "npb-ft", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "npb-ft",
 		},
 		{
-			ID: "openssl", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "openssl",
 		},
 		{
-			ID: "stream", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "stream",
 		},
 		{
-			ID: "fio", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "fio",
 		},
 		{
-			ID: "iperf3", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "iperf3",
 		},
 		{
-			ID: "nexttrace-tiny", Staging: StagingPolicy{Category: StagingNextTrace, Source: StagingSourceNextTraceArchitecture},
+			ID: "nexttrace-tiny",
 		},
 		{
-			ID: "ping", Staging: StagingPolicy{Category: StagingArchive},
+			ID: "ping",
 		},
 		{
-			ID: "speedtest", Staging: StagingPolicy{Category: StagingOokla, Source: StagingSourceOoklaSignedPackage},
+			ID: "speedtest", ExternalService: "ookla",
 		},
 	}
 }

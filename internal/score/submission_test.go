@@ -62,6 +62,10 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if err != nil || len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
 		t.Fatalf("submission encode = %v", err)
 	}
+	parsed, err := ParseSubmission(encoded)
+	if err != nil || parsed.ID != submission.ID || parsed.SampleID != submission.SampleID {
+		t.Fatalf("ParseSubmission cached submission = %+v/%v", parsed, err)
+	}
 	encodedText := string(encoded)
 	if !strings.Contains(encodedText, `"sample_id":`) || strings.Contains(encodedText, `"fingerprint_version":`) || strings.Contains(encodedText, report.Run.ID) {
 		t.Fatalf("submission identity encoding = %s", encodedText)
@@ -481,12 +485,18 @@ func TestSubmissionJSONSizeBoundary(t *testing.T) {
 	if _, err := LoadSubmission(validPath); err != nil {
 		t.Fatalf("submission at 256 KiB rejected: %v", err)
 	}
+	if _, err := ParseSubmission(exact); err != nil {
+		t.Fatalf("ParseSubmission at 256 KiB rejected: %v", err)
+	}
 	overPath := filepath.Join(directory, "over.json")
 	if err := os.WriteFile(overPath, over, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadSubmission(overPath); err == nil || !strings.Contains(err.Error(), "256 KiB") {
 		t.Fatalf("submission over 256 KiB error = %v", err)
+	}
+	if _, err := ParseSubmission(over); err == nil || !strings.Contains(err.Error(), "256 KiB") {
+		t.Fatalf("ParseSubmission over 256 KiB error = %v", err)
 	}
 }
 

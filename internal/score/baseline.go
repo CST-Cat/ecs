@@ -10,6 +10,7 @@ package score
 // --score-baseline 传入。没有当前样本时，发行包不会使用旧的硬编码参考。
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -73,7 +74,19 @@ func LoadBaseline(path string) (Baseline, error) {
 	if info, err := file.Stat(); err == nil && info.Size() > 4*1024*1024 {
 		return baseline, fmt.Errorf("baseline file exceeds the 4 MiB safety limit")
 	}
-	return parseBaseline(file, false)
+	content, err := io.ReadAll(io.LimitReader(file, 4*1024*1024+1))
+	if err != nil {
+		return baseline, err
+	}
+	return ParseBaseline(content)
+}
+
+// ParseBaseline validates one complete baseline from cached bytes.
+func ParseBaseline(content []byte) (Baseline, error) {
+	if int64(len(content)) > 4*1024*1024 {
+		return Baseline{}, fmt.Errorf("baseline file exceeds the 4 MiB safety limit")
+	}
+	return parseBaseline(bytes.NewReader(content), false)
 }
 
 // parseBaseline is the single strict decoding and validation entry point for

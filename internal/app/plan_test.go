@@ -14,10 +14,9 @@ import (
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 	"ecs/internal/module"
-	"ecs/internal/tool"
 )
 
-func TestBuildExecutionPlanDerivesTypedToolStaging(t *testing.T) {
+func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T) {
 	application := newApplication()
 	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
 		Modules: []string{"route", "backtrace", "ookla", "zstd", "cpu", "latency"},
@@ -25,26 +24,36 @@ func TestBuildExecutionPlanDerivesTypedToolStaging(t *testing.T) {
 	if !reflect.DeepEqual(plan.RequiredTools, []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}) {
 		t.Fatalf("required tools = %v", plan.RequiredTools)
 	}
-	if !reflect.DeepEqual(plan.Staging.ToolArchiveTools, []string{"nexttrace-tiny", "zstd", "sysbench", "ping"}) {
-		t.Fatalf("archive tools = %v", plan.Staging.ToolArchiveTools)
-	}
-	if !plan.Staging.ToolArchiveRequired || !plan.Staging.ZstdCorpusRequired || !plan.Staging.NextTraceTinyRequired || !plan.Staging.OoklaPackageRequired {
-		t.Fatalf("staging flags = %+v", plan.Staging)
-	}
-	if plan.Staging.NextTraceSource != string(tool.StagingSourceNextTraceArchitecture) || plan.Staging.OoklaPackageSource != string(tool.StagingSourceOoklaSignedPackage) {
-		t.Fatalf("special staging sources = %+v", plan.Staging)
+	if !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) {
+		t.Fatalf("external services = %v", plan.ExternalServices)
 	}
 }
 
-func TestApplyToolStagingLeavesNoCapabilityForNone(t *testing.T) {
-	var staging planStaging
-	applyToolStaging(&staging, tool.Definition{ID: "fixture", Staging: tool.StagingPolicy{Category: tool.StagingNone}})
-	if staging.ToolArchiveRequired || len(staging.ToolArchiveTools) != 0 || staging.NextTraceTinyRequired || staging.NextTraceSource != "" || staging.OoklaPackageRequired || staging.OoklaPackageSource != "" || staging.ZstdCorpusRequired {
-		t.Fatalf("none staging changed plan facts: %+v", staging)
+func TestBuildExecutionPlanUsesToolServiceMetadata(t *testing.T) {
+	application := newApplication()
+	ookla, ok := application.modules.Lookup("ookla")
+	if !ok {
+		t.Fatal("ookla descriptor missing")
+	}
+	renamed := ookla
+	renamed.ID = "renamed-client"
+	bare := ookla
+	bare.RequiredTools = nil
+	catalog, err := module.NewCatalog([]module.Descriptor{renamed, bare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamedPlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"renamed-client"}})
+	if !reflect.DeepEqual(renamedPlan.ExternalServices, []string{"third-party-provider", "ookla"}) {
+		t.Fatalf("renamed tool service facts = %v", renamedPlan.ExternalServices)
+	}
+	barePlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"ookla"}})
+	if !reflect.DeepEqual(barePlan.ExternalServices, []string{"third-party-provider"}) {
+		t.Fatalf("bare module service facts = %v", barePlan.ExternalServices)
 	}
 }
 
-func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
+func TestPlanJSONUsesRunResolverAndDescribesRequiredTools(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	status := Main(context.Background(), []string{
 		"plan", "--lang", "en", "--profile", "full",
@@ -66,12 +75,6 @@ func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 		RequiredTools    []string `json:"required_tools"`
 		NeedsEgressIP    bool     `json:"needs_egress_ip"`
 		ExternalServices []string `json:"external_services"`
-		Staging          struct {
-			ToolArchiveRequired  bool     `json:"tool_archive_required"`
-			ToolArchiveTools     []string `json:"tool_archive_tools"`
-			OoklaPackageRequired bool     `json:"ookla_package_required"`
-			ZstdCorpusRequired   bool     `json:"zstd_corpus_required"`
-		} `json:"staging"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatal(err)
@@ -88,9 +91,6 @@ func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	if len(plan.RequiredTools) != 3 || !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) || plan.NeedsEgressIP {
 		t.Fatalf("machine tool/external metadata = %#v / %#v / %v", plan.RequiredTools, plan.ExternalServices, plan.NeedsEgressIP)
 	}
-	if !plan.Staging.ToolArchiveRequired || !plan.Staging.OoklaPackageRequired || !plan.Staging.ZstdCorpusRequired {
-		t.Fatalf("staging = %#v", plan.Staging)
-	}
 	if strings.Contains(stdout.String(), "标准") || strings.Contains(stdout.String(), "完整配置") {
 		t.Fatalf("machine plan contains localized prose: %s", stdout.String())
 	}
@@ -101,7 +101,7 @@ func TestPlanJSONUsesRunResolverAndDescribesStaging(t *testing.T) {
 	}
 	wantTopLevel := []string{
 		"exposure", "external_services", "ip_version", "modules", "needs_egress_ip",
-		"profile", "required_tools", "reveal", "schema_version", "staging", "tool",
+		"profile", "required_tools", "reveal", "schema_version", "tool",
 	}
 	gotTopLevel := make([]string, 0, len(raw))
 	for key := range raw {

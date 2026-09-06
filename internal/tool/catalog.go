@@ -70,27 +70,8 @@ func validateDefinition(index int, definition Definition, seenIDs map[string]str
 	if _, exists := seenIDs[definition.ID]; exists {
 		return fmt.Errorf("duplicate tool definition %q", definition.ID)
 	}
-	if err := validateStaging(definition.ID, definition.Staging); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateStaging(id string, policy StagingPolicy) error {
-	if !policy.Category.valid() || !policy.Source.valid() {
-		return fmt.Errorf("tool %q has invalid staging policy", id)
-	}
-	wantSource := StagingSourceNone
-	switch policy.Category {
-	case StagingNone, StagingArchive, StagingZstdCorpus:
-		wantSource = StagingSourceNone
-	case StagingNextTrace:
-		wantSource = StagingSourceNextTraceArchitecture
-	case StagingOokla:
-		wantSource = StagingSourceOoklaSignedPackage
-	}
-	if policy.Source != wantSource {
-		return fmt.Errorf("tool %q has staging source %q for category %q, want %q", id, policy.Source, policy.Category, wantSource)
+	if !validExternalService(definition.ExternalService) {
+		return fmt.Errorf("tool %q has invalid external service %q", definition.ID, definition.ExternalService)
 	}
 	return nil
 }

@@ -64,8 +64,8 @@ shell 语法、发布中间目录忽略规则、工具包布局回归和各架�
 Command、Module 和 Tool Catalog，并将显式 Catalog 值传给 config、runner、list、plan 和 wizard 等消费者。
 
 Catalog 没有 `init` 注册或运行时 `Register`、`Delete`、`Replace` API，也没有可变全局 registry、`any`、
-反射或弱类型 factory/DI。模块的 `RequiredTools` 只引用 Tool Catalog 中的工具 ID；Tool Catalog 负责工具身份、
-doctor 用途、版本验证策略和 plan staging 能力，仍与 [`internal/toolsmanifest`](internal/toolsmanifest) 的发布包
+反射或弱类型 factory/DI。模块的 `RequiredTools` 只引用 Tool Catalog 中的工具 ID；Tool Catalog 只负责工具身份和
+plan 外部服务事实，仍与 [`internal/toolsmanifest`](internal/toolsmanifest) 的发布包
 内容以及 `run.sh` 的下载、安装和执行事实分离。工具 URL、校验和、release asset 和 shell 下载命令不属于 Tool
 Catalog。
 

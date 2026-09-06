@@ -7,10 +7,10 @@ import (
 )
 
 func validDefinition(id string) Definition {
-	return Definition{ID: id, Staging: StagingPolicy{Category: StagingArchive}}
+	return Definition{ID: id}
 }
 
-func TestBuiltinCatalogHasCanonicalOrderAndStagingFacts(t *testing.T) {
+func TestBuiltinCatalogHasCanonicalOrderAndExternalServiceFacts(t *testing.T) {
 	catalog, err := BuiltinCatalog()
 	if err != nil {
 		t.Fatal(err)
@@ -25,29 +25,11 @@ func TestBuiltinCatalogHasCanonicalOrderAndStagingFacts(t *testing.T) {
 	if !catalog.Valid() || len(catalog.Definitions()) != len(wantIDs) {
 		t.Fatalf("builtin catalog validity/size = %t/%d", catalog.Valid(), len(catalog.Definitions()))
 	}
-	want := map[string]struct {
-		staging StagingCategory
-		source  StagingSource
-	}{
-		"sysbench":       {StagingArchive, StagingSourceNone},
-		"zstd":           {StagingZstdCorpus, StagingSourceNone},
-		"npb-ep":         {StagingArchive, StagingSourceNone},
-		"npb-ft":         {StagingArchive, StagingSourceNone},
-		"openssl":        {StagingArchive, StagingSourceNone},
-		"stream":         {StagingArchive, StagingSourceNone},
-		"fio":            {StagingArchive, StagingSourceNone},
-		"iperf3":         {StagingArchive, StagingSourceNone},
-		"nexttrace-tiny": {StagingNextTrace, StagingSourceNextTraceArchitecture},
-		"ping":           {StagingArchive, StagingSourceNone},
-		"speedtest":      {StagingOokla, StagingSourceOoklaSignedPackage},
-	}
+	wantServices := map[string]string{"speedtest": "ookla"}
 	for _, definition := range catalog.Definitions() {
-		facts, ok := want[definition.ID]
-		if !ok {
+		service := wantServices[definition.ID]
+		if definition.ExternalService != service {
 			t.Fatalf("unexpected builtin tool %q", definition.ID)
-		}
-		if definition.Staging.Category != facts.staging || definition.Staging.Source != facts.source {
-			t.Fatalf("staging facts for %q = %+v, want %q/%q", definition.ID, definition.Staging, facts.staging, facts.source)
 		}
 	}
 }
@@ -73,8 +55,7 @@ func TestNewCatalogRejectsInvalidDefinitions(t *testing.T) {
 	}{
 		{"empty ID", func(definition *Definition) { definition.ID = " " }, "empty ID"},
 		{"noncanonical ID", func(definition *Definition) { definition.ID = "Fixture_Tool" }, "noncanonical"},
-		{"invalid staging category", func(definition *Definition) { definition.Staging.Category = "future" }, "invalid staging"},
-		{"mismatched staging source", func(definition *Definition) { definition.Staging.Source = StagingSourceOoklaSignedPackage }, "staging source"},
+		{"invalid external service", func(definition *Definition) { definition.ExternalService = "future" }, "external service"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

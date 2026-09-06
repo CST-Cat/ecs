@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,31 +22,37 @@ type leaderboardInputEnvelope struct {
 	SchemaVersion string `json:"schema_version"`
 }
 
-// readLeaderboardSchema reads the top-level discriminant before a loader
-// validates the complete input. The size bound keeps malformed or untrusted
-// paths from turning identification into an unbounded read; the selected
-// loader retains its own, tighter contract.
-func readLeaderboardSchema(path string) (string, error) {
+// readLeaderboardArtifact reads one bounded artifact and its top-level
+// discriminant. The selected strict parser consumes these same bytes so a
+// leaderboard input is never reopened after classification.
+func readLeaderboardArtifact(path string) ([]byte, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer file.Close()
 	if info, err := file.Stat(); err == nil && info.Size() > leaderboardEnvelopeLimit {
-		return "", fmt.Errorf("ECS artifact envelope exceeds the 32 MiB safety limit")
+		return nil, "", fmt.Errorf("ECS artifact envelope exceeds the 32 MiB safety limit")
+	}
+	content, err := io.ReadAll(io.LimitReader(file, leaderboardEnvelopeLimit+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if int64(len(content)) > leaderboardEnvelopeLimit {
+		return nil, "", fmt.Errorf("ECS artifact envelope exceeds the 32 MiB safety limit")
 	}
 	var envelope leaderboardInputEnvelope
-	decoder := json.NewDecoder(io.LimitReader(file, leaderboardEnvelopeLimit+1))
+	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&envelope); err != nil {
-		return "", fmt.Errorf("read ECS artifact schema envelope: %w", err)
+		return nil, "", fmt.Errorf("read ECS artifact schema envelope: %w", err)
 	}
 	if envelope.Schema != "" && envelope.SchemaVersion != "" && envelope.Schema != envelope.SchemaVersion {
-		return "", fmt.Errorf("unsupported ECS artifact schema: conflicting schema %q and schema_version %q", envelope.Schema, envelope.SchemaVersion)
+		return nil, "", fmt.Errorf("unsupported ECS artifact schema: conflicting schema %q and schema_version %q", envelope.Schema, envelope.SchemaVersion)
 	}
 	if envelope.Schema != "" {
-		return envelope.Schema, nil
+		return content, envelope.Schema, nil
 	}
-	return envelope.SchemaVersion, nil
+	return content, envelope.SchemaVersion, nil
 }
 
 // validateBaselineReport rejects a syntactically valid full report that has

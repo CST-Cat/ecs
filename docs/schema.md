@@ -434,14 +434,13 @@ NAT 的候选 STUN 池不是字段里的本地化拼接字符串。配置中存�
 
 `ecs plan` 输出固定的 `ecs.plan/v1` 机器计划，唯一输出格式为 JSON。顶层 `executionPlan` 的字段为
 `schema_version`、`tool`、`profile`、`exposure`、`reveal`、`ip_version`、`modules`、
-`required_tools`、`needs_egress_ip`、`staging`（必需）以及可省略的 `external_services`。其中：
+`required_tools`、`needs_egress_ip` 以及可省略的 `external_services`。其中：
 
 - `exposure` 必须是 `local`、`public`、`thirdparty` 或 `any`；
 - `reveal` 是必需 JSON boolean，不是字符串，也不由本地化文案表达；
 - `modules[]` 只保存稳定的 `id`。模块标题、描述、exposure、调度策略、重试策略、估算和隐私提示
   都是实现或展示层 metadata，不属于机器计划输出；顶层 `required_tools` 是 wrapper 唯一读取的工具集合；
-- `staging` 必须存在，保存工具归档、NextTrace、Ookla 和 zstd corpus 的准备事实；只有
-  `external_services` 可以省略。
+- `external_services` 保存由所需工具和模块元数据推导出的外部服务名称；它可以省略。
 
 `run.sh` 调用 `ecs plan`，读取 `schema_version`、`profile`、顶层 `exposure/reveal`、`modules[].id`
 和顶层 `required_tools`，并将计划的 exposure/reveal 严格解析后追加到每个普通 run 的最终 CLI 参数之后，

@@ -212,14 +212,7 @@ ${plan_extra_reveal_line}
     $plan_tools_json
   ],
   "needs_egress_ip": false,
-  "external_services": [],
-  "staging": {
-    "mode": "temporary-prefix",
-    "tool_archive_required": false,
-    "nexttrace_tiny_required": false,
-    "ookla_package_required": false,
-    "zstd_corpus_required": false
-  }
+  "external_services": []
 }
 JSON
   exit 0

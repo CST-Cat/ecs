@@ -381,7 +381,7 @@ func TestRunDefinitionAppendsOneBenchmarkWindowWithoutChangingResult(t *testing.
 				if !reflect.DeepEqual(gotBefore, before) || !reflect.DeepEqual(gotAfter, after) {
 					t.Fatalf("window assembly snapshots = before %+v/after %+v, want injected before %+v/after %+v", gotBefore, gotAfter, before, after)
 				}
-				return benchmarkWindowMeasurements(gotBefore, gotAfter)
+				return probe.BuildPressureMeasurements(gotBefore, gotAfter)
 			}
 
 			wantSummary := []model.Message{model.NewMessage("fixture.benchmark.summary")}
@@ -431,7 +431,7 @@ func TestBenchmarkWindowMeasurementsPreserveRawPretestLoad(t *testing.T) {
 		LoadKnown:  true,
 	}
 	after := probe.EnvironmentSnapshot{CapturedAt: time.Unix(101, 0)}
-	got := benchmarkWindowMeasurements(before, after)
+	got := probe.BuildPressureMeasurements(before, after)
 	if len(got) != 1 || got[0].Key != "pretest_load_1m" || got[0].Value != 123 || got[0].Label != "probe.pressure.metric.pretest_load_1m" {
 		t.Fatalf("pretest load measurement = %+v, want one raw measurement", got)
 	}

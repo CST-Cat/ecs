@@ -112,7 +112,7 @@ func leaderboardCommand(app application, args []string, stdout, stderr io.Writer
 	seenSampleIDs := make(map[string]string)
 	var outlierSamples []score.OutlierSample
 	for _, path := range paths {
-		schema, err := readLeaderboardSchema(path)
+		content, schema, err := readLeaderboardArtifact(path)
 		if err != nil {
 			if inputIssue(path, err) {
 				return 1
@@ -122,14 +122,14 @@ func leaderboardCommand(app application, args []string, stdout, stderr io.Writer
 		switch schema {
 		case score.BaselineSchema:
 			// 目录里通常就放着上一次生成的基线，它不是输入。
-			if _, err := score.LoadBaseline(path); err != nil {
+			if _, err := score.ParseBaseline(content); err != nil {
 				if inputIssue(path, fmt.Errorf("baseline validation error: %w", err)) {
 					return 1
 				}
 			}
 			continue
 		case score.SubmissionSchema:
-			submission, err := score.LoadSubmission(path)
+			submission, err := score.ParseSubmission(content)
 			if err != nil {
 				if inputIssue(path, fmt.Errorf("submission validation error: %w", err)) {
 					return 1
@@ -149,7 +149,7 @@ func leaderboardCommand(app application, args []string, stdout, stderr io.Writer
 			reports = append(reports, submission.AsReport())
 			continue
 		case buildinfo.SchemaVersion:
-			data, err := reporter.LoadJSON(path)
+			data, err := reporter.ParseJSON(content)
 			if err != nil {
 				// 一份坏输入默认不该让整批失败，但必须说出来是哪一份、为什么。
 				if inputIssue(path, fmt.Errorf("report validation error: %w", err)) {

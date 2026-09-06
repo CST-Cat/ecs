@@ -58,8 +58,7 @@ var runIDRandomReader io.Reader = rand.Reader
 // These seams keep runner tests independent from the host's live resource
 // counters while preserving the production snapshot and measurement flow.
 var captureEnvironmentSnapshot = probe.CaptureEnvironmentSnapshot
-var benchmarkWindowMeasurements = probe.BuildPressureMeasurements
-var buildBenchmarkWindowMeasurements = benchmarkWindowMeasurements
+var buildBenchmarkWindowMeasurements = probe.BuildPressureMeasurements
 
 func Run(ctx context.Context, definitions []probe.Definition, catalog module.Catalog, cfg config.Runtime, progress ProgressFunc) (model.Report, error) {
 	runID, err := newRunID()

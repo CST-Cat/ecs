@@ -29,7 +29,6 @@ type executionPlan struct {
 	RequiredTools    []string        `json:"required_tools"`
 	NeedsEgressIP    bool            `json:"needs_egress_ip"`
 	ExternalServices []string        `json:"external_services,omitempty"`
-	Staging          planStaging     `json:"staging"`
 }
 
 type planTool struct {
@@ -39,17 +38,6 @@ type planTool struct {
 
 type plannedModule struct {
 	ID string `json:"id"`
-}
-
-type planStaging struct {
-	Mode                  string   `json:"mode"`
-	ToolArchiveRequired   bool     `json:"tool_archive_required"`
-	ToolArchiveTools      []string `json:"tool_archive_tools,omitempty"`
-	NextTraceTinyRequired bool     `json:"nexttrace_tiny_required"`
-	NextTraceSource       string   `json:"nexttrace_source,omitempty"`
-	OoklaPackageRequired  bool     `json:"ookla_package_required"`
-	OoklaPackageSource    string   `json:"ookla_package_source,omitempty"`
-	ZstdCorpusRequired    bool     `json:"zstd_corpus_required"`
 }
 
 func planCommand(app application, ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -107,10 +95,9 @@ func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime conf
 		Reveal:        runtime.Reveal,
 		IPVersion:     runtime.IPVersion,
 		Modules:       make([]plannedModule, 0, len(runtime.Modules)),
-		Staging:       planStaging{Mode: "temporary-prefix"},
 	}
 	needsThirdPartyProvider := false
-	needsOokla := false
+	var toolServices []string
 	for _, id := range runtime.Modules {
 		descriptor, ok := catalog.Lookup(id)
 		if !ok {
@@ -123,17 +110,14 @@ func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime conf
 		if descriptor.Exposure == module.ExposureThirdParty {
 			needsThirdPartyProvider = true
 		}
-		if descriptor.ID == "ookla" {
-			needsOokla = true
-		}
 		for _, toolID := range descriptor.RequiredTools {
 			if containsPlanValue(plan.RequiredTools, toolID) {
 				continue
 			}
 			plan.RequiredTools = append(plan.RequiredTools, toolID)
 			definition, ok := tools.Lookup(toolID)
-			if ok {
-				applyToolStaging(&plan.Staging, definition)
+			if ok && definition.ExternalService != "" && !containsPlanValue(toolServices, definition.ExternalService) {
+				toolServices = append(toolServices, definition.ExternalService)
 			}
 		}
 	}
@@ -143,30 +127,8 @@ func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime conf
 	if needsThirdPartyProvider {
 		plan.ExternalServices = append(plan.ExternalServices, "third-party-provider")
 	}
-	if needsOokla {
-		plan.ExternalServices = append(plan.ExternalServices, "ookla")
-	}
+	plan.ExternalServices = append(plan.ExternalServices, toolServices...)
 	return plan
-}
-
-func applyToolStaging(staging *planStaging, definition tool.Definition) {
-	switch definition.Staging.Category {
-	case tool.StagingArchive:
-		staging.ToolArchiveRequired = true
-		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
-	case tool.StagingZstdCorpus:
-		staging.ZstdCorpusRequired = true
-		staging.ToolArchiveRequired = true
-		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
-	case tool.StagingNextTrace:
-		staging.NextTraceTinyRequired = true
-		staging.NextTraceSource = string(definition.Staging.Source)
-		staging.ToolArchiveRequired = true
-		staging.ToolArchiveTools = append(staging.ToolArchiveTools, definition.ID)
-	case tool.StagingOokla:
-		staging.OoklaPackageRequired = true
-		staging.OoklaPackageSource = string(definition.Staging.Source)
-	}
 }
 
 func containsPlanValue(values []string, wanted string) bool {

@@ -11,6 +11,7 @@ package score
 // 了什么就悄悄多带出去——这个方向的默认值必须是"不带"。
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -346,7 +347,20 @@ func LoadSubmission(path string) (Submission, error) {
 	if info, err := file.Stat(); err == nil && info.Size() > 256*1024 {
 		return submission, fmt.Errorf("submission exceeds the 256 KiB limit")
 	}
-	decoder := json.NewDecoder(file)
+	content, err := io.ReadAll(io.LimitReader(file, 256*1024+1))
+	if err != nil {
+		return submission, err
+	}
+	return ParseSubmission(content)
+}
+
+// ParseSubmission validates one complete submission from cached bytes.
+func ParseSubmission(content []byte) (Submission, error) {
+	if int64(len(content)) > 256*1024 {
+		return Submission{}, fmt.Errorf("submission exceeds the 256 KiB limit")
+	}
+	var submission Submission
+	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&submission); err != nil {
 		return submission, err

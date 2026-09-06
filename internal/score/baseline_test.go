@@ -84,6 +84,10 @@ func TestBuildBaselineAndRoundTrip(t *testing.T) {
 	if err != nil || len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
 		t.Fatalf("baseline encode = %v", err)
 	}
+	parsed, err := ParseBaseline(encoded)
+	if err != nil || parsed.Schema != baseline.Schema || parsed.Metrics["cpu_single"] != baseline.Metrics["cpu_single"] {
+		t.Fatalf("ParseBaseline cached baseline = %+v/%v", parsed, err)
+	}
 	path := filepath.Join(t.TempDir(), "baseline.json")
 	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		t.Fatal(err)
@@ -433,6 +437,13 @@ func TestBaselineLoadFileFailuresAndUnknownFields(t *testing.T) {
 	_ = file.Close()
 	if _, err := LoadBaseline(largePath); err == nil || !strings.Contains(err.Error(), "4 MiB") {
 		t.Fatalf("oversize error = %v", err)
+	}
+	exact := append(append([]byte(nil), valid...), bytes.Repeat([]byte{' '}, 4*1024*1024-len(valid))...)
+	if _, err := ParseBaseline(exact); err != nil {
+		t.Fatalf("ParseBaseline at 4 MiB rejected: %v", err)
+	}
+	if _, err := ParseBaseline(append(exact, ' ')); err == nil || !strings.Contains(err.Error(), "4 MiB") {
+		t.Fatalf("ParseBaseline over 4 MiB error = %v", err)
 	}
 }
 

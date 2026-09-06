@@ -253,6 +253,10 @@ func TestJSONSerializesWindowMeasurementWithoutRemovedStructures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadJSON: %v", err)
 	}
+	parsed, err := ParseJSON(content)
+	if err != nil || parsed.SchemaVersion != loaded.SchemaVersion {
+		t.Fatalf("ParseJSON cached report = %q/%v, want %q", parsed.SchemaVersion, err, loaded.SchemaVersion)
+	}
 	if loaded.SchemaVersion != "ecs.report/v1" {
 		t.Fatalf("loaded schema_version = %q, want ecs.report/v1", loaded.SchemaVersion)
 	}
@@ -447,6 +451,13 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 	}
 	if _, err := LoadJSON(largePath); err == nil || !strings.Contains(err.Error(), "32 MiB") {
 		t.Fatalf("oversize LoadJSON error = %v", err)
+	}
+	exact := append(append([]byte(nil), valid...), bytes.Repeat([]byte{' '}, 32*1024*1024-len(valid))...)
+	if _, err := ParseJSON(exact); err != nil {
+		t.Fatalf("ParseJSON at 32 MiB rejected: %v", err)
+	}
+	if _, err := ParseJSON(append(exact, ' ')); err == nil || !strings.Contains(err.Error(), "32 MiB") {
+		t.Fatalf("ParseJSON over 32 MiB error = %v", err)
 	}
 
 	for _, schema := range []string{buildinfo.SchemaVersion, "ecs.report/v9", "other/v1"} {
