@@ -3,12 +3,13 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# freeze → tools-plan → source-checks/tools×7 → assemble → verify → publish。
+# freeze → tools-plan → source-checks/tools×7/ecs-build×7 → assemble → verify → publish。
 #
 #   freeze     contents: read    冻结 SHA，校验发布说明
 #   source-checks contents: read  跑确定性源码检查
 #   tools-plan contents: read    判断是否可复用上一正式 Release 的工具包
 #   tools × 7  contents: read    七架构构建或复用工具包
+#   ecs-build × 7 contents: read 七架构构建主程序
 #   assemble   contents: read    组装全部发布物，记录实测工具链版本
 #   verify     contents: read    校验解包出来的实际二进制
 #   publish    contents: write   唯一持有写权限的 job
@@ -23,7 +24,7 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 freeze → tools-plan → source-checks/tools×7 → assemble → verify
+  # 手动触发是发布演练：走完 freeze → tools-plan → source-checks/tools×7/ecs-build×7 → assemble → verify
   # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
   # 没有控制开关；tools-plan 根据冻结提交自动选择构建或复用。
   workflow_dispatch:
@@ -33,8 +34,8 @@ permissions:
 
 # 正式发布中需要 Go 的 job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，
 # 不从主模块 go.mod 自动选择工具链。所有会运行 Go 命令的 release job（包括被脚本间接调用的
-# go build/go test/go run）都禁止 go 命令根据 go.mod 自动切换工具链；assemble 记录
-# 实际 go env GOVERSION，并原样交给 verify 校验。
+# go build/go test/go run）都禁止 go 命令根据 go.mod 自动切换工具链；ecs-build 记录
+# 实际 go env GOVERSION，assemble 从 amd64 构建 artifact 读取并原样交给 verify 校验。
 env:
   GOTOOLCHAIN: local
 
@@ -229,13 +230,52 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # 七架构主程序独立构建，完成后由 assemble 统一打包。
+  ecs-build:
+    needs: freeze
+    name: ecs-build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armv7, "386", s390x, riscv64, ppc64le]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.freeze.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+      - name: Build the ECS binary
+        env:
+          ARCH: ${{ matrix.arch }}
+          OUTPUT_DIR: artifact
+          VERSION: ${{ needs.freeze.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          ./scripts/cross.sh --arch "$ARCH"
+          go env GOVERSION >artifact/build-go-version
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-binary-${{ matrix.arch }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 7
+
   # 组装全部发布物，并记录**实测**的工具链版本。
   #
   # Release job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
-  # expected_go=... 这种可能分叉的期望值。这里在 assemble 记录 setup-go 后本次构建
-  # 实际的 go env GOVERSION，并原样通过 --build-go-version 交给 verify 校验二进制里的元数据。
+  # expected_go=... 这种可能分叉的期望值。ecs-build 将实际的 go env GOVERSION 随同
+  # 每个主程序 artifact 交给 assemble；assemble 从 amd64 artifact 取出并通过
+  # --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
-    needs: [freeze, source-checks, tools]
+    needs: [freeze, source-checks, tools, ecs-build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -256,6 +296,11 @@ jobs:
           pattern: ecs-tools-stage-*
           path: tools-artifacts
 
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-binary-*
+          path: artifact/ecs-binaries-artifacts
+
       - name: Normalize the downloaded tools stages
         run: |
           set -euo pipefail
@@ -268,6 +313,19 @@ jobs:
             cp -a "$source_dir/." "tools-stage/linux_${arch}/"
           done
 
+      - name: Normalize the downloaded ECS binaries
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          mkdir -p artifact/ecs-binaries
+          for arch in "${ECS_ARCHES[@]}"; do
+            source_dir="artifact/ecs-binaries-artifacts/ecs-binary-${arch}"
+            test -s "$source_dir/ecs_linux_${arch}"
+            test -s "$source_dir/build-go-version"
+            cp "$source_dir/ecs_linux_${arch}" "artifact/ecs-binaries/ecs_linux_${arch}"
+            chmod +x "artifact/ecs-binaries/ecs_linux_${arch}"
+          done
+
       # 洁净源码检查在 build.sh 里，与本地演练共用同一份实现。
       - name: Assemble release assets
         id: build
@@ -275,8 +333,12 @@ jobs:
           VERSION: ${{ needs.freeze.outputs.version }}
         run: |
           set -euo pipefail
-          echo "build_go_version=$(go env GOVERSION)" >>"$GITHUB_OUTPUT"
-          ./scripts/release/build.sh "$VERSION" --tools-stage tools-stage
+          build_go_version=$(<"artifact/ecs-binaries-artifacts/ecs-binary-amd64/build-go-version")
+          test -n "$build_go_version"
+          echo "build_go_version=$build_go_version" >>"$GITHUB_OUTPUT"
+          ./scripts/release/build.sh "$VERSION" \
+            --binaries-dir artifact/ecs-binaries \
+            --tools-stage tools-stage
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

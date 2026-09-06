@@ -19,8 +19,9 @@ cd "$ECS_REPO_ROOT"
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/release/build.sh VERSION [--tools-stage STAGE_ROOT] [--dry-run]
+usage: scripts/release/build.sh VERSION [--binaries-dir BINARY_DIR] [--tools-stage STAGE_ROOT] [--dry-run]
 
+  --binaries-dir  已构建的七架构主程序目录，省略时由本脚本编译
   --tools-stage  七架构工具 stage 的根目录，省略时只打包主程序
   --dry-run      本地演练：允许脏工作区。发布路径绝不能传——洁净检查正是
                  用来挡住会带上 vcs.modified=true 的构建的。
@@ -40,9 +41,16 @@ version="${1:-}"
 shift
 
 tools_stage=""
+binaries_dir=""
 dry_run=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    --binaries-dir)
+      [[ "$#" -ge 2 && -n "$2" ]] || die "--binaries-dir requires BINARY_DIR"
+      [[ -z "$binaries_dir" ]] || die "--binaries-dir may only be supplied once"
+      binaries_dir=$2
+      shift 2
+      ;;
     --tools-stage)
       [[ "$#" -ge 2 && -n "$2" ]] || die "--tools-stage requires STAGE_ROOT"
       tools_stage=$2
@@ -80,8 +88,9 @@ fi
 # 可复现构建：时间戳取自提交；同一提交、工具链和输入可得到同样的包。
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ECS_REPO_ROOT" show -s --format=%ct HEAD)}"
 
-prebuilt_dir=$(mktemp -d "${TMPDIR:-/tmp}/ecs-release-binaries.XXXXXX")
+prebuilt_dir=""
 cleanup_prebuilt() {
+  [[ -n "$prebuilt_dir" ]] || return 0
   rm -rf -- "$prebuilt_dir"
 }
 trap cleanup_prebuilt EXIT
@@ -107,10 +116,16 @@ if [[ -n "$tools_stage" ]]; then
   done
 fi
 
-echo "release-build: 编译七架构主程序" >&2
-OUTPUT_DIR="$prebuilt_dir" VERSION="$version" scripts/cross.sh
+if [[ -n "$binaries_dir" ]]; then
+  echo "release-build: 使用预构建主程序目录 $binaries_dir" >&2
+else
+  prebuilt_dir=$(mktemp -d "${TMPDIR:-/tmp}/ecs-release-binaries.XXXXXX")
+  echo "release-build: 编译七架构主程序" >&2
+  OUTPUT_DIR="$prebuilt_dir" VERSION="$version" scripts/cross.sh
+  binaries_dir="$prebuilt_dir"
+fi
 
-package_args=(--binaries-dir "$prebuilt_dir")
+package_args=(--binaries-dir "$binaries_dir")
 if [[ -n "$tools_stage" ]]; then
   package_args+=(--tools-stage "$tools_stage")
 else
