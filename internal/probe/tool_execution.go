@@ -42,12 +42,12 @@ func lookupToolInBin(bin, name string) (string, error) {
 func commandVersion(ctx context.Context, path string) string {
 	for _, argument := range []string{"--version", "-V"} {
 		versionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		output, err := exec.CommandContext(versionCtx, path, argument).CombinedOutput()
+		result := newProbeCommand(versionCtx, path, argument).RunCombined(probeCommandCombinedLimit)
 		cancel()
-		if err != nil {
+		if result.Err != nil {
 			continue
 		}
-		for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
+		for _, line := range strings.Split(sanitizeCommandOutput(result.Combined), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				return line
 			}

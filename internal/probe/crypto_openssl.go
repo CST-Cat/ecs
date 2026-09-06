@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -229,13 +228,11 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 func queryOpenSSLVersion(ctx context.Context, path string) (string, string, error) {
 	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(versionCtx, path, "version").CombinedOutput()
-	text := sanitizeCommandOutput(output)
-	if versionCtx.Err() != nil {
-		return text, "", versionCtx.Err()
-	}
-	if err != nil {
-		return text, "", err
+	command := newProbeCommand(versionCtx, path, "version")
+	run := command.RunCombined(probeCommandCombinedLimit)
+	text := sanitizeCommandOutput(run.Combined)
+	if run.Err != nil {
+		return text, "", run.Err
 	}
 	matches := openSSLVersionPattern.FindAllStringSubmatch(text, -1)
 	if len(matches) != 1 || len(matches[0]) != 2 {
@@ -284,16 +281,13 @@ func executeOpenSSLSpeed(ctx context.Context, path string, spec openSSLAlgorithm
 	}
 	runCtx, cancel := context.WithTimeout(ctx, openSSLRunTimeout)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = benchmarkEnvironment(overrides)
 	command.Dir = workDirectory
-	output, err := command.CombinedOutput()
-	sample.Output = normalizeCarriageReturnOutput(output)
-	if runCtx.Err() != nil {
-		return sample, runCtx.Err()
-	}
-	if err != nil {
-		return sample, fmt.Errorf("OpenSSL speed %s 执行失败: %w: %s", spec.Label, err, tailText(sample.Output, 600))
+	run := command.RunCombined(probeCommandCombinedLimit)
+	sample.Output = normalizeCarriageReturnOutput(run.Combined)
+	if run.Err != nil {
+		return sample, fmt.Errorf("OpenSSL speed %s 执行失败: %w: %s", spec.Label, run.Err, tailText(sample.Output, 600))
 	}
 	parsed, err := parseOpenSSLSpeedOutput(sample.Output, spec, workers, seconds, blockBytes)
 	parsed.Args = sample.Args

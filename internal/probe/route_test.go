@@ -70,11 +70,11 @@ func TestNextTraceSeparatesAndBoundsCommandStreams(t *testing.T) {
 	started := time.Now()
 	output, err = runRouteCommandForFamily(overflowContext, engine, "oversized", routeSnapshotHops, config.IPVersionAuto)
 	var overflowExitErr *exec.ExitError
-	if !errors.Is(err, errRouteCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil || time.Since(started) >= overflowTimeout {
+	if !errors.Is(err, errProbeCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil || time.Since(started) >= overflowTimeout {
 		t.Fatalf("oversized stdout = output_nil:%v err:%v elapsed:%s", output == nil, err, time.Since(started))
 	}
 	row = runBacktraceTarget(overflowContext, engine, config.Endpoint{Name: "oversized", Address: "oversized"}, config.IPVersionAuto)
-	if !errors.Is(row.Err, errRouteCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
+	if !errors.Is(row.Err, errProbeCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
 		t.Fatalf("oversized backtrace = raw:%d details:%d hops:%d hits:%d err:%v", len(row.Raw), len(row.Details), len(row.Hops), len(row.Hits), row.Err)
 	}
 	result := (routeProbe{}).Run(overflowContext, routeTestEnvironment([]config.Endpoint{{Name: "Oversized", Address: "oversized"}}, config.IPVersionAuto))
@@ -82,11 +82,11 @@ func TestNextTraceSeparatesAndBoundsCommandStreams(t *testing.T) {
 		t.Fatalf("oversized route result = measurements:%d evidence:%+v failures:%+v", len(result.Measurements), result.Evidence, result.Failures)
 	}
 	output, err = runRouteCommandForFamily(overflowContext, engine, "stderr_oversized", routeSnapshotHops, config.IPVersionAuto)
-	if !errors.Is(err, errRouteCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil {
+	if !errors.Is(err, errProbeCommandOutputLimit) || !errors.As(err, &overflowExitErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || output != nil {
 		t.Fatalf("oversized stderr = output_nil:%v err:%v", output == nil, err)
 	}
 	row = runBacktraceTarget(overflowContext, engine, config.Endpoint{Name: "stderr_oversized", Address: "stderr_oversized"}, config.IPVersionAuto)
-	if !errors.Is(row.Err, errRouteCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
+	if !errors.Is(row.Err, errProbeCommandOutputLimit) || !errors.As(row.Err, &overflowExitErr) || errors.Is(row.Err, context.Canceled) || errors.Is(row.Err, context.DeadlineExceeded) || row.Raw != "" || len(row.Details) != 0 || len(row.Hops) != 0 || len(row.Hits) != 0 {
 		t.Fatalf("oversized stderr backtrace = raw:%d details:%d hops:%d hits:%d err:%v", len(row.Raw), len(row.Details), len(row.Hops), len(row.Hits), row.Err)
 	}
 }

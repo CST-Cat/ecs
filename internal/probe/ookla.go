@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -324,17 +323,14 @@ func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaRes
 	var parsed ooklaResult
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	output, runErr := command.CombinedOutput()
+	run := command.RunCombined(probeCommandOoklaLimit)
 	if cause := contextCauseError(runCtx); cause != nil {
 		return parsed, cause, nil, true
 	}
-	if len(output) > 512*1024 {
-		output = output[:512*1024]
-	}
-	parsed, parseErr := parseOoklaJSON(output)
-	return parsed, runErr, parseErr, runCtx.Err() != nil
+	parsed, parseErr := parseOoklaJSON(run.Combined)
+	return parsed, run.Err, parseErr, contextCauseError(runCtx) != nil
 }
 
 func formatOoklaServer(parsed ooklaResult) string {

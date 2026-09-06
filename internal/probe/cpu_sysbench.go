@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -246,15 +245,12 @@ func executeSysbenchCPU(ctx context.Context, path string, threads, seconds int) 
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds+10)*time.Second)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
-	output, err := command.CombinedOutput()
-	text := sanitizeCommandOutput(output)
-	if runCtx.Err() != nil {
-		return sysbenchCPUResult{Output: text, Args: args}, runCtx.Err()
-	}
-	if err != nil {
-		return sysbenchCPUResult{Output: text, Args: args}, fmt.Errorf("%w: %s", err, tailText(text, 400))
+	run := command.RunCombined(probeCommandCombinedLimit)
+	text := sanitizeCommandOutput(run.Combined)
+	if run.Err != nil {
+		return sysbenchCPUResult{Output: text, Args: args}, fmt.Errorf("%w: %s", run.Err, tailText(text, 400))
 	}
 	rate, ok := parseFirstFloat(sysbenchEventsRatePattern, text)
 	if !ok || rate <= 0 {

@@ -1,14 +1,13 @@
 package probe
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -80,19 +79,14 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds+12)*time.Second)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-
-	result := udpResult{}
-	if runCtx.Err() != nil {
-		result.Err = runCtx.Err().Error()
-		return result
+	run := command.RunSeparate()
+	if cause := contextCauseError(runCtx); cause != nil && !errors.Is(run.Err, errProbeCommandOutputLimit) {
+		return udpResult{Err: cause.Error()}
 	}
-	return parseIPerfUDPJSON(stdout.Bytes(), err, stderr.Bytes())
+
+	return parseIPerfUDPJSON(run.Stdout, run.Err, run.Stderr)
 }
 
 // parseIPerfUDPJSON validates one iperf3 UDP JSON result.  commandErr and
@@ -100,6 +94,10 @@ func runIPerfUDP(ctx context.Context, path, host string, port int, family string
 // diagnostics while remaining deterministic for callers and tests.
 func parseIPerfUDPJSON(raw []byte, commandErr error, stderr []byte) udpResult {
 	result := udpResult{}
+	if errors.Is(commandErr, errProbeCommandOutputLimit) {
+		result.Err = commandErr.Error()
+		return result
+	}
 	if len(raw) > 4*1024*1024 {
 		result.Err = "iperf3 UDP JSON 超过 4 MiB 安全上限"
 		return result
@@ -593,7 +591,7 @@ func runIPerfDirectionWithPreferred(
 
 	var last iperfDirectionResult
 	for _, port := range orderedIPerfPorts(ports, preferredPort) {
-		if err := runCtx.Err(); err != nil {
+		if err := contextCauseError(runCtx); err != nil {
 			// Keep the first configured port in the result when cancellation
 			// happens before any attempt, matching executeIPerf's port record.
 			if last.Port == 0 {
@@ -708,24 +706,17 @@ func executeIPerf(ctx context.Context, path, host string, port int, family strin
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds+12)*time.Second)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
+	run := command.RunSeparate()
 	sample := iperfDirectionResult{Port: port}
-	if runCtx.Err() != nil {
-		sample.Error = runCtx.Err().Error()
+	if run.Err != nil {
+		sample.Error = fmt.Sprintf("%v: %s", run.Err, tailText(sanitizeCommandOutput(run.Stderr), 300))
 		return sample
 	}
-	if err != nil {
-		sample.Error = fmt.Sprintf("%v: %s", err, tailText(sanitizeCommandOutput(stderr.Bytes()), 300))
-		return sample
-	}
-	parsed := parseIPerfTCPJSON(stdout.Bytes(), port, reverse)
-	if parsed.Error != "" && len(stderr.Bytes()) > 0 {
-		parsed.Error += ": " + tailText(sanitizeCommandOutput(stderr.Bytes()), 300)
+	parsed := parseIPerfTCPJSON(run.Stdout, port, reverse)
+	if parsed.Error != "" && len(run.Stderr) > 0 {
+		parsed.Error += ": " + tailText(sanitizeCommandOutput(run.Stderr), 300)
 	}
 	return parsed
 }

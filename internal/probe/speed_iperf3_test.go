@@ -63,6 +63,16 @@ func TestSpeedMissingToolPreservesStagedLookupError(t *testing.T) {
 	}
 }
 
+func TestIPerfUDPPreservesCallerCancellationCause(t *testing.T) {
+	cause := errors.New("fixture UDP cancellation cause")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	result := runIPerfUDP(ctx, "/bin/sh", "unused", 5201, "IPv4", "1M", 1)
+	if !strings.Contains(result.Err, cause.Error()) {
+		t.Fatalf("cancelled UDP result = %q, want caller cause", result.Err)
+	}
+}
+
 func TestIPerfJSONParsersAndDirectionDiagnostics(t *testing.T) {
 	forward := parseIPerfTCPJSON([]byte(`{
 		"start":{"connected":[{"local_host":"local","remote_host":"remote"}],"test_start":{"protocol":"TCP","reverse":0}},
@@ -125,6 +135,9 @@ func TestIPerfJSONParsersAndDirectionDiagnostics(t *testing.T) {
 		if test.name == "malformed stderr" && strings.Contains(got.Err, "\x1b") {
 			t.Errorf("%s leaked terminal escape: %q", test.name, got.Err)
 		}
+	}
+	if got := parseIPerfUDPJSON([]byte(`{"start":{"test_start":{"protocol":"UDP"}}}`), errProbeCommandOutputLimit, nil); !strings.Contains(got.Err, "external command output exceeded") || strings.Contains(got.Err, "解析 UDP JSON") {
+		t.Fatalf("UDP output-limit diagnostic = %q", got.Err)
 	}
 	if got := parseIPerfUDPJSON(bytes.Repeat([]byte("x"), 4<<20+1), nil, nil); !strings.Contains(got.Err, "超过 4 MiB") {
 		t.Fatalf("oversized UDP JSON error = %q", got.Err)

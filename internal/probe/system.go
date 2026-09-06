@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -362,13 +361,13 @@ func parseMemInfo(path string) map[string]uint64 {
 }
 
 func commandOutput(ctx context.Context, name string, args ...string) string {
-	command := exec.CommandContext(ctx, name, args...)
+	command := newProbeCommand(ctx, name, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
-	output, err := command.Output()
-	if err != nil {
+	run := command.RunSeparate()
+	if run.Err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(output))
+	return strings.TrimSpace(string(run.Stdout))
 }
 
 func readTrimmed(path, fallbackValue string) string {

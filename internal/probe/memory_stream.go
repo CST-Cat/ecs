@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -212,15 +211,12 @@ func executeStreamMemory(ctx context.Context, path string, threads int) (streamM
 	}
 	runCtx, cancel := context.WithTimeout(ctx, streamRunTimeout)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path)
+	command := newProbeCommand(runCtx, path)
 	command.Env = streamEnvironment(threads)
-	output, err := command.CombinedOutput()
-	run.Output = sanitizeCommandOutput(output)
-	if runCtx.Err() != nil {
-		return run, runCtx.Err()
-	}
-	if err != nil {
-		return run, fmt.Errorf("STREAM 执行失败: %w: %s", err, tailText(run.Output, 400))
+	runResult := command.RunCombined(probeCommandCombinedLimit)
+	run.Output = sanitizeCommandOutput(runResult.Combined)
+	if runResult.Err != nil {
+		return run, fmt.Errorf("STREAM 执行失败: %w: %s", runResult.Err, tailText(run.Output, 400))
 	}
 	parsed, parseErr := parseStreamOutput(run.Output)
 	if parseErr != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"time"
@@ -75,18 +74,16 @@ func runICMPPingFamily(ctx context.Context, host string, count int, timeout time
 	runCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	command := exec.CommandContext(runCtx, path, pingArgumentsForFamily(host, count, timeout, family)...)
+	command := newProbeCommand(runCtx, path, pingArgumentsForFamily(host, count, timeout, family)...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
-	output, runErr := command.CombinedOutput()
-	text := sanitizeCommandOutput(output)
+	run := command.RunCombined(probeCommandCombinedLimit)
+	text := sanitizeCommandOutput(run.Combined)
 
 	stats = parseICMPOutput(text)
 	// ping 在有丢包时返回非零退出码，但统计行依然有效，所以先解析再判错。
 	if !stats.Available {
-		if runCtx.Err() != nil {
-			stats.Err = runCtx.Err()
-		} else if runErr != nil {
-			stats.Err = runErr
+		if run.Err != nil {
+			stats.Err = run.Err
 		}
 	}
 	return stats

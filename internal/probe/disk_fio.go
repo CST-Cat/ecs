@@ -1,13 +1,11 @@
 package probe
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -122,10 +120,11 @@ func (e fioEngine) EffectiveDepth(requested int) int {
 func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 	helpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(helpCtx, fioPath, "--enghelp")
+	command := newProbeCommand(helpCtx, fioPath, "--enghelp")
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	output, err := command.CombinedOutput()
-	if err != nil && len(output) == 0 {
+	run := command.RunCombined(probeCommandCombinedLimit)
+	output := run.Combined
+	if run.Err != nil && len(output) == 0 {
 		// 探测本身失败时退到最保守、必然存在的同步引擎。
 		return fioEngine{Name: "psync", AsyncQueue: false}
 	}
@@ -189,38 +188,27 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		matrixMode = config.DiskMatrixTime
 	}
 	args := fioArgumentsForMode(tempName, actualBytes, engine, plan, matrixMode)
-	command := exec.CommandContext(ctx, fioPath, args...)
+	command := newProbeCommand(ctx, fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	runErr := command.Run()
-	if runErr != nil {
-		detail := strings.TrimSpace(stderr.String())
+	run := command.RunSeparate()
+	if run.Err != nil {
+		detail := strings.TrimSpace(string(run.Stderr))
 		if detail == "" {
-			detail = strings.TrimSpace(stdout.String())
+			detail = strings.TrimSpace(string(run.Stdout))
 		}
 		if len(detail) > 500 {
 			detail = detail[:500] + "…"
 		}
-		if ctx.Err() != nil {
-			runErr = ctx.Err()
-		}
 		if detail != "" {
-			runErr = fmt.Errorf("%w: %s", runErr, detail)
+			run.Err = fmt.Errorf("%w: %s", run.Err, detail)
 		}
 		result.Status = model.StatusError
-		addFailure(&result, "benchmark_run", "fio", fmt.Errorf("fio 执行失败: %w", runErr))
-		return result
-	}
-	if stdout.Len() > 4*1024*1024 {
-		result.Status = model.StatusError
-		addFailure(&result, "parse", "fio", fmt.Errorf("fio JSON 超过 4 MiB 安全上限"))
+		addFailure(&result, "benchmark_run", "fio", fmt.Errorf("fio 执行失败: %w", run.Err))
 		return result
 	}
 
 	var output fioOutput
-	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+	if err := json.Unmarshal(run.Stdout, &output); err != nil {
 		result.Status = model.StatusError
 		addFailure(&result, "parse", "fio", fmt.Errorf("解析 fio JSON: %w", err))
 		return result

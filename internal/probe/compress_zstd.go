@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -319,15 +318,12 @@ func executeZstdBenchmark(ctx context.Context, path, corpus string, threads int,
 	sample.Args = append([]string(nil), args...)
 	runCtx, cancel := context.WithTimeout(ctx, zstdRunTimeout)
 	defer cancel()
-	command := exec.CommandContext(runCtx, path, args...)
+	command := newProbeCommand(runCtx, path, args...)
 	command.Env = benchmarkEnvironment(nil)
-	output, err := command.CombinedOutput()
-	sample.Output = normalizeCarriageReturnOutput(output)
-	if runCtx.Err() != nil {
-		return sample, runCtx.Err()
-	}
-	if err != nil {
-		return sample, fmt.Errorf("zstd 执行失败: %w: %s", err, tailText(sample.Output, 400))
+	run := command.RunCombined(probeCommandCombinedLimit)
+	sample.Output = normalizeCarriageReturnOutput(run.Combined)
+	if run.Err != nil {
+		return sample, fmt.Errorf("zstd 执行失败: %w: %s", run.Err, tailText(sample.Output, 400))
 	}
 	parsed, err := parseZstdBenchmarkOutput(sample.Output, contract)
 	parsed.Args = sample.Args

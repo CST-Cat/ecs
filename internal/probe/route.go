@@ -2,10 +2,8 @@ package probe
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -219,53 +217,6 @@ func detectRouteEngine(ctx context.Context) routeEngine {
 // routeSnapshotHops 是路径快照的跳数上限。
 const routeSnapshotHops = 12
 
-const (
-	// Frozen NextTrace JSON is hop-sized; 4 MiB leaves room for unusually rich
-	// metadata while keeping stdout bounded. Diagnostics need much less space.
-	routeCommandStdoutLimit = 4 * 1024 * 1024
-	routeCommandStderrLimit = 64 * 1024
-)
-
-var errRouteCommandOutputLimit = errors.New("nexttrace command output exceeded its limit")
-
-type routeCommandWriter struct {
-	data     []byte
-	limit    int
-	cancel   context.CancelFunc
-	overflow bool
-}
-
-func newRouteCommandWriter(limit int, cancel context.CancelFunc) *routeCommandWriter {
-	return &routeCommandWriter{limit: limit, cancel: cancel}
-}
-
-func (writer *routeCommandWriter) Write(data []byte) (int, error) {
-	if writer.overflow {
-		return 0, errRouteCommandOutputLimit
-	}
-	remaining := writer.limit - len(writer.data)
-	if len(data) > remaining {
-		writer.data = append(writer.data, data[:remaining]...)
-		writer.overflow = true
-		writer.cancel()
-		return remaining, errRouteCommandOutputLimit
-	}
-	writer.data = append(writer.data, data...)
-	return len(data), nil
-}
-
-func routeCommandOutputLimitError(stream string, limit int, stderr []byte, runErr error) error {
-	err := fmt.Errorf("nexttrace %s exceeded %d-byte limit: %w", stream, limit, errRouteCommandOutputLimit)
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		err = errors.Join(err, exitErr)
-	}
-	if len(stderr) > 0 {
-		err = fmt.Errorf("%w: nexttrace stderr: %s", err, sanitizeCommandOutput(stderr))
-	}
-	return err
-}
-
 func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
 	if !isNextTraceEngine(engine.Name) || engine.Path == "" {
 		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)
@@ -274,31 +225,10 @@ func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target st
 	if len(args) == 0 {
 		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)
 	}
-	commandCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	command := exec.CommandContext(commandCtx, engine.Path, args...)
+	command := newProbeCommand(ctx, engine.Path, args...)
 	command.Env = append(os.Environ(), "NO_COLOR=1", "LC_ALL=C", "LANG=C")
-	stdoutWriter := newRouteCommandWriter(routeCommandStdoutLimit, cancel)
-	stderrWriter := newRouteCommandWriter(routeCommandStderrLimit, cancel)
-	command.Stdout = stdoutWriter
-	command.Stderr = stderrWriter
-	runErr := command.Run()
-	if cause := contextCauseError(ctx); cause != nil {
-		if stdoutWriter.overflow || stderrWriter.overflow {
-			return nil, cause
-		}
-		return stdoutWriter.data, cause
-	}
-	if stdoutWriter.overflow {
-		return nil, routeCommandOutputLimitError("stdout", routeCommandStdoutLimit, stderrWriter.data, runErr)
-	}
-	if stderrWriter.overflow {
-		return nil, routeCommandOutputLimitError("stderr", routeCommandStderrLimit, stderrWriter.data, runErr)
-	}
-	if runErr != nil && len(stderrWriter.data) > 0 {
-		runErr = fmt.Errorf("%w: nexttrace stderr: %s", runErr, sanitizeCommandOutput(stderrWriter.data))
-	}
-	return stdoutWriter.data, runErr
+	result := command.RunSeparate()
+	return result.Stdout, result.Err
 }
 
 func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, family string) []string {

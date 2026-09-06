@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -281,16 +280,13 @@ func runMultiDiskFIO(ctx context.Context, fioPath, mountPath string, engine fioE
 	args := fioArguments(tempName, sizeBytes, engine, plan)
 	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	command := exec.CommandContext(runCtx, fioPath, args...)
+	command := newProbeCommand(runCtx, fioPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
-	output, runErr := command.Output()
-	if runCtx.Err() != nil {
-		return sample, runCtx.Err()
+	run := command.RunSeparate()
+	if run.Err != nil {
+		return sample, run.Err
 	}
-	if runErr != nil {
-		return sample, runErr
-	}
-	jobs, err := parseFIOJobs(output)
+	jobs, err := parseFIOJobs(run.Stdout)
 	if err != nil {
 		return sample, err
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -217,16 +216,13 @@ func executeNPBBenchmark(ctx context.Context, path string, spec npbBenchmarkSpec
 		return sample, fmt.Errorf("创建 NPB 私有工作目录: %w", err)
 	}
 	defer os.RemoveAll(workDirectory)
-	command := exec.CommandContext(runCtx, path)
+	command := newProbeCommand(runCtx, path)
 	command.Env = benchmarkEnvironment(overrides)
 	command.Dir = workDirectory
-	output, err := command.CombinedOutput()
-	sample.Output = normalizeCarriageReturnOutput(output)
-	if runCtx.Err() != nil {
-		return sample, runCtx.Err()
-	}
-	if err != nil {
-		return sample, fmt.Errorf("NPB %s 执行失败: %w: %s", spec.Name, err, tailText(sample.Output, 600))
+	run := command.RunCombined(probeCommandCombinedLimit)
+	sample.Output = normalizeCarriageReturnOutput(run.Combined)
+	if run.Err != nil {
+		return sample, fmt.Errorf("NPB %s 执行失败: %w: %s", spec.Name, run.Err, tailText(sample.Output, 600))
 	}
 	parsed, err := parseNPBBenchmarkOutput(sample.Output, spec, threads)
 	parsed.Output = sample.Output
