@@ -225,6 +225,14 @@ JSON
   exit 0
 fi
 
+# The zstd case checks only wrapper corpus handoff and final fixture entry;
+# it never runs a compression benchmark or validates measurements.
+if [ "${ECS_TEST_PLAN_TOOLS:-}" = zstd ]; then
+  [ -n "${ECS_ZSTD_CORPUS:-}" ] && [ -f "$ECS_ZSTD_CORPUS" ] || exit 92
+  [ "$(cat "$ECS_ZSTD_CORPUS")" = 'local zstd corpus fixture' ] || exit 93
+  printf '%s\n' "$ECS_ZSTD_CORPUS" >"$ECS_TEST_LOG_ROOT/zstd-corpus-path"
+fi
+
 if [ "${1:-}" = submit ] && [ "${2:-}" = --help ]; then
   exit 0
 fi
@@ -270,6 +278,11 @@ tar -czf "$fixture_release/$fixture_tools_asset" -C "$fixture_release/tools" bin
 fixture_tools_digest=$(sha256sum "$fixture_release/$fixture_tools_asset" | awk '{print $1}')
 printf '%s  %s\n' "$fixture_tools_digest" "$fixture_tools_asset" >>"$fixture_release/checksums.txt"
 export ECS_TEST_TOOLS_ASSET="$fixture_tools_asset"
+fixture_corpus_asset='ecs-corpus_silesia-v1.tar.gz'
+mkdir -p "$fixture_release/corpus"
+printf '%s\n' 'local zstd corpus fixture' >"$fixture_release/corpus/ecs-silesia-v1.corpus"
+tar -czf "$fixture_release/$fixture_corpus_asset" -C "$fixture_release/corpus" ecs-silesia-v1.corpus
+export ECS_TEST_CORPUS_ASSET="$fixture_corpus_asset"
 
 cat >"$fixture_bin/curl" <<'EOF'
 #!/bin/sh
@@ -293,6 +306,7 @@ case "$url" in
   "$ECS_TEST_RELEASE_URL/$ECS_TEST_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_ASSET" ;;
   "$ECS_TEST_RELEASE_URL/checksums.txt") source_path="$ECS_TEST_RELEASE_ROOT/checksums.txt" ;;
   "$ECS_TEST_RELEASE_URL/$ECS_TEST_TOOLS_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_TOOLS_ASSET" ;;
+  "$ECS_TEST_RELEASE_URL/$ECS_TEST_CORPUS_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_CORPUS_ASSET" ;;
   *)
     : >"$ECS_TEST_LOG_ROOT/unexpected-network"
     exit 90
@@ -368,6 +382,28 @@ fi
 [[ "$(wc -l <"$frozen_tool_logs/fetch.log")" -eq 3 ]] || fail "host sysbench suppressed the frozen tool download"
 [[ ! -e "$frozen_tool_logs/host-sysbench-used" ]] || fail "host sysbench was used"
 [[ -f "$frozen_tool_output/fixture.json" ]] || fail "frozen tool staging fixture produced no report"
+
+# A valid local corpus member must be extracted, exported, and handed to the
+# final fixture entrypoint alongside the staged zstd tool.
+zstd_corpus_tmp="$test_root/zstd-corpus-tmp"
+zstd_corpus_logs="$fixture_logs/zstd-corpus"
+zstd_corpus_output="$test_root/zstd-corpus-output"
+mkdir -p "$zstd_corpus_tmp" "$zstd_corpus_logs"
+if ! ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$zstd_corpus_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_PLAN_TOOLS=zstd ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_CORPUS_BASE_URL="$release_url" ECS_TEST_LOG_ROOT="$zstd_corpus_logs" \
+    ECS_TEST_REPORT_DIR="$zstd_corpus_output" \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --profile standard --only noop --output "$zstd_corpus_output" \
+    >"$test_root/zstd-corpus.stdout" 2>"$test_root/zstd-corpus.stderr"; then
+  fail "local zstd corpus success fixture returned a failure: $(<"$test_root/zstd-corpus.stderr")"
+fi
+[[ -f "$zstd_corpus_output/fixture.json" ]] || fail "zstd corpus fixture produced no report"
+[[ -s "$zstd_corpus_logs/zstd-corpus-path" ]] || fail "zstd corpus path did not reach the final fixture entrypoint"
+[[ "$(cat "$zstd_corpus_logs/zstd-corpus-path")" == *"/ecs-silesia-v1.corpus" ]] ||
+  fail "zstd corpus fixture handed off the wrong corpus member"
 
 # Disabling dependency setup must stop a selected-tool run instead of letting
 # the downloaded ecs report a missing tool or use the host executable.

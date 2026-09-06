@@ -295,7 +295,6 @@ TEMP_TOOL_CACHE="$WORK/packages"
 ORIGINAL_PATH=${PATH:-}
 TEMP_TOOL_PATH_READY=0
 ORIGINAL_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
-TEMP_PREPARED_TOOLS=""
 APT_TEMP_LISTS="$WORK/apt/lists"
 APT_TEMP_CACHE="$WORK/apt/cache"
 APT_HOST_LISTS="/var/lib/apt/lists"
@@ -304,7 +303,6 @@ APT_TEMP_SOURCES=""
 MISSING_TOOLS=""
 PACKAGES=""
 OOKLA_MISSING=0
-OOKLA_REPO_READY=0
 OOKLA_KEY_ASC=""
 OOKLA_KEYRING=""
 OOKLA_GNUPGHOME=""
@@ -317,7 +315,6 @@ TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
 TOOLS_EXTRACT_ROOT="$WORK/tools"
 TOOLS_STAGING_BIN="$WORK/tools-staging-bin"
 TOOLS_REQUESTED=""
-TOOLS_READY=0
 TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
 TOOLS_BASE=${TOOLS_BASE%/}
 TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
@@ -362,14 +359,6 @@ select_package_manager() {
   else
     return 1
   fi
-}
-
-package_for_tool() {
-  case "$PACKAGE_MANAGER:$1" in
-    apt:ping)      printf '%s\n' iputils-ping ;;
-    dnf:ping|yum:ping|apk:ping|pacman:ping) printf '%s\n' iputils ;;
-    *)             printf '%s\n' "$1" ;;
-  esac
 }
 
 add_package() {
@@ -451,15 +440,7 @@ prepare_tools_archive() {
     remove_missing_tool "$tools_requested"
   done
   activate_temp_tool_path
-  TOOLS_READY=1
   return 0
-}
-
-list_contains() {
-  case ",$1," in
-    *,"$2",*) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 # Package-manager output is kept in the private work directory.  This helper
@@ -611,10 +592,6 @@ stage_temp_tool() {
   [ -n "$stage_candidate" ] || return 1
   rm -f "$TEMP_TOOL_BIN/$stage_tool"
   ln -s "$stage_candidate" "$TEMP_TOOL_BIN/$stage_tool" || return 1
-  case " $TEMP_PREPARED_TOOLS " in
-    *" $stage_tool "*) ;;
-    *) TEMP_PREPARED_TOOLS="${TEMP_PREPARED_TOOLS:+$TEMP_PREPARED_TOOLS }$stage_tool" ;;
-  esac
   return 0
 }
 
@@ -860,29 +837,11 @@ prepare_ookla_apt() {
   extract_debs || return 1
   stage_temp_tool speedtest || return 1
   activate_temp_tool_path
-  OOKLA_REPO_READY=1
-}
-
-prepare_ookla_rpm() {
-  # RPM metadata can be verified without installation, but extracting an RPM
-  # safely requires rpm2cpio/cpio (and dnf's download plugin).  Do not guess or
-  # install those helpers globally: terminate instead of running without the
-  # selected fixed client.
-  #
-  # 这里刻意不再生成 .repo 文件与导入 GPG key：当前路径没有安全的临时
-  # 解包器，提前建立仓库配置只是在 WORK 里留下用不到的产物。
-  say "当前 RPM 路径没有安全的临时解包器，运行终止" \
-    "the RPM path lacks a safe temporary extractor; the run will stop"
-  return 1
 }
 
 install_ookla() {
   say "通过 Ookla 官方签名包源临时准备 speedtest" "temporarily preparing speedtest from Ookla's signed official package source"
-  case "$PACKAGE_MANAGER" in
-    apt) prepare_ookla_apt ;;
-    dnf|yum) prepare_ookla_rpm ;;
-    *) return 1 ;;
-  esac
+  prepare_ookla_apt
 }
 
 # Module selection and required tools come from the downloaded binary's
@@ -978,28 +937,9 @@ collect_missing_tools() {
   # is the only source of the selected module/tool set.
   for tool in $PLAN_TOOLS; do
     add_missing_tool "$tool"
-    case "$tool" in
-      zstd)
-        # The benchmark contract pins both executable and corpus. An
-        # arbitrary host command named zstd is not interchangeable.
-        add_tools_request zstd
-        ;;
-      npb-ep|npb-ft)
-        # Class, OpenMP implementation and compiler flags are embedded in
-        # the release binaries and verified from every benchmark output.
-        add_tools_request "$tool"
-        ;;
-      openssl)
-        # Crypto results use the pinned LTS build rather than the host TLS
-        # utility, whose version and Configure options are distribution-specific.
-        add_tools_request openssl
-        ;;
-      nexttrace-tiny)
-        add_tools_request nexttrace-tiny
-        ;;
-      speedtest) ;;
-      *) add_tools_request "$tool" ;;
-    esac
+    # All frozen tools use the archive; speedtest is prepared from its signed
+    # package path instead.
+    [ "$tool" = speedtest ] || add_tools_request "$tool"
   done
 }
 
