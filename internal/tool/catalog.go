@@ -24,7 +24,7 @@ func NewCatalog(definitions []Definition) (Catalog, error) {
 			return Catalog{}, err
 		}
 		seenIDs[definition.ID] = struct{}{}
-		copyOfDefinitions[index] = copyDefinition(definition)
+		copyOfDefinitions[index] = definition
 	}
 	return Catalog{definitions: copyOfDefinitions, valid: true}, nil
 }
@@ -37,7 +37,7 @@ func (catalog Catalog) Valid() bool { return catalog.valid }
 func (catalog Catalog) Definitions() []Definition {
 	result := make([]Definition, len(catalog.definitions))
 	for index, definition := range catalog.definitions {
-		result[index] = copyDefinition(definition)
+		result[index] = definition
 	}
 	return result
 }
@@ -47,7 +47,7 @@ func (catalog Catalog) Definitions() []Definition {
 func (catalog Catalog) Lookup(id string) (Definition, bool) {
 	for _, definition := range catalog.definitions {
 		if definition.ID == id {
-			return copyDefinition(definition), true
+			return definition, true
 		}
 	}
 	return Definition{}, false
@@ -115,8 +115,4 @@ func canonicalID(id string) bool {
 		return false
 	}
 	return true
-}
-
-func copyDefinition(definition Definition) Definition {
-	return definition
 }

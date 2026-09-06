@@ -86,20 +86,13 @@ func BuiltinDefinitions() []Definition {
 			[]string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"), Probe: backtraceProbe{}},
 	}
 
-	if _, err := validateDefinitions(definitions); err != nil {
-		panic(fmt.Sprintf("invalid built-in probe definitions: %v", err))
-	}
-	return copyDefinitions(definitions)
+	return definitions
 }
 
 // CatalogFromDefinitions validates a definition set and derives its immutable
 // descriptor catalog. The caller supplies the definitions explicitly so this
 // boundary cannot silently fall back to built-in module state.
 func CatalogFromDefinitions(definitions []Definition) (module.Catalog, error) {
-	return validateDefinitions(definitions)
-}
-
-func validateDefinitions(definitions []Definition) (module.Catalog, error) {
 	descriptors := make([]module.Descriptor, len(definitions))
 	for index, definition := range definitions {
 		descriptors[index] = definition.Descriptor
@@ -126,26 +119,6 @@ func validateDefinitions(definitions []Definition) (module.Catalog, error) {
 		seenProbes[probeID] = struct{}{}
 	}
 	return catalog, nil
-}
-
-func copyDefinitions(definitions []Definition) []Definition {
-	descriptors := make([]module.Descriptor, len(definitions))
-	for index, definition := range definitions {
-		descriptors[index] = definition.Descriptor
-	}
-	catalog, err := module.NewCatalog(descriptors)
-	if err != nil {
-		panic(fmt.Sprintf("invalid built-in module catalog copy: %v", err))
-	}
-	result := make([]Definition, len(definitions))
-	for index, definition := range definitions {
-		descriptor, ok := catalog.Lookup(definition.Descriptor.ID)
-		if !ok {
-			panic(fmt.Sprintf("missing copied built-in descriptor %q", definition.Descriptor.ID))
-		}
-		result[index] = Definition{Descriptor: descriptor, Probe: definition.Probe}
-	}
-	return result
 }
 
 func moduleDescriptor(id string, standard bool, exposure module.Exposure, needsEgress bool, concurrency module.Concurrency, methodology model.Methodology, tools []string, estimate time.Duration, wizard ...string) module.Descriptor {

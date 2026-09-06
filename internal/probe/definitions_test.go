@@ -187,25 +187,11 @@ func TestDefinitionValidationRejectsInvalidPairs(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := validateDefinitions(test.input)
+			_, err := CatalogFromDefinitions(test.input)
 			if err == nil || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("definition validation error = %v, want %q", err, test.marker)
 			}
 		})
-	}
-}
-
-func TestDefinitionCopyDeepCopiesNestedDescriptorMetadata(t *testing.T) {
-	input := testDefinition("fixture")
-	input.Descriptor.RequiredTools = []string{"tool"}
-	input.Descriptor.Methodology.Parameters = map[string]string{"key": "value"}
-	copy := copyDefinitions([]Definition{input})
-	copy[0].Descriptor.RequiredTools[0] = "changed"
-	copy[0].Descriptor.Methodology.Parameters["key"] = "changed"
-	copy[0].Descriptor.RequiredTools = append(copy[0].Descriptor.RequiredTools, "extra")
-
-	if input.Descriptor.RequiredTools[0] != "tool" || input.Descriptor.Methodology.Parameters["key"] != "value" || len(input.Descriptor.RequiredTools) != 1 {
-		t.Fatalf("definition copy shares nested metadata: input=%+v copy=%+v", input, copy[0])
 	}
 }
 
