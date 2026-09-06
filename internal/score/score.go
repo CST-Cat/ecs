@@ -57,10 +57,6 @@ type Metric struct {
 	// bandwidth merely because it has more cells. Empty means the metric is its
 	// own group.
 	Group string
-	// Optional marks a metric that may be absent from a partially populated
-	// current baseline. A missing value is reported explicitly and never treated
-	// as zero; newly aggregated baselines score it normally.
-	Optional bool
 }
 
 // Aggregation 是多值归并方式。
@@ -96,10 +92,10 @@ func Dimensions() []Dimension {
 				// STREAM is the current memory backend. Each kernel is its own
 				// equal-weight subgroup, and the 1T/NT values are explicitly
 				// aggregated by median so neither thread context silently dominates.
-				{Key: "memory_copy", Prefix: "stream_copy_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "copy", Optional: true},
-				{Key: "memory_scale", Prefix: "stream_scale_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "scale", Optional: true},
-				{Key: "memory_add", Prefix: "stream_add_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "add", Optional: true},
-				{Key: "memory_triad", Prefix: "stream_triad_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "triad", Optional: true},
+				{Key: "memory_copy", Prefix: "stream_copy_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "copy"},
+				{Key: "memory_scale", Prefix: "stream_scale_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "scale"},
+				{Key: "memory_add", Prefix: "stream_add_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "add"},
+				{Key: "memory_triad", Prefix: "stream_triad_", Suffix: "_mib_s", Aggregate: AggregateMedian, HigherIsBetter: true, Group: "triad"},
 			},
 		},
 		{
@@ -198,7 +194,7 @@ func crystalScoreMetrics() []Metric {
 				metrics = append(metrics, Metric{
 					Key:            "crystal_" + workload + "_" + direction + "_" + kind,
 					MeasurementKey: "crystal_" + workload + "_" + direction + "_" + kind,
-					HigherIsBetter: true, Group: "crystal", Optional: true,
+					HigherIsBetter: true, Group: "crystal",
 				})
 			}
 		}
@@ -214,7 +210,7 @@ func mixedScoreMetrics() []Metric {
 			metrics = append(metrics, Metric{
 				Key:            "fio_mixed_" + block + "_" + direction + "_mib_s",
 				MeasurementKey: "fio_mixed_" + block + "_" + direction + "_mib_s",
-				HigherIsBetter: true, Group: "mixed", Optional: true,
+				HigherIsBetter: true, Group: "mixed",
 			})
 		}
 	}
@@ -230,7 +226,7 @@ func attoScoreMetrics() []Metric {
 				metrics = append(metrics, Metric{
 					Key:            "atto_" + block + "_" + direction + "_" + kind,
 					MeasurementKey: "atto_" + block + "_" + direction + "_" + kind,
-					HigherIsBetter: true, Group: "atto", Optional: true,
+					HigherIsBetter: true, Group: "atto",
 				})
 			}
 		}
