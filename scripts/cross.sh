@@ -9,6 +9,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
 
+arch=""
+if [[ "$#" -eq 2 && "$1" == "--arch" && -n "$2" ]]; then
+  arch=$2
+elif [[ "$#" -ne 0 ]]; then
+  echo "usage: $0 [--arch ARCH]" >&2
+  exit 2
+fi
+
 go_command="${GO:-go}"
 version="${VERSION:-dev}"
 if [[ ! "$version" =~ ^[0-9A-Za-z._+-]+$ ]]; then
@@ -30,14 +38,24 @@ ldflags+=" -X ecs/internal/buildinfo.Commit=$commit"
 ldflags+=" -X ecs/internal/buildinfo.BuildDate=$build_date"
 
 mkdir -p "$output_dir"
+build_count=0
 for entry in "${ECS_TARGETS[@]}"; do
   read -r goos goarch name <<<"$entry"
+  if [[ -n "$arch" && "$name" != "$arch" ]]; then
+    continue
+  fi
   goarm=""
   [[ "$name" == armv7 ]] && goarm=7
   printf 'cross: %s/%s -> %s\n' "$goos" "$name" "$output_dir/ecs_${goos}_${name}" >&2
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" \
     "$go_command" build -trimpath -ldflags "$ldflags" \
     -o "$output_dir/ecs_${goos}_${name}" "$ECS_REPO_ROOT/cmd/ecs"
+  build_count=$((build_count + 1))
 done
 
-echo "cross: built ${#ECS_TARGETS[@]} architectures into $output_dir" >&2
+if [[ -n "$arch" && "$build_count" -eq 0 ]]; then
+  echo "cross: unknown architecture: $arch" >&2
+  exit 1
+fi
+
+echo "cross: built $build_count architectures into $output_dir" >&2
