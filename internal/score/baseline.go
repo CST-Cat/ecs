@@ -283,16 +283,17 @@ func (b Baseline) RankThreshold() int {
 	return DefaultRankMinSamples
 }
 
-// arithmeticMean returns the sample mean without mutating the input slice.
+// arithmeticMean returns the mean of finite non-negative samples without
+// mutating the input slice. Empty input returns zero.
 func arithmeticMean(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
-	var sum float64
-	for _, value := range values {
-		sum += value
+	mean := values[0]
+	for index := 1; index < len(values); index++ {
+		mean += (values[index] - mean) / float64(index+1)
 	}
-	return sum / float64(len(values))
+	return mean
 }
 
 // hostVCPU 从报告里取逻辑核数，用于归档。

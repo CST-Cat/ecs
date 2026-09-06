@@ -1,6 +1,7 @@
 package score
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -284,6 +285,116 @@ func TestComputeMissingAndInvalidValues(t *testing.T) {
 	if got := Compute(model.Report{Results: []model.Result{{ID: "system", Status: model.StatusOK}}}, baseline); got != nil {
 		t.Fatal("report with no scoreable dimensions should return nil")
 	}
+}
+
+func TestComputeFiniteBoundariesFromJSON(t *testing.T) {
+	roundTrip := func(t *testing.T, input model.Report) model.Report {
+		t.Helper()
+		encoded, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output model.Report
+		if err := json.Unmarshal(encoded, &output); err != nil {
+			t.Fatal(err)
+		}
+		if err := model.ValidateReportIdentity(output); err != nil {
+			t.Fatal(err)
+		}
+		return output
+	}
+	contains := func(values []string, want string) bool {
+		for _, value := range values {
+			if value == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("nonfinite ratio remains a missing metric", func(t *testing.T) {
+		report := scoreReportFixture()
+		setReportMeasurement(&report, "sysbench_cpu_multi_events_s", 1e308)
+		baseline := baselineFixture()
+		baseline.Metrics["cpu_multi"] = 1e-308
+		got := Compute(roundTrip(t, report), baseline)
+		if got == nil {
+			t.Fatal("nonfinite ratio removed the whole partial score")
+		}
+		cpu := dimensionScore(got, "cpu")
+		if cpu.Missing || !contains(cpu.MissingMetrics, "cpu_multi") || len(cpu.Metrics) != 1 || got.Complete {
+			t.Fatalf("nonfinite ratio score = %+v", got)
+		}
+		for _, dimension := range got.Dimensions {
+			if dimension.Key != "cpu" && dimension.Missing {
+				t.Fatalf("unrelated dimension became missing: %+v", dimension)
+			}
+		}
+	})
+
+	t.Run("large finite group and total means", func(t *testing.T) {
+		report := scoreReportFixture()
+		baseline := baselineFixture()
+		for key := range baseline.Metrics {
+			baseline.Metrics[key] = 1
+		}
+		for _, dimension := range Dimensions() {
+			result := findResult(&report, dimension.ModuleID)
+			for index := range result.Measurements {
+				result.Measurements[index].Value = 1e305
+			}
+		}
+		got := Compute(roundTrip(t, report), baseline)
+		if got == nil || !finite(got.Total) || !finite(got.Ratio) || got.Total != 1e308 {
+			t.Fatalf("large total = %+v", got)
+		}
+		for _, dimension := range got.Dimensions {
+			if dimension.Missing || !finite(dimension.Score) || !finite(dimension.Ratio) {
+				t.Fatalf("large dimension = %+v", dimension)
+			}
+			for _, group := range dimension.Groups {
+				if !finite(group.Score) || !finite(group.Ratio) {
+					t.Fatalf("large group = %+v", group)
+				}
+			}
+		}
+		if _, err := json.Marshal(got); err != nil {
+			t.Fatalf("large score JSON = %v", err)
+		}
+	})
+
+	t.Run("scaled score overflow is missing only that metric", func(t *testing.T) {
+		report := scoreReportFixture()
+		setReportMeasurement(&report, "sysbench_cpu_single_events_s", 1e308)
+		baseline := baselineFixture()
+		baseline.Metrics["cpu_single"] = 1
+		got := Compute(roundTrip(t, report), baseline)
+		if got == nil {
+			t.Fatal("scaled overflow removed the whole partial score")
+		}
+		cpu := dimensionScore(got, "cpu")
+		if cpu.Missing || !contains(cpu.MissingMetrics, "cpu_single") || len(cpu.Metrics) != 1 || got.Complete {
+			t.Fatalf("scaled overflow score = %+v", got)
+		}
+	})
+
+	t.Run("large dynamic median stays finite", func(t *testing.T) {
+		report := scoreReportFixture()
+		for index := range findResult(&report, "speed").Measurements {
+			findResult(&report, "speed").Measurements[index].Value = 1e308
+		}
+		baseline := baselineFixture()
+		baseline.Metrics["bandwidth_download"] = 1e305
+		baseline.Metrics["bandwidth_upload"] = 1e305
+		got := Compute(roundTrip(t, report), baseline)
+		if got == nil {
+			t.Fatal("large dynamic median removed the score")
+		}
+		bandwidth := dimensionScore(got, "bandwidth")
+		if bandwidth.Missing || len(bandwidth.Metrics) != 2 || bandwidth.Metrics[0].Value != 1e308 || !finite(bandwidth.Score) {
+			t.Fatalf("large dynamic median = %+v", bandwidth)
+		}
+	})
 }
 
 func TestMeasurementLookupPreservesModuleOwner(t *testing.T) {

@@ -407,12 +407,11 @@ func Compute(data model.Report, baseline Baseline) *Report {
 	if out.Covered == 0 {
 		return nil
 	}
-	var sum float64
-	for _, value := range totals {
-		sum += value
-	}
-	out.Total = sum / float64(len(totals))
+	out.Total = arithmeticMean(totals)
 	out.Ratio = out.Total / FullScale
+	if !finite(out.Total) || !finite(out.Ratio) {
+		return nil
+	}
 	out.Complete = complete && out.Covered == out.Possible
 	populateRank(&out, baseline)
 	return &out
@@ -466,12 +465,12 @@ func scoreDimension(dimension Dimension, values measurementsByModule, baseline B
 	groupScores := make(map[string][]float64)
 	for _, metric := range dimension.Metrics {
 		base, ok := baseline.Metrics[metric.Key]
-		if !ok || base <= 0 {
+		if !ok || !positiveFinite(base) {
 			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
 		value, unit, label, found := resolveMetric(metric, moduleValues)
-		if !found || value <= 0 {
+		if !found || !positiveFinite(value) {
 			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
@@ -480,12 +479,18 @@ func scoreDimension(dimension Dimension, values measurementsByModule, baseline B
 			// 越小越好的指标反过来算：基线除以实测，比基线快一倍就是两倍分。
 			ratio = base / value
 		}
-		if math.IsInf(ratio, 0) || math.IsNaN(ratio) {
+		if !finite(ratio) {
+			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
+			continue
+		}
+		score := ratio * FullScale
+		if !finite(score) {
+			scored.MissingMetrics = append(scored.MissingMetrics, metric.Key)
 			continue
 		}
 		item := MetricScore{
 			Key: metric.Key, Label: label, Group: metric.Group, Value: value, Unit: unit,
-			Baseline: base, Ratio: ratio, Score: ratio * FullScale,
+			Baseline: base, Ratio: ratio, Score: score,
 		}
 		scored.Metrics = append(scored.Metrics, item)
 		group := metric.Group
@@ -505,20 +510,16 @@ func scoreDimension(dimension Dimension, values measurementsByModule, baseline B
 		groupKeys = append(groupKeys, key)
 	}
 	sort.Strings(groupKeys)
-	var sum float64
+	groupMeans := make([]float64, 0, len(groupKeys))
 	for _, key := range groupKeys {
 		values := groupScores[key]
-		var groupSum float64
-		for _, value := range values {
-			groupSum += value
-		}
-		groupScore := groupSum / float64(len(values))
+		groupScore := arithmeticMean(values)
 		scored.Groups = append(scored.Groups, GroupScore{
 			Key: key, Score: groupScore, Ratio: groupScore / FullScale, MetricCount: len(values),
 		})
-		sum += groupScore
+		groupMeans = append(groupMeans, groupScore)
 	}
-	scored.Score = sum / float64(len(groupKeys))
+	scored.Score = arithmeticMean(groupMeans)
 	scored.Ratio = scored.Score / FullScale
 	return scored
 }
@@ -600,7 +601,7 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 		if metric.Suffix != "" && !strings.HasSuffix(key, metric.Suffix) {
 			continue
 		}
-		if item.value <= 0 {
+		if !positiveFinite(item.value) {
 			continue
 		}
 		matchedKeys = append(matchedKeys, key)
@@ -618,6 +619,9 @@ func resolveMetric(metric Metric, values map[string]measured) (float64, string, 
 }
 
 func aggregate(values []float64, mode Aggregation) float64 {
+	if len(values) == 0 {
+		return 0
+	}
 	sort.Float64s(values)
 	switch mode {
 	case AggregateMax:
@@ -627,6 +631,14 @@ func aggregate(values []float64, mode Aggregation) float64 {
 		if len(values)%2 == 1 {
 			return values[middle]
 		}
-		return (values[middle-1] + values[middle]) / 2
+		return values[middle-1] + (values[middle]-values[middle-1])/2
 	}
+}
+
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func positiveFinite(value float64) bool {
+	return value > 0 && finite(value)
 }

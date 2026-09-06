@@ -103,6 +103,40 @@ func TestBuildBaselineAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBaselineMeansRemainFiniteForLargeSamples(t *testing.T) {
+	if got := arithmeticMean([]float64{1e308, 1e308}); got != 1e308 || math.IsInf(got, 0) {
+		t.Fatalf("large arithmetic mean = %v", got)
+	}
+	if got := arithmeticMean([]float64{math.SmallestNonzeroFloat64, math.SmallestNonzeroFloat64}); got <= 0 {
+		t.Fatalf("small arithmetic mean underflowed to %v", got)
+	}
+	reports := []model.Report{scoreReportFixture(), scoreReportFixture()}
+	for index := range reports {
+		if !setReportMeasurement(&reports[index], "sysbench_cpu_single_events_s", 1e308) {
+			t.Fatal("fixture CPU measurement missing")
+		}
+	}
+	baseline, err := BuildBaseline(reports, "large fixture")
+	if err != nil || baseline.Metrics["cpu_single"] != 1e308 || math.IsInf(baseline.Metrics["cpu_single"], 0) {
+		t.Fatalf("large baseline = %v, err=%v", baseline.Metrics["cpu_single"], err)
+	}
+	if len(baseline.Tiers) != 1 || baseline.Tiers[0].Metrics["cpu_single"] != 1e308 {
+		t.Fatalf("large tier baseline = %+v", baseline.Tiers)
+	}
+	encoded, err := baseline.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "large-baseline.json")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadBaseline(path)
+	if err != nil || loaded.Metrics["cpu_single"] != 1e308 {
+		t.Fatalf("loaded large baseline = %v, err=%v", loaded.Metrics["cpu_single"], err)
+	}
+}
+
 func TestBuildBaselineSourceMachineContract(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
