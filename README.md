@@ -139,7 +139,7 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `--input FILE` | 必填 | ecs JSON 报告路径 |
-| `--format json,md,html` | `json,md,html` | 输出格式 |
+| `--format md,html` | `md,html` | 默认输出 Markdown/HTML；显式包含 `json` 可重新导出 JSON，可能覆盖输入文件 |
 | `--output DIR` | 与输入文件同目录 | 输出目录 |
 | `--name PREFIX` | 输入文件名（去扩展名） | 报告文件名前缀 |
 | `--score-baseline FILE` | 内嵌参考 | 评分排行榜参考文件 |
@@ -194,7 +194,7 @@ ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
-JSON 保存采集后的 canonical 字段、表格和原始证据；中文或英文渲染不会改变机器数据。`render` 可用同一个 JSON 再生成另一种语言；`compare` 只接受通过当前 `ecs.report/v1` exact loader 的 JSON，schema 不一致的报告会被拒绝。字段定义见 [docs/schema.md](docs/schema.md)。
+JSON 保存采集后的 canonical 字段、表格和原始证据；中文或英文渲染不会改变机器数据。`render` 默认在输入文件同目录、使用输入文件名输出 Markdown 和 HTML；显式指定 `json` 会重新导出 JSON 到该路径，可能覆盖输入文件。`render` 可用同一个 JSON 再生成另一种语言；`compare` 只接受通过当前 `ecs.report/v1` exact loader 的 JSON，schema 不一致的报告会被拒绝。字段定义见 [docs/schema.md](docs/schema.md)。
 
 ## 配置档与模块
 

@@ -75,6 +75,54 @@ func TestRenderWritesRequestedFormats(t *testing.T) {
 	}
 }
 
+func TestRenderDefaultsPreserveInputAndWriteHumanFormats(t *testing.T) {
+	root := t.TempDir()
+	input := writeAppRenderReport(t, root)
+	original, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Leading/trailing whitespace makes this a deliberately noncanonical input
+	// while remaining valid JSON for the strict report loader.
+	noncanonical := append([]byte("\n  "), original...)
+	noncanonical = append(noncanonical, []byte("  \n")...)
+	if err := os.WriteFile(input, noncanonical, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, stdout, stderr := invokeAppMain("--lang", "en", "render", "--input", input)
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "MD ") || !strings.Contains(stdout, "HTML ") || strings.Contains(stdout, "JSON ") {
+		t.Fatalf("default render status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	after, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, noncanonical) {
+		t.Fatal("default render rewrote the input JSON")
+	}
+	for _, format := range []string{"md", "html"} {
+		if _, err := os.Stat(filepath.Join(root, "sample."+format)); err != nil {
+			t.Fatalf("default render did not write %s: %v", format, err)
+		}
+	}
+
+	status, stdout, stderr = invokeAppMain("--lang", "en", "render", "--input", input, "--format", "json")
+	if status != 0 || stderr != "" || !strings.Contains(stdout, "JSON ") {
+		t.Fatalf("explicit JSON render status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+	reexported, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(reexported, original) {
+		t.Fatal("explicit JSON render did not re-export canonical JSON")
+	}
+	if _, err := reporter.LoadJSON(input); err != nil {
+		t.Fatalf("explicit JSON same-path re-export is invalid: %v", err)
+	}
+}
+
 func TestRenderLoadsScoreBaseline(t *testing.T) {
 	root := t.TempDir()
 	input := writeAppRenderReport(t, root)

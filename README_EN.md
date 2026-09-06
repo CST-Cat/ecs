@@ -139,7 +139,7 @@ Behavior and exit:
 | Option | Default | Description |
 | --- | --- | --- |
 | `--input FILE` | required | Path to an ecs JSON report |
-| `--format json,md,html` | `json,md,html` | Output formats |
+| `--format md,html` | `md,html` | Markdown/HTML by default; explicitly include `json` to re-export JSON, which may overwrite the input |
 | `--output DIR` | same directory as the input | Output directory |
 | `--name PREFIX` | input file name without extension | Report file name prefix |
 | `--score-baseline FILE` | embedded reference | Scoring leaderboard reference file |
@@ -194,7 +194,7 @@ ecs compare yesterday.json today.json --format md,html
 ecs compare a.json b.json c.json --reference 2
 ```
 
-JSON preserves canonical fields, tables and raw evidence. Rendering in Chinese or English does not change machine data, and the same JSON can be rendered again in another language. `compare` accepts only JSON reports that pass the current `ecs.report/v1` exact loader; reports with a different schema version are rejected. See [docs/schema.md](docs/schema.md) for field definitions.
+JSON preserves canonical fields, tables and raw evidence. Rendering in Chinese or English does not change machine data, and the same JSON can be rendered again in another language. `render` defaults to Markdown and HTML in the input directory with the input filename; explicitly requesting `json` re-exports JSON to that path and may overwrite the input file. `compare` accepts only JSON reports that pass the current `ecs.report/v1` exact loader; reports with a different schema version are rejected. See [docs/schema.md](docs/schema.md) for field definitions.
 
 ## Profiles and modules
 

@@ -27,7 +27,7 @@
 `summary` 字段。顶层 `summary` 对象与 Result 的 `summary_messages` 是两个不同层级：两层的人类可读
 摘要都只用结构化 Message 表示；顶层对象另外保留 `status`、`ok`、`warnings`、`skipped`、`errors`。
 
-`ecs render` 从同一份 JSON 可重新导出 `json`、`md`、`html` 三种文件格式；渲染器
+`ecs render` 默认从同一份 JSON 在输入文件同目录、使用输入文件名重新导出 `md`、`html`；显式指定 `json` 时也可重新导出 JSON，可能覆盖输入文件。渲染器
 不重新执行探针，也不把某种文件格式当成唯一输出。
 
 综合评分不写进报告 JSON：它依赖运行时选定的基线，把某一份基线下的分数固化进

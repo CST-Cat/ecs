@@ -19,7 +19,7 @@ func renderCommand(_ application, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("ecs render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	input := flags.String("input", "", i18n.T("flag.renderInput"))
-	formats := flags.String("format", "json,md,html", i18n.T("flag.format"))
+	formats := flags.String("format", "md,html", i18n.T("flag.renderFormat"))
 	output := flags.String("output", "", i18n.T("flag.renderOutput"))
 	name := flags.String("name", "", i18n.T("flag.name"))
 	renderBaseline := flags.String("score-baseline", "", i18n.T("flag.scoreBaseline"))
