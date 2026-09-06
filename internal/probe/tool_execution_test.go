@@ -72,7 +72,7 @@ func TestProbeCommandKillsProcessGroups(t *testing.T) {
 				return
 			}
 			data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 				return
 			}
 			if err == nil {
