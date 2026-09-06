@@ -36,9 +36,7 @@ func (catalog Catalog) Valid() bool { return catalog.valid }
 // Definitions returns all definitions in canonical catalog order.
 func (catalog Catalog) Definitions() []Definition {
 	result := make([]Definition, len(catalog.definitions))
-	for index, definition := range catalog.definitions {
-		result[index] = definition
-	}
+	copy(result, catalog.definitions)
 	return result
 }
 
