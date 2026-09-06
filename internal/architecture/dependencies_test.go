@@ -12,6 +12,18 @@ import (
 	"testing"
 )
 
+const (
+	appImportPath           = "ecs/internal/app"
+	configImportPath        = "ecs/internal/config"
+	moduleImportPath        = "ecs/internal/module"
+	probeImportPath         = "ecs/internal/probe"
+	reportImportPath        = "ecs/internal/report"
+	runnerImportPath        = "ecs/internal/runner"
+	scoreImportPath         = "ecs/internal/score"
+	toolImportPath          = "ecs/internal/tool"
+	toolsmanifestImportPath = "ecs/internal/toolsmanifest"
+)
+
 // TestLayerDependenciesKeepsLowLevelContractsAcyclic parses the package
 // imports directly so this guard remains independent of the shell's current
 // working directory and cannot be bypassed by formatting or import aliases.
@@ -69,6 +81,15 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+}
+
+func excludedProductionDirectory(name string) bool {
+	switch name {
+	case ".git", ".cache", "cache", "generated", "gen", "testdata", "vendor":
+		return true
+	default:
+		return false
+	}
 }
 
 func packageImports(directory string) ([]string, error) {
