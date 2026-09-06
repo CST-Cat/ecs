@@ -3,11 +3,12 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# freeze → source-checks/tools×7 → assemble → verify → publish。
+# freeze → tools-plan → source-checks/tools×7 → assemble → verify → publish。
 #
 #   freeze     contents: read    冻结 SHA，校验发布说明
 #   source-checks contents: read  跑确定性源码检查
-#   tools × 7  contents: read    七架构完整构建工具包
+#   tools-plan contents: read    判断是否可复用上一正式 Release 的工具包
+#   tools × 7  contents: read    七架构构建或复用工具包
 #   assemble   contents: read    组装全部发布物，记录实测工具链版本
 #   verify     contents: read    校验解包出来的实际二进制
 #   publish    contents: write   唯一持有写权限的 job
@@ -22,9 +23,9 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 freeze → source-checks/tools×7 → assemble → verify
+  # 手动触发是发布演练：走完 freeze → tools-plan → source-checks/tools×7 → assemble → verify
   # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
-  # 没有 rebuild_tools 之类的开关——每次都完整构建七架构，没有可跳过的选项。
+  # 没有控制开关；tools-plan 根据冻结提交自动选择构建或复用。
   workflow_dispatch:
 
 permissions:
@@ -99,17 +100,53 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
+  # 只根据工具源代码和构建入口的三条路径决定能否复用上一正式 Release。
+  tools-plan:
+    needs: freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
+      prev_tag: ${{ steps.plan.outputs.prev_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.freeze.outputs.sha }}
+          fetch-depth: 0
+      - name: Plan the tools stage
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts \
+            --exclude-pre-releases \
+            --limit 1 \
+            --json tagName \
+            --jq '.[0].tagName')
+          test -n "$PREV_TAG"
+          echo "prev_tag=$PREV_TAG" >>"$GITHUB_OUTPUT"
+          if git diff --quiet "$PREV_TAG"...HEAD -- \
+            tools/ \
+            scripts/build_tools.sh \
+            scripts/build_tools_container.sh
+          then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+          fi
+
   # amd64/arm64 用对应的原生硬件，386 用 x86-64 的原生 32 位兼容执行，
   # 其余四个架构由宿主原生跑交叉编译器，只让短 smoke 显式走 QEMU。
   #
   # matrix 只描述 where——挑哪台机器。镜像、apt 包、交叉三元组、QEMU 运行器
   # 全部由 scripts/build_tools_container.sh 的架构表决定。
   #
-  # 每次发布都完整构建七架构。不复用上一个 Release 的工具包：那需要靠"哪些
-  # 路径变了"去推断产物是否仍然等价，而这种推断错一次就是发出一个没人验证过
-  # 的二进制。
+  # tools-plan 只允许在上述三条工具输入未变化时复用上一正式 Release；否则完整构建。
   tools:
-    needs: [freeze]
+    needs: [freeze, tools-plan]
     name: tools (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -129,6 +166,7 @@ jobs:
         with:
           ref: ${{ needs.freeze.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.tools-plan.outputs.changed == 'true'
         with:
           go-version: 'stable'
           check-latest: true
@@ -136,6 +174,7 @@ jobs:
 
       # 交叉构建把宿主当成构建机，跑错架构的宿主会得到错误的产物。
       - name: Verify runner architecture
+        if: needs.tools-plan.outputs.changed == 'true'
         env:
           EXPECTED: ${{ matrix.runner_arch }}
         run: |
@@ -150,6 +189,7 @@ jobs:
           esac
 
       - name: Build tools in the target container
+        if: needs.tools-plan.outputs.changed == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/build_tools_container.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
@@ -157,7 +197,23 @@ jobs:
       # manifest 要能被 ecs 自己的解析器读下来，构建口径要与构建脚本声明的一致。
       # 语料在这里摘出去：它是独立发布物，七份副本没有必要。
       - name: Verify the staged tools
+        if: needs.tools-plan.outputs.changed == 'true'
         run: ./scripts/verify_tools_stage.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
+
+      - name: Reuse tools from the previous release
+        if: needs.tools-plan.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV_TAG: ${{ needs.tools-plan.outputs.prev_tag }}
+        run: |
+          set -euo pipefail
+          archive="ecs-tools_linux_${{ matrix.arch }}.tar.gz"
+          mkdir -p ".ci-tools-stage/linux_${{ matrix.arch }}"
+          gh release download "$PREV_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" \
+            --dir .
+          tar -xzf "$archive" -C ".ci-tools-stage/linux_${{ matrix.arch }}"
 
       - name: Collect the architecture stage
         run: |
