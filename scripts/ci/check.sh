@@ -33,7 +33,7 @@ for_each_build_tag() {
 }
 
 ecs_step "gofmt"
-unformatted=$(gofmt -l ./cmd ./internal)
+unformatted=$(./scripts/gofmt.sh -l ./cmd ./internal)
 if [[ -n "$unformatted" ]]; then
   echo "以下文件未通过 gofmt：" >&2
   echo "$unformatted" >&2

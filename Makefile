@@ -29,7 +29,7 @@ release-dry-run:
 	./scripts/release/verify.sh --dist dist --dry-run
 
 fmt:
-	$(GO) fmt ./...
+	./scripts/gofmt.sh -w $$(git ls-files '*.go')
 
 clean:
 	rm -rf bin dist .devtools-bin

@@ -20,11 +20,12 @@
 
 本地检查：
 
-Go 版本按三层职责管理：
+Go 版本与源码格式化工具按四层职责管理：
 
 1. 根 `go.mod` 的 `go 1.22` 是源码最低兼容版本，不代表当前开发工具链版本。
 2. `.github/workflows/ci.yml` 的 `compat` job 显式使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`；它是唯一的最低版本验证入口。
 3. 普通 CI、leaderboard、security 和正式 Release workflow 通过固定完整 SHA 的 `actions/setup-go` v7 请求 `stable` 并启用 `check-latest`；Action 引用已固定，但编译器仍跟随当前官方稳定版本。Release 的 assemble 会记录实际 `GOVERSION`，再由 verify 校验。
+4. `scripts/gofmt.sh` 是固定版本的源码 canonical formatter，具体版本以该脚本为唯一事实源。
 
 `devtools/go.mod` 是工具 module 的最低 Go 版本要求与工具依赖清单（用于构建 `staticcheck`/`govulncheck`），不是 compiler selector。
 主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release binary 不需要 Go。
@@ -33,7 +34,7 @@ GitHub Actions、`staticcheck` 及其他工具的升级均由维护者手工审�
 setup-go `stable` 跟随当前官方稳定版本，仓库不会为版本升级生成拉取请求。
 
 ```bash
-gofmt -w $(git ls-files '*.go')
+make fmt
 make test            # go test ./...，不需要任何外部工具
 make check           # 普通 quality 门禁；具体范围见下文
 make integration     # 需要真实 fio / sysbench / iperf3 / ping / STREAM
