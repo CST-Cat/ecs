@@ -45,6 +45,8 @@ ECS Release 发布入口确认候选提交等于当时远端 `main`，随后该�
 
 已发布的 Release 使用 GitHub Immutable Releases。发布流程先创建 draft、上传资产再 publish；发布后 Release 的不可变性由 GitHub 平台保证：资产不可替换或删除、对应 Git tag 不可移动。CI 不在内部重复执行 attestation verification。
 
+Release immutability 是 repository-level administrative prerequisite：管理员必须在首次正式发布前启用它。Release workflows 不持有 repository Administration 权限，也不在每次发布中重复查询这一 repository-level invariant；该策略由仓库管理员维护。
+
 普通 CI、排行榜重建、security 与 Release workflow 直接通过 `actions/setup-go@v7` 的 `stable` 和 `check-latest` 选择当前官方稳定 Go；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本，`ci.yml` 的 `compat` job 仍固定使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`。`devtools/go.mod` 只记录工具 module 的最低 Go 版本要求与工具依赖清单，不是 compiler selector。项目不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
 
 `actions/setup-go@v7` 是本任务为跟随官方稳定版本明确允许的浮动引用例外；除此之外，所有 GitHub Actions `uses` 引用仍固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。客户端下载边界是各自 Release 的 `checksums.txt` 与 SHA-256：`install.sh` 和 `compare.sh` 只校验 ECS Release，`run.sh` 先校验 ECS Release，再校验 Bundle Release 的工具和 corpus；CI 不替代下载方校验，也不在 CI 内重复执行 attestation verification。

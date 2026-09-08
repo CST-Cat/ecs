@@ -89,13 +89,21 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 notes_file=$(mktemp)
 trap 'rm -f -- "$notes_file"' EXIT
 
+if [[ "$kind" == "ecs" ]]; then
+  bundle_tag=$(<tools/BUNDLE)
+  printf 'Benchmark Bundle:\n[%s](https://github.com/%s/releases/tag/%s)\n\n' \
+    "$bundle_tag" "${GITHUB_REPOSITORY:-CST-Cat/ecs}" "$bundle_tag" >"$notes_file"
+else
+  : >"$notes_file"
+fi
+
 awk -v version="$version" '
   BEGIN { heading = "## " version; found = 0 }
   $0 == heading || index($0, heading " ") == 1 { found = 1; print; next }
   found && /^## / { exit }
   found { print }
   END { if (!found) exit 1 }
-' CHANGELOG.md >"$notes_file" || die "CHANGELOG.md 里没有 $version 这一节"
+' CHANGELOG.md >>"$notes_file" || die "CHANGELOG.md 里没有 $version 这一节"
 [[ -s "$notes_file" ]] || die "CHANGELOG.md 的 $version 一节是空的"
 
 printf '\n\n---\n完整版本历史：[CHANGELOG.md](%s)\n' \
@@ -130,13 +138,19 @@ if gh release view "$tag" >/dev/null 2>&1; then
   [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" == "true" ]] ||
     die "$tag 已经是正式 Release，拒绝改动已发布的东西"
   echo "release-publish: 复用已有草稿 $tag" >&2
-  gh release edit "$tag" --notes-file "$notes_file" >&2
+  if [[ "$kind" == "bundle" ]]; then
+    gh release edit "$tag" --title "Benchmark Runtime Bundle · $tag" \
+      --notes-file "$notes_file" >&2
+  else
+    gh release edit "$tag" --notes-file "$notes_file" >&2
+  fi
 else
   create_args=("$tag" --draft --notes-file "$notes_file")
   if [[ "$kind" == "ecs" ]]; then
     create_args+=(--verify-tag)
   else
-    create_args+=(--target "$revision" --latest=false)
+    create_args+=(--target "$revision" --latest=false \
+      --title "Benchmark Runtime Bundle · $tag")
   fi
   gh release create "${create_args[@]}" >&2
 fi

@@ -9,7 +9,8 @@
 
 ## Unreleased
 
-后续版本的变更记录写在这里。
+- ECS Release notes 现在直接链接固定的 Benchmark Bundle；Bundle Release 使用明确的 Benchmark Runtime 标题。
+- 完成 GitHub Immutable Releases 的实际 rollout。
 
 ## 0.7.31 — 2026-09-07
 
