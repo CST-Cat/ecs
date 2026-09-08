@@ -1,22 +1,45 @@
-# Changelog
+# 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
 `v0.1.0` 到当前版本 `v0.7.31` 及后续 `Unreleased` 的主要变化。
 
+This file follows the actual Git tag and commit history from `v0.1.0` through
+the current `v0.7.31` release and subsequent `Unreleased` changes.
+
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
-- `Unreleased` 用于后续维护；发布新版本时，应先补充该节，再移动为带日期的版本节。
+- `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
+- `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
 ## Unreleased
 
+### 中文
+
 - ECS Release notes 现在直接链接固定的 Benchmark Bundle；Bundle Release 使用明确的 Benchmark Runtime 标题。
 - 完成 GitHub Immutable Releases 的实际 rollout。
+- ECS Release notes 使用中文“基准工具包”入口和分割线，分割线下只展示 English 变更记录。
+- `CHANGELOG.md` 的当前及后续版本章节同步维护中文与 English 内容。
+
+### English
+
+- ECS release notes now link directly to their fixed Benchmark Bundle, and Bundle releases use an explicit Benchmark Runtime title.
+- Completed the rollout of GitHub Immutable Releases.
+- ECS release notes now use a Chinese Benchmark Bundle heading and a divider, followed by an English-only changelog.
+- Current and future version sections in `CHANGELOG.md` are maintained in both Chinese and English.
 
 ## 0.7.31 — 2026-09-07
+
+### 中文
 
 - 拆分项目本体与 benchmark Bundle 的发布边界：ECS Release 仅发布七架构主程序归档和 `checksums.txt`，Bundle 通过独立流程发布工具与 corpus。
 - 新增 `ecs version --bundle` 与 `tools/BUNDLE` 的 `bundle-v1` 身份，并让运行脚本按 Bundle 版本校验和获取对应工具制品。
 - 收紧跨架构构建、打包、校验和发布流程，所有发布阶段围绕冻结提交串行交接。
+
+### English
+
+- Separated the application and benchmark Bundle release boundaries: ECS releases contain only the seven architecture-specific application archives and `checksums.txt`, while a separate Bundle workflow publishes tools and the corpus.
+- Added `ecs version --bundle` and the `bundle-v1` identity in `tools/BUNDLE`, and made the runner verify and fetch tool artifacts by Bundle version.
+- Tightened cross-architecture build, packaging, verification, and publishing so every release stage is handed off serially around the frozen commit.
 
 ## 0.7.30 — 2026-09-06
 

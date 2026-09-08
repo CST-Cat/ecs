@@ -84,32 +84,53 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 
 # ---- 发布说明 ----
 #
-# 取自 CHANGELOG.md 里对应版本那一节。取不到就失败：一个没有说明的 Release
-# 对用户没有意义，而"忘了写 CHANGELOG"正是应该在这里被拦住的疏漏。
+# 取自 CHANGELOG.md 对应版本的 English 小节。取不到就失败：一个没有说明的
+# Release 对用户没有意义，而"忘了维护双语 CHANGELOG"正是应该被拦住的疏漏。
 notes_file=$(mktemp)
 trap 'rm -f -- "$notes_file"' EXIT
 
 if [[ "$kind" == "ecs" ]]; then
   bundle_tag=$(<tools/BUNDLE)
-  printf 'Benchmark Bundle:\n[%s](https://github.com/%s/releases/tag/%s)\n\n' \
+  printf '基准工具包：\n[%s](https://github.com/%s/releases/tag/%s)\n\n---\n\n' \
     "$bundle_tag" "${GITHUB_REPOSITORY:-CST-Cat/ecs}" "$bundle_tag" >"$notes_file"
 else
   : >"$notes_file"
 fi
 
 awk -v version="$version" '
-  BEGIN { heading = "## " version; found = 0 }
-  $0 == heading || index($0, heading " ") == 1 { found = 1; print; next }
+  BEGIN {
+    heading = "## " version
+    found = 0
+    english = 0
+    has_english = 0
+    version_heading = ""
+  }
+  $0 == heading || index($0, heading " ") == 1 {
+    found = 1
+    version_heading = $0
+    next
+  }
   found && /^## / { exit }
-  found { print }
-  END { if (!found) exit 1 }
-' CHANGELOG.md >>"$notes_file" || die "CHANGELOG.md 里没有 $version 这一节"
-[[ -s "$notes_file" ]] || die "CHANGELOG.md 的 $version 一节是空的"
+  found && $0 == "### English" {
+    english = 1
+    print version_heading
+    next
+  }
+  english && /^### / { exit }
+  english {
+    print
+    if ($0 !~ /^[[:space:]]*$/) has_english = 1
+  }
+  END {
+    if (!found || !english || !has_english) exit 1
+  }
+' CHANGELOG.md >>"$notes_file" ||
+  die "CHANGELOG.md 的 $version 章节缺少非空 English 小节"
 
-printf '\n\n---\n完整版本历史：[CHANGELOG.md](%s)\n' \
+printf '\n\n---\nFull version history: [CHANGELOG.md](%s)\n' \
   "https://github.com/${GITHUB_REPOSITORY:-CST-Cat/ecs}/blob/${revision}/CHANGELOG.md" \
   >>"$notes_file"
-echo "release-publish: 已从 CHANGELOG.md 取出 $version 的发布说明" >&2
+echo "release-publish: 已从 CHANGELOG.md 取出 $version 的 English 发布说明" >&2
 
 # ---- 资产清单 ----
 assets=(checksums.txt)
