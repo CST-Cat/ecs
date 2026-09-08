@@ -2,7 +2,7 @@
 
 `ecs` 只面向 Linux，Go 依赖仍只有标准库。IP 质量模块采用 [xykt/IPQuality](https://github.com/xykt/IPQuality) 的多源覆盖、字段映射与风险分段思路，项目因此整体按 AGPL-3.0-only 发布；归属和差异见 [NOTICE](NOTICE)。
 
-版本、tag 和随包许可证文件以 CI 生成的 `manifest.json`、`checksums.txt`
+版本、tag 和随包许可证文件以 CI 生成的 `manifest.json`、Bundle Release 的 `checksums.txt`
 和 `LICENSES/` 为准。源码中的示例 manifest 允许 `unknown`/`unavailable`，这里不填写尚未由
 CI 产出的工具版本、发布资产或许可证正文。
 
@@ -10,7 +10,7 @@ CI 产出的工具版本、发布资产或许可证正文。
 
 ## 固定工具
 
-标准 `run.sh` 不复用用户本机的同名程序；每次按选中模块从当前 Linux 架构匹配的 `ecs-tools` `tar.gz` 包临时提供固定二进制。zstd、NPB 与 OpenSSL 只接受下表的固定版本/参数；任意系统版本不会生成可比较成绩。选中 zstd 时，固定 corpus 由独立 Release 资产临时提供。`ecs` 仅以独立进程调用。
+标准 `run.sh` 不复用用户本机的同名程序；每次按选中模块从当前 Linux 架构匹配的 `ecs-tools` `tar.gz` 包临时提供固定二进制。zstd、NPB 与 OpenSSL 只接受下表的固定版本/参数；任意系统版本不会生成可比较成绩。选中 zstd 时，固定 corpus 由 Bundle Release 资产临时提供。`ecs` 仅以独立进程调用。
 `ecs-tools` 的工具包边界由每个架构的 `manifest.json` 和 `LICENSES/` 决定，不把下表之外
 的版本或资产默认为已发布：
 
@@ -38,12 +38,12 @@ Ookla 官方 `speedtest` 客户端是闭源、适用其自身条款和隐私政�
 `nat` 模块不调用任何外部程序：STUN（RFC 5389/5780）由 `ecs` 用标准库自行实现，
 只发送 Binding 请求，不含 TURN、ICE、认证或消息完整性。
 
-`run.sh` 总是选择当前 Linux 架构匹配的 `ecs-tools` `tar.gz`，先核对 Release `checksums.txt`，再只解包本次实际请求且确实存在、为普通可执行文件的成员到本次运行的 `$WORK`；Go 入口负责 manifest 的结构与字段；发布归档的完整性由 Release `checksums.txt` 在下载时校验。选中 zstd 时，从独立 Release 资产精确解包 corpus；实际 zstd probe 在使用前校验其固定长度和 SHA-256，不在 wrapper 中重复读取 200 MiB 文件。
+`run.sh` 总是选择当前 Linux 架构匹配的 `ecs-tools` `tar.gz`，先核对 Bundle Release 的 `checksums.txt`，再只解包本次实际请求且确实存在、为普通可执行文件的成员到本次运行的 `$WORK`；Go 入口负责 manifest 的结构与字段；发布归档的完整性由 Bundle Release 的 `checksums.txt` 在下载时校验。选中 zstd 时，从 Bundle Release 资产精确解包并按该 Release 的 `checksums.txt` 校验 corpus 归档；实际 zstd probe 在使用前校验其固定长度和 SHA-256，不在 wrapper 中重复读取 200 MiB 文件。
 通用固定工具不使用 APT/Packagecloud。Ookla 被 profile 选中或被 `--only` 显式选中时，才走独立的官方 Packagecloud 源、固定指纹的 GPG
 公钥、索引和缓存路径；由 apt 验证签名后仅下载/解包，不执行供应商的 `curl | sh` 安装脚本。
 `full` 选中 `speedtest` 时走该独立官方签名源，`standard` 只有显式 `--only ookla` 时走该路径；Ookla 永不进入
 `ecs-tools`。工具包准备失败或 `ECS_AUTO_DEPS=0` 时，`run.sh` 直接终止，不生成缺失工具的降级报告。
-`install.sh` 只安装 `ecs`；工具由 `ecs-tools` 临时提供，固定 corpus 由独立 Release 资产经 `run.sh`
+`install.sh` 只安装 `ecs`；工具由 `ecs-tools` 临时提供，固定 corpus 由 Bundle Release 资产经 `run.sh`
 临时提供。该路径不替用户接受
 闭源软件许可证。Geekbench 因闭源和免费版结果处理边界不作为依赖；Ookla 只提供可审计的
 本机客户端适配器。

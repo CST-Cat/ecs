@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
 ```
 
+ECS Release 只发布主程序；固定的 benchmark runtime、工具和 corpus 由独立的 Bundle Release 提供。每个 ECS Release 的 `ecs` 主程序携带其依赖的 Bundle 标识，可用 `ecs version --bundle` 查看。上述一键运行方法保持不变：`run.sh` 先校验 ECS Release，再按主程序携带的标识获取对应 Bundle；Bundle 版本不接受用户覆盖，也不从 `main` 读取。
+
 `run.sh` 会校验下载的文件，并把本次所需的固定工具放入临时 PATH；不会写系统目录，运行结束后清理。报告位置可用 `--output PATH` 指定。
 
 已有报告时可以只下载主程序进行本地比较：
@@ -52,7 +54,7 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | `ecs leaderboard REPORT...` | 聚合排行榜参考 |
 | `ecs submit --input FILE` | 从完整报告导出可公开提交的精简 JSON |
 | `ecs plan` | 以 JSON 输出解析后的机器执行计划，不执行探针 |
-| `ecs version` | 显示版本 |
+| `ecs version` | 显示版本；`ecs version --bundle` 显示当前 Bundle |
 | `ecs help` | 显示命令总览 |
 
 非运行命令的界面语言放在全局前缀中，例如 `ecs --lang en compare ...`；`run` 和 `plan` 也在自己的选项中接受 `--lang zh|en`。退出码为 `0`（成功）、`1`（参数或运行错误）、`2`（`--strict` 下有警告或失败）、`130`（中断）。
@@ -175,7 +177,7 @@ ECS_REPOSITORY=owner/ecs ./install.sh
 | `--region NAME` | 空 | 自报地区（如 `jp`、`us-west`），用于排行榜分组 |
 | `--note TEXT` | 空 | 备注，最多 200 字 |
 
-**`ecs list` / `ecs version` / `ecs help`** 不接受参数；**`ecs config`** 只接受子命令 `example`。
+**`ecs list` / `ecs help`** 不接受参数；**`ecs version`** 可接受 `--bundle`；**`ecs config`** 只接受子命令 `example`。
 
 ## 报告、渲染与比较
 

@@ -14,21 +14,19 @@ set -euo pipefail
 #   - vcs.revision 必须等于冻结的发布 SHA；
 #   - vcs.modified 必须为 false，否则构建时工作区是脏的。
 #
-# 此外校验语料归档结构、主程序归档数量、预期发布物是否齐全，以及工具包里
-# 没有混进语料。checksums.txt 由 package.sh 在同一次构建中生成，不在此重算：
-# 它的消费者是下载方（install.sh、compare.sh、run.sh）。
+# checksums.txt 由 package.sh 在同一次构建中生成，不在此重算：它的消费者是
+# 下载方（install.sh、compare.sh、run.sh）。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/release/verify.sh --dist DIR --build-go-version GOVERSION --revision SHA [--no-tools]
+usage: scripts/release/verify.sh --dist DIR --build-go-version GOVERSION --revision SHA
        scripts/release/verify.sh --dist DIR --dry-run
 
   --build-go-version  本次构建实测的工具链，如 go1.x.y（由构建方给出）
   --revision          冻结的发布提交 SHA
-  --no-tools          只校验主程序与语料
-  --dry-run           本地演练：隐含 --no-tools，自行取工具链与 HEAD，并跳过
+  --dry-run           本地演练：自行取工具链与 HEAD，并跳过
                       提交相关断言（本地工作区通常是脏的）。发布路径绝不能用：
                       那两条断言正是用来挡住脏工作区构建的。
 USAGE
@@ -42,7 +40,6 @@ die() {
 dist=""
 build_go_version=""
 revision=""
-with_tools=1
 dry_run=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -61,13 +58,8 @@ while [[ "$#" -gt 0 ]]; do
       revision=$2
       shift 2
       ;;
-    --no-tools)
-      with_tools=0
-      shift
-      ;;
     --dry-run)
       dry_run=1
-      with_tools=0
       shift
       ;;
     -h | --help)
@@ -123,37 +115,14 @@ while IFS=$'\t' read -r name binary; do
   echo "release-verify: $name 元数据一致" >&2
 done <<<"$listing"
 
-# ---- 语料 ----
-corpus_archive="$dist/$ECS_CORPUS_ARCHIVE"
-[[ -s "$corpus_archive" ]] || die "缺少语料发布物"
-corpus_listing=$(tar -tzf "$corpus_archive")
-[[ "$corpus_listing" == "$ECS_CORPUS_NAME" ]] || die "语料归档内容异常：$corpus_listing"
-echo "release-verify: 语料归档结构一致" >&2
-
 # ---- 发布物清单 ----
 assets=()
 for arch in "${ECS_ARCHES[@]}"; do
   assets+=("ecs_linux_${arch}.tar.gz")
 done
-if [[ "$with_tools" -eq 1 ]]; then
-  for arch in "${ECS_ARCHES[@]}"; do
-    assets+=("ecs-tools_linux_${arch}.tar.gz")
-  done
-fi
-assets+=("$ECS_CORPUS_ARCHIVE")
 
 for asset in "${assets[@]}"; do
   [[ -s "$dist/$asset" ]] || die "缺少发布物 $asset"
 done
-
-if [[ "$with_tools" -eq 1 ]]; then
-  for arch in "${ECS_ARCHES[@]}"; do
-    asset="$dist/ecs-tools_linux_$arch.tar.gz"
-    if tar -tzf "$asset" | grep -E '(^|/)(share|ecs-silesia-v1[.]corpus)(/|$)' >/dev/null; then
-      die "$asset 里混进了语料或 share 目录"
-    fi
-  done
-  echo "release-verify: ${#ECS_ARCHES[@]} 个工具包都不含语料" >&2
-fi
 
 echo "release-verify: 全部校验通过"

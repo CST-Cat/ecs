@@ -17,6 +17,12 @@ die() {
 [[ "${#ECS_TARGETS[@]}" -eq 7 ]] || die "expected seven architecture targets"
 [[ "${#ECS_TOOL_NAMES[@]}" -eq 10 ]] || die "expected ten locked tools"
 
+bundle_file="$repo_root/tools/BUNDLE"
+[[ -f "$bundle_file" ]] || die "missing tools/BUNDLE"
+[[ "$(wc -l < "$bundle_file")" -eq 1 ]] || die "tools/BUNDLE must contain exactly one line"
+bundle_name=$(<"$bundle_file")
+[[ "$bundle_name" =~ ^bundle-v[1-9][0-9]*$ ]] || die "invalid tools/BUNDLE"
+
 jq -e '
   (.architectures | length == 7) and
   ([.architectures[].package] | length == 7 and length == (unique | length)) and

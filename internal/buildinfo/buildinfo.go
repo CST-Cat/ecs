@@ -1,9 +1,10 @@
 package buildinfo
 
 var (
-	Version   = "dev"
-	Commit    = "unknown"
-	BuildDate = "unknown"
+	Version     = "dev"
+	Commit      = "unknown"
+	BuildDate   = "unknown"
+	ToolsBundle = "dev"
 )
 
 const (

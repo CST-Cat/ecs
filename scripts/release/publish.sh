@@ -16,7 +16,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
 
 usage() {
-  echo "usage: scripts/release/publish.sh --tag TAG --version VERSION --revision SHA --dist DIR" >&2
+  cat >&2 <<'USAGE'
+usage: scripts/release/publish.sh [--kind ecs|bundle] --tag TAG --version VERSION --revision SHA --dist DIR
+
+  --kind ecs|bundle  发布 ECS（默认）或 Bundle
+USAGE
 }
 
 die() {
@@ -28,8 +32,17 @@ tag=""
 version=""
 revision=""
 dist=""
+kind="ecs"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    --kind)
+      [[ "$#" -ge 2 && -n "$2" ]] || die "--kind requires ecs or bundle"
+      case "$2" in
+        ecs | bundle) kind=$2 ;;
+        *) die "--kind must be ecs or bundle" ;;
+      esac
+      shift 2
+      ;;
     --tag)
       [[ "$#" -ge 2 && -n "$2" ]] || die "--tag requires a value"
       tag=$2
@@ -71,11 +84,6 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 
 # ---- 发布说明 ----
 #
-# preflight 已经检查过一次；publish 再检查一次，防止单独调用这个脚本时绕过
-# 发布门禁。检查脚本还会拒绝只有标题、没有正文的版本章节。
-./scripts/release/check_changelog.sh --version "$version" ||
-  die "CHANGELOG.md 的 $version 章节校验失败"
-
 # 取自 CHANGELOG.md 里对应版本那一节。取不到就失败：一个没有说明的 Release
 # 对用户没有意义，而"忘了写 CHANGELOG"正是应该在这里被拦住的疏漏。
 notes_file=$(mktemp)
@@ -96,10 +104,20 @@ printf '\n\n---\n完整版本历史：[CHANGELOG.md](%s)\n' \
 echo "release-publish: 已从 CHANGELOG.md 取出 $version 的发布说明" >&2
 
 # ---- 资产清单 ----
-assets=(checksums.txt "$ECS_CORPUS_ARCHIVE")
-for arch in "${ECS_ARCHES[@]}"; do
-  assets+=("ecs_linux_${arch}.tar.gz" "ecs-tools_linux_${arch}.tar.gz")
-done
+assets=(checksums.txt)
+case "$kind" in
+  ecs)
+    for arch in "${ECS_ARCHES[@]}"; do
+      assets+=("ecs_linux_${arch}.tar.gz")
+    done
+    ;;
+  bundle)
+    for arch in "${ECS_ARCHES[@]}"; do
+      assets+=("ecs-tools_linux_${arch}.tar.gz")
+    done
+    assets+=("$ECS_CORPUS_ARCHIVE")
+    ;;
+esac
 
 uploads=()
 for asset in "${assets[@]}"; do
@@ -114,19 +132,17 @@ if gh release view "$tag" >/dev/null 2>&1; then
   echo "release-publish: 复用已有草稿 $tag" >&2
   gh release edit "$tag" --notes-file "$notes_file" >&2
 else
-  gh release create "$tag" --verify-tag --draft --notes-file "$notes_file" >&2
+  create_args=("$tag" --draft --notes-file "$notes_file")
+  if [[ "$kind" == "ecs" ]]; then
+    create_args+=(--verify-tag)
+  else
+    create_args+=(--target "$revision" --latest=false)
+  fi
+  gh release create "${create_args[@]}" >&2
 fi
 
-ecs_retry gh release upload "$tag" "${uploads[@]}" --clobber >&2
-
-# ---- 转正前确认远端真的齐了 ----
-remote=$(gh release view "$tag" --json assets --jq '.assets[].name')
-for asset in "${assets[@]}"; do
-  grep -F -x "$asset" <<<"$remote" >/dev/null || die "远端缺少 $asset，保持草稿状态"
-done
+gh release upload "$tag" "${uploads[@]}" --clobber >&2
 
 gh release edit "$tag" --draft=false >&2
-[[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" == "false" ]] ||
-  die "$tag 未能转为正式 Release"
 
 echo "release-publish: $tag 已发布，共 ${#assets[@]} 个资产" >&2

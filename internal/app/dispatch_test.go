@@ -3,12 +3,15 @@ package app
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode"
 
+	"ecs/internal/buildinfo"
 	"ecs/internal/config"
 	"ecs/internal/i18n"
 )
@@ -37,6 +40,24 @@ func TestInformationCommandsSucceed(t *testing.T) {
 				t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestVersionCommandBundleInterfaceAndArgumentValidation(t *testing.T) {
+	status, stdout, stderr := runInformationCommand("version", "--bundle")
+	if status != 0 || stdout != buildinfo.ToolsBundle+"\n" || stderr != "" {
+		t.Fatalf("version --bundle status=%d stdout=%q stderr=%q", status, stdout, stderr)
+	}
+
+	status, stdout, stderr = runInformationCommand("version")
+	wantVersion := fmt.Sprintf("%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
+	if status != 0 || stdout != wantVersion || stderr != "" {
+		t.Fatalf("version status=%d stdout=%q stderr=%q, want stdout=%q", status, stdout, stderr, wantVersion)
+	}
+
+	status, stdout, stderr = runInformationCommand("version", "--bundle", "extra")
+	if status != 1 || stdout != "" || stderr == "" {
+		t.Fatalf("version with extra argument status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
 }
 

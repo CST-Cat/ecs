@@ -271,9 +271,9 @@ case "$(uname -m)" in
 esac
 
 if [ "$VERSION" = "latest" ]; then
-  BASE="https://github.com/${REPO}/releases/latest/download"
+  ECS_BASE="https://github.com/${REPO}/releases/latest/download"
 else
-  BASE="https://github.com/${REPO}/releases/download/${VERSION}"
+  ECS_BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
 ASSET="ecs_linux_${ARCH}.tar.gz"
 
@@ -321,13 +321,11 @@ TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
 TOOLS_EXTRACT_ROOT="$WORK/tools"
 TOOLS_STAGING_BIN="$WORK/tools-staging-bin"
 TOOLS_REQUESTED=""
-TOOLS_BASE="${ECS_TOOLS_BASE_URL:-$BASE}"
-TOOLS_BASE=${TOOLS_BASE%/}
+BUNDLE_VERSION=""
+BUNDLE_BASE=""
 TOOLS_CHECKSUMS_FILE="$WORK/ecs-tools-checksums.txt"
 ZSTD_CORPUS_ASSET='ecs-corpus_silesia-v1.tar.gz'
 ZSTD_CORPUS_NAME='ecs-silesia-v1.corpus'
-ZSTD_CORPUS_BASE="${ECS_CORPUS_BASE_URL:-$BASE}"
-ZSTD_CORPUS_BASE=${ZSTD_CORPUS_BASE%/}
 ZSTD_CORPUS_ARCHIVE="$WORK/$ZSTD_CORPUS_ASSET"
 ZSTD_CORPUS_EXTRACT_ROOT="$WORK/zstd-corpus"
 
@@ -397,25 +395,25 @@ tools_tar_extract_member() {
 }
 
 prepare_zstd_corpus() {
-  fetch "${ZSTD_CORPUS_BASE}/${ZSTD_CORPUS_ASSET}" "$ZSTD_CORPUS_ARCHIVE" 900 || return 1
+  ZSTD_CORPUS_EXPECTED=$(awk -v f="$ZSTD_CORPUS_ASSET" '$2 == f {print $1; exit}' "$TOOLS_CHECKSUMS_FILE" | tr '[:upper:]' '[:lower:]')
+  [ -n "$ZSTD_CORPUS_EXPECTED" ] || return 1
+  fetch "${BUNDLE_BASE}/${ZSTD_CORPUS_ASSET}" "$ZSTD_CORPUS_ARCHIVE" 900 || return 1
+  ZSTD_CORPUS_ACTUAL=$(file_sha256 "$ZSTD_CORPUS_ARCHIVE") || return 1
+  [ "$ZSTD_CORPUS_ACTUAL" = "$ZSTD_CORPUS_EXPECTED" ] || return 1
   mkdir -p "$ZSTD_CORPUS_EXTRACT_ROOT" || return 1
   tar -xzf "$ZSTD_CORPUS_ARCHIVE" -C "$ZSTD_CORPUS_EXTRACT_ROOT" "$ZSTD_CORPUS_NAME" || return 1
   zstd_corpus_path="$ZSTD_CORPUS_EXTRACT_ROOT/$ZSTD_CORPUS_NAME"
   [ -f "$zstd_corpus_path" ] && [ ! -L "$zstd_corpus_path" ] || return 1
-  # The zstd probe owns the fixed corpus size and digest contract immediately
-  # before use; repeating it in this wrapper only reads the 200 MiB file twice.
+  # The archive was verified against the Bundle checksums exactly once before
+  # extraction; the zstd probe owns the fixed corpus content contract at use.
   export ECS_ZSTD_CORPUS="$zstd_corpus_path"
 }
 
 prepare_tools_archive() {
   [ -n "$TOOLS_REQUESTED" ] || return 0
   say "下载并校验架构工具包 $TOOLS_ASSET" "downloading and verifying architecture tool package $TOOLS_ASSET"
-  if [ "$TOOLS_BASE" = "$BASE" ]; then
-    cp "$WORK/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
-  else
-    fetch "${TOOLS_BASE}/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
-  fi
-  fetch "${TOOLS_BASE}/${TOOLS_ASSET}" "$TOOLS_ARCHIVE" 900 || return 1
+  fetch "${BUNDLE_BASE}/checksums.txt" "$TOOLS_CHECKSUMS_FILE" || return 1
+  fetch "${BUNDLE_BASE}/${TOOLS_ASSET}" "$TOOLS_ARCHIVE" 900 || return 1
 
   TOOLS_EXPECTED=$(awk -v f="$TOOLS_ASSET" '$2 == f {print $1; exit}' "$TOOLS_CHECKSUMS_FILE" | tr '[:upper:]' '[:lower:]')
   [ -n "$TOOLS_EXPECTED" ] || return 1
@@ -1089,8 +1087,8 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
 fi
 
 say "下载 $ASSET" "downloading $ASSET"
-fetch "${BASE}/${ASSET}" "${WORK}/${ASSET}" || die "下载失败；仓库是否已发布 Release？" "download failed; has the repository published a Release?"
-fetch "${BASE}/checksums.txt" "${WORK}/checksums.txt" || die "下载校验文件失败" "failed to download the checksum file"
+fetch "${ECS_BASE}/${ASSET}" "${WORK}/${ASSET}" || die "下载失败；仓库是否已发布 Release？" "download failed; has the repository published a Release?"
+fetch "${ECS_BASE}/checksums.txt" "${WORK}/checksums.txt" || die "下载校验文件失败" "failed to download the checksum file"
 
 # 确认下载归档与同一 Release 清单记录的字节一致。
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt" | tr '[:upper:]' '[:lower:]')
@@ -1104,6 +1102,15 @@ say "SHA-256 已校验" "SHA-256 verified"
 tar -xzf "${WORK}/${ASSET}" -C "$WORK" ecs
 [ -f "${WORK}/ecs" ] && [ ! -L "${WORK}/ecs" ] || die "压缩包里没有常规的 ecs 文件" "the archive contains no regular ecs file"
 chmod +x "${WORK}/ecs"
+
+if ! BUNDLE_VERSION=$("${WORK}/ecs" version --bundle); then
+  die "下载的 ecs 无法报告 Bundle 版本" "the downloaded ecs failed to report its Bundle version"
+fi
+case "$BUNDLE_VERSION" in
+  bundle-v[0-9A-Za-z._+-]*) ;;
+  *) die "下载的 ecs 返回了非法 Bundle 版本：$BUNDLE_VERSION" "the downloaded ecs returned an invalid Bundle version: $BUNDLE_VERSION" ;;
+esac
+BUNDLE_BASE="https://github.com/${REPO}/releases/download/${BUNDLE_VERSION}"
 
 if [ "$SUBMIT_MODE" -eq 1 ]; then
   # Check the downloaded binary before dependencies or benchmarks.  This is a

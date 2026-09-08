@@ -3,30 +3,27 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# freeze → tools-plan → source-checks/tools×7/ecs-build×7 → assemble → verify → publish。
+# freeze → source-checks/ecs-build×7 → assemble → verify → publish。
 #
 #   freeze     contents: read    冻结 SHA，校验发布说明
 #   source-checks contents: read  跑确定性源码检查
-#   tools-plan contents: read    判断是否可复用上一正式 Release 的工具包
-#   tools × 7  contents: read    七架构构建或复用工具包
 #   ecs-build × 7 contents: read 七架构构建主程序
-#   assemble   contents: read    组装全部发布物，记录实测工具链版本
+#   assemble   contents: read    组装全部发布物，记录实测 Go 版本
 #   verify     contents: read    校验解包出来的实际二进制
 #   publish    contents: write   唯一持有写权限的 job
 #
 # 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release。
 #
-# 编译器、Docker、tar、构建脚本、全部第三方工具都跑在没有仓库
-# 写权限的 job 里。真正拿到 contents: write 的只有最后那个上传步骤。
+# 编译器、打包工具和构建脚本都跑在没有仓库写权限的 job 里。
+# 真正拿到 contents: write 的只有最后那个上传步骤。
 #
 # 构建实现全部在 scripts/ 下。这里只决定 when / where / permission / dependency。
 
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 freeze → tools-plan → source-checks/tools×7/ecs-build×7 → assemble → verify
+  # 手动触发是发布演练：走完 freeze → source-checks/ecs-build×7 → assemble → verify
   # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
-  # 没有控制开关；tools-plan 根据冻结提交自动选择构建或复用。
   workflow_dispatch:
 
 permissions:
@@ -70,7 +67,7 @@ jobs:
           ./scripts/release/freeze.sh --event "$EVENT" --ref "$REF" --sha "$SHA" \
             | tee -a "$GITHUB_OUTPUT"
 
-      # 忘写发布说明必须在七架构工具构建前失败，不能等到最后的 publish 才发现。
+      # 忘写发布说明必须在七架构构建前失败，不能等到最后的 publish 才发现。
       # workflow_dispatch 的 dev 演练没有对应版本章节，因此只对实际 tag 校验。
       - name: Validate release changelog
         if: startsWith(github.ref, 'refs/tags/v')
@@ -100,135 +97,6 @@ jobs:
         env:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
-
-  # 只根据工具源代码和构建入口的三条路径决定能否复用上一正式 Release。
-  tools-plan:
-    needs: freeze
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      changed: ${{ steps.plan.outputs.changed }}
-      prev_tag: ${{ steps.plan.outputs.prev_tag }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.freeze.outputs.sha }}
-          fetch-depth: 0
-      - name: Plan the tools stage
-        id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          PREV_TAG=$(gh release list \
-            --repo "$GITHUB_REPOSITORY" \
-            --exclude-drafts \
-            --exclude-pre-releases \
-            --limit 1 \
-            --json tagName \
-            --jq '.[0].tagName')
-          test -n "$PREV_TAG"
-          echo "prev_tag=$PREV_TAG" >>"$GITHUB_OUTPUT"
-          if git diff --quiet "$PREV_TAG"...HEAD -- \
-            tools/ \
-            scripts/build_tools.sh \
-            scripts/build_tools_container.sh
-          then
-            echo "changed=false" >>"$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >>"$GITHUB_OUTPUT"
-          fi
-
-  # amd64/arm64 用对应的原生硬件，386 用 x86-64 的原生 32 位兼容执行，
-  # 其余四个架构由宿主原生跑交叉编译器，只让短 smoke 显式走 QEMU。
-  #
-  # matrix 只描述 where——挑哪台机器。镜像、apt 包、交叉三元组、QEMU 运行器
-  # 全部由 scripts/build_tools_container.sh 的架构表决定。
-  #
-  # tools-plan 只允许在上述三条工具输入未变化时复用上一正式 Release；否则完整构建。
-  tools:
-    needs: [freeze, tools-plan]
-    name: tools (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: amd64, runner: ubuntu-24.04, runner_arch: x86_64 }
-          - { arch: arm64, runner: ubuntu-24.04-arm, runner_arch: arm64 }
-          - { arch: armv7, runner: ubuntu-24.04-arm, runner_arch: arm64 }
-          - { arch: "386", runner: ubuntu-24.04, runner_arch: x86_64 }
-          - { arch: s390x, runner: ubuntu-24.04, runner_arch: x86_64 }
-          - { arch: riscv64, runner: ubuntu-24.04, runner_arch: x86_64 }
-          - { arch: ppc64le, runner: ubuntu-24.04, runner_arch: x86_64 }
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.freeze.outputs.sha }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        if: needs.tools-plan.outputs.changed == 'true'
-        with:
-          go-version: 'stable'
-          check-latest: true
-          cache: false
-
-      # 交叉构建把宿主当成构建机，跑错架构的宿主会得到错误的产物。
-      - name: Verify runner architecture
-        if: needs.tools-plan.outputs.changed == 'true'
-        env:
-          EXPECTED: ${{ matrix.runner_arch }}
-        run: |
-          set -euo pipefail
-          actual=$(uname -m)
-          case "$EXPECTED:$actual" in
-            x86_64:x86_64 | arm64:aarch64 | arm64:arm64) ;;
-            *)
-              echo "expected $EXPECTED runner, got $actual" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Build tools in the target container
-        if: needs.tools-plan.outputs.changed == 'true'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./scripts/build_tools_container.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
-
-      # manifest 要能被 ecs 自己的解析器读下来，构建口径要与构建脚本声明的一致。
-      # 语料在这里摘出去：它是独立发布物，七份副本没有必要。
-      - name: Verify the staged tools
-        if: needs.tools-plan.outputs.changed == 'true'
-        run: ./scripts/verify_tools_stage.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
-
-      - name: Reuse tools from the previous release
-        if: needs.tools-plan.outputs.changed == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PREV_TAG: ${{ needs.tools-plan.outputs.prev_tag }}
-        run: |
-          set -euo pipefail
-          archive="ecs-tools_linux_${{ matrix.arch }}.tar.gz"
-          mkdir -p ".ci-tools-stage/linux_${{ matrix.arch }}"
-          gh release download "$PREV_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "$archive" \
-            --dir .
-          tar -xzf "$archive" -C ".ci-tools-stage/linux_${{ matrix.arch }}"
-
-      - name: Collect the architecture stage
-        run: |
-          set -euo pipefail
-          mkdir -p artifact
-          sudo cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
-          sudo chown -R "$(id -u):$(id -g)" artifact
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ecs-tools-stage-${{ matrix.arch }}
-          path: artifact
-          if-no-files-found: error
-          retention-days: 7
 
   # 七架构主程序独立构建，完成后由 assemble 统一打包。
   ecs-build:
@@ -268,14 +136,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # 组装全部发布物，并记录**实测**的工具链版本。
+  # 组装全部发布物，并记录**实测**的 Go 版本。
   #
-  # Release job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
+  # ecs-build 通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
   # expected_go=... 这种可能分叉的期望值。ecs-build 将实际的 go env GOVERSION 随同
   # 每个主程序 artifact 交给 assemble；assemble 从 amd64 artifact 取出并通过
   # --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
-    needs: [freeze, source-checks, tools, ecs-build]
+    needs: [freeze, source-checks, ecs-build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -285,33 +153,10 @@ jobs:
         with:
           ref: ${{ needs.freeze.outputs.sha }}
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: 'stable'
-          check-latest: true
-          cache: false
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: ecs-tools-stage-*
-          path: tools-artifacts
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ecs-binary-*
           path: artifact/ecs-binaries-artifacts
-
-      - name: Normalize the downloaded tools stages
-        run: |
-          set -euo pipefail
-          source scripts/lib/common.sh
-          mkdir -p tools-stage
-          for arch in "${ECS_ARCHES[@]}"; do
-            source_dir="tools-artifacts/ecs-tools-stage-${arch}/linux_${arch}"
-            test -d "$source_dir"
-            mkdir -p "tools-stage/linux_${arch}"
-            cp -a "$source_dir/." "tools-stage/linux_${arch}/"
-          done
 
       - name: Normalize the downloaded ECS binaries
         run: |
@@ -337,8 +182,7 @@ jobs:
           test -n "$build_go_version"
           echo "build_go_version=$build_go_version" >>"$GITHUB_OUTPUT"
           ./scripts/release/build.sh "$VERSION" \
-            --binaries-dir artifact/ecs-binaries \
-            --tools-stage tools-stage
+            --binaries-dir artifact/ecs-binaries
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -402,4 +246,5 @@ jobs:
           REVISION: ${{ needs.freeze.outputs.sha }}
         run: |
           ./scripts/release/publish.sh \
+            --kind ecs \
             --tag "$TAG" --version "$VERSION" --revision "$REVISION" --dist dist

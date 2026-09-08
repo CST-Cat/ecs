@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"ecs/internal/buildinfo"
+	"ecs/internal/i18n"
 )
 
 // commandHandler is the one typed boundary between command selection and a
@@ -83,7 +84,15 @@ func (catalog commandCatalog) lookup(name string) (commandDefinition, bool) {
 	return commandDefinition{}, false
 }
 
-func versionCommand(_ application, _ context.Context, _ []string, stdout, _ io.Writer) int {
+func versionCommand(_ application, _ context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && args[0] == "--bundle" {
+		fmt.Fprintln(stdout, buildinfo.ToolsBundle)
+		return 0
+	}
+	if len(args) != 0 {
+		fmt.Fprintf(stderr, "%s: %s\n", i18n.T("cli.error"), i18n.T("help.extraArgs"))
+		return 1
+	}
 	fmt.Fprintf(stdout, "%s %s commit=%s built=%s go=%s\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate, runtime.Version())
 	return 0
 }

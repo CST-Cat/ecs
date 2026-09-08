@@ -31,11 +31,13 @@ if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
 fi
 build_date="${BUILD_DATE:-$(date -u -d "@$source_date_epoch" +%Y-%m-%dT%H:%M:%SZ)}"
 output_dir="${OUTPUT_DIR:-$ECS_REPO_ROOT/dist}"
+tools_bundle=$(<"$ECS_REPO_ROOT/tools/BUNDLE")
 
 ldflags="-s -w"
 ldflags+=" -X ecs/internal/buildinfo.Version=$version"
 ldflags+=" -X ecs/internal/buildinfo.Commit=$commit"
 ldflags+=" -X ecs/internal/buildinfo.BuildDate=$build_date"
+ldflags+=" -X ecs/internal/buildinfo.ToolsBundle=$tools_bundle"
 
 mkdir -p "$output_dir"
 build_count=0

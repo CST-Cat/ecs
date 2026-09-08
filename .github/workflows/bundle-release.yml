@@ -1,0 +1,162 @@
+name: bundle-release
+
+# 独立发布七架构 benchmark bundle。Bundle 不参与 ECS application release。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+concurrency:
+  group: bundle-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tools:
+    name: tools (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04, runner_arch: x86_64 }
+          - { arch: arm64, runner: ubuntu-24.04-arm, runner_arch: arm64 }
+          - { arch: armv7, runner: ubuntu-24.04-arm, runner_arch: arm64 }
+          - { arch: "386", runner: ubuntu-24.04, runner_arch: x86_64 }
+          - { arch: s390x, runner: ubuntu-24.04, runner_arch: x86_64 }
+          - { arch: riscv64, runner: ubuntu-24.04, runner_arch: x86_64 }
+          - { arch: ppc64le, runner: ubuntu-24.04, runner_arch: x86_64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Verify runner architecture
+        env:
+          EXPECTED: ${{ matrix.runner_arch }}
+        run: |
+          set -euo pipefail
+          actual=$(uname -m)
+          case "$EXPECTED:$actual" in
+            x86_64:x86_64 | arm64:aarch64 | arm64:arm64) ;;
+            *)
+              echo "expected $EXPECTED runner, got $actual" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Build tools in the target container
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/build_tools_container.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
+
+      - name: Validate the staged tools
+        run: |
+          set -euo pipefail
+          validate_args=(--arch '${{ matrix.arch }}' --stage-root .ci-tools-stage)
+          if [[ '${{ matrix.arch }}' == amd64 ]]; then
+            validate_args+=(--keep-corpus)
+          fi
+          ./scripts/verify_tools_stage.sh "${validate_args[@]}"
+
+      - name: Collect the architecture stage
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          sudo cp -a ".ci-tools-stage/linux_${{ matrix.arch }}" artifact/
+          sudo chown -R "$(id -u):$(id -g)" artifact
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-tools-stage-${{ matrix.arch }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-tools-stage-*
+          path: tools-artifacts
+
+      - name: Normalize the downloaded tools stages
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          mkdir -p tools-stage
+          for arch in "${ECS_ARCHES[@]}"; do
+            source_dir="tools-artifacts/ecs-tools-stage-${arch}/linux_${arch}"
+            stage_dir="tools-stage/linux_${arch}"
+            test -d "$source_dir"
+            mkdir -p "$stage_dir"
+            cp -a "$source_dir/." "$stage_dir/"
+            chmod +x "$stage_dir/bin/"*
+          done
+
+      - name: Package the bundle
+        run: ./scripts/package.sh --tools-stage tools-stage
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bundle-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bundle-dist
+          path: dist
+
+      - name: Read the bundle release tag
+        id: bundle
+        run: |
+          set -euo pipefail
+          bundle=$(<tools/BUNDLE)
+          printf 'tag=%s\n' "$bundle" >>"$GITHUB_OUTPUT"
+
+      - name: Publish the bundle release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bundle.outputs.tag }}
+          VERSION: Unreleased
+          REVISION: ${{ github.sha }}
+        run: |
+          ./scripts/release/publish.sh \
+            --kind bundle \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --revision "$REVISION" \
+            --dist dist

@@ -130,9 +130,10 @@ esac
 fixture_root="$test_root/fixture"
 fixture_bin="$fixture_root/bin"
 fixture_release="$fixture_root/release"
+fixture_bundle_release="$fixture_root/bundle-release"
 fixture_logs="$fixture_root/logs"
 fixture_asset="ecs_linux_${fixture_arch}.tar.gz"
-mkdir -p "$fixture_bin" "$fixture_release/archive" "$fixture_logs"
+mkdir -p "$fixture_bin" "$fixture_release/archive" "$fixture_bundle_release" "$fixture_logs"
 export ECS_TEST_PLAN_TOOLS=""
 
 cat >"$fixture_release/archive/ecs" <<'EOF'
@@ -149,6 +150,13 @@ record_argv() {
 }
 
 record_argv "$ECS_TEST_LOG_ROOT/ecs.argv" "$@"
+
+if [ "${1:-}" = version ] && [ "${2:-}" = --bundle ] && [ "$#" -eq 2 ]; then
+  record_argv "$ECS_TEST_LOG_ROOT/version.argv" "$@"
+  [ "${ECS_TEST_VERSION_BUNDLE_MODE:-valid}" = valid ] || exit 94
+  printf '%s\n' bundle-v-test
+  exit 0
+fi
 
 if [ "${1:-}" = plan ]; then
   [ "${2:-}" != --json ] || exit 64
@@ -256,25 +264,27 @@ tar -czf "$fixture_release/$fixture_asset" -C "$fixture_release/archive" ecs
 fixture_digest=$(sha256sum "$fixture_release/$fixture_asset" | awk '{print $1}')
 printf '%s  %s\n' "$fixture_digest" "$fixture_asset" >"$fixture_release/checksums.txt"
 fixture_tools_asset="ecs-tools_linux_"$fixture_arch".tar.gz"
-mkdir -p "$fixture_release/tools/bin"
-cat >"$fixture_release/tools/bin/zstd" <<'EOF'
+mkdir -p "$fixture_bundle_release/tools/bin"
+cat >"$fixture_bundle_release/tools/bin/zstd" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 0755 "$fixture_release/tools/bin/zstd"
-cat >"$fixture_release/tools/bin/sysbench" <<'EOF'
+chmod 0755 "$fixture_bundle_release/tools/bin/zstd"
+cat >"$fixture_bundle_release/tools/bin/fixture-tool" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 0755 "$fixture_release/tools/bin/sysbench"
-tar -czf "$fixture_release/$fixture_tools_asset" -C "$fixture_release/tools" bin
-fixture_tools_digest=$(sha256sum "$fixture_release/$fixture_tools_asset" | awk '{print $1}')
-printf '%s  %s\n' "$fixture_tools_digest" "$fixture_tools_asset" >>"$fixture_release/checksums.txt"
+chmod 0755 "$fixture_bundle_release/tools/bin/fixture-tool"
+tar -czf "$fixture_bundle_release/$fixture_tools_asset" -C "$fixture_bundle_release/tools" bin
+fixture_tools_digest=$(sha256sum "$fixture_bundle_release/$fixture_tools_asset" | awk '{print $1}')
+printf '%s  %s\n' "$fixture_tools_digest" "$fixture_tools_asset" >"$fixture_bundle_release/checksums.txt"
 export ECS_TEST_TOOLS_ASSET="$fixture_tools_asset"
 fixture_corpus_asset='ecs-corpus_silesia-v1.tar.gz'
-mkdir -p "$fixture_release/corpus"
-printf '%s\n' 'local zstd corpus fixture' >"$fixture_release/corpus/ecs-silesia-v1.corpus"
-tar -czf "$fixture_release/$fixture_corpus_asset" -C "$fixture_release/corpus" ecs-silesia-v1.corpus
+mkdir -p "$fixture_bundle_release/corpus"
+printf '%s\n' 'local zstd corpus fixture' >"$fixture_bundle_release/corpus/ecs-silesia-v1.corpus"
+tar -czf "$fixture_bundle_release/$fixture_corpus_asset" -C "$fixture_bundle_release/corpus" ecs-silesia-v1.corpus
+fixture_corpus_digest=$(sha256sum "$fixture_bundle_release/$fixture_corpus_asset" | awk '{print $1}')
+printf '%s  %s\n' "$fixture_corpus_digest" "$fixture_corpus_asset" >>"$fixture_bundle_release/checksums.txt"
 export ECS_TEST_CORPUS_ASSET="$fixture_corpus_asset"
 
 cat >"$fixture_bin/curl" <<'EOF'
@@ -299,8 +309,9 @@ done
 case "$url" in
   "$ECS_TEST_RELEASE_URL/$ECS_TEST_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_ASSET" ;;
   "$ECS_TEST_RELEASE_URL/checksums.txt") source_path="$ECS_TEST_RELEASE_ROOT/checksums.txt" ;;
-  "$ECS_TEST_RELEASE_URL/$ECS_TEST_TOOLS_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_TOOLS_ASSET" ;;
-  "$ECS_TEST_RELEASE_URL/$ECS_TEST_CORPUS_ASSET") source_path="$ECS_TEST_RELEASE_ROOT/$ECS_TEST_CORPUS_ASSET" ;;
+  "$ECS_TEST_BUNDLE_RELEASE_URL/checksums.txt") source_path="$ECS_TEST_BUNDLE_RELEASE_ROOT/checksums.txt" ;;
+  "$ECS_TEST_BUNDLE_RELEASE_URL/$ECS_TEST_TOOLS_ASSET") source_path="$ECS_TEST_BUNDLE_RELEASE_ROOT/$ECS_TEST_TOOLS_ASSET" ;;
+  "$ECS_TEST_BUNDLE_RELEASE_URL/$ECS_TEST_CORPUS_ASSET") source_path="$ECS_TEST_BUNDLE_RELEASE_ROOT/$ECS_TEST_CORPUS_ASSET" ;;
   *)
     : >"$ECS_TEST_LOG_ROOT/unexpected-network"
     exit 90
@@ -316,14 +327,17 @@ cp "$fixture_bin/curl" "$fixture_bin/wget"
 chmod 0755 "$fixture_bin/wget"
 
 # A host tool with the same name must not suppress the frozen archive download.
-cat >"$fixture_bin/sysbench" <<'EOF'
+cat >"$fixture_bin/fixture-tool" <<'EOF'
 #!/bin/sh
-: >"$ECS_TEST_LOG_ROOT/host-sysbench-used"
+: >"$ECS_TEST_LOG_ROOT/host-fixture-tool-used"
 exit 91
 EOF
-chmod 0755 "$fixture_bin/sysbench"
+chmod 0755 "$fixture_bin/fixture-tool"
 
 release_url="https://github.com/example/ecs/releases/download/v-test"
+bundle_release_url="https://github.com/example/ecs/releases/download/bundle-v-test"
+export ECS_TEST_BUNDLE_RELEASE_URL="$bundle_release_url"
+export ECS_TEST_BUNDLE_RELEASE_ROOT="$fixture_bundle_release"
 test_path="$fixture_bin:$PATH"
 
 make_wget_only_path() {
@@ -337,6 +351,122 @@ make_wget_only_path() {
 }
 wget_only_path="$test_root/wget-only-path"
 make_wget_only_path "$wget_only_path"
+
+# ECS checksums are scoped to the ECS release. A bad ECS digest must stop before
+# the downloaded binary is extracted or asked for its Bundle version.
+ecs_checksum_failure_release="$test_root/ecs-checksum-failure-release"
+ecs_checksum_failure_logs="$fixture_logs/ecs-checksum-failure"
+ecs_checksum_failure_output="$test_root/ecs-checksum-failure-output"
+mkdir -p "$ecs_checksum_failure_release" "$ecs_checksum_failure_logs" "$test_root/ecs-checksum-failure-tmp"
+cp "$fixture_release/$fixture_asset" "$ecs_checksum_failure_release/$fixture_asset"
+printf '%064d  %s\n' 0 "$fixture_asset" >"$ecs_checksum_failure_release/checksums.txt"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$test_root/ecs-checksum-failure-tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$ecs_checksum_failure_logs" ECS_TEST_REPORT_DIR="$ecs_checksum_failure_output" \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$ecs_checksum_failure_release" \
+  ECS_TEST_ASSET="$fixture_asset" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$ecs_checksum_failure_output" \
+  >"$test_root/ecs-checksum-failure.stdout" 2>"$test_root/ecs-checksum-failure.stderr"
+ecs_checksum_failure_status=$?
+set -e
+[[ "$ecs_checksum_failure_status" -eq 1 ]] || fail "bad ECS checksum returned $ecs_checksum_failure_status instead of failing"
+[[ "$(wc -l <"$ecs_checksum_failure_logs/fetch.log")" -eq 2 ]] || fail "bad ECS checksum did not stop after the ECS downloads"
+[[ ! -e "$ecs_checksum_failure_logs/version.argv" ]] || fail "bad ECS checksum reached version --bundle"
+[[ ! -e "$ecs_checksum_failure_logs/run.argv" ]] || fail "bad ECS checksum invoked ecs"
+[[ ! -e "$ecs_checksum_failure_output/fixture.json" ]] || fail "bad ECS checksum produced a report"
+
+# Bundle checksums are independent of ECS checksums. A bad tools digest must
+# stop after the Bundle downloads and before any selected tool is staged.
+bundle_tools_checksum_failure_release="$test_root/bundle-tools-checksum-failure-release"
+bundle_tools_checksum_failure_logs="$fixture_logs/bundle-tools-checksum-failure"
+bundle_tools_checksum_failure_output="$test_root/bundle-tools-checksum-failure-output"
+mkdir -p "$bundle_tools_checksum_failure_release" "$bundle_tools_checksum_failure_logs" "$test_root/bundle-tools-checksum-failure-tmp"
+cp -a "$fixture_bundle_release/." "$bundle_tools_checksum_failure_release/"
+printf '%064d  %s\n' 0 "$fixture_tools_asset" >"$bundle_tools_checksum_failure_release/checksums.txt"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/bundle-tools-checksum-failure-tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$bundle_tools_checksum_failure_logs" ECS_TEST_REPORT_DIR="$bundle_tools_checksum_failure_output" \
+  ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" ECS_TEST_BUNDLE_RELEASE_ROOT="$bundle_tools_checksum_failure_release" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$bundle_tools_checksum_failure_output" \
+  >"$test_root/bundle-tools-checksum-failure.stdout" 2>"$test_root/bundle-tools-checksum-failure.stderr"
+bundle_tools_checksum_failure_status=$?
+set -e
+[[ "$bundle_tools_checksum_failure_status" -eq 1 ]] || fail "bad Bundle tools checksum returned $bundle_tools_checksum_failure_status instead of failing"
+[[ "$(wc -l <"$bundle_tools_checksum_failure_logs/fetch.log")" -eq 4 ]] || fail "bad Bundle tools checksum did not download both release boundaries"
+[[ ! -e "$bundle_tools_checksum_failure_logs/run.argv" ]] || fail "bad Bundle tools checksum invoked ecs"
+[[ ! -e "$bundle_tools_checksum_failure_output/fixture.json" ]] || fail "bad Bundle tools checksum produced a report"
+
+# The corpus is a separate Bundle asset and must be checked against the same
+# Bundle checksums file exactly once before extraction.
+corpus_checksum_failure_release="$test_root/corpus-checksum-failure-release"
+corpus_checksum_failure_logs="$fixture_logs/corpus-checksum-failure"
+corpus_checksum_failure_output="$test_root/corpus-checksum-failure-output"
+mkdir -p "$corpus_checksum_failure_release" "$corpus_checksum_failure_logs" "$test_root/corpus-checksum-failure-tmp"
+cp -a "$fixture_bundle_release/." "$corpus_checksum_failure_release/"
+awk -v f="$fixture_corpus_asset" '$2 != f' "$fixture_bundle_release/checksums.txt" >"$corpus_checksum_failure_release/checksums.txt"
+printf '%064d  %s\n' 0 "$fixture_corpus_asset" >>"$corpus_checksum_failure_release/checksums.txt"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/corpus-checksum-failure-tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$corpus_checksum_failure_logs" ECS_TEST_REPORT_DIR="$corpus_checksum_failure_output" \
+  ECS_TEST_PLAN_TOOLS=zstd ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" ECS_TEST_BUNDLE_RELEASE_ROOT="$corpus_checksum_failure_release" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$corpus_checksum_failure_output" \
+  >"$test_root/corpus-checksum-failure.stdout" 2>"$test_root/corpus-checksum-failure.stderr"
+corpus_checksum_failure_status=$?
+set -e
+[[ "$corpus_checksum_failure_status" -eq 1 ]] || fail "bad corpus checksum returned $corpus_checksum_failure_status instead of failing"
+[[ "$(wc -l <"$corpus_checksum_failure_logs/fetch.log")" -eq 5 ]] || fail "bad corpus checksum did not download the corpus after the tools archive"
+[[ ! -e "$corpus_checksum_failure_logs/run.argv" ]] || fail "bad corpus checksum invoked ecs"
+[[ ! -e "$corpus_checksum_failure_output/fixture.json" ]] || fail "bad corpus checksum produced a report"
+
+# There is no legacy Bundle fallback: a binary that cannot report its Bundle
+# version fails before any Bundle URL is contacted.
+version_failure_logs="$fixture_logs/version-failure"
+version_failure_output="$test_root/version-failure-output"
+mkdir -p "$version_failure_logs" "$test_root/version-failure-tmp"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$test_root/version-failure-tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test ECS_TEST_VERSION_BUNDLE_MODE=fail \
+  ECS_TEST_LOG_ROOT="$version_failure_logs" ECS_TEST_REPORT_DIR="$version_failure_output" \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$version_failure_output" \
+  >"$test_root/version-failure.stdout" 2>"$test_root/version-failure.stderr"
+version_failure_status=$?
+set -e
+[[ "$version_failure_status" -eq 1 ]] || fail "version --bundle failure returned $version_failure_status instead of failing"
+[[ "$(wc -l <"$version_failure_logs/fetch.log")" -eq 2 ]] || fail "version --bundle failure contacted the Bundle release"
+[[ -e "$version_failure_logs/version.argv" ]] || fail "version --bundle failure did not invoke the version interface"
+[[ ! -e "$version_failure_logs/run.argv" ]] || fail "version --bundle failure invoked ecs"
+[[ ! -e "$version_failure_output/fixture.json" ]] || fail "version --bundle failure produced a report"
+
+# A missing resolved Bundle release fails locally at the fixture boundary and
+# never falls back to the ECS release or a branch-pinned bundle file.
+missing_bundle_logs="$fixture_logs/missing-bundle"
+missing_bundle_output="$test_root/missing-bundle-output"
+mkdir -p "$missing_bundle_logs" "$test_root/missing-bundle-tmp"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/missing-bundle-tmp" PATH="$test_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$missing_bundle_logs" ECS_TEST_REPORT_DIR="$missing_bundle_output" \
+  ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  ECS_TEST_ASSET="$fixture_asset" ECS_TEST_BUNDLE_RELEASE_ROOT="$test_root/missing-bundle-release" \
+  sh "$repo_root/run.sh" --profile standard --only noop --output "$missing_bundle_output" \
+  >"$test_root/missing-bundle.stdout" 2>"$test_root/missing-bundle.stderr"
+missing_bundle_status=$?
+set -e
+[[ "$missing_bundle_status" -eq 1 ]] || fail "missing Bundle release returned $missing_bundle_status instead of failing"
+[[ "$(wc -l <"$missing_bundle_logs/fetch.log")" -eq 3 ]] || fail "missing Bundle release did not reach the Bundle download boundary"
+[[ ! -e "$missing_bundle_logs/unexpected-network" ]] || fail "missing Bundle release attempted unexpected network access"
+[[ ! -e "$missing_bundle_logs/run.argv" ]] || fail "missing Bundle release invoked ecs"
+[[ ! -e "$missing_bundle_output/fixture.json" ]] || fail "missing Bundle release produced a report"
 
 # Wget-only HTTPS success proves fetch selects wget when curl is absent.
 wget_success_tmp="$test_root/wget-success-tmp"
@@ -369,16 +499,33 @@ mkdir -p "$frozen_tool_tmp" "$frozen_tool_logs"
 if ! ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$frozen_tool_tmp" PATH="$test_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_TEST_LOG_ROOT="$frozen_tool_logs" ECS_TEST_REPORT_DIR="$frozen_tool_output" \
-    ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+    ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
     sh "$repo_root/run.sh" --profile standard --only noop --output "$frozen_tool_output" \
     >"$test_root/frozen-tool.stdout" 2>"$test_root/frozen-tool.stderr"; then
   fail "frozen tool staging fixture returned a failure: $(<"$test_root/frozen-tool.stderr")"
 fi
-[[ "$(wc -l <"$frozen_tool_logs/fetch.log")" -eq 3 ]] || fail "host sysbench suppressed the frozen tool download"
-[[ ! -e "$frozen_tool_logs/host-sysbench-used" ]] || fail "host sysbench was used"
+[[ "$(wc -l <"$frozen_tool_logs/fetch.log")" -eq 4 ]] || fail "host fixture tool suppressed the frozen tool download"
+[[ ! -e "$frozen_tool_logs/host-fixture-tool-used" ]] || fail "host fixture tool was used"
 [[ -f "$frozen_tool_output/fixture.json" ]] || fail "frozen tool staging fixture produced no report"
+mapfile -d '' -t frozen_version_argv <"$frozen_tool_logs/version.argv"
+[[ "${#frozen_version_argv[@]}" -eq 2 && "${frozen_version_argv[0]}" == version &&
+   "${frozen_version_argv[1]}" == --bundle ]] ||
+  fail "fixture did not invoke ecs version --bundle"
+mapfile -t frozen_fetches <"$frozen_tool_logs/fetch.log"
+expected_frozen_fetches=(
+  "$release_url/$fixture_asset"
+  "$release_url/checksums.txt"
+  "$bundle_release_url/checksums.txt"
+  "$bundle_release_url/$fixture_tools_asset"
+)
+[[ "${#frozen_fetches[@]}" -eq "${#expected_frozen_fetches[@]}" ]] ||
+  fail "frozen tool fixture fetched an unexpected number of URLs"
+for i in "${!expected_frozen_fetches[@]}"; do
+  [[ "${frozen_fetches[$i]}" == "${expected_frozen_fetches[$i]}" ]] ||
+    fail "frozen tool fixture fetch $i changed: ${frozen_fetches[$i]}"
+done
 frozen_fetch_args=$(tr '\0' '\n' <"$frozen_tool_logs/fetch-args.log")
 grep -F -x -- '--speed-limit' <<<"$frozen_fetch_args" >/dev/null || fail "run curl omitted speed limit"
 grep -F -x -- '--speed-time' <<<"$frozen_fetch_args" >/dev/null || fail "run curl omitted speed time"
@@ -396,7 +543,7 @@ mkdir -p "$zstd_corpus_tmp" "$zstd_corpus_logs"
 if ! ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$zstd_corpus_tmp" PATH="$test_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_TEST_PLAN_TOOLS=zstd ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
-    ECS_CORPUS_BASE_URL="$release_url" ECS_TEST_LOG_ROOT="$zstd_corpus_logs" \
+    ECS_TEST_LOG_ROOT="$zstd_corpus_logs" \
     ECS_TEST_REPORT_DIR="$zstd_corpus_output" \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
@@ -404,6 +551,7 @@ if ! ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$zstd_corpus_tmp" PATH="$test_path" \
     >"$test_root/zstd-corpus.stdout" 2>"$test_root/zstd-corpus.stderr"; then
   fail "local zstd corpus success fixture returned a failure: $(<"$test_root/zstd-corpus.stderr")"
 fi
+[[ "$(wc -l <"$zstd_corpus_logs/fetch.log")" -eq 5 ]] || fail "zstd corpus fixture did not download both releases and corpus"
 [[ -f "$zstd_corpus_output/fixture.json" ]] || fail "zstd corpus fixture produced no report"
 [[ -s "$zstd_corpus_logs/zstd-corpus-path" ]] || fail "zstd corpus path did not reach the final fixture entrypoint"
 [[ "$(cat "$zstd_corpus_logs/zstd-corpus-path")" == *"/ecs-silesia-v1.corpus" ]] ||
@@ -421,7 +569,7 @@ set +e
 ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$disabled_tool_tmp" PATH="$test_path" \
   ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
   ECS_TEST_LOG_ROOT="$disabled_tool_logs" ECS_TEST_REPORT_DIR="$disabled_tool_output" \
-  ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
   ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
   ECS_TEST_ASSET="$fixture_asset" \
   sh "$repo_root/run.sh" --profile standard --only noop --output "$disabled_tool_output" \
@@ -431,7 +579,7 @@ set -e
 [[ "$disabled_tool_status" -eq 1 ]] || fail "disabled dependency setup returned $disabled_tool_status instead of stopping"
 [[ ! -e "$disabled_tool_output/fixture.json" ]] || fail "disabled dependency setup produced a fallback report"
 [[ ! -e "$disabled_tool_logs/run.argv" ]] || fail "disabled dependency setup invoked ecs after stopping"
-[[ ! -e "$disabled_tool_logs/host-sysbench-used" ]] || fail "disabled dependency setup used host sysbench"
+[[ ! -e "$disabled_tool_logs/host-fixture-tool-used" ]] || fail "disabled dependency setup used host fixture tool"
 if grep -qi 'missing' "$test_root/disabled-tool.stdout" "$test_root/disabled-tool.stderr"; then
   fail "disabled dependency setup reported a missing-tool fallback"
 fi
@@ -440,21 +588,21 @@ fi
 archive_failure_tmp="$test_root/archive-failure-tmp"
 archive_failure_logs="$fixture_logs/archive-failure"
 archive_failure_output="$test_root/archive-failure-output"
-archive_failure_backup="$fixture_release/$fixture_tools_asset.backup"
+archive_failure_backup="$fixture_bundle_release/$fixture_tools_asset.backup"
 mkdir -p "$archive_failure_tmp" "$archive_failure_logs"
-mv "$fixture_release/$fixture_tools_asset" "$archive_failure_backup"
+mv "$fixture_bundle_release/$fixture_tools_asset" "$archive_failure_backup"
 set +e
 ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$archive_failure_tmp" PATH="$test_path" \
   ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
   ECS_TEST_LOG_ROOT="$archive_failure_logs" ECS_TEST_REPORT_DIR="$archive_failure_output" \
-  ECS_TEST_PLAN_TOOLS=sysbench ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
+  ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
   ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
   ECS_TEST_ASSET="$fixture_asset" \
   sh "$repo_root/run.sh" --profile standard --only noop --output "$archive_failure_output" \
   >"$test_root/archive-failure.stdout" 2>"$test_root/archive-failure.stderr"
 archive_failure_status=$?
 set -e
-mv "$archive_failure_backup" "$fixture_release/$fixture_tools_asset"
+mv "$archive_failure_backup" "$fixture_bundle_release/$fixture_tools_asset"
 [[ "$archive_failure_status" -eq 1 ]] || fail "failed frozen-tool download returned $archive_failure_status instead of stopping"
 [[ ! -e "$archive_failure_output/fixture.json" ]] || fail "failed frozen-tool download produced a fallback report"
 [[ ! -e "$archive_failure_logs/run.argv" ]] || fail "failed frozen-tool download invoked ecs after stopping"
@@ -462,32 +610,27 @@ if grep -qi 'missing' "$test_root/archive-failure.stdout" "$test_root/archive-fa
   fail "failed frozen-tool download reported a missing-tool fallback"
 fi
 
-run_http_corpus_rejection() {
+run_fetch_function="$test_root/run-fetch-function.sh"
+sed -n '/^say()/,/^file_sha256()/p' "$repo_root/run.sh" |
+  sed '$d' >"$run_fetch_function"
+
+run_http_fetch_rejection() {
   local case_name=$1 command_path=$2
-  local case_logs="$fixture_logs/http-corpus-$case_name"
-  local case_output="$test_root/http-corpus-$case_name-output"
-  mkdir -p "$case_logs" "$case_output"
-  mkdir -p "$test_root/http-corpus-$case_name-tmp"
+  local case_output="$test_root/http-fetch-$case_name-output"
   set +e
-  ECS_LANG=en ECS_AUTO_DEPS=1 TMPDIR="$test_root/http-corpus-$case_name-tmp" PATH="$command_path" \
-    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
-    ECS_CORPUS_BASE_URL=http://fixture.invalid/corpus \
-    ECS_TEST_LOG_ROOT="$case_logs" ECS_TEST_REPORT_DIR="$case_output" \
-    ECS_TEST_PLAN_TOOLS=zstd ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
-    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
-    ECS_TEST_ASSET="$fixture_asset" \
-    sh "$repo_root/run.sh" --profile standard --only noop --output "$case_output" \
-    >"$test_root/http-corpus-$case_name.stdout" 2>"$test_root/http-corpus-$case_name.stderr"
+  PATH="$command_path" UI=en sh -c '
+    . "$1"
+    fetch http://fixture.invalid/source "$2"
+  ' sh "$run_fetch_function" "$case_output" \
+    >"$test_root/http-fetch-$case_name.stdout" 2>"$test_root/http-fetch-$case_name.stderr"
   local case_status=$?
   set -e
-  [[ ! -e "$case_logs/unexpected-network" ]] || fail "$case_name invoked a downloader for an HTTP corpus URL"
-  [[ "$(grep -c 'https://github.com/example/ecs/releases/download/v-test' "$case_logs/fetch.log")" -eq 3 ]] || \
-    fail "$case_name did not complete the HTTPS artifact downloads before rejecting the HTTP corpus URL"
-  [[ "$case_status" -eq 1 ]] || fail "$case_name returned $case_status instead of rejecting the HTTP corpus URL"
+  [[ "$case_status" -eq 1 ]] || fail "$case_name returned $case_status instead of rejecting the HTTP URL"
+  [[ ! -e "$case_output" ]] || fail "$case_name created an output for an HTTP URL"
 }
 
-run_http_corpus_rejection curl "$test_path"
-run_http_corpus_rejection wget "$wget_only_path"
+run_http_fetch_rejection curl "$test_path"
+run_http_fetch_rejection wget "$wget_only_path"
 
 # Wrapper help must be local for every supported global-language spelling. The
 # first field is the conflicting ECS_LANG fallback: lang=en cases use zh so

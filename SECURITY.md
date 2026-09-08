@@ -12,7 +12,7 @@ NAT 探测以标准库实现 STUN（RFC 5389/5780）。请求只包含协议头�
 
 三网测速节点清单固定到每个 `ecs` 版本审计过的上游 commit。节点 URL 必须是绝对 HTTP(S) URL，拒绝 userinfo、fragment、非法端口和特殊用途地址；专用客户端忽略环境代理，在实际拨号处解析并筛选公网地址，每次重定向也重新校验。因此内网/回环目标、DNS rebinding 和重定向不能把它变成 SSRF 通道。部分节点只有 HTTP，测速流量可能被链路观察或篡改，结果不构成机密性或完整性证明。
 
-路由与回程模块只使用官方 NextTrace Tiny，以参数数组调用无启动横幅的 JSON 模式，不经过 shell，并记录实际版本和完整参数。`run.sh` 先校验当前架构 `ecs-tools` 归档在 Release `checksums.txt` 中的摘要，再只把本次需要的成员 staging 到私有 `$WORK/bin`；工具准备失败或 `ECS_AUTO_DEPS=0` 时终止运行，退出时清理 `$WORK`，不安装到系统。
+路由与回程模块只使用官方 NextTrace Tiny，以参数数组调用无启动横幅的 JSON 模式，不经过 shell，并记录实际版本和完整参数。`run.sh` 先校验当前架构 `ecs-tools` 归档在 Bundle Release `checksums.txt` 中的摘要，再只把本次需要的成员 staging 到私有 `$WORK/bin`；工具准备失败或 `ECS_AUTO_DEPS=0` 时终止运行，退出时清理 `$WORK`，不安装到系统。
 
 Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显式选择才会调用官方客户端。若 `run.sh` 需要临时准备客户端，Debian/Ubuntu 路径会在 `$WORK` 内校验固定 GPG 指纹、验证官方 Packagecloud 签名并解包，不写 `/etc`，也不执行供应商安装脚本；无法安全临时解包的平台会终止运行。Ookla 可独立接收出口 IP、客户端、服务器和测量元数据，因此该模式不属于本地零上传边界。
 
@@ -26,19 +26,28 @@ Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显�
 
 ## 安装与供应链
 
-建议从 Release 下载资产后核对 `checksums.txt`，或从源码自行构建。`install.sh` 只接受 HTTPS，强制校验 Release 资产 SHA-256，不关闭证书验证，也不执行下载到的其他脚本。`run.sh` 的临时 staging 仅在私有运行目录中准备已校验工具，不修改主机软件包数据库。
+建议从 ECS Release 下载主程序资产后核对该 Release 的 `checksums.txt`，或从源码自行构建。`install.sh` 只接受 HTTPS，强制校验 ECS Release 资产 SHA-256，不关闭证书验证，也不执行下载到的其他脚本。`run.sh` 的临时 staging 仅在私有运行目录中准备已校验工具；工具和 corpus 的校验信息来自对应 Bundle Release 的 `checksums.txt`，不修改主机软件包数据库。
 
-发布链为：
+### Release 供应链拓扑
+
+ECS Release 与 Bundle Release 是两条独立的发布链：
 
 ```text
-preflight → tools × 7 → assemble → verify → publish
+ECS Release:    preflight → ecs-build × 7 → assemble → verify → publish
+Bundle Release: tools × 7 → assemble → publish
 ```
 
-发布入口确认候选提交等于当时远端 `main`，随后所有阶段只使用该冻结 SHA；发布构建要求 Git 工作区洁净。工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败。工具 manifest 记录来源与构建参数。完整性校验只设在下载边界：发布链内部不重复校验自己刚产出的字节，最终资产的 `checksums.txt` 供下载方核对。
+ECS Release 只发布七架构主程序归档及其 `checksums.txt`。Bundle Release 独立发布固定的 benchmark runtime、工具归档、corpus 及其自己的 `checksums.txt`；ECS 主程序携带所依赖的 Bundle 标识，客户端据此选择 Bundle，而不是从移动中的 `main` 读取或接受用户覆盖。
+
+ECS Release 发布入口确认候选提交等于当时远端 `main`，随后该流程只使用冻结 SHA；Bundle Release 只使用 workflow 触发时的固定 SHA。两条发布流程都要求 Git 工作区洁净。Bundle 的工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败。工具 manifest 记录来源与构建参数。每条 Release 各自产生 `checksums.txt`；完整性校验只设在下载边界，发布链内部不重复校验自己刚产出的字节。
+
+### Immutable Releases
+
+已发布的 Release 使用 GitHub Immutable Releases。发布流程先创建 draft、上传资产再 publish；发布后 Release 的不可变性由 GitHub 平台保证：资产不可替换或删除、对应 Git tag 不可移动。CI 不在内部重复执行 attestation verification。
 
 普通 CI、排行榜重建、security 与 Release workflow 直接通过 `actions/setup-go@v7` 的 `stable` 和 `check-latest` 选择当前官方稳定 Go；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本，`ci.yml` 的 `compat` job 仍固定使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`。`devtools/go.mod` 只记录工具 module 的最低 Go 版本要求与工具依赖清单，不是 compiler selector。项目不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
 
-`actions/setup-go@v7` 是本任务为跟随官方稳定版本明确允许的浮动引用例外；除此之外，所有 GitHub Actions `uses` 引用仍固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。本项目不生成 GitHub artifact attestation：请用 Release 附带的 `checksums.txt` 核对下载资产。
+`actions/setup-go@v7` 是本任务为跟随官方稳定版本明确允许的浮动引用例外；除此之外，所有 GitHub Actions `uses` 引用仍固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。客户端下载边界是各自 Release 的 `checksums.txt` 与 SHA-256：`install.sh` 和 `compare.sh` 只校验 ECS Release，`run.sh` 先校验 ECS Release，再校验 Bundle Release 的工具和 corpus；CI 不替代下载方校验，也不在 CI 内重复执行 attestation verification。
 
 ## 报告安全问题
 

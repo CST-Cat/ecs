@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh
 curl -fsSL https://raw.githubusercontent.com/CST-Cat/ecs/main/run.sh | sh -s -- --profile full --lang en
 ```
 
+An ECS Release publishes only the main program; the fixed benchmark runtime, tools and corpus are provided by a separate Bundle Release. Each ECS Release `ecs` binary carries the Bundle identifier it depends on, which you can inspect with `ecs version --bundle`. The one-command flow above is unchanged: `run.sh` verifies the ECS Release and then fetches that Bundle; users cannot override the Bundle version, and it is not read from `main`.
+
 `run.sh` verifies downloaded files and stages only the fixed tools needed for this run in a temporary PATH. It does not write system directories and cleans up on exit. Use `--output PATH` to choose the report location.
 
 Compare existing reports by downloading only the main program:
@@ -52,7 +54,7 @@ The installer only installs `ecs`; it never uses a system package manager for be
 | `ecs leaderboard REPORT...` | Aggregate a leaderboard reference |
 | `ecs submit --input FILE` | Export a slim JSON suitable for public submission |
 | `ecs plan` | Print the resolved machine execution plan as JSON without probing |
-| `ecs version` | Show the version |
+| `ecs version` | Show the version; `ecs version --bundle` shows the current Bundle |
 | `ecs help` | Show the command overview |
 
 For non-run commands, put the interface language in the global prefix, for example `ecs --lang en compare ...`. `run` and `plan` also accept `--lang zh|en` in their own options. Exit codes are `0` (success), `1` (argument or run error), `2` (warnings or failed probes with `--strict`) and `130` (interrupted).
@@ -175,7 +177,7 @@ Behavior and exit:
 | `--region NAME` | empty | Self-reported region (e.g. `jp`, `us-west`) for leaderboard grouping |
 | `--note TEXT` | empty | Free-form note, up to 200 characters |
 
-**`ecs list` / `ecs version` / `ecs help`** take no options; **`ecs config`** accepts only the `example` subcommand.
+**`ecs list` / `ecs help`** take no options; **`ecs version`** accepts `--bundle`; **`ecs config`** accepts only the `example` subcommand.
 
 ## Reports, rendering and comparison
 
