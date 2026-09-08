@@ -84,53 +84,74 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 
 # ---- 发布说明 ----
 #
-# 取自 CHANGELOG.md 对应版本的 English 小节。取不到就失败：一个没有说明的
-# Release 对用户没有意义，而"忘了维护双语 CHANGELOG"正是应该被拦住的疏漏。
+# 取自 CHANGELOG.md 对应版本的中文与 English 小节。取不到就失败：一个没有
+# 完整双语说明的 Release 对用户没有意义，而这种疏漏应该在发布时被拦住。
 notes_file=$(mktemp)
 trap 'rm -f -- "$notes_file"' EXIT
+: >"$notes_file"
+
+append_changelog_language() {
+  local language=$1 status=0
+  awk -v version="$version" -v language_heading="### $language" '
+    BEGIN {
+      heading = "## " version
+      found = 0
+      selected = 0
+      has_content = 0
+      pending_blank = ""
+      version_heading = ""
+    }
+    $0 == heading || index($0, heading " ") == 1 {
+      found = 1
+      version_heading = $0
+      next
+    }
+    found && /^## / { exit }
+    found && $0 == language_heading {
+      selected = 1
+      print version_heading
+      print ""
+      next
+    }
+    selected && /^### / { exit }
+    selected && $0 ~ /^[[:space:]]*$/ {
+      if (has_content) pending_blank = pending_blank "\n"
+      next
+    }
+    selected {
+      printf "%s%s\n", pending_blank, $0
+      pending_blank = ""
+      has_content = 1
+    }
+    END {
+      if (!found || !selected || !has_content) exit 1
+    }
+  ' CHANGELOG.md >>"$notes_file" || status=$?
+  [[ "$status" -eq 0 ]] ||
+    die "CHANGELOG.md 的 $version 章节缺少非空 $language 小节"
+}
+
+repository=${GITHUB_REPOSITORY:-CST-Cat/ecs}
+changelog_url="https://github.com/${repository}/blob/${revision}/CHANGELOG.md"
 
 if [[ "$kind" == "ecs" ]]; then
   bundle_tag=$(<tools/BUNDLE)
-  printf '基准工具包：\n[%s](https://github.com/%s/releases/tag/%s)\n\n---\n\n' \
-    "$bundle_tag" "${GITHUB_REPOSITORY:-CST-Cat/ecs}" "$bundle_tag" >"$notes_file"
-else
-  : >"$notes_file"
+  bundle_url="https://github.com/${repository}/releases/tag/${bundle_tag}"
+  printf '第三方工具包：\n[%s](%s)\n\n' "$bundle_tag" "$bundle_url" >>"$notes_file"
 fi
+append_changelog_language "中文"
+printf '\n完整版本历史：[CHANGELOG.md](%s)\n' "$changelog_url" >>"$notes_file"
 
-awk -v version="$version" '
-  BEGIN {
-    heading = "## " version
-    found = 0
-    english = 0
-    has_english = 0
-    version_heading = ""
-  }
-  $0 == heading || index($0, heading " ") == 1 {
-    found = 1
-    version_heading = $0
-    next
-  }
-  found && /^## / { exit }
-  found && $0 == "### English" {
-    english = 1
-    print version_heading
-    next
-  }
-  english && /^### / { exit }
-  english {
-    print
-    if ($0 !~ /^[[:space:]]*$/) has_english = 1
-  }
-  END {
-    if (!found || !english || !has_english) exit 1
-  }
-' CHANGELOG.md >>"$notes_file" ||
-  die "CHANGELOG.md 的 $version 章节缺少非空 English 小节"
+printf '\n---\n\n' >>"$notes_file"
 
-printf '\n\n---\nFull version history: [CHANGELOG.md](%s)\n' \
-  "https://github.com/${GITHUB_REPOSITORY:-CST-Cat/ecs}/blob/${revision}/CHANGELOG.md" \
-  >>"$notes_file"
-echo "release-publish: 已从 CHANGELOG.md 取出 $version 的 English 发布说明" >&2
+if [[ "$kind" == "ecs" ]]; then
+  printf 'Third-party Tool Package:\n[%s](%s)\n\n' \
+    "$bundle_tag" "$bundle_url" >>"$notes_file"
+fi
+append_changelog_language "English"
+printf '\nFull version history: [CHANGELOG.md](%s)\n' \
+  "$changelog_url" >>"$notes_file"
+echo "release-publish: 已从 CHANGELOG.md 取出 $version 的中英文发布说明" >&2
 
 # ---- 资产清单 ----
 assets=(checksums.txt)
@@ -160,7 +181,7 @@ if gh release view "$tag" >/dev/null 2>&1; then
     die "$tag 已经是正式 Release，拒绝改动已发布的东西"
   echo "release-publish: 复用已有草稿 $tag" >&2
   if [[ "$kind" == "bundle" ]]; then
-    gh release edit "$tag" --title "Benchmark Runtime Bundle · $tag" \
+    gh release edit "$tag" --title "Third-party Tool Package · $tag" \
       --notes-file "$notes_file" >&2
   else
     gh release edit "$tag" --notes-file "$notes_file" >&2
@@ -171,7 +192,7 @@ else
     create_args+=(--verify-tag)
   else
     create_args+=(--target "$revision" --latest=false \
-      --title "Benchmark Runtime Bundle · $tag")
+      --title "Third-party Tool Package · $tag")
   fi
   gh release create "${create_args[@]}" >&2
 fi

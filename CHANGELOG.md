@@ -15,29 +15,29 @@ the current `v0.7.31` release and subsequent `Unreleased` changes.
 
 ### 中文
 
-- ECS Release notes 现在直接链接固定的 Benchmark Bundle；Bundle Release 使用明确的 Benchmark Runtime 标题。
-- 完成 GitHub Immutable Releases 的实际 rollout。
-- ECS Release notes 使用中文“基准工具包”入口和分割线，分割线下只展示 English 变更记录。
-- `CHANGELOG.md` 的当前及后续版本章节同步维护中文与 English 内容。
+- ECS 发布说明现在直接链接固定的第三方工具包；工具包发布使用明确的英文标题“Third-party Tool Package”。
+- 完成 GitHub Immutable Releases 功能的实际启用。
+- ECS 发布说明先完整展示“第三方工具包”和中文变更记录，再以分割线隔开完整的“Third-party Tool Package”和英文变更记录。
+- `CHANGELOG.md` 的当前及后续版本章节同步维护中文与英文内容。
 
 ### English
 
-- ECS release notes now link directly to their fixed Benchmark Bundle, and Bundle releases use an explicit Benchmark Runtime title.
+- ECS release notes now link directly to their fixed third-party tool package, and tool package releases use an explicit Third-party Tool Package title.
 - Completed the rollout of GitHub Immutable Releases.
-- ECS release notes now use a Chinese Benchmark Bundle heading and a divider, followed by an English-only changelog.
+- ECS release notes now present the third-party tool package and Chinese changelog as one complete block, followed by a divider and a complete English tool package and changelog block.
 - Current and future version sections in `CHANGELOG.md` are maintained in both Chinese and English.
 
 ## 0.7.31 — 2026-09-07
 
 ### 中文
 
-- 拆分项目本体与 benchmark Bundle 的发布边界：ECS Release 仅发布七架构主程序归档和 `checksums.txt`，Bundle 通过独立流程发布工具与 corpus。
-- 新增 `ecs version --bundle` 与 `tools/BUNDLE` 的 `bundle-v1` 身份，并让运行脚本按 Bundle 版本校验和获取对应工具制品。
+- 拆分项目本体与第三方工具包的发布边界：ECS 发布仅包含七种架构的主程序归档和 `checksums.txt`，工具包通过独立流程发布工具与语料库。
+- 新增 `ecs version --bundle` 与 `tools/BUNDLE` 的 `bundle-v1` 身份，并让运行脚本按工具包版本校验和获取对应工具制品。
 - 收紧跨架构构建、打包、校验和发布流程，所有发布阶段围绕冻结提交串行交接。
 
 ### English
 
-- Separated the application and benchmark Bundle release boundaries: ECS releases contain only the seven architecture-specific application archives and `checksums.txt`, while a separate Bundle workflow publishes tools and the corpus.
+- Separated the application and third-party tool package release boundaries: ECS releases contain only the seven architecture-specific application archives and `checksums.txt`, while a separate tool package workflow publishes tools and the corpus.
 - Added `ecs version --bundle` and the `bundle-v1` identity in `tools/BUNDLE`, and made the runner verify and fetch tool artifacts by Bundle version.
 - Tightened cross-architecture build, packaging, verification, and publishing so every release stage is handed off serially around the frozen commit.
 

@@ -168,7 +168,7 @@ ecs_install_tools() {
   local -a install_packages=("$@")
 
   if ((${#install_packages[@]} == 0)); then
-    echo "integration: 没有要安装的基准工具包" >&2
+    echo "integration: 没有要安装的第三方工具包" >&2
     return 2
   fi
 
