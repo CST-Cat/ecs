@@ -140,9 +140,9 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-  # 编译通过不等于支持。两个正式 FreeBSD 架构都在真实 FreeBSD 15.1 VM 中
-  # 以普通用户原生 build ecs，并直接验收 system、ping、route、backtrace 等
-  # FreeBSD 产品路径；bsd 日常 push 的支持门禁只看这一组真实功能测试。
+  # 两个正式 FreeBSD 架构各启动一台真实 FreeBSD 15.1 VM。VM 只启动一次，
+  # 后续 BUILD/SYSTEM/PING/ROUTE/BACKTRACE 通过 action 提供的 freebsd shell
+  # 进入同一台 VM；每个功能域在 Actions UI 中独立可见，失败不会遮住后续功能。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
     runs-on: ubuntu-latest
@@ -153,22 +153,97 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Test in FreeBSD 15.1
+
+      - name: Start FreeBSD 15.1 VM
+        id: freebsd_vm
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
         with:
           release: "15.1"
           arch: ${{ matrix.arch }}
-          copyback: false
+          sync: nfs
           cache-after-prepare: true
+          custom-shell-name: freebsd
           prepare: |
             pkg install -y go
             pw useradd ecsci -m -s /bin/sh
-          run: |
-            set -eu
-            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
-            su -m ecsci -c \
-              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-              /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh'"
+
+      - name: BUILD
+        id: freebsd_build
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' build"
+
+      - name: SYSTEM
+        id: freebsd_system
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' system"
+
+      - name: PING
+        id: freebsd_ping
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' ping"
+
+      - name: ROUTE
+        id: freebsd_route
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' route"
+
+      - name: BACKTRACE
+        id: freebsd_backtrace
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' backtrace"
+
+      - name: Require FreeBSD functionality
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.freebsd_build.outcome }}
+          SYSTEM_OUTCOME: ${{ steps.freebsd_system.outcome }}
+          PING_OUTCOME: ${{ steps.freebsd_ping.outcome }}
+          ROUTE_OUTCOME: ${{ steps.freebsd_route.outcome }}
+          BACKTRACE_OUTCOME: ${{ steps.freebsd_backtrace.outcome }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for item in \
+            "BUILD=$BUILD_OUTCOME" \
+            "SYSTEM=$SYSTEM_OUTCOME" \
+            "PING=$PING_OUTCOME" \
+            "ROUTE=$ROUTE_OUTCOME" \
+            "BACKTRACE=$BACKTRACE_OUTCOME"; do
+            name=${item%%=*}
+            outcome=${item#*=}
+            if [[ "$outcome" == "success" ]]; then
+              printf '[PASS] %s\n' "$name"
+            else
+              printf '[FAIL] %s (%s)\n' "$name" "$outcome" >&2
+              failed=1
+            fi
+          done
+          exit "$failed"
 
   # 跑分提交校验属于主线数据门禁，bsd 日常 push 不重复执行。
   submissions:
