@@ -60,121 +60,91 @@ jobs:
       - name: SOURCES
         id: tools_sources
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sources"
 
       - name: SYSBENCH
         id: tools_sysbench
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sysbench"
 
       - name: ZSTD
         id: tools_zstd
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' zstd"
 
       - name: NPB
         id: tools_npb
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' npb"
 
       - name: OPENSSL
         id: tools_openssl
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' openssl"
 
       - name: STREAM
         id: tools_stream
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' stream"
 
       - name: FIO
         id: tools_fio
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' fio"
 
       - name: IPERF3
         id: tools_iperf3
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' iperf3"
 
       - name: MANIFEST
         id: tools_manifest
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' manifest"
 
       - name: VERIFY
         id: tools_verify
         shell: freebsd {0}
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         run: |
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' verify"
 
       - name: FreeBSD tools summary
