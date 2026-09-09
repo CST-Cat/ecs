@@ -28,6 +28,8 @@ func capturePlatformEnvironment(snapshot *EnvironmentSnapshot) {
 
 func platformPressureFactsAvailable() bool { return true }
 
+func platformLoadAverageMethod() string { return "proc-loadavg-v1" }
+
 func collectResourceLimits() resourceLimits {
 	limits := resourceLimits{CPU: detectCPUAllowance()}
 	limits.CPUSet, limits.CPUSetCount, limits.CPUSetSource = readCPUSet()

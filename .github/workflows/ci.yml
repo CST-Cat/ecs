@@ -158,7 +158,7 @@ jobs:
             set -eu
             chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
             su -m ecsci -c \
-              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/bin:/bin \
+              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
               /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh'"
 
   # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，

@@ -140,18 +140,19 @@ func pressureMeasurementLabel(key string) string {
 
 // BuildPressureMeasurements computes ordinary measurements from two resource
 // snapshots. Missing or non-monotonic counters are omitted rather than
-// inferred. FreeBSD returns no Linux pressure facts from its platform hook.
+// inferred. Load average is portable but keeps platform-specific provenance;
+// the remaining counters are Linux pressure facts and are gated below.
 func BuildPressureMeasurements(before, after EnvironmentSnapshot) []model.Measurement {
-	if !platformPressureFactsAvailable() {
-		return nil
-	}
 	elapsed := after.CapturedAt.Sub(before.CapturedAt)
 	measurements := make([]model.Measurement, 0, 17)
 	add := func(key string, value float64, unit, display, method string) {
 		measurements = append(measurements, environmentMeasurement(key, pressureMeasurementLabel(key), value, unit, display, method))
 	}
 	if before.LoadKnown {
-		add("pretest_load_1m", before.Load1, "load", fmt.Sprintf("%.2f", before.Load1), "proc-loadavg-v1")
+		add("pretest_load_1m", before.Load1, "load", fmt.Sprintf("%.2f", before.Load1), platformLoadAverageMethod())
+	}
+	if !platformPressureFactsAvailable() {
+		return measurements
 	}
 	if before.CPUTracked && after.CPUTracked {
 		if steal, ok := stealPercent(before.CPUTimes, after.CPUTimes); ok {

@@ -14,3 +14,5 @@ func capturePlatformEnvironment(snapshot *EnvironmentSnapshot) {
 }
 
 func platformPressureFactsAvailable() bool { return false }
+
+func platformLoadAverageMethod() string { return "freebsd-sysctl-vm-loadavg-v1" }
