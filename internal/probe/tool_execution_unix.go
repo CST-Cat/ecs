@@ -18,7 +18,7 @@ const (
 	probeCommandCombinedLimit = 4 * 1024 * 1024
 	probeCommandStdoutLimit   = 4 * 1024 * 1024
 	probeCommandStderrLimit   = 64 * 1024
-	probeCommandWaitDelay     = 200 * time.Millisecond
+	probeCommandWaitDelay     = 500 * time.Millisecond
 	probeCommandOoklaLimit    = 512 * 1024
 )
 
