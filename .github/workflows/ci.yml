@@ -2,10 +2,8 @@ name: ci
 
 # 这个 commit 能不能进 main？
 #
-# main push 和 PR 跑完整回归；bsd 分支日常 push 只验收真实 FreeBSD 功能，
-# 不重复消耗 Linux unit/race/integration/cross 等资源。bsd 合并回 main 的 PR
-# 仍会恢复完整回归，因此平台移植期间和合并门禁的职责保持分离。
-# 排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
+# main push 和 PR 跑完整回归；bsd 分支使用独立的 bsd.yml，只验收真实 FreeBSD
+# 功能。排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
 # 红灯语义：ci 红表示代码或构建问题，应阻断合并；leaderboard 红表示排行榜
 # 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
@@ -15,7 +13,7 @@ name: ci
 
 on:
   push:
-    branches: ["main", "bsd"]
+    branches: ["main"]
   pull_request:
 
 permissions:
@@ -29,9 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 行为：程序做的事对不对。bsd 日常 push 不重复 Linux 主线回归。
   unit:
-    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -41,15 +37,12 @@ jobs:
           go-version: 'stable'
           check-latest: true
           cache: false
-      # 翻译覆盖率用当前报告样本；样本缺失时测试回落到当前 renderer contract。
       - name: Unit and parser tests
         env:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 最低源码兼容版本测试。
   compat:
-    if: github.ref_name != 'bsd'
     name: compat (${{ matrix.go-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -68,10 +61,7 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 静态规则、格式、数据契约。与 release preflight 是同一个脚本；安全扫描在
-  # 独立的 security workflow 中运行，不改变本 workflow 的 required gate。
   quality:
-    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -83,9 +73,7 @@ jobs:
           cache: false
       - run: ./scripts/ci/check.sh
 
-  # 与真实基准工具的集成。工具由脚本自己装齐，装什么不写在 YAML 里。
   integration:
-    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -97,9 +85,7 @@ jobs:
           cache: false
       - run: ./scripts/ci/integration.sh
 
-  # 并发问题。
   race:
-    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -111,10 +97,7 @@ jobs:
           cache: false
       - run: go test -race ./...
 
-  # 七个 Linux 发布架构只在 main/PR 验证能否交叉编译。FreeBSD 不在这里
-  # 重复做一遍：两个正式 FreeBSD 目标都由下面的真实 VM job 原生 build 并运行。
   cross:
-    if: github.ref_name != 'bsd'
     name: cross (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -140,9 +123,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-  # 两个正式 FreeBSD 架构各启动一台真实 FreeBSD 15.1 VM。VM 只启动一次，
-  # 后续 BUILD/SYSTEM/PING/ROUTE/BACKTRACE 通过 action 提供的 freebsd shell
-  # 进入同一台 VM；每个功能域在 Actions UI 中独立可见，失败不会遮住后续功能。
+  # 合并前仍在两个正式 FreeBSD 架构上做真实运行验收。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
     runs-on: ubuntu-latest
@@ -153,9 +134,7 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
       - name: Start FreeBSD 15.1 VM
-        id: freebsd_vm
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
         with:
           release: "15.1"
@@ -166,7 +145,6 @@ jobs:
           prepare: |
             pkg install -y go
             pw useradd ecsci -m -s /bin/sh
-
       - name: BUILD
         id: freebsd_build
         continue-on-error: true
@@ -176,7 +154,6 @@ jobs:
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' build"
-
       - name: SYSTEM
         id: freebsd_system
         continue-on-error: true
@@ -186,7 +163,6 @@ jobs:
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' system"
-
       - name: PING
         id: freebsd_ping
         continue-on-error: true
@@ -196,7 +172,6 @@ jobs:
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' ping"
-
       - name: ROUTE
         id: freebsd_route
         continue-on-error: true
@@ -206,7 +181,6 @@ jobs:
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' route"
-
       - name: BACKTRACE
         id: freebsd_backtrace
         continue-on-error: true
@@ -216,7 +190,6 @@ jobs:
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' backtrace"
-
       - name: Require FreeBSD functionality
         if: always()
         env:
@@ -245,9 +218,7 @@ jobs:
           done
           exit "$failed"
 
-  # 跑分提交校验属于主线数据门禁，bsd 日常 push 不重复执行。
   submissions:
-    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -261,9 +232,6 @@ jobs:
         env:
           ECS_SUBMISSION_DIR: submissions
         run: go test ./internal/score -run '^TestSubmissionCorpus$' -count=1 -v
-
-      # 离群检测只标记不阻断：可能是新硬件或特殊配置，由维护者判断。
-      # --annotate 把结果转成 GitHub 检查注解，直接显示在检查页面上。
       - name: Check for outliers
         run: |
           if find submissions -mindepth 2 -maxdepth 2 -type f -name '*.json' -print -quit | grep -q .; then
@@ -275,17 +243,14 @@ jobs:
             echo "当前没有排行榜提交，跳过离群检测"
           fi
 
-  # branch protection 的单点引用。bsd push 只要求 FreeBSD runtime；main 和 PR
-  # 仍要求完整回归全部成功。
   required:
     if: always()
     needs: [unit, compat, quality, integration, race, cross, freebsd, submissions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require relevant checks to pass
+      - name: Require every check to pass
         env:
-          REF_NAME: ${{ github.ref_name }}
           UNIT_RESULT: ${{ needs.unit.result }}
           COMPAT_RESULT: ${{ needs.compat.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
@@ -296,12 +261,6 @@ jobs:
           SUBMISSIONS_RESULT: ${{ needs.submissions.result }}
         run: |
           set -euo pipefail
-          if [[ "$REF_NAME" == "bsd" ]]; then
-            echo "bsd 分支只验收 FreeBSD runtime：freebsd=$FREEBSD_RESULT"
-            [[ "$FREEBSD_RESULT" == "success" ]]
-            exit 0
-          fi
-
           summary=(
             "unit=$UNIT_RESULT"
             "compat=$COMPAT_RESULT"
