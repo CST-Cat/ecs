@@ -299,6 +299,7 @@ clone_release "$zstd_repository" "$zstd_tag" "$zstd_commit" "$zstd_src"
 clone_release "$openssl_repository" "$openssl_tag" "$openssl_commit" "$openssl_src"
 clone_release "$fio_repository" "$fio_tag" "$fio_commit" "$fio_src"
 clone_release "$iperf3_repository" "$iperf3_tag" "$iperf3_commit" "$iperf3_src"
+sysbench_short_commit=$(git -C "$sysbench_src" rev-parse --short HEAD)
 
 npb_archive="$work/$npb_tag.tar.gz"
 download_sha256 "$npb_url" "$npb_sha" "$npb_archive" "NPB $npb_tag source archive"
@@ -468,8 +469,11 @@ echo 'running functional FreeBSD tool smoke tests'
 run="$stage/bin"
 sysbench_version=$(lock_tool_field sysbench version)
 "$run/sysbench" --version >"$work/sysbench-version.txt" 2>&1
-grep -Eq "^sysbench ${sysbench_version//./\\.}([[:space:]]|$)" "$work/sysbench-version.txt" ||
-  die "sysbench version smoke did not report $sysbench_version"
+expected_sysbench_version="sysbench $sysbench_version-$sysbench_short_commit"
+grep -Fx "$expected_sysbench_version" "$work/sysbench-version.txt" >/dev/null || {
+  cat "$work/sysbench-version.txt" >&2
+  die "sysbench version smoke did not report $expected_sysbench_version"
+}
 "$run/sysbench" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
 grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" || die 'sysbench CPU smoke output was not recognized'
 
