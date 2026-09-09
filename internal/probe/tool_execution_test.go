@@ -106,7 +106,11 @@ func TestProbeCommandKillsProcessGroups(t *testing.T) {
 	t.Run("parent exits while child holds pipes", func(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "child.pid")
 		path := writeLifecycleFixture(t, "(while :; do :; done) &\nprintf '%s' \"$!\" > \"$1\"\nexit 0\n")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// Keep the caller deadline beyond the configured pipe-drain grace so
+		// this fixture continues to exercise ErrWaitDelay rather than context
+		// cancellation when the grace is tuned for slower FreeBSD VMs.
+		deadline := probeCommandWaitDelay + time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), deadline)
 		defer cancel()
 		started := time.Now()
 		command := newProbeCommand(ctx, path, marker)
@@ -116,7 +120,7 @@ func TestProbeCommandKillsProcessGroups(t *testing.T) {
 			}
 		}()
 		result := command.RunCombined(probeCommandCombinedLimit)
-		if !errors.Is(result.Err, exec.ErrWaitDelay) || time.Since(started) >= time.Second {
+		if !errors.Is(result.Err, exec.ErrWaitDelay) || time.Since(started) >= deadline {
 			t.Fatalf("parent-exit lifecycle command = err:%v elapsed:%s", result.Err, time.Since(started))
 		}
 		pid := readLifecyclePID(t, marker)
