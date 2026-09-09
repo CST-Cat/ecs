@@ -33,6 +33,28 @@ git_source() {
   printf 'git+https://github.com/%s.git@%s\n' "$1" "$2"
 }
 
+# Mirror the Linux bundle contract: compilers always run directly on the build
+# host, while only target binaries may be wrapped by a user-mode emulator.
+# Native FreeBSD CI leaves ECS_TARGET_RUNNER unset, so this is a zero-behavior-
+# change refactor until a cross-build target explicitly selects a runner such as
+# qemu-aarch64-static.
+target_runner_command=()
+smoke_runner=direct
+if [[ -n "${ECS_TARGET_RUNNER:-}" ]]; then
+  command -v "$ECS_TARGET_RUNNER" >/dev/null 2>&1 ||
+    die "target runner is missing: $ECS_TARGET_RUNNER"
+  target_runner_command=("$ECS_TARGET_RUNNER")
+  smoke_runner=$ECS_TARGET_RUNNER
+fi
+
+run_target() {
+  if [[ "${#target_runner_command[@]}" -gt 0 ]]; then
+    "${target_runner_command[@]}" "$@"
+  else
+    "$@"
+  fi
+}
+
 require_layout() {
   [[ -d "$work" ]] || die "phase $phase requires prepared work directory: $work"
   [[ -d "$stage/bin" && -d "$stage/LICENSES" ]] ||
