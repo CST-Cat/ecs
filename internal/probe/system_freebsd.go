@@ -7,10 +7,15 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
-const freeBSDSysctlPath = "/sbin/sysctl"
+const (
+	freeBSDSysctlPath      = "/sbin/sysctl"
+	freeBSDClockMonotonic = 4
+)
 
 func platformDFCommand() string    { return "/bin/df" }
 func platformUnameCommand() string { return "/usr/bin/uname" }
@@ -74,7 +79,14 @@ func collectPlatformSystem(ctx context.Context, s *systemSnapshot) {
 		s.SwapKnown = true
 	}
 
-	if boot, ok := parseFreeBSDBootTime(values["kern.boottime"], time.Now()); ok {
+	// CLOCK_MONOTONIC is the direct FreeBSD uptime fact. Prefer it to
+	// subtracting kern.boottime from wall clock time: VM snapshot/RTC adjustment
+	// can move CLOCK_REALTIME without changing elapsed time since boot.
+	if uptime, ok := freeBSDMonotonicUptimeSeconds(); ok {
+		s.UptimeSeconds, s.UptimeKnown = uptime, true
+	} else if boot, ok := parseFreeBSDBootTime(values["kern.boottime"], time.Now()); ok {
+		// Keep the formatted sysctl as a conservative fallback for environments
+		// that deny clock_gettime unexpectedly.
 		s.UptimeSeconds, s.UptimeKnown = boot, true
 	}
 	if load := parseFreeBSDLoadAverage(values["vm.loadavg"]); load != "" {
@@ -216,6 +228,20 @@ func parseFreeBSDLoadAverage(value string) string {
 		loads = append(loads, field)
 	}
 	return strings.Join(loads, " / ")
+}
+
+func freeBSDMonotonicUptimeSeconds() (uint64, bool) {
+	var timestamp syscall.Timespec
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_CLOCK_GETTIME,
+		uintptr(freeBSDClockMonotonic),
+		uintptr(unsafe.Pointer(&timestamp)),
+		0,
+	)
+	if errno != 0 || timestamp.Sec < 0 {
+		return 0, false
+	}
+	return uint64(timestamp.Sec), true
 }
 
 func parseFreeBSDBootTime(value string, now time.Time) (uint64, bool) {
