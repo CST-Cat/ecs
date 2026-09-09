@@ -107,10 +107,9 @@ func traceProbeValue(probe map[string]json.RawMessage, names ...string) string {
 	return jsonMapString(geo, names...)
 }
 
-// traceNetworkValue keeps network identity ahead of presentation-only host
-// names. Official NextTrace JSON commonly puts the carrier in Geo.owner while
-// also exposing a reverse-DNS Hostname at the probe level; checking every
-// probe key in one flat list would let that Hostname mask the carrier.
+// traceNetworkValue accepts only fields whose source contract describes a
+// network or organization. Reverse-DNS PTR/Host/Hostname values are observed
+// host labels, not network identity, and must not be placed in Network.
 func traceNetworkValue(probe map[string]json.RawMessage) string {
 	if value := jsonMapString(probe, "ASName", "Organization", "Org", "ISP", "Isp", "Network"); value != "" {
 		return value
@@ -123,7 +122,7 @@ func traceNetworkValue(probe map[string]json.RawMessage) string {
 			}
 		}
 	}
-	return jsonMapString(probe, "Owner", "PTR", "Host", "Hostname")
+	return jsonMapString(probe, "Owner")
 }
 
 func jsonMapString(values map[string]json.RawMessage, names ...string) string {

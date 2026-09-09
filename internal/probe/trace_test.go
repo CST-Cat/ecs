@@ -81,6 +81,17 @@ func TestNextTraceCanonicalAdapter(t *testing.T) {
 	}
 }
 
+func TestNextTraceCanonicalAdapterDoesNotPromoteHostnameToNetwork(t *testing.T) {
+	output := `{"Hops":[[{"Address":{"IP":"203.0.113.1"},"Hostname":"router.example","PTR":"ptr.example"}]]}`
+	trace, err := parseNextTraceCanonical(output, "4", "203.0.113.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trace.Hops) != 1 || !trace.Hops[0].Responded || trace.Hops[0].Network != "" {
+		t.Fatalf("NextTrace hostname polluted canonical Network: %#v", trace.Hops)
+	}
+}
+
 func TestFreeBSDTracerouteParserRealFixtures(t *testing.T) {
 	for _, test := range []struct {
 		name, output, family, target string

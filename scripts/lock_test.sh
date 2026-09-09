@@ -32,6 +32,7 @@ jq -e '
   ([.architectures[] | select(.goos == "linux")] | length == 7) and
   ([.architectures[] | select(.goos == "freebsd")] | length == 2) and
   ([.architectures[] | select(.goos == "freebsd") | .goarch] | sort == ["amd64", "arm64"]) and
+  ([.architectures[] | select(.goos == "freebsd") | .openssl_target] | sort == ["BSD-aarch64", "BSD-x86_64"]) and
   ([.architectures[] | select(.goos == "linux") | .package] | length == 7 and length == (unique | length)) and
   (.tools | length == 10) and
   ([.tools[].name] | length == 10 and length == (unique | length)) and
