@@ -27,7 +27,7 @@ concurrency:
 jobs:
   native:
     name: native bundle smoke (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.host_runner }}
     timeout-minutes: 300
     strategy:
       fail-fast: false
@@ -36,11 +36,38 @@ jobs:
           - arch: x86_64
             target: freebsd_amd64
             guest_uname: amd64
+            host_runner: ubuntu-24.04
+            host_uname: x86_64
           - arch: aarch64
             target: freebsd_arm64
             guest_uname: arm64
+            host_runner: ubuntu-24.04
+            host_uname: x86_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: HOST CONTRACT
+        id: host_contract
+        run: |
+          set -eu
+          host_arch=$(uname -m)
+          expected_arch='${{ matrix.host_uname }}'
+          [ "$host_arch" = "$expected_arch" ] || {
+            printf 'host architecture mismatch: target=%s expected=%s actual=%s\n' \
+              '${{ matrix.target }}' "$expected_arch" "$host_arch" >&2
+            exit 1
+          }
+          if [ -c /dev/kvm ]; then
+            kvm=available
+          else
+            kvm=unavailable
+          fi
+          printf 'target=%s\n' '${{ matrix.target }}'
+          printf 'host_runner=%s\n' '${{ matrix.host_runner }}'
+          printf 'host_uname=%s\n' "$host_arch"
+          printf 'host_kvm=%s\n' "$kvm"
+          printf '%s\n' \
+            'host_policy=GitHub ARM64 standard runners do not expose nested KVM; vmactions recommends an x86_64 host for FreeBSD aarch64 guests'
 
       - name: Start FreeBSD 15.1 VM
         id: freebsd_vm
@@ -181,6 +208,7 @@ jobs:
       - name: FreeBSD tools summary
         if: always()
         env:
+          HOST_CONTRACT_OUTCOME: ${{ steps.host_contract.outcome }}
           VM_OUTCOME: ${{ steps.freebsd_vm.outcome }}
           VM_CONTRACT_OUTCOME: ${{ steps.vm_contract.outcome }}
           SOURCES_OUTCOME: ${{ steps.tools_sources.outcome }}
@@ -196,6 +224,7 @@ jobs:
         run: |
           failed=0
           for item in \
+            "HOST_CONTRACT=$HOST_CONTRACT_OUTCOME" \
             "VM=$VM_OUTCOME" \
             "VM_CONTRACT=$VM_CONTRACT_OUTCOME" \
             "SOURCES=$SOURCES_OUTCOME" \
