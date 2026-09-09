@@ -21,11 +21,10 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-freebsd-runtime.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 
 # Runtime CI answers whether the FreeBSD product path actually works. Build the
-# real binary and execute a local-only system report as an ordinary user before
-# running the small set of platform-specific regressions below. System inventory
-# may legitimately be warning-level when optional hardware/cloud facts are
-# unavailable, so this smoke checks successful execution and report creation;
-# the targeted runtime test below asserts the required FreeBSD core facts.
+# real binary and execute a local-only system report as an ordinary user. System
+# inventory may legitimately be warning-level when optional hardware/cloud facts
+# are unavailable, so this smoke checks successful execution and report creation;
+# the native system test below asserts the required FreeBSD core facts.
 go build -o "$work/ecs" ./cmd/ecs
 mkdir -p "$work/reports"
 "$work/ecs" \
@@ -41,12 +40,13 @@ mkdir -p "$work/reports"
   exit 1
 }
 
-# Keep this deliberately narrow. Linux already owns the broad unit/race/parser
-# suite. FreeBSD runtime CI validates native system collection, the shared
-# command lifecycle regression that previously broke arm64, and the real base
-# ping/traceroute/backtrace paths that define FreeBSD support.
+# Keep this deliberately functional. Broad unit/race/parser regressions run on
+# Linux already. FreeBSD runtime CI only gates the native system inventory and
+# the real base-system ping/traceroute/backtrace paths that define FreeBSD
+# support. Frozen benchmark binaries have their own native functional smoke in
+# freebsd-tools.yml.
 go test -tags=integration ./internal/probe \
-  -run '^(TestFreeBSDSystemResultUsesNativeMethodsAndUnavailableLinuxFacts|TestSpeedProducerBuildsStablePartialStatusDirectly|TestProbeCommandKillsProcessGroups|TestIntegrationPingLoopback|TestIntegrationFreeBSDTracerouteCanonicalRoute|TestIntegrationFreeBSDBacktraceCanonical)$' \
+  -run '^(TestFreeBSDSystemResultUsesNativeMethodsAndUnavailableLinuxFacts|TestIntegrationPingLoopback|TestIntegrationFreeBSDTracerouteCanonicalRoute|TestIntegrationFreeBSDBacktraceCanonical)$' \
   -timeout 10m \
   -count=1 \
   -v
