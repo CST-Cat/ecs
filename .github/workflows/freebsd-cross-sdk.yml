@@ -50,11 +50,11 @@ jobs:
           set -eu
           [ "$(uname -s)" = FreeBSD ]
           [ "$(uname -m)" = amd64 ]
-          command -v aarch64-unknown-freebsd15.1-as
-          command -v aarch64-unknown-freebsd15.1-ld
+          pkg info -e 'aarch64-binutils-*'
           command -v qemu-aarch64-static
           printf 'build_host=%s/%s\n' "$(uname -s)" "$(uname -m)"
           printf 'target=FreeBSD/aarch64\n'
+          printf 'binutils_package=%s\n' "$(pkg query '%n-%v' aarch64-binutils)"
           printf 'execution_model=host-native cross build; qemu-user only for finished target probes\n'
 
       - name: SYSROOT
