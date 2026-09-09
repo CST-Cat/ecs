@@ -50,14 +50,43 @@ require_sources() {
   [[ -s "$stream_src" ]] || die 'prepared STREAM source is missing'
 }
 
+validate_freebsd_elf_identity() {
+  local tool=$1 binary=$2
+  local header="$work/${tool}.elf-header"
+  local notes="$work/${tool}.elf-notes"
+
+  if ! readelf -hW "$binary" >"$header" 2>&1; then
+    cat "$header" >&2
+    die "ELF-header readelf failed for $tool"
+  fi
+
+  # GCC-built FreeBSD/aarch64 binaries can retain a GNU/Linux EI_OSABI value
+  # while carrying the authoritative FreeBSD ABI version in .note.tag. Accept
+  # either the explicit ELF OS/ABI or a FreeBSD-owned ELF note; do not infer the
+  # target OS from architecture or from the human-oriented `file` description.
+  if grep -Eq 'OS/ABI:[[:space:]]+UNIX - FreeBSD' "$header"; then
+    return 0
+  fi
+
+  if ! readelf -nW "$binary" >"$notes" 2>&1; then
+    cat "$header" "$notes" >&2
+    die "ELF-note readelf failed for $tool"
+  fi
+  if grep -Eq '(^|[[:space:]])FreeBSD([[:space:]]|$)' "$notes"; then
+    return 0
+  fi
+
+  cat "$header" "$notes" >&2
+  die "$tool is missing FreeBSD ELF ABI identity"
+}
+
 validate_binary() {
   local tool=$1
   local binary="$stage/bin/$tool"
   chmod 0755 "$binary"
   [[ -s "$binary" ]] || die "built $tool is empty"
   file "$binary"
-  readelf -h "$binary" | grep -Eq 'FreeBSD|UNIX - FreeBSD' ||
-    die "$tool is not a FreeBSD ELF binary"
+  validate_freebsd_elf_identity "$tool" "$binary"
   readelf -dW "$binary" >"$work/${tool}.dynamic" 2>&1 ||
     die "dynamic-header readelf failed for $tool"
   readelf -lW "$binary" >"$work/${tool}.program" 2>&1 ||
