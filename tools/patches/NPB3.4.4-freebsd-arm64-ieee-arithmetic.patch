@@ -1,0 +1,29 @@
+--- a/EP/verify.f90
++++ b/EP/verify.f90
+@@ -2,8 +2,6 @@
+       subroutine verify(m, sx, sy, gc, verified, class)
+ !---------------------------------------------------------------------
+ 
+-      use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
+-
+       implicit none
+       integer m
+       double precision sx, sy, gc
+@@ -55,7 +53,7 @@
+       if (verified) then
+          sx_err = abs((sx - sx_verify_value)/sx_verify_value)
+          sy_err = abs((sy - sy_verify_value)/sy_verify_value)
+-         if (ieee_is_nan(sx_err) .or. ieee_is_nan(sy_err)) then
++         if ((sx_err.ne.sx_err) .or. (sy_err.ne.sy_err)) then
+             verified = .false.
+          else
+             verified = ((sx_err.le.epsilon) .and. (sy_err.le.epsilon))
+@@ -63,7 +61,7 @@
+       endif
+       if (verified) then
+          gc_err = abs((gc - gc_verify_value)/gc_verify_value)
+-         if (ieee_is_nan(gc_err) .or. gc_err.gt.epsilon) then
++         if ((gc_err.ne.gc_err) .or. gc_err.gt.epsilon) then
+             verified = .false.
+          endif
+       endif
