@@ -12,10 +12,8 @@ import (
 	"unsafe"
 )
 
-const (
-	freeBSDSysctlPath      = "/sbin/sysctl"
-	freeBSDClockMonotonic = 4
-)
+const freeBSDSysctlPath = "/sbin/sysctl"
+const freeBSDClockMonotonic = 4
 
 func platformDFCommand() string    { return "/bin/df" }
 func platformUnameCommand() string { return "/usr/bin/uname" }
