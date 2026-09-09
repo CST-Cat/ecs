@@ -39,25 +39,178 @@ jobs:
             target: freebsd_arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Build and smoke pinned tools in FreeBSD 15.1
+
+      - name: Start FreeBSD 15.1 VM
+        id: freebsd_vm
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
-        env:
-          ECS_FREEBSD_TARGET: ${{ matrix.target }}
         with:
           release: "15.1"
           arch: ${{ matrix.arch }}
-          envs: ECS_FREEBSD_TARGET
+          sync: rsync
           copyback: false
           cache-after-prepare: true
+          custom-shell-name: freebsd
           prepare: |
             pkg install -y \
               autoconf automake bash binutils ca_root_nss concurrencykit curl \
               gcc14 git gmake go help2man jq libtool luajit m4 perl5 pkgconf
             pw useradd ecsci -m -s /bin/sh
-          run: |
-            set -eu
             chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
-            su -m ecsci -c \
-              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-              ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
-              /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh'"
+
+      - name: SOURCES
+        id: tools_sources
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sources"
+
+      - name: SYSBENCH
+        id: tools_sysbench
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sysbench"
+
+      - name: ZSTD
+        id: tools_zstd
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' zstd"
+
+      - name: NPB
+        id: tools_npb
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' npb"
+
+      - name: OPENSSL
+        id: tools_openssl
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' openssl"
+
+      - name: STREAM
+        id: tools_stream
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' stream"
+
+      - name: FIO
+        id: tools_fio
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' fio"
+
+      - name: IPERF3
+        id: tools_iperf3
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' iperf3"
+
+      - name: MANIFEST
+        id: tools_manifest
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' manifest"
+
+      - name: VERIFY
+        id: tools_verify
+        shell: freebsd {0}
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' verify"
+
+      - name: FreeBSD tools summary
+        if: always()
+        env:
+          VM_OUTCOME: ${{ steps.freebsd_vm.outcome }}
+          SOURCES_OUTCOME: ${{ steps.tools_sources.outcome }}
+          SYSBENCH_OUTCOME: ${{ steps.tools_sysbench.outcome }}
+          ZSTD_OUTCOME: ${{ steps.tools_zstd.outcome }}
+          NPB_OUTCOME: ${{ steps.tools_npb.outcome }}
+          OPENSSL_OUTCOME: ${{ steps.tools_openssl.outcome }}
+          STREAM_OUTCOME: ${{ steps.tools_stream.outcome }}
+          FIO_OUTCOME: ${{ steps.tools_fio.outcome }}
+          IPERF3_OUTCOME: ${{ steps.tools_iperf3.outcome }}
+          MANIFEST_OUTCOME: ${{ steps.tools_manifest.outcome }}
+          VERIFY_OUTCOME: ${{ steps.tools_verify.outcome }}
+        run: |
+          failed=0
+          for item in \
+            "VM=$VM_OUTCOME" \
+            "SOURCES=$SOURCES_OUTCOME" \
+            "SYSBENCH=$SYSBENCH_OUTCOME" \
+            "ZSTD=$ZSTD_OUTCOME" \
+            "NPB=$NPB_OUTCOME" \
+            "OPENSSL=$OPENSSL_OUTCOME" \
+            "STREAM=$STREAM_OUTCOME" \
+            "FIO=$FIO_OUTCOME" \
+            "IPERF3=$IPERF3_OUTCOME" \
+            "MANIFEST=$MANIFEST_OUTCOME" \
+            "VERIFY=$VERIFY_OUTCOME"; do
+            name=${item%%=*}
+            outcome=${item#*=}
+            case "$outcome" in
+              success) printf '[PASS] %s\n' "$name" ;;
+              skipped) printf '[SKIP] %s\n' "$name" ;;
+              *) printf '[FAIL] %s (%s)\n' "$name" "$outcome"; failed=1 ;;
+            esac
+          done
+          exit "$failed"
