@@ -1,8 +1,8 @@
 #!/bin/sh
-set -u
+set -eu
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "freebsd-runtime: integration must run as an ordinary user" >&2
+  echo "freebsd-runtime: checks must run as an ordinary user" >&2
   exit 1
 fi
 if [ "$(uname -s)" != FreeBSD ]; then
@@ -10,46 +10,29 @@ if [ "$(uname -s)" != FreeBSD ]; then
   exit 1
 fi
 
-repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd) || exit 1
-cd "$repo_root" || exit 1
+repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+cd "$repo_root"
 
-freebsd-version
-uname -a
-go version
-
-work=$(mktemp -d "${TMPDIR:-/tmp}/ecs-freebsd-runtime.XXXXXX") || exit 1
-trap 'rm -rf -- "$work"' EXIT HUP INT TERM
-
-failures=0
-results=""
-
-run_check() {
-  name=$1
-  shift
-
-  printf '\n===== %s =====\n' "$name"
-  if "$@"; then
-    printf '[PASS] %s\n' "$name"
-    results="${results}${name}=PASS\n"
-    return 0
-  else
-    status=$?
-  fi
-
-  printf '[FAIL] %s (exit %s)\n' "$name" "$status" >&2
-  results="${results}${name}=FAIL\n"
-  failures=$((failures + 1))
-  return 0
-}
+work="${TMPDIR:-/tmp}/ecs-freebsd-runtime"
+command=${1:-}
 
 check_build() {
+  rm -rf -- "$work"
+  mkdir -p "$work"
+  freebsd-version
+  uname -a
+  go version
   go build -o "$work/ecs" ./cmd/ecs
 }
 
 check_system() {
-  mkdir -p "$work/reports" || return 1
-  rm -f "$work/reports/system.json"
+  [ -x "$work/ecs" ] || {
+    echo "freebsd-runtime: BUILD did not produce $work/ecs" >&2
+    return 1
+  }
 
+  mkdir -p "$work/reports"
+  rm -f "$work/reports/system.json"
   "$work/ecs" \
     --only system \
     --exposure local \
@@ -57,12 +40,12 @@ check_system() {
     --output "$work/reports" \
     --name system \
     --yes \
-    --no-color || return 1
+    --no-color
 
-  if [ ! -s "$work/reports/system.json" ]; then
+  [ -s "$work/reports/system.json" ] || {
     echo "freebsd-runtime: ecs --only system did not produce JSON" >&2
     return 1
-  fi
+  }
 
   go test -tags=integration ./internal/probe \
     -run '^TestFreeBSDSystemResultUsesNativeMethodsAndUnavailableLinuxFacts$' \
@@ -95,20 +78,24 @@ check_backtrace() {
     -v
 }
 
-# One VM, five product-facing failure domains. A failure in one domain must not
-# hide the state of the others; collect every result and fail once at the end.
-run_check BUILD check_build
-run_check SYSTEM check_system
-run_check PING check_ping
-run_check ROUTE check_route
-run_check BACKTRACE check_backtrace
-
-printf '\n===== FreeBSD runtime summary =====\n'
-printf '%b' "$results"
-
-if [ "$failures" -ne 0 ]; then
-  printf 'freebsd-runtime: %d functional check(s) failed\n' "$failures" >&2
-  exit 1
-fi
-
-printf 'freebsd-runtime: all functional checks passed\n'
+case "$command" in
+  build)
+    check_build
+    ;;
+  system)
+    check_system
+    ;;
+  ping)
+    check_ping
+    ;;
+  route)
+    check_route
+    ;;
+  backtrace)
+    check_backtrace
+    ;;
+  *)
+    echo "usage: $0 {build|system|ping|route|backtrace}" >&2
+    exit 2
+    ;;
+esac
