@@ -151,15 +151,15 @@ jobs:
           arch: ${{ matrix.arch }}
           copyback: false
           cache-after-prepare: true
-          prepare: pkg install -y go
+          prepare: |
+            pkg install -y go
+            pw useradd ecsci -m -s /bin/sh
           run: |
             set -eu
-            test "$(id -u)" -ne 0
-            freebsd-version
-            uname -a
-            go version
-            go test ./...
-            go test -tags=integration ./internal/probe -timeout 20m -count=1
+            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+            su -m ecsci -c \
+              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/bin:/bin \
+              /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh'"
 
   # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，
   # 手改数值而不重算会被当场发现。只读：写权限属于 leaderboard.yml。

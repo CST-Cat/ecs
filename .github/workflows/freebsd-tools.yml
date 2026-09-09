@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/freebsd-tools.yml"
       - "scripts/build_tools_freebsd.sh"
+      - "scripts/ci/freebsd_tools.sh"
       - "scripts/package.sh"
       - "scripts/verify_tools_stage.sh"
       - "scripts/lib/**"
@@ -51,16 +52,11 @@ jobs:
             pkg install -y \
               autoconf automake bash binutils ca_root_nss concurrencykit curl \
               gcc14 git gmake go help2man jq libtool luajit m4 perl5 pkgconf
+            pw useradd ecsci -m -s /bin/sh
           run: |
             set -eu
-            test "$(id -u)" -ne 0
-            stage_root=/tmp/ecs-freebsd-tools-stage
-            work_root=/tmp/ecs-freebsd-tools-work
-            rm -rf "$stage_root" "$work_root"
-            ECS_TOOLS_WORK="$work_root" JOBS=2 \
-              bash scripts/build_tools_freebsd.sh \
-                --target "$ECS_FREEBSD_TARGET" \
-                --stage-root "$stage_root"
-            bash scripts/verify_tools_stage.sh \
-              --target "$ECS_FREEBSD_TARGET" \
-              --stage-root "$stage_root"
+            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+            su -m ecsci -c \
+              "HOME=/home/ecsci PATH=/usr/local/bin:/usr/bin:/bin \
+              ECS_FREEBSD_TARGET='$ECS_FREEBSD_TARGET' \
+              /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh'"
