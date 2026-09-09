@@ -32,9 +32,10 @@ run_check() {
     printf '[PASS] %s\n' "$name"
     results="${results}${name}=PASS\n"
     return 0
+  else
+    status=$?
   fi
 
-  status=$?
   printf '[FAIL] %s (exit %s)\n' "$name" "$status" >&2
   results="${results}${name}=FAIL\n"
   failures=$((failures + 1))
