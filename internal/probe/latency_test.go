@@ -59,19 +59,22 @@ func TestLatencyResolutionFamiliesInterceptionAndICMP(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name string
-		tcp  time.Duration
-		icmp icmpStats
-		want bool
+		name    string
+		tcp     time.Duration
+		icmp    icmpStats
+		address string
+		want    bool
 	}{
-		{name: "strong mismatch", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, want: true},
-		{name: "normal ratio", tcp: 30 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}},
-		{name: "no ICMP", tcp: 10 * time.Millisecond},
-		{name: "all loss", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100, LossPercent: 100}},
-		{name: "local RTT", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 1}},
-		{name: "invalid TCP", tcp: 0, icmp: icmpStats{Available: true, AvgMS: 100}},
+		{name: "strong mismatch", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443", want: true},
+		{name: "normal ratio", tcp: 30 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443"},
+		{name: "no ICMP", tcp: 10 * time.Millisecond, address: "203.0.113.1:443"},
+		{name: "all loss", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100, LossPercent: 100}, address: "203.0.113.1:443"},
+		{name: "local RTT", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 1}, address: "203.0.113.1:443"},
+		{name: "loopback scheduler noise", tcp: 200 * time.Microsecond, icmp: icmpStats{Available: true, AvgMS: 3}, address: "127.0.0.1:443"},
+		{name: "IPv6 loopback scheduler noise", tcp: 200 * time.Microsecond, icmp: icmpStats{Available: true, AvgMS: 3}, address: "[::1]:443"},
+		{name: "invalid TCP", tcp: 0, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443"},
 	} {
-		if got := tcpLikelyIntercepted(test.tcp, test.icmp); got != test.want {
+		if got := tcpLikelyIntercepted(test.tcp, test.icmp, test.address); got != test.want {
 			t.Errorf("%s interception = %v, want %v", test.name, got, test.want)
 		}
 	}

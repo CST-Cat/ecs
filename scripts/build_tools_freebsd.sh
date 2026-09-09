@@ -493,8 +493,10 @@ for benchmark in ep ft; do
       OMP_SCHEDULE=static OMP_DISPLAY_ENV=FALSE NPB_TIMER_FLAG=0 \
       "$run/npb-$benchmark"
   ) >"$work/npb-$benchmark-smoke.txt" 2>&1
-  grep -F 'Verification = SUCCESSFUL' "$work/npb-$benchmark-smoke.txt" >/dev/null ||
+  grep -F 'Verification = SUCCESSFUL' "$work/npb-$benchmark-smoke.txt" >/dev/null || {
+    cat "$work/npb-$benchmark-smoke.txt" >&2
     die "NPB $benchmark smoke verification failed"
+  }
   grep -Eq "^[[:space:]]*Version[[:space:]]*=[[:space:]]*${npb_version//./\\.}[[:space:]]*$" \
     "$work/npb-$benchmark-smoke.txt" || die "NPB $benchmark reported the wrong version"
 done

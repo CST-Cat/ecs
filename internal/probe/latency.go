@@ -114,11 +114,17 @@ const tcpInterceptRatio = 5
 
 // tcpLikelyIntercepted 判断 TCP 建连延迟是否与同目标的 ICMP 往返严重背离。
 //
-// 只在 ICMP 确实拿到样本、且目标不在本地网络时判断；缺证据一律返回 false，
+// 只在 ICMP 确实拿到样本、且目标不是回环地址时判断；缺证据一律返回 false，
 // 绝不把普通的网络波动说成代理截获。
-func tcpLikelyIntercepted(tcpMedian time.Duration, icmp icmpStats) bool {
+func tcpLikelyIntercepted(tcpMedian time.Duration, icmp icmpStats, dialAddress string) bool {
 	if !icmp.Available || icmp.LossPercent >= 100 || icmp.AvgMS <= 1 {
 		return false
+	}
+	host, _, err := net.SplitHostPort(dialAddress)
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return false
+		}
 	}
 	tcpMS := float64(tcpMedian) / float64(time.Millisecond)
 	if tcpMS <= 0 {
@@ -300,7 +306,7 @@ func (latencyProbe) Run(ctx context.Context, env Environment) model.Result {
 			addFailure(&result, "connect", item.DialAddress, item.LastErr, item.Failures)
 		}
 		appendICMPMeasurementsForFamily(&result, item.Endpoint.Name, item.Family, item.ICMP)
-		if tcpLikelyIntercepted(median, item.ICMP) {
+		if tcpLikelyIntercepted(median, item.ICMP, item.DialAddress) {
 			intercepted = append(intercepted, item.Endpoint.Name)
 		}
 	}
