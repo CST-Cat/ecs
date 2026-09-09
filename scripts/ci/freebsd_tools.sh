@@ -16,7 +16,15 @@ if [[ "$(id -u)" -eq 0 ]]; then
   die 'build and smoke tests must run as an ordinary user'
 fi
 [[ "$(uname -s)" == FreeBSD ]] || die 'expected FreeBSD'
-[[ -n "${ECS_FREEBSD_TARGET:-}" ]] || die 'ECS_FREEBSD_TARGET is required'
+
+if [[ -z "${ECS_FREEBSD_TARGET:-}" ]]; then
+  case "$(uname -m)" in
+    amd64 | x86_64) ECS_FREEBSD_TARGET=freebsd_amd64 ;;
+    arm64 | aarch64) ECS_FREEBSD_TARGET=freebsd_arm64 ;;
+    *) die "unsupported FreeBSD architecture: $(uname -m)" ;;
+  esac
+fi
+export ECS_FREEBSD_TARGET
 
 phase=${1:-all}
 case "$phase" in
