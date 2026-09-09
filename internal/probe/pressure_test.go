@@ -1,3 +1,5 @@
+//go:build linux
+
 package probe
 
 import (
@@ -28,48 +30,12 @@ var pressureWindowMeasurementKeys = []string{
 	"cgroup_oom_kill_events_window",
 }
 
-func TestPressureParsersAndCalculations(t *testing.T) {
-	psi := parsePSI("some avg10=1.50 avg60=2.00 avg300=3.00 total=100\nfull avg10=0.10 avg60=0.20 avg300=0.30 total=20\n")
-	if !psi.Some.Present || psi.Some.Avg10 != 1.5 || psi.Some.Avg60 != 2 || psi.Some.Avg300 != 3 || psi.Some.TotalUS != 100 {
-		t.Fatalf("PSI some parse = %+v", psi.Some)
-	}
-	if !psi.Full.Present || psi.Full.Avg10 != 0.1 || psi.Full.Avg60 != 0.2 || psi.Full.Avg300 != 0.3 || psi.Full.TotalUS != 20 {
-		t.Fatalf("PSI full parse = %+v", psi.Full)
-	}
-	if malformed := parsePSI("not-a-psi-line\n"); malformed.Some.Present || malformed.Full.Present {
-		t.Fatalf("malformed PSI reported as present: %+v", malformed)
-	}
-
+func TestLinuxPressureCgroupParsers(t *testing.T) {
 	if counters := parseKeyValueCounters("usage_usec 10\nbad nope\nnr_periods 2\n"); counters["usage_usec"] != 10 || counters["nr_periods"] != 2 || len(counters) != 2 {
 		t.Fatalf("counter parse = %v", counters)
 	}
 	if cpuSetCount("0-2,4,invalid,7-6") != 4 {
 		t.Fatalf("cpuset count = %d", cpuSetCount("0-2,4,invalid,7-6"))
-	}
-	if delta, ok := counterDelta(2, 5); !ok || delta != 3 {
-		t.Fatalf("counter delta = %v/%v", delta, ok)
-	}
-	if delta, ok := counterDelta(5, 2); ok || delta != 0 {
-		t.Fatalf("counter rollback delta = %v/%v", delta, ok)
-	}
-	if value, ok := pressurePercent(
-		psiValues{TotalUS: 100, Present: true},
-		psiValues{TotalUS: 350_100, Present: true},
-		time.Second,
-	); !ok || value != 35 {
-		t.Fatalf("pressure percentage = %v/%v", value, ok)
-	}
-	if value, ok := pressurePercent(psiValues{Present: true}, psiValues{Present: true, TotalUS: 2_000_000}, time.Second); !ok || value != 100 {
-		t.Fatalf("pressure percentage clamp = %v/%v", value, ok)
-	}
-	if _, ok := pressurePercent(psiValues{TotalUS: 5, Present: true}, psiValues{TotalUS: 2, Present: true}, time.Second); ok {
-		t.Fatal("PSI counter rollback produced a percentage")
-	}
-	if _, ok := pressurePercent(psiValues{}, psi.Some, time.Second); ok {
-		t.Fatal("unavailable PSI produced a percentage")
-	}
-	if _, ok := pressurePercent(psi.Some, psi.Some, 0); ok {
-		t.Fatal("zero-length window produced a percentage")
 	}
 }
 

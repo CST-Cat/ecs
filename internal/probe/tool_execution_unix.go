@@ -1,3 +1,5 @@
+//go:build linux || freebsd
+
 package probe
 
 import (
@@ -55,6 +57,9 @@ type probeCommandResult struct {
 	Err      error
 }
 
+// probeCommand owns the shared command lifecycle used by benchmark
+// adapters. Linux and FreeBSD both support a child process group, so the
+// output limits, cancellation and cleanup policy remain one implementation.
 type probeCommand struct {
 	*exec.Cmd
 	parentContext context.Context

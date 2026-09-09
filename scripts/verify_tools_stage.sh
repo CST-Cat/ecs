@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 校验某个架构的工具 stage，并把 Silesia 语料从中摘出去。
+# 校验某个完整 platform target 的工具 stage，并把 Silesia 语料从中摘出去。
 #
 # 校验分两层：
 #
@@ -23,7 +23,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
 
 usage() {
-  echo "usage: scripts/verify_tools_stage.sh --arch ARCH --stage-root DIR [--keep-corpus]" >&2
+  echo "usage: scripts/verify_tools_stage.sh --target TARGET --stage-root DIR [--keep-corpus]" >&2
 }
 
 die() {
@@ -31,14 +31,14 @@ die() {
   exit 1
 }
 
-arch=""
+target=""
 stage_root=""
 keep_corpus=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --arch)
-      [[ "$#" -ge 2 && -n "$2" ]] || die "--arch requires a value"
-      arch=$2
+    --target)
+      [[ "$#" -ge 2 && -n "$2" ]] || die "--target requires a value"
+      target=$2
       shift 2
       ;;
     --stage-root)
@@ -61,53 +61,64 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ -n "$arch" ]] || {
+[[ -n "$target" ]] || {
   usage
-  die "--arch is required"
+  die "--target is required"
 }
 [[ -n "$stage_root" ]] || {
   usage
   die "--stage-root is required"
 }
-stage_dir="$stage_root/linux_$arch"
+stage_dir="$stage_root/$target"
 manifest="$stage_dir/manifest.json"
 [[ -s "$manifest" ]] || die "missing manifest: $manifest"
 
 # 构建口径来自构建脚本本身。
-params=$("$ECS_REPO_ROOT/scripts/build_tools_container.sh" --arch "$arch" --print-params)
+case "$target" in
+  linux_*) params=$("$ECS_REPO_ROOT/scripts/build_tools_container.sh" --target "$target" --print-params) ;;
+  freebsd_*) params=$("$ECS_REPO_ROOT/scripts/build_tools_freebsd.sh" --target "$target" --print-params) ;;
+  *) die "unsupported target: $target" ;;
+esac
 toolchain_mode=$(awk -F= '$1 == "toolchain_mode" { print $2 }' <<<"$params")
 target_runner=$(awk -F= '$1 == "target_runner" { print $2 }' <<<"$params")
 npb_class=$(awk -F= '$1 == "npb_ci_smoke_class" { print $2 }' <<<"$params")
 [[ -n "$toolchain_mode" && -n "$target_runner" && -n "$npb_class" ]] ||
-  die "could not resolve build parameters for $arch"
+  die "could not resolve build parameters for $target"
 
-echo "verify-tools-stage: $arch mode=$toolchain_mode runner=$target_runner npb_class=$npb_class" >&2
+echo "verify-tools-stage: $target mode=$toolchain_mode runner=$target_runner npb_class=$npb_class" >&2
 
 # Canonical parser/validator owns manifest structure, fields, tool set, and
 # architecture semantics. The expected build mode, smoke runner, and NPB
 # class are stage-specific values supplied by the build container, so they are
 # checked by the same Go entry point rather than duplicated in jq.
 go run "$ECS_REPO_ROOT/cmd/tools-manifest-check" \
-  --architecture "$arch" \
+  --target "$target" \
   --toolchain-mode "$toolchain_mode" \
   --smoke-runner "$target_runner" \
   --npb-smoke-class "$npb_class" \
   "$manifest"
 
-# 十个工具都必须真的在 stage 里，且可执行。
-for tool in "${ECS_TOOL_NAMES[@]}"; do
+# 当前 target 的全部工具都必须真的在 stage 里，且可执行。
+mapfile -t target_tools < <(ecs_target_tool_names "$target")
+for tool in "${target_tools[@]}"; do
   tool_path="$stage_dir/bin/$tool"
-  [[ -x "$tool_path" ]] || die "$arch stage is missing an executable $tool"
+  [[ -x "$tool_path" ]] || die "$target stage is missing an executable $tool"
 done
-[[ -d "$stage_dir/LICENSES" ]] || die "$arch stage is missing LICENSES"
+[[ -d "$stage_dir/LICENSES" ]] || die "$target stage is missing LICENSES"
 
 corpus="$stage_dir/share/ecs/corpus/$ECS_CORPUS_NAME"
+goos=$(ecs_lock_target_field "$target" goos) || die "could not resolve OS for $target"
+if [[ "$goos" == freebsd ]]; then
+  [[ ! -e "$corpus" ]] || die "$target stage unexpectedly contains the separately packaged Silesia corpus"
+  echo "verify-tools-stage: $target verified; the shared Silesia corpus is packaged separately" >&2
+  exit 0
+fi
 if [[ "$keep_corpus" -eq 1 ]]; then
-  echo "verify-tools-stage: $arch verified, corpus kept" >&2
+  echo "verify-tools-stage: $target verified, corpus kept" >&2
   exit 0
 fi
 
-[[ -f "$corpus" ]] || die "$arch stage is missing the Silesia corpus"
+[[ -f "$corpus" ]] || die "$target stage is missing the Silesia corpus"
 
 # 容器以 root 写出这些文件，宿主上的普通用户需要 sudo 才能删。
 remove() {
@@ -121,4 +132,4 @@ rmdir "$stage_dir/share/ecs/corpus" "$stage_dir/share/ecs" "$stage_dir/share" 2>
   sudo rmdir "$stage_dir/share/ecs/corpus" "$stage_dir/share/ecs" "$stage_dir/share" 2>/dev/null || true
 [[ ! -e "$corpus" ]] || die "corpus is still present after removal"
 
-echo "verify-tools-stage: $arch verified, corpus removed" >&2
+echo "verify-tools-stage: $target verified, corpus removed" >&2

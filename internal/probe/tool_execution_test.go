@@ -3,7 +3,6 @@ package probe
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,19 +70,8 @@ func TestProbeCommandKillsProcessGroups(t *testing.T) {
 			if err := syscall.Kill(-processGroup, 0); errors.Is(err, syscall.ESRCH) {
 				return
 			}
-			data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			if processStateGone(t, pid) {
 				return
-			}
-			if err == nil {
-				if end := strings.LastIndexByte(string(data), ')'); end >= 0 {
-					fields := strings.Fields(string(data)[end+1:])
-					if len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X") {
-						return
-					}
-				}
-			} else {
-				t.Fatal(err)
 			}
 			if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
 				return
@@ -96,7 +84,9 @@ func TestProbeCommandKillsProcessGroups(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "child.pid")
 		path := writeLifecycleFixture(t, "(while :; do :; done) &\nprintf '%s' \"$!\" > \"$1\"\nwhile :; do :; done\n")
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		// Keep enough startup margin for slower real FreeBSD VMs before the
+		// cancellation deadline, while retaining a bounded lifecycle check.
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 		command := newProbeCommand(ctx, path, marker)
 		defer func() {

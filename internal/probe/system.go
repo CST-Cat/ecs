@@ -18,41 +18,49 @@ type systemProbe struct{}
 func (systemProbe) ID() string { return "system" }
 
 type systemSnapshot struct {
-	Hostname      string
-	OS            string
-	Kernel        string
-	Arch          string
-	CPUModel      string
-	LogicalCPUs   int
-	PhysicalCores int
-	CPUFrequency  string
-	CPUCache      string
-	AES           string
+	Hostname           string
+	OS                 string
+	Kernel             string
+	Arch               string
+	CPUModel           string
+	LogicalCPUs        int
+	PhysicalCores      int
+	PhysicalCoresKnown bool
+	CPUFrequency       string
+	CPUCache           string
+	AES                string
 	// Nested 表示 CPU 是否暴露了硬件虚拟化指令（vmx/svm），决定能否跑嵌套虚拟化。
-	Nested         string
-	Virtualization string
-	MemoryTotal    uint64
-	MemoryUsed     uint64
-	MemoryFree     uint64
-	MemoryUsage    float64
-	SwapTotal      uint64
-	DiskTotal      uint64
-	DiskUsed       uint64
-	DiskFree       uint64
-	DiskUsage      float64
-	DiskDevice     string
-	DiskMount      string
-	UptimeSeconds  uint64
-	UptimeKnown    bool
-	Load           string
-	Congestion     string
-	QDisc          string
-	Hardware       hardwareInventory
+	Nested               string
+	Virtualization       string
+	MemoryTotal          uint64
+	MemoryUsed           uint64
+	MemoryFree           uint64
+	MemoryUsage          float64
+	MemoryTotalKnown     bool
+	MemoryUsedKnown      bool
+	MemoryAvailableKnown bool
+	MemoryMethod         string
+	SwapTotal            uint64
+	SwapKnown            bool
+	DiskTotal            uint64
+	DiskUsed             uint64
+	DiskFree             uint64
+	DiskUsage            float64
+	DiskKnown            bool
+	DiskDevice           string
+	DiskMount            string
+	UptimeSeconds        uint64
+	UptimeKnown          bool
+	Load                 string
+	Congestion           string
+	QDisc                string
+	Hardware             hardwareInventory
 
 	// Allowance 是 cgroup 配额折算后本进程真正可用的 CPU。
 	Allowance cpuAllowance
-	// MemoryLimit 是 cgroup 内存上限；非零且小于 MemoryTotal 时说明
-	// /proc/meminfo 报的是宿主机内存（没有 lxcfs 的 LXC/OpenVZ 常见）。
+	// MemoryLimit 是 Linux cgroup 内存上限；非零且小于 MemoryTotal 时说明
+	// Linux host memory reporting is not the process's effective limit. FreeBSD
+	// leaves this fact unavailable because it has no Linux cgroup interface.
 	MemoryLimit    uint64
 	BalloonReclaim memoryFacility
 	KSM            memoryFacility
@@ -79,34 +87,29 @@ func (systemProbe) Run(ctx context.Context, env Environment) model.Result {
 func collectSystem(ctx context.Context, diskPath string) systemSnapshot {
 	hostname, _ := os.Hostname()
 	s := systemSnapshot{
-		Hostname:       hostname,
-		OS:             "linux",
-		Arch:           runtime.GOARCH,
-		LogicalCPUs:    runtime.NumCPU(),
-		PhysicalCores:  runtime.NumCPU(),
-		CPUModel:       "unknown",
-		CPUFrequency:   "unknown",
-		CPUCache:       "unknown",
-		AES:            "unknown",
-		Nested:         "unknown",
-		Virtualization: "unknown",
-		Load:           "unknown",
-		Congestion:     "n/a",
-		QDisc:          "n/a",
-		DiskMount:      diskPath,
-		Allowance:      detectCPUAllowance(),
-		BalloonReclaim: memoryFacility{Evidence: "unavailable"},
-		KSM:            memoryFacility{Evidence: "unavailable"},
+		Hostname:           hostname,
+		OS:                 "unknown",
+		Arch:               runtime.GOARCH,
+		LogicalCPUs:        runtime.NumCPU(),
+		PhysicalCores:      runtime.NumCPU(),
+		PhysicalCoresKnown: true,
+		CPUModel:           "unknown",
+		CPUFrequency:       "unknown",
+		CPUCache:           "unknown",
+		AES:                "unknown",
+		Nested:             "unknown",
+		Virtualization:     "unknown",
+		Load:               "unknown",
+		Congestion:         "n/a",
+		QDisc:              "n/a",
+		DiskMount:          diskPath,
+		Allowance:          detectCPUAllowance(),
+		BalloonReclaim:     memoryFacility{Evidence: "unavailable"},
+		KSM:                memoryFacility{Evidence: "unavailable"},
 	}
 
-	collectLinuxSystem(&s)
+	collectPlatformSystem(ctx, &s)
 	s.Hardware = collectHardwareInventory()
-	if kernel := commandOutput(ctx, "uname", "-sr"); kernel != "" {
-		s.Kernel = kernel
-	}
-	if s.Kernel == "" {
-		s.Kernel = "linux"
-	}
 	collectDisk(ctx, diskPath, &s)
 	return s
 }
@@ -128,108 +131,8 @@ func joinHardwareList(values []string) string {
 	return strings.Join(values, " · ")
 }
 
-func collectLinuxSystem(s *systemSnapshot) {
-	if values := parseOSRelease("/etc/os-release"); len(values) > 0 {
-		if pretty := values["PRETTY_NAME"]; pretty != "" {
-			s.OS = pretty
-		}
-	}
-	cpuinfo, _ := os.ReadFile("/proc/cpuinfo")
-	cpuText := string(cpuinfo)
-	physical := make(map[string]bool)
-	var physicalID, coreID string
-	scanner := bufio.NewScanner(strings.NewReader(cpuText))
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			if physicalID != "" || coreID != "" {
-				physical[physicalID+":"+coreID] = true
-			}
-			physicalID, coreID = "", ""
-			continue
-		}
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
-		switch key {
-		case "model name", "Hardware", "Processor":
-			if s.CPUModel == "unknown" && value != "" {
-				s.CPUModel = value
-			}
-		case "cpu MHz":
-			if s.CPUFrequency == "unknown" {
-				s.CPUFrequency = value + " MHz"
-			}
-		case "cache size":
-			if s.CPUCache == "unknown" && value != "" {
-				s.CPUCache = value
-			}
-		case "physical id":
-			physicalID = value
-		case "core id":
-			coreID = value
-		case "flags", "Features":
-			flags := " " + strings.ToLower(value) + " "
-			if strings.Contains(flags, " aes ") {
-				s.AES = "available"
-			} else if s.AES == "unknown" {
-				s.AES = "unavailable"
-			}
-			// Intel 是 vmx、AMD 是 svm；两者都没有说明宿主没有透传虚拟化扩展，
-			// 该机器上跑不了 KVM 嵌套虚拟化。
-			if strings.Contains(flags, " vmx ") {
-				s.Nested = "VT-x (vmx)"
-			} else if strings.Contains(flags, " svm ") {
-				s.Nested = "AMD-V (svm)"
-			} else if s.Nested == "unknown" {
-				s.Nested = "unavailable"
-			}
-		}
-	}
-	if physicalID != "" || coreID != "" {
-		physical[physicalID+":"+coreID] = true
-	}
-	if len(physical) > 0 {
-		s.PhysicalCores = len(physical)
-	}
-
-	mem := parseMemInfo("/proc/meminfo")
-	// Read the cgroup limit before computing the effective benchmark view.  The
-	// host-visible values remain in the current fields below; the memory
-	// probe uses the same helper and applies the limit to allocation decisions.
-	if limit, _, ok := cgroupMemoryLimit(); ok {
-		s.MemoryLimit = limit
-	}
-	usage := memoryUsageFromMemInfo(mem, s.MemoryLimit)
-	s.MemoryTotal = usage.HostTotalBytes
-	s.MemoryUsed = usage.HostUsedBytes
-	s.MemoryFree = usage.HostAvailableBytes
-	s.MemoryUsage = usage.HostUsagePercent
-	s.SwapTotal = mem["SwapTotal"] * 1024
-	s.BalloonReclaim = detectBalloonReclaim("/sys", "/proc/vmstat")
-	s.KSM = detectKSM("/sys")
-
-	if data, err := os.ReadFile("/proc/uptime"); err == nil {
-		if seconds, ok := parseUptimeSeconds(data); ok {
-			s.UptimeSeconds, s.UptimeKnown = seconds, true
-		}
-	}
-	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
-		fields := strings.Fields(string(data))
-		if len(fields) >= 3 {
-			s.Load = strings.Join(fields[:3], " / ")
-		}
-	}
-	s.Congestion = readTrimmed("/proc/sys/net/ipv4/tcp_congestion_control", "n/a")
-	s.QDisc = readTrimmed("/proc/sys/net/core/default_qdisc", "n/a")
-	s.Virtualization = detectLinuxVirtualization(cpuText)
-
-	if sample, ok := readCPUTimes(); ok {
-		s.StealPercent, s.StealKnown = cumulativeStealPercent(sample)
-	}
-}
-
 func collectDisk(ctx context.Context, diskPath string, s *systemSnapshot) {
-	output := commandOutput(ctx, "df", "-Pk", diskPath)
+	output := commandOutput(ctx, platformDFCommand(), "-Pk", diskPath)
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) < 2 {
 		return
@@ -241,6 +144,10 @@ func collectDisk(ctx context.Context, diskPath string, s *systemSnapshot) {
 	}
 	s.DiskDevice, s.DiskTotal, s.DiskUsed, s.DiskFree = parsed.DiskDevice, parsed.DiskTotal, parsed.DiskUsed, parsed.DiskFree
 	s.DiskUsage, s.DiskMount = parsed.DiskUsage, parsed.DiskMount
+	// A zero-sized or malformed df record cannot establish the disk facts
+	// needed by the system inventory; keep those fields unavailable instead of
+	// turning parser defaults into a 0 B measurement.
+	s.DiskKnown = parsed.DiskTotal > 0
 }
 
 func parseDiskDFFields(fields []string) (systemSnapshot, bool) {
@@ -249,9 +156,16 @@ func parseDiskDFFields(fields []string) (systemSnapshot, bool) {
 		return parsed, false
 	}
 	parsed.DiskDevice = fields[0]
-	parsed.DiskTotal = parseUintDefault(fields[len(fields)-5], 0) * 1024
-	parsed.DiskUsed = parseUintDefault(fields[len(fields)-4], 0) * 1024
-	parsed.DiskFree = parseUintDefault(fields[len(fields)-3], 0) * 1024
+	var ok bool
+	if parsed.DiskTotal, ok = parseDFBlocks(fields[len(fields)-5]); !ok {
+		return systemSnapshot{}, false
+	}
+	if parsed.DiskUsed, ok = parseDFBlocks(fields[len(fields)-4]); !ok {
+		return systemSnapshot{}, false
+	}
+	if parsed.DiskFree, ok = parseDFBlocks(fields[len(fields)-3]); !ok {
+		return systemSnapshot{}, false
+	}
 	if parsed.DiskTotal > 0 {
 		if parsed.DiskUsed > parsed.DiskTotal {
 			parsed.DiskUsed = parsed.DiskTotal
@@ -260,67 +174,23 @@ func parseDiskDFFields(fields []string) (systemSnapshot, bool) {
 			parsed.DiskFree = parsed.DiskTotal - parsed.DiskUsed
 		}
 		parsed.DiskUsage = float64(parsed.DiskUsed) / float64(parsed.DiskTotal) * 100
-	} else if usage, err := strconv.ParseFloat(strings.TrimSuffix(fields[len(fields)-2], "%"), 64); err == nil && usage >= 0 {
+	} else {
+		usage, err := strconv.ParseFloat(strings.TrimSuffix(fields[len(fields)-2], "%"), 64)
+		if err != nil || usage < 0 || usage > 100 {
+			return systemSnapshot{}, false
+		}
 		parsed.DiskUsage = usage
 	}
 	parsed.DiskMount = fields[len(fields)-1]
 	return parsed, true
 }
 
-func detectLinuxVirtualization(cpuinfo string) string {
-	candidates := []struct {
-		Path  string
-		Value string
-	}{
-		{"/.dockerenv", "Docker"},
-		{"/run/.containerenv", "container"},
-		{"/proc/xen", "Xen"},
-		{"/proc/vz", "OpenVZ"},
+func parseDFBlocks(value string) (uint64, bool) {
+	blocks, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	if err != nil || blocks > ^uint64(0)/1024 {
+		return 0, false
 	}
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate.Path); err == nil {
-			return candidate.Value
-		}
-	}
-	var evidence strings.Builder
-	for _, path := range []string{
-		"/proc/1/cgroup",
-		"/sys/class/dmi/id/product_name",
-		"/sys/class/dmi/id/sys_vendor",
-		"/sys/class/dmi/id/board_vendor",
-	} {
-		if data, err := os.ReadFile(path); err == nil {
-			evidence.Write(data)
-			evidence.WriteByte('\n')
-		}
-	}
-	text := strings.ToLower(evidence.String())
-	checks := []struct {
-		Needle string
-		Name   string
-	}{
-		{"docker", "Docker"},
-		{"kubepods", "Kubernetes"},
-		{"containerd", "containerd"},
-		{"lxc", "LXC"},
-		{"openvz", "OpenVZ"},
-		{"kvm", "KVM"},
-		{"qemu", "KVM/QEMU"},
-		{"vmware", "VMware"},
-		{"virtualbox", "VirtualBox"},
-		{"microsoft corporation", "Hyper-V"},
-		{"amazon ec2", "Amazon EC2"},
-		{"google compute engine", "Google Compute Engine"},
-	}
-	for _, check := range checks {
-		if strings.Contains(text, check.Needle) {
-			return check.Name
-		}
-	}
-	if strings.Contains(strings.ToLower(cpuinfo), " hypervisor ") {
-		return "virtual machine"
-	}
-	return "none/unknown"
+	return blocks * 1024, true
 }
 
 func parseOSRelease(path string) map[string]string {

@@ -3,10 +3,10 @@ set -Eeuo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/build_tools.sh --arch ARCH --stage-root STAGE_ROOT
+usage: scripts/build_tools.sh --target TARGET --stage-root STAGE_ROOT
                               [--cross-prefix PREFIX --target-runner COMMAND]
 
-Build the ECS benchmark tools for one Linux architecture. This script is
+Build the ECS benchmark tools for one Linux target. This script is
 intended to run inside the native or cross-build container used by CI; it never
 uses a fixture or a distribution-provided benchmark binary. Cross mode keeps
 the compiler native and uses TARGET_RUNNER only for final binary smoke tests.
@@ -22,15 +22,15 @@ die() {
   exit 1
 }
 
-arch=""
+target=""
 stage_root=""
 cross_prefix=""
 target_runner=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --arch)
+    --target)
       [[ "$#" -ge 2 ]] || { usage; exit 2; }
-      arch=$2
+      target=$2
       shift 2
       ;;
     --stage-root)
@@ -60,14 +60,15 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-case " ${ECS_ARCHES[*]} " in
-  *" $arch "*) ;;
-  *) die "unsupported architecture: ${arch:-<empty>}" ;;
-esac
+[[ -n "$target" ]] || { usage; exit 2; }
+goos=$(ecs_lock_target_field "$target" goos) || die "unsupported target: $target"
+goarch=$(ecs_lock_target_field "$target" goarch) || die "target $target has no goarch"
+arch=$(ecs_lock_target_field "$target" package) || die "target $target has no package architecture"
+[[ "$goos" == linux ]] || die "scripts/build_tools.sh only builds Linux targets; use scripts/build_tools_freebsd.sh for $target"
 [[ -n "$stage_root" ]] || { usage; exit 2; }
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
-openssl_target=$(ecs_lock_architecture_field "$arch" openssl_target) ||
-  die "tools lock has no OpenSSL target for $arch"
+openssl_target=$(ecs_lock_target_field "$target" openssl_target) ||
+  die "tools lock has no OpenSSL target for $target"
 if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
   case "$arch" in
     armv7|s390x|riscv64|ppc64le) ;;
@@ -184,7 +185,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/tools/ping.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/tools/openssl.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/tools/nexttrace.sh"
 
-stage="$stage_root/linux_${arch}"
+stage="$stage_root/$target"
 work=/tmp/ecs-tools-build
 [[ ! -e "$work" ]] || die "deterministic build directory already exists: $work"
 mkdir -m 0700 -- "$work"
@@ -504,10 +505,15 @@ stream_upstream=$(ecs_lock_tool_field stream upstream)
 nexttrace_upstream=$(ecs_lock_tool_field nexttrace-tiny upstream)
 iputils_upstream=$(ecs_lock_tool_field ping upstream)
 supported_architectures_json=$(printf '%s\n' "${ECS_ARCHES[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+supported_targets_json=$(printf '%s\n' "${ECS_LINUX_TARGET_IDS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
 
 jq -n \
+  --arg target "$target" \
+  --arg goos "$goos" \
+  --arg goarch "$goarch" \
   --arg architecture "$arch" \
   --argjson supported_architectures "$supported_architectures_json" \
+  --argjson supported_targets "$supported_targets_json" \
   --arg toolchain_mode "$build_mode" \
   --arg build_triplet "$build_triplet" \
   --arg target_triplet "$target_triplet" \
@@ -580,8 +586,12 @@ jq -n \
   --arg nexttrace_upstream "$nexttrace_upstream" \
   ' {
       schema_version: "ecs-tools.manifest/v1",
+      target: $target,
+      goos: $goos,
+      goarch: $goarch,
       architecture: $architecture,
       supported_architectures: $supported_architectures,
+      supported_targets: $supported_targets,
       build: {
         toolchain_mode: $toolchain_mode,
         build_triplet: $build_triplet,

@@ -12,7 +12,7 @@ name: ci
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "bsd"]
   pull_request:
 
 permissions:
@@ -103,15 +103,24 @@ jobs:
           cache: false
       - run: go test -race ./...
 
-  # 七个发布架构现在都编得过吗。
+  # 七个 Linux 发布架构和两个 FreeBSD 目标现在都编得过吗。
   cross:
-    name: cross (${{ matrix.arch }})
+    name: cross (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64, armv7, "386", s390x, riscv64, ppc64le]
+        target:
+          - linux_amd64
+          - linux_arm64
+          - linux_armv7
+          - linux_386
+          - linux_s390x
+          - linux_riscv64
+          - linux_ppc64le
+          - freebsd_amd64
+          - freebsd_arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -119,9 +128,38 @@ jobs:
           go-version: 'stable'
           check-latest: true
           cache: false
-      - run: ./scripts/cross.sh --arch "$ARCH"
+      - run: ./scripts/cross.sh --target "$TARGET"
         env:
-          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+
+  # 编译通过不等于支持。两个 FreeBSD 架构都在真实 FreeBSD 15.1 VM 中运行
+  # 单元测试以及 base ping/traceroute 的非 root 集成测试。
+  freebsd:
+    name: freebsd runtime (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Test in FreeBSD 15.1
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: ${{ matrix.arch }}
+          copyback: false
+          cache-after-prepare: true
+          prepare: pkg install -y go
+          run: |
+            set -eu
+            test "$(id -u)" -ne 0
+            freebsd-version
+            uname -a
+            go version
+            go test ./...
+            go test -tags=integration ./internal/probe -timeout 20m -count=1
 
   # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，
   # 手改数值而不重算会被当场发现。只读：写权限属于 leaderboard.yml。
@@ -157,7 +195,7 @@ jobs:
   # 不必去仓库设置里逐个勾选。
   required:
     if: always()
-    needs: [unit, compat, quality, integration, race, cross, submissions]
+    needs: [unit, compat, quality, integration, race, cross, freebsd, submissions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -169,6 +207,7 @@ jobs:
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           RACE_RESULT: ${{ needs.race.result }}
           CROSS_RESULT: ${{ needs.cross.result }}
+          FREEBSD_RESULT: ${{ needs.freebsd.result }}
           SUBMISSIONS_RESULT: ${{ needs.submissions.result }}
         run: |
           set -euo pipefail
@@ -179,6 +218,7 @@ jobs:
             "integration=$INTEGRATION_RESULT"
             "race=$RACE_RESULT"
             "cross=$CROSS_RESULT"
+            "freebsd=$FREEBSD_RESULT"
             "submissions=$SUBMISSIONS_RESULT"
           )
           printf '上游 job 结果：%s\n' "${summary[*]}"

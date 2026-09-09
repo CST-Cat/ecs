@@ -1,5 +1,8 @@
 {
   "schema_version": "ecs-tools.manifest/v1",
+  "target": "linux_amd64",
+  "goos": "linux",
+  "goarch": "amd64",
   "architecture": "amd64",
   "supported_architectures": [
     "amd64",
@@ -9,6 +12,15 @@
     "s390x",
     "riscv64",
     "ppc64le"
+  ],
+  "supported_targets": [
+    "linux_amd64",
+    "linux_arm64",
+    "linux_armv7",
+    "linux_386",
+    "linux_s390x",
+    "linux_riscv64",
+    "linux_ppc64le"
   ],
   "build": {
     "toolchain_mode": "native",

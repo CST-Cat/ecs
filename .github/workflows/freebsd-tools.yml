@@ -1,0 +1,66 @@
+name: freebsd-tools
+
+on:
+  push:
+    branches: ["bsd"]
+    paths:
+      - ".github/workflows/freebsd-tools.yml"
+      - "scripts/build_tools_freebsd.sh"
+      - "scripts/package.sh"
+      - "scripts/verify_tools_stage.sh"
+      - "scripts/lib/**"
+      - "tools/lock.json"
+      - "tools/manifest.example.json"
+      - "cmd/tools-manifest-check/**"
+      - "internal/toolsmanifest/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freebsd-tools-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: native bundle smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: freebsd_amd64
+          - arch: aarch64
+            target: freebsd_arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build and smoke pinned tools in FreeBSD 15.1
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        env:
+          ECS_FREEBSD_TARGET: ${{ matrix.target }}
+        with:
+          release: "15.1"
+          arch: ${{ matrix.arch }}
+          envs: ECS_FREEBSD_TARGET
+          copyback: false
+          cache-after-prepare: true
+          prepare: |
+            pkg install -y \
+              autoconf automake bash binutils ca_root_nss concurrencykit curl \
+              gcc14 git gmake go help2man jq libtool luajit m4 perl5 pkgconf
+          run: |
+            set -eu
+            test "$(id -u)" -ne 0
+            stage_root=/tmp/ecs-freebsd-tools-stage
+            work_root=/tmp/ecs-freebsd-tools-work
+            rm -rf "$stage_root" "$work_root"
+            ECS_TOOLS_WORK="$work_root" JOBS=2 \
+              bash scripts/build_tools_freebsd.sh \
+                --target "$ECS_FREEBSD_TARGET" \
+                --stage-root "$stage_root"
+            bash scripts/verify_tools_stage.sh \
+              --target "$ECS_FREEBSD_TARGET" \
+              --stage-root "$stage_root"

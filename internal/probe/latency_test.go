@@ -184,12 +184,10 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.values" {
 			t.Fatalf("latency success summary = %+v", result.SummaryMessages)
 		}
-		if len(result.Notes) != 3 || result.Notes[0] != "probe.latency.note.resolution" || result.Notes[1] != "probe.latency.note.region" || result.Notes[2] != "probe.latency.note.icmp_unavailable" {
-			t.Fatalf("latency success notes = %v", result.Notes)
+		if len(result.Notes) < 2 || result.Notes[0] != "probe.latency.note.resolution" || result.Notes[1] != "probe.latency.note.region" {
+			t.Fatalf("latency success common notes = %v", result.Notes)
 		}
-		if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.latency.metric.tcp" || result.Measurements[4].Label != "probe.latency.metric.best_median" {
-			t.Fatalf("latency success measurements = %+v", result.Measurements)
-		}
+		assertLatencySuccessPlatform(t, result)
 		for _, measurement := range result.Measurements {
 			if _, ok := measurement.Display.Raw(); !ok {
 				t.Fatalf("latency measurement display is not raw: %+v", measurement)

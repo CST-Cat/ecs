@@ -12,7 +12,7 @@ import (
 
 const SchemaVersion = "ecs-tools.manifest/v1"
 
-var architectures = [...]string{
+var linuxArchitectures = [...]string{
 	"amd64",
 	"arm64",
 	"armv7",
@@ -22,7 +22,9 @@ var architectures = [...]string{
 	"ppc64le",
 }
 
-var toolNames = [...]string{
+var freeBSDArchitectures = [...]string{"amd64", "arm64"}
+
+var linuxToolNames = [...]string{
 	"sysbench",
 	"zstd",
 	"npb-ep",
@@ -35,11 +37,47 @@ var toolNames = [...]string{
 	"ping",
 }
 
-// Manifest describes one Linux architecture's ecs-tools package.
+var freeBSDToolNames = [...]string{
+	"sysbench",
+	"zstd",
+	"npb-ep",
+	"npb-ft",
+	"openssl",
+	"stream",
+	"fio",
+	"iperf3",
+}
+
+type targetSpec struct {
+	Target  string
+	GOOS    string
+	GOARCH  string
+	Package string
+}
+
+var targetSpecs = [...]targetSpec{
+	{Target: "linux_amd64", GOOS: "linux", GOARCH: "amd64", Package: "amd64"},
+	{Target: "linux_arm64", GOOS: "linux", GOARCH: "arm64", Package: "arm64"},
+	{Target: "linux_armv7", GOOS: "linux", GOARCH: "arm", Package: "armv7"},
+	{Target: "linux_386", GOOS: "linux", GOARCH: "386", Package: "386"},
+	{Target: "linux_s390x", GOOS: "linux", GOARCH: "s390x", Package: "s390x"},
+	{Target: "linux_riscv64", GOOS: "linux", GOARCH: "riscv64", Package: "riscv64"},
+	{Target: "linux_ppc64le", GOOS: "linux", GOARCH: "ppc64le", Package: "ppc64le"},
+	{Target: "freebsd_amd64", GOOS: "freebsd", GOARCH: "amd64", Package: "amd64"},
+	{Target: "freebsd_arm64", GOOS: "freebsd", GOARCH: "arm64", Package: "arm64"},
+}
+
+// Manifest describes one platform target's ecs-tools package. Architecture is
+// the human-facing package label; Target, GOOS and GOARCH are the unambiguous
+// build identity.
 type Manifest struct {
 	SchemaVersion          string        `json:"schema_version"`
+	Target                 string        `json:"target"`
+	GOOS                   string        `json:"goos"`
+	GOARCH                 string        `json:"goarch"`
 	Architecture           string        `json:"architecture"`
 	SupportedArchitectures []string      `json:"supported_architectures,omitempty"`
+	SupportedTargets       []string      `json:"supported_targets,omitempty"`
 	Build                  BuildMetadata `json:"build"`
 	Tools                  []Tool        `json:"tools"`
 }
@@ -85,7 +123,7 @@ type Tool struct {
 // not tell a CI operator which object of a three-level manifest is wrong.
 // TestFieldListsMatchStructTags keeps them from drifting away from the structs.
 var (
-	manifestFields   = []string{"schema_version", "architecture", "supported_architectures", "build", "tools"}
+	manifestFields   = []string{"schema_version", "target", "goos", "goarch", "architecture", "supported_architectures", "supported_targets", "build", "tools"}
 	buildFields      = []string{"toolchain_mode", "build_triplet", "target_triplet", "smoke_runner", "validation"}
 	validationFields = []string{"scope", "performance_valid"}
 	toolFields       = []string{
@@ -117,13 +155,16 @@ func Parse(data []byte) (Manifest, error) {
 	if err := rejectUnknownFields(raw, manifestFields...); err != nil {
 		return Manifest{}, err
 	}
-	for _, field := range []string{"schema_version", "architecture", "build", "tools"} {
+	for _, field := range []string{"schema_version", "target", "goos", "goarch", "architecture", "build", "tools"} {
 		if err := requireField(raw, field); err != nil {
 			return Manifest{}, err
 		}
 	}
 	if value, ok := raw["supported_architectures"]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 		return Manifest{}, fmt.Errorf("supported_architectures must be an array when present")
+	}
+	if value, ok := raw["supported_targets"]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return Manifest{}, fmt.Errorf("supported_targets must be an array when present")
 	}
 	buildRaw, err := rawObject(raw["build"], "build")
 	if err != nil {
@@ -216,14 +257,57 @@ func rejectUnknownFields(fields map[string]json.RawMessage, allowed ...string) e
 	return nil
 }
 
+func targetSpecFor(target string) (targetSpec, bool) {
+	for _, spec := range targetSpecs {
+		if spec.Target == target {
+			return spec, true
+		}
+	}
+	return targetSpec{}, false
+}
+
+func targetArchitectures(goos string) []string {
+	if goos == "freebsd" {
+		return freeBSDArchitectures[:]
+	}
+	return linuxArchitectures[:]
+}
+
+func targetToolNames(goos string) []string {
+	if goos == "freebsd" {
+		return freeBSDToolNames[:]
+	}
+	return linuxToolNames[:]
+}
+
+func targetIDs(goos string) []string {
+	ids := make([]string, 0, len(targetSpecs))
+	for _, spec := range targetSpecs {
+		if spec.GOOS == goos {
+			ids = append(ids, spec.Target)
+		}
+	}
+	return ids
+}
+
 // Validate checks the stable manifest contract without consulting the
 // filesystem or executing any tool.
 func Validate(manifest Manifest) error {
 	if manifest.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("schema_version must be %q, got %q", SchemaVersion, manifest.SchemaVersion)
 	}
-	if !slices.Contains(architectures[:], manifest.Architecture) {
-		return fmt.Errorf("unsupported architecture %q", manifest.Architecture)
+	spec, ok := targetSpecFor(manifest.Target)
+	if !ok {
+		return fmt.Errorf("unsupported target %q", manifest.Target)
+	}
+	if manifest.GOOS != spec.GOOS {
+		return fmt.Errorf("goos %q does not match target %q", manifest.GOOS, manifest.Target)
+	}
+	if manifest.GOARCH != spec.GOARCH {
+		return fmt.Errorf("goarch %q does not match target %q", manifest.GOARCH, manifest.Target)
+	}
+	if manifest.Architecture != spec.Package {
+		return fmt.Errorf("architecture %q does not match target %q", manifest.Architecture, manifest.Target)
 	}
 	if manifest.Build.ToolchainMode != "native" && manifest.Build.ToolchainMode != "cross" {
 		return fmt.Errorf("build.toolchain_mode must be %q or %q, got %q", "native", "cross", manifest.Build.ToolchainMode)
@@ -245,29 +329,49 @@ func Validate(manifest Manifest) error {
 	if manifest.Build.Validation.PerformanceValid {
 		return fmt.Errorf("build.validation.performance_valid must be false for CI smoke validation")
 	}
+	validArchitectures := targetArchitectures(manifest.GOOS)
 	if manifest.SupportedArchitectures != nil {
-		if len(manifest.SupportedArchitectures) != len(architectures) {
-			return fmt.Errorf("supported_architectures must list all %d Linux architectures", len(architectures))
+		if len(manifest.SupportedArchitectures) != len(validArchitectures) {
+			return fmt.Errorf("supported_architectures must list all %d %s architectures", len(validArchitectures), manifest.GOOS)
 		}
 		seen := make(map[string]bool, len(manifest.SupportedArchitectures))
 		for _, architecture := range manifest.SupportedArchitectures {
-			if !slices.Contains(architectures[:], architecture) || seen[architecture] {
+			if !slices.Contains(validArchitectures, architecture) || seen[architecture] {
 				return fmt.Errorf("invalid supported architecture %q", architecture)
 			}
 			seen[architecture] = true
 		}
-		for _, architecture := range architectures {
+		for _, architecture := range validArchitectures {
 			if !seen[architecture] {
 				return fmt.Errorf("supported_architectures omits %q", architecture)
 			}
 		}
 	}
-	if len(manifest.Tools) != len(toolNames) {
-		return fmt.Errorf("tools must contain exactly %d entries", len(toolNames))
+	validTargets := targetIDs(manifest.GOOS)
+	if manifest.SupportedTargets != nil {
+		if len(manifest.SupportedTargets) != len(validTargets) {
+			return fmt.Errorf("supported_targets must list all %d %s targets", len(validTargets), manifest.GOOS)
+		}
+		seen := make(map[string]bool, len(manifest.SupportedTargets))
+		for _, supportedTarget := range manifest.SupportedTargets {
+			if !slices.Contains(validTargets, supportedTarget) || seen[supportedTarget] {
+				return fmt.Errorf("invalid supported target %q", supportedTarget)
+			}
+			seen[supportedTarget] = true
+		}
+		for _, validTarget := range validTargets {
+			if !seen[validTarget] {
+				return fmt.Errorf("supported_targets omits %q", validTarget)
+			}
+		}
+	}
+	validToolNames := targetToolNames(manifest.GOOS)
+	if len(manifest.Tools) != len(validToolNames) {
+		return fmt.Errorf("tools must contain exactly %d entries for %s", len(validToolNames), manifest.GOOS)
 	}
 	seenTools := make(map[string]bool, len(manifest.Tools))
 	for index, tool := range manifest.Tools {
-		if !slices.Contains(toolNames[:], tool.Name) {
+		if !slices.Contains(validToolNames, tool.Name) {
 			return fmt.Errorf("tool %d has unsupported name %q", index, tool.Name)
 		}
 		if seenTools[tool.Name] {

@@ -14,7 +14,9 @@ die() {
 }
 
 [[ "$ECS_LOCK_SCHEMA_VERSION" == "ecs.tools.lock/v1" ]] || die "unexpected schema"
-[[ "${#ECS_TARGETS[@]}" -eq 7 ]] || die "expected seven architecture targets"
+[[ "${#ECS_TARGETS[@]}" -eq 9 ]] || die "expected nine platform targets"
+[[ "${#ECS_LINUX_TARGETS[@]}" -eq 7 ]] || die "expected seven Linux targets"
+[[ "${#ECS_FREEBSD_TARGETS[@]}" -eq 2 ]] || die "expected two FreeBSD targets"
 [[ "${#ECS_TOOL_NAMES[@]}" -eq 10 ]] || die "expected ten locked tools"
 
 bundle_file="$repo_root/tools/BUNDLE"
@@ -24,15 +26,20 @@ bundle_name=$(<"$bundle_file")
 [[ "$bundle_name" =~ ^bundle-v[1-9][0-9]*$ ]] || die "invalid tools/BUNDLE"
 
 jq -e '
-  (.architectures | length == 7) and
-  ([.architectures[].package] | length == 7 and length == (unique | length)) and
+  (.architectures | length == 9) and
+  ([.architectures[].target] | length == 9 and length == (unique | length)) and
+  (all(.architectures[]; (.target | test("^(linux|freebsd)_[a-z0-9]+$")) and (.goos | IN("linux", "freebsd")))) and
+  ([.architectures[] | select(.goos == "linux")] | length == 7) and
+  ([.architectures[] | select(.goos == "freebsd")] | length == 2) and
+  ([.architectures[] | select(.goos == "freebsd") | .goarch] | sort == ["amd64", "arm64"]) and
+  ([.architectures[] | select(.goos == "linux") | .package] | length == 7 and length == (unique | length)) and
   (.tools | length == 10) and
   ([.tools[].name] | length == 10 and length == (unique | length)) and
   (all(.tools[]; (.name | length > 0) and (.upstream | startswith("http")))) and
   (all(.tools[] | select(.repository != null); (.tag | length > 0) and (.commit | test("^[0-9a-f]{40}$")))) and
   ((.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256) as $digests |
     ($digests | type == "object") and
-    (($digests | keys | sort) == ([.architectures[].package] | sort)) and
+    (($digests | keys | sort) == ([.architectures[] | select(.goos == "linux") | .package] | sort)) and
     (all($digests[]; test("^[0-9a-f]{64}$")))) and
   (.corpus.name == "ecs-silesia-v1.corpus") and
   (.corpus.bytes == 211938580) and

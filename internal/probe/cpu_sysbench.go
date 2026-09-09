@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"ecs/internal/model"
@@ -211,19 +210,6 @@ func cpuAllowanceMachineValue(allowance cpuAllowance) string {
 		return fmt.Sprintf("visible=%d;quota=unlimited", allowance.Visible)
 	}
 	return fmt.Sprintf("visible=%d;quota=%.2f;threads=%d;source=%s", allowance.Visible, allowance.Quota, allowance.Threads, allowance.Source)
-}
-
-func readLoadAverage1() (float64, bool) {
-	data, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return 0, false
-	}
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return 0, false
-	}
-	value, err := strconv.ParseFloat(fields[0], 64)
-	return value, err == nil && value >= 0
 }
 
 func formatSysbenchEvents(sample sysbenchCPUResult) string {

@@ -59,12 +59,12 @@ jobs:
       - name: Build tools in the target container
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./scripts/build_tools_container.sh --arch '${{ matrix.arch }}' --stage-root .ci-tools-stage
+        run: ./scripts/build_tools_container.sh --target 'linux_${{ matrix.arch }}' --stage-root .ci-tools-stage
 
       - name: Validate the staged tools
         run: |
           set -euo pipefail
-          validate_args=(--arch '${{ matrix.arch }}' --stage-root .ci-tools-stage)
+          validate_args=(--target 'linux_${{ matrix.arch }}' --stage-root .ci-tools-stage)
           if [[ '${{ matrix.arch }}' == amd64 ]]; then
             validate_args+=(--keep-corpus)
           fi

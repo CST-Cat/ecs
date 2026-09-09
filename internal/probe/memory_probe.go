@@ -3,9 +3,7 @@ package probe
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"ecs/internal/model"
@@ -18,8 +16,7 @@ func (memoryProbe) ID() string { return "memory" }
 func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
 	memory := collectMemoryUsageSnapshot()
-	balloon := detectBalloonReclaim("/sys", "/proc/vmstat")
-	ksm := detectKSM("/sys")
+	balloon, ksm := collectPlatformMemoryFacilities()
 	allowance := detectCPUAllowance()
 
 	if path := officialStreamPath(); path != "" {
@@ -61,68 +58,7 @@ func newMemoryResult() model.Result {
 }
 
 func collectMemoryUsageSnapshot() memoryUsageSnapshot {
-	mem := parseMemInfo("/proc/meminfo")
-	limit, _, _ := cgroupMemoryLimit()
-	memory := memoryUsageFromMemInfo(mem, limit)
-	if !memory.LimitApplied {
-		return memory
-	}
-	current, currentSource, currentOK := cgroupMemoryCurrent()
-	return applyCgroupMemoryUsage(memory, currentSource, current, currentOK, cgroupMemoryLimitCandidates())
-}
-
-func applyCgroupMemoryUsage(memory memoryUsageSnapshot, currentSource string, current uint64, currentOK bool, limits []cgroupMemoryLimitCandidate) memoryUsageSnapshot {
-	// Host MemAvailable is a useful upper bound, including an explicit zero,
-	// but never substitutes for cgroup aggregate usage.
-	memory.EffectiveAvailableBytes = 0
-	memory.EffectiveAvailableKnown = false
-	memory.EffectiveUsedBytes = 0
-	memory.EffectiveUsagePercent = 0
-	memory.EffectiveCurrentKnown = false
-	if currentOK {
-		memory.EffectiveUsedBytes = current
-		memory.EffectiveCurrentKnown = true
-		if memory.EffectiveTotalBytes > 0 {
-			memory.EffectiveUsagePercent = float64(current) / float64(memory.EffectiveTotalBytes) * 100
-		}
-	}
-	if len(limits) == 0 {
-		return memory
-	}
-	available := memory.HostAvailableBytes
-	usageKnown := true
-	for _, limit := range limits {
-		usage, ok := cgroupMemoryUsageAt(limit)
-		if !ok && currentOK && filepath.Dir(limit.path) == filepath.Dir(currentSource) {
-			usage, ok = current, true
-		}
-		if !ok {
-			usageKnown = false
-			continue
-		}
-		remaining := uint64(0)
-		if usage < limit.limit {
-			remaining = limit.limit - usage
-		}
-		if remaining < available {
-			available = remaining
-		}
-	}
-	memory.EffectiveAvailableKnown = usageKnown && memory.AvailableKnown
-	if memory.EffectiveAvailableKnown {
-		memory.EffectiveAvailableBytes = available
-	}
-	return memory
-}
-
-func cgroupMemoryUsageAt(limit cgroupMemoryLimitCandidate) (uint64, bool) {
-	file := "memory.current"
-	if !limit.v2 {
-		file = "memory.usage_in_bytes"
-	}
-	text := strings.TrimSpace(readTrimmed(filepath.Join(filepath.Dir(limit.path), file), ""))
-	value, err := strconv.ParseUint(text, 10, 64)
-	return value, err == nil
+	return collectPlatformMemoryUsageSnapshot()
 }
 
 func officialStreamPath() string {
@@ -137,9 +73,18 @@ func appendMemoryInventory(result *model.Result, memory memoryUsageSnapshot, bal
 	if result == nil {
 		return
 	}
-	available := model.FormatBytes(memory.EffectiveAvailableBytes)
-	used := model.FormatBytes(memory.EffectiveUsedBytes)
-	usagePercent := fmt.Sprintf("%.1f %%", memory.EffectiveUsagePercent)
+	total := "unavailable"
+	available := "unavailable"
+	used := "unavailable"
+	usagePercent := "unavailable"
+	if memory.EffectiveTotalBytes > 0 {
+		total = model.FormatBytes(memory.EffectiveTotalBytes)
+		used = model.FormatBytes(memory.EffectiveUsedBytes)
+		usagePercent = fmt.Sprintf("%.1f %%", memory.EffectiveUsagePercent)
+		if !memory.LimitApplied || memory.EffectiveAvailableKnown {
+			available = model.FormatBytes(memory.EffectiveAvailableBytes)
+		}
+	}
 	if memory.LimitApplied && !memory.EffectiveAvailableKnown {
 		available = "unavailable"
 	}
@@ -148,7 +93,7 @@ func appendMemoryInventory(result *model.Result, memory memoryUsageSnapshot, bal
 		usagePercent = "unavailable"
 	}
 	result.Fields = append(result.Fields,
-		model.Field{Key: "memory_total", Label: "probe.memory.field.total", Value: model.RawValue(model.FormatBytes(memory.EffectiveTotalBytes))},
+		model.Field{Key: "memory_total", Label: "probe.memory.field.total", Value: model.RawValue(total)},
 		model.Field{Key: "memory_used", Label: "probe.memory.field.used", Value: model.RawValue(used)},
 		model.Field{Key: "memory_available", Label: "probe.memory.field.available", Value: model.RawValue(available)},
 		model.Field{Key: "memory_usage_percent", Label: "probe.memory.field.usage_percent", Value: model.RawValue(usagePercent)},
@@ -167,7 +112,7 @@ func appendMemoryInventory(result *model.Result, memory memoryUsageSnapshot, bal
 			result.Notes = append(result.Notes, "probe.memory.note.cgroup_current_unknown")
 		}
 	}
-	if !memory.AvailableKnown {
+	if !memory.AvailableKnown && platformUsesMemoryAvailableFallback() {
 		result.Notes = append(result.Notes, "probe.memory.note.memavailable_legacy_fallback")
 	}
 	if !balloon.Available {

@@ -104,6 +104,11 @@ type fioEngine struct {
 	Detected   bool
 }
 
+type fioEngineCandidate struct {
+	name  string
+	async bool
+}
+
 // EffectiveDepth 返回该引擎下实际生效的队列深度。
 func (e fioEngine) EffectiveDepth(requested int) int {
 	if e.AsyncQueue {
@@ -112,11 +117,9 @@ func (e fioEngine) EffectiveDepth(requested int) int {
 	return 1
 }
 
-// detectFIOEngine 探测 fio 实际可用的 ioengine。
-//
-// 精简发行版的 fio 常常没有编入 libaio 支持，硬选 libaio 会让整个磁盘模块以
-// "engine libaio not loadable" 失败。这里用 fio --enghelp 读取真实可用列表，
-// 按 io_uring -> libaio -> psync 的顺序回退。
+// detectFIOEngine 探测 fio 实际可用的 ioengine。平台文件提供候选顺序，
+// 让 Linux 保持 io_uring -> libaio -> psync，而 FreeBSD 使用其真实的
+// posixaio -> psync 能力边界。
 func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 	helpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -132,14 +135,7 @@ func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 	for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
 		available[strings.TrimSpace(line)] = true
 	}
-	for _, candidate := range []struct {
-		name  string
-		async bool
-	}{
-		{"io_uring", true},
-		{"libaio", true},
-		{"psync", false},
-	} {
+	for _, candidate := range fioEngineCandidates() {
 		if available[candidate.name] {
 			return fioEngine{Name: candidate.name, AsyncQueue: candidate.async, Detected: true}
 		}

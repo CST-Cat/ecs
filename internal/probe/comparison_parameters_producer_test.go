@@ -215,18 +215,38 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 	})
 
 	t.Run("route tool missing", func(t *testing.T) {
-		noToolPath(t)
-		result := (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-			IPVersion: config.IPVersion4, RouteTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
-		}})
+		var result model.Result
+		if routeToolMissingTestApplies(t) {
+			noToolPath(t)
+			result = (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4, RouteTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
+			}})
+		} else {
+			// FreeBSD's route backend is an OS-managed base utility, not a
+			// staged tool. Exercise the producer's deterministic no-target path
+			// instead of skipping the comparison-parameter contract.
+			result = (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion6,
+			}})
+		}
 		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops")
 	})
 
 	t.Run("backtrace tool missing", func(t *testing.T) {
-		noToolPath(t)
-		result := (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-			IPVersion: config.IPVersion4, BacktraceTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
-		}})
+		var result model.Result
+		if backtraceToolMissingTestApplies(t) {
+			noToolPath(t)
+			result = (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4, BacktraceTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
+			}})
+		} else {
+			// FreeBSD's backtrace backend is an OS-managed base utility, not a
+			// staged tool. Exercise the deterministic no-target path instead of
+			// invoking a real traceroute from the unit test.
+			result = (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4,
+			}})
+		}
 		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "signature_set")
 	})
 }

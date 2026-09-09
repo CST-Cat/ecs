@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          ./scripts/cross.sh --arch "$ARCH"
+          ./scripts/cross.sh --target "linux_$ARCH"
           go env GOVERSION >artifact/build-go-version
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

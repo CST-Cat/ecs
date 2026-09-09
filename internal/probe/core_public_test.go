@@ -74,6 +74,8 @@ func TestSystemAndInventoryParsersUseFixtureFiles(t *testing.T) {
 		{name: "short", fields: []string{"/dev/sda", "100"}},
 		{name: "clamped", fields: []string{"/dev/sda", "100", "150", "200", "200%", "/mnt"}, wantOK: true, wantUsage: 100, wantUsed: 100 * 1024},
 		{name: "percentage without total", fields: []string{"/dev/sda", "0", "0", "0", "37.5%", "/mnt"}, wantOK: true, wantUsage: 37.5},
+		{name: "invalid blocks", fields: []string{"/dev/sda", "100", "not-a-number", "60", "40%", "/mnt"}},
+		{name: "invalid percentage without total", fields: []string{"/dev/sda", "0", "0", "0", "not-a-percent", "/mnt"}},
 	}
 	for _, test := range diskCases {
 		t.Run(test.name, func(t *testing.T) {
@@ -172,6 +174,6 @@ func TestKernelBDPFormula(t *testing.T) {
 	if bdpThroughputMbps(0, 100) != 0 || bdpThroughputMbps(1_000_000, 0) != 0 {
 		t.Fatal("non-positive BDP inputs were not rejected")
 	}
-	// appendKernelNetworkParams intentionally reads fixed /proc/sys paths; its
+	// appendKernelNetworkParams intentionally reads platform-native paths; its
 	// host-facing behavior is covered by the system probe boundary, not here.
 }
