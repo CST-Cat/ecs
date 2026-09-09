@@ -95,6 +95,7 @@ jobs:
 
       - name: OPENSSL
         id: tools_openssl
+        timeout-minutes: 45
         shell: freebsd {0}
         run: |
           set -eu
