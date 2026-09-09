@@ -13,27 +13,42 @@ fi
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cd "$repo_root"
 
+artifacts="$repo_root/.ci/freebsd-runtime"
+ecs="$artifacts/ecs"
+probe_test="$artifacts/probe.test"
 work="${TMPDIR:-/tmp}/ecs-freebsd-runtime"
 command=${1:-}
 
-check_build() {
-  rm -rf -- "$work"
-  mkdir -p "$work"
-  freebsd-version
-  uname -a
-  go version
-  go build -o "$work/ecs" ./cmd/ecs
+require_artifacts() {
+  [ -x "$ecs" ] || {
+    echo "freebsd-runtime: BUILD did not provide executable $ecs" >&2
+    return 1
+  }
+  [ -x "$probe_test" ] || {
+    echo "freebsd-runtime: BUILD did not provide executable $probe_test" >&2
+    return 1
+  }
+}
+
+run_probe_test() {
+  pattern=$1
+  require_artifacts
+  "$probe_test" \
+    -test.run="$pattern" \
+    -test.timeout=5m \
+    -test.count=1 \
+    -test.v
 }
 
 check_system() {
-  [ -x "$work/ecs" ] || {
-    echo "freebsd-runtime: BUILD did not produce $work/ecs" >&2
-    return 1
-  }
-
+  require_artifacts
+  rm -rf -- "$work"
   mkdir -p "$work/reports"
-  rm -f "$work/reports/system.json"
-  "$work/ecs" \
+
+  freebsd-version
+  uname -a
+
+  "$ecs" \
     --only system \
     --exposure local \
     --format json \
@@ -47,41 +62,22 @@ check_system() {
     return 1
   }
 
-  go test -tags=integration ./internal/probe \
-    -run '^TestFreeBSDSystemResultUsesNativeMethodsAndUnavailableLinuxFacts$' \
-    -timeout 5m \
-    -count=1 \
-    -v
+  run_probe_test '^TestFreeBSDSystemResultUsesNativeMethodsAndUnavailableLinuxFacts$'
 }
 
 check_ping() {
-  go test -tags=integration ./internal/probe \
-    -run '^TestIntegrationPingLoopback$' \
-    -timeout 5m \
-    -count=1 \
-    -v
+  run_probe_test '^TestIntegrationPingLoopback$'
 }
 
 check_route() {
-  go test -tags=integration ./internal/probe \
-    -run '^TestIntegrationFreeBSDTracerouteCanonicalRoute$' \
-    -timeout 5m \
-    -count=1 \
-    -v
+  run_probe_test '^TestIntegrationFreeBSDTracerouteCanonicalRoute$'
 }
 
 check_backtrace() {
-  go test -tags=integration ./internal/probe \
-    -run '^TestIntegrationFreeBSDBacktraceCanonical$' \
-    -timeout 5m \
-    -count=1 \
-    -v
+  run_probe_test '^TestIntegrationFreeBSDBacktraceCanonical$'
 }
 
 case "$command" in
-  build)
-    check_build
-    ;;
   system)
     check_system
     ;;
@@ -95,7 +91,7 @@ case "$command" in
     check_backtrace
     ;;
   *)
-    echo "usage: $0 {build|system|ping|route|backtrace}" >&2
+    echo "usage: $0 {system|ping|route|backtrace}" >&2
     exit 2
     ;;
 esac

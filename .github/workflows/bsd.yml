@@ -25,9 +25,39 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      # BUILD verifies the exact FreeBSD target on the fast host. Runtime support
+      # is proven below by executing these artifacts inside the real target VM;
+      # compiling the Go toolchain under QEMU only measures emulator speed.
+      - name: BUILD
+        id: freebsd_build
+        env:
+          FREEBSD_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$FREEBSD_ARCH" in
+            x86_64) goarch=amd64 ;;
+            aarch64) goarch=arm64 ;;
+            *) echo "unsupported FreeBSD CI arch: $FREEBSD_ARCH" >&2; exit 1 ;;
+          esac
+          rm -rf .ci/freebsd-runtime
+          mkdir -p .ci/freebsd-runtime
+          GOOS=freebsd GOARCH="$goarch" CGO_ENABLED=0 \
+            go build -o .ci/freebsd-runtime/ecs ./cmd/ecs
+          GOOS=freebsd GOARCH="$goarch" CGO_ENABLED=0 \
+            go test -c -tags=integration \
+              -o .ci/freebsd-runtime/probe.test ./internal/probe
+          test -s .ci/freebsd-runtime/ecs
+          test -s .ci/freebsd-runtime/probe.test
 
       - name: Start FreeBSD 15.1 VM
         id: freebsd_vm
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' }}
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
         with:
           release: "15.1"
@@ -37,22 +67,11 @@ jobs:
           cache-after-prepare: true
           custom-shell-name: freebsd
           prepare: |
-            pkg install -y go
             pw useradd ecsci -m -s /bin/sh
-
-      - name: BUILD
-        id: freebsd_build
-        if: ${{ steps.freebsd_vm.outcome == 'success' }}
-        shell: freebsd {0}
-        run: |
-          set -eu
-          su -m ecsci -c \
-            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
-            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' build"
 
       - name: SYSTEM
         id: freebsd_system
-        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -62,7 +81,7 @@ jobs:
 
       - name: PING
         id: freebsd_ping
-        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -72,7 +91,7 @@ jobs:
 
       - name: ROUTE
         id: freebsd_route
-        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -82,7 +101,7 @@ jobs:
 
       - name: BACKTRACE
         id: freebsd_backtrace
-        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -94,6 +113,7 @@ jobs:
         if: always()
         env:
           BUILD_OUTCOME: ${{ steps.freebsd_build.outcome }}
+          VM_OUTCOME: ${{ steps.freebsd_vm.outcome }}
           SYSTEM_OUTCOME: ${{ steps.freebsd_system.outcome }}
           PING_OUTCOME: ${{ steps.freebsd_ping.outcome }}
           ROUTE_OUTCOME: ${{ steps.freebsd_route.outcome }}
@@ -101,6 +121,7 @@ jobs:
         run: |
           for item in \
             "BUILD=$BUILD_OUTCOME" \
+            "VM=$VM_OUTCOME" \
             "SYSTEM=$SYSTEM_OUTCOME" \
             "PING=$PING_OUTCOME" \
             "ROUTE=$ROUTE_OUTCOME" \
