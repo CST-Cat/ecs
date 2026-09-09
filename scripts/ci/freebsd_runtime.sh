@@ -22,7 +22,10 @@ trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 
 # Runtime CI answers whether the FreeBSD product path actually works. Build the
 # real binary and execute a local-only system report as an ordinary user before
-# running the small set of platform-specific regressions below.
+# running the small set of platform-specific regressions below. System inventory
+# may legitimately be warning-level when optional hardware/cloud facts are
+# unavailable, so this smoke checks successful execution and report creation;
+# the targeted runtime test below asserts the required FreeBSD core facts.
 go build -o "$work/ecs" ./cmd/ecs
 mkdir -p "$work/reports"
 "$work/ecs" \
@@ -32,7 +35,7 @@ mkdir -p "$work/reports"
   --output "$work/reports" \
   --name system \
   --yes \
-  --strict
+  --no-color
 [ -s "$work/reports/system.json" ] || {
   echo "freebsd-runtime: ecs --only system did not produce JSON" >&2
   exit 1
