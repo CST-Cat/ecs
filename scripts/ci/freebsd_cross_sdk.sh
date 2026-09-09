@@ -32,7 +32,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 lock_file="$repo_root/tools/freebsd-cross-sdk.lock.json"
 [[ -s "$lock_file" ]] || die "missing SDK lock: $lock_file"
 
-for command_name in cc c++ curl gmake jq sha256 sha512 tar xz; do
+for command_name in cc c++ curl file gmake jq pkg sha256 sha512 tar xz; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing host command: $command_name"
 done
 
@@ -46,7 +46,7 @@ target_triple=$(lock '.freebsd.target_triple')
 gcc_version=$(lock '.gcc.version')
 gcc_url=$(lock '.gcc.source_url')
 gcc_sha512=$(lock '.gcc.source_sha512')
-binutils_prefix=$(lock '.binutils.target_prefix')
+binutils_package=$(lock '.binutils.package')
 
 sdk_root=${ECS_FREEBSD_CROSS_SDK_ROOT:-/tmp/ecs-freebsd-arm64-sdk}
 [[ "$sdk_root" = /* && "$sdk_root" != / ]] || die 'SDK root must be an absolute non-root path'
@@ -70,6 +70,60 @@ fetch_file() {
   fi
 }
 
+discover_binutils() {
+  local package_list
+  package_list=$(mktemp "$sdk_root/.binutils-package.XXXXXX")
+  pkg info -l "$binutils_package" >"$package_list" || {
+    rm -f -- "$package_list"
+    die "cannot read installed package manifest for $binutils_package"
+  }
+
+  local -a as_candidates=()
+  mapfile -t as_candidates < <(
+    sed -n 's@^[[:space:]]*\(/usr/local/bin/aarch64[^/]*-as\)$@\1@p' "$package_list"
+  )
+  rm -f -- "$package_list"
+  [[ "${#as_candidates[@]}" -eq 1 ]] ||
+    die "$binutils_package must install exactly one aarch64 FreeBSD assembler, found ${#as_candidates[@]}"
+
+  target_as=${as_candidates[0]}
+  binutils_prefix=${target_as%-as}
+  target_ld="${binutils_prefix}-ld"
+  target_ar="${binutils_prefix}-ar"
+  target_nm="${binutils_prefix}-nm"
+  target_ranlib="${binutils_prefix}-ranlib"
+  target_readelf="${binutils_prefix}-readelf"
+  target_strip="${binutils_prefix}-strip"
+
+  local tool
+  for tool in "$target_as" "$target_ld" "$target_ar" "$target_nm" \
+    "$target_ranlib" "$target_readelf" "$target_strip"; do
+    [[ -x "$tool" ]] || die "cross-binutils set is incomplete: $tool"
+  done
+
+  case "$(basename "$binutils_prefix")" in
+    aarch64-*-freebsd*) ;;
+    *) die "unexpected cross-binutils target prefix: $binutils_prefix" ;;
+  esac
+  printf 'binutils_package=%s\n' "$(pkg query '%n-%v' "$binutils_package")"
+  printf 'binutils_prefix=%s\n' "$binutils_prefix"
+}
+
+verify_sysroot_fenv() {
+  discover_binutils
+  local libm="$sysroot/usr/lib/libm.a"
+  [[ -s "$libm" ]] || die 'sysroot omitted static libm'
+  local nm_out="$sdk_root/libm-nm.txt"
+  "$target_nm" -g "$libm" >"$nm_out"
+  for symbol in feenableexcept fedisableexcept fegetexcept; do
+    grep -Eq "[[:space:]][TWD][[:space:]]+${symbol}$" "$nm_out" || {
+      grep -F "$symbol" "$nm_out" >&2 || true
+      die "FreeBSD $freebsd_release arm64 libm does not export $symbol"
+    }
+  done
+  echo 'freebsd-cross-sdk: target libm exports the fenv hooks required by libgfortran IEEE support'
+}
+
 phase_sysroot() {
   mkdir -p "$sources"
   fetch_file "$release_url/MANIFEST" "$manifest"
@@ -89,6 +143,8 @@ phase_sysroot() {
   [[ -s "$sysroot/usr/lib/libc.a" ]] || die 'sysroot omitted libc.a'
   [[ -s "$sysroot/usr/include/sys/param.h" ]] || die 'sysroot omitted system headers'
 
+  verify_sysroot_fenv
+
   cat >"$sdk_root/SYSROOT" <<EOF
 release=$freebsd_release
 source=$release_url/base.txz
@@ -107,11 +163,7 @@ phase_toolchain() {
   [[ "$actual" == "$gcc_sha512" ]] ||
     die "GCC source SHA-512 mismatch: expected $gcc_sha512, got $actual"
 
-  local target_as target_ld
-  target_as=$(command -v "${binutils_prefix}-as" || true)
-  target_ld=$(command -v "${binutils_prefix}-ld" || true)
-  [[ -n "$target_as" ]] || die "missing ${binutils_prefix}-as; install aarch64-binutils"
-  [[ -n "$target_ld" ]] || die "missing ${binutils_prefix}-ld; install aarch64-binutils"
+  discover_binutils
 
   if [[ ! -d "$gcc_source" ]]; then
     tar -xJf "$gcc_archive" -C "$sources"
@@ -176,6 +228,17 @@ phase_toolchain() {
   "$prefix/bin/${target_triple}-gfortran" -dumpmachine | grep -Fx "$target_triple" >/dev/null ||
     die 'cross gfortran reports the wrong target'
 
+  local libgfortran_config="$build/$target_triple/libgfortran/config.h"
+  [[ -s "$libgfortran_config" ]] || die 'libgfortran target config.h is missing'
+  grep -Eq '^#define HAVE_FEENABLEEXCEPT 1$' "$libgfortran_config" || {
+    grep -E 'HAVE_FEENABLEEXCEPT|HAVE_FENV_H' "$libgfortran_config" >&2 || true
+    die 'libgfortran did not detect target FreeBSD feenableexcept support'
+  }
+
+  local ieee_module
+  ieee_module=$(find "$prefix" -type f -name 'ieee_arithmetic.mod' -print -quit)
+  [[ -n "$ieee_module" ]] || die 'cross gfortran did not install ieee_arithmetic.mod'
+  printf 'ieee_arithmetic_module=%s\n' "$ieee_module"
   echo "freebsd-cross-sdk: host-native GCC $gcc_version SDK installed at $prefix"
 }
 
