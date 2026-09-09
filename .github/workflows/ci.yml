@@ -103,7 +103,8 @@ jobs:
           cache: false
       - run: go test -race ./...
 
-  # 七个 Linux 发布架构和两个 FreeBSD 目标现在都编得过吗。
+  # 七个 Linux 发布架构只验证能否交叉编译。FreeBSD 不在这里重复做一遍：
+  # 两个正式 FreeBSD 目标都由下面的真实 VM job 原生 build 并实际运行。
   cross:
     name: cross (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -119,8 +120,6 @@ jobs:
           - linux_s390x
           - linux_riscv64
           - linux_ppc64le
-          - freebsd_amd64
-          - freebsd_arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -132,8 +131,9 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-  # 编译通过不等于支持。两个 FreeBSD 架构都在真实 FreeBSD 15.1 VM 中运行
-  # 单元测试以及 base ping/traceroute 的非 root 集成测试。
+  # 编译通过不等于支持。两个正式 FreeBSD 架构都在真实 FreeBSD 15.1 VM 中
+  # 以普通用户原生 build ecs，并直接验收 system、ping、route、backtrace 等
+  # FreeBSD 产品路径；不在 FreeBSD VM 中重复整仓 Linux 已覆盖的测试矩阵。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
     runs-on: ubuntu-latest
