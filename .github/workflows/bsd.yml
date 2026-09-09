@@ -1,0 +1,117 @@
+name: bsd
+
+on:
+  push:
+    branches: ["bsd"]
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+concurrency:
+  group: bsd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freebsd:
+    name: freebsd runtime (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Start FreeBSD 15.1 VM
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: ${{ matrix.arch }}
+          sync: nfs
+          cache-after-prepare: true
+          custom-shell-name: freebsd
+          prepare: |
+            pkg install -y go
+            pw useradd ecsci -m -s /bin/sh
+
+      - name: BUILD
+        id: freebsd_build
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' build"
+
+      - name: SYSTEM
+        id: freebsd_system
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' system"
+
+      - name: PING
+        id: freebsd_ping
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' ping"
+
+      - name: ROUTE
+        id: freebsd_route
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' route"
+
+      - name: BACKTRACE
+        id: freebsd_backtrace
+        continue-on-error: true
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' backtrace"
+
+      - name: Require FreeBSD functionality
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.freebsd_build.outcome }}
+          SYSTEM_OUTCOME: ${{ steps.freebsd_system.outcome }}
+          PING_OUTCOME: ${{ steps.freebsd_ping.outcome }}
+          ROUTE_OUTCOME: ${{ steps.freebsd_route.outcome }}
+          BACKTRACE_OUTCOME: ${{ steps.freebsd_backtrace.outcome }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for item in \
+            "BUILD=$BUILD_OUTCOME" \
+            "SYSTEM=$SYSTEM_OUTCOME" \
+            "PING=$PING_OUTCOME" \
+            "ROUTE=$ROUTE_OUTCOME" \
+            "BACKTRACE=$BACKTRACE_OUTCOME"; do
+            name=${item%%=*}
+            outcome=${item#*=}
+            if [[ "$outcome" == "success" ]]; then
+              printf '[PASS] %s\n' "$name"
+            else
+              printf '[FAIL] %s (%s)\n' "$name" "$outcome" >&2
+              failed=1
+            fi
+          done
+          exit "$failed"
