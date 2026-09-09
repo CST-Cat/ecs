@@ -27,11 +27,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Start FreeBSD 15.1 VM
+        id: freebsd_vm
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
         with:
           release: "15.1"
           arch: ${{ matrix.arch }}
-          sync: nfs
+          sync: rsync
+          copyback: false
           cache-after-prepare: true
           custom-shell-name: freebsd
           prepare: |
@@ -40,7 +42,7 @@ jobs:
 
       - name: BUILD
         id: freebsd_build
-        continue-on-error: true
+        if: ${{ steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -50,7 +52,7 @@ jobs:
 
       - name: SYSTEM
         id: freebsd_system
-        continue-on-error: true
+        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -60,7 +62,7 @@ jobs:
 
       - name: PING
         id: freebsd_ping
-        continue-on-error: true
+        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -70,7 +72,7 @@ jobs:
 
       - name: ROUTE
         id: freebsd_route
-        continue-on-error: true
+        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -80,7 +82,7 @@ jobs:
 
       - name: BACKTRACE
         id: freebsd_backtrace
-        continue-on-error: true
+        if: ${{ always() && steps.freebsd_vm.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -88,7 +90,7 @@ jobs:
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
             /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh' backtrace"
 
-      - name: Require FreeBSD functionality
+      - name: FreeBSD functionality summary
         if: always()
         env:
           BUILD_OUTCOME: ${{ steps.freebsd_build.outcome }}
@@ -97,8 +99,6 @@ jobs:
           ROUTE_OUTCOME: ${{ steps.freebsd_route.outcome }}
           BACKTRACE_OUTCOME: ${{ steps.freebsd_backtrace.outcome }}
         run: |
-          set -euo pipefail
-          failed=0
           for item in \
             "BUILD=$BUILD_OUTCOME" \
             "SYSTEM=$SYSTEM_OUTCOME" \
@@ -110,8 +110,6 @@ jobs:
             if [[ "$outcome" == "success" ]]; then
               printf '[PASS] %s\n' "$name"
             else
-              printf '[FAIL] %s (%s)\n' "$name" "$outcome" >&2
-              failed=1
+              printf '[FAIL] %s (%s)\n' "$name" "$outcome"
             fi
           done
-          exit "$failed"
