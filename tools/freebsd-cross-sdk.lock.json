@@ -17,8 +17,7 @@
     "languages": ["c", "c++", "fortran"]
   },
   "binutils": {
-    "package": "aarch64-binutils",
-    "target_prefix": "aarch64-unknown-freebsd15.1"
+    "package": "aarch64-binutils"
   },
   "runtime_targets": [
     "libgcc",
