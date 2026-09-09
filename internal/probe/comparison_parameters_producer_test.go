@@ -300,7 +300,15 @@ func TestZstdComparisonArgumentsIgnoreOnlyTemporaryCorpusPath(t *testing.T) {
 }
 
 func TestDiskProducerComparisonParameterUsesExplanationFreeEngineName(t *testing.T) {
-	directory := t.TempDir()
+	directory, err := os.MkdirTemp(".", ".ecs-disk-producer-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove disk producer fixture: %v", err)
+		}
+	})
 	path := filepath.Join(directory, "fio")
 	script := `#!/bin/sh
 if [ "$1" = "--enghelp" ]; then
@@ -315,7 +323,7 @@ printf '%s\n' '{"fio version":"fio-fixture","jobs":[{"jobname":"seqwrite","write
 	t.Setenv("PATH", directory)
 	t.Setenv(ToolBinEnv, directory)
 	result := (diskProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-		DiskPath: t.TempDir(), DiskMiB: 128,
+		DiskPath: directory, DiskMiB: 128,
 	}})
 	assertProducerParameterScope(t, result,
 		"configured_file_mib", "multi_mount", "tool_version", "actual_file_size",
