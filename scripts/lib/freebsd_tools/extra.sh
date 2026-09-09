@@ -30,7 +30,7 @@ phase_openssl() {
   local version algorithm output_name
   local -a aead
   version=$(lock_tool_field openssl version)
-  OPENSSL_CONF=/dev/null "$stage/bin/openssl" version >"$work/openssl-version.txt" 2>&1
+  OPENSSL_CONF=/dev/null run_target "$stage/bin/openssl" version >"$work/openssl-version.txt" 2>&1
   grep -Eq "^OpenSSL ${version//./\\.}([[:space:]]|$)" "$work/openssl-version.txt" ||
     die "OpenSSL version smoke did not report $version"
   mkdir -p "$work/openssl-smoke/modules" "$work/openssl-smoke/engines"
@@ -43,7 +43,7 @@ phase_openssl() {
     OPENSSL_CONF=/dev/null \
       OPENSSL_MODULES="$work/openssl-smoke/modules" \
       OPENSSL_ENGINES="$work/openssl-smoke/engines" \
-      "$stage/bin/openssl" speed -elapsed -seconds 1 -bytes 16384 -mr -multi 1 \
+      run_target "$stage/bin/openssl" speed -elapsed -seconds 1 -bytes 16384 -mr -multi 1 \
       -evp "$algorithm" "${aead[@]}" >"$work/openssl-${algorithm}-smoke.txt" 2>&1
     grep -F "+DT:${output_name}:1:16384" "$work/openssl-${algorithm}-smoke.txt" >/dev/null ||
       die "OpenSSL speed $algorithm smoke omitted fixed parameters"
@@ -64,7 +64,7 @@ phase_stream() {
     "$stream_src" -o "$stage/bin/stream"
   validate_binary stream
 
-  OMP_NUM_THREADS=1 "$stage/bin/stream" >"$work/stream-smoke.txt"
+  OMP_NUM_THREADS=1 run_target "$stage/bin/stream" >"$work/stream-smoke.txt"
   local kernel
   for kernel in Copy Scale Add Triad; do
     grep -q "$kernel:" "$work/stream-smoke.txt" || die "STREAM smoke omitted $kernel"
@@ -104,17 +104,17 @@ phase_fio() {
   local version required_engine requested_depth fio_json
   dd if=/dev/zero of="$work/fio-smoke.data" bs=4096 count=2048 >/dev/null 2>&1
   version=$(lock_tool_field fio version)
-  "$stage/bin/fio" --version >"$work/fio-version.txt" 2>&1
+  run_target "$stage/bin/fio" --version >"$work/fio-version.txt" 2>&1
   grep -Eq "^fio-${version//./\\.}([[:space:]]|$)" "$work/fio-version.txt" ||
     die "fio version smoke did not report $version"
-  "$stage/bin/fio" --enghelp >"$work/fio-engines.txt"
+  run_target "$stage/bin/fio" --enghelp >"$work/fio-engines.txt"
   for required_engine in posixaio psync; do
     grep -Eiq "(^|[^[:alnum:]_])${required_engine}([^[:alnum:]_]|$)" "$work/fio-engines.txt" ||
       die "FreeBSD fio omitted required engine: $required_engine"
   done
   for requested_depth in 32 64; do
     fio_json="$work/fio-qd${requested_depth}.json"
-    "$stage/bin/fio" --name="ecs-qd${requested_depth}" --filename="$work/fio-smoke.data" \
+    run_target "$stage/bin/fio" --name="ecs-qd${requested_depth}" --filename="$work/fio-smoke.data" \
       --rw=read --bs=4k --size=4m --runtime=1 --time_based=1 \
       --ioengine=posixaio --iodepth="$requested_depth" --numjobs=1 --direct=1 \
       --output-format=json --output="$fio_json"
@@ -145,16 +145,16 @@ phase_iperf3() {
 
   local version iperf_port iperf_server iperf_json iperf_ok
   version=$(lock_tool_field iperf3 version)
-  "$stage/bin/iperf3" --version >"$work/iperf3-version.txt" 2>&1
+  run_target "$stage/bin/iperf3" --version >"$work/iperf3-version.txt" 2>&1
   grep -Eq "iperf ${version//./\\.}([^0-9]|$)" "$work/iperf3-version.txt" ||
     die "iperf3 version smoke did not report $version"
   iperf_port=$((42000 + (${RANDOM:-1} % 1000)))
-  "$stage/bin/iperf3" -s -1 -p "$iperf_port" >"$work/iperf3-server.txt" 2>&1 &
+  run_target "$stage/bin/iperf3" -s -1 -p "$iperf_port" >"$work/iperf3-server.txt" 2>&1 &
   iperf_server=$!
   iperf_json="$work/iperf3-smoke.json"
   iperf_ok=0
   for _ in {1..50}; do
-    if "$stage/bin/iperf3" -J -c 127.0.0.1 -p "$iperf_port" -t 1 -P 1 >"$iperf_json" 2>"$work/iperf3-client.txt"; then
+    if run_target "$stage/bin/iperf3" -J -c 127.0.0.1 -p "$iperf_port" -t 1 -P 1 >"$iperf_json" 2>"$work/iperf3-client.txt"; then
       iperf_ok=1
       break
     fi
