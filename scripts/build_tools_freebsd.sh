@@ -493,12 +493,32 @@ for benchmark in ep ft; do
       OMP_SCHEDULE=static OMP_DISPLAY_ENV=FALSE NPB_TIMER_FLAG=0 \
       "$run/npb-$benchmark"
   ) >"$work/npb-$benchmark-smoke.txt" 2>&1
-  grep -F 'Verification = SUCCESSFUL' "$work/npb-$benchmark-smoke.txt" >/dev/null || {
+  npb_smoke_output="$work/npb-$benchmark-smoke.txt"
+  benchmark_upper=${benchmark^^}
+  grep -Eq "NAS Parallel Benchmarks \\(NPB3\\.4-OMP\\) - ${benchmark_upper} Benchmark" "$npb_smoke_output" || {
+    cat "$npb_smoke_output" >&2
+    die "NPB $benchmark smoke omitted the official header"
+  }
+  grep -Eq '^[[:space:]]*Class[[:space:]]*=[[:space:]]*A[[:space:]]*$' "$npb_smoke_output" || {
+    cat "$npb_smoke_output" >&2
+    die "NPB $benchmark smoke did not run the release Class A binary"
+  }
+  grep -Eq '^[[:space:]]*Total threads[[:space:]]*=[[:space:]]*1[[:space:]]*$' "$npb_smoke_output" || {
+    cat "$npb_smoke_output" >&2
+    die "NPB $benchmark smoke did not use one OpenMP thread"
+  }
+  grep -Eq '^[[:space:]]*Verification[[:space:]]*=[[:space:]]*SUCCESSFUL[[:space:]]*$' "$npb_smoke_output" || {
     cat "$work/npb-$benchmark-smoke.txt" >&2
     die "NPB $benchmark smoke verification failed"
   }
   grep -Eq "^[[:space:]]*Version[[:space:]]*=[[:space:]]*${npb_version//./\\.}[[:space:]]*$" \
-    "$work/npb-$benchmark-smoke.txt" || die "NPB $benchmark reported the wrong version"
+    "$npb_smoke_output" || die "NPB $benchmark reported the wrong version"
+  grep -F "FC           = $fc_command" "$npb_smoke_output" >/dev/null ||
+    die "NPB $benchmark smoke reported the wrong compiler"
+  grep -F 'FFLAGS       = -O3 -fopenmp -static' "$npb_smoke_output" >/dev/null ||
+    die "NPB $benchmark smoke reported unexpected compiler flags"
+  grep -Eq '^[[:space:]]*RAND[[:space:]]*=[[:space:]]*randi8[[:space:]]*$' "$npb_smoke_output" ||
+    die "NPB $benchmark smoke reported the wrong random generator"
 done
 
 openssl_version=$(lock_tool_field openssl version)

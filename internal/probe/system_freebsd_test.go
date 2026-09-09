@@ -24,20 +24,21 @@ func TestFreeBSDMemoryUsageUsesVMPageStatistics(t *testing.T) {
 	if method := memoryMethodForFreeBSDValues(values); method != "freebsd-sysctl-vmstat-v1" {
 		t.Fatalf("page-stat memory method = %q", method)
 	}
+	delete(values, "vm.stats.vm.v_cache_count")
+	got = freeBSDMemoryUsage(values)
+	if !got.AvailableKnown || got.HostAvailableBytes != 300*4096 {
+		t.Fatalf("FreeBSD VM page memory without compatibility cache OID = %+v", got)
+	}
 }
 
-func TestFreeBSDMemoryUsageUsermemFallbackHasDistinctProvenance(t *testing.T) {
+func TestFreeBSDMemoryUsageDoesNotTreatNonWiredMemoryAsAvailable(t *testing.T) {
 	values := map[string]string{"hw.physmem": "1000", "hw.usermem": "400"}
 	got := freeBSDMemoryUsage(values)
-	if !got.AvailableKnown || got.HostAvailableBytes != 400 || got.HostUsedBytes != 600 {
-		t.Fatalf("hw.usermem fallback = %+v", got)
+	if got.AvailableKnown || got.HostAvailableBytes != 0 || got.HostUsedBytes != 0 {
+		t.Fatalf("hw.usermem was treated as current available memory = %+v", got)
 	}
-	if method := memoryMethodForFreeBSDValues(values); method != "freebsd-sysctl-hw-physmem-usermem-v1" {
+	if method := memoryMethodForFreeBSDValues(values); method != "freebsd-sysctl-hw-physmem-v1" {
 		t.Fatalf("hw.usermem method = %q", method)
-	}
-	zero := map[string]string{"hw.physmem": "1000", "hw.usermem": "0"}
-	if memory := freeBSDMemoryUsage(zero); memory.AvailableKnown || memoryMethodForFreeBSDValues(zero) != "freebsd-sysctl-hw-physmem-v1" {
-		t.Fatalf("zero hw.usermem was treated as available: %+v / %q", memory, memoryMethodForFreeBSDValues(zero))
 	}
 }
 

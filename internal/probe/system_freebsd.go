@@ -103,7 +103,7 @@ func freeBSDSysctlValue(ctx context.Context, key string) string {
 func freeBSDSystemValues(ctx context.Context) map[string]string {
 	values := make(map[string]string)
 	for _, key := range []string{
-		"hw.physmem", "hw.usermem", "hw.pagesize", "vm.stats.vm.v_page_size",
+		"hw.physmem", "hw.pagesize", "vm.stats.vm.v_page_size",
 		"vm.stats.vm.v_free_count", "vm.stats.vm.v_inactive_count", "vm.stats.vm.v_cache_count",
 		"vm.swap_total", "kern.boottime", "vm.loadavg",
 	} {
@@ -130,21 +130,15 @@ func parseFreeBSDUint(value string) (uint64, bool) {
 }
 
 // freeBSDMemoryUsage derives basic memory usage from FreeBSD VM page
-// statistics.  The page counters are intentionally preferred over hw.usermem:
-// hw.usermem is a FreeBSD-specific userspace-available view and is not a
-// Linux MemAvailable equivalent.  It is only a clearly labelled fallback.
+// statistics. hw.usermem is deliberately not used: FreeBSD defines it as all
+// non-wired memory, which includes active application pages and therefore is
+// not a current-availability fact.
 func freeBSDMemoryUsage(values map[string]string) memoryUsageSnapshot {
 	result := memoryUsageSnapshot{}
 	result.HostTotalBytes, _ = parseFreeBSDUint(values["hw.physmem"])
 	if available, ok := freeBSDVMAvailableBytes(values); ok {
 		result.HostAvailableBytes = available
 		result.AvailableKnown = true
-	}
-	if !result.AvailableKnown {
-		if usermem, ok := parseFreeBSDUint(values["hw.usermem"]); ok && usermem > 0 {
-			result.HostAvailableBytes = usermem
-			result.AvailableKnown = true
-		}
 	}
 	if result.HostTotalBytes > 0 && result.HostAvailableBytes > result.HostTotalBytes {
 		result.HostAvailableBytes = result.HostTotalBytes
@@ -168,9 +162,6 @@ func memoryMethodForFreeBSDValues(values map[string]string) string {
 		return "freebsd-sysctl-vmstat-v1"
 	}
 	physmem, physmemOK := parseFreeBSDUint(values["hw.physmem"])
-	if usermem, ok := parseFreeBSDUint(values["hw.usermem"]); physmemOK && physmem > 0 && ok && usermem > 0 {
-		return "freebsd-sysctl-hw-physmem-usermem-v1"
-	}
 	if physmemOK && physmem > 0 {
 		return "freebsd-sysctl-hw-physmem-v1"
 	}
@@ -186,12 +177,21 @@ func freeBSDVMAvailableBytes(values map[string]string) (uint64, bool) {
 		return 0, false
 	}
 	var pages uint64
-	for _, key := range []string{"vm.stats.vm.v_free_count", "vm.stats.vm.v_inactive_count", "vm.stats.vm.v_cache_count"} {
+	for _, key := range []string{"vm.stats.vm.v_free_count", "vm.stats.vm.v_inactive_count"} {
 		count, ok := parseFreeBSDUint(values[key])
 		if !ok || ^uint64(0)-pages < count {
 			return 0, false
 		}
 		pages += count
+	}
+	// v_cache_count became a compatibility OID after the cache and inactive
+	// queues were unified. Add it when a supported kernel exposes a real or
+	// zero compatibility value, but do not make the obsolete OID mandatory.
+	if cached, ok := parseFreeBSDUint(values["vm.stats.vm.v_cache_count"]); ok {
+		if ^uint64(0)-pages < cached {
+			return 0, false
+		}
+		pages += cached
 	}
 	if pages > ^uint64(0)/pageSize {
 		return 0, false
