@@ -309,14 +309,33 @@ npb_src="$work/$npb_tag/NPB3.4-OMP"
 [[ -d "$npb_src/EP" && -d "$npb_src/FT" ]] || die 'NPB archive omitted NPB3.4-OMP EP or FT'
 npb_ep_source_patches_json='[]'
 npb_ft_source_patches_json='[]'
+npb_f_inc=''
+npb_f_lib=''
 if [[ "$target" == freebsd_arm64 ]]; then
-  npb_arm64_patch_relative='tools/patches/NPB3.4.4-freebsd-arm64-ieee-arithmetic.patch'
-  npb_arm64_patch="$repo_root/$npb_arm64_patch_relative"
-  patch -d "$npb_src" -p1 -N <"$npb_arm64_patch"
-  npb_ep_source_patches_json=$(jq -n \
-    --arg path "$npb_arm64_patch_relative" \
-    '[{path: $path, reason: "FreeBSD aarch64 GCC lacks the ieee_arithmetic intrinsic module (FreeBSD Bug 255890); preserve NPB NaN rejection with standard self-inequality checks"}]')
-  npb_ft_source_patches_json=$npb_ep_source_patches_json
+  npb_ieee_source="$repo_root/scripts/ci/npb_ieee_arithmetic_freebsd.f90"
+  [[ -s "$npb_ieee_source" ]] || die "missing FreeBSD NPB intrinsic-module provider: $npb_ieee_source"
+  npb_intrinsic_dir="$work/npb-intrinsic-modules"
+  mkdir -p "$npb_intrinsic_dir"
+  "$fc_command" -O3 -c "$npb_ieee_source" -J "$npb_intrinsic_dir" \
+    -o "$npb_intrinsic_dir/ieee_arithmetic.o"
+  [[ -s "$npb_intrinsic_dir/ieee_arithmetic.mod" ]] ||
+    die 'FreeBSD NPB ieee_arithmetic provider did not produce ieee_arithmetic.mod'
+  [[ -s "$npb_intrinsic_dir/ieee_arithmetic.o" ]] ||
+    die 'FreeBSD NPB ieee_arithmetic provider did not produce an object file'
+  npb_f_inc="-fintrinsic-modules-path=$npb_intrinsic_dir"
+  npb_f_lib="$npb_intrinsic_dir/ieee_arithmetic.o"
+  cat >"$work/npb-ieee-probe.f90" <<'EOF'
+program ecs_npb_ieee_probe
+  use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
+  implicit none
+  real(kind=kind(0.0d0)) :: value
+  value = 0.0d0
+  if (ieee_is_nan(value)) error stop 1
+end program ecs_npb_ieee_probe
+EOF
+  "$fc_command" "$npb_f_inc" "$work/npb-ieee-probe.f90" "$npb_f_lib" \
+    -o "$work/npb-ieee-probe"
+  "$work/npb-ieee-probe" || die 'FreeBSD NPB ieee_arithmetic provider failed its intrinsic-module probe'
 fi
 
 stream_src="$work/stream.c"
@@ -360,8 +379,8 @@ npb_compile_date=$(date -u -r "$SOURCE_DATE_EPOCH" '+%d %b %Y')
 cat >"$npb_src/config/make.def" <<EOF
 FC = $fc_command
 FLINK = $fc_command
-F_LIB =
-F_INC =
+F_LIB = $npb_f_lib
+F_INC = $npb_f_inc
 FFLAGS = $npb_flags
 FLINKFLAGS = $npb_flags
 CC = $cc_command
