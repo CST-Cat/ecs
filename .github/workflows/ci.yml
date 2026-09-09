@@ -2,7 +2,10 @@ name: ci
 
 # 这个 commit 能不能进 main？
 #
-# 只回答这一个问题。排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
+# main push 和 PR 跑完整回归；bsd 分支日常 push 只验收真实 FreeBSD 功能，
+# 不重复消耗 Linux unit/race/integration/cross 等资源。bsd 合并回 main 的 PR
+# 仍会恢复完整回归，因此平台移植期间和合并门禁的职责保持分离。
+# 排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
 # 红灯语义：ci 红表示代码或构建问题，应阻断合并；leaderboard 红表示排行榜
 # 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
@@ -26,8 +29,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 行为：程序做的事对不对。
+  # 行为：程序做的事对不对。bsd 日常 push 不重复 Linux 主线回归。
   unit:
+    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,6 +49,7 @@ jobs:
 
   # 最低源码兼容版本测试。
   compat:
+    if: github.ref_name != 'bsd'
     name: compat (${{ matrix.go-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -66,6 +71,7 @@ jobs:
   # 静态规则、格式、数据契约。与 release preflight 是同一个脚本；安全扫描在
   # 独立的 security workflow 中运行，不改变本 workflow 的 required gate。
   quality:
+    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -79,6 +85,7 @@ jobs:
 
   # 与真实基准工具的集成。工具由脚本自己装齐，装什么不写在 YAML 里。
   integration:
+    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -92,6 +99,7 @@ jobs:
 
   # 并发问题。
   race:
+    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -103,9 +111,10 @@ jobs:
           cache: false
       - run: go test -race ./...
 
-  # 七个 Linux 发布架构只验证能否交叉编译。FreeBSD 不在这里重复做一遍：
-  # 两个正式 FreeBSD 目标都由下面的真实 VM job 原生 build 并实际运行。
+  # 七个 Linux 发布架构只在 main/PR 验证能否交叉编译。FreeBSD 不在这里
+  # 重复做一遍：两个正式 FreeBSD 目标都由下面的真实 VM job 原生 build 并运行。
   cross:
+    if: github.ref_name != 'bsd'
     name: cross (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -133,7 +142,7 @@ jobs:
 
   # 编译通过不等于支持。两个正式 FreeBSD 架构都在真实 FreeBSD 15.1 VM 中
   # 以普通用户原生 build ecs，并直接验收 system、ping、route、backtrace 等
-  # FreeBSD 产品路径；不在 FreeBSD VM 中重复整仓 Linux 已覆盖的测试矩阵。
+  # FreeBSD 产品路径；bsd 日常 push 的支持门禁只看这一组真实功能测试。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
     runs-on: ubuntu-latest
@@ -161,9 +170,9 @@ jobs:
               "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
               /bin/sh '$GITHUB_WORKSPACE/scripts/ci/freebsd_runtime.sh'"
 
-  # 跑分提交校验：格式合法、指纹自洽、不与已有记录重复。指纹由内容派生，
-  # 手改数值而不重算会被当场发现。只读：写权限属于 leaderboard.yml。
+  # 跑分提交校验属于主线数据门禁，bsd 日常 push 不重复执行。
   submissions:
+    if: github.ref_name != 'bsd'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -191,16 +200,17 @@ jobs:
             echo "当前没有排行榜提交，跳过离群检测"
           fi
 
-  # branch protection 的单点引用：加新 job 时只改这里的 needs，
-  # 不必去仓库设置里逐个勾选。
+  # branch protection 的单点引用。bsd push 只要求 FreeBSD runtime；main 和 PR
+  # 仍要求完整回归全部成功。
   required:
     if: always()
     needs: [unit, compat, quality, integration, race, cross, freebsd, submissions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every check to pass
+      - name: Require relevant checks to pass
         env:
+          REF_NAME: ${{ github.ref_name }}
           UNIT_RESULT: ${{ needs.unit.result }}
           COMPAT_RESULT: ${{ needs.compat.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
@@ -211,6 +221,12 @@ jobs:
           SUBMISSIONS_RESULT: ${{ needs.submissions.result }}
         run: |
           set -euo pipefail
+          if [[ "$REF_NAME" == "bsd" ]]; then
+            echo "bsd 分支只验收 FreeBSD runtime：freebsd=$FREEBSD_RESULT"
+            [[ "$FREEBSD_RESULT" == "success" ]]
+            exit 0
+          fi
+
           summary=(
             "unit=$UNIT_RESULT"
             "compat=$COMPAT_RESULT"
