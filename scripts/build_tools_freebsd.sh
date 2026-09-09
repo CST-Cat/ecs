@@ -316,6 +316,7 @@ if [[ "$target" == freebsd_arm64 ]]; then
   npb_ep_source_patches_json=$(jq -n \
     --arg path "$npb_arm64_patch_relative" \
     '[{path: $path, reason: "FreeBSD aarch64 GCC lacks the ieee_arithmetic intrinsic module (FreeBSD Bug 255890); preserve NPB NaN rejection with standard self-inequality checks"}]')
+  npb_ft_source_patches_json=$npb_ep_source_patches_json
 fi
 
 stream_src="$work/stream.c"
