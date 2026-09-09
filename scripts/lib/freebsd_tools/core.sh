@@ -25,13 +25,13 @@ phase_sysbench() {
   local version short_commit expected
   version=$(lock_tool_field sysbench version)
   short_commit=$(git -C "$sysbench_src" rev-parse --short HEAD)
-  "$stage/bin/sysbench" --version >"$work/sysbench-version.txt" 2>&1
+  run_target "$stage/bin/sysbench" --version >"$work/sysbench-version.txt" 2>&1
   expected="sysbench $version-$short_commit"
   grep -Fx "$expected" "$work/sysbench-version.txt" >/dev/null || {
     cat "$work/sysbench-version.txt" >&2
     die "sysbench version smoke did not report $expected"
   }
-  "$stage/bin/sysbench" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
+  run_target "$stage/bin/sysbench" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
   grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" ||
     die 'sysbench CPU smoke output was not recognized'
 }
@@ -48,11 +48,11 @@ phase_zstd() {
   local version
   printf '%s\n' 'ECS FreeBSD zstd smoke input' >"$work/zstd-input"
   version=$(lock_tool_field zstd version)
-  "$stage/bin/zstd" --version >"$work/zstd-version.txt" 2>&1
+  run_target "$stage/bin/zstd" --version >"$work/zstd-version.txt" 2>&1
   grep -Eq "v${version//./\\.}([^0-9]|$)" "$work/zstd-version.txt" ||
     die "zstd version smoke did not report $version"
-  "$stage/bin/zstd" -q -f "$work/zstd-input" -o "$work/zstd-output.zst"
-  "$stage/bin/zstd" -q -d -f "$work/zstd-output.zst" -o "$work/zstd-roundtrip"
+  run_target "$stage/bin/zstd" -q -f "$work/zstd-input" -o "$work/zstd-output.zst"
+  run_target "$stage/bin/zstd" -q -d -f "$work/zstd-output.zst" -o "$work/zstd-roundtrip"
   cmp "$work/zstd-input" "$work/zstd-roundtrip" || die 'zstd round trip failed'
 }
 
@@ -93,7 +93,8 @@ end program ecs_npb_ieee_probe
 PROBE
     "$fc_command" "$npb_f_inc" "$work/npb-ieee-probe.f90" "$npb_f_lib" \
       -o "$work/npb-ieee-probe"
-    "$work/npb-ieee-probe" || die 'FreeBSD NPB ieee_arithmetic provider failed its intrinsic-module probe'
+    run_target "$work/npb-ieee-probe" ||
+      die 'FreeBSD NPB ieee_arithmetic provider failed its intrinsic-module probe'
   fi
 
   echo "building NPB $npb_version OpenMP EP + FT Class A"
@@ -140,7 +141,7 @@ MAKEDEF
       cd "$work"
       OMP_NUM_THREADS=1 OMP_DYNAMIC=FALSE OMP_PROC_BIND=close OMP_PLACES=cores \
         OMP_SCHEDULE=static OMP_DISPLAY_ENV=FALSE NPB_TIMER_FLAG=0 \
-        "$stage/bin/npb-$benchmark"
+        run_target "$stage/bin/npb-$benchmark"
     ) >"$work/npb-$benchmark-smoke.txt" 2>&1
     npb_smoke_output="$work/npb-$benchmark-smoke.txt"
     benchmark_upper=${benchmark^^}
