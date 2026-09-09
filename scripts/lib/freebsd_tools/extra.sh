@@ -22,7 +22,6 @@ phase_openssl() {
   (
     cd "$openssl_src"
     CC="$cc_command" perl ./Configure "${openssl_build_flags[@]}"
-    gmake -j"$jobs" build_generated
     gmake -j"$jobs" apps/openssl
   )
   cp "$openssl_src/apps/openssl" "$stage/bin/openssl"
