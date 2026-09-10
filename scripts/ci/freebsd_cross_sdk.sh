@@ -165,6 +165,27 @@ phase_toolchain() {
 
   discover_binutils
 
+  # Ports installs aarch64-binutils as aarch64--freebsd-*; GCC looks up
+  # ${target}-ar / -nm / -ranlib / ... from PATH when building target libs.
+  # Alias only; do not rename the packaged tools.
+  local aliases_dir="$sdk_root/target-aliases"
+  local alias_tool real_tool
+  rm -rf -- "$aliases_dir"
+  mkdir -p "$aliases_dir"
+  for alias_tool in as ld ar nm ranlib readelf strip objdump objcopy; do
+    real_tool="${binutils_prefix}-${alias_tool}"
+    if [[ -x "$real_tool" ]]; then
+      ln -s "$real_tool" "$aliases_dir/${target_triple}-${alias_tool}"
+    fi
+  done
+  [[ -x "$aliases_dir/${target_triple}-ar" ]] ||
+    die "missing ${target_triple}-ar alias for ${binutils_prefix}-ar"
+  [[ -x "$aliases_dir/${target_triple}-as" ]] ||
+    die "missing ${target_triple}-as alias for ${binutils_prefix}-as"
+  [[ -x "$aliases_dir/${target_triple}-ld" ]] ||
+    die "missing ${target_triple}-ld alias for ${binutils_prefix}-ld"
+  printf 'target_aliases_dir=%s\n' "$aliases_dir"
+
   if [[ ! -d "$gcc_source" ]]; then
     tar -xJf "$gcc_archive" -C "$sources"
   fi
@@ -177,6 +198,7 @@ phase_toolchain() {
   host_triplet=$(cc -dumpmachine)
   (
     cd "$build"
+    export PATH="$aliases_dir:$PATH"
     CC=cc CXX=c++ "$gcc_source/configure" \
       --build="$host_triplet" \
       --host="$host_triplet" \
