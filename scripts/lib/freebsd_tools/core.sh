@@ -174,10 +174,17 @@ MAKEDEF
     }
     grep -Eq "^[[:space:]]*Version[[:space:]]*=[[:space:]]*${npb_version//./\\.}[[:space:]]*$" \
       "$npb_smoke_output" || die "NPB $benchmark reported the wrong version"
-    grep -F "FC           = $fc_command" "$npb_smoke_output" >/dev/null ||
+    # NPB echoes the FC string from make.def. Accept either the absolute
+    # cross path or the bare triple-prefixed tool name.
+    if ! grep -F "FC           = $fc_command" "$npb_smoke_output" >/dev/null &&
+      ! grep -F "FC           = $(basename "$fc_command")" "$npb_smoke_output" >/dev/null; then
+      cat "$npb_smoke_output" >&2
       die "NPB $benchmark smoke reported the wrong compiler"
-    grep -F 'FFLAGS       = -O3 -fopenmp -static' "$npb_smoke_output" >/dev/null ||
+    fi
+    grep -F 'FFLAGS       = -O3 -fopenmp -static' "$npb_smoke_output" >/dev/null || {
+      cat "$npb_smoke_output" >&2
       die "NPB $benchmark smoke reported unexpected compiler flags"
+    }
     grep -Eq '^[[:space:]]*RAND[[:space:]]*=[[:space:]]*randi8[[:space:]]*$' "$npb_smoke_output" ||
       die "NPB $benchmark smoke reported the wrong random generator"
   done
