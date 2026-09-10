@@ -28,15 +28,25 @@ phase_sysbench() {
   local version short_commit expected
   version=$(lock_tool_field sysbench version)
   short_commit=$(git -C "$sysbench_src" rev-parse --short HEAD)
+  set +e
   run_target "$stage/bin/sysbench" --version >"$work/sysbench-version.txt" 2>&1
+  local version_status=$?
+  set -e
+  if [[ "$version_status" -ne 0 ]]; then
+    echo "sysbench --version exited $version_status under ${smoke_runner}:" >&2
+    cat "$work/sysbench-version.txt" >&2 || true
+    die "sysbench version smoke failed under the target runner"
+  fi
   expected="sysbench $version-$short_commit"
   grep -Fx "$expected" "$work/sysbench-version.txt" >/dev/null || {
     cat "$work/sysbench-version.txt" >&2
     die "sysbench version smoke did not report $expected"
   }
-  run_target "$stage/bin/sysbench" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt"
-  grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" ||
+  run_target "$stage/bin/sysbench" cpu --cpu-max-prime=1000 --threads=1 run >"$work/sysbench-smoke.txt" 2>&1
+  grep -Eq 'events per second|total time' "$work/sysbench-smoke.txt" || {
+    cat "$work/sysbench-smoke.txt" >&2
     die 'sysbench CPU smoke output was not recognized'
+  }
 }
 
 phase_zstd() {

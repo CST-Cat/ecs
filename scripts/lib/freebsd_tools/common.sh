@@ -44,6 +44,13 @@ if [[ -n "${ECS_TARGET_RUNNER:-}" ]]; then
   command -v "$ECS_TARGET_RUNNER" >/dev/null 2>&1 ||
     die "target runner is missing: $ECS_TARGET_RUNNER"
   target_runner_command=("$ECS_TARGET_RUNNER")
+  # Point qemu-user at the pinned FreeBSD/arm64 sysroot so guest lookups do
+  # not fall through to the amd64 host tree.
+  if [[ -n "${ECS_FREEBSD_CROSS_SYSROOT:-}" ]]; then
+    [[ -d "$ECS_FREEBSD_CROSS_SYSROOT" ]] ||
+      die "ECS_FREEBSD_CROSS_SYSROOT does not exist: $ECS_FREEBSD_CROSS_SYSROOT"
+    target_runner_command+=(-L "$ECS_FREEBSD_CROSS_SYSROOT")
+  fi
   smoke_runner=$ECS_TARGET_RUNNER
 fi
 
