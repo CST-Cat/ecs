@@ -198,6 +198,44 @@ assert_checksums 1
 [[ -s "$dist_root/ecs_freebsd_arm64.tar.gz" ]] ||
   fail "target-selected ECS package did not write the FreeBSD archive"
 
+# Case D: --all-targets is how release and bundle wiring promote every platform
+# target, including the two FreeBSD stages, in one invocation. The default stays
+# Linux-only, so this is the path that emits the FreeBSD tool archives.
+if ! package_output=$(env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \
+  --tools-stage "$stage_root" --all-targets 2>&1); then
+  fail "all-targets bundle invocation failed:\n$package_output"
+fi
+assert_archives ecs-tools_ "${#ECS_TARGETS[@]}"
+assert_checksums "$((${#ECS_TARGETS[@]} + 1))"
+[[ -z "$(find "$dist_root" -mindepth 1 -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print -quit)" ]] ||
+  fail "all-targets bundle unexpectedly wrote ECS archives"
+[[ -s "$dist_root/$ECS_CORPUS_ARCHIVE" ]] ||
+  fail "all-targets bundle did not write the corpus archive"
+for target_record in "${ECS_FREEBSD_TARGETS[@]}"; do
+  read -r target goos _goarch arch <<<"$target_record"
+  archive="$dist_root/ecs-tools_$target.tar.gz"
+  [[ -s "$archive" ]] || fail "all-targets bundle did not write the $target tools archive"
+  listing=$(tar -tzf "$archive") || fail "could not inspect the $target tools archive"
+  if grep -E -x 'bin/(ping|nexttrace-tiny)' <<<"$listing" >/dev/null; then
+    fail "$target tools archive unexpectedly contains a base-system tool"
+  fi
+  mapfile -t target_tools < <(ecs_target_tool_names "$target")
+  for tool in "${target_tools[@]}"; do
+    grep -F -x "bin/$tool" <<<"$listing" >/dev/null ||
+      fail "$target tools archive omitted bin/$tool"
+  done
+done
+
+# --all-targets and --target answer the same question; asking both is ambiguous
+# input rather than a union, and must not silently pick one interpretation.
+if env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \
+  --binaries-dir "$binary_root" --all-targets --target freebsd_amd64 \
+  >"$test_root/all-targets-conflict.out" 2>&1; then
+  fail "package.sh accepted --all-targets together with --target"
+fi
+grep -F -- '--all-targets cannot be combined with --target' "$test_root/all-targets-conflict.out" >/dev/null ||
+  fail "package.sh did not diagnose --all-targets together with --target"
+
 # Duplicate selectors are ambiguous input and must not silently duplicate a
 # checksum entry for one overwritten archive.
 if env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \

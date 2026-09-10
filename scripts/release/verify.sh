@@ -117,8 +117,8 @@ done <<<"$listing"
 
 # ---- 发布物清单 ----
 assets=()
-for arch in "${ECS_ARCHES[@]}"; do
-  assets+=("ecs_linux_${arch}.tar.gz")
+for target in "${ECS_TARGET_IDS[@]}"; do
+  assets+=("ecs_${target}.tar.gz")
 done
 
 for asset in "${assets[@]}"; do

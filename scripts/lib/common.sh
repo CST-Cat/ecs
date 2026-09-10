@@ -160,16 +160,16 @@ ecs_retry() {
 # 从 dist 目录里解出全部主程序二进制，每行输出 "归档名<TAB>二进制路径"。
 # 归档数不等于发布架构数时失败——少一个架构就发布是这套流程最该挡住的事。
 #
-# verify 的归档校验需要统一解开全部七个主程序归档，所以该逻辑
+# verify 的归档校验需要统一解开全部九个平台目标的主程序归档，所以该逻辑
 # 作为共享辅助函数保留在这里。
 ecs_release_binaries() {
   local dist=$1 out=$2
   local archive name directory
   local -a archives
 
-  mapfile -t archives < <(find "$dist" -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print | sort)
-  if [[ "${#archives[@]}" -ne "${#ECS_ARCHES[@]}" ]]; then
-    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_ARCHES[@]}" >&2
+  mapfile -t archives < <(find "$dist" -maxdepth 1 -type f -name 'ecs_*.tar.gz' -print | sort)
+  if [[ "${#archives[@]}" -ne "${#ECS_TARGETS[@]}" ]]; then
+    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_TARGETS[@]}" >&2
     return 1
   fi
 

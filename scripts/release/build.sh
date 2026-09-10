@@ -3,7 +3,8 @@ set -euo pipefail
 
 # 组装 ECS Release。
 #
-#   dist/ecs_linux_<arch>.tar.gz          七架构主程序
+#   dist/ecs_<target>.tar.gz              九个平台目标主程序
+#                                         （七个 Linux 加 FreeBSD amd64/arm64）
 #   dist/checksums.txt                    以上全部的 SHA-256
 #
 # 本脚本被 release workflow 的 assemble job 和本地 `make release-dry-run` 共用。
@@ -19,7 +20,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/release/build.sh VERSION [--binaries-dir BINARY_DIR] [--dry-run]
 
-  --binaries-dir  已构建的七架构主程序目录，省略时由本脚本编译
+  --binaries-dir  已构建的九目标主程序目录，省略时由本脚本编译
   --dry-run      本地演练：允许脏工作区。发布路径绝不能传——洁净检查正是
                  用来挡住会带上 vcs.modified=true 的构建的。
 USAGE
@@ -90,11 +91,11 @@ if [[ -n "$binaries_dir" ]]; then
   echo "release-build: 使用预构建主程序目录 $binaries_dir" >&2
 else
   prebuilt_dir=$(mktemp -d "${TMPDIR:-/tmp}/ecs-release-binaries.XXXXXX")
-  echo "release-build: 编译七架构主程序" >&2
+  echo "release-build: 编译九目标主程序" >&2
   OUTPUT_DIR="$prebuilt_dir" VERSION="$version" scripts/cross.sh
   binaries_dir="$prebuilt_dir"
 fi
 
-scripts/package.sh --binaries-dir "$binaries_dir"
+scripts/package.sh --binaries-dir "$binaries_dir" --all-targets
 
 echo "release-build: $version 组装完成，共 $(wc -l <"$dist/checksums.txt") 个发布物" >&2

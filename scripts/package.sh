@@ -5,13 +5,14 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/package.sh --binaries-dir BINARY_DIR
        scripts/package.sh --tools-stage STAGE_ROOT
-       [--target TARGET] ...
+       [--target TARGET]... | --all-targets
 USAGE
 }
 
 tools_stage_root=""
 binaries_dir=""
 target_selectors=()
+all_targets=0
 usage_error() {
   echo "$*" >&2
   usage
@@ -38,6 +39,11 @@ while [[ "$#" -gt 0 ]]; do
       [[ "$#" -ge 2 && -n "$2" ]] || usage_error "--target requires TARGET"
       target_selectors+=("$2")
       shift 2
+      ;;
+    --all-targets)
+      [[ "$all_targets" -eq 0 ]] || usage_error "--all-targets may only be supplied once"
+      all_targets=1
+      shift
       ;;
     *)
       usage_error "unknown option: $1"
@@ -68,28 +74,36 @@ die() {
   exit 1
 }
 
-# Preserve the existing Linux release set by default while allowing callers to
-# select an unambiguous Linux or FreeBSD platform target explicitly.
-targets=("${ECS_LINUX_TARGETS[@]}")
-if [[ "${#target_selectors[@]}" -gt 0 ]]; then
-  targets=()
-  for selected_target in "${target_selectors[@]}"; do
-    for existing_target in "${targets[@]}"; do
-      read -r existing_target_id _ <<<"$existing_target"
-      [[ "$existing_target_id" != "$selected_target" ]] ||
-        usage_error "target may only be supplied once: $selected_target"
+# The default stays the seven Linux targets so an unqualified local packaging
+# run keeps the historic set. Release and bundle wiring ask for all nine
+# platform targets explicitly with --all-targets, and a single unambiguous
+# Linux or FreeBSD target can still be selected with --target.
+if [[ "$all_targets" -eq 1 ]]; then
+  [[ "${#target_selectors[@]}" -eq 0 ]] ||
+    usage_error "--all-targets cannot be combined with --target"
+  targets=("${ECS_TARGETS[@]}")
+else
+  targets=("${ECS_LINUX_TARGETS[@]}")
+  if [[ "${#target_selectors[@]}" -gt 0 ]]; then
+    targets=()
+    for selected_target in "${target_selectors[@]}"; do
+      for existing_target in "${targets[@]}"; do
+        read -r existing_target_id _ <<<"$existing_target"
+        [[ "$existing_target_id" != "$selected_target" ]] ||
+          usage_error "target may only be supplied once: $selected_target"
+      done
+      selected=0
+      for target_record in "${ECS_TARGETS[@]}"; do
+        read -r target_id _goos _goarch _arch <<<"$target_record"
+        if [[ "$target_id" == "$selected_target" ]]; then
+          targets+=("$target_record")
+          selected=1
+          break
+        fi
+      done
+      [[ "$selected" -eq 1 ]] || usage_error "unsupported target: $selected_target"
     done
-    selected=0
-    for target_record in "${ECS_TARGETS[@]}"; do
-      read -r target_id _goos _goarch _arch <<<"$target_record"
-      if [[ "$target_id" == "$selected_target" ]]; then
-        targets+=("$target_record")
-        selected=1
-        break
-      fi
-    done
-    [[ "$selected" -eq 1 ]] || usage_error "unsupported target: $selected_target"
-  done
+  fi
 fi
 
 temp_stages=()
