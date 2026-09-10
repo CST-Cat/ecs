@@ -25,12 +25,21 @@ phase_sysbench() {
   cp "$sysbench_src/src/sysbench" "$stage/bin/sysbench"
   validate_binary sysbench
 
+  # LuaJIT's runtime code generation reliably aborts under qemu-user
+  # (SIGABRT / "uncaught target signal 6"), even for --version. ELF identity
+  # and static linkage are already proven above. Functional smoke for the
+  # cross path belongs on a real FreeBSD/arm64 guest, not the emulator.
+  if [[ "$toolchain_mode" == cross ]]; then
+    echo "sysbench: static FreeBSD/arm64 ELF validated; skipping qemu-user functional smoke (LuaJIT)"
+    return 0
+  fi
+
   local version short_commit expected
   version=$(lock_tool_field sysbench version)
   short_commit=$(git -C "$sysbench_src" rev-parse --short HEAD)
   set +e
   run_target "$stage/bin/sysbench" --version >"$work/sysbench-version.txt" 2>&1
-  local version_status=$?
+  version_status=$?
   set -e
   if [[ "$version_status" -ne 0 ]]; then
     echo "sysbench --version exited $version_status under ${smoke_runner}:" >&2

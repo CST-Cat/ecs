@@ -169,9 +169,6 @@ case "$target" in
     toolchain_mode=cross
     cross_target_triplet=$sdk_triple
     sdk_deps_localbase="$sdk_root/deps/usr/local"
-    export ECS_FREEBSD_CROSS_SYSROOT="$sdk_root/sysroot"
-    [[ -d "$ECS_FREEBSD_CROSS_SYSROOT" ]] ||
-      die "SDK sysroot is missing; run freebsd_cross_sdk.sh sysroot ($ECS_FREEBSD_CROSS_SYSROOT)"
     [[ -s "$sdk_deps_localbase/lib/libluajit-5.1.a" ]] ||
       die "SDK deps are missing; run freebsd_cross_sdk.sh deps ($sdk_deps_localbase)"
     export PKG_CONFIG_PATH="$sdk_deps_localbase/libdata/pkgconfig"
