@@ -52,6 +52,12 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 	if submission.Host.Region != "us-west" || submission.Host.Provider != "Fixture Cloud" || submission.Note != "diagnostic fixture" {
 		t.Fatalf("sanitized metadata = %+v", submission)
 	}
+	// The OS is a grouping dimension, not an identifier: Linux and FreeBSD
+	// share GOARCH but not the disk engine, so a leaderboard needs it even
+	// though the report's arch field alone cannot express the difference.
+	if submission.Host.Arch != "amd64" || submission.Host.OS != "FreeBSD 15.1" {
+		t.Fatalf("host platform spec = %+v, want amd64/FreeBSD 15.1", submission.Host)
+	}
 	if submission.MemoryBackend != memoryBackendStream || submission.Tool.ECS != "ecs-test" || submission.Tool.Sysbench != "sysbench 1.0.20" || submission.Tool.Fio != "fio-3.35" || submission.Tool.IPerf3 != "iperf 3.12" {
 		t.Fatalf("submission whitelist metadata = %+v", submission)
 	}
@@ -158,6 +164,7 @@ func TestSubmissionBuildWhitelistFingerprintAndRoundTrip(t *testing.T) {
 		{name: "host cpu model", mutate: func(value *Submission) { value.Host.CPUModel += " changed" }},
 		{name: "host virtualization", mutate: func(value *Submission) { value.Host.Virtualization += " changed" }},
 		{name: "host architecture", mutate: func(value *Submission) { value.Host.Arch += "-changed" }},
+		{name: "host os", mutate: func(value *Submission) { value.Host.OS += " changed" }},
 		{name: "host region", mutate: func(value *Submission) { value.Host.Region += "-changed" }},
 		{name: "host provider", mutate: func(value *Submission) { value.Host.Provider += "-changed" }},
 		{name: "tool ecs", mutate: func(value *Submission) { value.Tool.ECS += "-changed" }},

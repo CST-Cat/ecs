@@ -11,7 +11,7 @@ A submission is a separate JSON artifact produced by `ecs submit`, not a compres
 ```json
 {
   "schema": "ecs.submission/v1",
-  "id": "f6b007e06d561cd7792089973c85554f",
+  "id": "924f7165657a43733f6ad58c6201590d",
   "sample_id": "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5",
   "host": {
     "vcpu": 16,
@@ -19,6 +19,7 @@ A submission is a separate JSON artifact produced by `ecs submit`, not a compres
     "virtualization": "kvm",
     "cpu_model": "AMD Ryzen 7 PRO 4750U with Radeon Graphics",
     "arch": "amd64",
+    "os": "Ubuntu 24.04",
     "region": "jp-tokyo",
     "provider": "vultr"
   },
@@ -42,7 +43,7 @@ A submission is a separate JSON artifact produced by `ecs submit`, not a compres
 }
 ```
 
-The fields are an explicit whitelist: host facts, tool versions and the `metrics` needed for scoring are retained; probe verdicts from a full report do not enter merely because the report gains a field. `sample_id` is the anonymous benchmark sample identity derived from the full report's `run.id` as `SHA-256("ecs.sample/v1\x00" + run.id)`; the raw `run.id` is never written to a submission. `id` uses the single current canonical JSON content fingerprint, excluding `id`, `sample_id` and `ran_at` while covering every other accepted public field. `provider`, `region` and `note` are self-reported; the validator enforces their limits and the registered metric keys.
+The fields are an explicit whitelist: host facts, tool versions and the `metrics` needed for scoring are retained; probe verdicts from a full report do not enter merely because the report gains a field. `sample_id` is the anonymous benchmark sample identity derived from the full report's `run.id` as `SHA-256("ecs.sample/v1\x00" + run.id)`; the raw `run.id` is never written to a submission. `id` uses the single current canonical JSON content fingerprint, excluding `id`, `sample_id` and `ran_at` while covering every other accepted public field. `provider`, `region` and `note` are self-reported; the validator enforces their limits and the registered metric keys. `arch` and `os` exist for grouping: Linux and FreeBSD share a GOARCH but not the disk engine (`io_uring`/`libaio` vs `posixaio`) or the routing tool, so grouping by `arch` alone would mix two measurement contracts in one table.
 
 ## Produce a submission
 
@@ -69,7 +70,7 @@ The wrapper interprets only `--submit`, `--provider`, `--region`, and submission
 ```text
 submissions/
 ├── 2026-08/
-│   ├── f6b007e06d561cd7792089973c85554f-vultr-jp-tokyo.json
+│   ├── 924f7165657a43733f6ad58c6201590d-vultr-jp-tokyo.json
 │   └── 3f9a12c4e5b7a8c9d0e1f22334455667-hetzner-de-fsn.json
 ├── 2026-09/
 │   └── ...
