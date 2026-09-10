@@ -100,6 +100,15 @@ PROBE
     die 'compiler ieee_arithmetic intrinsic module failed its probe'
 
   echo "building NPB $npb_version OpenMP EP + FT Class A"
+  # UCC builds setparams, which must run on the build host. Keep it on the
+  # native compiler even when FC/CC are the arm64 cross pair.
+  local npb_ucc=cc
+  if [[ "$toolchain_mode" == cross ]]; then
+    npb_ucc=$(command -v cc)
+    [[ -n "$npb_ucc" ]] || die 'host cc is required to build NPB setparams'
+  else
+    npb_ucc=$cc_command
+  fi
   cat >"$npb_src/config/make.def" <<MAKEDEF
 FC = $fc_command
 FLINK = $fc_command
@@ -113,7 +122,7 @@ C_LIB = -lm
 C_INC =
 CFLAGS = $npb_flags
 CLINKFLAGS = $npb_flags
-UCC = $cc_command
+UCC = $npb_ucc
 BINDIR = ../bin
 RAND = randi8
 WTIME = wtime.c
