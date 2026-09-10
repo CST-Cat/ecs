@@ -174,10 +174,16 @@ MAKEDEF
     }
     grep -Eq "^[[:space:]]*Version[[:space:]]*=[[:space:]]*${npb_version//./\\.}[[:space:]]*$" \
       "$npb_smoke_output" || die "NPB $benchmark reported the wrong version"
-    # NPB echoes the FC string from make.def. Accept either the absolute
-    # cross path or the bare triple-prefixed tool name.
-    if ! grep -F "FC           = $fc_command" "$npb_smoke_output" >/dev/null &&
-      ! grep -F "FC           = $(basename "$fc_command")" "$npb_smoke_output" >/dev/null; then
+    # NPB print_results truncates long compiler paths to a prefix plus "...".
+    # Accept the exact path, the basename, or the truncated prefix.
+    local fc_ok=0 fc_prefix
+    fc_prefix=${fc_command:0:40}
+    if grep -F "FC           = $fc_command" "$npb_smoke_output" >/dev/null ||
+      grep -F "FC           = $(basename "$fc_command")" "$npb_smoke_output" >/dev/null ||
+      grep -F "FC           = $fc_prefix" "$npb_smoke_output" >/dev/null; then
+      fc_ok=1
+    fi
+    if [[ "$fc_ok" -ne 1 ]]; then
       cat "$npb_smoke_output" >&2
       die "NPB $benchmark smoke reported the wrong compiler"
     fi
