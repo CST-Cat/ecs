@@ -1,6 +1,6 @@
 # ecs
 
-An ad-free, local-first Linux VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, Markdown and HTML reports locally.
+An ad-free, local-first Linux and FreeBSD VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, Markdown and HTML reports locally.
 
 Project boundaries:
 
@@ -264,9 +264,9 @@ ecs --config ecs.json
 
 ## Tools and platform boundary
 
-Each standard `run.sh` invocation stages the frozen architecture-matched `ecs-tools` for its selected modules; routing uses the pinned NextTrace Tiny asset, and Ookla uses its signed official client when selected. Tool preparation failure stops the run; it never reuses same-named host programs or produces a fallback report.
+Each standard `run.sh` invocation stages the frozen architecture-matched `ecs-tools` for its selected modules. Routing and return-path tracing use the pinned NextTrace Tiny asset on Linux; on FreeBSD they use the base-system `/sbin/ping` and `/usr/sbin/traceroute` instead, no privileged network program is downloaded, and the FreeBSD `ecs-tools` archive contains neither `ping` nor `nexttrace-tiny`. Ookla ships an official client for Linux only, so selecting `ookla` on FreeBSD fails closed. Tool preparation failure stops the run; it never reuses same-named host programs or produces a fallback report.
 
-The project supports Linux only and publishes `amd64`, `arm64`, `armv7`, `386`, `s390x`, `riscv64` and `ppc64le` binaries. Native probes do not require root.
+The project supports Linux and FreeBSD. Linux publishes `amd64`, `arm64`, `armv7`, `386`, `s390x`, `riscv64` and `ppc64le`; FreeBSD publishes `amd64` and `arm64`. Native probes do not require root.
 
 Source development and maintenance are described in [CONTRIBUTING.md](CONTRIBUTING.md). See [CHANGELOG.md](CHANGELOG.md) for changes and [NOTICE](NOTICE)/[LICENSE](LICENSE) for attribution and licensing.
 

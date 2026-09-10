@@ -1,6 +1,6 @@
 # ecs
 
-无广告、默认零上传的 Linux VPS 综合测试工具。一次运行覆盖本地性能、网络质量、路由与回程、流媒体和 IP 信誉，报告只写到本地 JSON、Markdown、HTML 文件。
+无广告、默认零上传的 Linux / FreeBSD VPS 综合测试工具。一次运行覆盖本地性能、网络质量、路由与回程、流媒体和 IP 信誉，报告只写到本地 JSON、Markdown、HTML 文件。
 
 项目边界：
 
@@ -264,9 +264,9 @@ ecs --config ecs.json
 
 ## 工具与平台边界
 
-标准 `run.sh` 每次都为选中的模块准备当前架构的冻结 `ecs-tools` 工具；路由使用固定 NextTrace Tiny，Ookla 选中时使用官方签名客户端。工具包准备失败时直接终止，不复用用户 `PATH` 中的同名程序或生成降级报告。
+标准 `run.sh` 每次都为选中的模块准备当前架构的冻结 `ecs-tools` 工具。路由与回程在 Linux 上使用固定 NextTrace Tiny；FreeBSD 改用 base-system 的 `/sbin/ping`、`/usr/sbin/traceroute`，不从工具包下载特权网络程序，FreeBSD 的 `ecs-tools` 归档也不含 `ping` 与 `nexttrace-tiny`。Ookla 只有 Linux 有官方客户端，FreeBSD 上选中 `ookla` 会直接失败。工具包准备失败时直接终止，不复用用户 `PATH` 中的同名程序或生成降级报告。
 
-项目只支持 Linux，发布架构包括 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`；原生探针不需要 root。
+项目正式支持 Linux 与 FreeBSD。Linux 发布架构为 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`；FreeBSD 发布架构为 `amd64`、`arm64`。原生探针不需要 root。
 
 从源码构建和维护项目见 [CONTRIBUTING.md](CONTRIBUTING.md)。版本变化见 [CHANGELOG.md](CHANGELOG.md)，许可证和归属见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)。
 

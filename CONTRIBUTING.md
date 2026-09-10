@@ -14,7 +14,7 @@
 8. IP 风险源必须保留供应商原始语义、通道、失败状态和耗时；不得把不同模型的分值直接平均。
 9. 从 GPL/AGPL 上游适配代码或规则时，必须在 `NOTICE` 和 `THIRD_PARTY.md` 标明项目、版本、许可证和改动；不要移除上游归属。
 10. 探针层的性能测量必须直接来自公开维护、可审计的标准工具；探针不得加入自研 CPU、内存、磁盘或网络吞吐替代工作负载，也不得把派生/综合分数持久化为原始 benchmark measurement。跨报告聚合、基线比较和综合评分只属于 `internal/score` 与 leaderboard/baseline 层。
-11. 项目正式支持 Linux 与 FreeBSD。Linux 发布架构为 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64` 和 `ppc64le`；FreeBSD 正式支持 `amd64` 与 `arm64`。平台差异优先通过编译期文件边界表达，使用 `*_linux.go` 与 `*_freebsd.go`；仅在确实是运行时产品事实且无法用编译期边界表达时，才允许极少数 `runtime.GOOS`，不得让无边界分支蔓延到公共代码。正式支持的 Linux 与 FreeBSD 都必须有真实对应操作系统的 integration test；不得只 cross-build 后宣称支持。测试应断言对应平台的真实行为，不放宽到"哪个平台都成立"；架构维度（`GOARCH`）仍需保留。
+11. 项目正式支持 Linux 与 FreeBSD。Linux 发布架构为 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64` 和 `ppc64le`；FreeBSD 正式支持 `amd64` 与 `arm64`。平台差异优先通过编译期文件边界表达，使用 `*_linux.go` 与 `*_freebsd.go`；仅在确实是运行时产品事实且无法用编译期边界表达时，才允许极少数 `runtime.GOOS`，不得让无边界分支蔓延到公共代码。正式支持的 Linux 与 FreeBSD 都必须有真实对应操作系统的 integration test；不得只 cross-build 后宣称支持。测试应断言对应平台的真实行为，不放宽到"哪个平台都成立"；架构维度（`GOARCH`）仍需保留。发布路径还必须通过发布物级验收：由 `scripts/package.sh` 产出的真实发布布局要在真实对应操作系统的客户机里被真实 `run.sh` 消费（校验、解包、Bundle 基址解析、固定工具暂存与一次真实基准），编译或打包成功不能替代这一步。
 12. 外部工具的适配器测试必须调用**真实工具**，规则同样适用于 Linux 与 FreeBSD；不得用脚本替身冒充 fio、sysbench、iperf3、ping、traceroute、STREAM 或 NextTrace：替身只能证明解析器认得自己造出来的输出。FreeBSD 的 `ping` 与 `traceroute` 使用真实 base-system 工具，不得下载或安装特权网络程序。需要隔离时用回环（iperf3 起本地服务端、ping/NextTrace/traceroute 打 `127.0.0.1` 或等价 loopback 目标）。
 13. 数据源清单、节点地址、端口范围一律照抄上游并注明版本，**不得凭记忆填写**；第三方服务和公共节点可能限流、改版或下线，不得从固定样本推断当前可用性，无法确认时要明确记录。
 
