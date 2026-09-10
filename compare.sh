@@ -76,9 +76,12 @@ case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
 
-case "$(uname -s)" in
-  Linux) : ;;
-  *) die "ecs 只支持 Linux" "ecs only supports Linux" ;;
+# 平台识别：与 run.sh 一致，解析出的 OS token 直接参与资产名拼装。
+OS_NAME=$(uname -s)
+case "$OS_NAME" in
+  Linux)   OS=linux ;;
+  FreeBSD) OS=freebsd ;;
+  *) die "只支持 Linux 与 FreeBSD（检测到 $OS_NAME）" "only Linux and FreeBSD are supported (detected $OS_NAME)" ;;
 esac
 
 case "$(uname -m)" in
@@ -92,12 +95,21 @@ case "$(uname -m)" in
   *) die "不支持的架构：$(uname -m)" "unsupported architecture: $(uname -m)" ;;
 esac
 
+# tools lock 里只有 freebsd_amd64 与 freebsd_arm64；接受别的架构就等于选中
+# 一个不可能存在的资产，所以在下载前直接拒绝。
+if [ "$OS" = freebsd ]; then
+  case "$ARCH" in
+    amd64|arm64) ;;
+    *) die "FreeBSD 只支持 amd64 与 arm64（检测到 $ARCH）" "FreeBSD supports only amd64 and arm64 (detected $ARCH)" ;;
+  esac
+fi
+
 if [ "$VERSION" = "latest" ]; then
   BASE="https://github.com/${REPO}/releases/latest/download"
 else
   BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
-ASSET="ecs_linux_${ARCH}.tar.gz"
+ASSET="ecs_${OS}_${ARCH}.tar.gz"
 
 # 两个目录职责分开，都在 /tmp 下，都不碰调用者的当前目录：
 #   WORK 放二进制、下载中间文件和一次性的默认 output，退出时删除；
@@ -136,8 +148,15 @@ fetch() {
     command -v timeout >/dev/null 2>&1 ||
       die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
     timeout 300 wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+  elif [ "$OS" = freebsd ] && [ -x /usr/bin/fetch ]; then
+    # FreeBSD base 系统的 /usr/bin/fetch，排在 curl 与 wget 之后的最后手段。
+    # 这里用绝对路径：它指的是操作系统自己拥有的 base 工具，与 FreeBSD 探针
+    # 直接写 /sbin/ping、/usr/sbin/traceroute 是同一个理由。
+    command -v timeout >/dev/null 2>&1 ||
+      die "fetch 路径需要 timeout 来限制总下载时间" "the fetch path requires timeout to bound total download time"
+    timeout 300 /usr/bin/fetch -q -o "$2" "$1"
   else
-    die "需要 curl 或 wget" "curl or wget is required"
+    die "需要 curl、wget 或 FreeBSD fetch" "curl, wget, or FreeBSD fetch is required"
   fi
 }
 

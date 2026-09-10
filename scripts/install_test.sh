@@ -238,6 +238,74 @@ grep -F -x -- '--speed-time' <<<"$remote_args_text" >/dev/null || fail "install 
 awk '$0 == "--max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$remote_args_text" || fail "install curl omitted 300-second max-time"
 awk '$0 == "--retry-max-time" { getline; if ($0 == "300") found=1 } END { exit !found }' <<<"$remote_args_text" || fail "install curl omitted 300-second retry window"
 
+# install.sh derives the release asset name from uname -s, so the FreeBSD entry
+# is exercised with a stub uname ahead of the real one. This harness runs on
+# Linux; the FreeBSD-specific tool filtering lives in the Go plan and is not
+# install.sh's concern.
+make_freebsd_install_path() {
+  local path=$1 machine=$2
+  make_command_path "$path"
+  # uname must be replaced, not symlinked: writing the stub through a symlink to
+  # the real uname would try to overwrite the system binary.
+  rm -f "$path/uname"
+  cat >"$path/uname" <<EOF
+#!/bin/sh
+case "\$1" in
+  -s) printf '%s\n' FreeBSD ;;
+  -m) printf '%s\n' $machine ;;
+  *) printf '%s\n' FreeBSD ;;
+esac
+EOF
+  chmod 0755 "$path/uname"
+  write_downloader "$path" curl
+}
+
+freebsd_release="$test_root/freebsd-release"
+freebsd_asset="ecs_freebsd_${fixture_arch}.tar.gz"
+mkdir -p "$freebsd_release/archive"
+cp "$fixture_one" "$freebsd_release/archive/ecs"
+tar -czf "$freebsd_release/$freebsd_asset" -C "$freebsd_release/archive" ecs
+printf '%s  %s\n' "$(sha256sum "$freebsd_release/$freebsd_asset" | awk '{print $1}')" "$freebsd_asset" >"$freebsd_release/checksums.txt"
+
+freebsd_path="$test_root/freebsd-path"
+make_freebsd_install_path "$freebsd_path" "$fixture_arch"
+freebsd_install_dir="$test_root/freebsd-install"
+freebsd_log="$test_root/freebsd-download.log"
+freebsd_unexpected="$test_root/freebsd-unexpected"
+if ! ECS_INSTALL_DIR="$freebsd_install_dir" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
+    ECS_INSTALL_TEST_DOWNLOAD_LOG="$freebsd_log" ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$freebsd_unexpected" \
+    ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" \
+    ECS_INSTALL_TEST_RELEASE_ROOT="$freebsd_release" \
+    ECS_INSTALL_TEST_ASSET="$freebsd_asset" PATH="$freebsd_path" \
+    sh "$repo_root/install.sh" \
+    >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"; then
+  fail "FreeBSD fixture install failed: $(<"$test_root/freebsd.stderr")"
+fi
+cmp -s "$fixture_one" "$freebsd_install_dir/ecs" || fail "FreeBSD fixture changed the binary contents"
+grep -F -x "https://fixture.invalid/releases/$freebsd_asset" "$freebsd_log" >/dev/null ||
+  fail "FreeBSD fixture did not request $freebsd_asset"
+[[ ! -e "$freebsd_unexpected" ]] || fail "FreeBSD fixture reached an unexpected network path"
+
+# The tools lock carries only freebsd_amd64 and freebsd_arm64, so the installer
+# must refuse any other FreeBSD architecture before it downloads rather than
+# naming an asset that can never exist.
+freebsd_bad_path="$test_root/freebsd-bad-path"
+make_freebsd_install_path "$freebsd_bad_path" i386
+set +e
+ECS_INSTALL_DIR="$test_root/freebsd-bad-install" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
+  ECS_INSTALL_TEST_DOWNLOAD_LOG="$test_root/freebsd-bad-download.log" \
+  ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$test_root/freebsd-bad-unexpected" \
+  ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" \
+  ECS_INSTALL_TEST_RELEASE_ROOT="$freebsd_release" ECS_INSTALL_TEST_ASSET="$freebsd_asset" \
+  PATH="$freebsd_bad_path" sh "$repo_root/install.sh" \
+  >"$test_root/freebsd-bad.stdout" 2>"$test_root/freebsd-bad.stderr"
+freebsd_bad_status=$?
+set -e
+[[ "$freebsd_bad_status" -eq 1 ]] || fail "FreeBSD i386 returned $freebsd_bad_status instead of 1"
+grep -F 'only amd64 and arm64 on FreeBSD' "$test_root/freebsd-bad.stderr" >/dev/null ||
+  fail "FreeBSD i386 was not rejected with the architecture message"
+[[ ! -e "$test_root/freebsd-bad-download.log" ]] || fail "FreeBSD i386 downloaded before rejecting"
+
 # A bad archive checksum must preserve an existing installation and clean the
 # work directory without touching the destination candidate path.
 bad_release="$test_root/bad-release"

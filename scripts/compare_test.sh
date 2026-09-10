@@ -369,6 +369,83 @@ done
 [[ ! -e "$normal_logs/unexpected-network" ]] || fail "valid fixture attempted unexpected network access"
 assert_empty_dir "$normal_tmp" "valid comparison"
 
+# compare.sh derives the release asset name from uname -s, so the FreeBSD entry
+# is exercised with a stub uname ahead of the real one. This harness runs on
+# Linux; compare.sh needs the OS token only for the asset name.
+freebsd_stub_bin="$test_root/freebsd-stub-bin"
+mkdir -p "$freebsd_stub_bin"
+cat >"$freebsd_stub_bin/uname" <<EOF
+#!/bin/sh
+case "\$1" in
+  -s) printf '%s\n' FreeBSD ;;
+  -m) printf '%s\n' $fixture_arch ;;
+  *) printf '%s\n' FreeBSD ;;
+esac
+EOF
+chmod 0755 "$freebsd_stub_bin/uname"
+freebsd_path="$freebsd_stub_bin:$fixture_bin:$PATH"
+
+freebsd_release="$test_root/freebsd-release"
+freebsd_asset="ecs_freebsd_${fixture_arch}.tar.gz"
+mkdir -p "$freebsd_release/archive"
+cp "$fixture_release/archive/ecs" "$freebsd_release/archive/ecs"
+tar -czf "$freebsd_release/$freebsd_asset" -C "$freebsd_release/archive" ecs
+printf '%s  %s\n' "$(sha256sum "$freebsd_release/$freebsd_asset" | awk '{print $1}')" "$freebsd_asset" >"$freebsd_release/checksums.txt"
+
+freebsd_tmp="$test_root/freebsd-tmp"
+freebsd_logs="$fixture_logs/freebsd"
+freebsd_output="$test_root/freebsd-output"
+mkdir -p "$freebsd_tmp" "$freebsd_logs"
+if ! ECS_LANG=en TMPDIR="$freebsd_tmp" PATH="$freebsd_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$freebsd_logs" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
+    ECS_TEST_ASSET="$freebsd_asset" \
+    sh "$repo_root/compare.sh" --output "$freebsd_output" "$report_one" "$report_two" \
+    >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"; then
+  fail "FreeBSD compare fixture returned a failure: $(<"$test_root/freebsd.stderr")"
+fi
+[[ -f "$freebsd_output/comparison.json" ]] || fail "FreeBSD fixture did not execute fake ecs"
+mapfile -t freebsd_fetches <"$freebsd_logs/fetch.log"
+expected_freebsd_fetches=("$release_url/$freebsd_asset" "$release_url/checksums.txt")
+[[ "${#freebsd_fetches[@]}" -eq "${#expected_freebsd_fetches[@]}" ]] ||
+  fail "FreeBSD fixture fetched an unexpected number of URLs"
+for i in "${!expected_freebsd_fetches[@]}"; do
+  [[ "${freebsd_fetches[$i]}" == "${expected_freebsd_fetches[$i]}" ]] ||
+    fail "FreeBSD fixture fetch $i changed: ${freebsd_fetches[$i]}"
+done
+[[ ! -e "$freebsd_logs/unexpected-network" ]] || fail "FreeBSD fixture attempted unexpected network access"
+assert_empty_dir "$freebsd_tmp" "FreeBSD comparison"
+
+# The tools lock carries only freebsd_amd64 and freebsd_arm64, so compare.sh
+# must refuse any other FreeBSD architecture before it downloads rather than
+# naming an asset that can never exist.
+freebsd_bad_stub_bin="$test_root/freebsd-bad-stub-bin"
+mkdir -p "$freebsd_bad_stub_bin"
+cat >"$freebsd_bad_stub_bin/uname" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -s) printf '%s\n' FreeBSD ;;
+  -m) printf '%s\n' i386 ;;
+  *) printf '%s\n' FreeBSD ;;
+esac
+EOF
+chmod 0755 "$freebsd_bad_stub_bin/uname"
+freebsd_bad_logs="$fixture_logs/freebsd-bad"
+mkdir -p "$freebsd_bad_logs"
+set +e
+ECS_LANG=en TMPDIR="$test_root/freebsd-bad-tmp" PATH="$freebsd_bad_stub_bin:$fixture_bin:$PATH" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$freebsd_bad_logs" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
+  ECS_TEST_ASSET="$freebsd_asset" \
+  sh "$repo_root/compare.sh" --output "$test_root/freebsd-bad-output" "$report_one" "$report_two" \
+  >"$test_root/freebsd-bad.stdout" 2>"$test_root/freebsd-bad.stderr"
+freebsd_bad_status=$?
+set -e
+[[ "$freebsd_bad_status" -eq 1 ]] || fail "FreeBSD i386 returned $freebsd_bad_status instead of 1"
+grep -F 'FreeBSD supports only amd64 and arm64' "$test_root/freebsd-bad.stderr" >/dev/null ||
+  fail "FreeBSD i386 was not rejected with the architecture message"
+[[ ! -e "$freebsd_bad_logs/fetch.log" ]] || fail "FreeBSD i386 downloaded before rejecting"
+
 # checksum 不匹配时必须拒绝执行下载的 fake ecs，并清理 WORK。
 mismatch_tmp="$test_root/mismatch-tmp"
 mismatch_logs="$fixture_logs/mismatch"

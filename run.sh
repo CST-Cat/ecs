@@ -10,10 +10,16 @@
 #       └ 一次完成测试，并在 ${TMPDIR:-/tmp} 生成可公开提交的 ecs.submission/v1 文件
 #
 # 依赖策略：
-#   - 所有选中的基准工具都按当前架构从 ecs-tools_linux_<arch>.tar.gz 获取，
+#   - 支持 Linux 与 FreeBSD；资产名由 uname -s 解析出的 OS token 拼出：
+#     ecs_<os>_<arch>.tar.gz 与 ecs-tools_<os>_<arch>.tar.gz。FreeBSD 只有
+#     amd64 与 arm64 两个目标。
+#   - 所有选中的基准工具都按当前架构从 ecs-tools_<os>_<arch>.tar.gz 获取，
 #     校验 checksums.txt 后，只把本次需要的固定 binary 放入 WORK/bin；
 #     zstd 选中时再从独立 corpus 发行资产准备固定输入。
 #     绝不调用系统包安装器，也不改动系统数据库。
+#   - FreeBSD 的 latency/route/backtrace 使用 base 系统的 ping 与 traceroute，
+#     因此 FreeBSD 计划里不会出现 ping/nexttrace-tiny，也不会进入 Linux 的
+#     包管理依赖路径。Ookla speedtest 没有 FreeBSD 客户端，显式选中会直接终止。
 #   - standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。
 #     Ookla speedtest 不放入工具包；--only ookla 仍可在任意档位显式单独选择，选中时走独立的 Ookla
 #     官方签名软件源路径。
@@ -87,8 +93,21 @@ fetch() {
     command -v timeout >/dev/null 2>&1 ||
       die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
     timeout "$fetch_max_time" wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+  elif [ "${OS:-}" = freebsd ] && [ -x /usr/bin/fetch ]; then
+    # FreeBSD base-system /usr/bin/fetch, the last resort after curl and wget.
+    #
+    # The path is absolute on purpose. This wrapper function is itself named
+    # fetch, and `command -v fetch` inside its own body resolves to the shell
+    # function rather than to the executable, so PATH lookup cannot be used to
+    # tell them apart. `timeout` is an external program as well, so it could
+    # not run a `command fetch ...` word anyway. FreeBSD owns /usr/bin/fetch
+    # exactly like it owns /sbin/ping and /usr/sbin/traceroute, so naming the
+    # base-system path is both unambiguous and consistent with the probes.
+    command -v timeout >/dev/null 2>&1 ||
+      die "fetch 路径需要 timeout 来限制总下载时间" "the fetch path requires timeout to bound total download time"
+    timeout "$fetch_max_time" /usr/bin/fetch -q -o "$2" "$1"
   else
-    die "需要 curl 或 wget" "curl or wget is required"
+    die "需要 curl、wget 或 FreeBSD fetch" "curl, wget, or FreeBSD fetch is required"
   fi
 }
 
@@ -97,6 +116,10 @@ file_sha256() {
     sha256sum "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+  elif command -v sha256 >/dev/null 2>&1; then
+    # FreeBSD base-system /sbin/sha256. -q prints the digest alone, so the
+    # output already matches the "one lowercase hex line" contract above.
+    sha256 -q "$1" | tr '[:upper:]' '[:lower:]'
   else
     return 1
   fi
@@ -257,7 +280,14 @@ if [ "$SUBMIT_MODE" -eq 0 ] &&
     "--provider, --region, and wrapper --output require --submit"
 fi
 
-[ "$(uname -s)" = "Linux" ] || die "只支持 Linux（检测到 $(uname -s)）" "Linux only (detected $(uname -s))"
+# 平台识别：wrapper 只解析一个 OS token，资产名与工具包名都由它拼出。
+# FreeBSD 是一等目标，但架构集合受限；其余系统在发生任何下载之前就被拒绝。
+OS_NAME=$(uname -s)
+case "$OS_NAME" in
+  Linux)   OS=linux ;;
+  FreeBSD) OS=freebsd ;;
+  *) die "只支持 Linux 与 FreeBSD（检测到 $OS_NAME）" "only Linux and FreeBSD are supported (detected $OS_NAME)" ;;
+esac
 
 case "$(uname -m)" in
   x86_64|amd64)   ARCH=amd64 ;;
@@ -270,12 +300,21 @@ case "$(uname -m)" in
   *) die "不支持的架构：$(uname -m)" "unsupported architecture: $(uname -m)" ;;
 esac
 
+# FreeBSD 在 tools lock 里只有 amd64 与 arm64 两个目标。接受别的架构就等于
+# 选中一个永远不可能存在的资产，所以在下载前直接拒绝，而不是让 404 说话。
+if [ "$OS" = freebsd ]; then
+  case "$ARCH" in
+    amd64|arm64) ;;
+    *) die "FreeBSD 只支持 amd64 与 arm64（检测到 $ARCH）" "FreeBSD supports only amd64 and arm64 (detected $ARCH)" ;;
+  esac
+fi
+
 if [ "$VERSION" = "latest" ]; then
   ECS_BASE="https://github.com/${REPO}/releases/latest/download"
 else
   ECS_BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
-ASSET="ecs_linux_${ARCH}.tar.gz"
+ASSET="ecs_${OS}_${ARCH}.tar.gz"
 
 # Keep the default work root unambiguously under /tmp.  TMPDIR remains an
 # explicit advanced override for administrators who need a different
@@ -316,7 +355,7 @@ OOKLA_APT_SOURCES=""
 OOKLA_APT_LISTS=""
 OOKLA_DEB_SEEN=""
 OOKLA_KEY_FINGERPRINT="C525F88FCF3A7E56CE2CF59131EB3981E723ACAA"
-TOOLS_ASSET="ecs-tools_linux_${ARCH}.tar.gz"
+TOOLS_ASSET="ecs-tools_${OS}_${ARCH}.tar.gz"
 TOOLS_ARCHIVE="$WORK/$TOOLS_ASSET"
 TOOLS_EXTRACT_ROOT="$WORK/tools"
 TOOLS_STAGING_BIN="$WORK/tools-staging-bin"
@@ -1009,6 +1048,15 @@ prepare_dependencies() {
         "frozen architecture tool package download, SHA-256, or executable verification failed; the run will stop"
   fi
   if [ "$OOKLA_MISSING" -eq 1 ]; then
+    # FreeBSD must never enter the package-manager path below. That path exists
+    # only to stage the signed Ookla package from a Debian/Ubuntu source, and
+    # Ookla publishes no FreeBSD client, so the FreeBSD frozen bundle ships no
+    # speedtest either. Failing closed here keeps the "no local substitute, no
+    # degraded report" contract instead of silently running ookla without it.
+    if [ "$OS" = freebsd ]; then
+      die "FreeBSD 不支持 Ookla speedtest；请用 --skip ookla 或 --only 选择其他模块" \
+        "Ookla speedtest is not available on FreeBSD; use --skip ookla or --only to select other modules"
+    fi
     if ! select_package_manager; then
       die "找不到 Ookla 所需的包管理器，运行终止" \
         "no package manager is available for the explicit Ookla path; the run will stop"
@@ -1094,7 +1142,7 @@ fetch "${ECS_BASE}/checksums.txt" "${WORK}/checksums.txt" || die "下载校验�
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$EXPECTED" ] || die "校验文件里没有 ${ASSET} 的条目" "no checksum entry for ${ASSET}"
 if ! ACTUAL=$(file_sha256 "${WORK}/${ASSET}"); then
-  die "需要 sha256sum 或 shasum 才能校验" "sha256sum or shasum is required to verify"
+  die "需要 sha256sum、shasum 或 FreeBSD sha256 才能校验" "sha256sum, shasum, or FreeBSD sha256 is required to verify"
 fi
 [ "$ACTUAL" = "$EXPECTED" ] || die "SHA-256 校验失败：内容与发布版本不一致" "SHA-256 mismatch: content differs from the published release"
 say "SHA-256 已校验" "SHA-256 verified"

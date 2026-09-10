@@ -12,7 +12,9 @@ usage() {
   printf '%s\n' \
     "ecs installer — downloads one release asset and verifies SHA-256" \
     "" \
-    "ecs only supports Linux (amd64, arm64, armv7, 386, s390x, riscv64, ppc64le)." \
+    "ecs only supports Linux and FreeBSD." \
+    "  Linux:   amd64, arm64, armv7, 386, s390x, riscv64, ppc64le" \
+    "  FreeBSD: amd64, arm64" \
     "" \
     "Usage: ./install.sh [--from /path/to/ecs] [--install-dir DIR] [--version VERSION]" \
     "" \
@@ -111,10 +113,13 @@ fi
 
 os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
 machine=$(uname -m | tr '[:upper:]' '[:lower:]')
-if [ "$os_name" != "linux" ]; then
-  printf 'ecs only supports Linux; detected: %s\n' "$os_name" >&2
-  exit 1
-fi
+case "$os_name" in
+  linux|freebsd) ;;
+  *)
+    printf 'ecs only supports Linux and FreeBSD; detected: %s\n' "$os_name" >&2
+    exit 1
+    ;;
+esac
 case "$machine" in
   x86_64|amd64) arch=amd64 ;;
   aarch64|arm64) arch=arm64 ;;
@@ -125,6 +130,19 @@ case "$machine" in
   ppc64le) arch=ppc64le ;;
   *) printf 'unsupported architecture: %s\n' "$machine" >&2; exit 1 ;;
 esac
+
+# The tools lock carries only freebsd_amd64 and freebsd_arm64. Accepting any
+# other FreeBSD architecture here would name an asset that can never exist, so
+# the installer refuses before it downloads rather than reporting a 404.
+if [ "$os_name" = "freebsd" ]; then
+  case "$arch" in
+    amd64|arm64) ;;
+    *)
+      printf 'ecs supports only amd64 and arm64 on FreeBSD; detected: %s\n' "$machine" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 asset="${program}_${os_name}_${arch}.tar.gz"
 
@@ -173,8 +191,18 @@ download() {
       exit 1
     }
     timeout 300 wget --https-only --tries=3 --timeout=20 -O "$destination_file" "$source_url"
+  elif [ "$os_name" = "freebsd" ] && [ -x /usr/bin/fetch ]; then
+    # FreeBSD base-system /usr/bin/fetch, the last resort after curl and wget.
+    # The absolute path is deliberate: it names the base-system utility the OS
+    # owns, the same way the FreeBSD probes name /sbin/ping and
+    # /usr/sbin/traceroute, so PATH lookup can never pick up something else.
+    command -v timeout >/dev/null 2>&1 || {
+      printf '%s\n' "timeout is required to bound fetch's total download time" >&2
+      exit 1
+    }
+    timeout 300 /usr/bin/fetch -q -o "$destination_file" "$source_url"
   else
-    printf '%s\n' "curl or wget is required to download a release" >&2
+    printf '%s\n' "curl, wget, or FreeBSD fetch is required to download a release" >&2
     exit 1
   fi
 }
@@ -188,8 +216,11 @@ if command -v sha256sum >/dev/null 2>&1; then
   actual_hash=$(sha256sum "${work_dir}/${asset}" | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
   actual_hash=$(shasum -a 256 "${work_dir}/${asset}" | awk '{print $1}')
+elif command -v sha256 >/dev/null 2>&1; then
+  # FreeBSD base-system /sbin/sha256; -q prints the digest alone.
+  actual_hash=$(sha256 -q "${work_dir}/${asset}")
 else
-  printf '%s\n' "sha256sum or shasum is required to verify the release" >&2
+  printf '%s\n' "sha256sum, shasum, or FreeBSD sha256 is required to verify the release" >&2
   exit 1
 fi
 [ "$actual_hash" = "$expected_hash" ] || { printf '%s\n' "SHA-256 verification failed" >&2; exit 1; }
