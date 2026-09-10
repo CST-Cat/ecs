@@ -310,15 +310,23 @@ phase_deps() {
   [[ -s "$deps_prefix/usr/local/libdata/pkgconfig/ck.pc" ]] ||
     die 'deps prefix omitted ck.pc'
 
-  # pkg-config files ship with prefix=/usr/local. Rewrite to the extracted
-  # prefix so cross sysbench configure resolves headers/libs without touching
-  # the host package database.
+  # FreeBSD ports ship pkg-config files with absolute /usr/local paths (ck.pc
+  # hardcodes includedir/libdir; luajit.pc uses ${prefix}). Rewrite every
+  # /usr/local occurrence so cross sysbench resolves headers/libs from the
+  # extracted prefix instead of the host.
   local pc
   for pc in "$deps_prefix"/usr/local/libdata/pkgconfig/*.pc; do
     [[ -s "$pc" ]] || continue
-    sed -i.bak "s@^prefix=/usr/local@prefix=$deps_prefix/usr/local@" "$pc"
+    sed -i.bak \
+      -e "s@=/usr/local@=$deps_prefix/usr/local@g" \
+      "$pc"
     rm -f -- "$pc.bak"
   done
+
+  # Sanity-check the rewrite actually moved CK off the host prefix.
+  grep -F "includedir=$deps_prefix/usr/local/include" \
+    "$deps_prefix/usr/local/libdata/pkgconfig/ck.pc" >/dev/null ||
+    die 'ck.pc rewrite did not retarget includedir to the SDK deps prefix'
 
   echo "freebsd-cross-sdk: target deps installed at $deps_prefix/usr/local"
 }
