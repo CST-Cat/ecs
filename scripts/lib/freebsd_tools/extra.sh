@@ -22,6 +22,9 @@ phase_openssl() {
   (
     cd "$openssl_src"
     CC="$cc_command" perl ./Configure "${openssl_build_flags[@]}"
+    # OpenSSL 3.5 generates public headers (e.g. x509_acert.h) from .in
+    # templates. Targeting apps/openssl alone races that step under -j.
+    gmake -j"$jobs" build_generated
     gmake -j"$jobs" apps/openssl
   )
   cp "$openssl_src/apps/openssl" "$stage/bin/openssl"

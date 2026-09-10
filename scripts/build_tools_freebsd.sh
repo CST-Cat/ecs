@@ -177,9 +177,20 @@ case "$target" in
       die 'SDK deps are missing the LuaJIT pkg-config metadata'
     sysbench_ck_version=$(pkg-config --modversion ck) ||
       die 'SDK deps are missing the Concurrency Kit pkg-config metadata'
-    sysbench_luajit_package="luajit-${sysbench_luajit_version}"
-    sysbench_ck_package="concurrencykit-${sysbench_ck_version}"
+    # Ports license directories use the package version, not pkg-config's
+    # LuaJIT "githash" version. Discover the extracted license dirs.
     freebsd_localbase=$sdk_deps_localbase
+    freebsd_license_root="$freebsd_localbase/share/licenses"
+    luajit_license_candidates=()
+    ck_license_candidates=()
+    mapfile -t luajit_license_candidates < <(printf '%s\n' "$freebsd_license_root"/luajit-*)
+    mapfile -t ck_license_candidates < <(printf '%s\n' "$freebsd_license_root"/concurrencykit-*)
+    [[ "${#luajit_license_candidates[@]}" -eq 1 && -d "${luajit_license_candidates[0]}" ]] ||
+      die "SDK deps must contain exactly one LuaJIT license directory under $freebsd_license_root"
+    [[ "${#ck_license_candidates[@]}" -eq 1 && -d "${ck_license_candidates[0]}" ]] ||
+      die "SDK deps must contain exactly one Concurrency Kit license directory under $freebsd_license_root"
+    sysbench_luajit_package=$(basename "${luajit_license_candidates[0]}")
+    sysbench_ck_package=$(basename "${ck_license_candidates[0]}")
     configure_cross_args=("--build=$(cc -dumpmachine)" "--host=$sdk_triple")
     export CC="$cc_command"
     export CXX="$cxx_command"
