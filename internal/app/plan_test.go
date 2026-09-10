@@ -16,13 +16,19 @@ import (
 	"ecs/internal/module"
 )
 
+// TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices pins the
+// platform-resolved tool contract for one mixed selection. The expected tool
+// set comes from the platform test file: linux stages every declared tool,
+// while FreeBSD substitutes base-system ping and traceroute and therefore drops
+// the matching downloads. External services are platform-independent and are
+// asserted inline.
 func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T) {
 	application := newApplication()
 	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
 		Modules: []string{"route", "backtrace", "ookla", "zstd", "cpu", "latency"},
 	})
-	if !reflect.DeepEqual(plan.RequiredTools, []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}) {
-		t.Fatalf("required tools = %v", plan.RequiredTools)
+	if !reflect.DeepEqual(plan.RequiredTools, wantSelectedModuleTools()) {
+		t.Fatalf("required tools = %v, want %v", plan.RequiredTools, wantSelectedModuleTools())
 	}
 	if !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) {
 		t.Fatalf("external services = %v", plan.ExternalServices)
