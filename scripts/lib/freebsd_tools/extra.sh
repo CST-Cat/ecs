@@ -77,23 +77,11 @@ phase_fio() {
   echo "building fio $fio_tag ($fio_commit) with posixaio + psync"
   (
     cd "$fio_src"
-    CC="$cc_command" ./configure \
-      --prefix="$work/fio-prefix" \
-      --build-static \
-      --disable-numa \
-      --disable-rdma \
-      --disable-rados \
-      --disable-rbd \
-      --disable-gfapi \
-      --disable-http \
-      --disable-pmem \
-      --disable-libzbc \
-      --disable-xnvme \
-      --disable-libblkio \
-      --disable-libnfs \
-      --disable-dfs \
-      --disable-tcmalloc \
-      --disable-native
+    local -a fio_configure=(--prefix="$work/fio-prefix" --build-static --disable-numa --disable-rdma --disable-rados --disable-rbd --disable-gfapi --disable-http --disable-pmem --disable-libzbc --disable-xnvme --disable-libblkio --disable-libnfs --disable-dfs --disable-tcmalloc --disable-native)
+    if [[ "$toolchain_mode" == cross ]]; then
+      fio_configure+=(--cpu=aarch64 --cc="$cc_command")
+    fi
+    CC="$cc_command" ./configure "${fio_configure[@]}"
     grep -Eq '^CONFIG_POSIXAIO=y$' config-host.mak || die 'FreeBSD fio did not enable CONFIG_POSIXAIO'
     grep -Eq '^CONFIG_LIBAIO=y$' config-host.mak && die 'FreeBSD fio unexpectedly enabled Linux libaio'
     gmake -j"$jobs"
@@ -136,7 +124,10 @@ phase_iperf3() {
   echo "building iperf3 $iperf3_tag ($iperf3_commit)"
   (
     cd "$iperf3_src"
-    CC="$cc_command" ./configure --prefix="$work/iperf3-prefix" --enable-static-bin \
+    CC="$cc_command" ./configure \
+      ${configure_cross_args[@]+"${configure_cross_args[@]}"} \
+      --prefix="$work/iperf3-prefix" \
+      --enable-static-bin \
       --without-sctp --without-openssl --without-ldconfig
     gmake -j"$jobs"
   )

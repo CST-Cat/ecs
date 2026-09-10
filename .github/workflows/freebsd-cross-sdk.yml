@@ -78,6 +78,16 @@ jobs:
             ECS_FREEBSD_CROSS_SDK_ROOT=/tmp/ecs-freebsd-arm64-sdk JOBS=4 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_cross_sdk.sh' toolchain"
 
+      - name: DEPS
+        id: sdk_deps
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_CROSS_SDK_ROOT=/tmp/ecs-freebsd-arm64-sdk \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_cross_sdk.sh' deps"
+
       - name: PROBE
         id: sdk_probe
         timeout-minutes: 10
@@ -97,6 +107,7 @@ jobs:
           HOST_OUTCOME: ${{ steps.host_contract.outcome }}
           SYSROOT_OUTCOME: ${{ steps.sdk_sysroot.outcome }}
           TOOLCHAIN_OUTCOME: ${{ steps.sdk_toolchain.outcome }}
+          DEPS_OUTCOME: ${{ steps.sdk_deps.outcome }}
           PROBE_OUTCOME: ${{ steps.sdk_probe.outcome }}
         run: |
           set -eu
@@ -106,6 +117,7 @@ jobs:
             "HOST=$HOST_OUTCOME" \
             "SYSROOT=$SYSROOT_OUTCOME" \
             "TOOLCHAIN=$TOOLCHAIN_OUTCOME" \
+            "DEPS=$DEPS_OUTCOME" \
             "PROBE=$PROBE_OUTCOME"; do
             name=${item%%=*}
             outcome=${item#*=}

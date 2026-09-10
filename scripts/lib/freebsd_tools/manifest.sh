@@ -47,9 +47,10 @@ phase_manifest() {
   [[ -n "$stream_revision" ]] || die 'could not read official STREAM revision'
   npb_gfortran_version=$("$fc_command" --version | sed -n '1p')
   npb_ieee_provider=none
-  [[ "$target" == freebsd_arm64 ]] && npb_ieee_provider='scripts/ci/npb_ieee_arithmetic_freebsd.f90'
   set_openssl_build_flags
   openssl_build_flags_json=$(printf '%s\n' "${openssl_build_flags[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+  local smoke_runner_label=$smoke_runner
+  local toolchain_mode_label=$toolchain_mode
 
   jq -n \
     --arg target "$target" \
@@ -58,6 +59,8 @@ phase_manifest() {
     --arg cc "$cc_command" \
     --arg cxx "$cxx_command" \
     --arg fc "$fc_command" \
+    --arg toolchain_mode "$toolchain_mode_label" \
+    --arg smoke_runner "$smoke_runner_label" \
     --argjson supported_architectures "$supported_architectures_json" \
     --argjson supported_targets "$supported_targets_json" \
     --arg build_triplet "$build_triplet" \
@@ -90,7 +93,7 @@ phase_manifest() {
         architecture: $architecture,
         supported_architectures: $supported_architectures,
         supported_targets: $supported_targets,
-        build: {toolchain_mode: "native", build_triplet: $build_triplet, target_triplet: $target_triplet, smoke_runner: "direct", validation: {scope: "functional", performance_valid: false}},
+        build: {toolchain_mode: $toolchain_mode, build_triplet: $build_triplet, target_triplet: $target_triplet, smoke_runner: $smoke_runner, validation: {scope: "functional", performance_valid: false}},
         tools: [
           {name: "sysbench", upstream: $sysbench_upstream, version: $sysbench_version, tag_or_commit: $sysbench_tag, source: $sysbench_source, build_flags: [("CC=" + $cc), ("CXX=" + $cxx), "LDFLAGS=-static", "--without-gcc-arch", "--with-system-luajit", "--with-system-ck", "--with-extra-ldflags=-all-static -static-libgcc -Wl,--as-needed", "--without-mysql", "--without-pgsql", "--without-drizzle", "--without-attachsql", "--without-oracle"], enabled_features: ["cpu", "LuaJIT", "Concurrency Kit"], disabled_features: ["database-drivers", "host-CPU-specific architecture flags", "mysql", "pgsql", "drizzle", "attachsql", "oracle"], architecture: $architecture, license: "GPL-2.0-only", parameters: {source_commit: $sysbench_commit, system_luajit_version: $sysbench_luajit_version, system_luajit_package: $sysbench_luajit_package, system_ck_version: $sysbench_ck_version, system_ck_package: $sysbench_ck_package, fully_static: true, stripped: false}},
           {name: "zstd", upstream: $zstd_upstream, version: $zstd_version, tag_or_commit: $zstd_tag, source: $zstd_source, build_flags: [$cc, "-O3", "-static", "-static-libgcc", "-DZSTD_NODICT", "-DZSTD_NOTRACE", "HAVE_ZLIB=0", "HAVE_LZMA=0", "HAVE_LZ4=0", "ZSTD_LEGACY_SUPPORT=0"], enabled_features: ["benchmark", "multithread", "compression", "decompression"], disabled_features: ["zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace"], architecture: $architecture, license: "BSD-3-Clause OR GPL-2.0-only", parameters: {source_commit: $zstd_commit, level: 3, evaluation_seconds: 5, thread_modes: ["1T", "NT"], corpus_name: $zstd_corpus_name, corpus_path: ("runtime/" + $zstd_corpus_name), corpus_bytes: $zstd_corpus_bytes, corpus_sha256: $zstd_corpus_sha, corpus_source_url: $zstd_corpus_url, corpus_source_sha256: $zstd_corpus_source_sha, corpus_construction: "raw concatenation: dickens,mozilla,mr,nci,ooffice,osdb,reymont,samba,sao,webster,x-ray,xml", fully_static: true, stripped: false}},
@@ -103,5 +106,5 @@ phase_manifest() {
         ]
       }' | jq . >"$stage/manifest.json"
 
-  echo "completed native FreeBSD tools stage: $stage"
+  echo "completed $toolchain_mode FreeBSD tools stage: $stage"
 }

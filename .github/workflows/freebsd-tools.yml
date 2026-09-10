@@ -5,13 +5,15 @@ on:
     branches: ["bsd"]
     paths:
       - ".github/workflows/freebsd-tools.yml"
+      - ".github/workflows/freebsd-cross-sdk.yml"
       - "scripts/build_tools_freebsd.sh"
+      - "scripts/ci/freebsd_cross_sdk.sh"
       - "scripts/ci/freebsd_tools.sh"
-      - "scripts/ci/npb_ieee_arithmetic_freebsd.f90"
       - "scripts/package.sh"
       - "scripts/verify_tools_stage.sh"
       - "scripts/lib/**"
       - "tools/lock.json"
+      - "tools/freebsd-cross-sdk.lock.json"
       - "tools/manifest.example.json"
       - "cmd/tools-manifest-check/**"
       - "internal/toolsmanifest/**"
@@ -25,24 +27,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  native:
-    name: native bundle smoke (${{ matrix.target }})
-    runs-on: ${{ matrix.host_runner }}
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            target: freebsd_amd64
-            guest_uname: amd64
-            host_runner: ubuntu-24.04
-            host_uname: x86_64
-          - arch: aarch64
-            target: freebsd_arm64
-            guest_uname: arm64
-            host_runner: ubuntu-24.04
-            host_uname: x86_64
+  # freebsd_amd64 stays a pure in-VM native build: the guest architecture
+  # matches the target, so gcc14 from Ports is the application toolchain.
+  native-amd64:
+    name: native bundle smoke (freebsd_amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -51,32 +41,24 @@ jobs:
         run: |
           set -eu
           host_arch=$(uname -m)
-          expected_arch='${{ matrix.host_uname }}'
-          [ "$host_arch" = "$expected_arch" ] || {
-            printf 'host architecture mismatch: target=%s expected=%s actual=%s\n' \
-              '${{ matrix.target }}' "$expected_arch" "$host_arch" >&2
+          [ "$host_arch" = x86_64 ] || {
+            printf 'host architecture mismatch: target=freebsd_amd64 expected=x86_64 actual=%s\n' "$host_arch" >&2
             exit 1
           }
-          if [ -c /dev/kvm ]; then
-            kvm=available
-          else
-            kvm=unavailable
-          fi
-          printf 'target=%s\n' '${{ matrix.target }}'
-          printf 'host_runner=%s\n' '${{ matrix.host_runner }}'
+          printf 'target=freebsd_amd64\n'
+          printf 'host_runner=ubuntu-24.04\n'
           printf 'host_uname=%s\n' "$host_arch"
-          printf 'host_kvm=%s\n' "$kvm"
-          printf '%s\n' \
-            'host_policy=GitHub ARM64 standard runners do not expose nested KVM; vmactions recommends an x86_64 host for FreeBSD aarch64 guests'
+          printf 'host_kvm=%s\n' "$([ -c /dev/kvm ] && echo available || echo unavailable)"
+          printf 'build_model=native FreeBSD/amd64 VM; compiler runs in guest\n'
 
       - name: Start FreeBSD 15.1 VM
         id: freebsd_vm
         uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
         with:
           release: "15.1"
-          arch: ${{ matrix.arch }}
-          cpu: "2"
-          mem: "6144"
+          arch: x86_64
+          cpu: "4"
+          mem: "8192"
           sync: rsync
           copyback: false
           cache-after-prepare: true
@@ -94,25 +76,21 @@ jobs:
         run: |
           set -eu
           guest_arch=$(uname -m)
-          expected_arch='${{ matrix.guest_uname }}'
-          target='${{ matrix.target }}'
-          [ "$guest_arch" = "$expected_arch" ] || {
-            printf 'guest architecture mismatch: target=%s expected=%s actual=%s\n' \
-              "$target" "$expected_arch" "$guest_arch" >&2
+          [ "$guest_arch" = amd64 ] || {
+            printf 'guest architecture mismatch: target=freebsd_amd64 expected=amd64 actual=%s\n' "$guest_arch" >&2
             exit 1
           }
           ncpu=$(sysctl -n hw.ncpu)
           [ "$ncpu" -ge 2 ] || {
-            printf 'VM CPU contract violated: target=%s expected>=2 actual=%s\n' "$target" "$ncpu" >&2
+            printf 'VM CPU contract violated: target=freebsd_amd64 expected>=2 actual=%s\n' "$ncpu" >&2
             exit 1
           }
-          printf 'target=%s\n' "$target"
+          printf 'target=freebsd_amd64\n'
           printf 'guest_uname=%s\n' "$guest_arch"
           printf 'guest_ncpu=%s\n' "$ncpu"
           printf 'guest_memory_bytes=%s\n' "$(sysctl -n hw.physmem)"
           printf 'vm_guest=%s\n' "$(sysctl -n kern.vm_guest 2>/dev/null || printf unknown)"
-          printf '%s\n' \
-            'phase_contract=SOURCES,SYSBENCH,ZSTD,NPB,OPENSSL,STREAM,FIO,IPERF3,MANIFEST,VERIFY'
+          printf 'phase_contract=SOURCES,SYSBENCH,ZSTD,NPB,OPENSSL,STREAM,FIO,IPERF3,MANIFEST,VERIFY\n'
 
       - name: SOURCES
         id: tools_sources
@@ -121,6 +99,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sources"
 
       - name: SYSBENCH
@@ -130,6 +109,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sysbench"
 
       - name: ZSTD
@@ -139,6 +119,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' zstd"
 
       - name: NPB
@@ -148,6 +129,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' npb"
 
       - name: OPENSSL
@@ -158,6 +140,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' openssl"
 
       - name: STREAM
@@ -167,6 +150,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' stream"
 
       - name: FIO
@@ -176,6 +160,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' fio"
 
       - name: IPERF3
@@ -185,6 +170,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' iperf3"
 
       - name: MANIFEST
@@ -194,6 +180,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' manifest"
 
       - name: VERIFY
@@ -203,6 +190,7 @@ jobs:
           set -eu
           su -m ecsci -c \
             "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_amd64 \
             /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' verify"
 
       - name: FreeBSD tools summary
@@ -227,6 +215,251 @@ jobs:
             "HOST_CONTRACT=$HOST_CONTRACT_OUTCOME" \
             "VM=$VM_OUTCOME" \
             "VM_CONTRACT=$VM_CONTRACT_OUTCOME" \
+            "SOURCES=$SOURCES_OUTCOME" \
+            "SYSBENCH=$SYSBENCH_OUTCOME" \
+            "ZSTD=$ZSTD_OUTCOME" \
+            "NPB=$NPB_OUTCOME" \
+            "OPENSSL=$OPENSSL_OUTCOME" \
+            "STREAM=$STREAM_OUTCOME" \
+            "FIO=$FIO_OUTCOME" \
+            "IPERF3=$IPERF3_OUTCOME" \
+            "MANIFEST=$MANIFEST_OUTCOME" \
+            "VERIFY=$VERIFY_OUTCOME"; do
+            name=${item%%=*}
+            outcome=${item#*=}
+            case "$outcome" in
+              success) printf '[PASS] %s\n' "$name" ;;
+              skipped) printf '[SKIP] %s\n' "$name" ;;
+              *) printf '[FAIL] %s (%s)\n' "$name" "$outcome"; failed=1 ;;
+            esac
+          done
+          exit "$failed"
+
+  # freebsd_arm64 is a host-native cross build on FreeBSD/amd64. Compilers and
+  # heavy tool builds run natively on the amd64 guest; qemu-user only executes
+  # finished arm64 FreeBSD ELF smoke binaries. Official libgfortran supplies
+  # ieee_arithmetic — the local IEEE shim is not used on this path.
+  cross-arm64:
+    name: cross bundle smoke (freebsd_arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: HOST CONTRACT
+        id: host_contract
+        run: |
+          set -eu
+          host_arch=$(uname -m)
+          [ "$host_arch" = x86_64 ] || {
+            printf 'host architecture mismatch: target=freebsd_arm64 expected=x86_64 actual=%s\n' "$host_arch" >&2
+            exit 1
+          }
+          printf 'target=freebsd_arm64\n'
+          printf 'host_runner=ubuntu-24.04\n'
+          printf 'host_uname=%s\n' "$host_arch"
+          printf 'build_model=FreeBSD/amd64 guest runs compilers natively; qemu-user only for arm64 smoke\n'
+
+      - name: Start FreeBSD 15.1 amd64 VM
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: x86_64
+          cpu: "4"
+          mem: "8192"
+          sync: rsync
+          copyback: false
+          cache-after-prepare: true
+          custom-shell-name: freebsd
+          prepare: |
+            pkg install -y \
+              aarch64-binutils autoconf automake bash ca_root_nss curl git \
+              gmake gmp go help2man jq libiconv libtool m4 mpc mpfr perl5 \
+              pkgconf qemu-user-static texinfo
+            pw useradd ecsci -m -s /bin/sh
+            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+
+      - name: VM CONTRACT
+        id: vm_contract
+        shell: freebsd {0}
+        run: |
+          set -eu
+          guest_arch=$(uname -m)
+          [ "$guest_arch" = amd64 ] || {
+            printf 'guest architecture mismatch: target=freebsd_arm64 host-guest expected=amd64 actual=%s\n' "$guest_arch" >&2
+            exit 1
+          }
+          pkg info -e 'aarch64-binutils-*'
+          command -v qemu-aarch64-static
+          ncpu=$(sysctl -n hw.ncpu)
+          [ "$ncpu" -ge 2 ] || {
+            printf 'VM CPU contract violated: target=freebsd_arm64 expected>=2 actual=%s\n' "$ncpu" >&2
+            exit 1
+          }
+          printf 'target=freebsd_arm64\n'
+          printf 'guest_role=cross-build host (FreeBSD/amd64)\n'
+          printf 'guest_uname=%s\n' "$guest_arch"
+          printf 'guest_ncpu=%s\n' "$ncpu"
+          printf 'execution_model=host-native cross build; qemu-user only for finished target probes\n'
+          printf 'phase_contract=SDK,SOURCES,SYSBENCH,ZSTD,NPB,OPENSSL,STREAM,FIO,IPERF3,MANIFEST,VERIFY\n'
+
+      - name: SDK
+        id: cross_sdk
+        timeout-minutes: 90
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_CROSS_SDK_ROOT=/tmp/ecs-freebsd-arm64-sdk JOBS=4 \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_cross_sdk.sh' all"
+
+      - name: SOURCES
+        id: tools_sources
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sources"
+
+      - name: SYSBENCH
+        id: tools_sysbench
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' sysbench"
+
+      - name: ZSTD
+        id: tools_zstd
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' zstd"
+
+      - name: NPB
+        id: tools_npb
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' npb"
+
+      - name: OPENSSL
+        id: tools_openssl
+        timeout-minutes: 45
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' openssl"
+
+      - name: STREAM
+        id: tools_stream
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' stream"
+
+      - name: FIO
+        id: tools_fio
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' fio"
+
+      - name: IPERF3
+        id: tools_iperf3
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' iperf3"
+
+      - name: MANIFEST
+        id: tools_manifest
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' manifest"
+
+      - name: VERIFY
+        id: tools_verify
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            ECS_FREEBSD_TARGET=freebsd_arm64 \
+            ECS_FREEBSD_CROSS_SDK=/tmp/ecs-freebsd-arm64-sdk \
+            ECS_TARGET_RUNNER=qemu-aarch64-static \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_tools.sh' verify"
+
+      - name: FreeBSD tools summary
+        if: always()
+        env:
+          HOST_CONTRACT_OUTCOME: ${{ steps.host_contract.outcome }}
+          VM_OUTCOME: ${{ steps.freebsd_vm.outcome }}
+          VM_CONTRACT_OUTCOME: ${{ steps.vm_contract.outcome }}
+          SDK_OUTCOME: ${{ steps.cross_sdk.outcome }}
+          SOURCES_OUTCOME: ${{ steps.tools_sources.outcome }}
+          SYSBENCH_OUTCOME: ${{ steps.tools_sysbench.outcome }}
+          ZSTD_OUTCOME: ${{ steps.tools_zstd.outcome }}
+          NPB_OUTCOME: ${{ steps.tools_npb.outcome }}
+          OPENSSL_OUTCOME: ${{ steps.tools_openssl.outcome }}
+          STREAM_OUTCOME: ${{ steps.tools_stream.outcome }}
+          FIO_OUTCOME: ${{ steps.tools_fio.outcome }}
+          IPERF3_OUTCOME: ${{ steps.tools_iperf3.outcome }}
+          MANIFEST_OUTCOME: ${{ steps.tools_manifest.outcome }}
+          VERIFY_OUTCOME: ${{ steps.tools_verify.outcome }}
+        run: |
+          failed=0
+          for item in \
+            "HOST_CONTRACT=$HOST_CONTRACT_OUTCOME" \
+            "VM=$VM_OUTCOME" \
+            "VM_CONTRACT=$VM_CONTRACT_OUTCOME" \
+            "SDK=$SDK_OUTCOME" \
             "SOURCES=$SOURCES_OUTCOME" \
             "SYSBENCH=$SYSBENCH_OUTCOME" \
             "ZSTD=$ZSTD_OUTCOME" \

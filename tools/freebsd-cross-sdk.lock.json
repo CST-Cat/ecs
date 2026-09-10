@@ -19,6 +19,26 @@
   "binutils": {
     "package": "aarch64-binutils"
   },
+  "deps": {
+    "abi": "FreeBSD:15:aarch64",
+    "repo_url": "https://pkg.freebsd.org/FreeBSD:15:aarch64/latest",
+    "packages": [
+      {
+        "name": "luajit",
+        "version": "2.1.0.20260727",
+        "path": "All/Hashed/luajit-2.1.0.20260727~2$ydjc5rxf.pkg",
+        "sha256": "6dd949d1b6b69b0637dbcfd3888459ff401536c1c0cebbf0d675df85be1e7c9f",
+        "licenses": ["MIT", "PD"]
+      },
+      {
+        "name": "concurrencykit",
+        "version": "0.7.2",
+        "path": "All/Hashed/concurrencykit-0.7.2~2$947xyiqx.pkg",
+        "sha256": "1c2558a4a5b56a5179fc5331dcba502fae6b1574887edb24d89401698ae5f6a2",
+        "licenses": ["BSD2CLAUSE"]
+      }
+    ]
+  },
   "runtime_targets": [
     "libgcc",
     "libstdc++-v3",

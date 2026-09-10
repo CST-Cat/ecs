@@ -6,7 +6,10 @@ phase_sysbench() {
   (
     cd "$sysbench_src"
     ./autogen.sh
-    CC="$cc_command" CXX="$cxx_command" LDFLAGS=-static ./configure \
+    # shellcheck disable=SC2086
+    CC="$cc_command" CXX="$cxx_command" LDFLAGS=-static \
+      ./configure \
+      ${configure_cross_args[@]+"${configure_cross_args[@]}"} \
       --prefix="$work/sysbench-prefix" \
       --without-gcc-arch \
       --with-system-luajit \
@@ -58,31 +61,13 @@ phase_zstd() {
 
 phase_npb() {
   require_sources
-  local npb_flags npb_compile_date npb_f_inc npb_f_lib npb_intrinsic_dir npb_ieee_source
+  local npb_flags npb_compile_date
   npb_flags='-O3 -fopenmp -static'
   npb_compile_date=$(date -u -r "$SOURCE_DATE_EPOCH" '+%d %b %Y')
-  npb_f_inc=''
-  npb_f_lib=''
 
-  if [[ "$target" == freebsd_arm64 ]]; then
-    npb_ieee_source="$repo_root/scripts/ci/npb_ieee_arithmetic_freebsd.f90"
-    [[ -s "$npb_ieee_source" ]] || die "missing FreeBSD NPB intrinsic-module provider: $npb_ieee_source"
-    npb_intrinsic_dir="$work/npb-intrinsic-modules"
-    rm -rf -- "$npb_intrinsic_dir"
-    mkdir -p "$npb_intrinsic_dir"
-    "$fc_command" -O3 -c "$npb_ieee_source" -J "$npb_intrinsic_dir" \
-      -o "$npb_intrinsic_dir/ieee_arithmetic.o"
-    [[ -s "$npb_intrinsic_dir/ieee_arithmetic.mod" ]] ||
-      die 'FreeBSD NPB ieee_arithmetic provider did not produce ieee_arithmetic.mod'
-    [[ -s "$npb_intrinsic_dir/ieee_arithmetic.o" ]] ||
-      die 'FreeBSD NPB ieee_arithmetic provider did not produce an object file'
-    nm "$npb_intrinsic_dir/ieee_arithmetic.o" | grep -q ' T _gfortran_ieee_procedure_entry$' ||
-      die 'FreeBSD NPB provider omitted _gfortran_ieee_procedure_entry'
-    nm "$npb_intrinsic_dir/ieee_arithmetic.o" | grep -q ' T _gfortran_ieee_procedure_exit$' ||
-      die 'FreeBSD NPB provider omitted _gfortran_ieee_procedure_exit'
-    npb_f_inc="-fintrinsic-modules-path=$npb_intrinsic_dir"
-    npb_f_lib="$npb_intrinsic_dir/ieee_arithmetic.o"
-    cat >"$work/npb-ieee-probe.f90" <<'PROBE'
+  # Official libgfortran (cross SDK or FreeBSD/amd64 Ports gcc14) supplies
+  # ieee_arithmetic.mod. Probe it before the Class A build.
+  cat >"$work/npb-ieee-probe.f90" <<'PROBE'
 program ecs_npb_ieee_probe
   use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
   implicit none
@@ -91,18 +76,16 @@ program ecs_npb_ieee_probe
   if (ieee_is_nan(value)) error stop 1
 end program ecs_npb_ieee_probe
 PROBE
-    "$fc_command" "$npb_f_inc" "$work/npb-ieee-probe.f90" "$npb_f_lib" \
-      -o "$work/npb-ieee-probe"
-    run_target "$work/npb-ieee-probe" ||
-      die 'FreeBSD NPB ieee_arithmetic provider failed its intrinsic-module probe'
-  fi
+  "$fc_command" -O3 -static "$work/npb-ieee-probe.f90" -o "$work/npb-ieee-probe"
+  run_target "$work/npb-ieee-probe" ||
+    die 'compiler ieee_arithmetic intrinsic module failed its probe'
 
   echo "building NPB $npb_version OpenMP EP + FT Class A"
   cat >"$npb_src/config/make.def" <<MAKEDEF
 FC = $fc_command
 FLINK = $fc_command
-F_LIB = $npb_f_lib
-F_INC = $npb_f_inc
+F_LIB =
+F_INC =
 FFLAGS = $npb_flags
 FLINKFLAGS = $npb_flags
 CC = $cc_command

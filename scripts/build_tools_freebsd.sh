@@ -15,9 +15,9 @@ usage: scripts/build_tools_freebsd.sh --target freebsd_amd64|freebsd_arm64 \
 PHASE is one of:
   all sources sysbench zstd npb openssl stream fio iperf3 manifest
 
-The target stage contains native sysbench, zstd, NPB EP/FT, OpenSSL, STREAM,
-fio and iperf3 binaries. ping and NextTrace are FreeBSD base-system tools and
-are deliberately never packaged here.
+freebsd_amd64 builds natively on a FreeBSD/amd64 host. freebsd_arm64 is a
+host-native cross build against the pinned FreeBSD/amd64 -> arm64 SDK
+(ECS_FREEBSD_CROSS_SDK); qemu-user only executes finished target smoke binaries.
 USAGE
 }
 
@@ -90,8 +90,16 @@ if [[ "$print_params" -eq 1 ]]; then
   printf 'goos=freebsd\n'
   printf 'goarch=%s\n' "$goarch"
   printf 'package_arch=%s\n' "$package_arch"
-  printf 'toolchain_mode=native\n'
-  printf 'target_runner=direct\n'
+  case "$target" in
+    freebsd_amd64)
+      printf 'toolchain_mode=native\n'
+      printf 'target_runner=direct\n'
+      ;;
+    freebsd_arm64)
+      printf 'toolchain_mode=cross\n'
+      printf 'target_runner=qemu-aarch64-static\n'
+      ;;
+  esac
   printf 'npb_ci_smoke_class=A\n'
   printf 'tools=sysbench zstd npb-ep npb-ft openssl stream fio iperf3\n'
   exit 0
@@ -103,36 +111,6 @@ stage="$stage_root/$target"
 work=${ECS_TOOLS_WORK:-/tmp/ecs-tools-freebsd-build}
 [[ "$work" = /* && "$work" != / ]] || die "build work directory must be an absolute non-root path"
 
-cc_command=${CC:-gcc14}
-cxx_command=${CXX:-g++14}
-fc_command=${FC:-gfortran14}
-for command_name in bash "$cc_command" "$cxx_command" "$fc_command" git gmake jq perl pkg pkg-config sha256 tar sed awk grep file readelf nm; do
-  command -v "$command_name" >/dev/null 2>&1 || die "required FreeBSD build command is missing: $command_name"
-done
-command -v curl >/dev/null 2>&1 || command -v fetch >/dev/null 2>&1 ||
-  die 'curl or fetch is required to download pinned sources'
-
-sysbench_luajit_version=$(pkg-config --modversion luajit) ||
-  die 'FreeBSD builder is missing the LuaJIT pkg-config metadata'
-sysbench_ck_version=$(pkg-config --modversion ck) ||
-  die 'FreeBSD builder is missing the Concurrency Kit pkg-config metadata'
-sysbench_luajit_package=$(pkg query '%n-%v' luajit) ||
-  die 'FreeBSD builder cannot resolve the LuaJIT package identity'
-sysbench_ck_package=$(pkg query '%n-%v' concurrencykit) ||
-  die 'FreeBSD builder cannot resolve the Concurrency Kit package identity'
-freebsd_localbase=$(pkg-config --variable=prefix luajit) ||
-  die 'FreeBSD builder cannot resolve the dependency installation prefix'
-[[ -n "$freebsd_localbase" && "$freebsd_localbase" = /* ]] ||
-  die "invalid dependency installation prefix: ${freebsd_localbase:-<empty>}"
-freebsd_license_root="$freebsd_localbase/share/licenses"
-luajit_license_dir="$freebsd_license_root/$sysbench_luajit_package"
-ck_license_dir="$freebsd_license_root/$sysbench_ck_package"
-for license_file in "$luajit_license_dir/MIT" "$luajit_license_dir/PD" "$ck_license_dir/BSD2CLAUSE"; do
-  [[ -s "$license_file" ]] || die "required dependency license is missing: $license_file"
-done
-build_triplet=$("$cc_command" -dumpmachine)
-target_triplet=$build_triplet
-
 export LC_ALL=C
 export LANG=C
 export TZ=UTC
@@ -140,6 +118,105 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-946684800}
 [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || die 'SOURCE_DATE_EPOCH must be an integer'
 jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=2
+
+toolchain_mode=native
+configure_cross_args=()
+sdk_deps_localbase=''
+cross_target_triplet=''
+
+case "$target" in
+  freebsd_amd64)
+    [[ -z "${ECS_FREEBSD_CROSS_SDK:-}" ]] ||
+      die 'freebsd_amd64 is a native target; unset ECS_FREEBSD_CROSS_SDK'
+    cc_command=${CC:-gcc14}
+    cxx_command=${CXX:-g++14}
+    fc_command=${FC:-gfortran14}
+    for command_name in bash "$cc_command" "$cxx_command" "$fc_command" git gmake jq perl pkg pkg-config sha256 tar sed awk grep file readelf nm; do
+      command -v "$command_name" >/dev/null 2>&1 || die "required FreeBSD build command is missing: $command_name"
+    done
+    sysbench_luajit_version=$(pkg-config --modversion luajit) ||
+      die 'FreeBSD builder is missing the LuaJIT pkg-config metadata'
+    sysbench_ck_version=$(pkg-config --modversion ck) ||
+      die 'FreeBSD builder is missing the Concurrency Kit pkg-config metadata'
+    sysbench_luajit_package=$(pkg query '%n-%v' luajit) ||
+      die 'FreeBSD builder cannot resolve the LuaJIT package identity'
+    sysbench_ck_package=$(pkg query '%n-%v' concurrencykit) ||
+      die 'FreeBSD builder cannot resolve the Concurrency Kit package identity'
+    freebsd_localbase=$(pkg-config --variable=prefix luajit) ||
+      die 'FreeBSD builder cannot resolve the dependency installation prefix'
+    [[ -n "$freebsd_localbase" && "$freebsd_localbase" = /* ]] ||
+      die "invalid dependency installation prefix: ${freebsd_localbase:-<empty>}"
+    ;;
+  freebsd_arm64)
+    [[ -n "${ECS_FREEBSD_CROSS_SDK:-}" ]] ||
+      die 'freebsd_arm64 requires ECS_FREEBSD_CROSS_SDK (host-native FreeBSD/amd64 -> arm64 SDK)'
+    sdk_root=$ECS_FREEBSD_CROSS_SDK
+    [[ -d "$sdk_root" ]] || die "SDK root does not exist: $sdk_root"
+    sdk_triple=$(jq -er '.freebsd.target_triple' "$repo_root/tools/freebsd-cross-sdk.lock.json") ||
+      die 'cannot read target triple from tools/freebsd-cross-sdk.lock.json'
+    cc_command="$sdk_root/toolchain/bin/${sdk_triple}-gcc"
+    cxx_command="$sdk_root/toolchain/bin/${sdk_triple}-g++"
+    fc_command="$sdk_root/toolchain/bin/${sdk_triple}-gfortran"
+    readelf_command="$sdk_root/target-aliases/${sdk_triple}-readelf"
+    nm_command="$sdk_root/target-aliases/${sdk_triple}-nm"
+    [[ -x "$cc_command" ]] || die "SDK cross gcc is missing: $cc_command"
+    [[ -x "$cxx_command" ]] || die "SDK cross g++ is missing: $cxx_command"
+    [[ -x "$fc_command" ]] || die "SDK cross gfortran is missing: $fc_command"
+    [[ -x "$readelf_command" ]] || readelf_command=$(command -v readelf || true)
+    [[ -n "$readelf_command" && -x "$readelf_command" ]] || die 'readelf is required for ELF validation'
+    [[ -n "${ECS_TARGET_RUNNER:-}" ]] ||
+      die 'freebsd_arm64 requires ECS_TARGET_RUNNER (e.g. qemu-aarch64-static)'
+    toolchain_mode=cross
+    cross_target_triplet=$sdk_triple
+    sdk_deps_localbase="$sdk_root/deps/usr/local"
+    [[ -s "$sdk_deps_localbase/lib/libluajit-5.1.a" ]] ||
+      die "SDK deps are missing; run freebsd_cross_sdk.sh deps ($sdk_deps_localbase)"
+    export PKG_CONFIG_PATH="$sdk_deps_localbase/libdata/pkgconfig"
+    export PKG_CONFIG_LIBDIR="$sdk_deps_localbase/libdata/pkgconfig"
+    sysbench_luajit_version=$(pkg-config --modversion luajit) ||
+      die 'SDK deps are missing the LuaJIT pkg-config metadata'
+    sysbench_ck_version=$(pkg-config --modversion ck) ||
+      die 'SDK deps are missing the Concurrency Kit pkg-config metadata'
+    sysbench_luajit_package="luajit-${sysbench_luajit_version}"
+    sysbench_ck_package="concurrencykit-${sysbench_ck_version}"
+    freebsd_localbase=$sdk_deps_localbase
+    configure_cross_args=("--build=$(cc -dumpmachine)" "--host=$sdk_triple")
+    export CC="$cc_command"
+    export CXX="$cxx_command"
+    export AR="$sdk_root/target-aliases/${sdk_triple}-ar"
+    export RANLIB="$sdk_root/target-aliases/${sdk_triple}-ranlib"
+    [[ -x "$AR" ]] || die "SDK cross ar alias is missing: $AR"
+    [[ -x "$RANLIB" ]] || die "SDK cross ranlib alias is missing: $RANLIB"
+    # Host file(1)/elftoolchain readelf already understand AArch64 ELF, so
+    # validate_binary keeps using the unprefixed host tools. PATH only needs
+    # the SDK compilers for anything that invokes them by name.
+    export PATH="$sdk_root/toolchain/bin:$sdk_root/target-aliases:$PATH"
+    ;;
+  *)
+    die "unsupported target: $target"
+    ;;
+esac
+
+for command_name in curl git gmake jq perl sha256 tar sed awk grep file; do
+  command -v "$command_name" >/dev/null 2>&1 || die "required host command is missing: $command_name"
+done
+command -v curl >/dev/null 2>&1 || command -v fetch >/dev/null 2>&1 ||
+  die 'curl or fetch is required to download pinned sources'
+
+freebsd_license_root="$freebsd_localbase/share/licenses"
+luajit_license_dir="$freebsd_license_root/$sysbench_luajit_package"
+ck_license_dir="$freebsd_license_root/$sysbench_ck_package"
+for license_file in "$luajit_license_dir/MIT" "$luajit_license_dir/PD" "$ck_license_dir/BSD2CLAUSE"; do
+  [[ -s "$license_file" ]] || die "required dependency license is missing: $license_file"
+done
+
+if [[ "$toolchain_mode" == cross ]]; then
+  build_triplet=$(cc -dumpmachine)
+  target_triplet=$cross_target_triplet
+else
+  build_triplet=$("$cc_command" -dumpmachine)
+  target_triplet=$build_triplet
+fi
 
 source "$repo_root/scripts/lib/freebsd_tools/common.sh"
 

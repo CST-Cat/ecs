@@ -3,11 +3,13 @@ set -Eeuo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/ci/freebsd_cross_sdk.sh [all|sysroot|toolchain|probe]
+usage: scripts/ci/freebsd_cross_sdk.sh [all|sysroot|toolchain|deps|probe]
 
 Build and validate the pinned amd64-FreeBSD -> arm64-FreeBSD application SDK.
 The compiler itself always runs natively on the amd64 FreeBSD host. QEMU user
 mode is used only by the probe to execute finished arm64 FreeBSD binaries.
+The deps phase extracts official FreeBSD/aarch64 packages (LuaJIT, CK) into a
+target prefix so host-native cross builds can link sysbench.
 USAGE
 }
 
@@ -18,7 +20,7 @@ die() {
 
 phase=${1:-all}
 case "$phase" in
-  all | sysroot | toolchain | probe) ;;
+  all | sysroot | toolchain | deps | probe) ;;
   *) usage; die "unsupported phase: $phase" ;;
 esac
 
@@ -54,6 +56,7 @@ sysroot="$sdk_root/sysroot"
 sources="$sdk_root/sources"
 build="$sdk_root/build-gcc"
 prefix="$sdk_root/toolchain"
+deps_prefix="$sdk_root/deps"
 manifest="$sources/MANIFEST"
 base_archive="$sources/base.txz"
 gcc_archive="$sources/gcc-$gcc_version.tar.xz"
@@ -264,6 +267,62 @@ phase_toolchain() {
   echo "freebsd-cross-sdk: host-native GCC $gcc_version SDK installed at $prefix"
 }
 
+phase_deps() {
+  local deps_repo count i name version pkg_path pkg_sha pkg_url pkg_file extract_root
+  deps_repo=$(lock '.deps.repo_url')
+  count=$(lock '.deps.packages | length')
+  [[ "$count" =~ ^[1-9][0-9]*$ ]] || die 'SDK lock has no deps.packages entries'
+
+  rm -rf -- "$deps_prefix"
+  mkdir -p "$deps_prefix" "$sources/deps"
+  extract_root="$sources/deps-extract"
+
+  for ((i = 0; i < count; i++)); do
+    name=$(lock ".deps.packages[$i].name")
+    version=$(lock ".deps.packages[$i].version")
+    pkg_path=$(lock ".deps.packages[$i].path")
+    pkg_sha=$(lock ".deps.packages[$i].sha256")
+    pkg_url="$deps_repo/$pkg_path"
+    pkg_file="$sources/deps/${name}-${version}.pkg"
+    fetch_file "$pkg_url" "$pkg_file"
+    local actual
+    actual=$(sha256 -q "$pkg_file")
+    [[ "$actual" == "$pkg_sha" ]] ||
+      die "$name package SHA-256 mismatch: expected $pkg_sha, got $actual"
+
+    rm -rf -- "$extract_root"
+    mkdir -p "$extract_root"
+    tar -xf "$pkg_file" -C "$extract_root"
+    [[ -d "$extract_root/usr/local" ]] ||
+      die "$name package omitted usr/local"
+    # Merge package payload into the shared target prefix.
+    (cd "$extract_root" && tar -cf - usr/local) | (cd "$deps_prefix" && tar -xf -)
+    rm -rf -- "$extract_root"
+    printf 'dep=%s-%s sha256=%s\n' "$name" "$version" "$actual"
+  done
+
+  [[ -s "$deps_prefix/usr/local/lib/libluajit-5.1.a" ]] ||
+    die 'deps prefix omitted static libluajit'
+  [[ -s "$deps_prefix/usr/local/lib/libck.a" ]] ||
+    die 'deps prefix omitted static libck'
+  [[ -s "$deps_prefix/usr/local/libdata/pkgconfig/luajit.pc" ]] ||
+    die 'deps prefix omitted luajit.pc'
+  [[ -s "$deps_prefix/usr/local/libdata/pkgconfig/ck.pc" ]] ||
+    die 'deps prefix omitted ck.pc'
+
+  # pkg-config files ship with prefix=/usr/local. Rewrite to the extracted
+  # prefix so cross sysbench configure resolves headers/libs without touching
+  # the host package database.
+  local pc
+  for pc in "$deps_prefix"/usr/local/libdata/pkgconfig/*.pc; do
+    [[ -s "$pc" ]] || continue
+    sed -i.bak "s@^prefix=/usr/local@prefix=$deps_prefix/usr/local@" "$pc"
+    rm -f -- "$pc.bak"
+  done
+
+  echo "freebsd-cross-sdk: target deps installed at $deps_prefix/usr/local"
+}
+
 run_target() {
   local runner=${ECS_TARGET_RUNNER:-qemu-aarch64-static}
   command -v "$runner" >/dev/null 2>&1 || die "missing target runner: $runner"
@@ -324,9 +383,11 @@ case "$phase" in
     rm -rf -- "$sdk_root"
     phase_sysroot
     phase_toolchain
+    phase_deps
     phase_probe
     ;;
   sysroot) phase_sysroot ;;
   toolchain) phase_toolchain ;;
+  deps) phase_deps ;;
   probe) phase_probe ;;
 esac

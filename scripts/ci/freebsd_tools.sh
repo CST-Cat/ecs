@@ -4,6 +4,10 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/ci/freebsd_tools.sh [all|sources|sysbench|zstd|npb|openssl|stream|fio|iperf3|manifest|verify]
+
+freebsd_amd64 builds natively on FreeBSD/amd64. freebsd_arm64 is a host-native
+cross build and requires ECS_FREEBSD_CROSS_SDK plus ECS_TARGET_RUNNER
+(typically qemu-aarch64-static) in the environment.
 USAGE
 }
 
@@ -25,6 +29,15 @@ if [[ -z "${ECS_FREEBSD_TARGET:-}" ]]; then
   esac
 fi
 export ECS_FREEBSD_TARGET
+
+# Cross arm64 runs on an amd64 host; do not let uname -m override an explicit
+# target, and require the SDK contract the builder enforces.
+if [[ "$ECS_FREEBSD_TARGET" == freebsd_arm64 ]]; then
+  [[ -n "${ECS_FREEBSD_CROSS_SDK:-}" ]] ||
+    die 'freebsd_arm64 requires ECS_FREEBSD_CROSS_SDK'
+  [[ -n "${ECS_TARGET_RUNNER:-}" ]] ||
+    die 'freebsd_arm64 requires ECS_TARGET_RUNNER (e.g. qemu-aarch64-static)'
+fi
 
 phase=${1:-all}
 case "$phase" in
