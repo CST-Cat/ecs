@@ -11,9 +11,24 @@ ecs_freebsd_c_build_fio() {
   local src="$work/src-fio"
   ecs_freebsd_c_clone_tool "$repository" "$tag" "$commit" "$src"
 
+  # fio configure has no FreeBSD compiler define branch: when __linux__ is
+  # absent it falls through to `uname -s` of the *build* host. Override uname
+  # only for this configure so targetos becomes FreeBSD.
+  local uname_bin="$work/fio-uname"
+  mkdir -p "$uname_bin"
+  cat >"$uname_bin/uname" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-s" ]]; then
+  echo FreeBSD
+  exit 0
+fi
+exec /usr/bin/uname "$@"
+EOF
+  chmod +x "$uname_bin/uname"
+
   (
     cd "$src"
-    ./configure \
+    PATH="$uname_bin:$PATH" ./configure \
       --prefix="$work/fio-prefix" \
       --build-static \
       --disable-numa \
@@ -30,6 +45,12 @@ ecs_freebsd_c_build_fio() {
       --disable-dfs \
       --disable-tcmalloc \
       --disable-native
+
+    if ! grep -Eq '^CONFIG_TARGET_OS=FreeBSD$' config-host.mak; then
+      echo 'fio configure did not target FreeBSD' >&2
+      grep -E '^CONFIG_TARGET_OS=' config-host.mak >&2 || true
+      exit 1
+    fi
     # FreeBSD requires POSIX AIO. Linux libaio must stay off.
     if ! grep -Eq '^CONFIG_POSIXAIO=y$' config-host.mak; then
       echo 'CONFIG_POSIXAIO=y' >>config-host.mak
