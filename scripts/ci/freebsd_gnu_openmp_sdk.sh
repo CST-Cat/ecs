@@ -201,9 +201,11 @@ mkdir -p "$build_root/gcc"
     --with-gmp \
     --with-mpfr \
     --with-mpc
-  # Full all/install: selective all-target-* skips configured target libs
-  # (libquadmath was "Nothing to be done" on arm64). languages=c,fortran
-  # keeps libstdc++ out of the graph.
+  # Full all/install builds every configured target lib. GCC gates
+  # libquadmath on a per-target __float128 probe (BUILD_LIBQUADMATH): the
+  # probe fails on aarch64, so upstream does not build libquadmath for
+  # arm64 and its all/install are no-ops there. languages=c,fortran keeps
+  # libstdc++ out of the graph.
   MAKEINFO=true make -j"$jobs" all
   MAKEINFO=true make install
 )
@@ -224,14 +226,17 @@ if find "$prefix" -name 'libstdc++.so*' | grep -q .; then
   die "libstdc++.so must not be installed"
 fi
 
-# Required runtime static libs
+# Required runtime static libs, per target: GCC's per-target BUILD_LIBQUADMATH
+# probe fails on aarch64, so upstream never builds libquadmath for arm64.
 libdir="$prefix/lib/gcc/$gnu_triple/$gcc_version"
 # Also search the broader prefix because libgcc/libgfortran may install elsewhere.
-for lib in libgcc.a libgfortran.a libgomp.a libquadmath.a; do
+required_libs=$(jq -er --arg t "$target" '.targets[$t].required_libraries[]' "$LOCK_FILE") ||
+  die "lock has no required_libraries for target: $target"
+while IFS= read -r lib; do
   if ! find "$prefix" -name "$lib" | grep -q .; then
     die "required runtime library missing: $lib"
   fi
-done
+done <<<"$required_libs"
 
 probe_dir="$work_dir/probe"
 rm -rf "$probe_dir"
