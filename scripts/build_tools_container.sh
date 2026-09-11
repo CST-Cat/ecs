@@ -79,7 +79,7 @@ done
 
 goos=$(ecs_lock_target_field "$target" goos) || die "unsupported target: $target"
 arch=$(ecs_lock_target_field "$target" package) || die "target $target has no package architecture"
-[[ "$goos" == linux ]] || die "unsupported target: $target (FreeBSD bundles use scripts/build_tools_freebsd.sh)"
+[[ "$goos" == linux ]] || die "FreeBSD tools builder unavailable"
 
 # 架构表。每行：镜像、容器 platform、构建模式、Debian 架构、交叉三元组、smoke 运行器。
 #

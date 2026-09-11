@@ -69,6 +69,10 @@ done
   usage
   die "--stage-root is required"
 }
+# FreeBSD tools builder 在 Linux-hosted 重建完成前不可用；不要从这里推导 FreeBSD 事实。
+case "$target" in
+  freebsd_*) die "FreeBSD tools builder unavailable" ;;
+esac
 stage_dir="$stage_root/$target"
 manifest="$stage_dir/manifest.json"
 [[ -s "$manifest" ]] || die "missing manifest: $manifest"
@@ -76,7 +80,6 @@ manifest="$stage_dir/manifest.json"
 # 构建口径来自构建脚本本身。
 case "$target" in
   linux_*) params=$("$ECS_REPO_ROOT/scripts/build_tools_container.sh" --target "$target" --print-params) ;;
-  freebsd_*) params=$("$ECS_REPO_ROOT/scripts/build_tools_freebsd.sh" --target "$target" --print-params) ;;
   *) die "unsupported target: $target" ;;
 esac
 toolchain_mode=$(awk -F= '$1 == "toolchain_mode" { print $2 }' <<<"$params")

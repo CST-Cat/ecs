@@ -97,9 +97,10 @@ ecs_step "构建定义可解析"
 for target in "${ECS_LINUX_TARGET_IDS[@]}"; do
   scripts/build_tools_container.sh --target "$target" --print-params >/dev/null
 done
-for target in "${ECS_FREEBSD_TARGET_IDS[@]}"; do
-  scripts/build_tools_freebsd.sh --target "$target" --print-params >/dev/null
-done
+# FreeBSD tools builder 已删除，Linux-hosted 重建完成前不得假装可解析。
+if [[ "${#ECS_FREEBSD_TARGET_IDS[@]}" -gt 0 ]]; then
+  echo "check: FreeBSD tools builder unavailable; freebsd_* build definitions are intentionally not parseable" >&2
+fi
 
 echo
 echo "check: 全部确定性检查通过"

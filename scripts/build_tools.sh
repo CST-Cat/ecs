@@ -64,7 +64,7 @@ done
 goos=$(ecs_lock_target_field "$target" goos) || die "unsupported target: $target"
 goarch=$(ecs_lock_target_field "$target" goarch) || die "target $target has no goarch"
 arch=$(ecs_lock_target_field "$target" package) || die "target $target has no package architecture"
-[[ "$goos" == linux ]] || die "scripts/build_tools.sh only builds Linux targets; use scripts/build_tools_freebsd.sh for $target"
+[[ "$goos" == linux ]] || die "FreeBSD tools builder unavailable"
 [[ -n "$stage_root" ]] || { usage; exit 2; }
 [[ "$stage_root" = /* ]] || die "stage root must be an absolute path"
 openssl_target=$(ecs_lock_target_field "$target" openssl_target) ||

@@ -1,0 +1,180 @@
+name: freebsd-rebuild
+
+# 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
+#
+# 当前阶段：Stage 1 — 彻底删除旧 FreeBSD VM builder。
+# 本 workflow 只证明 legacy 不存在、legacy 调用不存在、Linux 现有路径未回归。
+# 它不是 FreeBSD builder：不得下载 sysroot、不得启动 FreeBSD VM、
+# 不得 clang cross compile、不得构建 FreeBSD binary。
+
+on:
+  push:
+    branches: [bsd]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freebsd-rebuild-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  legacy-absent:
+    name: legacy builder absent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Assert legacy builder files are gone
+        run: |
+          set -euo pipefail
+          legacy_files=(
+            .github/workflows/freebsd-tools.yml
+            .github/workflows/freebsd-cross-sdk.yml
+            scripts/ci/freebsd_tools.sh
+            scripts/ci/freebsd_cross_sdk.sh
+            scripts/build_tools_freebsd.sh
+            scripts/lib/freebsd_tools/core.sh
+            scripts/lib/freebsd_tools/extra.sh
+            scripts/lib/freebsd_tools/manifest.sh
+            scripts/lib/freebsd_tools/common.sh
+            tools/freebsd-cross-sdk.lock.json
+          )
+          failed=0
+          for path in "${legacy_files[@]}"; do
+            if [[ -e "$path" ]]; then
+              echo "legacy file still present: $path" >&2
+              failed=1
+            else
+              echo "absent: $path"
+            fi
+          done
+          if [[ -d scripts/lib/freebsd_tools ]]; then
+            echo "legacy lib directory still present: scripts/lib/freebsd_tools" >&2
+            failed=1
+          fi
+          exit "$failed"
+
+      - name: Assert legacy call sites are gone
+        run: |
+          set -euo pipefail
+          patterns=(
+            'freebsd_tools\.sh'
+            'freebsd_cross_sdk\.sh'
+            'build_tools_freebsd\.sh'
+            'ECS_FREEBSD_CROSS_SDK'
+          )
+          failed=0
+          for pattern in "${patterns[@]}"; do
+            if git grep -nE "$pattern" -- . \
+              ':!.github/workflows/freebsd-rebuild.yml' \
+              ':!PLAN.md'; then
+              echo "legacy call site still present for pattern: $pattern" >&2
+              failed=1
+            else
+              echo "clean: $pattern"
+            fi
+          done
+          exit "$failed"
+
+      - name: Assert FreeBSD builder unavailable path is explicit
+        run: |
+          set -euo pipefail
+          grep -q 'FreeBSD tools builder unavailable' scripts/verify_tools_stage.sh
+          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools.sh
+          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools_container.sh
+          set +e
+          out=$(scripts/verify_tools_stage.sh --target freebsd_amd64 --stage-root /tmp/does-not-exist 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          if [[ $rc -eq 0 ]]; then
+            echo 'verify_tools_stage.sh freebsd path unexpectedly succeeded' >&2
+            exit 1
+          fi
+          if ! grep -q 'FreeBSD tools builder unavailable' <<<"$out"; then
+            echo 'verify_tools_stage.sh freebsd path did not report builder unavailable' >&2
+            exit 1
+          fi
+          echo 'verify_tools_stage.sh freebsd path fails as expected'
+
+  linux-static:
+    name: linux static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Run scripts/ci/check.sh
+        run: bash scripts/ci/check.sh
+
+  workflow-static:
+    name: workflow static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate YAML parses
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user pyyaml >/dev/null
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          try:
+              import yaml
+          except ImportError:
+              sys.exit('PyYAML is required for workflow static checks')
+
+          root = Path('.github/workflows')
+          failed = False
+          for path in sorted(root.glob('*.yml')):
+              try:
+                  yaml.safe_load(path.read_text(encoding='utf-8'))
+              except Exception as exc:  # noqa: BLE001
+                  print(f'FAIL {path}: {exc}', file=sys.stderr)
+                  failed = True
+              else:
+                  print(f'ok {path}')
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Assert no FreeBSD VM builder workflows remain
+        run: |
+          set -euo pipefail
+          if [[ -e .github/workflows/freebsd-tools.yml ]]; then
+            echo 'freebsd-tools.yml must stay deleted in Stage 1' >&2
+            exit 1
+          fi
+          if [[ -e .github/workflows/freebsd-cross-sdk.yml ]]; then
+            echo 'freebsd-cross-sdk.yml must stay deleted in Stage 1' >&2
+            exit 1
+          fi
+          # freebsd-rebuild.yml 是唯一允许存在的 FreeBSD 相关临时 workflow。
+          mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
+          for wf in "${freebsd_workflows[@]}"; do
+            if [[ "$wf" != 'freebsd-rebuild.yml' ]]; then
+              echo "unexpected FreeBSD workflow present: $wf" >&2
+              exit 1
+            fi
+          done
+          echo "freebsd workflows present: ${freebsd_workflows[*]}"
