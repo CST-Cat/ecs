@@ -201,8 +201,11 @@ mkdir -p "$build_root/gcc"
     --with-gmp \
     --with-mpfr \
     --with-mpc
-  MAKEINFO=true make -j"$jobs" all-gcc all-target-libgcc all-target-libgfortran all-target-libgomp all-target-libquadmath
-  MAKEINFO=true make install-gcc install-target-libgcc install-target-libgfortran install-target-libgomp install-target-libquadmath
+  # Full all/install: selective all-target-* skips configured target libs
+  # (libquadmath was "Nothing to be done" on arm64). languages=c,fortran
+  # keeps libstdc++ out of the graph.
+  MAKEINFO=true make -j"$jobs" all
+  MAKEINFO=true make install
 )
 
 gcc_bin="$prefix/bin/${gnu_triple}-gcc"
