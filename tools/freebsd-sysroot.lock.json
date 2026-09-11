@@ -1,0 +1,42 @@
+{
+  "schema_version": "ecs.freebsd-sysroot.lock/v1",
+  "freebsd_release": "15.1-RELEASE",
+  "freebsd_revision": "96841ea08dcf",
+  "download_base": "https://download.freebsd.org/releases",
+  "targets": {
+    "freebsd_amd64": {
+      "goos": "freebsd",
+      "goarch": "amd64",
+      "release_arch_path": "amd64/amd64",
+      "clang_target_triple": "x86_64-unknown-freebsd15.1",
+      "elf_machine": "amd64",
+      "base_txz_url": "https://download.freebsd.org/releases/amd64/amd64/15.1-RELEASE/base.txz",
+      "base_txz_sha256": "3768988b151c20f965679062b065c63a977d6bbb9f47fd83695ec2c40790c18f"
+    },
+    "freebsd_arm64": {
+      "goos": "freebsd",
+      "goarch": "arm64",
+      "release_arch_path": "arm64/aarch64",
+      "clang_target_triple": "aarch64-unknown-freebsd15.1",
+      "elf_machine": "arm64",
+      "base_txz_url": "https://download.freebsd.org/releases/arm64/aarch64/15.1-RELEASE/base.txz",
+      "base_txz_sha256": "5b7a46a0abfbe23a1d4454b5600e2efcfce16b705bc7e9c851c37470c035ef98"
+    }
+  },
+  "extract_paths": [
+    "lib",
+    "libexec",
+    "usr/include",
+    "usr/lib",
+    "usr/libdata"
+  ],
+  "forbidden_sysroot_contents": [
+    "usr/bin/gcc",
+    "usr/bin/g++",
+    "usr/bin/clang",
+    "usr/local/bin/luajit",
+    "usr/local/lib/libluajit",
+    "usr/local/include/ck",
+    "usr/local/include/luajit"
+  ]
+}

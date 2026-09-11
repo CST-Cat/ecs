@@ -2,10 +2,15 @@ name: freebsd-rebuild
 
 # 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
 #
-# 当前阶段：Stage 1 — 彻底删除旧 FreeBSD VM builder。
-# 本 workflow 只证明 legacy 不存在、legacy 调用不存在、Linux 现有路径未回归。
-# 它不是 FreeBSD builder：不得下载 sysroot、不得启动 FreeBSD VM、
-# 不得 clang cross compile、不得构建 FreeBSD binary。
+# 当前阶段：Stage 2 — Linux-hosted FreeBSD Sysroot。
+# 串行链：
+#   legacy-absent
+#   linux-static
+#   workflow-static
+#   SYSROOT AMD64
+#   SYSROOT ARM64
+#
+# 仍然禁止：FreeBSD VM、benchmark/tool 构建、GNU SDK、cache、matrix 并行。
 
 on:
   push:
@@ -162,14 +167,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -e .github/workflows/freebsd-tools.yml ]]; then
-            echo 'freebsd-tools.yml must stay deleted in Stage 1' >&2
+            echo 'freebsd-tools.yml must stay deleted until Stage 7' >&2
             exit 1
           fi
           if [[ -e .github/workflows/freebsd-cross-sdk.yml ]]; then
-            echo 'freebsd-cross-sdk.yml must stay deleted in Stage 1' >&2
+            echo 'freebsd-cross-sdk.yml must stay deleted' >&2
             exit 1
           fi
-          # freebsd-rebuild.yml 是唯一允许存在的 FreeBSD 相关临时 workflow。
           mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
           for wf in "${freebsd_workflows[@]}"; do
             if [[ "$wf" != 'freebsd-rebuild.yml' ]]; then
@@ -178,3 +182,87 @@ jobs:
             fi
           done
           echo "freebsd workflows present: ${freebsd_workflows[*]}"
+
+  sysroot-amd64:
+    name: SYSROOT AMD64
+    needs: [legacy-absent, linux-static, workflow-static]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm file xz-utils
+
+      - name: Print resolved sysroot lock
+        run: bash scripts/ci/freebsd_sysroot.sh --target freebsd_amd64 --print-lock
+
+      - name: Install and probe FreeBSD amd64 sysroot
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_sysroot.sh \
+            --target freebsd_amd64 \
+            --sysroot-dir "$PWD/.ci/sysroot/freebsd_amd64" \
+            --work-dir "$PWD/.ci/sysroot-work"
+
+      - name: Assert Stage 2 forbids tool builds
+        run: |
+          set -euo pipefail
+          test ! -e scripts/build_tools_freebsd_c.sh
+          test ! -e scripts/ci/freebsd_gnu_openmp_sdk.sh
+          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
+          echo 'no Stage 3+ builders present'
+
+  sysroot-arm64:
+    name: SYSROOT ARM64
+    needs: [sysroot-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm file xz-utils
+
+      - name: Print resolved sysroot lock
+        run: bash scripts/ci/freebsd_sysroot.sh --target freebsd_arm64 --print-lock
+
+      - name: Install and probe FreeBSD arm64 sysroot
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_sysroot.sh \
+            --target freebsd_arm64 \
+            --sysroot-dir "$PWD/.ci/sysroot/freebsd_arm64" \
+            --work-dir "$PWD/.ci/sysroot-work"
+
+      - name: Assert both sysroot targets are locked to 15.1-RELEASE
+        run: |
+          set -euo pipefail
+          release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          test "$release" = "15.1-RELEASE"
+          for target in freebsd_amd64 freebsd_arm64; do
+            url=$(jq -er --arg t "$target" '.targets[$t].base_txz_url' tools/freebsd-sysroot.lock.json)
+            case "$url" in
+              *15.1-RELEASE*) ;;
+              *) echo "target $target is not pinned to 15.1-RELEASE: $url" >&2; exit 1 ;;
+            esac
+            case "$url" in
+              *latest*|*stable*|*current*)
+                echo "target $target uses a rolling URL: $url" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo 'sysroot locks are release-pinned'
