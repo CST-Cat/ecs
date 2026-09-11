@@ -160,6 +160,10 @@ export CPPFLAGS="-I$deps_prefix/usr/local/include"
 export CFLAGS="-O2 -fPIC"
 export CXXFLAGS="$CFLAGS"
 export LDFLAGS="-static -L$sysroot/usr/lib -L$deps_prefix/usr/local/lib"
+# FreeBSD .pc files use prefix=/usr/local; rewrite -I/-L into the extract root.
+export PKG_CONFIG_SYSROOT_DIR="$deps_prefix"
+export PKG_CONFIG_PATH="$deps_prefix/usr/local/libdata/pkgconfig:$deps_prefix/usr/local/lib/pkgconfig"
+export PKG_CONFIG_LIBDIR="$deps_prefix/usr/local/libdata/pkgconfig:$deps_prefix/usr/local/lib/pkgconfig"
 
 echo "build-tools-freebsd-c: probing clang wrappers with the configure environment" >&2
 ecs_freebsd_c_probe_wrappers "$work"

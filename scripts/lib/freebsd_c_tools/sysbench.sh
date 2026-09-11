@@ -11,7 +11,10 @@ ecs_freebsd_c_build_sysbench() {
   ecs_freebsd_c_clone_tool "$repository" "$tag" "$commit" "$src"
 
   # pkg-config metadata must come from the FreeBSD target prefix, never Ubuntu.
-  export PKG_CONFIG_PATH="$deps_prefix/usr/local/libdata/pkgconfig:$deps_prefix/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+  # FreeBSD .pc files install with prefix=/usr/local; without SYSROOT_DIR,
+  # pkg-config would emit host /usr/local paths instead of the extracted prefix.
+  export PKG_CONFIG_SYSROOT_DIR="$deps_prefix"
+  export PKG_CONFIG_PATH="$deps_prefix/usr/local/libdata/pkgconfig:$deps_prefix/usr/local/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$deps_prefix/usr/local/libdata/pkgconfig:$deps_prefix/usr/local/lib/pkgconfig"
   command -v pkg-config >/dev/null 2>&1 || ecs_freebsd_c_die "pkg-config is required"
   local luajit_pc ck_pc
