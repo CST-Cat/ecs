@@ -1,0 +1,61 @@
+{
+  "schema_version": "ecs.freebsd-target-deps.lock/v1",
+  "snapshot": {
+    "id": "ci-freebsd-deps-v1",
+    "kind": "immutable-ci-dependency-snapshot",
+    "not_an": [
+      "ecs-software-release",
+      "bundle-vN",
+      "user-tool-package"
+    ],
+    "base_url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-deps-v1",
+    "provenance": "Official FreeBSD 15 package bytes captured once; CI verifies SHA256 and never uses rolling /latest or Hashed pkg paths."
+  },
+  "freebsd_abi": "freebsd:15:default",
+  "packages": {
+    "freebsd_amd64": [
+      {
+        "name": "luajit",
+        "version": "2.1.0.20260903",
+        "origin": "lang/luajit",
+        "license": "MIT",
+        "asset": "amd64-luajit-2.1.0.20260903.pkg",
+        "snapshot_url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-deps-v1/amd64-luajit-2.1.0.20260903.pkg",
+        "sha256": "58782de8a252f3a680708e459479f074e0960939a064f94b8a221d48388d9b54",
+        "source_note": "Captured from official FreeBSD:15:amd64 package repository"
+      },
+      {
+        "name": "concurrencykit",
+        "version": "0.7.2",
+        "origin": "devel/concurrencykit",
+        "license": "Apache-2.0",
+        "asset": "amd64-concurrencykit-0.7.2.pkg",
+        "snapshot_url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-deps-v1/amd64-concurrencykit-0.7.2.pkg",
+        "sha256": "954bf6d91e7f4eb4698e9284435a6bd483882330f6611c64c3462a67e1bf2470",
+        "source_note": "Captured from official FreeBSD:15:amd64 package repository"
+      }
+    ],
+    "freebsd_arm64": [
+      {
+        "name": "luajit",
+        "version": "2.1.0.20260903",
+        "origin": "lang/luajit",
+        "license": "MIT",
+        "asset": "arm64-luajit-2.1.0.20260903.pkg",
+        "snapshot_url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-deps-v1/arm64-luajit-2.1.0.20260903.pkg",
+        "sha256": "48a82e6e4133948b4cd7dd7ffbb814c4f1c86f657a948499185c9c09af652e0d",
+        "source_note": "Captured from official FreeBSD:15:aarch64 package repository"
+      },
+      {
+        "name": "concurrencykit",
+        "version": "0.7.2",
+        "origin": "devel/concurrencykit",
+        "license": "Apache-2.0",
+        "asset": "arm64-concurrencykit-0.7.2.pkg",
+        "snapshot_url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-deps-v1/arm64-concurrencykit-0.7.2.pkg",
+        "sha256": "1c2558a4a5b56a5179fc5331dcba502fae6b1574887edb24d89401698ae5f6a2",
+        "source_note": "Captured from official FreeBSD:15:aarch64 package repository"
+      }
+    ]
+  }
+}

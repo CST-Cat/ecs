@@ -2,15 +2,17 @@ name: freebsd-rebuild
 
 # 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
 #
-# 当前阶段：Stage 2 — Linux-hosted FreeBSD Sysroot。
+# 当前阶段：Stage 3 — 五个普通 C-tools。
 # 串行链：
-#   legacy-absent
-#   linux-static
-#   workflow-static
+#   legacy-absent / linux-static / workflow-static
 #   SYSROOT AMD64
 #   SYSROOT ARM64
+#   C-DEPS AMD64
+#   C-TOOLS AMD64
+#   C-DEPS ARM64
+#   C-TOOLS ARM64
 #
-# 仍然禁止：FreeBSD VM、benchmark/tool 构建、GNU SDK、cache、matrix 并行。
+# 仍然禁止：FreeBSD VM builder、GNU SDK、NPB/STREAM、cache、matrix 并行。
 
 on:
   push:
@@ -211,13 +213,14 @@ jobs:
             --sysroot-dir "$PWD/.ci/sysroot/freebsd_amd64" \
             --work-dir "$PWD/.ci/sysroot-work"
 
-      - name: Assert Stage 2 forbids tool builds
+      - name: Assert Stage 3 forbids GNU/NPB/merge builders
         run: |
           set -euo pipefail
-          test ! -e scripts/build_tools_freebsd_c.sh
           test ! -e scripts/ci/freebsd_gnu_openmp_sdk.sh
+          test ! -e scripts/build_tools_freebsd_gnu.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'no Stage 3+ builders present'
+          test ! -e tools/freebsd-gnu-openmp.lock.json
+          echo 'no Stage 4+ builders present'
 
   sysroot-arm64:
     name: SYSROOT ARM64
@@ -266,3 +269,152 @@ jobs:
             esac
           done
           echo 'sysroot locks are release-pinned'
+
+  c-deps-amd64:
+    name: C-DEPS AMD64
+    needs: [sysroot-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install package extract tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd libarchive-tools curl jq
+
+      - name: Print target deps lock
+        run: bash scripts/ci/freebsd_target_deps.sh --target freebsd_amd64 --print-lock
+
+      - name: Fetch immutable LuaJIT/CK snapshot
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_target_deps.sh \
+            --target freebsd_amd64 \
+            --prefix "$PWD/.ci/target-deps/freebsd_amd64" \
+            --work-dir "$PWD/.ci/target-deps-work"
+
+      - name: Assert no rolling package URLs in lock
+        run: |
+          set -euo pipefail
+          if jq -e '.. | objects | select(has("snapshot_url")) | .snapshot_url' \
+            tools/freebsd-target-deps.lock.json | grep -E 'latest|Hashed'; then
+            echo 'lock contains rolling package URLs' >&2
+            exit 1
+          fi
+          test "$(jq -er '.snapshot.id' tools/freebsd-target-deps.lock.json)" = 'ci-freebsd-deps-v1'
+          echo 'target deps lock is snapshot-pinned'
+
+  c-tools-amd64:
+    name: C-TOOLS AMD64
+    needs: [c-deps-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld and build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld llvm file xz-utils zstd libarchive-tools \
+            autoconf automake libtool libtool-bin pkg-config \
+            make git curl jq perl
+
+      - name: Print builder params
+        run: bash scripts/build_tools_freebsd_c.sh --target freebsd_amd64 --print-params
+
+      - name: Build five C-tools for freebsd_amd64
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_c.sh \
+            --target freebsd_amd64 \
+            --stage-root "$PWD/.ci/freebsd-c-tools-stage" \
+            --jobs "$(nproc)"
+
+      - name: Upload C-tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-freebsd_amd64
+          path: .ci/freebsd-c-tools-stage/freebsd_amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  c-deps-arm64:
+    name: C-DEPS ARM64
+    needs: [c-tools-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install package extract tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd libarchive-tools curl jq
+
+      - name: Fetch immutable LuaJIT/CK snapshot
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_target_deps.sh \
+            --target freebsd_arm64 \
+            --prefix "$PWD/.ci/target-deps/freebsd_arm64" \
+            --work-dir "$PWD/.ci/target-deps-work"
+
+  c-tools-arm64:
+    name: C-TOOLS ARM64
+    needs: [c-deps-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld and build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld llvm file xz-utils zstd libarchive-tools \
+            autoconf automake libtool libtool-bin pkg-config \
+            make git curl jq perl
+
+      - name: Build five C-tools for freebsd_arm64
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_c.sh \
+            --target freebsd_arm64 \
+            --stage-root "$PWD/.ci/freebsd-c-tools-stage" \
+            --jobs "$(nproc)"
+
+      - name: Upload C-tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-freebsd_arm64
+          path: .ci/freebsd-c-tools-stage/freebsd_arm64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Assert Stage 3 forbids GNU/NPB/merge
+        run: |
+          set -euo pipefail
+          test ! -e scripts/ci/freebsd_gnu_openmp_sdk.sh
+          test ! -e scripts/build_tools_freebsd_gnu.sh
+          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
+          test ! -e tools/freebsd-gnu-openmp.lock.json
+          echo 'no Stage 4+ builders present'
+
