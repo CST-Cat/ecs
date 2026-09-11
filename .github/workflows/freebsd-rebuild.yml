@@ -2,14 +2,14 @@ name: freebsd-rebuild
 
 # 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
 #
-# 当前阶段：Stage 5 — NPB + STREAM（GNU SDK 交叉构建）。
+# 当前阶段：Stage 6 — Merge + 最终 Manifest。
 # 两条独立并行链（2026-09-11 用户指令：amd64 与 arm64 互不等待）：
 #   legacy-absent / linux-static / workflow-static（独立）
-#   链 AMD64：SYSROOT AMD64 → C-DEPS AMD64 → C-TOOLS AMD64 → GNU SDK AMD64 → GNU BENCH AMD64
-#   链 ARM64：SYSROOT ARM64 → C-DEPS ARM64 → C-TOOLS ARM64 → GNU SDK ARM64 → GNU BENCH ARM64
+#   链 AMD64：SYSROOT AMD64 → C-DEPS AMD64 → C-TOOLS AMD64 → GNU SDK AMD64 → GNU BENCH AMD64 → MERGE AMD64 → VERIFY AMD64
+#   链 ARM64：SYSROOT ARM64 → C-DEPS ARM64 → C-TOOLS ARM64 → GNU SDK ARM64 → GNU BENCH ARM64 → MERGE ARM64 → VERIFY ARM64
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder。
 #
-# 仍然禁止：FreeBSD VM builder、cache、merge/manifest（Stage 6+）。
+# 仍然禁止：FreeBSD VM builder、cache。
 
 on:
   push:
@@ -86,12 +86,19 @@ jobs:
           done
           exit "$failed"
 
-      - name: Assert FreeBSD builder unavailable path is explicit
+      - name: Assert Linux builders still refuse FreeBSD targets
         run: |
           set -euo pipefail
-          grep -q 'FreeBSD tools builder unavailable' scripts/verify_tools_stage.sh
+          # build_tools.sh / build_tools_container.sh 只构建 Linux，继续显式拒绝
+          # freebsd_* 目标（FreeBSD 由 Stage 3/5 独立 builder 与 Stage 6 merge 负责）。
           grep -q 'FreeBSD tools builder unavailable' scripts/build_tools.sh
           grep -q 'FreeBSD tools builder unavailable' scripts/build_tools_container.sh
+          # Stage 6 起 verify_tools_stage.sh 直接对 FreeBSD stage 做结构验证，
+          # 不再占位失败；占位口径消失是本阶段预期状态。
+          if grep -q 'FreeBSD tools builder unavailable' scripts/verify_tools_stage.sh; then
+            echo 'verify_tools_stage.sh still defers FreeBSD to a builder' >&2
+            exit 1
+          fi
           set +e
           out=$(scripts/verify_tools_stage.sh --target freebsd_amd64 --stage-root /tmp/does-not-exist 2>&1)
           rc=$?
@@ -101,11 +108,11 @@ jobs:
             echo 'verify_tools_stage.sh freebsd path unexpectedly succeeded' >&2
             exit 1
           fi
-          if ! grep -q 'FreeBSD tools builder unavailable' <<<"$out"; then
-            echo 'verify_tools_stage.sh freebsd path did not report builder unavailable' >&2
+          if ! grep -q 'missing manifest' <<<"$out"; then
+            echo 'verify_tools_stage.sh freebsd path did not report the missing stage' >&2
             exit 1
           fi
-          echo 'verify_tools_stage.sh freebsd path fails as expected'
+          echo 'verify_tools_stage.sh freebsd path verifies stages instead of deferring to a builder'
 
   linux-static:
     name: linux static checks
@@ -209,12 +216,6 @@ jobs:
             --target freebsd_amd64 \
             --sysroot-dir "$PWD/.ci/sysroot/freebsd_amd64" \
             --work-dir "$PWD/.ci/sysroot-work"
-
-      - name: Assert Stage 6 merge builder still absent
-        run: |
-          set -euo pipefail
-          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'merge builder remains Stage 6+'
 
   sysroot-arm64:
     name: SYSROOT ARM64
@@ -403,12 +404,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Assert Stage 6 merge builder still absent
-        run: |
-          set -euo pipefail
-          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'merge builder remains Stage 6+'
-
   gnu-sdk-amd64:
     name: GNU SDK AMD64
     needs: [c-tools-amd64]
@@ -483,12 +478,6 @@ jobs:
           path: .ci/gnu-sdk/freebsd_arm64
           if-no-files-found: error
           retention-days: 7
-
-      - name: Assert Stage 6 merge builder still absent
-        run: |
-          set -euo pipefail
-          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'merge builder remains Stage 6+'
 
   gnu-bench-amd64:
     name: GNU BENCH AMD64
@@ -574,4 +563,167 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  merge-amd64:
+    name: MERGE AMD64
+    needs: [c-tools-amd64, gnu-bench-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install merge dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download Stage 3 C-tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-freebsd_amd64
+          path: .ci/freebsd-c-tools-stage/freebsd_amd64
+
+      - name: Download Stage 5 GNU tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-freebsd_amd64
+          path: .ci/freebsd-gnu-tools-stage/freebsd_amd64
+
+      - name: Merge C + GNU fragments into the final stage
+        run: |
+          set -euo pipefail
+          bash scripts/ci/merge_freebsd_tools_stage.sh \
+            --target freebsd_amd64 \
+            --c-fragment "$PWD/.ci/freebsd-c-tools-stage/freebsd_amd64" \
+            --gnu-fragment "$PWD/.ci/freebsd-gnu-tools-stage/freebsd_amd64" \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"
+
+      - name: Upload merged FreeBSD tools stage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_amd64
+          path: .ci/freebsd-tools-stage/freebsd_amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  merge-arm64:
+    name: MERGE ARM64
+    needs: [c-tools-arm64, gnu-bench-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install merge dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download Stage 3 C-tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-freebsd_arm64
+          path: .ci/freebsd-c-tools-stage/freebsd_arm64
+
+      - name: Download Stage 5 GNU tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-freebsd_arm64
+          path: .ci/freebsd-gnu-tools-stage/freebsd_arm64
+
+      - name: Merge C + GNU fragments into the final stage
+        run: |
+          set -euo pipefail
+          bash scripts/ci/merge_freebsd_tools_stage.sh \
+            --target freebsd_arm64 \
+            --c-fragment "$PWD/.ci/freebsd-c-tools-stage/freebsd_arm64" \
+            --gnu-fragment "$PWD/.ci/freebsd-gnu-tools-stage/freebsd_arm64" \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"
+
+      - name: Upload merged FreeBSD tools stage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_arm64
+          path: .ci/freebsd-tools-stage/freebsd_arm64
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-amd64:
+    name: VERIFY AMD64
+    needs: [merge-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Install verification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y file binutils jq
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_amd64
+          path: .ci/freebsd-tools-stage/freebsd_amd64
+
+      - name: Verify the merged FreeBSD tools stage
+        run: |
+          set -euo pipefail
+          bash scripts/verify_tools_stage.sh \
+            --target freebsd_amd64 \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"
+
+  verify-arm64:
+    name: VERIFY ARM64
+    needs: [merge-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Install verification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y file binutils jq
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_arm64
+          path: .ci/freebsd-tools-stage/freebsd_arm64
+
+      - name: Verify the merged FreeBSD tools stage
+        run: |
+          set -euo pipefail
+          bash scripts/verify_tools_stage.sh \
+            --target freebsd_arm64 \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"
 
