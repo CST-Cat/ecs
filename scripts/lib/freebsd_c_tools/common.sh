@@ -9,23 +9,28 @@ ecs_freebsd_c_die() {
 }
 
 # Create clang/clang++ wrappers that always target the FreeBSD sysroot.
+# Real compilers are invoked by absolute path: a bare `clang` would resolve
+# back to this wrapper via PATH and recurse until ARG_MAX.
 # The wrappers are probed with the same CC/CFLAGS/LDFLAGS/PKG_CONFIG_PATH
 # environment that configure will later see.
 ecs_freebsd_c_write_wrappers() {
   local work=$1 triple=$2 sysroot=$3
   local bin="$work/clang-wrap"
+  local real_clang real_clangxx
+  real_clang=$(command -v clang) || ecs_freebsd_c_die "clang not found before writing wrappers"
+  real_clangxx=$(command -v clang++) || ecs_freebsd_c_die "clang++ not found before writing wrappers"
   mkdir -p "$bin"
   cat >"$bin/clang" <<EOF
 #!/usr/bin/env bash
-exec clang --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
+exec $real_clang --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
 EOF
   cat >"$bin/clang++" <<EOF
 #!/usr/bin/env bash
-exec clang++ --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
+exec $real_clangxx --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
 EOF
   cat >"$bin/cpp" <<EOF
 #!/usr/bin/env bash
-exec clang -E --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
+exec $real_clang -E --target=$triple --sysroot=$sysroot -fuse-ld=lld "\$@"
 EOF
   chmod +x "$bin/clang" "$bin/clang++" "$bin/cpp"
   echo "$bin"
