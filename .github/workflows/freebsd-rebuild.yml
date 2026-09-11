@@ -2,15 +2,14 @@ name: freebsd-rebuild
 
 # 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
 #
-# 当前阶段：Stage 4 — GNU C/Fortran/OpenMP SDK。
-# 串行链：
-#   legacy-absent / linux-static / workflow-static
-#   SYSROOT AMD64 → SYSROOT ARM64
-#   C-DEPS AMD64 → C-TOOLS AMD64
-#   C-DEPS ARM64 → C-TOOLS ARM64
-#   GNU SDK AMD64 → GNU SDK ARM64
+# 当前阶段：Stage 5 — NPB + STREAM（GNU SDK 交叉构建）。
+# 两条独立并行链（2026-09-11 用户指令：amd64 与 arm64 互不等待）：
+#   legacy-absent / linux-static / workflow-static（独立）
+#   链 AMD64：SYSROOT AMD64 → C-DEPS AMD64 → C-TOOLS AMD64 → GNU SDK AMD64 → GNU BENCH AMD64
+#   链 ARM64：SYSROOT ARM64 → C-DEPS ARM64 → C-TOOLS ARM64 → GNU SDK ARM64 → GNU BENCH ARM64
+# 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder。
 #
-# 仍然禁止：FreeBSD VM builder、NPB/STREAM、cache、matrix 并行。
+# 仍然禁止：FreeBSD VM builder、cache、merge/manifest（Stage 6+）。
 
 on:
   push:
@@ -211,16 +210,15 @@ jobs:
             --sysroot-dir "$PWD/.ci/sysroot/freebsd_amd64" \
             --work-dir "$PWD/.ci/sysroot-work"
 
-      - name: Assert Stage 4 forbids NPB/merge builders
+      - name: Assert Stage 6 merge builder still absent
         run: |
           set -euo pipefail
-          test ! -e scripts/build_tools_freebsd_gnu.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'no Stage 5+ builders present'
+          echo 'merge builder remains Stage 6+'
 
   sysroot-arm64:
     name: SYSROOT ARM64
-    needs: [sysroot-amd64]
+    needs: [legacy-absent, linux-static, workflow-static]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -346,7 +344,7 @@ jobs:
 
   c-deps-arm64:
     name: C-DEPS ARM64
-    needs: [c-tools-amd64]
+    needs: [sysroot-arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -405,16 +403,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Assert Stage 4 forbids NPB/merge
+      - name: Assert Stage 6 merge builder still absent
         run: |
           set -euo pipefail
-          test ! -e scripts/build_tools_freebsd_gnu.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'no Stage 5+ builders present'
+          echo 'merge builder remains Stage 6+'
 
   gnu-sdk-amd64:
     name: GNU SDK AMD64
-    needs: [c-tools-arm64]
+    needs: [c-tools-amd64]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -453,7 +450,7 @@ jobs:
 
   gnu-sdk-arm64:
     name: GNU SDK ARM64
-    needs: [gnu-sdk-amd64]
+    needs: [c-tools-arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -487,12 +484,94 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Assert Stage 4 did not build NPB/STREAM
+      - name: Assert Stage 6 merge builder still absent
         run: |
           set -euo pipefail
-          test ! -e scripts/build_tools_freebsd_gnu.sh
-          test ! -e scripts/lib/freebsd_gnu_tools/npb.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          echo 'NPB/STREAM/merge remain Stage 5+'
+          echo 'merge builder remains Stage 6+'
+
+  gnu-bench-amd64:
+    name: GNU BENCH AMD64
+    needs: [gnu-sdk-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install host build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld build-essential file jq curl xz-utils
+
+      - name: Download Stage 4 GNU SDK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-freebsd_amd64
+          path: .ci/gnu-sdk/freebsd_amd64
+
+      - name: Print builder params
+        run: bash scripts/build_tools_freebsd_gnu.sh --target freebsd_amd64 --print-params
+
+      - name: Build NPB EP/FT + STREAM for freebsd_amd64
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_gnu.sh \
+            --target freebsd_amd64 \
+            --sdk-prefix "$PWD/.ci/gnu-sdk/freebsd_amd64" \
+            --stage-root "$PWD/.ci/freebsd-gnu-tools-stage"
+
+      - name: Upload GNU tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-freebsd_amd64
+          path: .ci/freebsd-gnu-tools-stage/freebsd_amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  gnu-bench-arm64:
+    name: GNU BENCH ARM64
+    needs: [gnu-sdk-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install host build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld build-essential file jq curl xz-utils
+
+      - name: Download Stage 4 GNU SDK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-freebsd_arm64
+          path: .ci/gnu-sdk/freebsd_arm64
+
+      - name: Print builder params
+        run: bash scripts/build_tools_freebsd_gnu.sh --target freebsd_arm64 --print-params
+
+      - name: Build NPB EP/FT + STREAM for freebsd_arm64
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_gnu.sh \
+            --target freebsd_arm64 \
+            --sdk-prefix "$PWD/.ci/gnu-sdk/freebsd_arm64" \
+            --stage-root "$PWD/.ci/freebsd-gnu-tools-stage"
+
+      - name: Upload GNU tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-freebsd_arm64
+          path: .ci/freebsd-gnu-tools-stage/freebsd_arm64
+          if-no-files-found: error
+          retention-days: 7
 
 
