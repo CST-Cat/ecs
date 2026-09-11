@@ -84,6 +84,8 @@ triple=$(jq -er --arg t "$target" '.targets[$t].clang_target_triple' \
   "$ECS_REPO_ROOT/tools/freebsd-sysroot.lock.json")
 elf_machine=$(jq -er --arg t "$target" '.targets[$t].elf_machine' \
   "$ECS_REPO_ROOT/tools/freebsd-sysroot.lock.json")
+# Tool scripts assert against this shared global.
+ecs_freebsd_elf_machine=$elf_machine
 release=$(jq -er '.freebsd_release' "$ECS_REPO_ROOT/tools/freebsd-sysroot.lock.json")
 
 if [[ "$print_params" -eq 1 ]]; then

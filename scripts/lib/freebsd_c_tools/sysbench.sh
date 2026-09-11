@@ -41,7 +41,7 @@ ecs_freebsd_c_build_sysbench() {
       --prefix="$work/sysbench-prefix" \
       --with-system-luajit \
       --with-system-ck \
-      --with-extra-ldflags='-static' \
+      --with-extra-ldflags='-all-static' \
       --without-mysql \
       --without-pgsql \
       --without-drizzle \
