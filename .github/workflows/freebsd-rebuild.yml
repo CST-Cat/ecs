@@ -2,17 +2,15 @@ name: freebsd-rebuild
 
 # 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
 #
-# 当前阶段：Stage 3 — 五个普通 C-tools。
+# 当前阶段：Stage 4 — GNU C/Fortran/OpenMP SDK。
 # 串行链：
 #   legacy-absent / linux-static / workflow-static
-#   SYSROOT AMD64
-#   SYSROOT ARM64
-#   C-DEPS AMD64
-#   C-TOOLS AMD64
-#   C-DEPS ARM64
-#   C-TOOLS ARM64
+#   SYSROOT AMD64 → SYSROOT ARM64
+#   C-DEPS AMD64 → C-TOOLS AMD64
+#   C-DEPS ARM64 → C-TOOLS ARM64
+#   GNU SDK AMD64 → GNU SDK ARM64
 #
-# 仍然禁止：FreeBSD VM builder、GNU SDK、NPB/STREAM、cache、matrix 并行。
+# 仍然禁止：FreeBSD VM builder、NPB/STREAM、cache、matrix 并行。
 
 on:
   push:
@@ -213,14 +211,12 @@ jobs:
             --sysroot-dir "$PWD/.ci/sysroot/freebsd_amd64" \
             --work-dir "$PWD/.ci/sysroot-work"
 
-      - name: Assert Stage 3 forbids GNU/NPB/merge builders
+      - name: Assert Stage 4 forbids NPB/merge builders
         run: |
           set -euo pipefail
-          test ! -e scripts/ci/freebsd_gnu_openmp_sdk.sh
           test ! -e scripts/build_tools_freebsd_gnu.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          test ! -e tools/freebsd-gnu-openmp.lock.json
-          echo 'no Stage 4+ builders present'
+          echo 'no Stage 5+ builders present'
 
   sysroot-arm64:
     name: SYSROOT ARM64
@@ -409,12 +405,94 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Assert Stage 3 forbids GNU/NPB/merge
+      - name: Assert Stage 4 forbids NPB/merge
         run: |
           set -euo pipefail
-          test ! -e scripts/ci/freebsd_gnu_openmp_sdk.sh
           test ! -e scripts/build_tools_freebsd_gnu.sh
           test ! -e scripts/ci/merge_freebsd_tools_stage.sh
-          test ! -e tools/freebsd-gnu-openmp.lock.json
-          echo 'no Stage 4+ builders present'
+          echo 'no Stage 5+ builders present'
+
+  gnu-sdk-amd64:
+    name: GNU SDK AMD64
+    needs: [c-tools-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install toolchain build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
+            texinfo file xz-utils curl jq
+
+      - name: Print GNU SDK lock
+        run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64 --print-lock
+
+      - name: Build FreeBSD amd64 GNU C/Fortran/OpenMP SDK
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --target freebsd_amd64 \
+            --prefix "$PWD/.ci/gnu-sdk/freebsd_amd64" \
+            --work-dir "$PWD/.ci/gnu-sdk-work" \
+            --jobs "$(nproc)"
+
+      - name: Upload GNU SDK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-freebsd_amd64
+          path: .ci/gnu-sdk/freebsd_amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  gnu-sdk-arm64:
+    name: GNU SDK ARM64
+    needs: [gnu-sdk-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install toolchain build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
+            texinfo file xz-utils curl jq
+
+      - name: Build FreeBSD arm64 GNU C/Fortran/OpenMP SDK
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --target freebsd_arm64 \
+            --prefix "$PWD/.ci/gnu-sdk/freebsd_arm64" \
+            --work-dir "$PWD/.ci/gnu-sdk-work" \
+            --jobs "$(nproc)"
+
+      - name: Upload GNU SDK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-freebsd_arm64
+          path: .ci/gnu-sdk/freebsd_arm64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Assert Stage 4 did not build NPB/STREAM
+        run: |
+          set -euo pipefail
+          test ! -e scripts/build_tools_freebsd_gnu.sh
+          test ! -e scripts/lib/freebsd_gnu_tools/npb.sh
+          test ! -e scripts/ci/merge_freebsd_tools_stage.sh
+          echo 'NPB/STREAM/merge remain Stage 5+'
+
 
