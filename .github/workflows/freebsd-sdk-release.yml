@@ -1,0 +1,220 @@
+name: freebsd-sdk-release
+
+# 维护者手动触发的 FreeBSD GNU C/Fortran/OpenMP SDK immutable 快照发布器。
+#
+# 仅 workflow_dispatch 触发（push/pull_request 永不触发）。构建逻辑完全复用
+# scripts/ci/freebsd_gnu_openmp_sdk.sh（与 freebsd-chain.yml 的 gnu-sdk job
+# 同一脚本、同一 lock，本 workflow 只做编排），两个目标并行各占一台
+# ubuntu-24.04 runner：work-dir 天然隔离，脚本在 work-dir 下复用的 src/build
+# 树不会跨目标互相污染。
+#
+# 产物发布到固定 tag `ci-freebsd-gnu-sdk-v1` 的 GitHub Release：
+#   - ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
+#   - ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+#   - SHA256SUMS（两个 tarball 的 sha256，格式 `sha256  filename`）
+# CI 按 tools/freebsd-gnu-openmp.lock.json 钉定的 SHA256 消费这些 assets，
+# 下载后可用 `sha256sum -c SHA256SUMS` 校验。
+#
+# 何时需要重发布：lock 的 gcc/binutils 版本或源 SHA256 变化、
+# scripts/ci/freebsd_gnu_openmp_sdk.sh 或 sysroot lock 变化。重跑本 workflow
+# 是合法维护动作：同 tag 下 assets 以 --clobber 原位覆盖、body 以 --notes
+# 更新，消费方始终以 SHA256SUMS 为准。
+#
+# 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与；
+# 永久禁止：FreeBSD VM builder。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 两次 dispatch 串行排队，防止并行 runs 互相 clobber 同一个 Release；
+# 不取消进行中的 run，宁可排队等待完整构建。
+concurrency:
+  group: freebsd-sdk-release
+  cancel-in-progress: false
+
+env:
+  SDK_RELEASE_TAG: ci-freebsd-gnu-sdk-v1
+
+jobs:
+  sdk-amd64:
+    name: GNU SDK (freebsd_amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      # 覆盖 SDK 脚本的命令清单（curl sha256sum tar make gcc g++ flex bison）
+      # 及其依赖面：jq（lock 解析）、file/xz-utils（probe 与 tar -xJf）、
+      # libgmp/libmpfr/libmpc 开发头文件（GCC 用宿主库）、zstd（打包）；
+      # clang/lld 由 runner 镜像自带（freebsd_sysroot.sh probe 需要）。
+      - name: Install toolchain build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
+            texinfo file xz-utils curl jq zstd
+
+      - name: Print GNU SDK lock
+        run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64 --print-lock
+
+      - name: Build FreeBSD GNU C/Fortran/OpenMP SDK (freebsd_amd64)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --target freebsd_amd64 \
+            --prefix "$PWD/.ci/gnu-sdk/freebsd_amd64" \
+            --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_amd64" \
+            --jobs "$(nproc)"
+
+      - name: Package GNU SDK tarball (freebsd_amd64)
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/dist
+          tar -C .ci/gnu-sdk -caf \
+            .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst freebsd_amd64
+          sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
+
+      - name: Upload GNU SDK tarball artifact (freebsd_amd64)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-tarball-freebsd_amd64
+          path: .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+
+  sdk-arm64:
+    name: GNU SDK (freebsd_arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install toolchain build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
+            texinfo file xz-utils curl jq zstd
+
+      - name: Print GNU SDK lock
+        run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_arm64 --print-lock
+
+      - name: Build FreeBSD GNU C/Fortran/OpenMP SDK (freebsd_arm64)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --target freebsd_arm64 \
+            --prefix "$PWD/.ci/gnu-sdk/freebsd_arm64" \
+            --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_arm64" \
+            --jobs "$(nproc)"
+
+      - name: Package GNU SDK tarball (freebsd_arm64)
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/dist
+          tar -C .ci/gnu-sdk -caf \
+            .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst freebsd_arm64
+          sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+
+      - name: Upload GNU SDK tarball artifact (freebsd_arm64)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-tarball-freebsd_arm64
+          path: .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish SDK Release
+    needs: [sdk-amd64, sdk-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download both SDK tarballs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-tarball-freebsd_amd64
+          path: .ci/dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-tarball-freebsd_arm64
+          path: .ci/dist
+
+      - name: Generate SHA256SUMS and release notes
+        run: |
+          set -euo pipefail
+          cd .ci/dist
+          sha256sum \
+            ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst \
+            ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst > SHA256SUMS
+          cat SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          gcc_version=$(jq -er '.gcc_version' tools/freebsd-gnu-openmp.lock.json)
+          binutils_version=$(jq -er '.binutils_version' tools/freebsd-gnu-openmp.lock.json)
+          gcc_sha=$(jq -er '.sources.gcc.sha256' tools/freebsd-gnu-openmp.lock.json)
+          binutils_sha=$(jq -er '.sources.binutils.sha256' tools/freebsd-gnu-openmp.lock.json)
+          sysroot_release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          FreeBSD GNU C/Fortran/OpenMP SDK immutable 快照，供 CI 按
+          tools/freebsd-gnu-openmp.lock.json 钉定的 SHA256 消费。
+
+          - 来源 commit / Source commit: $GITHUB_SHA
+          - 生成日期 / Generated (UTC): $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          - GCC: $gcc_version (source sha256: $gcc_sha)
+          - Binutils: $binutils_version (source sha256: $binutils_sha)
+          - Sysroot: FreeBSD $sysroot_release
+          - Assets: ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst,
+            ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+          - 校验 / Verify: sha256sum -c SHA256SUMS
+
+          重跑本 workflow 是合法维护动作：同 tag 下 assets 与本说明原位覆盖
+          更新，消费方始终以 SHA256SUMS 为准。Re-running this workflow is the
+          documented maintenance path: assets and notes are replaced in place
+          under the same tag.
+          EOF
+
+      - name: Create or update SDK Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd .ci/dist
+          assets=(
+            ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
+            ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+            SHA256SUMS
+          )
+          title='FreeBSD GNU SDK snapshot (ci-freebsd-gnu-sdk-v1)'
+          if gh release view "$SDK_RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$SDK_RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$SDK_RELEASE_TAG" \
+              --title "$title" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$SDK_RELEASE_TAG" "${assets[@]}" \
+              --title "$title" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --target "$GITHUB_SHA"
+          fi
+          gh release view "$SDK_RELEASE_TAG" --json tagName,assets --jq \
+            '.tagName, (.assets[] | .name + " " + (.size|tostring) + " bytes")'

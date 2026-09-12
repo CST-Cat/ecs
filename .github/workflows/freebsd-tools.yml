@@ -172,7 +172,7 @@ jobs:
           fi
           mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
           for wf in "${freebsd_workflows[@]}"; do
-            if [[ "$wf" != 'freebsd-tools.yml' && "$wf" != 'freebsd-chain.yml' ]]; then
+            if [[ "$wf" != 'freebsd-tools.yml' && "$wf" != 'freebsd-chain.yml' && "$wf" != 'freebsd-sdk-release.yml' ]]; then
               echo "unexpected FreeBSD workflow present: $wf" >&2
               exit 1
             fi
