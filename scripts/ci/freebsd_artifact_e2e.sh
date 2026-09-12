@@ -12,16 +12,19 @@ set -Eeuo pipefail
 #     -> 解包真实固定工具包 -> 只把本次所需 binary 放进临时 PATH
 #     -> ecs plan（FreeBSD 平台解析）-> 真实基准运行 -> 真实报告
 #
-# Case E 验收 bundle 归档本身：SHA-256 对 checksums.txt、归档成员恰好是
-# 8 个工具 + manifest + 许可文件（无 ping/nexttrace-tiny/多余文件）、manifest
-# （ecs-tools.manifest/v1，toolchain_mode=cross）逐工具 sha256 与解包后的
-# 二进制一致，然后从这份已校验的归档里真实执行代表性验收：5 个版本工具对
-# tools/lock.json、NPB EP/FT 真实跑到 Verification SUCCESSFUL、STREAM
-# Solution Validates。两个 FreeBSD 目标跑同一套口径。
+# Case E 验收 bundle 归档本身的完整性：SHA-256 对 checksums.txt、归档成员恰
+# 好是 8 个工具 + manifest + 许可文件（无 ping/nexttrace-tiny/多余文件）、
+# manifest（ecs-tools.manifest/v1，toolchain_mode=cross）逐工具 sha256 与解包
+# 后的二进制一致、逐工具 FreeBSD 静态 ELF 身份。8 个工具的真实执行由
+# freebsd-tools.yml 的 REAL GATE 在真实 FreeBSD 15.1 VM 内对合并 stage 承担，
+# stage 与 bundle 的工具字节经 manifest 逐工具 sha256 一一对应；本脚本的
+# Cases A/D 仍真实执行 stream（bundle 内始终有工具被真实消费）。两个 FreeBSD
+# 目标跑同一套口径。
 #
 # 与 scripts/run_test.sh 的分工：run_test.sh 在 Linux 上用 fixture 二进制覆盖
 # wrapper 的确定性边界；这里用真实 FreeBSD 二进制、真实归档和真实工具，只把
-# 网络传输替换掉。两者都覆盖 wrapper，但只有这里能证明"发布的字节确实能跑"。
+# 网络传输替换掉。两者都覆盖 wrapper，但只有这里能证明"发布的字节确实能被
+# 真实 run.sh 消费并跑出真实报告"。
 #
 # 三条网络路径都显式覆盖，而不是依赖 CI 镜像恰好装了什么：
 #   A. curl 分支：把 curl shim 放在 PATH 最前。
@@ -428,14 +431,15 @@ case_d_work=$(kept_work_dir "$case_d_stderr")
   fail "case D did not stage the frozen stream binary through the base fetch path"
 echo "freebsd-artifact-e2e: case D passed (FreeBSD base /usr/bin/fetch branch)"
 
-# ---- Case E：bundle 归档内容验收 + 代表性真实执行 --------------------------
-# Case A-D 证明真实 run.sh 能消费这份发布布局；case E 直接验收 bundle 归档：
-# 完整性（checksums）、成员集合（恰好 8 工具，无 ping/nexttrace-tiny/多余文
-# 件）、manifest 契约与逐工具 sha256、FreeBSD 静态 ELF 身份，然后从这份已校
-# 验的归档里真实执行：版本对 lock、NPB EP/FT 真实验证、STREAM 真实验证。
+# ---- Case E：bundle 归档内容（发布包完整性）验收 ---------------------------
+# Case A-D 证明真实 run.sh 能消费这份发布布局（且真实执行 stream）；case E
+# 直接验收 bundle 归档本身的完整性：checksums、成员集合（恰好 8 工具，无
+# ping/nexttrace-tiny/多余文件）、manifest 契约与逐工具 sha256、FreeBSD 静态
+# ELF 身份。工具的真实执行由 freebsd-tools.yml 的 REAL GATE 对合并 stage 承
+# 担：REAL GATE 真实执行的 stage 字节与本归档内的工具字节经 manifest 逐工具
+# sha256 一一对应，因此本脚本只验发布包完整性，不重复真执行。
 case_e_dir="$scratch/case-e"
-case_e_work="$scratch/case-e-work"
-mkdir -p "$case_e_dir" "$case_e_work"
+mkdir -p "$case_e_dir"
 
 expected_bundle_sha=$(awk -v f="$tools_asset" '$2 == f {print $1; exit}' \
   "$bundle_release_dir/checksums.txt" | tr '[:upper:]' '[:lower:]')
@@ -512,83 +516,6 @@ for tool in "${bundle_tools[@]}"; do
   esac
 done
 
-lock_file="$repo_root/tools/lock.json"
-[[ -s "$lock_file" ]] || fail "case E missing tools lock: $lock_file"
-lock_version() {
-  jq -er --arg tool "$1" '.tools[] | select(.name == $tool) | .version' "$lock_file"
-}
-
-check_bundle_versions() {
-  local bin="$case_e_dir/bin"
-  local ver commit vout
-
-  ver=$(lock_version sysbench) || return 1
-  commit=$(jq -er '.tools[] | select(.name == "sysbench") | .commit' "$lock_file") || return 1
-  vout=$("$bin/sysbench" --version 2>&1) || { echo "sysbench --version failed" >&2; return 1; }
-  printf '%s\n' "$vout"
-  grep -Eq "^sysbench ${ver}-${commit:0:7}([[:space:]]|\$)" <<<"$vout" ||
-    { echo "sysbench --version did not report the locked ${ver}-${commit:0:7}" >&2; return 1; }
-
-  ver=$(lock_version zstd) || return 1
-  vout=$("$bin/zstd" --version 2>&1) || { echo "zstd --version failed" >&2; return 1; }
-  printf '%s\n' "$vout"
-  grep -Eq "v${ver//./\\.}([[:space:],]|\$)" <<<"$vout" ||
-    { echo "zstd --version did not report the locked $ver" >&2; return 1; }
-
-  ver=$(lock_version openssl) || return 1
-  vout=$("$bin/openssl" version 2>&1) || { echo "openssl version failed" >&2; return 1; }
-  printf '%s\n' "$vout"
-  grep -Eq "OpenSSL ${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
-    { echo "openssl version did not report the locked $ver" >&2; return 1; }
-
-  ver=$(lock_version fio) || return 1
-  vout=$("$bin/fio" --version 2>&1) || { echo "fio --version failed" >&2; return 1; }
-  printf '%s\n' "$vout"
-  grep -Eq "^fio-${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
-    { echo "fio --version did not report the locked $ver" >&2; return 1; }
-
-  ver=$(lock_version iperf3) || return 1
-  vout=$("$bin/iperf3" --version 2>&1) || { echo "iperf3 --version failed" >&2; return 1; }
-  printf '%s\n' "$vout"
-  grep -Eq "^iperf ${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
-    { echo "iperf3 --version did not report the locked $ver" >&2; return 1; }
-}
-
-bundle_npb_check() {
-  local name=$1 bin="$case_e_dir/bin/$1" benchmark log
-  benchmark=${name#npb-}
-  log="$case_e_work/$name.log"
-  "$bin" >"$log" 2>&1 || { echo "$name execution failed" >&2; cat "$log" >&2; return 1; }
-  # NPB 3.4-OMP 打印的横幅是「NAS Parallel Benchmarks (NPB3.4-OMP) - EP
-  # Benchmark」；括号里是实现标识，不假设它的内部格式，只要求同一行给出
-  # NPB 横幅与本次运行的 benchmark 名。
-  grep -Eiq "^[[:space:]]*NAS Parallel Benchmarks[[:space:]]*\(NPB[^)]*\)[[:space:]]*-[[:space:]]*${benchmark} Benchmark" "$log" ||
-    { echo "$name did not identify itself as the ${benchmark} benchmark" >&2; head -n 20 "$log" >&2; return 1; }
-  grep -Eiq 'Verification[[:space:]]*=[[:space:]]*SUCCESSFUL' "$log" ||
-    { echo "$name did not verify successfully" >&2; cat "$log" >&2; return 1; }
-  grep -E 'Verification' "$log"
-}
-
-check_bundle_stream() {
-  local bin="$case_e_dir/bin/stream" log array_size
-  array_size=$(jq -er '.tools[] | select(.name == "stream") | .array_size' "$lock_file") ||
-    return 1
-  log="$case_e_work/stream.log"
-  # 无 CLI 参数：二进制按构建时钉死的 STREAM_ARRAY_SIZE / NTIMES 原样运行。
-  "$bin" >"$log" 2>&1 || { echo "stream execution failed" >&2; cat "$log" >&2; return 1; }
-  grep -Fq 'Solution Validates' "$log" ||
-    { echo "stream did not validate" >&2; cat "$log" >&2; return 1; }
-  grep -Fq "Array size = $array_size (elements)" "$log" ||
-    { echo "stream did not run the locked STREAM_ARRAY_SIZE=$array_size" >&2; cat "$log" >&2; return 1; }
-  grep -E '^(Copy|Scale|Add|Triad):' "$log"
-  grep -F 'Solution Validates' "$log"
-}
-
-check_bundle_versions || fail "case E bundle version checks failed"
-bundle_npb_check npb-ep || fail "case E npb-ep did not verify successfully"
-bundle_npb_check npb-ft || fail "case E npb-ft did not verify successfully"
-check_bundle_stream || fail "case E stream did not validate"
-
-echo "freebsd-artifact-e2e: case E passed (bundle checksums, members, manifest, 8 identities, NPB EP/FT, STREAM)"
+echo "freebsd-artifact-e2e: case E passed (bundle checksums, members, manifest, 8 identities)"
 
 echo "freebsd-artifact-e2e: artifact-level E2E passed on real FreeBSD/$host_arch"
