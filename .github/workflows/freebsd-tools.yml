@@ -19,6 +19,8 @@ on:
   push:
     branches: [bsd]
   workflow_dispatch:
+  # bundle-release.yml 通过 workflow_call 复用本 workflow 的已 gate 产物。
+  workflow_call:
 
 permissions:
   contents: read

@@ -12,6 +12,13 @@ set -Eeuo pipefail
 #     -> 解包真实固定工具包 -> 只把本次所需 binary 放进临时 PATH
 #     -> ecs plan（FreeBSD 平台解析）-> 真实基准运行 -> 真实报告
 #
+# Case E 验收 bundle 归档本身：SHA-256 对 checksums.txt、归档成员恰好是
+# 8 个工具 + manifest + 许可文件（无 ping/nexttrace-tiny/多余文件）、manifest
+# （ecs-tools.manifest/v1，toolchain_mode=cross）逐工具 sha256 与解包后的
+# 二进制一致，然后从这份已校验的归档里真实执行代表性验收：5 个版本工具对
+# tools/lock.json、NPB EP/FT 真实跑到 Verification SUCCESSFUL、STREAM
+# Solution Validates。两个 FreeBSD 目标跑同一套口径。
+#
 # 与 scripts/run_test.sh 的分工：run_test.sh 在 Linux 上用 fixture 二进制覆盖
 # wrapper 的确定性边界；这里用真实 FreeBSD 二进制、真实归档和真实工具，只把
 # 网络传输替换掉。两者都覆盖 wrapper，但只有这里能证明"发布的字节确实能跑"。
@@ -91,7 +98,7 @@ host_arch=$(uname -m)
 [[ "$host_arch" == "$guest_arch" ]] ||
   die "target $target does not match the guest architecture $host_arch"
 
-for required_command in bash jq tar sha256; do
+for required_command in bash jq tar sha256 file; do
   command -v "$required_command" >/dev/null 2>&1 ||
     die "missing required command: $required_command"
 done
@@ -420,5 +427,165 @@ case_d_work=$(kept_work_dir "$case_d_stderr")
 [[ -x "$case_d_work/bin/stream" ]] ||
   fail "case D did not stage the frozen stream binary through the base fetch path"
 echo "freebsd-artifact-e2e: case D passed (FreeBSD base /usr/bin/fetch branch)"
+
+# ---- Case E：bundle 归档内容验收 + 代表性真实执行 --------------------------
+# Case A-D 证明真实 run.sh 能消费这份发布布局；case E 直接验收 bundle 归档：
+# 完整性（checksums）、成员集合（恰好 8 工具，无 ping/nexttrace-tiny/多余文
+# 件）、manifest 契约与逐工具 sha256、FreeBSD 静态 ELF 身份，然后从这份已校
+# 验的归档里真实执行：版本对 lock、NPB EP/FT 真实验证、STREAM 真实验证。
+case_e_dir="$scratch/case-e"
+case_e_work="$scratch/case-e-work"
+mkdir -p "$case_e_dir" "$case_e_work"
+
+expected_bundle_sha=$(awk -v f="$tools_asset" '$2 == f {print $1; exit}' \
+  "$bundle_release_dir/checksums.txt" | tr '[:upper:]' '[:lower:]')
+[[ -n "$expected_bundle_sha" ]] ||
+  fail "case E bundle checksums have no entry for $tools_asset"
+actual_bundle_sha=$(sha256 -q "$bundle_release_dir/$tools_asset" | tr '[:upper:]' '[:lower:]')
+[[ "$actual_bundle_sha" == "$expected_bundle_sha" ]] ||
+  fail "case E bundle SHA-256 mismatch: checksums $expected_bundle_sha != actual $actual_bundle_sha"
+
+tar -xzf "$bundle_release_dir/$tools_asset" -C "$case_e_dir"
+
+bundle_tools=(sysbench zstd npb-ep npb-ft openssl stream fio iperf3)
+expected_bin=$(printf '%s\n' "${bundle_tools[@]}" | LC_ALL=C sort)
+
+archive_bin=$(tar -tzf "$bundle_release_dir/$tools_asset" |
+  sed -n 's#^bin/##p' | sed '/^$/d' | LC_ALL=C sort)
+[[ "$archive_bin" == "$expected_bin" ]] ||
+  fail "case E bundle bin members changed: $(printf '%s ' $archive_bin)"
+for forbidden in ping nexttrace-tiny; do
+  if grep -Fx "$forbidden" <<<"$archive_bin" >/dev/null; then
+    fail "case E bundle contains $forbidden, which the FreeBSD base system provides"
+  fi
+done
+
+archive_top=$(tar -tzf "$bundle_release_dir/$tools_asset" |
+  awk -F/ '{print $1}' | LC_ALL=C sort -u)
+expected_top=$(printf '%s\n' LICENSE LICENSES NOTICE bin manifest.json | LC_ALL=C sort -u)
+[[ "$archive_top" == "$expected_top" ]] ||
+  fail "case E bundle top-level members changed: $(printf '%s ' $archive_top)"
+
+manifest="$case_e_dir/manifest.json"
+[[ -s "$manifest" ]] || fail "case E bundle has no manifest.json"
+jq -e '.schema_version == "ecs-tools.manifest/v1"' "$manifest" >/dev/null ||
+  fail "case E manifest schema changed"
+jq -e '.build.toolchain_mode == "cross"' "$manifest" >/dev/null ||
+  fail "case E manifest toolchain_mode is not cross"
+jq -e --arg target "$target" '.target == $target' "$manifest" >/dev/null ||
+  fail "case E manifest target changed"
+[[ "$(jq -er '.tools | length' "$manifest")" -eq 8 ]] ||
+  fail "case E manifest does not record exactly 8 tools"
+manifest_tools=$(jq -r '.tools[].name' "$manifest" | LC_ALL=C sort)
+[[ "$manifest_tools" == "$expected_bin" ]] ||
+  fail "case E manifest tool set changed: $manifest_tools"
+
+case "$target" in
+  freebsd_amd64) machine_token='x86-64' ;;
+  freebsd_arm64) machine_token='aarch64' ;;
+esac
+
+for tool in "${bundle_tools[@]}"; do
+  binary="$case_e_dir/bin/$tool"
+  [[ -f "$binary" && -s "$binary" ]] || fail "case E bundle is missing $tool"
+  # tar 归档里已是 0755；恢复只防御解包路径的权限丢失，字节不变。
+  chmod 0755 "$binary"
+  manifest_sha=$(jq -er --arg tool "$tool" \
+    '.tools[] | select(.name == $tool) | .parameters.sha256' "$manifest") ||
+    fail "case E manifest has no sha256 for $tool"
+  actual_tool_sha=$(sha256 -q "$binary" | tr '[:upper:]' '[:lower:]')
+  [[ "$actual_tool_sha" == "$manifest_sha" ]] ||
+    fail "case E $tool sha256 mismatch: manifest $manifest_sha != bundle $actual_tool_sha"
+  identity=$(file -b "$binary")
+  echo "case E $tool: $identity"
+  case "$identity" in
+    *FreeBSD*) ;;
+    *) fail "case E $tool is not a FreeBSD ELF: $identity" ;;
+  esac
+  case "$identity" in
+    *static*) ;;
+    *) fail "case E $tool is not statically linked: $identity" ;;
+  esac
+  case "$identity" in
+    *"$machine_token"*) ;;
+    *) fail "case E $tool is not a $machine_token ELF: $identity" ;;
+  esac
+done
+
+lock_file="$repo_root/tools/lock.json"
+[[ -s "$lock_file" ]] || fail "case E missing tools lock: $lock_file"
+lock_version() {
+  jq -er --arg tool "$1" '.tools[] | select(.name == $tool) | .version' "$lock_file"
+}
+
+check_bundle_versions() {
+  local bin="$case_e_dir/bin"
+  local ver commit vout
+
+  ver=$(lock_version sysbench) || return 1
+  commit=$(jq -er '.tools[] | select(.name == "sysbench") | .commit' "$lock_file") || return 1
+  vout=$("$bin/sysbench" --version 2>&1) || { echo "sysbench --version failed" >&2; return 1; }
+  printf '%s\n' "$vout"
+  grep -Eq "^sysbench ${ver}-${commit:0:7}([[:space:]]|\$)" <<<"$vout" ||
+    { echo "sysbench --version did not report the locked ${ver}-${commit:0:7}" >&2; return 1; }
+
+  ver=$(lock_version zstd) || return 1
+  vout=$("$bin/zstd" --version 2>&1) || { echo "zstd --version failed" >&2; return 1; }
+  printf '%s\n' "$vout"
+  grep -Eq "v${ver//./\\.}([[:space:],]|\$)" <<<"$vout" ||
+    { echo "zstd --version did not report the locked $ver" >&2; return 1; }
+
+  ver=$(lock_version openssl) || return 1
+  vout=$("$bin/openssl" version 2>&1) || { echo "openssl version failed" >&2; return 1; }
+  printf '%s\n' "$vout"
+  grep -Eq "OpenSSL ${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
+    { echo "openssl version did not report the locked $ver" >&2; return 1; }
+
+  ver=$(lock_version fio) || return 1
+  vout=$("$bin/fio" --version 2>&1) || { echo "fio --version failed" >&2; return 1; }
+  printf '%s\n' "$vout"
+  grep -Eq "^fio-${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
+    { echo "fio --version did not report the locked $ver" >&2; return 1; }
+
+  ver=$(lock_version iperf3) || return 1
+  vout=$("$bin/iperf3" --version 2>&1) || { echo "iperf3 --version failed" >&2; return 1; }
+  printf '%s\n' "$vout"
+  grep -Eq "^iperf ${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
+    { echo "iperf3 --version did not report the locked $ver" >&2; return 1; }
+}
+
+bundle_npb_check() {
+  local name=$1 bin="$case_e_dir/bin/$1" benchmark log
+  benchmark=${name#npb-}
+  log="$case_e_work/$name.log"
+  "$bin" >"$log" 2>&1 || { echo "$name execution failed" >&2; cat "$log" >&2; return 1; }
+  grep -Eiq "^[[:space:]]*NAS Parallel Benchmarks[[:space:]]*\(NPB\)[[:space:]]+[0-9.]+[[:space:]]*-[[:space:]]*${benchmark} Benchmark" "$log" ||
+    { echo "$name did not identify itself as the ${benchmark} benchmark" >&2; head -n 20 "$log" >&2; return 1; }
+  grep -Eiq 'Verification[[:space:]]*=[[:space:]]*SUCCESSFUL' "$log" ||
+    { echo "$name did not verify successfully" >&2; cat "$log" >&2; return 1; }
+  grep -E 'Verification' "$log"
+}
+
+check_bundle_stream() {
+  local bin="$case_e_dir/bin/stream" log array_size
+  array_size=$(jq -er '.tools[] | select(.name == "stream") | .array_size' "$lock_file") ||
+    return 1
+  log="$case_e_work/stream.log"
+  # 无 CLI 参数：二进制按构建时钉死的 STREAM_ARRAY_SIZE / NTIMES 原样运行。
+  "$bin" >"$log" 2>&1 || { echo "stream execution failed" >&2; cat "$log" >&2; return 1; }
+  grep -Fq 'Solution Validates' "$log" ||
+    { echo "stream did not validate" >&2; cat "$log" >&2; return 1; }
+  grep -Fq "Array size = $array_size (elements)" "$log" ||
+    { echo "stream did not run the locked STREAM_ARRAY_SIZE=$array_size" >&2; cat "$log" >&2; return 1; }
+  grep -E '^(Copy|Scale|Add|Triad):' "$log"
+  grep -F 'Solution Validates' "$log"
+}
+
+check_bundle_versions || fail "case E bundle version checks failed"
+bundle_npb_check npb-ep || fail "case E npb-ep did not verify successfully"
+bundle_npb_check npb-ft || fail "case E npb-ft did not verify successfully"
+check_bundle_stream || fail "case E stream did not validate"
+
+echo "freebsd-artifact-e2e: case E passed (bundle checksums, members, manifest, 8 identities, NPB EP/FT, STREAM)"
 
 echo "freebsd-artifact-e2e: artifact-level E2E passed on real FreeBSD/$host_arch"

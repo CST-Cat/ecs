@@ -2,16 +2,34 @@ name: bundle-release
 
 # 独立发布 benchmark bundle。Bundle 不参与 ECS application release。
 #
-# Stage 1 状态：旧 FreeBSD VM builder 路径已删除。Linux 七个目标在目标架构
-# 容器里构建。FreeBSD tools 暂时无法构建是预期状态；Linux-hosted FreeBSD
-# builder 重建完成并通过远端 CI 之前，本 workflow 不得再次引入 FreeBSD 构建。
+# Stage 9 状态：FreeBSD 路径重新接入。唯一 FreeBSD build path 是
+# freebsd-tools.yml，通过 workflow_call 整体复用（同 run 内 artifact 按名可
+# 取）；本 workflow 不构建 FreeBSD tools，也不复制任何 builder 逻辑。
 #
-# 最终消费者基础设施仍在仓库中，等待后续阶段接回唯一 build path：
-#   scripts/ci/freebsd_arm64_gate.sh
+# 唯一 DAG（FreeBSD 链与 Linux 七目标链并行；publish 硬依赖全部前置）：
+#   tools ×7（Linux，目标架构容器构建）
+#   FREEBSD BUILD（workflow_call 复用 freebsd-tools.yml：SYSROOT→C-DEPS→
+#     C-TOOLS→GNU SDK→GNU BENCH→MERGE→VERIFY×2→REAL GATE AMD64 ∥ REAL GATE
+#     ARM64；19 个 job 全绿才算通过）
+#     → PACKAGE（scripts/ci/freebsd_artifact_layout.sh 每个目标调用真
+#       scripts/package.sh，产出 ecs-release 与 bundle-release 发布布局）
+#     → ARTIFACT E2E AMD64 ∥ ARTIFACT E2E ARM64（并行，在真实 FreeBSD 15.1
+#       guest 内用真实 run.sh 消费 package.sh 产物，并直接验收 bundle 内容）
+#   → ASSEMBLE（九个平台目标的 stage 由 scripts/package.sh --all-targets
+#     一次打包，统一 checksums）
+#   → PUBLISH。
+#
+# 触发语义与 release.yml 一致：workflow_dispatch 是全链彩排，publish 只在
+# bundle tag（refs/tags/bundle-v*）上运行，因此彩排不会发出任何东西；正式
+# 发布 = 推送 tools/BUNDLE 指向的 bundle tag。
+#
+# FreeBSD 消费者基础设施（全部复用，不重新实现）：
 #   scripts/ci/freebsd_artifact_layout.sh
 #   scripts/ci/freebsd_artifact_e2e.sh
 
 on:
+  push:
+    tags: ["bundle-v*"]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +43,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # FreeBSD 唯一 build path：整体复用生产 workflow，含全部 structural verify
+  # 与两个真实 FreeBSD VM gate。这里不重复它的任何逻辑。
+  freebsd-build:
+    name: FREEBSD BUILD
+    permissions:
+      contents: read
+    uses: ./.github/workflows/freebsd-tools.yml
+
   tools:
     name: tools (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
@@ -93,8 +119,210 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # PACKAGE：消费 freebsd-build 的 merged stage artifact，每个 FreeBSD 目标跑
+  # 一次 freebsd_artifact_layout.sh——它只调用真 scripts/package.sh（ECS release
+  # 线交叉编译主程序 + bundle 线打包 stage）并搬运产物，不重新实现打包。E2E
+  # 消费的就是这份布局：被验证的字节与发布路径产出的字节同源。
+  package:
+    name: PACKAGE
+    needs: [freebsd-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Download the merged FreeBSD tools stages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-freebsd-tools-stage-*
+          path: freebsd-stage-artifacts
+
+      - name: Restore the merged FreeBSD tools stages
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          mkdir -p .ci/freebsd-tools-stage
+          for target in "${ECS_FREEBSD_TARGET_IDS[@]}"; do
+            source_dir="freebsd-stage-artifacts/ecs-freebsd-tools-stage-${target}"
+            stage_dir=".ci/freebsd-tools-stage/${target}"
+            test -d "$source_dir/bin"
+            test -s "$source_dir/manifest.json"
+            mkdir -p "$stage_dir"
+            cp -a "$source_dir/." "$stage_dir/"
+            # upload-artifact 会丢可执行位；package.sh 只需要读权限并自己补 0755。
+            chmod -R a+rX "$stage_dir"
+          done
+
+      - name: Build the FreeBSD release layouts
+        run: |
+          set -euo pipefail
+          for target in freebsd_amd64 freebsd_arm64; do
+            bash scripts/ci/freebsd_artifact_layout.sh \
+              --stage-root "$PWD/.ci/freebsd-tools-stage" \
+              --layout "$PWD/.ci/freebsd-artifact-layout/${target}" \
+              --target "$target"
+          done
+
+      - name: Upload the freebsd_amd64 release layout
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_amd64
+          path: .ci/freebsd-artifact-layout/freebsd_amd64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the freebsd_arm64 release layout
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_arm64
+          path: .ci/freebsd-artifact-layout/freebsd_arm64
+          if-no-files-found: error
+          retention-days: 7
+
+  # 发布物级端到端：消费 PACKAGE 产出的真实发布布局，在真实 FreeBSD 15.1 guest
+  # 内交给真实 run.sh 消费（SHA-256 校验、解包 ecs、解析 Bundle 基址、暂存固定
+  # 工具、真实基准、真实报告），并直接验收 bundle 归档内容（checksums、成员、
+  # manifest、逐工具 sha256、真实执行）。两个 FreeBSD 目标都必须过这一步；
+  # VM 只以 consumer/judge 身份出现，不重新构建任何东西。
+  artifact-e2e-amd64:
+    name: ARTIFACT E2E AMD64
+    needs: [package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download the freebsd_amd64 release layout
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_amd64
+          path: .ci/freebsd-artifact-layout/freebsd_amd64
+
+      - name: Start FreeBSD 15.1 VM (artifact consumer)
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: x86_64
+          sync: rsync
+          copyback: false
+          custom-shell-name: freebsd
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
+            pw useradd ecsci -m -s /bin/sh
+            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+
+      - name: VM CONTRACT
+        id: vm_contract
+        shell: freebsd {0}
+        run: |
+          set -eu
+          guest_arch=$(uname -m)
+          [ "$guest_arch" = amd64 ] || {
+            printf 'guest architecture mismatch: target=freebsd_amd64 expected=amd64 actual=%s\n' "$guest_arch" >&2
+            exit 1
+          }
+          layout="$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_amd64"
+          [ -s "$layout/ecs-release/ecs_freebsd_amd64.tar.gz" ] ||
+            { echo 'ECS release line did not reach the guest' >&2; exit 1; }
+          [ -s "$layout/bundle-release/ecs-tools_freebsd_amd64.tar.gz" ] ||
+            { echo 'bundle release line did not reach the guest' >&2; exit 1; }
+          printf 'target=freebsd_amd64\n'
+          printf 'guest_uname=%s\n' "$guest_arch"
+          printf 'guest_ncpu=%s\n' "$(sysctl -n hw.ncpu)"
+          printf 'phase_contract=ARTIFACT_E2E\n'
+
+      - name: ARTIFACT E2E
+        id: artifact_e2e
+        timeout-minutes: 120
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_artifact_e2e.sh' \
+              --layout '$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_amd64' \
+              --target freebsd_amd64"
+
+  artifact-e2e-arm64:
+    name: ARTIFACT E2E ARM64
+    needs: [package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download the freebsd_arm64 release layout
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_arm64
+          path: .ci/freebsd-artifact-layout/freebsd_arm64
+
+      - name: Start FreeBSD 15.1 VM (artifact consumer)
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: aarch64
+          sync: rsync
+          copyback: false
+          custom-shell-name: freebsd
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
+            pw useradd ecsci -m -s /bin/sh
+            chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+
+      - name: VM CONTRACT
+        id: vm_contract
+        shell: freebsd {0}
+        run: |
+          set -eu
+          guest_arch=$(uname -m)
+          [ "$guest_arch" = arm64 ] || {
+            printf 'guest architecture mismatch: target=freebsd_arm64 expected=arm64 actual=%s\n' "$guest_arch" >&2
+            exit 1
+          }
+          layout="$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_arm64"
+          [ -s "$layout/ecs-release/ecs_freebsd_arm64.tar.gz" ] ||
+            { echo 'ECS release line did not reach the guest' >&2; exit 1; }
+          [ -s "$layout/bundle-release/ecs-tools_freebsd_arm64.tar.gz" ] ||
+            { echo 'bundle release line did not reach the guest' >&2; exit 1; }
+          printf 'target=freebsd_arm64\n'
+          printf 'guest_uname=%s\n' "$guest_arch"
+          printf 'guest_ncpu=%s\n' "$(sysctl -n hw.ncpu)"
+          printf 'phase_contract=ARTIFACT_E2E\n'
+
+      - name: ARTIFACT E2E
+        id: artifact_e2e
+        timeout-minutes: 120
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_artifact_e2e.sh' \
+              --layout '$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_arm64' \
+              --target freebsd_arm64"
+
+  # ASSEMBLE 在依赖图上强制位于全部前置之后：Linux 七目标 stage、freebsd-build
+  # 的 merged stage、PACKAGE 与两个 ARTIFACT E2E 全部成功才运行。九个目标的
+  # 打包仍只由 scripts/package.sh 完成。
   assemble:
-    needs: [tools]
+    needs: [tools, freebsd-build, package, artifact-e2e-amd64, artifact-e2e-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -106,6 +334,11 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ecs-tools-stage-*
+          path: tools-artifacts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-freebsd-tools-stage-*
           path: tools-artifacts
 
       - name: Normalize the downloaded tools stages
@@ -121,10 +354,19 @@ jobs:
             cp -a "$source_dir/." "$stage_dir/"
             chmod +x "$stage_dir/bin/"*
           done
+          for target in "${ECS_FREEBSD_TARGET_IDS[@]}"; do
+            source_dir="tools-artifacts/ecs-freebsd-tools-stage-${target}"
+            stage_dir="tools-stage/${target}"
+            test -d "$source_dir/bin"
+            test -s "$source_dir/manifest.json"
+            mkdir -p "$stage_dir"
+            cp -a "$source_dir/." "$stage_dir/"
+            chmod +x "$stage_dir/bin/"*
+          done
 
-      - name: Package the Linux bundle
-        # Stage 1：默认只打包七个 Linux 目标。FreeBSD tools builder 不可用。
-        run: ./scripts/package.sh --tools-stage tools-stage
+      - name: Package the bundle
+        # 九个平台目标一次打包：Linux 七个 + freebsd_amd64/arm64，统一 checksums。
+        run: ./scripts/package.sh --tools-stage tools-stage --all-targets
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -133,7 +375,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # 唯一发布出口：依赖图上经过 assemble 的全部前置（tools、freebsd-build、
+  # package、两个 ARTIFACT E2E）。运行条件与 release.yml 的 publish 相同——
+  # 只在正式发布触发（bundle tag）上满足；workflow_dispatch 彩排按设计跳过。
   publish:
+    if: startsWith(github.ref, 'refs/tags/bundle-v')
     needs: assemble
     runs-on: ubuntu-latest
     timeout-minutes: 20
