@@ -21,7 +21,7 @@
     "freebsd_amd64": {
       "clang_target_triple": "x86_64-unknown-freebsd15.1",
       "gnu_target_triple": "x86_64-unknown-freebsd15.1",
-      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a", "libquadmath.a"]
+      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a"]
     },
     "freebsd_arm64": {
       "clang_target_triple": "aarch64-unknown-freebsd15.1",
