@@ -162,12 +162,16 @@ verdict() {
 # each fallible step handles its own error explicitly and returns 1.
 
 check_sysbench() {
-  local bin="$bin_dir/sysbench" ver vout eps smoke
+  local bin="$bin_dir/sysbench" ver commit vout eps smoke
   ver=$(lock_version sysbench)
+  commit=$(jq -er '.tools[] | select(.name == "sysbench") | .commit' "$lock_file") ||
+    die "tools lock has no sysbench commit"
   vout=$("$bin" --version 2>&1) || { echo "sysbench --version failed" >&2; return 1; }
   printf '%s\n' "$vout"
-  grep -Eq "^sysbench ${ver//./\\.}([[:space:]]|\$)" <<<"$vout" ||
-    { echo "sysbench --version did not report the locked $ver" >&2; return 1; }
+  # The pinned binary reports its build identity "version-commit7" (e.g.
+  # "sysbench 1.0.20-ebf1c90"), derived from the locked commit.
+  grep -Eq "^sysbench ${ver}-${commit:0:7}([[:space:]]|\$)" <<<"$vout" ||
+    { echo "sysbench --version did not report the locked ${ver}-${commit:0:7}" >&2; return 1; }
 
   smoke="$work/sysbench-cpu.log"
   "$bin" cpu --time=5 run >"$smoke" 2>&1 ||
@@ -228,7 +232,7 @@ check_openssl() {
   log="$work/openssl-speed.log"
   "$bin" speed -seconds 1 -elapsed -evp aes-256-gcm >"$log" 2>&1 ||
     { echo "openssl speed aes-256-gcm smoke failed" >&2; cat "$log" >&2; return 1; }
-  grep -Eq 'aes-256-gcm' "$log" ||
+  grep -Eiq 'aes-256-gcm' "$log" ||
     { echo "openssl speed output lacks aes-256-gcm results" >&2; cat "$log" >&2; return 1; }
   echo "openssl speed aes-256-gcm smoke completed:"
   tail -n 6 "$log"
