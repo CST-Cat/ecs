@@ -228,7 +228,6 @@ fi
 
 # Required runtime static libs, per target: GCC's per-target BUILD_LIBQUADMATH
 # probe fails on aarch64, so upstream never builds libquadmath for arm64.
-libdir="$prefix/lib/gcc/$gnu_triple/$gcc_version"
 # Also search the broader prefix because libgcc/libgfortran may install elsewhere.
 required_libs=$(jq -er --arg t "$target" '.targets[$t].required_libraries[]' "$LOCK_FILE") ||
   die "lock has no required_libraries for target: $target"
