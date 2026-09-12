@@ -197,17 +197,15 @@ mkdir -p "$build_root/gcc"
     --disable-libsanitizer \
     --disable-libvtv \
     --disable-libssp \
-    --disable-libquadmath \
     --without-isl \
     --with-gmp \
     --with-mpfr \
     --with-mpc
-  # Full all/install builds every configured target lib. languages=c,fortran
-  # keeps libstdc++ out of the graph, and --disable-libquadmath (plan 10B trim
-  # experiment) drops libquadmath outright: it is only meaningful on
-  # x86-family targets (upstream's per-target BUILD_LIBQUADMATH __float128
-  # probe already failed on aarch64), and none of the project's 8 tools or
-  # SDK probes use _Float128.
+  # Full all/install builds every configured target lib. GCC gates
+  # libquadmath on a per-target __float128 probe (BUILD_LIBQUADMATH): the
+  # probe fails on aarch64, so upstream does not build libquadmath for
+  # arm64 and its all/install are no-ops there. languages=c,fortran keeps
+  # libstdc++ out of the graph.
   MAKEINFO=true make -j"$jobs" all
   MAKEINFO=true make install
 )
@@ -228,10 +226,10 @@ if find "$prefix" -name 'libstdc++.so*' | grep -q .; then
   die "libstdc++.so must not be installed"
 fi
 
-# Required runtime static libs, per target. With --disable-libquadmath the
-# SDK provides libgcc/libgfortran/libgomp only, on both targets.
-# Search the whole prefix because libgcc/libgfortran may install outside the
-# versioned gcc libdir.
+# Required runtime static libs, per target: GCC's per-target BUILD_LIBQUADMATH
+# probe fails on aarch64, so upstream never builds libquadmath for arm64.
+libdir="$prefix/lib/gcc/$gnu_triple/$gcc_version"
+# Also search the broader prefix because libgcc/libgfortran may install elsewhere.
 required_libs=$(jq -er --arg t "$target" '.targets[$t].required_libraries[]' "$LOCK_FILE") ||
   die "lock has no required_libraries for target: $target"
 while IFS= read -r lib; do
