@@ -326,6 +326,25 @@ jobs:
       - name: Print target deps lock
         run: bash scripts/ci/freebsd_target_deps.sh --target freebsd_amd64 --print-lock
 
+      - name: Compute deps cache key
+        id: deps-cache-key
+        run: |
+          set -euo pipefail
+          lock_sha=$(sha256sum tools/freebsd-target-deps.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_target_deps.sh | awk '{print $1}')
+          snapshot_id=$(jq -er '.snapshot.id' tools/freebsd-target-deps.lock.json)
+          pkgs_sha=$(jq -erSc --arg t freebsd_amd64 '[.snapshot, .freebsd_abi, .packages[$t]]' tools/freebsd-target-deps.lock.json | sha256sum | awk '{print $1}')
+          key="ecs-deps-cache-v1.freebsd_amd64.snapshot-${snapshot_id}.pkgs-${pkgs_sha}.lock-${lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "deps cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore installed FreeBSD amd64 target deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/target-deps/freebsd_amd64
+          key: ${{ steps.deps-cache-key.outputs.key }}
+
       - name: Fetch immutable LuaJIT/CK snapshot
         run: |
           set -euo pipefail
@@ -400,6 +419,25 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y zstd libarchive-tools curl jq
+
+      - name: Compute deps cache key
+        id: deps-cache-key
+        run: |
+          set -euo pipefail
+          lock_sha=$(sha256sum tools/freebsd-target-deps.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_target_deps.sh | awk '{print $1}')
+          snapshot_id=$(jq -er '.snapshot.id' tools/freebsd-target-deps.lock.json)
+          pkgs_sha=$(jq -erSc --arg t freebsd_arm64 '[.snapshot, .freebsd_abi, .packages[$t]]' tools/freebsd-target-deps.lock.json | sha256sum | awk '{print $1}')
+          key="ecs-deps-cache-v1.freebsd_arm64.snapshot-${snapshot_id}.pkgs-${pkgs_sha}.lock-${lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "deps cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore installed FreeBSD arm64 target deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/target-deps/freebsd_arm64
+          key: ${{ steps.deps-cache-key.outputs.key }}
 
       - name: Fetch immutable LuaJIT/CK snapshot
         run: |

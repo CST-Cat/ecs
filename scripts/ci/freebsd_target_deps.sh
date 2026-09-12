@@ -109,6 +109,38 @@ echo "freebsd-target-deps: snapshot=$snapshot_id target=$target" >&2
 mapfile -t packages < <(jq -cer --arg t "$target" '.packages[$t][] | @base64' "$LOCK_FILE")
 [[ "${#packages[@]}" -gt 0 ]] || die "no packages locked for $target"
 
+# Cache identity of this installed dependency prefix. A restored prefix is
+# only reused when every production input matches byte-for-byte; the lock,
+# schema, rolling-URL, snapshot-pinning and pkg-config checks below still run
+# on every invocation, hit or miss. Cache never participates in correctness:
+# a miss must take the full download/extract path.
+deps_lock_sha256=$(sha256sum "$LOCK_FILE" | awk '{print $1}')
+deps_script_sha256=$(sha256sum "$ECS_REPO_ROOT/scripts/ci/freebsd_target_deps.sh" | awk '{print $1}')
+freebsd_abi=$(jq -er '.freebsd_abi' "$LOCK_FILE")
+package_identity=$(jq -er --arg t "$target" '
+  .packages[$t][] |
+  "package=\(.name) version=\(.version) asset=\(.asset) url=\(.snapshot_url) sha256=\(.sha256)"
+' "$LOCK_FILE")
+cache_id=$(cat <<EOF
+ecs-deps-cache-v1
+target=$target
+snapshot_id=$snapshot_id
+base_url=$base_url
+freebsd_abi=$freebsd_abi
+$package_identity
+lock_sha256=$deps_lock_sha256
+script_sha256=$deps_script_sha256
+EOF
+)
+cache_marker="$prefix/.ecs-deps-cache.id"
+
+if [[ -f "$cache_marker" && "$(cat "$cache_marker")" == "$cache_id" ]]; then
+  deps_cache_hit=1
+  echo "freebsd-target-deps: cache identity matched; reusing installed packages for $target" >&2
+else
+  deps_cache_hit=0
+fi
+
 for encoded in "${packages[@]}"; do
   pkg_json=$(printf '%s' "$encoded" | base64 -d)
   name=$(jq -er '.name' <<<"$pkg_json")
@@ -125,6 +157,12 @@ for encoded in "${packages[@]}"; do
     "$base_url"/*) ;;
     *) die "package $name URL is not under snapshot base: $url" ;;
   esac
+
+  # Cache hit: every per-package validation above already ran; skip only the
+  # download/extract production steps.
+  if [[ "$deps_cache_hit" -eq 1 ]]; then
+    continue
+  fi
 
   archive="$work_dir/$asset"
   if [[ -s "$archive" ]] && [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$sha" ]]; then
@@ -180,5 +218,9 @@ cat >"$prefix/deps-provenance.json" <<EOF
   "packages": $(jq -c --arg t "$target" '.packages[$t]' "$LOCK_FILE")
 }
 EOF
+
+# Record the cache identity only after every validation above has passed, so
+# a partial or rejected prefix can never be cached as reusable.
+printf '%s\n' "$cache_id" >"$cache_marker"
 
 echo "freebsd-target-deps: $target dependencies ready at $prefix" >&2
