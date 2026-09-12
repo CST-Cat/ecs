@@ -559,7 +559,10 @@ bundle_npb_check() {
   benchmark=${name#npb-}
   log="$case_e_work/$name.log"
   "$bin" >"$log" 2>&1 || { echo "$name execution failed" >&2; cat "$log" >&2; return 1; }
-  grep -Eiq "^[[:space:]]*NAS Parallel Benchmarks[[:space:]]*\(NPB\)[[:space:]]+[0-9.]+[[:space:]]*-[[:space:]]*${benchmark} Benchmark" "$log" ||
+  # NPB 3.4-OMP 打印的横幅是「NAS Parallel Benchmarks (NPB3.4-OMP) - EP
+  # Benchmark」；括号里是实现标识，不假设它的内部格式，只要求同一行给出
+  # NPB 横幅与本次运行的 benchmark 名。
+  grep -Eiq "^[[:space:]]*NAS Parallel Benchmarks[[:space:]]*\(NPB[^)]*\)[[:space:]]*-[[:space:]]*${benchmark} Benchmark" "$log" ||
     { echo "$name did not identify itself as the ${benchmark} benchmark" >&2; head -n 20 "$log" >&2; return 1; }
   grep -Eiq 'Verification[[:space:]]*=[[:space:]]*SUCCESSFUL' "$log" ||
     { echo "$name did not verify successfully" >&2; cat "$log" >&2; return 1; }
