@@ -3,8 +3,12 @@ set -euo pipefail
 
 # Linux-hosted FreeBSD GNU C/Fortran/OpenMP SDK (Stage 4).
 #
-# Builds Binutils 2.43.1 and GCC 14.2.0 (c,fortran only) targeting the
-# FreeBSD 15.1 sysroot. Does not build NPB or STREAM.
+# Default mode consumes the immutable prebuilt snapshot pinned in the lock
+# (Release ci-freebsd-gnu-sdk-v1, published by freebsd-sdk-release.yml):
+# download, verify SHA256, unpack, then run the full assertion and probe
+# suite. --from-source instead builds Binutils 2.43.1 and GCC 14.2.0
+# (c,fortran only) targeting the FreeBSD 15.1 sysroot. Does not build NPB
+# or STREAM.
 #
 # Probes: C/Fortran static hello, ieee_arithmetic, C OpenMP, Fortran OpenMP.
 # Asserts required runtime libs exist and g++/libstdc++ do not.
@@ -19,6 +23,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64|freebsd_arm64
                                             --prefix DIR [--work-dir DIR] [--jobs N]
+                                            [--from-source]
        scripts/ci/freebsd_gnu_openmp_sdk.sh --print-lock --target TARGET
 USAGE
 }
@@ -32,6 +37,7 @@ target=""
 prefix=""
 work_dir=""
 print_lock=0
+from_source=0
 jobs="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -54,6 +60,10 @@ while [[ "$#" -gt 0 ]]; do
       [[ "$#" -ge 2 && -n "$2" ]] || die "--jobs requires a value"
       jobs=$2
       shift 2
+      ;;
+    --from-source)
+      from_source=1
+      shift
       ;;
     --print-lock)
       print_lock=1
@@ -104,6 +114,19 @@ EOF
   exit 0
 fi
 
+# Acquisition mode: the default consumes the immutable prebuilt snapshot
+# pinned at targets[$t].prebuilt; --from-source forces the full fetch/build
+# path used by the freebsd-sdk-release.yml publisher.
+if [[ "$from_source" -eq 1 ]]; then
+  sdk_mode="from-source"
+else
+  prebuilt_url=$(jq -er --arg t "$target" '.targets[$t].prebuilt.url' "$LOCK_FILE") ||
+    die "lock has no prebuilt snapshot for $target; run the freebsd-sdk-release workflow first or pass --from-source"
+  prebuilt_sha256=$(jq -er --arg t "$target" '.targets[$t].prebuilt.sha256' "$LOCK_FILE") ||
+    die "lock prebuilt snapshot for $target is missing sha256"
+  sdk_mode="prebuilt"
+fi
+
 [[ -n "$prefix" ]] || {
   usage
   die "--prefix is required"
@@ -119,31 +142,6 @@ fi
 
 export LC_ALL=C
 export PATH="$prefix/bin:$PATH"
-
-# Cache identity of this installed SDK prefix. A restored prefix is only
-# reused when every production input matches byte-for-byte; the binary,
-# forbidden-content, required-library and probe checks below still run on
-# every invocation, hit or miss. Cache never participates in correctness:
-# a miss must take the full sysroot-install/fetch/build path.
-gnu_lock_sha256=$(sha256sum "$LOCK_FILE" | awk '{print $1}')
-sdk_script_sha256=$(sha256sum "$ECS_REPO_ROOT/scripts/ci/freebsd_gnu_openmp_sdk.sh" | awk '{print $1}')
-sysroot_release=$(jq -er '.freebsd_release' "$SYSROOT_LOCK")
-sysroot_base_sha=$(jq -er --arg t "$target" '.targets[$t].base_txz_sha256' "$SYSROOT_LOCK")
-cache_id=$(cat <<EOF
-ecs-gnu-sdk-cache-v1
-target=$target
-gnu_target_triple=$gnu_triple
-gcc_version=$gcc_version
-gcc_sha256=$gcc_sha
-binutils_version=$binutils_version
-binutils_sha256=$binutils_sha
-sysroot_release=$sysroot_release
-sysroot_base_txz_sha256=$sysroot_base_sha
-lock_sha256=$gnu_lock_sha256
-script_sha256=$sdk_script_sha256
-EOF
-)
-cache_marker="$prefix/.ecs-gnu-sdk-cache.id"
 
 mkdir -p "$work_dir"
 sysroot="$work_dir/sysroot"
@@ -162,14 +160,11 @@ fetch_verify() {
 }
 
 echo "freebsd-gnu-openmp-sdk: target=$target triple=$gnu_triple gcc=$gcc_version binutils=$binutils_version" >&2
+echo "freebsd-gnu-openmp-sdk: mode=$sdk_mode" >&2
 
-if [[ -f "$cache_marker" && "$(cat "$cache_marker")" == "$cache_id" ]]; then
-  sdk_cache_hit=1
-  echo "freebsd-gnu-openmp-sdk: cache identity matched; reusing installed SDK for $target" >&2
-else
-  sdk_cache_hit=0
-  rm -rf "$prefix"
-  mkdir -p "$prefix"
+rm -rf "$prefix"
+mkdir -p "$prefix"
+if [[ "$sdk_mode" == "from-source" ]]; then
   src_root="$work_dir/src"
   build_root="$work_dir/build"
   mkdir -p "$src_root" "$build_root"
@@ -181,8 +176,14 @@ bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --sysroot-dir "$sysroot" \
   --work-dir "$work_dir/sysroot-work"
 
-if [[ "$sdk_cache_hit" -eq 1 ]]; then
-  echo "freebsd-gnu-openmp-sdk: skipping source fetch and binutils/gcc build (cache hit); running full probe suite" >&2
+if [[ "$sdk_mode" == "prebuilt" ]]; then
+  sdk_tarball="$work_dir/$(basename "$prebuilt_url")"
+  fetch_verify "$prebuilt_url" "$prebuilt_sha256" "$sdk_tarball"
+  echo "freebsd-gnu-openmp-sdk: unpacking prebuilt SDK snapshot into $prefix" >&2
+  tar -xaf "$sdk_tarball" -C "$prefix" --strip-components=1
+  # Older snapshots still carry the marker of the retired cache mechanism;
+  # it is not part of the SDK contract.
+  rm -f "$prefix/.ecs-gnu-sdk-cache.id"
 else
   fetch_verify "$binutils_url" "$binutils_sha" "$src_root/binutils-$binutils_version.tar.xz"
   fetch_verify "$gcc_url" "$gcc_sha" "$src_root/gcc-$gcc_version.tar.xz"
@@ -384,6 +385,14 @@ case "$file_out" in
   *) die "Fortran OpenMP hello is not a FreeBSD ELF: $file_out" ;;
 esac
 
+if [[ "$sdk_mode" == "prebuilt" ]]; then
+  acquisition_fields="\"acquisition\": \"prebuilt\",
+  \"url\": \"$prebuilt_url\",
+  \"sha256\": \"$prebuilt_sha256\""
+else
+  acquisition_fields="\"acquisition\": \"from-source\""
+fi
+
 cat >"$prefix/sdk-provenance.json" <<EOF
 {
   "target": "$target",
@@ -394,13 +403,10 @@ cat >"$prefix/sdk-provenance.json" <<EOF
   "build_host": "ubuntu-24.04-amd64",
   "toolchain_mode": "cross",
   "openmp_runtime": "libgomp",
-  "probes": ["c-static-hello", "fortran-static-hello", "ieee_arithmetic", "c-openmp", "fortran-openmp"]
+  "probes": ["c-static-hello", "fortran-static-hello", "ieee_arithmetic", "c-openmp", "fortran-openmp"],
+  $acquisition_fields
 }
 EOF
-
-# Record the cache identity only after every probe above has passed, so a
-# partial or rejected prefix can never be cached as reusable.
-printf '%s\n' "$cache_id" >"$cache_marker"
 
 echo "freebsd-gnu-openmp-sdk: $target SDK ready at $prefix" >&2
 "$gcc_bin" --version | head -n1 >&2

@@ -21,12 +21,24 @@
     "freebsd_amd64": {
       "clang_target_triple": "x86_64-unknown-freebsd15.1",
       "gnu_target_triple": "x86_64-unknown-freebsd15.1",
-      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a", "libquadmath.a"]
+      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a", "libquadmath.a"],
+      "prebuilt": {
+        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst",
+        "sha256": "c0cdf98462ed99618fb1d5ab93752f846dc08e7b476e68e7315be15e5e2fecd3",
+        "source_commit": "485379b9f0065bd835aa846a6cd9eb1e0855ecad",
+        "generated": "2026-09-12T15:43:11Z"
+      }
     },
     "freebsd_arm64": {
       "clang_target_triple": "aarch64-unknown-freebsd15.1",
       "gnu_target_triple": "aarch64-unknown-freebsd15.1",
-      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a"]
+      "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a"],
+      "prebuilt": {
+        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst",
+        "sha256": "230c579101c63821b333a7d4be1aadb841b1684c1993823c8c93d591887e0c08",
+        "source_commit": "485379b9f0065bd835aa846a6cd9eb1e0855ecad",
+        "generated": "2026-09-12T15:43:11Z"
+      }
     }
   }
 }

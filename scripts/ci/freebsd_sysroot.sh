@@ -142,57 +142,35 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 
 readelf_bin=$(command -v llvm-readelf || command -v readelf)
 
-# Cache identity of this sysroot tree. A restored tree is only reused when
-# every production input matches byte-for-byte; the required-file, forbidden
-# path and static-ELF probe checks below still run on every invocation, hit
-# or miss. Cache never participates in correctness: a miss must take the
-# full download/extract path.
-sysroot_lock_sha256=$(sha256sum "$LOCK_FILE" | awk '{print $1}')
-sysroot_script_sha256=$(sha256sum "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" | awk '{print $1}')
-cache_id=$(cat <<EOF
-ecs-sysroot-cache-v1
-target=$target
-release=$release
-base_txz_sha256=$base_sha
-lock_sha256=$sysroot_lock_sha256
-script_sha256=$sysroot_script_sha256
-EOF
-)
-cache_marker="$sysroot_dir/.ecs-sysroot-cache.id"
-
 echo "freebsd-sysroot: target=$target release=$release revision=$revision" >&2
 echo "freebsd-sysroot: triple=$triple" >&2
 echo "freebsd-sysroot: url=$base_url" >&2
 
-if [[ -f "$cache_marker" && "$(cat "$cache_marker")" == "$cache_id" ]]; then
-  echo "freebsd-sysroot: cache identity matched; reusing extracted sysroot for $target" >&2
+rm -rf "$sysroot_dir"
+mkdir -p "$work_dir" "$sysroot_dir"
+archive="$work_dir/base-$target.txz"
+marker="$work_dir/base-$target.sha256"
+
+if [[ -s "$archive" && -f "$marker" && "$(cat "$marker")" == "$base_sha" ]]; then
+  echo "freebsd-sysroot: reusing verified base.txz for $target" >&2
 else
-  rm -rf "$sysroot_dir"
-  mkdir -p "$work_dir" "$sysroot_dir"
-  archive="$work_dir/base-$target.txz"
-  marker="$work_dir/base-$target.sha256"
-
-  if [[ -s "$archive" && -f "$marker" && "$(cat "$marker")" == "$base_sha" ]]; then
-    echo "freebsd-sysroot: reusing verified base.txz for $target" >&2
-  else
-    rm -f "$archive" "$marker"
-    curl -fsSL --retry 3 --retry-delay 2 -o "$archive" "$base_url"
-    actual_sha=$(sha256sum "$archive" | awk '{print $1}')
-    [[ "$actual_sha" == "$base_sha" ]] ||
-      die "base.txz SHA256 mismatch for $target: expected=$base_sha actual=$actual_sha"
-    printf '%s\n' "$base_sha" >"$marker"
-  fi
-
-  echo "freebsd-sysroot: extracting allowed paths into $sysroot_dir" >&2
-  mapfile -t extract_paths < <(jq -er '.extract_paths[]' "$LOCK_FILE")
-  [[ "${#extract_paths[@]}" -gt 0 ]] || die "lock has no extract_paths"
-  extract_args=()
-  for path in "${extract_paths[@]}"; do
-    extract_args+=("./$path")
-  done
-  # Only the locked header/library trees. Never pull /usr/bin toolchains.
-  tar -xJf "$archive" -C "$sysroot_dir" "${extract_args[@]}"
+  rm -f "$archive" "$marker"
+  curl -fsSL --retry 3 --retry-delay 2 -o "$archive" "$base_url"
+  actual_sha=$(sha256sum "$archive" | awk '{print $1}')
+  [[ "$actual_sha" == "$base_sha" ]] ||
+    die "base.txz SHA256 mismatch for $target: expected=$base_sha actual=$actual_sha"
+  printf '%s\n' "$base_sha" >"$marker"
 fi
+
+echo "freebsd-sysroot: extracting allowed paths into $sysroot_dir" >&2
+mapfile -t extract_paths < <(jq -er '.extract_paths[]' "$LOCK_FILE")
+[[ "${#extract_paths[@]}" -gt 0 ]] || die "lock has no extract_paths"
+extract_args=()
+for path in "${extract_paths[@]}"; do
+  extract_args+=("./$path")
+done
+# Only the locked header/library trees. Never pull /usr/bin toolchains.
+tar -xJf "$archive" -C "$sysroot_dir" "${extract_args[@]}"
 
 for required in \
   usr/include/sys/param.h \
@@ -267,10 +245,6 @@ if command -v readelf >/dev/null 2>&1; then
     die "probe binary has dynamic dependencies"
   fi
 fi
-
-# Record the cache identity only after every validation above has passed, so
-# a partial or rejected tree can never be cached as reusable.
-printf '%s\n' "$cache_id" >"$cache_marker"
 
 echo "freebsd-sysroot: $target sysroot ready at $sysroot_dir" >&2
 echo "freebsd-sysroot: static FreeBSD $elf_machine ELF probe OK" >&2
