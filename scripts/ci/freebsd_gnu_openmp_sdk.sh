@@ -288,7 +288,11 @@ int main(void) {
     return 0;
 }
 EOF
-"$gcc_bin" -static -o hello-c hello.c
+# The snapshot bakes the publisher's sysroot path (configure-time
+# --with-sysroot); pin the freshly installed sysroot explicitly — the same
+# contract the Stage 5 builder wrappers apply — so consumption never depends
+# on where the snapshot was produced.
+"$gcc_bin" --sysroot="$sysroot" -static -o hello-c hello.c
 file_out=$(file hello-c)
 echo "C hello: $file_out" >&2
 case "$file_out" in
@@ -305,7 +309,7 @@ program hello
   print *, 'gnu-fortran-ok'
 end program hello
 EOF
-"$gfortran_bin" -static -o hello-f hello.f90
+"$gfortran_bin" --sysroot="$sysroot" -static -o hello-f hello.f90
 file_out=$(file hello-f)
 echo "Fortran hello: $file_out" >&2
 case "$file_out" in
@@ -323,7 +327,7 @@ program ieee_check
   print *, ieee_support_nan(1.0)
 end program ieee_check
 EOF
-"$gfortran_bin" -static -o ieee ieee.f90
+"$gfortran_bin" --sysroot="$sysroot" -static -o ieee ieee.f90
 find "$prefix" -name 'ieee_arithmetic.mod' | grep -q . ||
   die "ieee_arithmetic.mod was not installed"
 
@@ -348,7 +352,7 @@ int main(void) {
 #endif
 }
 EOF
-"$gcc_bin" -static -fopenmp -o omp-c omp.c
+"$gcc_bin" --sysroot="$sysroot" -static -fopenmp -o omp-c omp.c
 file_out=$(file omp-c)
 case "$file_out" in
   *FreeBSD*static* | *static*FreeBSD*) ;;
@@ -373,7 +377,7 @@ program ompf
   print *, 'fortran-openmp-threads=', n
 end program ompf
 EOF
-"$gfortran_bin" -static -fopenmp -o omp-f omp.f90
+"$gfortran_bin" --sysroot="$sysroot" -static -fopenmp -o omp-f omp.f90
 file_out=$(file omp-f)
 case "$file_out" in
   *FreeBSD*)
