@@ -13,7 +13,23 @@ name: freebsd-tools
 # 在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行合并 stage 的 8 个工具，
 # VM 只以 consumer/judge 身份出现（scripts/ci/freebsd_tools_gate.sh）。
 #
-# 永久禁止：FreeBSD VM builder、任何 cache。
+# 永久禁止：FreeBSD VM builder。
+#
+# Cache 政策（取代旧的"任何 cache 一律禁止"）：仅允许以下三类构建产物 cache，
+# 任何其他 cache 仍然禁止：
+#   1. SYSROOT 产物 cache：freebsd_sysroot.sh 的 sysroot 提取目录；
+#   2. GNU SDK 产物 cache：freebsd_gnu_openmp_sdk.sh 的安装 prefix；
+#   3. target deps 产物 cache：freebsd_target_deps.sh 的安装 prefix。
+# 每类 cache 的硬性规则：
+#   - key 必须逐项包含 target、产物源身份 SHA256（sysroot=base.txz SHA256；
+#     GNU SDK=GCC/Binutils 版本与 tarball SHA256，且含 sysroot 身份
+#     release+base.txz SHA256；deps=ci-freebsd-deps snapshot 身份）、对应
+#     lock.json 的 SHA256、产出该产物的脚本的 SHA256；GNU SDK 另加
+#     compiler/binutils version；
+#   - 禁止宽泛 key（freebsd-cache-v1、latest 之类）；禁止 restore-keys 宽泛
+#     回退，宁可 miss 重新构建；
+#   - cache 永不参与正确性：miss 必须完整走原构建路径；hit 不是正确性前提，
+#     恢复内容必须重跑脚本自身的全部校验与 probe。
 
 on:
   push:
@@ -196,6 +212,25 @@ jobs:
       - name: Print resolved sysroot lock
         run: bash scripts/ci/freebsd_sysroot.sh --target freebsd_amd64 --print-lock
 
+      - name: Compute sysroot cache key
+        id: sysroot-cache-key
+        run: |
+          set -euo pipefail
+          lock_sha=$(sha256sum tools/freebsd-sysroot.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_sysroot.sh | awk '{print $1}')
+          release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          base_sha=$(jq -er --arg t freebsd_amd64 '.targets[$t].base_txz_sha256' tools/freebsd-sysroot.lock.json)
+          key="ecs-sysroot-cache-v1.freebsd_amd64.${release}.base-txz-${base_sha}.lock-${lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "sysroot cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore extracted FreeBSD amd64 sysroot
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/sysroot/freebsd_amd64
+          key: ${{ steps.sysroot-cache-key.outputs.key }}
+
       - name: Install and probe FreeBSD amd64 sysroot
         run: |
           set -euo pipefail
@@ -223,6 +258,25 @@ jobs:
 
       - name: Print resolved sysroot lock
         run: bash scripts/ci/freebsd_sysroot.sh --target freebsd_arm64 --print-lock
+
+      - name: Compute sysroot cache key
+        id: sysroot-cache-key
+        run: |
+          set -euo pipefail
+          lock_sha=$(sha256sum tools/freebsd-sysroot.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_sysroot.sh | awk '{print $1}')
+          release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          base_sha=$(jq -er --arg t freebsd_arm64 '.targets[$t].base_txz_sha256' tools/freebsd-sysroot.lock.json)
+          key="ecs-sysroot-cache-v1.freebsd_arm64.${release}.base-txz-${base_sha}.lock-${lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "sysroot cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore extracted FreeBSD arm64 sysroot
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/sysroot/freebsd_arm64
+          key: ${{ steps.sysroot-cache-key.outputs.key }}
 
       - name: Install and probe FreeBSD arm64 sysroot
         run: |
