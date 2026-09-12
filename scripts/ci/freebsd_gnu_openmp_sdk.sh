@@ -120,11 +120,33 @@ fi
 export LC_ALL=C
 export PATH="$prefix/bin:$PATH"
 
-mkdir -p "$work_dir" "$prefix"
-src_root="$work_dir/src"
-build_root="$work_dir/build"
+# Cache identity of this installed SDK prefix. A restored prefix is only
+# reused when every production input matches byte-for-byte; the binary,
+# forbidden-content, required-library and probe checks below still run on
+# every invocation, hit or miss. Cache never participates in correctness:
+# a miss must take the full sysroot-install/fetch/build path.
+gnu_lock_sha256=$(sha256sum "$LOCK_FILE" | awk '{print $1}')
+sdk_script_sha256=$(sha256sum "$ECS_REPO_ROOT/scripts/ci/freebsd_gnu_openmp_sdk.sh" | awk '{print $1}')
+sysroot_release=$(jq -er '.freebsd_release' "$SYSROOT_LOCK")
+sysroot_base_sha=$(jq -er --arg t "$target" '.targets[$t].base_txz_sha256' "$SYSROOT_LOCK")
+cache_id=$(cat <<EOF
+ecs-gnu-sdk-cache-v1
+target=$target
+gnu_target_triple=$gnu_triple
+gcc_version=$gcc_version
+gcc_sha256=$gcc_sha
+binutils_version=$binutils_version
+binutils_sha256=$binutils_sha
+sysroot_release=$sysroot_release
+sysroot_base_txz_sha256=$sysroot_base_sha
+lock_sha256=$gnu_lock_sha256
+script_sha256=$sdk_script_sha256
+EOF
+)
+cache_marker="$prefix/.ecs-gnu-sdk-cache.id"
+
+mkdir -p "$work_dir"
 sysroot="$work_dir/sysroot"
-mkdir -p "$src_root" "$build_root"
 
 fetch_verify() {
   local url=$1 sha=$2 dest=$3
@@ -141,74 +163,90 @@ fetch_verify() {
 
 echo "freebsd-gnu-openmp-sdk: target=$target triple=$gnu_triple gcc=$gcc_version binutils=$binutils_version" >&2
 
+if [[ -f "$cache_marker" && "$(cat "$cache_marker")" == "$cache_id" ]]; then
+  sdk_cache_hit=1
+  echo "freebsd-gnu-openmp-sdk: cache identity matched; reusing installed SDK for $target" >&2
+else
+  sdk_cache_hit=0
+  rm -rf "$prefix"
+  mkdir -p "$prefix"
+  src_root="$work_dir/src"
+  build_root="$work_dir/build"
+  mkdir -p "$src_root" "$build_root"
+fi
+
 echo "freebsd-gnu-openmp-sdk: installing FreeBSD sysroot" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --target "$target" \
   --sysroot-dir "$sysroot" \
   --work-dir "$work_dir/sysroot-work"
 
-fetch_verify "$binutils_url" "$binutils_sha" "$src_root/binutils-$binutils_version.tar.xz"
-fetch_verify "$gcc_url" "$gcc_sha" "$src_root/gcc-$gcc_version.tar.xz"
+if [[ "$sdk_cache_hit" -eq 1 ]]; then
+  echo "freebsd-gnu-openmp-sdk: skipping source fetch and binutils/gcc build (cache hit); running full probe suite" >&2
+else
+  fetch_verify "$binutils_url" "$binutils_sha" "$src_root/binutils-$binutils_version.tar.xz"
+  fetch_verify "$gcc_url" "$gcc_sha" "$src_root/gcc-$gcc_version.tar.xz"
 
-if [[ ! -d "$src_root/binutils-$binutils_version" ]]; then
-  tar -xJf "$src_root/binutils-$binutils_version.tar.xz" -C "$src_root"
+  if [[ ! -d "$src_root/binutils-$binutils_version" ]]; then
+    tar -xJf "$src_root/binutils-$binutils_version.tar.xz" -C "$src_root"
+  fi
+  if [[ ! -d "$src_root/gcc-$gcc_version" ]]; then
+    tar -xJf "$src_root/gcc-$gcc_version.tar.xz" -C "$src_root"
+  fi
+
+  # Use host libgmp/libmpfr/libmpc. Do not download GCC prerequisites (slow
+  # and unnecessary when Ubuntu packages are present).
+
+  echo "freebsd-gnu-openmp-sdk: building binutils" >&2
+  mkdir -p "$build_root/binutils"
+  (
+    cd "$build_root/binutils"
+    MAKEINFO=true "$src_root/binutils-$binutils_version/configure" \
+      --target="$gnu_triple" \
+      --prefix="$prefix" \
+      --with-sysroot="$sysroot" \
+      --disable-nls \
+      --disable-werror \
+      --disable-multilib \
+      --with-native-system-header-dir=/include
+    MAKEINFO=true make -j"$jobs"
+    MAKEINFO=true make install
+  )
+
+  echo "freebsd-gnu-openmp-sdk: building gcc (c,fortran only)" >&2
+  mkdir -p "$build_root/gcc"
+  (
+    cd "$build_root/gcc"
+    "$src_root/gcc-$gcc_version/configure" \
+      --target="$gnu_triple" \
+      --prefix="$prefix" \
+      --with-sysroot="$sysroot" \
+      --with-native-system-header-dir=/usr/include \
+      --enable-languages=c,fortran \
+      --disable-bootstrap \
+      --disable-multilib \
+      --disable-nls \
+      --disable-shared \
+      --enable-static \
+      --disable-libstdcxx \
+      --disable-libatomic \
+      --disable-libitm \
+      --disable-libsanitizer \
+      --disable-libvtv \
+      --disable-libssp \
+      --without-isl \
+      --with-gmp \
+      --with-mpfr \
+      --with-mpc
+    # Full all/install builds every configured target lib. GCC gates
+    # libquadmath on a per-target __float128 probe (BUILD_LIBQUADMATH): the
+    # probe fails on aarch64, so upstream does not build libquadmath for
+    # arm64 and its all/install are no-ops there. languages=c,fortran keeps
+    # libstdc++ out of the graph.
+    MAKEINFO=true make -j"$jobs" all
+    MAKEINFO=true make install
+  )
 fi
-if [[ ! -d "$src_root/gcc-$gcc_version" ]]; then
-  tar -xJf "$src_root/gcc-$gcc_version.tar.xz" -C "$src_root"
-fi
-
-# Use host libgmp/libmpfr/libmpc. Do not download GCC prerequisites (slow
-# and unnecessary when Ubuntu packages are present).
-
-echo "freebsd-gnu-openmp-sdk: building binutils" >&2
-mkdir -p "$build_root/binutils"
-(
-  cd "$build_root/binutils"
-  MAKEINFO=true "$src_root/binutils-$binutils_version/configure" \
-    --target="$gnu_triple" \
-    --prefix="$prefix" \
-    --with-sysroot="$sysroot" \
-    --disable-nls \
-    --disable-werror \
-    --disable-multilib \
-    --with-native-system-header-dir=/include
-  MAKEINFO=true make -j"$jobs"
-  MAKEINFO=true make install
-)
-
-echo "freebsd-gnu-openmp-sdk: building gcc (c,fortran only)" >&2
-mkdir -p "$build_root/gcc"
-(
-  cd "$build_root/gcc"
-  "$src_root/gcc-$gcc_version/configure" \
-    --target="$gnu_triple" \
-    --prefix="$prefix" \
-    --with-sysroot="$sysroot" \
-    --with-native-system-header-dir=/usr/include \
-    --enable-languages=c,fortran \
-    --disable-bootstrap \
-    --disable-multilib \
-    --disable-nls \
-    --disable-shared \
-    --enable-static \
-    --disable-libstdcxx \
-    --disable-libatomic \
-    --disable-libitm \
-    --disable-libsanitizer \
-    --disable-libvtv \
-    --disable-libssp \
-    --without-isl \
-    --with-gmp \
-    --with-mpfr \
-    --with-mpc
-  # Full all/install builds every configured target lib. GCC gates
-  # libquadmath on a per-target __float128 probe (BUILD_LIBQUADMATH): the
-  # probe fails on aarch64, so upstream does not build libquadmath for
-  # arm64 and its all/install are no-ops there. languages=c,fortran keeps
-  # libstdc++ out of the graph.
-  MAKEINFO=true make -j"$jobs" all
-  MAKEINFO=true make install
-)
 
 gcc_bin="$prefix/bin/${gnu_triple}-gcc"
 gfortran_bin="$prefix/bin/${gnu_triple}-gfortran"
@@ -359,6 +397,10 @@ cat >"$prefix/sdk-provenance.json" <<EOF
   "probes": ["c-static-hello", "fortran-static-hello", "ieee_arithmetic", "c-openmp", "fortran-openmp"]
 }
 EOF
+
+# Record the cache identity only after every probe above has passed, so a
+# partial or rejected prefix can never be cached as reusable.
+printf '%s\n' "$cache_id" >"$cache_marker"
 
 echo "freebsd-gnu-openmp-sdk: $target SDK ready at $prefix" >&2
 "$gcc_bin" --version | head -n1 >&2

@@ -467,6 +467,29 @@ jobs:
       - name: Print GNU SDK lock
         run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64 --print-lock
 
+      - name: Compute GNU SDK cache key
+        id: gnu-sdk-cache-key
+        run: |
+          set -euo pipefail
+          gnu_lock_sha=$(sha256sum tools/freebsd-gnu-openmp.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_gnu_openmp_sdk.sh | awk '{print $1}')
+          gcc_version=$(jq -er '.gcc_version' tools/freebsd-gnu-openmp.lock.json)
+          binutils_version=$(jq -er '.binutils_version' tools/freebsd-gnu-openmp.lock.json)
+          gcc_sha=$(jq -er '.sources.gcc.sha256' tools/freebsd-gnu-openmp.lock.json)
+          binutils_sha=$(jq -er '.sources.binutils.sha256' tools/freebsd-gnu-openmp.lock.json)
+          sysroot_release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          base_sha=$(jq -er --arg t freebsd_amd64 '.targets[$t].base_txz_sha256' tools/freebsd-sysroot.lock.json)
+          key="ecs-gnu-sdk-cache-v1.freebsd_amd64.gcc-${gcc_version}.binutils-${binutils_version}.gcc-src-${gcc_sha}.binutils-src-${binutils_sha}.sysroot-${sysroot_release}.base-txz-${base_sha}.lock-${gnu_lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "gnu sdk cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore built FreeBSD amd64 GNU SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/gnu-sdk/freebsd_amd64
+          key: ${{ steps.gnu-sdk-cache-key.outputs.key }}
+
       - name: Build FreeBSD amd64 GNU C/Fortran/OpenMP SDK
         run: |
           set -euo pipefail
@@ -502,6 +525,29 @@ jobs:
           sudo apt-get install -y \
             build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
             texinfo file xz-utils curl jq
+
+      - name: Compute GNU SDK cache key
+        id: gnu-sdk-cache-key
+        run: |
+          set -euo pipefail
+          gnu_lock_sha=$(sha256sum tools/freebsd-gnu-openmp.lock.json | awk '{print $1}')
+          script_sha=$(sha256sum scripts/ci/freebsd_gnu_openmp_sdk.sh | awk '{print $1}')
+          gcc_version=$(jq -er '.gcc_version' tools/freebsd-gnu-openmp.lock.json)
+          binutils_version=$(jq -er '.binutils_version' tools/freebsd-gnu-openmp.lock.json)
+          gcc_sha=$(jq -er '.sources.gcc.sha256' tools/freebsd-gnu-openmp.lock.json)
+          binutils_sha=$(jq -er '.sources.binutils.sha256' tools/freebsd-gnu-openmp.lock.json)
+          sysroot_release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          base_sha=$(jq -er --arg t freebsd_arm64 '.targets[$t].base_txz_sha256' tools/freebsd-sysroot.lock.json)
+          key="ecs-gnu-sdk-cache-v1.freebsd_arm64.gcc-${gcc_version}.binutils-${binutils_version}.gcc-src-${gcc_sha}.binutils-src-${binutils_sha}.sysroot-${sysroot_release}.base-txz-${base_sha}.lock-${gnu_lock_sha}.script-${script_sha}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "gnu sdk cache key: $key"
+
+      # 故意不设 restore-keys：key 不匹配宁可 miss 完整重建，不做宽泛回退。
+      - name: Restore built FreeBSD arm64 GNU SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .ci/gnu-sdk/freebsd_arm64
+          key: ${{ steps.gnu-sdk-cache-key.outputs.key }}
 
       - name: Build FreeBSD arm64 GNU C/Fortran/OpenMP SDK
         run: |
