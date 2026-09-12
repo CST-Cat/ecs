@@ -1,15 +1,15 @@
-name: freebsd-rebuild
+name: freebsd-tools
 
-# 临时验证 workflow：Linux-hosted FreeBSD 重建过程中的阶段门禁。
+# 正式生产 workflow：Linux-hosted FreeBSD 工具链交叉构建、合并与验证。
 #
-# 当前阶段：Stage 6 — Merge + 最终 Manifest。
-# 两条独立并行链（2026-09-11 用户指令：amd64 与 arm64 互不等待）：
-#   legacy-absent / linux-static / workflow-static（独立）
+# 两条独立并行链（amd64 与 arm64 互不等待）：
+#   legacy-absent / linux-static / workflow-static（独立静态检查）
 #   链 AMD64：SYSROOT AMD64 → C-DEPS AMD64 → C-TOOLS AMD64 → GNU SDK AMD64 → GNU BENCH AMD64 → MERGE AMD64 → VERIFY AMD64
 #   链 ARM64：SYSROOT ARM64 → C-DEPS ARM64 → C-TOOLS ARM64 → GNU SDK ARM64 → GNU BENCH ARM64 → MERGE ARM64 → VERIFY ARM64
-# 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder。
+# 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder；
+# 构建逻辑全部在 scripts/，本 workflow 只做编排。
 #
-# 仍然禁止：FreeBSD VM builder、cache。
+# 永久禁止：FreeBSD VM builder、任何 cache。
 
 on:
   push:
@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: freebsd-rebuild-${{ github.ref }}
+  group: freebsd-tools-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           legacy_files=(
-            .github/workflows/freebsd-tools.yml
+            .github/workflows/freebsd-rebuild.yml
             .github/workflows/freebsd-cross-sdk.yml
             scripts/ci/freebsd_tools.sh
             scripts/ci/freebsd_cross_sdk.sh
@@ -76,7 +76,7 @@ jobs:
           failed=0
           for pattern in "${patterns[@]}"; do
             if git grep -nE "$pattern" -- . \
-              ':!.github/workflows/freebsd-rebuild.yml' \
+              ':!.github/workflows/freebsd-tools.yml' \
               ':!PLAN.md'; then
               echo "legacy call site still present for pattern: $pattern" >&2
               failed=1
@@ -90,29 +90,10 @@ jobs:
         run: |
           set -euo pipefail
           # build_tools.sh / build_tools_container.sh 只构建 Linux，继续显式拒绝
-          # freebsd_* 目标（FreeBSD 由 Stage 3/5 独立 builder 与 Stage 6 merge 负责）。
+          # freebsd_* 目标；FreeBSD 工具链由本 workflow 的交叉构建链负责。
           grep -q 'FreeBSD tools builder unavailable' scripts/build_tools.sh
           grep -q 'FreeBSD tools builder unavailable' scripts/build_tools_container.sh
-          # Stage 6 起 verify_tools_stage.sh 直接对 FreeBSD stage 做结构验证，
-          # 不再占位失败；占位口径消失是本阶段预期状态。
-          if grep -q 'FreeBSD tools builder unavailable' scripts/verify_tools_stage.sh; then
-            echo 'verify_tools_stage.sh still defers FreeBSD to a builder' >&2
-            exit 1
-          fi
-          set +e
-          out=$(scripts/verify_tools_stage.sh --target freebsd_amd64 --stage-root /tmp/does-not-exist 2>&1)
-          rc=$?
-          set -e
-          echo "$out"
-          if [[ $rc -eq 0 ]]; then
-            echo 'verify_tools_stage.sh freebsd path unexpectedly succeeded' >&2
-            exit 1
-          fi
-          if ! grep -q 'missing manifest' <<<"$out"; then
-            echo 'verify_tools_stage.sh freebsd path did not report the missing stage' >&2
-            exit 1
-          fi
-          echo 'verify_tools_stage.sh freebsd path verifies stages instead of deferring to a builder'
+          echo 'Linux builders still refuse FreeBSD targets'
 
   linux-static:
     name: linux static checks
@@ -172,17 +153,17 @@ jobs:
       - name: Assert no FreeBSD VM builder workflows remain
         run: |
           set -euo pipefail
-          if [[ -e .github/workflows/freebsd-tools.yml ]]; then
-            echo 'freebsd-tools.yml must stay deleted until Stage 7' >&2
-            exit 1
-          fi
           if [[ -e .github/workflows/freebsd-cross-sdk.yml ]]; then
             echo 'freebsd-cross-sdk.yml must stay deleted' >&2
             exit 1
           fi
+          if [[ -e .github/workflows/freebsd-rebuild.yml ]]; then
+            echo 'freebsd-rebuild.yml must stay deleted' >&2
+            exit 1
+          fi
           mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
           for wf in "${freebsd_workflows[@]}"; do
-            if [[ "$wf" != 'freebsd-rebuild.yml' ]]; then
+            if [[ "$wf" != 'freebsd-tools.yml' ]]; then
               echo "unexpected FreeBSD workflow present: $wf" >&2
               exit 1
             fi
@@ -726,4 +707,3 @@ jobs:
           bash scripts/verify_tools_stage.sh \
             --target freebsd_arm64 \
             --stage-root "$PWD/.ci/freebsd-tools-stage"
-
