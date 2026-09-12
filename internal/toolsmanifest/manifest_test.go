@@ -58,8 +58,34 @@ func TestExampleManifestParsesAndValidates(t *testing.T) {
 	if err := Validate(manifest); err != nil {
 		t.Fatalf("parsed manifest failed validation: %v", err)
 	}
-	if manifest.SchemaVersion != SchemaVersion || manifest.Architecture == "" || len(manifest.Tools) != len(toolNames) {
+	if manifest.SchemaVersion != SchemaVersion || manifest.Architecture == "" || len(manifest.Tools) != len(linuxToolNames) {
 		t.Fatalf("manifest = schema %q, architecture %q, tools %d", manifest.SchemaVersion, manifest.Architecture, len(manifest.Tools))
+	}
+}
+
+func TestFreeBSDManifestUsesPlatformToolSet(t *testing.T) {
+	object := exampleManifestObject(t)
+	object["target"] = "freebsd_amd64"
+	object["goos"] = "freebsd"
+	object["goarch"] = "amd64"
+	object["supported_architectures"] = []any{"amd64", "arm64"}
+	object["supported_targets"] = []any{"freebsd_amd64", "freebsd_arm64"}
+	tools := object["tools"].([]any)
+	filtered := make([]any, 0, len(tools)-2)
+	for _, value := range tools {
+		name := value.(map[string]any)["name"]
+		if name == "ping" || name == "nexttrace-tiny" {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	object["tools"] = filtered
+	manifest, err := Parse(manifestBytes(t, object))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Target != "freebsd_amd64" || manifest.GOOS != "freebsd" || len(manifest.Tools) != len(freeBSDToolNames) {
+		t.Fatalf("FreeBSD manifest = target %q os %q tools %d", manifest.Target, manifest.GOOS, len(manifest.Tools))
 	}
 }
 
@@ -68,12 +94,34 @@ func TestExampleManifestParsesAndValidates(t *testing.T) {
 // changes which packages validate, so it must be a deliberate edit here too.
 func TestCanonicalManifestLists(t *testing.T) {
 	wantArchitectures := []string{"amd64", "arm64", "armv7", "386", "s390x", "riscv64", "ppc64le"}
+	wantFreeBSDArchitectures := []string{"amd64", "arm64"}
 	wantToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3", "nexttrace-tiny", "ping"}
-	if !reflect.DeepEqual(architectures[:], wantArchitectures) {
-		t.Fatalf("canonical architectures = %v", architectures)
+	wantFreeBSDToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3"}
+	wantTargets := []targetSpec{
+		{Target: "linux_amd64", GOOS: "linux", GOARCH: "amd64", Package: "amd64"},
+		{Target: "linux_arm64", GOOS: "linux", GOARCH: "arm64", Package: "arm64"},
+		{Target: "linux_armv7", GOOS: "linux", GOARCH: "arm", Package: "armv7"},
+		{Target: "linux_386", GOOS: "linux", GOARCH: "386", Package: "386"},
+		{Target: "linux_s390x", GOOS: "linux", GOARCH: "s390x", Package: "s390x"},
+		{Target: "linux_riscv64", GOOS: "linux", GOARCH: "riscv64", Package: "riscv64"},
+		{Target: "linux_ppc64le", GOOS: "linux", GOARCH: "ppc64le", Package: "ppc64le"},
+		{Target: "freebsd_amd64", GOOS: "freebsd", GOARCH: "amd64", Package: "amd64"},
+		{Target: "freebsd_arm64", GOOS: "freebsd", GOARCH: "arm64", Package: "arm64"},
 	}
-	if !reflect.DeepEqual(toolNames[:], wantToolNames) {
-		t.Fatalf("canonical tool names = %v", toolNames)
+	if !reflect.DeepEqual(linuxArchitectures[:], wantArchitectures) {
+		t.Fatalf("canonical Linux architectures = %v", linuxArchitectures)
+	}
+	if !reflect.DeepEqual(freeBSDArchitectures[:], wantFreeBSDArchitectures) {
+		t.Fatalf("canonical FreeBSD architectures = %v", freeBSDArchitectures)
+	}
+	if !reflect.DeepEqual(linuxToolNames[:], wantToolNames) {
+		t.Fatalf("canonical Linux tool names = %v", linuxToolNames)
+	}
+	if !reflect.DeepEqual(freeBSDToolNames[:], wantFreeBSDToolNames) {
+		t.Fatalf("canonical FreeBSD tool names = %v", freeBSDToolNames)
+	}
+	if !reflect.DeepEqual(targetSpecs[:], wantTargets) {
+		t.Fatalf("canonical targets = %#v", targetSpecs)
 	}
 }
 
@@ -100,7 +148,10 @@ func TestManifestParsingAndValidationDiagnostics(t *testing.T) {
 		{name: "unknown top field", mutate: func(object map[string]any) { object["extra"] = true }, marker: `unknown field "extra"`},
 		{name: "missing top field", mutate: func(object map[string]any) { delete(object, "schema_version") }, marker: `missing required field "schema_version"`},
 		{name: "schema version", mutate: func(object map[string]any) { object["schema_version"] = "ecs-tools.manifest/v0" }, marker: "schema_version must be"},
-		{name: "unsupported architecture", mutate: func(object map[string]any) { object["architecture"] = "windows-amd64" }, marker: "unsupported architecture"},
+		{name: "unsupported target", mutate: func(object map[string]any) { object["target"] = "windows-amd64" }, marker: "unsupported target"},
+		{name: "target OS mismatch", mutate: func(object map[string]any) { object["goos"] = "freebsd" }, marker: "does not match target"},
+		{name: "target GOARCH mismatch", mutate: func(object map[string]any) { object["goarch"] = "arm64" }, marker: "does not match target"},
+		{name: "target package mismatch", mutate: func(object map[string]any) { object["architecture"] = "arm64" }, marker: "does not match target"},
 		{name: "build object", mutate: func(object map[string]any) { object["build"] = "bad" }, marker: "build must be a JSON object"},
 		{name: "unknown build field", mutate: func(object map[string]any) { object["build"].(map[string]any)["extra"] = true }, marker: `build: unknown field "extra"`},
 		{name: "missing build field", mutate: func(object map[string]any) { delete(object["build"].(map[string]any), "smoke_runner") }, marker: `build: missing required field "smoke_runner"`},
@@ -124,6 +175,10 @@ func TestManifestParsingAndValidationDiagnostics(t *testing.T) {
 			values[1] = values[0]
 		}, marker: "supported architecture"},
 		{name: "supported architecture type", mutate: func(object map[string]any) { object["supported_architectures"] = "amd64" }, marker: "supported_architectures"},
+		{name: "supported target set", mutate: func(object map[string]any) {
+			values := object["supported_targets"].([]any)
+			values[1] = values[0]
+		}, marker: "invalid supported target"},
 		{name: "tool count", mutate: func(object map[string]any) { object["tools"] = []any{} }, marker: "tools must contain exactly"},
 		{name: "tool unknown field", mutate: func(object map[string]any) { firstManifestTool(t, object)["extra"] = true }, marker: `tool 0: unknown field "extra"`},
 		{name: "tool duplicate", mutate: func(object map[string]any) {

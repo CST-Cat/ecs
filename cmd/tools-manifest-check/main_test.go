@@ -43,7 +43,7 @@ func TestRunValidatesMultipleManifests(t *testing.T) {
 	if status != 0 || stderr != "" {
 		t.Fatalf("run status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	if strings.Count(stdout, ": valid (amd64)\n") != 2 {
+	if strings.Count(stdout, ": valid (linux_amd64)\n") != 2 {
 		t.Fatalf("stdout=%q", stdout)
 	}
 }
@@ -57,7 +57,7 @@ func TestRunReportsMissingAndInvalidManifests(t *testing.T) {
 	if status != 1 || !strings.Contains(stderr, missing+": invalid manifest:") {
 		t.Fatalf("missing status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	if !strings.Contains(stdout, valid+": valid (amd64)") {
+	if !strings.Contains(stdout, valid+": valid (linux_amd64)") {
 		t.Fatalf("valid manifest was not processed after missing file: %q", stdout)
 	}
 
@@ -93,7 +93,7 @@ func TestRunChecksEachExpectation(t *testing.T) {
 		mismatch string
 		want     string
 	}{
-		{name: "architecture", matching: "--architecture=amd64", mismatch: "--architecture=arm64", want: "architecture \"amd64\" does not match expected \"arm64\""},
+		{name: "target", matching: "--target=linux_amd64", mismatch: "--target=linux_arm64", want: "target \"linux_amd64\" does not match expected \"linux_arm64\""},
 		{name: "toolchain", matching: "--toolchain-mode=native", mismatch: "--toolchain-mode=cross", want: "build.toolchain_mode \"native\" does not match expected \"cross\""},
 		{name: "smoke runner", matching: "--smoke-runner=direct", mismatch: "--smoke-runner=container", want: "build.smoke_runner \"direct\" does not match expected \"container\""},
 		{name: "NPB smoke class", matching: "--npb-smoke-class=A", mismatch: "--npb-smoke-class=B", want: "tool \"npb-ep\" ci_smoke_class \"A\" does not match expected \"B\""},
@@ -101,7 +101,7 @@ func TestRunChecksEachExpectation(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			status, stdout, stderr := invoke(t, test.matching, manifest)
-			if status != 0 || stderr != "" || !strings.Contains(stdout, manifest+": valid (amd64)") {
+			if status != 0 || stderr != "" || !strings.Contains(stdout, manifest+": valid (linux_amd64)") {
 				t.Fatalf("matching status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 

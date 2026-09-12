@@ -7,7 +7,7 @@ import (
 
 func TestKernelMachineSemantics(t *testing.T) {
 	seen := make(map[string]bool)
-	for _, param := range kernelParams() {
+	for _, param := range platformKernelParams() {
 		if param.Key == "" || param.Path == "" || seen[param.Key] {
 			t.Fatalf("invalid or duplicate kernel parameter: %+v", param)
 		}

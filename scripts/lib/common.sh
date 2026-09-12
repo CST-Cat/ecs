@@ -43,16 +43,44 @@ ECS_LOCK_SCHEMA_VERSION=$(jq -er '.schema_version' "$ECS_LOCK_FILE") || return 1
 }
 
 ECS_TARGETS=()
-while IFS=$'\t' read -r ecs_goos ecs_goarch ecs_package; do
-  [[ -n "$ecs_package" ]] || continue
-  ECS_TARGETS+=("$ecs_goos $ecs_goarch $ecs_package")
-done < <(jq -er '.architectures[] | [.goos, .goarch, .package] | @tsv' "$ECS_LOCK_FILE") || return 1
+while IFS=$'\t' read -r ecs_target ecs_goos ecs_goarch ecs_package; do
+  [[ -n "$ecs_target" && -n "$ecs_package" ]] || continue
+  ECS_TARGETS+=("$ecs_target $ecs_goos $ecs_goarch $ecs_package")
+done < <(jq -er '.architectures[] | [.target, .goos, .goarch, .package] | @tsv' "$ECS_LOCK_FILE") || return 1
 
-ECS_ARCHES=()
-for ecs_target in "${ECS_TARGETS[@]}"; do
-  read -r _ _ ecs_arch <<<"$ecs_target"
-  ECS_ARCHES+=("$ecs_arch")
+# ECS_ARCHES is intentionally the seven Linux package architecture labels used
+# by the existing Linux-only tool builder and release checks.  A package label
+# such as amd64 is not a target identity once FreeBSD is present; consumers
+# that need to select a complete platform target use ECS_TARGETS or one of the
+# platform-specific arrays below.
+ECS_LINUX_TARGETS=()
+ECS_FREEBSD_TARGETS=()
+ECS_LINUX_TARGET_IDS=()
+ECS_FREEBSD_TARGET_IDS=()
+ECS_LINUX_ARCHES=()
+ECS_FREEBSD_ARCHES=()
+ECS_TARGET_IDS=()
+for ecs_target_record in "${ECS_TARGETS[@]}"; do
+  read -r ecs_target ecs_goos ecs_goarch ecs_arch <<<"$ecs_target_record"
+  ECS_TARGET_IDS+=("$ecs_target")
+  case "$ecs_goos" in
+    linux)
+      ECS_LINUX_TARGETS+=("$ecs_target_record")
+      ECS_LINUX_TARGET_IDS+=("$ecs_target")
+      ECS_LINUX_ARCHES+=("$ecs_arch")
+      ;;
+    freebsd)
+      ECS_FREEBSD_TARGETS+=("$ecs_target_record")
+      ECS_FREEBSD_TARGET_IDS+=("$ecs_target")
+      ECS_FREEBSD_ARCHES+=("$ecs_arch")
+      ;;
+    *)
+      echo "common: unsupported target OS in tools lock: $ecs_goos" >&2
+      return 1
+      ;;
+  esac
 done
+ECS_ARCHES=("${ECS_LINUX_ARCHES[@]}")
 
 ECS_TOOL_NAMES=()
 while IFS= read -r ecs_tool_name; do
@@ -71,10 +99,20 @@ ecs_lock_tool_field() {
     '.tools[] | select(.name == $tool) | .[$field] // empty' "$ECS_LOCK_FILE"
 }
 
-ecs_lock_architecture_field() {
-  local architecture=$1 field=$2
-  jq -er --arg architecture "$architecture" --arg field "$field" \
-    '.architectures[] | select(.package == $architecture) | .[$field] // empty' "$ECS_LOCK_FILE"
+ecs_lock_target_field() {
+  local target=$1 field=$2
+  jq -er --arg target "$target" --arg field "$field" \
+    '.architectures[] | select(.target == $target) | .[$field] // empty' "$ECS_LOCK_FILE"
+}
+
+ecs_target_tool_names() {
+  local target=$1 goos
+  goos=$(ecs_lock_target_field "$target" goos) || return 1
+  if [[ "$goos" == "freebsd" ]]; then
+    jq -er '.tools[].name | select(. != "ping" and . != "nexttrace-tiny")' "$ECS_LOCK_FILE"
+  else
+    jq -er '.tools[].name' "$ECS_LOCK_FILE"
+  fi
 }
 
 ecs_lock_corpus_field() {
@@ -122,16 +160,16 @@ ecs_retry() {
 # 从 dist 目录里解出全部主程序二进制，每行输出 "归档名<TAB>二进制路径"。
 # 归档数不等于发布架构数时失败——少一个架构就发布是这套流程最该挡住的事。
 #
-# verify 的归档校验需要统一解开全部七个主程序归档，所以该逻辑
+# verify 的归档校验需要统一解开全部九个平台目标的主程序归档，所以该逻辑
 # 作为共享辅助函数保留在这里。
 ecs_release_binaries() {
   local dist=$1 out=$2
   local archive name directory
   local -a archives
 
-  mapfile -t archives < <(find "$dist" -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print | sort)
-  if [[ "${#archives[@]}" -ne "${#ECS_ARCHES[@]}" ]]; then
-    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_ARCHES[@]}" >&2
+  mapfile -t archives < <(find "$dist" -maxdepth 1 -type f -name 'ecs_*.tar.gz' -print | sort)
+  if [[ "${#archives[@]}" -ne "${#ECS_TARGETS[@]}" ]]; then
+    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_TARGETS[@]}" >&2
     return 1
   fi
 

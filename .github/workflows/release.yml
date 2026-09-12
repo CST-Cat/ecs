@@ -7,7 +7,7 @@ name: release
 #
 #   freeze     contents: read    冻结 SHA，校验发布说明
 #   source-checks contents: read  跑确定性源码检查
-#   ecs-build × 7 contents: read 七架构构建主程序
+#   ecs-build × 9 contents: read 九个平台目标构建主程序
 #   assemble   contents: read    组装全部发布物，记录实测 Go 版本
 #   verify     contents: read    校验解包出来的实际二进制
 #   publish    contents: write   唯一持有写权限的 job
@@ -67,7 +67,7 @@ jobs:
           ./scripts/release/freeze.sh --event "$EVENT" --ref "$REF" --sha "$SHA" \
             | tee -a "$GITHUB_OUTPUT"
 
-      # 忘写发布说明必须在七架构构建前失败，不能等到最后的 publish 才发现。
+      # 忘写发布说明必须在九目标构建前失败，不能等到最后的 publish 才发现。
       # workflow_dispatch 的 dev 演练没有对应版本章节，因此只对实际 tag 校验。
       - name: Validate release changelog
         if: startsWith(github.ref, 'refs/tags/v')
@@ -98,16 +98,25 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 七架构主程序独立构建，完成后由 assemble 统一打包。
+  # 九目标主程序独立构建，完成后由 assemble 统一打包。
   ecs-build:
     needs: freeze
-    name: ecs-build (${{ matrix.arch }})
+    name: ecs-build (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64, armv7, "386", s390x, riscv64, ppc64le]
+        target:
+          - linux_amd64
+          - linux_arm64
+          - linux_armv7
+          - linux_386
+          - linux_s390x
+          - linux_riscv64
+          - linux_ppc64le
+          - freebsd_amd64
+          - freebsd_arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -120,18 +129,18 @@ jobs:
           cache: false
       - name: Build the ECS binary
         env:
-          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
           OUTPUT_DIR: artifact
           VERSION: ${{ needs.freeze.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p artifact
-          ./scripts/cross.sh --arch "$ARCH"
+          ./scripts/cross.sh --target "$TARGET"
           go env GOVERSION >artifact/build-go-version
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ecs-binary-${{ matrix.arch }}
+          name: ecs-binary-${{ matrix.target }}
           path: artifact
           if-no-files-found: error
           retention-days: 7
@@ -140,7 +149,7 @@ jobs:
   #
   # ecs-build 通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
   # expected_go=... 这种可能分叉的期望值。ecs-build 将实际的 go env GOVERSION 随同
-  # 每个主程序 artifact 交给 assemble；assemble 从 amd64 artifact 取出并通过
+  # 每个主程序 artifact 交给 assemble；assemble 从 linux_amd64 artifact 取出并通过
   # --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
     needs: [freeze, source-checks, ecs-build]
@@ -163,12 +172,12 @@ jobs:
           set -euo pipefail
           source scripts/lib/common.sh
           mkdir -p artifact/ecs-binaries
-          for arch in "${ECS_ARCHES[@]}"; do
-            source_dir="artifact/ecs-binaries-artifacts/ecs-binary-${arch}"
-            test -s "$source_dir/ecs_linux_${arch}"
+          for target in "${ECS_TARGET_IDS[@]}"; do
+            source_dir="artifact/ecs-binaries-artifacts/ecs-binary-${target}"
+            test -s "$source_dir/ecs_${target}"
             test -s "$source_dir/build-go-version"
-            cp "$source_dir/ecs_linux_${arch}" "artifact/ecs-binaries/ecs_linux_${arch}"
-            chmod +x "artifact/ecs-binaries/ecs_linux_${arch}"
+            cp "$source_dir/ecs_${target}" "artifact/ecs-binaries/ecs_${target}"
+            chmod +x "artifact/ecs-binaries/ecs_${target}"
           done
 
       # 洁净源码检查在 build.sh 里，与本地演练共用同一份实现。
@@ -178,7 +187,7 @@ jobs:
           VERSION: ${{ needs.freeze.outputs.version }}
         run: |
           set -euo pipefail
-          build_go_version=$(<"artifact/ecs-binaries-artifacts/ecs-binary-amd64/build-go-version")
+          build_go_version=$(<"artifact/ecs-binaries-artifacts/ecs-binary-linux_amd64/build-go-version")
           test -n "$build_go_version"
           echo "build_go_version=$build_go_version" >>"$GITHUB_OUTPUT"
           ./scripts/release/build.sh "$VERSION" \

@@ -3,12 +3,11 @@ package probe
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"ecs/internal/config"
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -16,15 +15,7 @@ type routeProbe struct{}
 
 func (routeProbe) ID() string { return "route" }
 
-type routeEngine struct {
-	Name    string
-	Path    string
-	Version string
-}
-
 const (
-	routeEngineTiny = "nexttrace-tiny"
-
 	routeStatusComplete    = "probe.route.status.complete"
 	routeStatusFailed      = "probe.route.status.failed"
 	routeStatusParseFailed = "probe.route.status.parse_failed"
@@ -47,16 +38,7 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.RouteTargets)
 	addComparisonParameter(result.Methodology.Parameters, "max_hops", strconv.Itoa(routeSnapshotHops))
 
-	engine := detectRouteEngine(ctx)
-	if engine.Path == "" {
-		result.Status = model.StatusSkipped
-		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.tool_missing")}
-		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: routeEngineTiny, Count: 1})
-		result.Evidence = model.NewEvidence(0, len(env.Config.RouteTargets), "target")
-		result.Notes = []string{"probe.route.note.tool_missing"}
-		result.Finish(start)
-		return result
-	}
+	backend := detectTraceBackend(ctx)
 	targets := endpointsForIPVersion(env.Config.RouteTargets, env.Config.IPVersion)
 	if len(targets) == 0 {
 		result.Status = model.StatusSkipped
@@ -66,17 +48,33 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 		result.Finish(start)
 		return result
 	}
-	commandArguments := strings.Join(routeCommandArgsForFamily(engine, "<target>", routeSnapshotHops, endpointFamily(targets[0], env.Config.IPVersion)), " ")
+	backendForTarget := false
+	for _, target := range targets {
+		if traceBackendAvailableForFamily(backend, endpointFamily(target, env.Config.IPVersion)) {
+			backendForTarget = true
+			break
+		}
+	}
+	if !backendForTarget {
+		result.Status = model.StatusSkipped
+		result.SummaryMessages = []model.Message{model.NewMessage("probe.route.summary.tool_missing")}
+		result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: backend.Name, Count: 1})
+		result.Evidence = model.NewEvidence(0, len(env.Config.RouteTargets), "target")
+		result.Notes = []string{"probe.route.note.tool_missing"}
+		result.Finish(start)
+		return result
+	}
+	addComparisonParameter(result.Methodology.Parameters, "max_hops", traceMaxHopsParameter(targets, env.Config.IPVersion))
+	commandArguments := traceArgumentsForTargets(backend, targets, env.Config.IPVersion)
 	result.Fields = []model.Field{
-		{Key: "engine", Label: "probe.route.field.engine", Value: model.RawValue(engine.Name)},
-		{Key: "version", Label: "probe.route.field.version", Value: model.RawValue(fallback(engine.Version, "unknown"))},
+		{Key: "engine", Label: "probe.route.field.engine", Value: model.RawValue(backend.Name)},
+		{Key: "version", Label: "probe.route.field.version", Value: model.RawValue(fallback(backend.Version, "unknown"))},
 		{Key: "arguments", Label: "probe.route.field.arguments", Value: model.RawValue(commandArguments)},
 	}
-	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(engine.Version, "unknown"))
+	addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(backend.Version, "unknown"))
+	addComparisonParameter(result.Methodology.Parameters, "adapter", backend.Adapter)
 	addComparisonParameter(result.Methodology.Parameters, "arguments", commandArguments)
-	result.Sources = append(result.Sources, model.Source{
-		Name: "probe.route.source.nexttrace.name", URL: "https://github.com/nxtrace/NTrace-core", Purpose: "probe.route.source.nexttrace",
-	})
+	result.Sources = append(result.Sources, traceBackendSource(backend))
 	table := model.Table{
 		Key:   "network.route.summary",
 		Title: "probe.route.table.summary",
@@ -99,27 +97,55 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	for targetIndex, target := range targets {
 		traceCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		traceStart := time.Now()
-		output, err := runRouteCommandForFamily(traceCtx, engine, target.Address, routeSnapshotHops, endpointFamily(target, env.Config.IPVersion))
+		targetFamily := endpointFamily(target, env.Config.IPVersion)
+		traceRun := runTraceCommandForFamily(traceCtx, backend, target.Address, traceMaxHopsForFamily(targetFamily), targetFamily)
 		elapsed := time.Since(traceStart)
-		clean := sanitizeCommandOutput(output)
+		clean := sanitizeCommandOutput(traceRun.Stdout)
+		cleanStderr := sanitizeCommandOutput(traceRun.Stderr)
 		contextErr := contextCauseError(traceCtx)
 		if contextErr != nil {
-			err = contextErr
+			traceRun.Err = contextErr
+			traceRun.Parsed = false
 		}
 		slots, visible, timeouts, parsed := 0, 0, 0, false
-		if contextErr == nil {
-			slots, visible, timeouts, parsed = routeHopSummary(engine.Name, clean)
+		var normalized []byte
+		if contextErr == nil && traceRun.Parsed {
+			var canonicalErr error
+			normalized, canonicalErr = traceRun.Trace.canonicalJSON()
+			if canonicalErr != nil {
+				traceRun.ParseErr = fmt.Errorf("canonical trace JSON: %w", canonicalErr)
+				traceRun.Parsed = false
+			} else {
+				slots, visible, timeouts, parsed = traceHopSummary(traceRun.Trace)
+				if !parsed {
+					traceRun.ParseErr = fmt.Errorf("canonical trace hop summary is invalid")
+				}
+			}
 		}
 		cancel()
 		status := routeStatusComplete
 		switch {
-		case err != nil:
+		case traceRun.Err != nil:
 			status = routeStatusFailed
-			addFailure(&result, "trace", target.Address, err)
+			entry := failure.FromError("trace", target.Address, traceRun.Err)
+			if traceRun.ParseErr != nil {
+				// A failed executable owns the failure category. Its stderr can
+				// contain words such as "parser" without turning an execution
+				// failure into a parse failure.
+				if entry.Category == model.FailureParse {
+					entry.Category = model.FailureUnknown
+				}
+				entry.Message = fmt.Sprintf("%s; parser diagnostic: %s", traceRun.Err, traceRun.ParseErr)
+			}
+			result.AddFailure(entry)
 		case !parsed:
 			status = routeStatusParseFailed
 			parseFailed = true
-			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: target.Address, Count: 1})
+			message := "trace output could not be parsed"
+			if traceRun.ParseErr != nil {
+				message = traceRun.ParseErr.Error()
+			}
+			result.AddFailure(model.Failure{Category: model.FailureParse, Stage: "parse", Target: target.Address, Message: message, Count: 1})
 		case visible == 0:
 			status = routeStatusNoResponse
 			validTraces++
@@ -136,30 +162,44 @@ func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 				model.Measurement{
 					Key: prefix + "_hop_slots", Label: "probe.route.metric.hop_slots",
 					Value: float64(slots), Unit: "hops", Display: model.RawValue(strconv.Itoa(slots)),
-					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+					Method: traceHopSummaryMethod, HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
 					Key: prefix + "_visible_hops", Label: "probe.route.metric.visible_hops",
 					Value: float64(visible), Unit: "hops", Display: model.RawValue(strconv.Itoa(visible)),
-					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(true),
+					Method: traceHopSummaryMethod, HigherIsBetter: model.BoolPtr(true),
 				},
 				model.Measurement{
 					Key: prefix + "_timeout_hops", Label: "probe.route.metric.timeout_hops",
 					Value: float64(timeouts), Unit: "hops", Display: model.RawValue(strconv.Itoa(timeouts)),
-					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+					Method: traceHopSummaryMethod, HigherIsBetter: model.BoolPtr(false),
 				},
 				model.Measurement{
 					Key: prefix + "_duration_ms", Label: "probe.route.metric.duration",
 					Value: float64(elapsed) / float64(time.Millisecond), Unit: "ms", Display: model.RawValue(elapsed.Round(time.Millisecond).String()),
-					Method: "nexttrace-tiny-json-v1", HigherIsBetter: model.BoolPtr(false),
+					Method: traceHopSummaryMethod, HigherIsBetter: model.BoolPtr(false),
 				},
 			)
 		}
 		if clean != "" {
 			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
-				Title:    "probe.route.raw_output",
-				Language: "json",
+				Title:    traceRawOutputTitle,
+				Language: traceRawLanguage(backend),
 				Content:  clean,
+			})
+		}
+		if cleanStderr != "" {
+			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
+				Title:    traceRawStderrTitle,
+				Language: "text",
+				Content:  cleanStderr,
+			})
+		}
+		if parsed {
+			result.TextBlocks = append(result.TextBlocks, model.TextBlock{
+				Title:    traceNormalizedJSONTitle,
+				Language: "json",
+				Content:  string(normalized),
 			})
 		}
 	}
@@ -202,69 +242,5 @@ func routeTargetKindValue(kind string) model.Value {
 	return model.KeyValue(key)
 }
 
-func detectRouteEngine(ctx context.Context) routeEngine {
-	path, err := LookupTool(routeEngineTiny)
-	if err != nil {
-		return routeEngine{}
-	}
-	return routeEngine{
-		Name:    routeEngineTiny,
-		Path:    path,
-		Version: commandVersion(ctx, path),
-	}
-}
-
 // routeSnapshotHops 是路径快照的跳数上限。
 const routeSnapshotHops = 12
-
-func runRouteCommandForFamily(ctx context.Context, engine routeEngine, target string, maxHops int, family string) ([]byte, error) {
-	if !isNextTraceEngine(engine.Name) || engine.Path == "" {
-		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)
-	}
-	args := routeCommandArgsForFamily(engine, target, maxHops, family)
-	if len(args) == 0 {
-		return nil, fmt.Errorf("unsupported route engine: %s", engine.Name)
-	}
-	command := newProbeCommand(ctx, engine.Path, args...)
-	command.Env = append(os.Environ(), "NO_COLOR=1", "LC_ALL=C", "LANG=C")
-	result := command.RunSeparate()
-	return result.Stdout, result.Err
-}
-
-func routeCommandArgsForFamily(engine routeEngine, target string, maxHops int, family string) []string {
-	hops := strconv.Itoa(maxHops)
-	familyArg := ""
-	if family == config.IPVersion4 || family == config.IPVersion6 {
-		familyArg = "-" + family
-	}
-	switch engine.Name {
-	case routeEngineTiny:
-		args := []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000"}
-		if familyArg != "" {
-			args = append([]string{familyArg}, args...)
-		}
-		return append(args, target)
-	default:
-		return nil
-	}
-}
-
-func routeHopSummary(engineName, output string) (slots, visible, timeouts int, ok bool) {
-	if !isNextTraceEngine(engineName) {
-		return 0, 0, 0, false
-	}
-	details, ok := extractNextTraceDetails(output)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	for _, hop := range details {
-		if hop.IP != "" && hop.IP != "—" {
-			visible++
-		}
-	}
-	return len(details), visible, len(details) - visible, true
-}
-
-func isNextTraceEngine(name string) bool {
-	return name == routeEngineTiny
-}

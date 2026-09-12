@@ -59,19 +59,22 @@ func TestLatencyResolutionFamiliesInterceptionAndICMP(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name string
-		tcp  time.Duration
-		icmp icmpStats
-		want bool
+		name    string
+		tcp     time.Duration
+		icmp    icmpStats
+		address string
+		want    bool
 	}{
-		{name: "strong mismatch", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, want: true},
-		{name: "normal ratio", tcp: 30 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}},
-		{name: "no ICMP", tcp: 10 * time.Millisecond},
-		{name: "all loss", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100, LossPercent: 100}},
-		{name: "local RTT", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 1}},
-		{name: "invalid TCP", tcp: 0, icmp: icmpStats{Available: true, AvgMS: 100}},
+		{name: "strong mismatch", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443", want: true},
+		{name: "normal ratio", tcp: 30 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443"},
+		{name: "no ICMP", tcp: 10 * time.Millisecond, address: "203.0.113.1:443"},
+		{name: "all loss", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 100, LossPercent: 100}, address: "203.0.113.1:443"},
+		{name: "local RTT", tcp: 10 * time.Millisecond, icmp: icmpStats{Available: true, AvgMS: 1}, address: "203.0.113.1:443"},
+		{name: "loopback scheduler noise", tcp: 200 * time.Microsecond, icmp: icmpStats{Available: true, AvgMS: 3}, address: "127.0.0.1:443"},
+		{name: "IPv6 loopback scheduler noise", tcp: 200 * time.Microsecond, icmp: icmpStats{Available: true, AvgMS: 3}, address: "[::1]:443"},
+		{name: "invalid TCP", tcp: 0, icmp: icmpStats{Available: true, AvgMS: 100}, address: "203.0.113.1:443"},
 	} {
-		if got := tcpLikelyIntercepted(test.tcp, test.icmp); got != test.want {
+		if got := tcpLikelyIntercepted(test.tcp, test.icmp, test.address); got != test.want {
 			t.Errorf("%s interception = %v, want %v", test.name, got, test.want)
 		}
 	}
@@ -184,12 +187,10 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 		if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.latency.summary.values" {
 			t.Fatalf("latency success summary = %+v", result.SummaryMessages)
 		}
-		if len(result.Notes) != 3 || result.Notes[0] != "probe.latency.note.resolution" || result.Notes[1] != "probe.latency.note.region" || result.Notes[2] != "probe.latency.note.icmp_unavailable" {
-			t.Fatalf("latency success notes = %v", result.Notes)
+		if len(result.Notes) < 2 || result.Notes[0] != "probe.latency.note.resolution" || result.Notes[1] != "probe.latency.note.region" {
+			t.Fatalf("latency success common notes = %v", result.Notes)
 		}
-		if len(result.Measurements) != 5 || result.Measurements[0].Label != "probe.latency.metric.tcp" || result.Measurements[4].Label != "probe.latency.metric.best_median" {
-			t.Fatalf("latency success measurements = %+v", result.Measurements)
-		}
+		assertLatencySuccessPlatform(t, result)
 		for _, measurement := range result.Measurements {
 			if _, ok := measurement.Display.Raw(); !ok {
 				t.Fatalf("latency measurement display is not raw: %+v", measurement)

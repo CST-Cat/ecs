@@ -28,15 +28,12 @@ type cloudInitDocument struct {
 	} `json:"v1"`
 }
 
-// discoverLocalCloudIdentity reads cloud-init's local cache.  The paths cover
-// the two layouts used by current Linux distributions; no network metadata
-// service is queried as a fallback.
+// discoverLocalCloudIdentity reads cloud-init's local cache. Platform-specific
+// cache layouts are selected by platformCloudIdentityPaths; no network
+// metadata service is queried as a fallback.
 func discoverLocalCloudIdentity() cloudIdentity {
 	identity := cloudIdentity{}
-	for _, path := range []string{
-		"/run/cloud-init/instance-data.json",
-		"/var/lib/cloud/instance/instance-data.json",
-	} {
+	for _, path := range platformCloudIdentityPaths() {
 		if candidate, ok := readCloudInitIdentity(path); ok {
 			identity = candidate
 			break
@@ -46,14 +43,6 @@ func discoverLocalCloudIdentity() cloudIdentity {
 		identity.Provider = discoverDMICloudProvider()
 	}
 	return identity
-}
-
-func discoverDMICloudProvider() string {
-	return cloudProviderFromDMI(
-		readHardwareValue("/sys/class/dmi/id/sys_vendor"),
-		readHardwareValue("/sys/class/dmi/id/product_name"),
-		readHardwareValue("/sys/class/dmi/id/board_vendor"),
-	)
 }
 
 // cloudProviderFromDMI uses only explicit provider signatures.  Generic

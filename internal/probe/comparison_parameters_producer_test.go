@@ -215,18 +215,38 @@ func TestDirectProducersOwnOnlyTheirComparisonParameters(t *testing.T) {
 	})
 
 	t.Run("route tool missing", func(t *testing.T) {
-		noToolPath(t)
-		result := (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-			IPVersion: config.IPVersion4, RouteTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
-		}})
+		var result model.Result
+		if routeToolMissingTestApplies(t) {
+			noToolPath(t)
+			result = (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4, RouteTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
+			}})
+		} else {
+			// FreeBSD's route backend is an OS-managed base utility, not a
+			// staged tool. Exercise the producer's deterministic no-target path
+			// instead of skipping the comparison-parameter contract.
+			result = (routeProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion6,
+			}})
+		}
 		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops")
 	})
 
 	t.Run("backtrace tool missing", func(t *testing.T) {
-		noToolPath(t)
-		result := (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-			IPVersion: config.IPVersion4, BacktraceTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
-		}})
+		var result model.Result
+		if backtraceToolMissingTestApplies(t) {
+			noToolPath(t)
+			result = (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4, BacktraceTargets: []config.Endpoint{{Name: "fixture", Address: "203.0.113.1"}},
+			}})
+		} else {
+			// FreeBSD's backtrace backend is an OS-managed base utility, not a
+			// staged tool. Exercise the deterministic no-target path instead of
+			// invoking a real traceroute from the unit test.
+			result = (backtraceProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
+				IPVersion: config.IPVersion4,
+			}})
+		}
 		assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "signature_set")
 	})
 }
@@ -280,7 +300,15 @@ func TestZstdComparisonArgumentsIgnoreOnlyTemporaryCorpusPath(t *testing.T) {
 }
 
 func TestDiskProducerComparisonParameterUsesExplanationFreeEngineName(t *testing.T) {
-	directory := t.TempDir()
+	directory, err := os.MkdirTemp(".", ".ecs-disk-producer-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove disk producer fixture: %v", err)
+		}
+	})
 	path := filepath.Join(directory, "fio")
 	script := `#!/bin/sh
 if [ "$1" = "--enghelp" ]; then
@@ -295,7 +323,7 @@ printf '%s\n' '{"fio version":"fio-fixture","jobs":[{"jobname":"seqwrite","write
 	t.Setenv("PATH", directory)
 	t.Setenv(ToolBinEnv, directory)
 	result := (diskProbe{}).Run(context.Background(), Environment{Config: config.Runtime{
-		DiskPath: t.TempDir(), DiskMiB: 128,
+		DiskPath: directory, DiskMiB: 128,
 	}})
 	assertProducerParameterScope(t, result,
 		"configured_file_mib", "multi_mount", "tool_version", "actual_file_size",

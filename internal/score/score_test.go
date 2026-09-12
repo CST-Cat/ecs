@@ -56,6 +56,7 @@ func scoreReportFixture() model.Report {
 				{Key: "virtualization", Label: "Virtualization", Value: model.RawValue("kvm")},
 				{Key: "cpu_model", Label: "CPU", Value: model.RawValue("Fixture CPU")},
 				{Key: "arch", Label: "Arch", Value: model.RawValue("amd64")},
+				{Key: "os", Label: "OS", Value: model.RawValue("FreeBSD 15.1")},
 			},
 			Measurements: []model.Measurement{
 				{Key: "logical_cpus", Value: 4},

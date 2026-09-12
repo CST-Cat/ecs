@@ -1,3 +1,5 @@
+//go:build linux || freebsd
+
 package probe
 
 import (
@@ -16,8 +18,12 @@ const (
 	probeCommandCombinedLimit = 4 * 1024 * 1024
 	probeCommandStdoutLimit   = 4 * 1024 * 1024
 	probeCommandStderrLimit   = 64 * 1024
-	probeCommandWaitDelay     = 200 * time.Millisecond
-	probeCommandOoklaLimit    = 512 * 1024
+	// WaitDelay is only the post-exit pipe-drain grace. Under heavily loaded
+	// emulated FreeBSD arm64 runners, Go's copy goroutines can be descheduled
+	// for well over 500 ms after a small child has already exited successfully.
+	// Command execution remains bounded by each probe's context deadline.
+	probeCommandWaitDelay  = 2 * time.Second
+	probeCommandOoklaLimit = 512 * 1024
 )
 
 var errProbeCommandOutputLimit = errors.New("external command output exceeded its limit")
@@ -55,6 +61,9 @@ type probeCommandResult struct {
 	Err      error
 }
 
+// probeCommand owns the shared command lifecycle used by benchmark
+// adapters. Linux and FreeBSD both support a child process group, so the
+// output limits, cancellation and cleanup policy remain one implementation.
 type probeCommand struct {
 	*exec.Cmd
 	parentContext context.Context

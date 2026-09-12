@@ -19,6 +19,12 @@ the current `v0.7.31` release and subsequent `Unreleased` changes.
 - 完成 GitHub Immutable Releases 功能的实际启用。
 - ECS 发布说明先完整展示“第三方工具包”和中文变更记录，再以分割线隔开完整的“Third-party Tool Package”和英文变更记录。
 - `CHANGELOG.md` 的当前及后续版本章节同步维护中文与英文内容。
+- 正式支持 FreeBSD：新增 `freebsd_amd64` 与 `freebsd_arm64` 两个发布目标及对应 `ecs-tools` 工具包。`run.sh`、`install.sh`、`compare.sh` 按 `uname -s` 选择 Linux 或 FreeBSD 资产，FreeBSD 复用 base-system 的 `fetch`、`sha256`、`/sbin/ping` 与 `/usr/sbin/traceroute`，完全不进入 apt/dnf/apk 路径。
+- 平台解析下沉到执行计划：`RequiredTools` 新增按平台解析的边界，FreeBSD 不再为延迟、路由和回程模块 stage `ping` 与 `nexttrace-tiny`，模块描述符保持平台无关；Linux 行为不变。
+- FreeBSD 上选中 `ookla` 直接失败（无官方客户端），不再回退到 Linux 的 Packagecloud 路径。
+- 发布与工具包接线扩展到九个平台目标；FreeBSD 工具归档不含 `ping` 与 `nexttrace-tiny`。
+- `freebsd_arm64` 工具包在打包前必须通过真实 FreeBSD/aarch64 客户机上的 fio 功能门禁（qemu-user 建不起 fio 需要的共享内存段），`bundle-release` 的 assemble 现在依赖该门禁。
+- 新增发布物级端到端验收：由 `scripts/package.sh` 产出的真实发布布局在真实 FreeBSD 客户机里驱动真实 `run.sh`，覆盖 SHA-256 校验、`ecs` 解包、Bundle 基址解析、固定工具暂存、平台 `RequiredTools` 解析，以及一次真实基准运行。
 
 ### English
 
@@ -26,6 +32,12 @@ the current `v0.7.31` release and subsequent `Unreleased` changes.
 - Completed the rollout of GitHub Immutable Releases.
 - ECS release notes now present the third-party tool package and Chinese changelog as one complete block, followed by a divider and a complete English tool package and changelog block.
 - Current and future version sections in `CHANGELOG.md` are maintained in both Chinese and English.
+- FreeBSD is now officially supported: two new release targets, `freebsd_amd64` and `freebsd_arm64`, each with its own `ecs-tools` package. `run.sh`, `install.sh` and `compare.sh` select Linux or FreeBSD assets from `uname -s`; FreeBSD reuses the base-system `fetch`, `sha256`, `/sbin/ping` and `/usr/sbin/traceroute` and never enters the apt/dnf/apk path.
+- Platform resolution moved into the execution plan: `RequiredTools` gained a platform resolver, so FreeBSD no longer stages `ping` or `nexttrace-tiny` for the latency, route and backtrace modules while module descriptors stay platform-independent. Linux behaviour is unchanged.
+- Selecting `ookla` on FreeBSD now fails closed (there is no official client) instead of falling back to the Linux Packagecloud path.
+- Release and tool-package wiring now covers nine platform targets; the FreeBSD tool archives contain neither `ping` nor `nexttrace-tiny`.
+- The `freebsd_arm64` tool package must pass a functional fio gate on a genuine FreeBSD/aarch64 guest before it is packaged (qemu-user cannot set up the shared-memory segment fio needs), and `bundle-release` assemble now depends on that gate.
+- Added an artifact-level end-to-end acceptance: the real release layout produced by `scripts/package.sh` drives the real `run.sh` inside a genuine FreeBSD guest, covering SHA-256 verification, `ecs` extraction, Bundle base resolution, frozen tool staging, platform `RequiredTools` resolution, and one real benchmark run.
 
 ## 0.7.31 — 2026-09-07
 

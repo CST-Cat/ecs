@@ -77,6 +77,10 @@ type HostSpec struct {
 	Virtualization string  `json:"virtualization,omitempty"`
 	CPUModel       string  `json:"cpu_model,omitempty"`
 	Arch           string  `json:"arch,omitempty"`
+	// OS 是分组维度而不是定位信息：Linux 与 FreeBSD 共用同一个 GOARCH，却不用
+	// 同一个磁盘引擎（io_uring/libaio 对 posixaio）、也不是同一个路由工具，因此
+	// 排行榜必须能把两者分开，否则同一张表里混着两种口径的分数。
+	OS string `json:"os,omitempty"`
 	// Region 与 Provider 由提交者自报：从 IP 推断需要引入 IP 情报数据，
 	// 而那正是这个格式要避开的东西。
 	Region   string `json:"region,omitempty"`
@@ -209,6 +213,8 @@ func extractHostSpec(data model.Report, values measurementsByModule) HostSpec {
 				spec.CPUModel = field.Value.Text()
 			case "arch", "architecture":
 				spec.Arch = field.Value.Text()
+			case "os":
+				spec.OS = field.Value.Text()
 			}
 		}
 	}

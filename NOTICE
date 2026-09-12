@@ -32,16 +32,18 @@ policy. IPQuality and the provider names are trademarks or project names of
 their respective owners; no endorsement is implied.
 
 Optional ecs-tools packages are separate-process aggregates, not Go code linked
-into ecs. Each Linux architecture package carries its own manifest.json,
+into ecs. Each platform target package carries its own manifest.json,
 LICENSE, NOTICE, and CI-populated LICENSES/ directory. The manifest schema
 supports unknown/unavailable version and license fields until CI has built and
 audited a real artifact. This notice does not claim that a release asset or
 tool version exists merely because a manifest example exists.
 
 When run.sh needs pinned zstd, NPB EP/FT, pinned OpenSSL, official STREAM,
-fio, iperf3, NextTrace Tiny, or ping, it uses the architecture-matched
+fio, iperf3, NextTrace Tiny, or ping, it uses the platform-matched
 ecs-tools tar.gz artifact for fixed-contract components and for any missing
-general tool. The artifact is accepted only after checks against the Bundle
+general tool. NextTrace Tiny and the pinned ping build are Linux-only: the
+FreeBSD tool packages omit both and use the base-system ping and traceroute
+instead. The artifact is accepted only after checks against the Bundle
 Release's checksums.txt, then only the requested regular executable members are unpacked
 into the temporary run directory and exposed through the temporary PATH.
 When the zstd benchmark is selected, run.sh downloads and
@@ -55,7 +57,10 @@ an explicit external adapter with its own terms and privacy policy: it is part
 of the full default profile, omitted from the standard default profile, and
 can be explicitly selected from any profile. It is never part of ecs-tools.
 System-provided ping likewise has no single project-wide license: the
-applicable notice is the distribution package actually used.
+applicable notice is the distribution package actually used. On FreeBSD the
+latency and routing probes run the base-system /sbin/ping and
+/usr/sbin/traceroute owned by the installed FreeBSD release, so their notice
+is the operating system's, not a bundled tool package's.
 
 The default public iperf3 endpoint registry is derived from:
 

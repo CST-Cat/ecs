@@ -48,7 +48,7 @@ staticcheck=$(ecs_devtool staticcheck)
 for_each_build_tag staticcheck "$staticcheck"
 
 ecs_step "ecs-tools manifest 与示例"
-go run ./cmd/tools-manifest-check --architecture amd64 tools/manifest.example.json
+go run ./cmd/tools-manifest-check --target linux_amd64 tools/manifest.example.json
 
 ecs_step "工具锁定事实"
 bash scripts/lock_test.sh
@@ -94,9 +94,13 @@ ecs_step "工具包布局回归"
 bash scripts/package_tools_test.sh
 
 ecs_step "构建定义可解析"
-for arch in "${ECS_ARCHES[@]}"; do
-  scripts/build_tools_container.sh --arch "$arch" --print-params >/dev/null
+for target in "${ECS_LINUX_TARGET_IDS[@]}"; do
+  scripts/build_tools_container.sh --target "$target" --print-params >/dev/null
 done
+# FreeBSD tools builder 已删除，Linux-hosted 重建完成前不得假装可解析。
+if [[ "${#ECS_FREEBSD_TARGET_IDS[@]}" -gt 0 ]]; then
+  echo "check: FreeBSD tools builder unavailable; freebsd_* build definitions are intentionally not parseable" >&2
+fi
 
 echo
 echo "check: 全部确定性检查通过"

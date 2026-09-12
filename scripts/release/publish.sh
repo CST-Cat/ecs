@@ -157,13 +157,13 @@ echo "release-publish: 已从 CHANGELOG.md 取出 $version 的中英文发布说
 assets=(checksums.txt)
 case "$kind" in
   ecs)
-    for arch in "${ECS_ARCHES[@]}"; do
-      assets+=("ecs_linux_${arch}.tar.gz")
+    for target in "${ECS_TARGET_IDS[@]}"; do
+      assets+=("ecs_${target}.tar.gz")
     done
     ;;
   bundle)
-    for arch in "${ECS_ARCHES[@]}"; do
-      assets+=("ecs-tools_linux_${arch}.tar.gz")
+    for target in "${ECS_TARGET_IDS[@]}"; do
+      assets+=("ecs-tools_${target}.tar.gz")
     done
     assets+=("$ECS_CORPUS_ARCHIVE")
     ;;

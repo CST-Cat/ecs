@@ -20,6 +20,10 @@ name: freebsd-sdk-release
 # 是合法维护动作：同 tag 下 assets 以 --clobber 原位覆盖、body 以 --notes
 # 更新，消费方始终以 SHA256SUMS 为准。
 #
+# 维护闭环：工具链/脚本变更 → 重跑本 workflow（--from-source 全量源码构建）
+# → 用新 assets 的 SHA256SUMS 更新 tools/freebsd-gnu-openmp.lock.json 的
+# targets[*].prebuilt.sha256（source_commit/generated 同步更新）。
+#
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与；
 # 永久禁止：FreeBSD VM builder。
 
@@ -68,6 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --from-source \
             --target freebsd_amd64 \
             --prefix "$PWD/.ci/gnu-sdk/freebsd_amd64" \
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_amd64" \
@@ -114,6 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --from-source \
             --target freebsd_arm64 \
             --prefix "$PWD/.ci/gnu-sdk/freebsd_arm64" \
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_arm64" \

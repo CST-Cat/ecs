@@ -76,7 +76,7 @@
 | NAT 类型与 UDP 映射/过滤行为 | ✓ | 自实现 STUN（RFC 5389/5780） | ✓ | ✓ |
 | 流媒体与 AI 服务区域检测（33 平台，强/弱证据分级） | ✓ | 内置规则包 v2 | ✓ | ✓ |
 | 多目标正向路由 | NextTrace JSON | 官方 NextTrace Tiny release asset | ✓ | ✓ |
-| 三网回程线路识别 | 骨干网段特征表 | NextTrace JSON | ✓ | ✓ |
+| 三网回程线路识别 | 实际 ASN 与精确地址规则 | canonical trace | ✓ | ✓ |
 | 快照时公共 BGP/互联观测 | RouteViews 当前 RIB | HTTPS JSON API | ✓ | ✓ |
 | 中国三网 HTTP 下载带宽 | — | speedtest.cn 节点 HTTP | 8s/100 MiB | 8s/100 MiB |
 | Ookla 三网测速 | 外部官方客户端 | 本机 speedtest CLI（standard 默认不运行；full 默认运行；`--only ookla` 可从任意档位显式选择；run.sh 缺失时从官方签名源下载并临时解包） | — | ✓ |
@@ -319,3 +319,91 @@ full 深度参数，保证直接运行与 `--only` 运行的结果可以比较�
 不包含 `network` 与 `ookla`；full 额外加入后两项。`SelectModules` 先处理
 `--only` 再处理 `--skip`，因此 standard 也可以直接运行 `--only network,ookla`，而
 `--skip` 仍可从任何预设中移除模块；显式选择的模块继续受各自 exposure 约束。
+
+## Phase 7：回程线路分类规则审计（2026-09-08）
+
+本节记录本阶段实际核对的范围、注册事实和分类决策。研究只使用 APNIC 的 RDAP
+aut-num/IP 对象，以及其对象中明确写出的网络名称和组织；没有使用搜索结果页、博客、
+固定样本或记忆推断。对象 URL 是可复核的原始注册来源；注册内容和 BGP 起源可能变化，
+因此它们是规则发布时的证据，不代表对未来路由调度的永久承诺。
+
+### 证据层级与输出边界
+
+分类器对每个已响应 hop 按以下顺序取证，并在报告中输出证据层级：
+
+1. canonical trace 提供的实际 ASN（`asn`）；
+2. 没有 ASN 时，APNIC RDAP 支持的精确 CIDR（`cidr`）；
+3. 只有未来有明确来源且明确标注低置信度时，才允许启发式指标（`heuristic`）。
+
+生产规则集本轮没有保留粗字符串前缀，故第三层目前为空；代码仍显式实现该层并以
+确定性测试证明它不能覆盖前两层。ASN 已存在但未识别时也不会退回 CIDR，避免用过时
+分配信息反驳当前 hop 的实际 ASN。分类结果和 evidence 只是独立消费者，绝不会写回
+trace hop 的 ASN、Network 或 Location observation。
+
+### ASN 身份对象
+
+APNIC RDAP aut-num 对象直接提供以下身份事实（检索日 2026-09-08）：
+
+| ASN | APNIC 对象名称/说明 | ecs 分类结论 | 来源 |
+| --- | --- | --- | --- |
+| AS4809 | `CHINATELECOM-CORE-WAN-CN2`；China Telecom Next Generation Carrier Network | Telecom CN2，但 CN2 variant unknown | [APNIC AS4809](https://rdap.apnic.net/autnum/4809) |
+| AS4134 | `CHINANET-BACKBONE`；for backbone of chinanet | Telecom CHINANET backbone | [APNIC AS4134](https://rdap.apnic.net/autnum/4134) |
+| AS9929 | `CUII`；China Unicom Industrial Internet Backbone | Unicom CUII | [APNIC AS9929](https://rdap.apnic.net/autnum/9929) |
+| AS4837 | `CHINA169-Backbone`；China Unicom China169 Backbone | Unicom 169 | [APNIC AS4837](https://rdap.apnic.net/autnum/4837) |
+| AS58453 | `CMI-INT-HK`；China Mobile International Limited | China Mobile CMI | [APNIC AS58453](https://rdap.apnic.net/autnum/58453) |
+| AS9808 | `CHINAMOBILE-CN`；China Mobile Communications Group Co., Ltd. | China Mobile network, variant unknown | [APNIC AS9808](https://rdap.apnic.net/autnum/9808) |
+| AS56048 | `CMNET-BEIJING-AP`；China Mobile Beijing IP core network | China Mobile CMNET | [APNIC AS56048](https://rdap.apnic.net/autnum/56048) |
+
+ASN 仅在 hop 实际携带该值时使用；静态表不会根据 IP 地址猜测 ASN。
+
+### IPv4 CIDR 对象与规则矩阵
+
+下表中的范围来自 APNIC RDAP IP 对象的 `startAddress`/`endAddress`，代码用
+`net/netip` 的精确 prefix containment 表达。只有注册事实直接支持当前身份时才保留
+CIDR fallback；无法证明运营商或路由角色的分配范围不进入 production classifier。
+
+| 旧指标 | APNIC 精确对象 | 对象名称/组织事实 | ecs CIDR fallback | 决策与证据 |
+| --- | --- | --- | --- | --- |
+| `59.43.` | `59.43.0.0/16` | `CN2-BB`；Chinatelecom Next Carrying Network backbone | CN2 variant unknown | 保留并收紧为 `/16`；[RDAP](https://rdap.apnic.net/ip/59.43.0.0/16) |
+| `202.97.` | `202.97.0.0/19`、`202.97.32.0/19`、`202.97.64.0/20`、`202.97.80.0/20` | `CHINANET-BB`；CHINANET backbone network / China Telecom | CHINANET backbone | 保留已注册 CHINANET 段；删除 `.96.0.0/19` 以后等旧粗前缀，因为 APNIC 将该段登记为 CHINANET-HK，后续还包含 Unicom 对象；[0/19](https://rdap.apnic.net/ip/202.97.0.0/19)、[32/19](https://rdap.apnic.net/ip/202.97.32.0/19)、[64/20](https://rdap.apnic.net/ip/202.97.64.0/20)、[80/20](https://rdap.apnic.net/ip/202.97.80.0/20) |
+| `218.105.` | `218.104.0.0/14` | `UNICOM-CN`；China Unicom IP network | China Unicom network, variant unknown | 保留精确分配范围；对象不证明 backbone、CUII 或 169，因此只报告中性网络身份；[RDAP](https://rdap.apnic.net/ip/218.104.0.0/14) |
+| `210.51.` | `210.51.0.0–210.51.19.255` | `CNC-BJ-IDC`；Beijing Tongtai IDC of China Netcom | 不分类 | 已审计但删除 production CIDR rule；对象不直接证明当前 China Unicom、backbone 或 CUII/169，范围内地址保持 unknown；[RDAP](https://rdap.apnic.net/ip/210.51.0.0/20) |
+| `219.158.` | `219.158.0.0/19` | `ChinaUnicom-BACKBONE`；Backbone of China Unicom | Unicom backbone, variant unknown | 保留精确 backbone allocation；不凭地址名称硬标 169；[RDAP](https://rdap.apnic.net/ip/219.158.0.0/19) |
+| `223.120.` | `223.120.0.0/17` | `CMI-INT-HK`；China Mobile International Limited | China Mobile CMI | 保留并收紧为 `/17`；[RDAP](https://rdap.apnic.net/ip/223.120.0.0/17) |
+| `221.183.` | `221.176.0.0/13` | `CMNET`；China Mobile Communications Group | China Mobile CMNET | 按注册对象使用完整 `/13`，不再只匹配一个粗字符串 `/16`；[RDAP](https://rdap.apnic.net/ip/221.176.0.0/13) |
+
+### IPv6 对象与规则矩阵
+
+| 旧指标 | APNIC 精确对象 | 对象名称/组织事实 | ecs CIDR fallback | 决策与证据 |
+| --- | --- | --- | --- | --- |
+| `240e:` | `240e::/18` | `CT-IPv6-Networks`；China Telecom | Telecom IPv6 | 保留并收紧为 `/18`；[RDAP](https://rdap.apnic.net/ip/240e::/18) |
+| `2408:8120:`、`2408:8000:` | `2408:8000::/20` | `CU-CN`；China Unicom | Unicom IPv6, variant unknown | 删除 `2408:8120:` 与 `2408:8000:` 的互相冲突 CUII/169 粗前缀；同一注册对象只报告 Unicom IPv6 variant unknown；[RDAP](https://rdap.apnic.net/ip/2408:8000::/20) |
+| `2409:` | `2409:8000::/20` | `CMNET-V6-20110823`；China Mobile Communications Corporation | China Mobile CMNET IPv6 | 收紧到 China Mobile 注册段；删除会误命中其他 `2409:` 分配的旧规则；[RDAP](https://rdap.apnic.net/ip/2409:8000::/20) |
+
+ASN 命中可以进一步使用 APNIC aut-num 事实（例如 AS9929=CUII、AS4837=China169）
+来区分来源明确的运营商网络身份；CIDR 命中只能使用上表的注册名称。特别是 `2408:8120::`
+仍在 APNIC 的同一个 `2408:8000::/20` China Unicom 对象内，没有一手注册事实支持把
+它拆成 CUII 与 169 两条线路。
+
+### CN2 GIA/GT 决策
+
+没有找到能直接、可复核地从 hop 的 ASN、上述地址注册对象或路径中 `59.43` 与
+`202.97` 的出现顺序区分 CN2 GIA 与 CN2 GT 的权威来源。APNIC 对象只支持 CN2
+（AS4809/`CN2-BB`）或 CHINANET（AS4134/`CHINANET-BB`），不支持两种产品变体的
+路径顺序判定。因此本阶段删除 GIA/GT 稳定 key、文案和测试，CN2 一律输出
+`CN2 variant unknown`；混合路径保留 CN2 命中 evidence，但不硬猜 variant。
+
+本语义变更同步升级 measurement method 与 comparison `signature_set`：
+`china-backbone-signature-v3` 与 `china-backbone-v3`，两者均由同一个代码常量的
+`v3` 后缀构成。公开报告仍保持 `ecs.report/v1`，没有添加 legacy 或第二 schema。
+
+### 未决项
+
+- RDAP 记录的是地址分配/登记事实，不保证每个时间点的 BGP 宣告或探测路径；运行时
+  仍保留实际 hop ASN、原始输出和失败状态，路线调度变化时不会静默替代事实。
+- CUII、China169、CMI、CMNET 的产品/路由策略可能由运营商调度变化；只有 hop 实际
+  ASN 能提升到对应 ASN 身份，单独 CIDR 对象不足时继续显示 variant unknown。AS9808
+  的对象只支持 China Mobile network，因此不硬标 CMNET；AS56048 的对象名称明确含
+  CMNET，仍保留该身份。
+- 未来若增加 heuristic indicator，必须先补充一手来源、边界测试、低置信 evidence
+  文案和新的 signature-set 版本；在此之前生产 heuristic 层保持为空。

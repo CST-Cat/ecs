@@ -1,7 +1,6 @@
 package probe
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -49,43 +48,7 @@ var unmountedPrefixes = []string{
 	"/var/lib/kubelet", "/var/lib/containers", "/var/snap",
 }
 
-// discoverMountPoints 从 /proc/mounts 读取当前挂载表。
-//
-// 用内核接口而不是 findmnt/lsblk：这两个命令在精简镜像里未必存在，
-// 而 /proc/mounts 在任何 Linux 上都有。
-func discoverMountPoints() []mountPoint {
-	file, err := os.Open("/proc/mounts")
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	var mounts []mountPoint
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		// 格式：device mountpoint fstype options dump pass
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 4 {
-			continue
-		}
-		readOnly := false
-		for _, option := range strings.Split(fields[3], ",") {
-			if option == "ro" {
-				readOnly = true
-				break
-			}
-		}
-		mounts = append(mounts, mountPoint{
-			// /proc/mounts 会把空格等字符转义成八进制，路径里含空格时需要还原。
-			Path:     unescapeMountPath(fields[1]),
-			Device:   fields[0],
-			FSType:   fields[2],
-			ReadOnly: readOnly,
-		})
-	}
-	return mounts
-}
-
-// unescapeMountPath 还原 /proc/mounts 的八进制转义（\040 空格、\011 制表符等）。
+// unescapeMountPath 还原 mount table 的八进制转义（\040 空格、\011 制表符等）。
 func unescapeMountPath(value string) string {
 	if !strings.Contains(value, `\`) {
 		return value
@@ -123,8 +86,10 @@ func testableMounts(mounts []mountPoint, primaryPath string) []mountPoint {
 		if mount.ReadOnly || virtualFilesystems[mount.FSType] {
 			continue
 		}
-		// 只测真实块设备；网络文件系统与伪设备一律跳过。
-		if !strings.HasPrefix(mount.Device, "/dev/") {
+		// 只测真实块设备或 FreeBSD 的 UFS/ZFS mount。Linux 常规设备
+		// 以 /dev/ 开头；FreeBSD 的 ZFS dataset 以 pool/dataset 形式
+		// 出现，不能因为它不是 /dev/ 路径而把真实磁盘过滤掉。
+		if !isDiskMountDevice(mount) {
 			continue
 		}
 		skip := false
@@ -151,6 +116,13 @@ func testableMounts(mounts []mountPoint, primaryPath string) []mountPoint {
 	}
 	sort.SliceStable(selected, func(i, j int) bool { return selected[i].Path < selected[j].Path })
 	return selected
+}
+
+func isDiskMountDevice(mount mountPoint) bool {
+	if strings.HasPrefix(mount.Device, "/dev/") {
+		return true
+	}
+	return mount.FSType == "ufs" || mount.FSType == "zfs"
 }
 
 // mountWritable 通过实际创建临时文件确认可写。

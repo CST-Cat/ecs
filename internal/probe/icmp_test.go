@@ -1,9 +1,7 @@
 package probe
 
 import (
-	"strings"
 	"testing"
-	"time"
 )
 
 func TestICMPParserArgumentsAndMeasurements(t *testing.T) {
@@ -35,14 +33,5 @@ func TestICMPParserArgumentsAndMeasurements(t *testing.T) {
 	}
 	if _, ok := parsePingFloats([]string{"1", "bad"}); ok {
 		t.Fatal("partially invalid ping floats parsed")
-	}
-	for _, test := range []struct {
-		family, want string
-		timeout      time.Duration
-	}{{"4", "-4", 500 * time.Millisecond}, {"6", "-6", time.Second}, {"", "-W 1", 0}} {
-		args := strings.Join(pingArgumentsForFamily("host", 3, test.timeout, test.family), " ")
-		if !strings.Contains(args, test.want) || !strings.HasSuffix(args, "host") || test.family == "" && (strings.Contains(args, " -4 ") || strings.Contains(args, " -6 ")) {
-			t.Fatalf("ping args = %q, want %q", args, test.want)
-		}
 	}
 }

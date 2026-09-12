@@ -1,0 +1,268 @@
+name: freebsd-tools
+
+# 正式生产 workflow：FreeBSD 工具链 CI 编排层（静态检查 + 双构建链 + REAL GATE）。
+#
+# 结构（编排只做依赖关系，构建逻辑全在 scripts/ 与 freebsd-chain.yml）：
+#   legacy-absent / linux-static / workflow-static（独立静态检查）
+#   → chain-amd64 ∥ chain-arm64：并行调用 .github/workflows/freebsd-chain.yml
+#     （target=freebsd_amd64 / freebsd_arm64），两条链互不等待；每条链内部
+#     SYSROOT → C-DEPS → C-TOOLS → GNU SDK → GNU BENCH → MERGE → VERIFY，
+#     链实现与 cache 政策见 freebsd-chain.yml
+#   → 两条链全部成功后，REAL GATE AMD64 ∥ REAL GATE ARM64 并行启动：
+#     在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行合并 stage 的 8 个工具，
+#     VM 只以 consumer/judge 身份出现（scripts/ci/freebsd_tools_gate.sh）。
+#
+# 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder；
+# 永久禁止：FreeBSD VM builder。
+#
+# bundle-release.yml 通过 workflow_call 整体复用本 workflow（同 run 内 artifact
+# 按名可取）。
+
+on:
+  push:
+    branches: [bsd]
+  workflow_dispatch:
+  # bundle-release.yml 通过 workflow_call 复用本 workflow 的已 gate 产物。
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freebsd-tools-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  legacy-absent:
+    name: legacy builder absent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Assert legacy builder files are gone
+        run: |
+          set -euo pipefail
+          legacy_files=(
+            .github/workflows/freebsd-rebuild.yml
+            .github/workflows/freebsd-cross-sdk.yml
+            scripts/ci/freebsd_tools.sh
+            scripts/ci/freebsd_cross_sdk.sh
+            scripts/build_tools_freebsd.sh
+            scripts/lib/freebsd_tools/core.sh
+            scripts/lib/freebsd_tools/extra.sh
+            scripts/lib/freebsd_tools/manifest.sh
+            scripts/lib/freebsd_tools/common.sh
+            tools/freebsd-cross-sdk.lock.json
+          )
+          failed=0
+          for path in "${legacy_files[@]}"; do
+            if [[ -e "$path" ]]; then
+              echo "legacy file still present: $path" >&2
+              failed=1
+            else
+              echo "absent: $path"
+            fi
+          done
+          if [[ -d scripts/lib/freebsd_tools ]]; then
+            echo "legacy lib directory still present: scripts/lib/freebsd_tools" >&2
+            failed=1
+          fi
+          exit "$failed"
+
+      - name: Assert legacy call sites are gone
+        run: |
+          set -euo pipefail
+          patterns=(
+            'freebsd_tools\.sh'
+            'freebsd_cross_sdk\.sh'
+            'build_tools_freebsd\.sh'
+            'ECS_FREEBSD_CROSS_SDK'
+          )
+          failed=0
+          for pattern in "${patterns[@]}"; do
+            if git grep -nE "$pattern" -- . \
+              ':!.github/workflows/freebsd-tools.yml' \
+              ':!PLAN.md'; then
+              echo "legacy call site still present for pattern: $pattern" >&2
+              failed=1
+            else
+              echo "clean: $pattern"
+            fi
+          done
+          exit "$failed"
+
+      - name: Assert Linux builders still refuse FreeBSD targets
+        run: |
+          set -euo pipefail
+          # build_tools.sh / build_tools_container.sh 只构建 Linux，继续显式拒绝
+          # freebsd_* 目标；FreeBSD 工具链由本 workflow 的交叉构建链负责。
+          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools.sh
+          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools_container.sh
+          echo 'Linux builders still refuse FreeBSD targets'
+
+  linux-static:
+    name: linux static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Run scripts/ci/check.sh
+        run: bash scripts/ci/check.sh
+
+  workflow-static:
+    name: workflow static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate YAML parses
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user pyyaml >/dev/null
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          try:
+              import yaml
+          except ImportError:
+              sys.exit('PyYAML is required for workflow static checks')
+
+          root = Path('.github/workflows')
+          failed = False
+          for path in sorted(root.glob('*.yml')):
+              try:
+                  yaml.safe_load(path.read_text(encoding='utf-8'))
+              except Exception as exc:  # noqa: BLE001
+                  print(f'FAIL {path}: {exc}', file=sys.stderr)
+                  failed = True
+              else:
+                  print(f'ok {path}')
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Assert no FreeBSD VM builder workflows remain
+        run: |
+          set -euo pipefail
+          if [[ -e .github/workflows/freebsd-cross-sdk.yml ]]; then
+            echo 'freebsd-cross-sdk.yml must stay deleted' >&2
+            exit 1
+          fi
+          if [[ -e .github/workflows/freebsd-rebuild.yml ]]; then
+            echo 'freebsd-rebuild.yml must stay deleted' >&2
+            exit 1
+          fi
+          mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
+          for wf in "${freebsd_workflows[@]}"; do
+            if [[ "$wf" != 'freebsd-tools.yml' && "$wf" != 'freebsd-chain.yml' && "$wf" != 'freebsd-sdk-release.yml' ]]; then
+              echo "unexpected FreeBSD workflow present: $wf" >&2
+              exit 1
+            fi
+          done
+          echo "freebsd workflows present: ${freebsd_workflows[*]}"
+
+  chain-amd64:
+    name: chain freebsd_amd64
+    needs: [legacy-absent, linux-static, workflow-static]
+    uses: ./.github/workflows/freebsd-chain.yml
+    with:
+      target: freebsd_amd64
+
+  chain-arm64:
+    name: chain freebsd_arm64
+    needs: [legacy-absent, linux-static, workflow-static]
+    uses: ./.github/workflows/freebsd-chain.yml
+    with:
+      target: freebsd_arm64
+
+  real-gate-amd64:
+    name: REAL GATE AMD64
+    needs: [chain-amd64, chain-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_amd64
+          path: .ci/freebsd-tools-stage/freebsd_amd64
+
+      - name: Start FreeBSD 15.1 VM (consumer/judge)
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: x86_64
+          sync: rsync
+          copyback: false
+          custom-shell-name: freebsd
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
+
+      - name: REAL GATE
+        shell: freebsd {0}
+        run: |
+          set -eu
+          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
+            --target freebsd_amd64 \
+            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/freebsd_amd64"
+
+  real-gate-arm64:
+    name: REAL GATE ARM64
+    needs: [chain-amd64, chain-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-freebsd_arm64
+          path: .ci/freebsd-tools-stage/freebsd_arm64
+
+      - name: Start FreeBSD 15.1 VM (consumer/judge)
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: aarch64
+          sync: rsync
+          copyback: false
+          custom-shell-name: freebsd
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
+
+      - name: REAL GATE
+        shell: freebsd {0}
+        run: |
+          set -eu
+          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
+            --target freebsd_arm64 \
+            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/freebsd_arm64"

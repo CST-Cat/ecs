@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /reports/
+/.ci/
 /.ci-tools-stage/
 /artifact/
 /tools-artifacts/
@@ -25,3 +26,5 @@ ecs-report-*
 
 # 本地 Agent 权限配置属于开发者环境，不入库
 .claude/
+# 本地 Agent 工作区状态（记忆、任务记录）同样属于开发者环境，不入库
+.workbuddy-ai/

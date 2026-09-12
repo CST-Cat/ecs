@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 在目标架构容器里构建并验证 ecs 的十个基准工具。
+# 在目标架构容器里构建并验证 Linux ecs 的十个基准工具。
 #
 # 本脚本是"怎么构建"的唯一定义。GitHub Actions 只负责 when / where /
 # permission / dependency：它挑选 runner、传一个架构名，其余全部在这里。
@@ -17,8 +17,8 @@ set -euo pipefail
 #                 目标架构上启动并给出可解析输出。
 #
 # 用法：
-#   scripts/build_tools_container.sh --arch ARCH --stage-root DIR
-#   scripts/build_tools_container.sh --arch ARCH --print-params
+#   scripts/build_tools_container.sh --target TARGET --stage-root DIR
+#   scripts/build_tools_container.sh --target TARGET --print-params
 #
 # --print-params 打印某架构解析后的全部构建参数而不实际构建，用于秒级比对
 # 构建定义是否等价——不需要为了确认一个参数而启动 40-90 分钟的真实构建。
@@ -27,10 +27,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/build_tools_container.sh --arch ARCH --stage-root DIR
-       scripts/build_tools_container.sh --arch ARCH --print-params
+usage: scripts/build_tools_container.sh --target TARGET --stage-root DIR
+       scripts/build_tools_container.sh --target TARGET --print-params
 
-  --arch ARCH        amd64 | arm64 | armv7 | 386 | s390x | riscv64 | ppc64le
+  --target TARGET    linux_amd64 | linux_arm64 | linux_armv7 | linux_386 |
+                     linux_s390x | linux_riscv64 | linux_ppc64le
   --stage-root DIR   构建产物的落地目录（宿主路径）
   --print-params     只打印解析后的构建参数，不构建
 USAGE
@@ -41,14 +42,14 @@ die() {
   exit 1
 }
 
-arch=""
+target=""
 stage_root=""
 print_params=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --arch)
-      [[ "$#" -ge 2 && -n "$2" ]] || die "--arch requires a value"
-      arch=$2
+    --target)
+      [[ "$#" -ge 2 && -n "$2" ]] || die "--target requires a value"
+      target=$2
       shift 2
       ;;
     --stage-root)
@@ -71,10 +72,14 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ -n "$arch" ]] || {
+[[ -n "$target" ]] || {
   usage
-  die "--arch is required"
+  die "--target is required"
 }
+
+goos=$(ecs_lock_target_field "$target" goos) || die "unsupported target: $target"
+arch=$(ecs_lock_target_field "$target" package) || die "target $target has no package architecture"
+[[ "$goos" == linux ]] || die "FreeBSD tools builder unavailable"
 
 # 架构表。每行：镜像、容器 platform、构建模式、Debian 架构、交叉三元组、smoke 运行器。
 #
@@ -138,7 +143,7 @@ case "$arch" in
     target_runner=qemu-ppc64le
     ;;
   *)
-    die "unsupported architecture: $arch (supported: ${ECS_ARCHES[*]})"
+    die "unsupported architecture: $arch (supported Linux targets: ${ECS_LINUX_ARCHES[*]})"
     ;;
 esac
 
@@ -170,6 +175,7 @@ expand_cross_target_packages() {
 }
 
 if [[ "$print_params" -eq 1 ]]; then
+  printf 'target=%s\n' "$target"
   printf 'arch=%s\n' "$arch"
   printf 'image=%s\n' "$image"
   printf 'platform=%s\n' "$platform"
@@ -214,7 +220,7 @@ docker_common=(
   --workdir /src
 )
 
-echo "build-tools-container: arch=$arch mode=$build_mode image=$image platform=$platform" >&2
+echo "build-tools-container: target=$target mode=$build_mode image=$image platform=$platform" >&2
 
 if [[ "$build_mode" == cross ]]; then
   mapfile -t expanded_target_packages < <(expand_cross_target_packages)
@@ -238,7 +244,7 @@ if [[ "$build_mode" == cross ]]; then
       # STREAM 的多线程 smoke 在 QEMU 下按核数起线程会拖到分钟级，固定两条足够验证。
       export STREAM_NT_THREADS=2
       scripts/build_tools.sh \
-        --arch "$ARCH" \
+        --target "linux_$ARCH" \
         --stage-root /stage \
         --cross-prefix "${CROSS_TRIPLET}-" \
         --target-runner "$TARGET_RUNNER"
@@ -254,8 +260,8 @@ else
       apt-get update
       # shellcheck disable=SC2086
       apt-get install -y --no-install-recommends $NATIVE_PACKAGES
-      scripts/build_tools.sh --arch "$ARCH" --stage-root /stage
+      scripts/build_tools.sh --target "linux_$ARCH" --stage-root /stage
     '
 fi
 
-echo "build-tools-container: $arch staged at $stage_root/linux_$arch" >&2
+echo "build-tools-container: $target staged at $stage_root/$target" >&2

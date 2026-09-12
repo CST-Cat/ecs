@@ -110,7 +110,12 @@ func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime conf
 		if descriptor.Exposure == module.ExposureThirdParty {
 			needsThirdPartyProvider = true
 		}
-		for _, toolID := range descriptor.RequiredTools {
+		// The descriptor records what a module needs; resolveRequiredTools
+		// records what this platform must actually stage for it. A base-system
+		// substitute on FreeBSD drops the download without changing the
+		// descriptor, so the machine contract stays platform-correct while the
+		// module metadata stays platform-independent.
+		for _, toolID := range resolveRequiredTools(descriptor.RequiredTools) {
 			if containsPlanValue(plan.RequiredTools, toolID) {
 				continue
 			}

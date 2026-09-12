@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 交叉编译七架构 ecs 主程序，确认每个发布目标都还能构建。
+# 交叉编译全部发布目标的 ecs 主程序，确认七个 Linux 与两个 FreeBSD
+# target 都还能构建。
 #
-# 只构建、不打包：打包是 scripts/package.sh 的职责，这里只回答"七个架构现在
-# 都编得过吗"。架构列表来自 scripts/lib/common.sh，与打包和发布共用同一张表。
+# 只构建、不打包：打包是 scripts/package.sh 的职责，这里只回答九个目标
+# 现在是否都能编译。目标列表来自 scripts/lib/common.sh，与打包和发布共用同一张表。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
 
-arch=""
-if [[ "$#" -eq 2 && "$1" == "--arch" && -n "$2" ]]; then
-  arch=$2
+target=""
+if [[ "$#" -eq 2 && "$1" == "--target" && -n "$2" ]]; then
+  target=$2
 elif [[ "$#" -ne 0 ]]; then
-  echo "usage: $0 [--arch ARCH]" >&2
+  echo "usage: $0 [--target GOOS_GOARCH]" >&2
   exit 2
 fi
 
@@ -42,22 +43,22 @@ ldflags+=" -X ecs/internal/buildinfo.ToolsBundle=$tools_bundle"
 mkdir -p "$output_dir"
 build_count=0
 for entry in "${ECS_TARGETS[@]}"; do
-  read -r goos goarch name <<<"$entry"
-  if [[ -n "$arch" && "$name" != "$arch" ]]; then
+  read -r target_id goos goarch package_arch <<<"$entry"
+  if [[ -n "$target" && "$target_id" != "$target" ]]; then
     continue
   fi
   goarm=""
-  [[ "$name" == armv7 ]] && goarm=7
-  printf 'cross: %s/%s -> %s\n' "$goos" "$name" "$output_dir/ecs_${goos}_${name}" >&2
+  [[ "$goos" == linux && "$package_arch" == armv7 ]] && goarm=7
+  printf 'cross: %s/%s -> %s\n' "$goos" "$package_arch" "$output_dir/ecs_${target_id}" >&2
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" \
     "$go_command" build -trimpath -ldflags "$ldflags" \
-    -o "$output_dir/ecs_${goos}_${name}" "$ECS_REPO_ROOT/cmd/ecs"
+    -o "$output_dir/ecs_${target_id}" "$ECS_REPO_ROOT/cmd/ecs"
   build_count=$((build_count + 1))
 done
 
-if [[ -n "$arch" && "$build_count" -eq 0 ]]; then
-  echo "cross: unknown architecture: $arch" >&2
+if [[ -n "$target" && "$build_count" -eq 0 ]]; then
+  echo "cross: unknown target: $target" >&2
   exit 1
 fi
 
-echo "cross: built $build_count architectures into $output_dir" >&2
+echo "cross: built $build_count targets into $output_dir" >&2

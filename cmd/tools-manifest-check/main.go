@@ -16,7 +16,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	expectedArchitecture := flags.String("architecture", "", "require this manifest architecture")
+	expectedTarget := flags.String("target", "", "require this manifest target")
 	expectedToolchainMode := flags.String("toolchain-mode", "", "require this build toolchain mode")
 	expectedSmokeRunner := flags.String("smoke-runner", "", "require this build smoke runner")
 	expectedNPBSmokeClass := flags.String("npb-smoke-class", "", "require this NPB CI smoke class")
@@ -41,8 +41,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		var manifest toolsmanifest.Manifest
 		if err == nil {
 			manifest, err = toolsmanifest.Parse(data)
-			if err == nil && *expectedArchitecture != "" && manifest.Architecture != *expectedArchitecture {
-				err = fmt.Errorf("architecture %q does not match expected %q", manifest.Architecture, *expectedArchitecture)
+			if err == nil && *expectedTarget != "" && manifest.Target != *expectedTarget {
+				err = fmt.Errorf("target %q does not match expected %q", manifest.Target, *expectedTarget)
 			}
 			if err == nil && *expectedToolchainMode != "" && manifest.Build.ToolchainMode != *expectedToolchainMode {
 				err = fmt.Errorf("build.toolchain_mode %q does not match expected %q", manifest.Build.ToolchainMode, *expectedToolchainMode)
@@ -68,7 +68,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			failed = true
 			continue
 		}
-		fmt.Fprintf(stdout, "%s: valid (%s)\n", path, manifest.Architecture)
+		fmt.Fprintf(stdout, "%s: valid (%s)\n", path, manifest.Target)
 	}
 	if failed {
 		return 1

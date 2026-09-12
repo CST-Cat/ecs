@@ -1,0 +1,317 @@
+name: freebsd-chain
+
+# per-target FreeBSD 工具链构建链：由 freebsd-tools.yml 并行调用两次
+# （target=freebsd_amd64 与 target=freebsd_arm64），每次独立走完整链条：
+#   SYSROOT → C-DEPS → C-TOOLS → GNU SDK → GNU BENCH → MERGE → VERIFY
+# 静态检查与整体依赖（legacy-absent / linux-static / workflow-static）由调用方
+# freebsd-tools.yml 承担，本文件 SYSROOT 无 needs；REAL GATE（真实 FreeBSD VM
+# 内真实执行 8 个工具）同样在 freebsd-tools.yml，不进本链。
+# 构建逻辑全部在 scripts/，本 workflow 只做编排；所有构建都在 ubuntu-24.04
+# amd64 宿主交叉完成，无 VM 参与 builder；永久禁止：FreeBSD VM builder。
+#
+# 零 cache（与 main 一致）：GNU SDK 来自 immutable Release
+# `ci-freebsd-gnu-sdk-v1`（lock 钉 SHA256，见 freebsd_gnu_openmp_sdk.sh），
+# 其余产物每次冷构建；VM builder 永久禁止。
+#
+# 注意：不放 concurrency 块——freebsd-tools.yml 会用两个 job 并行调用本
+# workflow，concurrency 分组会让两条链互相互斥。
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'FreeBSD target to build: freebsd_amd64 or freebsd_arm64'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sysroot:
+    name: SYSROOT (${{ inputs.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm file xz-utils
+
+      - name: Print resolved sysroot lock
+        run: bash scripts/ci/freebsd_sysroot.sh --target ${{ inputs.target }} --print-lock
+
+      - name: Install and probe FreeBSD sysroot (${{ inputs.target }})
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_sysroot.sh \
+            --target ${{ inputs.target }} \
+            --sysroot-dir "$PWD/.ci/sysroot/${{ inputs.target }}" \
+            --work-dir "$PWD/.ci/sysroot-work"
+
+      - name: Assert both sysroot targets are locked to 15.1-RELEASE
+        run: |
+          set -euo pipefail
+          release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
+          test "$release" = "15.1-RELEASE"
+          for target in freebsd_amd64 freebsd_arm64; do
+            url=$(jq -er --arg t "$target" '.targets[$t].base_txz_url' tools/freebsd-sysroot.lock.json)
+            case "$url" in
+              *15.1-RELEASE*) ;;
+              *) echo "target $target is not pinned to 15.1-RELEASE: $url" >&2; exit 1 ;;
+            esac
+            case "$url" in
+              *latest*|*stable*|*current*)
+                echo "target $target uses a rolling URL: $url" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo 'sysroot locks are release-pinned'
+
+  c-deps:
+    name: C-DEPS (${{ inputs.target }})
+    needs: [sysroot]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install package extract tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd libarchive-tools curl jq
+
+      - name: Print target deps lock
+        run: bash scripts/ci/freebsd_target_deps.sh --target ${{ inputs.target }} --print-lock
+
+      - name: Fetch immutable LuaJIT/CK snapshot
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_target_deps.sh \
+            --target ${{ inputs.target }} \
+            --prefix "$PWD/.ci/target-deps/${{ inputs.target }}" \
+            --work-dir "$PWD/.ci/target-deps-work"
+
+      - name: Assert no rolling package URLs in lock
+        run: |
+          set -euo pipefail
+          if jq -e '.. | objects | select(has("snapshot_url")) | .snapshot_url' \
+            tools/freebsd-target-deps.lock.json | grep -E 'latest|Hashed'; then
+            echo 'lock contains rolling package URLs' >&2
+            exit 1
+          fi
+          test "$(jq -er '.snapshot.id' tools/freebsd-target-deps.lock.json)" = 'ci-freebsd-deps-v1'
+          echo 'target deps lock is snapshot-pinned'
+
+  c-tools:
+    name: C-TOOLS (${{ inputs.target }})
+    needs: [c-deps]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install clang/lld and build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld llvm file xz-utils zstd libarchive-tools \
+            autoconf automake libtool libtool-bin pkg-config \
+            make git curl jq perl
+
+      - name: Print builder params
+        run: bash scripts/build_tools_freebsd_c.sh --target ${{ inputs.target }} --print-params
+
+      - name: Build five C-tools for ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_c.sh \
+            --target ${{ inputs.target }} \
+            --stage-root "$PWD/.ci/freebsd-c-tools-stage" \
+            --jobs "$(nproc)"
+
+      - name: Upload C-tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-c-tools-stage/${{ inputs.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  gnu-sdk:
+    name: GNU SDK (${{ inputs.target }})
+    needs: [c-tools]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install toolchain build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
+            texinfo file xz-utils curl jq zstd
+
+      - name: Print GNU SDK lock
+        run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target ${{ inputs.target }} --print-lock
+
+      - name: Build FreeBSD GNU C/Fortran/OpenMP SDK (${{ inputs.target }})
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --target ${{ inputs.target }} \
+            --prefix "$PWD/.ci/gnu-sdk/${{ inputs.target }}" \
+            --work-dir "$PWD/.ci/gnu-sdk-work" \
+            --jobs "$(nproc)"
+
+      - name: Upload GNU SDK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-${{ inputs.target }}
+          path: .ci/gnu-sdk/${{ inputs.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  gnu-bench:
+    name: GNU BENCH (${{ inputs.target }})
+    needs: [gnu-sdk]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install host build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld build-essential file jq curl xz-utils
+
+      - name: Download Stage 4 GNU SDK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-${{ inputs.target }}
+          path: .ci/gnu-sdk/${{ inputs.target }}
+
+      - name: Print builder params
+        run: bash scripts/build_tools_freebsd_gnu.sh --target ${{ inputs.target }} --print-params
+
+      - name: Build NPB EP/FT + STREAM for ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          bash scripts/build_tools_freebsd_gnu.sh \
+            --target ${{ inputs.target }} \
+            --sdk-prefix "$PWD/.ci/gnu-sdk/${{ inputs.target }}" \
+            --stage-root "$PWD/.ci/freebsd-gnu-tools-stage"
+
+      - name: Upload GNU tools stage fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-gnu-tools-stage/${{ inputs.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  merge:
+    name: MERGE (${{ inputs.target }})
+    needs: [c-tools, gnu-bench]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install merge dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download Stage 3 C-tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-c-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-c-tools-stage/${{ inputs.target }}
+
+      - name: Download Stage 5 GNU tools fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-gnu-tools-stage/${{ inputs.target }}
+
+      - name: Merge C + GNU fragments into the final stage
+        run: |
+          set -euo pipefail
+          bash scripts/ci/merge_freebsd_tools_stage.sh \
+            --target ${{ inputs.target }} \
+            --c-fragment "$PWD/.ci/freebsd-c-tools-stage/${{ inputs.target }}" \
+            --gnu-fragment "$PWD/.ci/freebsd-gnu-tools-stage/${{ inputs.target }}" \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"
+
+      - name: Upload merged FreeBSD tools stage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-tools-stage/${{ inputs.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: VERIFY (${{ inputs.target }})
+    needs: [merge]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 'stable'
+          check-latest: true
+          cache: false
+
+      - name: Install verification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y file binutils jq
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-tools-stage/${{ inputs.target }}
+
+      - name: Verify the merged FreeBSD tools stage
+        run: |
+          set -euo pipefail
+          bash scripts/verify_tools_stage.sh \
+            --target ${{ inputs.target }} \
+            --stage-root "$PWD/.ci/freebsd-tools-stage"

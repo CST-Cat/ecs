@@ -11,7 +11,7 @@
 ```json
 {
   "schema": "ecs.submission/v1",
-  "id": "9951817b04990224ff8d05d8042d7614",
+  "id": "47ce0fea2ce30a266ff754c61f21e8b2",
   "sample_id": "389beaef109ed18ac4db40b5cb4cf81fe140f625251cc054a9c5f9c527c49ad5",
   "host": {
     "vcpu": 16,
@@ -19,6 +19,7 @@
     "virtualization": "kvm",
     "cpu_model": "AMD Ryzen 7 PRO 4750U with Radeon Graphics",
     "arch": "amd64",
+    "os": "Ubuntu 24.04",
     "region": "jp-tokyo",
     "provider": "vultr"
   },
@@ -42,7 +43,7 @@
 }
 ```
 
-字段是显式白名单：主机规格、工具版本和评分所需的 `metrics` 会保留，完整报告中的探针结论不会因为新增字段自动进入提交。`sample_id` 是由完整报告 `run.id` 经 `SHA-256("ecs.sample/v1\x00" + run.id)` 派生的匿名 benchmark sample identity；原始 `run.id` 不写入提交。`id` 使用当前唯一的规范 JSON 内容指纹，排除 `id`、`sample_id` 和 `ran_at`，但包含其余允许公开字段；`provider`、`region` 和 `note` 为提交者自报字段；长度限制和可用评分键由 validator 检查。
+字段是显式白名单：主机规格、工具版本和评分所需的 `metrics` 会保留，完整报告中的探针结论不会因为新增字段自动进入提交。`sample_id` 是由完整报告 `run.id` 经 `SHA-256("ecs.sample/v1\x00" + run.id)` 派生的匿名 benchmark sample identity；原始 `run.id` 不写入提交。`id` 使用当前唯一的规范 JSON 内容指纹，排除 `id`、`sample_id` 和 `ran_at`，但包含其余允许公开字段；`provider`、`region` 和 `note` 为提交者自报字段；长度限制和可用评分键由 validator 检查。`arch` 与 `os` 用于分组：Linux 与 FreeBSD 共用同一个 GOARCH，磁盘引擎（`io_uring`/`libaio` 对 `posixaio`）和路由工具却不同，只按 `arch` 分组会把两种口径混在一张表里。
 
 ## 生成提交
 
@@ -69,7 +70,7 @@ wrapper 只解释第二个精确 `--` 之前的 `--submit`、`--provider`、`--r
 ```text
 submissions/
 ├── 2026-08/
-│   ├── 9951817b04990224ff8d05d8042d7614-vultr-jp-tokyo.json
+│   ├── 47ce0fea2ce30a266ff754c61f21e8b2-vultr-jp-tokyo.json
 │   └── 3f9a12c4e5b7a8c9d0e1f22334455667-hetzner-de-fsn.json
 ├── 2026-09/
 │   └── ...
