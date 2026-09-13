@@ -407,7 +407,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.bundle.outputs.tag }}
-          VERSION: Unreleased
+          VERSION: ${{ steps.bundle.outputs.tag }}
           REVISION: ${{ github.sha }}
         run: |
           ./scripts/release/publish.sh \

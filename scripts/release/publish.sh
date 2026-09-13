@@ -84,8 +84,14 @@ command -v gh >/dev/null 2>&1 || die "gh is required"
 
 # ---- 发布说明 ----
 #
-# 取自 CHANGELOG.md 对应版本的中文与 English 小节。取不到就失败：一个没有
-# 完整双语说明的 Release 对用户没有意义，而这种疏漏应该在发布时被拦住。
+# ECS（--kind ecs）取自 CHANGELOG.md 对应版本的中文与 English 小节，并在顶部
+# 以中英双语简单引用当前最新的 Bundle 工具包与 GNU SDK 快照；Bundle
+# （--kind bundle）取自 tools/BUNDLE_NOTES.md 的对应版本章节。取不到就失败：
+# 一个没有完整双语说明的 Release 对用户没有意义，而这种疏漏应该在发布时被拦住。
+notes_source=CHANGELOG.md
+if [[ "$kind" == "bundle" ]]; then
+  notes_source=tools/BUNDLE_NOTES.md
+fi
 notes_file=$(mktemp)
 trap 'rm -f -- "$notes_file"' EXIT
 : >"$notes_file"
@@ -126,9 +132,9 @@ append_changelog_language() {
     END {
       if (!found || !selected || !has_content) exit 1
     }
-  ' CHANGELOG.md >>"$notes_file" || status=$?
+  ' "$notes_source" >>"$notes_file" || status=$?
   [[ "$status" -eq 0 ]] ||
-    die "CHANGELOG.md 的 $version 章节缺少非空 $language 小节"
+    die "${notes_source} 的 $version 章节缺少非空 $language 小节"
 }
 
 repository=${GITHUB_REPOSITORY:-CST-Cat/ecs}
@@ -137,7 +143,12 @@ changelog_url="https://github.com/${repository}/blob/${revision}/CHANGELOG.md"
 if [[ "$kind" == "ecs" ]]; then
   bundle_tag=$(<tools/BUNDLE)
   bundle_url="https://github.com/${repository}/releases/tag/${bundle_tag}"
-  printf '第三方工具包：\n[%s](%s)\n\n' "$bundle_tag" "$bundle_url" >>"$notes_file"
+  sdk_tag=$(jq -r '.targets.freebsd_amd64.prebuilt.url' tools/freebsd-gnu-openmp.lock.json)
+  sdk_tag=${sdk_tag#*releases/download/}
+  sdk_tag=${sdk_tag%%/*}
+  sdk_url="https://github.com/${repository}/releases/tag/${sdk_tag}"
+  printf '第三方工具包：\n[%s](%s)\n' "$bundle_tag" "$bundle_url" >>"$notes_file"
+  printf 'GNU SDK 快照：\n[%s](%s)\n\n' "$sdk_tag" "$sdk_url" >>"$notes_file"
 fi
 append_changelog_language "中文"
 printf '\n完整版本历史：[CHANGELOG.md](%s)\n' "$changelog_url" >>"$notes_file"
@@ -145,13 +156,15 @@ printf '\n完整版本历史：[CHANGELOG.md](%s)\n' "$changelog_url" >>"$notes_
 printf '\n---\n\n' >>"$notes_file"
 
 if [[ "$kind" == "ecs" ]]; then
-  printf 'Third-party Tool Package:\n[%s](%s)\n\n' \
+  printf 'Third-party Tool Package:\n[%s](%s)\n' \
     "$bundle_tag" "$bundle_url" >>"$notes_file"
+  printf 'GNU SDK snapshot:\n[%s](%s)\n\n' \
+    "$sdk_tag" "$sdk_url" >>"$notes_file"
 fi
 append_changelog_language "English"
 printf '\nFull version history: [CHANGELOG.md](%s)\n' \
   "$changelog_url" >>"$notes_file"
-echo "release-publish: 已从 CHANGELOG.md 取出 $version 的中英文发布说明" >&2
+echo "release-publish: 已从 $notes_source 取出 $version 的中英文发布说明" >&2
 
 # ---- 资产清单 ----
 assets=(checksums.txt)
