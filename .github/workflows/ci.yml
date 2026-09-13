@@ -13,7 +13,7 @@ name: ci
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "bsd"]
   pull_request:
 
 permissions:
