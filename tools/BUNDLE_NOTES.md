@@ -9,6 +9,18 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.2
+
+### 中文
+
+- FreeBSD 工具发布物全量 strip：8 个工具 × 双架构在 provenance 计算前统一 `--strip-unneeded`，strip 前后全部 SHF_ALLOC runtime section（name/flags/size/address/内容 SHA256）逐字节等价，`.debug_*` 字节清零，manifest `stripped: true` 与实际字节一致。
+- 工具包体 22 MiB → 6.1 MiB（`freebsd_amd64`）/ 5.6 MiB（`freebsd_arm64`）；工具集合仍为 sysbench、zstd、npb-ep、npb-ft、openssl、stream、fio、iperf3 共 8 个静态 FreeBSD ELF，编译器、构建参数、manifest 与真实 FreeBSD 15.1 门禁合同不变。
+
+### English
+
+- The FreeBSD release tools are fully stripped: all eight tools on both architectures are uniformly passed through `--strip-unneeded` before provenance is computed, every SHF_ALLOC runtime section (name/flags/size/address/content SHA256) is proven byte-for-byte identical across the strip, `.debug_*` bytes drop to zero, and the manifest `stripped: true` matches the actual bytes.
+- The tool package shrinks from 22 MiB to 6.1 MiB (`freebsd_amd64`) and 5.6 MiB (`freebsd_arm64`); the tool set remains the same eight static FreeBSD ELFs — sysbench, zstd, npb-ep, npb-ft, openssl, stream, fio and iperf3 — with the compiler, build flags, manifest and real FreeBSD 15.1 gate contracts unchanged.
+
 ## bundle-v1.1
 
 ### 中文
