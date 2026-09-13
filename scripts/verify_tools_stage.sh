@@ -146,6 +146,18 @@ $actual_tools"
       die "$tool contains glibc symbols"
     fi
 
+    # Phase 1：发布物必须真的 strip 过——manifest 要这么说，二进制要自己证明
+    # （最终 artifact 检查，不信任任何 builder 的自我声明）。
+    local mstripped sw_out
+    mstripped=$(jq -r --arg t "$tool" \
+      '.tools[] | select(.name == $t) | .parameters.stripped' "$manifest")
+    [[ "$mstripped" == "true" ]] ||
+      die "$tool manifest parameters.stripped must be true, got: ${mstripped:-<missing>}"
+    sw_out=$(readelf -SW "$bin_path") || die "$tool: readelf -SW failed"
+    if grep -q '\.debug_' <<<"$sw_out"; then
+      die "$tool still contains .debug_* sections after strip"
+    fi
+
     mtriple=$(jq -er --arg t "$tool" \
       '.tools[] | select(.name == $t) | .parameters.target_triple' "$manifest") ||
       die "manifest has no parameters.target_triple for $tool"

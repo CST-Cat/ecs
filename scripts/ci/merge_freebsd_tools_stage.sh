@@ -510,7 +510,7 @@ jq -n \
           disabled_features: ["mysql", "pgsql", "drizzle", "attachsql", "oracle"],
           architecture: $architecture,
           license: "GPL-2.0-only",
-          parameters: {source_commit: $sysbench_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $sysbench_sha256, fully_static: true, stripped: false}
+          parameters: {source_commit: $sysbench_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $sysbench_sha256, fully_static: true, stripped: true}
         },
         {
           name: "zstd",
@@ -523,7 +523,7 @@ jq -n \
           disabled_features: ["zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace"],
           architecture: $architecture,
           license: "BSD-3-Clause OR GPL-2.0-only",
-          parameters: {source_commit: $zstd_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $zstd_sha256, fully_static: true, stripped: false}
+          parameters: {source_commit: $zstd_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $zstd_sha256, fully_static: true, stripped: true}
         },
         {
           name: "npb-ep",
@@ -536,7 +536,7 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ep_compiler_version, target_triple: $target_triplet, build_host: $npb_ep_build_host, openmp_runtime: "libgomp", sha256: $npb_ep_sha256, fully_static: true, stripped: false}
+          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ep_compiler_version, target_triple: $target_triplet, build_host: $npb_ep_build_host, openmp_runtime: "libgomp", sha256: $npb_ep_sha256, fully_static: true, stripped: true}
         },
         {
           name: "npb-ft",
@@ -549,7 +549,7 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ft_compiler_version, target_triple: $target_triplet, build_host: $npb_ft_build_host, openmp_runtime: "libgomp", sha256: $npb_ft_sha256, fully_static: true, stripped: false}
+          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ft_compiler_version, target_triple: $target_triplet, build_host: $npb_ft_build_host, openmp_runtime: "libgomp", sha256: $npb_ft_sha256, fully_static: true, stripped: true}
         },
         {
           name: "openssl",
@@ -562,7 +562,7 @@ jq -n \
           disabled_features: ["TLS/DTLS/QUIC", "network/HTTP", "shared libraries/modules/engines", "EC/DH/DSA/PQ families", "unrequested cipher/digest families", "tests/documentation"],
           architecture: $architecture,
           license: "Apache-2.0",
-          parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $openssl_sha256, fully_static: true, stripped: false}
+          parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $openssl_sha256, fully_static: true, stripped: true}
         },
         {
           name: "stream",
@@ -575,7 +575,7 @@ jq -n \
           disabled_features: [],
           architecture: $architecture,
           license: "STREAM-custom",
-          parameters: {source_sha256: $stream_source_sha256, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], compiler_family: "gcc", compiler_version: $stream_compiler_version, target_triple: $target_triplet, build_host: $stream_build_host, openmp_runtime: "libgomp", sha256: $stream_sha256, fully_static: true, stripped: false}
+          parameters: {source_sha256: $stream_source_sha256, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], compiler_family: "gcc", compiler_version: $stream_compiler_version, target_triple: $target_triplet, build_host: $stream_build_host, openmp_runtime: "libgomp", sha256: $stream_sha256, fully_static: true, stripped: true}
         },
         {
           name: "fio",
@@ -588,7 +588,7 @@ jq -n \
           disabled_features: ["io_uring", "libaio", "ceph", "rbd", "rados", "gluster", "gfapi", "rdma", "http", "pmem"],
           architecture: $architecture,
           license: "GPL-2.0-only",
-          parameters: {source_commit: $fio_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $fio_sha256, fully_static: true, stripped: false}
+          parameters: {source_commit: $fio_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $fio_sha256, fully_static: true, stripped: true}
         },
         {
           name: "iperf3",
@@ -601,7 +601,7 @@ jq -n \
           disabled_features: ["sctp", "openssl/auth"],
           architecture: $architecture,
           license: "BSD-3-Clause",
-          parameters: {source_commit: $iperf3_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $iperf3_sha256, fully_static: true, stripped: false}
+          parameters: {source_commit: $iperf3_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $iperf3_sha256, fully_static: true, stripped: true}
         }
       ]
     }' | jq . >"$manifest"
