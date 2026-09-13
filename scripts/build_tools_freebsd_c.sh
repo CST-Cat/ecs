@@ -11,6 +11,7 @@ set -euo pipefail
 #   <stage-root>/<target>/bin/{sysbench,zstd,openssl,fio,iperf3}
 #   <stage-root>/<target>/LICENSES/
 #   <stage-root>/<target>/provenance.json
+#   <stage-root>/<target>/SHA256SUMS
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -193,6 +194,17 @@ for tool in sysbench zstd openssl fio iperf3; do
 done
 
 ecs_freebsd_c_write_provenance "$stage" "$target" "$triple"
+
+# Package-level checksum manifest over the whole fragment (bin, licenses and
+# provenance; SHA256SUMS itself is excluded by construction). The per-tool
+# sha256 values stay in provenance.json as record fields; the fragment's
+# integrity is asserted once with `sha256sum -c` at merge time instead of
+# being re-asserted tool by tool.
+(
+  cd "$stage"
+  find bin LICENSES provenance.json -type f -print0 | LC_ALL=C sort -z |
+    xargs -0 sha256sum >SHA256SUMS
+)
 
 # Hard contract checks: exactly the five C tools, no extras, no manifest yet.
 expected=(sysbench zstd openssl fio iperf3)

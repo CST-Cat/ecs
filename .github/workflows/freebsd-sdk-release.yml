@@ -17,8 +17,9 @@ name: freebsd-sdk-release
 #
 # 何时需要重发布：lock 的 gcc/binutils 版本或源 SHA256 变化、
 # scripts/ci/freebsd_gnu_openmp_sdk.sh 或 sysroot lock 变化。重跑本 workflow
-# 是合法维护动作：同 tag 下 assets 以 --clobber 原位覆盖、body 以 --notes
-# 更新，消费方始终以 SHA256SUMS 为准。
+# 是合法维护动作：GitHub Immutable Releases 已启用，Release 资产不可原位
+# 增删改，重发布 = 整体删除重建（gh release delete --cleanup-tag 后按同一
+# tag 重新 create），消费方始终以 lock 钉定的 SHA256 与 SHA256SUMS 为准。
 #
 # 维护闭环：工具链/脚本变更 → 重跑本 workflow（--from-source 全量源码构建）
 # → 用新 assets 的 SHA256SUMS 更新 tools/freebsd-gnu-openmp.lock.json 的
@@ -192,13 +193,15 @@ jobs:
             ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
           - 校验 / Verify: sha256sum -c SHA256SUMS
 
-          重跑本 workflow 是合法维护动作：同 tag 下 assets 与本说明原位覆盖
-          更新，消费方始终以 SHA256SUMS 为准。Re-running this workflow is the
-          documented maintenance path: assets and notes are replaced in place
-          under the same tag.
+          Release 为 immutable：重发布通过整体删除并重建完成，消费方始终以
+          SHA256SUMS 为准。The Release is immutable: re-publishing deletes
+          and recreates it as a whole, and consumers always defer to
+          SHA256SUMS.
           EOF
 
-      - name: Create or update SDK Release
+      # Release 为 immutable：已存在时不能 --clobber/--edit 原位覆盖（422），
+      # 只能整体删除（连 tag 一起）后按当前 commit 重建。
+      - name: 'Create the SDK Release (immutable: delete and recreate)'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -212,15 +215,11 @@ jobs:
           )
           title='FreeBSD GNU SDK snapshot (ci-freebsd-gnu-sdk-v1)'
           if gh release view "$SDK_RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$SDK_RELEASE_TAG" "${assets[@]}" --clobber
-            gh release edit "$SDK_RELEASE_TAG" \
-              --title "$title" \
-              --notes-file "$RUNNER_TEMP/release-notes.md"
-          else
-            gh release create "$SDK_RELEASE_TAG" "${assets[@]}" \
-              --title "$title" \
-              --notes-file "$RUNNER_TEMP/release-notes.md" \
-              --target "$GITHUB_SHA"
+            gh release delete "$SDK_RELEASE_TAG" --yes --cleanup-tag
           fi
+          gh release create "$SDK_RELEASE_TAG" "${assets[@]}" \
+            --title "$title" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target "$GITHUB_SHA"
           gh release view "$SDK_RELEASE_TAG" --json tagName,assets --jq \
             '.tagName, (.assets[] | .name + " " + (.size|tostring) + " bytes")'

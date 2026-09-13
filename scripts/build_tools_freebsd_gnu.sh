@@ -9,7 +9,8 @@ set -euo pipefail
 #
 # Inputs:
 #   --sdk-prefix  installed Stage 4 SDK prefix (scripts/ci/freebsd_gnu_openmp_sdk.sh
-#                 output, consumed from the gnu-sdk job's upload-artifact);
+#                 output, acquired straight from the immutable Release snapshot;
+#                 the GNU SDK gate job has probed the same SHA256-pinned bytes);
 #                 the FreeBSD sysroot is re-installed from the pinned Stage 2
 #                 lock via scripts/ci/freebsd_sysroot.sh, exactly like the
 #                 Stage 3 C-tools builder does.
@@ -18,6 +19,7 @@ set -euo pipefail
 #   <stage-root>/<target>/bin/{npb-ep,npb-ft,stream}
 #   <stage-root>/<target>/LICENSES/
 #   <stage-root>/<target>/provenance.json
+#   <stage-root>/<target>/SHA256SUMS
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -128,7 +130,7 @@ fi
 }
 [[ -n "$sdk_prefix" ]] || {
   usage
-  die "--sdk-prefix is required (Stage 4 GNU SDK artifact)"
+  die "--sdk-prefix is required (installed Stage 4 GNU SDK prefix)"
 }
 
 for command_name in curl jq sha256sum make gcc file tar nm readelf strings; do
@@ -179,6 +181,17 @@ ecs_freebsd_gnu_build_stream "$work" "$stage" "$wrap_bin" "$file_machine"
 
 ecs_freebsd_gnu_write_provenance "$stage" "$target" "$triple" "$gcc_version" \
   "$ECS_NPB_URL" "$ECS_NPB_SHA256" "$ECS_STREAM_URL" "$ECS_STREAM_SOURCE_SHA256"
+
+# Package-level checksum manifest over the whole fragment (bin, licenses and
+# provenance; SHA256SUMS itself is excluded by construction). The per-tool
+# sha256 values stay in provenance.json as record fields; the fragment's
+# integrity is asserted once with `sha256sum -c` at merge time instead of
+# being re-asserted tool by tool.
+(
+  cd "$stage"
+  find bin LICENSES provenance.json -type f -print0 | LC_ALL=C sort -z |
+    xargs -0 sha256sum >SHA256SUMS
+)
 
 # Hard contract checks: exactly the three GNU/OpenMP tools, no extras, no
 # manifest yet (Stage 6 merge owns the final manifest).

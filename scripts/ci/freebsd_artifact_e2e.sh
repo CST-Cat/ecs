@@ -14,12 +14,12 @@ set -Eeuo pipefail
 #
 # Case E 验收 bundle 归档本身的完整性：SHA-256 对 checksums.txt、归档成员恰
 # 好是 8 个工具 + manifest + 许可文件（无 ping/nexttrace-tiny/多余文件）、
-# manifest（ecs-tools.manifest/v1，toolchain_mode=cross）逐工具 sha256 与解包
-# 后的二进制一致、逐工具 FreeBSD 静态 ELF 身份。8 个工具的真实执行由
-# freebsd-tools.yml 的 REAL GATE 在真实 FreeBSD 15.1 VM 内对合并 stage 承担，
-# stage 与 bundle 的工具字节经 manifest 逐工具 sha256 一一对应；本脚本的
-# Cases A/D 仍真实执行 stream（bundle 内始终有工具被真实消费）。两个 FreeBSD
-# 目标跑同一套口径。
+# manifest（ecs-tools.manifest/v1，toolchain_mode=cross）契约与逐工具
+# FreeBSD 静态 ELF 身份。8 个工具的真实执行由 freebsd-tools.yml 的 REAL
+# GATE 在真实 FreeBSD 15.1 VM 内对合并 stage 承担：REAL GATE 真实执行的
+# stage 与打包输入是同一份合并 stage artifact，其完整性由 stage 级
+# SHA256SUMS 钉死；本脚本的 Cases A/D 仍真实执行 stream（bundle 内始终有
+# 工具被真实消费）。两个 FreeBSD 目标跑同一套口径。
 #
 # 与 scripts/run_test.sh 的分工：run_test.sh 在 Linux 上用 fixture 二进制覆盖
 # wrapper 的确定性边界；这里用真实 FreeBSD 二进制、真实归档和真实工具，只把
@@ -434,10 +434,10 @@ echo "freebsd-artifact-e2e: case D passed (FreeBSD base /usr/bin/fetch branch)"
 # ---- Case E：bundle 归档内容（发布包完整性）验收 ---------------------------
 # Case A-D 证明真实 run.sh 能消费这份发布布局（且真实执行 stream）；case E
 # 直接验收 bundle 归档本身的完整性：checksums、成员集合（恰好 8 工具，无
-# ping/nexttrace-tiny/多余文件）、manifest 契约与逐工具 sha256、FreeBSD 静态
-# ELF 身份。工具的真实执行由 freebsd-tools.yml 的 REAL GATE 对合并 stage 承
-# 担：REAL GATE 真实执行的 stage 字节与本归档内的工具字节经 manifest 逐工具
-# sha256 一一对应，因此本脚本只验发布包完整性，不重复真执行。
+# ping/nexttrace-tiny/多余文件）、manifest 契约与逐工具 FreeBSD 静态 ELF 身
+# 份。工具的真实执行由 freebsd-tools.yml 的 REAL GATE 对合并 stage 承担：
+# REAL GATE 真实执行的 stage 与打包输入是同一份合并 stage artifact（完整性
+# 由 stage 级 SHA256SUMS 断言），因此本脚本只验发布包完整性，不重复真执行。
 case_e_dir="$scratch/case-e"
 mkdir -p "$case_e_dir"
 
@@ -494,12 +494,6 @@ for tool in "${bundle_tools[@]}"; do
   [[ -f "$binary" && -s "$binary" ]] || fail "case E bundle is missing $tool"
   # tar 归档里已是 0755；恢复只防御解包路径的权限丢失，字节不变。
   chmod 0755 "$binary"
-  manifest_sha=$(jq -er --arg tool "$tool" \
-    '.tools[] | select(.name == $tool) | .parameters.sha256' "$manifest") ||
-    fail "case E manifest has no sha256 for $tool"
-  actual_tool_sha=$(sha256 -q "$binary" | tr '[:upper:]' '[:lower:]')
-  [[ "$actual_tool_sha" == "$manifest_sha" ]] ||
-    fail "case E $tool sha256 mismatch: manifest $manifest_sha != bundle $actual_tool_sha"
   identity=$(file -b "$binary")
   echo "case E $tool: $identity"
   case "$identity" in

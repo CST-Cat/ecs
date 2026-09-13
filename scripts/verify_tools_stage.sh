@@ -39,8 +39,9 @@ die() {
 
 # ---- FreeBSD structural verification（Stage 6）---------------------------
 #
-# 只依据 manifest、目标合同、预期工具集合、binary inspection 与 per-tool
-# provenance；不再向任何 builder 索取构建口径。
+# 只依据 manifest、目标合同、预期工具集合、stage 级 SHA256SUMS、binary
+# inspection 与 manifest 的非 sha256 记录字段；不再向任何 builder 索取构建
+# 口径，也不再逐工具重算 sha256。
 
 ecs_verify_freebsd_stage() {
   local target=$1 stage_dir=$2 manifest=$3
@@ -78,19 +79,28 @@ ecs_verify_freebsd_stage() {
   [[ $(jq -er '.build.target_triplet' "$manifest") == "$triple" ]] ||
     die "manifest build.target_triplet does not match the pinned $release triple $triple"
 
-  # 3. Stage 布局：恰好 bin/、LICENSES/ 与 manifest.json；明确断言不携带
-  #    ping、nexttrace-tiny 与 Silesia 语料（corpus 是独立发布物）。
+  # 3. Stage 布局：恰好 bin/、LICENSES/、manifest.json 与 SHA256SUMS；明确
+  #    断言不携带 ping、nexttrace-tiny 与 Silesia 语料（corpus 是独立发布物）。
   local top
   top=$(find "$stage_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
-  [[ "$top" == "$(printf 'LICENSES\nbin\nmanifest.json')" ]] ||
-    die "$target stage must contain exactly bin/, LICENSES/ and manifest.json; found:
+  [[ "$top" == "$(printf 'LICENSES\nSHA256SUMS\nbin\nmanifest.json')" ]] ||
+    die "$target stage must contain exactly bin/, LICENSES/, manifest.json and SHA256SUMS; found:
 $top"
   local absent
   for absent in bin/ping bin/nexttrace-tiny share; do
     [[ ! -e "$stage_dir/$absent" ]] || die "$target stage unexpectedly contains $absent"
   done
 
-  # 4. 工具集合：恰好 8 个，一个不多、一个不少。
+  # 4. 包级完整性：merge 写出的 SHA256SUMS 一次覆盖 bin/、LICENSES/ 与
+  #    manifest.json 的全部文件（SHA256SUMS 自身不在清单内）。逐工具 sha256
+  #    只是 manifest 里的记录字段，不再逐工具重算比对。
+  echo "verify-tools-stage: verifying $target stage SHA256SUMS" >&2
+  (
+    cd "$stage_dir"
+    sha256sum -c SHA256SUMS
+  ) >&2 || die "$target stage failed its package-level SHA256SUMS verification"
+
+  # 5. 工具集合：恰好 8 个，一个不多、一个不少。
   mapfile -t expected_tools < <(ecs_target_tool_names "$target")
   [[ "${#expected_tools[@]}" -eq 8 ]] ||
     die "expected 8 FreeBSD tools in the tools lock, got ${#expected_tools[@]}"
@@ -105,8 +115,8 @@ $actual_tools"
   nonfile=$(find "$stage_dir/bin" -mindepth 1 -maxdepth 1 ! -type f -printf '%f\n')
   [[ -z "$nonfile" ]] || die "$target stage bin contains non-file entries: $nonfile"
 
-  # 5. 逐工具 binary inspection + manifest 与二进制一致性。
-  local tool bin_path file_out msha asha mtriple mfamily momp mversion mhost
+  # 6. 逐工具 binary inspection + manifest 非 sha256 字段一致性。
+  local tool bin_path file_out mtriple mfamily momp mversion mhost
   for tool in "${expected_tools[@]}"; do
     bin_path="$stage_dir/bin/$tool"
     [[ -f "$bin_path" && -s "$bin_path" ]] ||
@@ -136,12 +146,6 @@ $actual_tools"
       die "$tool contains glibc symbols"
     fi
 
-    asha=$(sha256sum "$bin_path" | awk '{print $1}')
-    msha=$(jq -er --arg t "$tool" \
-      '.tools[] | select(.name == $t) | .parameters.sha256' "$manifest") ||
-      die "manifest has no parameters.sha256 for $tool"
-    [[ "$msha" == "$asha" ]] ||
-      die "$tool sha256 mismatch: manifest $msha != binary $asha"
     mtriple=$(jq -er --arg t "$tool" \
       '.tools[] | select(.name == $t) | .parameters.target_triple' "$manifest") ||
       die "manifest has no parameters.target_triple for $tool"

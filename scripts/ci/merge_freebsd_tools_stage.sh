@@ -8,8 +8,11 @@ set -euo pipefail
 # complete FreeBSD tools stage and emits the final manifest.json.
 #
 # The merge is purely structural:
-#   - no binary is rebuilt, modified or re-linked (sha256 values recorded in
-#     the fragments' provenance.json must match the binaries byte for byte);
+#   - no binary is rebuilt, modified or re-linked; each fragment carries a
+#     package-level SHA256SUMS over all of its files (written by its builder)
+#     and must verify with a single `sha256sum -c` — per-tool sha256 values
+#     survive only as provenance/manifest record fields, copied verbatim and
+#     never re-asserted per tool;
 #   - both fragments are strictly validated first: missing files, extra files
 #     and overlapping tool names are hard errors;
 #   - LICENSES/ is merged from both fragments; a filename collision is an error;
@@ -21,6 +24,7 @@ set -euo pipefail
 #   <stage-root>/<target>/bin/{sysbench,zstd,npb-ep,npb-ft,openssl,stream,fio,iperf3}
 #   <stage-root>/<target>/LICENSES/
 #   <stage-root>/<target>/manifest.json
+#   <stage-root>/<target>/SHA256SUMS
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -109,9 +113,9 @@ check_fragment_layout() {
   local top
   top=$(find "$fragment" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
   local expected_top
-  expected_top=$(printf 'LICENSES\nbin\nprovenance.json\n')
+  expected_top=$(printf 'LICENSES\nSHA256SUMS\nbin\nprovenance.json\n')
   [[ "$top" == "$expected_top" ]] ||
-    die "$label fragment must contain exactly bin/, LICENSES/ and provenance.json; found:
+    die "$label fragment must contain exactly bin/, LICENSES/, provenance.json and SHA256SUMS; found:
 $top"
 
   local actual_bin
@@ -136,6 +140,24 @@ $actual_bin"
 
 check_fragment_layout "$c_fragment" C "${c_tools[@]}"
 check_fragment_layout "$gnu_fragment" GNU "${gnu_tools[@]}"
+
+# ---- fragment 包级完整性：每个 fragment 一次 sha256sum -c -----------------
+#
+# 构建器为 fragment 的全部文件（bin/、LICENSES/、provenance.json）生成了
+# SHA256SUMS；这里对 artifact 往返后的实际字节做一次整包校验，取代旧的逐工
+# 具 sha256 断言。SHA256SUMS 自身不在清单内。
+
+verify_fragment_checksums() {
+  local fragment=$1 label=$2
+  echo "merge-freebsd-tools-stage: verifying $label fragment SHA256SUMS" >&2
+  (
+    cd "$fragment"
+    sha256sum -c SHA256SUMS
+  ) >&2 || die "$label fragment failed its package-level SHA256SUMS verification"
+}
+
+verify_fragment_checksums "$c_fragment" C
+verify_fragment_checksums "$gnu_fragment" GNU
 
 # ---- provenance 校验：合并前先钉死输入事实 --------------------------------
 
@@ -226,6 +248,8 @@ overlap=$(comm -12 \
   <(printf '%s\n' "${gnu_tools[@]}" | LC_ALL=C sort))
 [[ -z "$overlap" ]] || die "C and GNU fragments overlap on tools: $overlap"
 
+# prov_sha256 只做取值：per-tool sha256 是 provenance/manifest 里的记录字段，
+# 完整性已由包级 SHA256SUMS 断言，这里不再逐工具重算比对。
 prov_sha256() {
   local prov=$1 tool=$2
   jq -er --arg tool "$tool" \
@@ -233,34 +257,20 @@ prov_sha256() {
     die "provenance has no sha256 for $tool"
 }
 
-assert_sha_matches_binary() {
-  local path=$1 expected=$2 label=$3
-  local actual
-  actual=$(sha256sum "$path" | awk '{print $1}')
-  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] ||
-    die "$label provenance sha256 is not a sha-256 digest: $expected"
-  [[ "$actual" == "$expected" ]] ||
-    die "$label sha256 mismatch: provenance $expected != binary $actual"
-}
-
 # 工具名里的 "-" 不能出现在 bash 变量名里，动态变量统一用 "_" 代替。
 for tool in "${c_tools[@]}"; do
   [[ -f "$c_fragment/bin/$tool" && -s "$c_fragment/bin/$tool" ]] ||
     die "C fragment binary is missing or empty: $tool"
-  sha=$(prov_sha256 "$c_prov" "$tool")
-  assert_sha_matches_binary "$c_fragment/bin/$tool" "$sha" "C $tool"
   [[ $(jq -er --arg tool "$tool" \
     '.tools[] | select(.name == $tool) | .compiler_family' "$c_prov") == "clang" ]] ||
     die "C provenance $tool compiler_family is not clang"
-  printf -v "c_sha_${tool//-/_}" '%s' "$sha"
+  printf -v "c_sha_${tool//-/_}" '%s' "$(prov_sha256 "$c_prov" "$tool")"
 done
 
 for tool in "${gnu_tools[@]}"; do
   key=${tool//-/_}
   [[ -f "$gnu_fragment/bin/$tool" && -s "$gnu_fragment/bin/$tool" ]] ||
     die "GNU fragment binary is missing or empty: $tool"
-  sha=$(prov_sha256 "$gnu_prov" "$tool")
-  assert_sha_matches_binary "$gnu_fragment/bin/$tool" "$sha" "GNU $tool"
   record=$(jq -cer --arg tool "$tool" \
     '.tools[] | select(.name == $tool) |
      {compiler_family, compiler_version, target_triple, build_host, openmp_runtime, source}' \
@@ -275,7 +285,7 @@ for tool in "${gnu_tools[@]}"; do
     die "GNU provenance $tool target_triple does not match $gnu_triple"
   build_host=$(jq -er '.build_host' <<<"$record")
   [[ -n "$build_host" ]] || die "GNU provenance $tool build_host is empty"
-  printf -v "gnu_sha_$key" '%s' "$sha"
+  printf -v "gnu_sha_$key" '%s' "$(prov_sha256 "$gnu_prov" "$tool")"
   printf -v "gnu_compiler_version_$key" '%s' "$compiler_version"
   printf -v "gnu_build_host_$key" '%s' "$build_host"
 done
@@ -343,8 +353,10 @@ done
 #
 # 全局只记录 build.toolchain_mode=cross；编译器事实逐工具记录在
 # parameters.compiler_family / compiler_version / target_triple / build_host /
-# openmp_runtime / sha256，与二进制逐一对应。工具元数据（upstream/version/
-# tag/source）与 Linux 发布构建一样取自 tools/lock.json。
+# openmp_runtime / sha256。其中 sha256 是从 fragment provenance 原样带入的
+# 记录字段（schema 不变），stage 的完整性由包级 SHA256SUMS 断言，不再逐工具
+# 重算比对。工具元数据（upstream/version/tag/source）与 Linux 发布构建一样
+# 取自 tools/lock.json。
 
 goos=$(ecs_lock_target_field "$target" goos) || die "tools lock has no goos for $target"
 goarch=$(ecs_lock_target_field "$target" goarch) || die "tools lock has no goarch for $target"
@@ -605,6 +617,15 @@ actual:
 $actual"
 [[ $(jq -er '.tools | length' "$manifest") -eq 8 ]] ||
   die "merged manifest does not record exactly 8 tools"
+
+# 合并 stage 的包级校验清单：覆盖 bin/、LICENSES/ 与 manifest.json 的全部文
+# 件（SHA256SUMS 自身不在清单内）。VERIFY 阶段对它做一次 sha256sum -c，取代
+# 旧的逐工具 sha256 断言。
+(
+  cd "$out_stage"
+  find bin LICENSES manifest.json -type f -print0 | LC_ALL=C sort -z |
+    xargs -0 sha256sum >SHA256SUMS
+)
 
 echo "merge-freebsd-tools-stage: $target merged stage at $out_stage" >&2
 find "$out_stage" -maxdepth 2 -type f | LC_ALL=C sort >&2

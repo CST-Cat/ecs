@@ -6,9 +6,11 @@ set -euo pipefail
 # Default mode consumes the immutable prebuilt snapshot pinned in the lock
 # (Release ci-freebsd-gnu-sdk-v1, published by freebsd-sdk-release.yml):
 # download, verify SHA256, unpack, then run the full assertion and probe
-# suite. --from-source instead builds Binutils 2.43.1 and GCC 14.2.0
-# (c,fortran only) targeting the FreeBSD 15.1 sysroot. Does not build NPB
-# or STREAM.
+# suite. --acquire-only stops after the same download/verify/unpack (no
+# probes, no build, no sysroot install): it re-acquires the exact bytes the
+# gate job already probed, pinned by the same SHA256. --from-source instead
+# builds Binutils 2.43.1 and GCC 14.2.0 (c,fortran only) targeting the
+# FreeBSD 15.1 sysroot. Does not build NPB or STREAM.
 #
 # Probes: C/Fortran static hello, ieee_arithmetic, C OpenMP, Fortran OpenMP.
 # Asserts required runtime libs exist and g++/libstdc++ do not.
@@ -23,7 +25,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64|freebsd_arm64
                                             --prefix DIR [--work-dir DIR] [--jobs N]
-                                            [--from-source]
+                                            [--acquire-only] [--from-source]
        scripts/ci/freebsd_gnu_openmp_sdk.sh --print-lock --target TARGET
 USAGE
 }
@@ -38,6 +40,7 @@ prefix=""
 work_dir=""
 print_lock=0
 from_source=0
+acquire_only=0
 jobs="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -63,6 +66,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --from-source)
       from_source=1
+      shift
+      ;;
+    --acquire-only)
+      acquire_only=1
       shift
       ;;
     --print-lock)
@@ -115,8 +122,12 @@ EOF
 fi
 
 # Acquisition mode: the default consumes the immutable prebuilt snapshot
-# pinned at targets[$t].prebuilt; --from-source forces the full fetch/build
-# path used by the freebsd-sdk-release.yml publisher.
+# pinned at targets[$t].prebuilt; --acquire-only stops right after unpacking
+# that same snapshot; --from-source forces the full fetch/build path used by
+# the freebsd-sdk-release.yml publisher.
+if [[ "$acquire_only" -eq 1 && "$from_source" -eq 1 ]]; then
+  die "--acquire-only consumes the locked prebuilt snapshot and cannot be combined with --from-source"
+fi
 if [[ "$from_source" -eq 1 ]]; then
   sdk_mode="from-source"
 else
@@ -133,7 +144,14 @@ fi
 }
 [[ -z "$work_dir" ]] && work_dir="$ECS_REPO_ROOT/.ci/gnu-sdk-work"
 
-for cmd in curl sha256sum tar make gcc g++ flex bison; do
+# acquire-only never compiles: it only fetches, verifies and unpacks, so the
+# build toolchain commands are not required in that mode.
+if [[ "$acquire_only" -eq 1 ]]; then
+  required_commands=(curl sha256sum tar)
+else
+  required_commands=(curl sha256sum tar make gcc g++ flex bison)
+fi
+for cmd in "${required_commands[@]}"; do
   command -v "$cmd" >/dev/null 2>&1 || die "required command is missing: $cmd"
 done
 if ! command -v makeinfo >/dev/null 2>&1; then
@@ -160,7 +178,22 @@ fetch_verify() {
 }
 
 echo "freebsd-gnu-openmp-sdk: target=$target triple=$gnu_triple gcc=$gcc_version binutils=$binutils_version" >&2
-echo "freebsd-gnu-openmp-sdk: mode=$sdk_mode" >&2
+echo "freebsd-gnu-openmp-sdk: mode=$sdk_mode acquire_only=$acquire_only" >&2
+
+# Acquire the prebuilt snapshot: download from the lock-pinned URL, verify the
+# pinned SHA256, unpack into the prefix and drop any leftover cache marker.
+# Shared by the default prebuilt mode (which continues with the assertion and
+# probe suite) and by --acquire-only (which exits right after unpacking: the
+# gate job has already probed these exact bytes, pinned by the same SHA256).
+acquire_prebuilt() {
+  local sdk_tarball="$work_dir/$(basename "$prebuilt_url")"
+  fetch_verify "$prebuilt_url" "$prebuilt_sha256" "$sdk_tarball"
+  echo "freebsd-gnu-openmp-sdk: unpacking prebuilt SDK snapshot into $prefix" >&2
+  tar -xaf "$sdk_tarball" -C "$prefix" --strip-components=1
+  # Older snapshots still carry the marker of the retired cache mechanism;
+  # it is not part of the SDK contract.
+  rm -f "$prefix/.ecs-gnu-sdk-cache.id"
+}
 
 rm -rf "$prefix"
 mkdir -p "$prefix"
@@ -170,6 +203,12 @@ if [[ "$sdk_mode" == "from-source" ]]; then
   mkdir -p "$src_root" "$build_root"
 fi
 
+if [[ "$acquire_only" -eq 1 ]]; then
+  acquire_prebuilt
+  echo "freebsd-gnu-openmp-sdk: $target prebuilt SDK acquired at $prefix (acquire-only: no probes, no build)" >&2
+  exit 0
+fi
+
 echo "freebsd-gnu-openmp-sdk: installing FreeBSD sysroot" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --target "$target" \
@@ -177,13 +216,7 @@ bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --work-dir "$work_dir/sysroot-work"
 
 if [[ "$sdk_mode" == "prebuilt" ]]; then
-  sdk_tarball="$work_dir/$(basename "$prebuilt_url")"
-  fetch_verify "$prebuilt_url" "$prebuilt_sha256" "$sdk_tarball"
-  echo "freebsd-gnu-openmp-sdk: unpacking prebuilt SDK snapshot into $prefix" >&2
-  tar -xaf "$sdk_tarball" -C "$prefix" --strip-components=1
-  # Older snapshots still carry the marker of the retired cache mechanism;
-  # it is not part of the SDK contract.
-  rm -f "$prefix/.ecs-gnu-sdk-cache.id"
+  acquire_prebuilt
 else
   fetch_verify "$binutils_url" "$binutils_sha" "$src_root/binutils-$binutils_version.tar.xz"
   fetch_verify "$gcc_url" "$gcc_sha" "$src_root/gcc-$gcc_version.tar.xz"

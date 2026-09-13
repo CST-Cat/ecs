@@ -3,8 +3,12 @@ name: freebsd-chain
 # per-target FreeBSD 工具链构建链：由 freebsd-tools.yml 并行调用两次
 # （target=freebsd_amd64 与 target=freebsd_arm64），每次独立走完整链条：
 #   SYSROOT → C-DEPS → C-TOOLS ────────┐
-#   SYSROOT → GNU SDK → GNU BENCH ─────┴→ MERGE → VERIFY → REAL GATE
-# GNU SDK 只依赖 sysroot（脚本自装），与 C-tools 无数据关系，两条支路并行。
+#   SYSROOT → GNU SDK（纯门禁）────────┴→ MERGE → VERIFY → REAL GATE
+#             └→ GNU BENCH：不经 artifact 中继，按同一 lock 直接从 immutable
+#                Release 消费同一份 SDK 字节（--acquire-only）。
+# GNU SDK 门禁 job 只依赖 sysroot（脚本自装），与 C-tools 无数据关系，两条
+# 支路并行；门禁对 lock 钉定 URL 下载的 prebuilt 快照跑全部既有断言与 5 项
+# probe，字节由 SHA256 钉死，GNU BENCH 据此直接从 Release 取同一字节。
 # 静态检查与整体依赖（legacy-absent / linux-static / workflow-static）由调用方
 # freebsd-tools.yml 承担，本文件 SYSROOT 无 needs。
 # 每条链末尾的 REAL GATE 在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行
@@ -179,7 +183,10 @@ jobs:
       - name: Print GNU SDK lock
         run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target ${{ inputs.target }} --print-lock
 
-      - name: Build FreeBSD GNU C/Fortran/OpenMP SDK (${{ inputs.target }})
+      # 纯门禁：按 lock 钉 URL 下载 prebuilt 快照 → SHA256 校验 → 解包 →
+      # 全部既有断言与 5 项 probe。不产出 artifact：probe 验证过的字节由
+      # SHA256 钉死，GNU BENCH 直接从 immutable Release 消费同一字节。
+      - name: Gate the pinned GNU SDK snapshot (${{ inputs.target }})
         run: |
           set -euo pipefail
           bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
@@ -187,14 +194,6 @@ jobs:
             --prefix "$PWD/.ci/gnu-sdk/${{ inputs.target }}" \
             --work-dir "$PWD/.ci/gnu-sdk-work" \
             --jobs "$(nproc)"
-
-      - name: Upload GNU SDK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ecs-freebsd-gnu-sdk-${{ inputs.target }}
-          path: .ci/gnu-sdk/${{ inputs.target }}
-          if-no-files-found: error
-          retention-days: 7
 
   gnu-bench:
     name: GNU BENCH (${{ inputs.target }})
@@ -211,13 +210,19 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld build-essential file jq curl xz-utils
+          sudo apt-get install -y clang lld build-essential file jq curl xz-utils zstd
 
-      - name: Download Stage 4 GNU SDK
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ecs-freebsd-gnu-sdk-${{ inputs.target }}
-          path: .ci/gnu-sdk/${{ inputs.target }}
+      # 直接消费 immutable Release：下载 lock 钉 URL 的 prebuilt 快照 →
+      # SHA256 校验 → 解包 → 清理残留 marker 后退出（不跑 probe、不构建；
+      # probe 已由 GNU SDK 门禁 job 对同一字节完成）。zstd 用于 .tar.zst 解包。
+      - name: Acquire prebuilt GNU SDK
+        run: |
+          set -euo pipefail
+          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
+            --acquire-only \
+            --target ${{ inputs.target }} \
+            --prefix "$PWD/.ci/gnu-sdk/${{ inputs.target }}" \
+            --work-dir "$PWD/.ci/gnu-sdk-work"
 
       - name: Print builder params
         run: bash scripts/build_tools_freebsd_gnu.sh --target ${{ inputs.target }} --print-params
