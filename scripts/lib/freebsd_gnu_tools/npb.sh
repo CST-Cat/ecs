@@ -62,6 +62,8 @@ ecs_freebsd_gnu_npb_download() {
 #     NPB3.4-MPI/config/make.def、NPB3.4-MPI/MG/mpinpb.f90、
 #     NPB3.4-OMP/config/make.def）：npb.sh 本就按 make.def.template 重写
 #     config/make.def，MPI 树与生成物不进入 OMP EP/FT 构建。
+# git 不保存空目录：官方 tarball 自带的 NPB3.4-OMP/bin/（EP/FT 链接输出
+# 目录，BINDIR=../bin）在镜像子树中缺失，fetch_mirror 按官方布局补建。
 # 使用前仍逐文件 sha256 校验消费集；任何缺失或不匹配都终止构建。
 ecs_freebsd_gnu_npb_mirror_manifest() {
   cat <<'ECS_NPB_MIRROR_MANIFEST'
@@ -136,6 +138,9 @@ ecs_freebsd_gnu_npb_fetch_mirror() {
   (cd "$mirror_root" && sha256sum -c "$tmp/consumed.sha256") 1>&2 ||
     { rm -rf "$tmp"; ecs_freebsd_gnu_die "npb: mirror consumed-set verification failed"; }
   mv "$mirror_root" "$target"
+  # git 不保存空目录：官方 tarball 的 NPB3.4-OMP/bin/（EP/FT 链接输出目录，
+  # BINDIR=../bin，官方分发自带）在镜像里缺失，按官方布局补建。
+  mkdir -p "$target/NPB3.4-OMP/bin"
   rm -rf "$tmp"
   echo "npb: mirror fallback staged verified NPB${ECS_NPB_VERSION} into $srcroot" >&2
 }
