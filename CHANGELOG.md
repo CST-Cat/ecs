@@ -1,10 +1,10 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.7.31` 的主要变化。
+`v0.1.0` 到当前版本 `v0.8.1` 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.7.31` release.
+the current `v0.8.1` release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
