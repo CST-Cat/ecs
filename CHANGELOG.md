@@ -11,6 +11,24 @@ the current [v0.8.0](https://github.com/CST-Cat/ecs/releases/tag/v0.8.0) release
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
+## Unreleased
+
+### 中文
+
+- 工具包新增 `freebsd_amd64` 与 `freebsd_arm64` 双架构，各含 sysbench、zstd、npb-ep、npb-ft、openssl、stream、fio、iperf3 共 8 个静态 FreeBSD ELF 工具，不含 `ping` 与 `nexttrace-tiny`。
+- FreeBSD 工具全部在 ubuntu-24.04 交叉构建：Clang/LLD 构建 C 工具，源码构建 GNU 14.2.0 C/Fortran/OpenMP SDK（Binutils 2.43.1，无 g++/libstdc++）构建 NPB 3.4.4 EP/FT 与 STREAM；FreeBSD 15.1 sysroot 与 GNU SDK 均以 immutable 快照（lock 钉 URL+SHA256）直接消费。
+- 打包前每架构必须通过真实 FreeBSD 15.1 客户机内的 8/8 运行门禁（含 NPB `Verification = SUCCESSFUL`、STREAM `Solution Validates`、fio posixaio QD32/QD64 有效队列深度），`bundle-release` 的 assemble 依赖该门禁。
+- 工具包带每工具 manifest（compiler_family/compiler_version/target_triple/build_host/openmp_runtime），发布物经真实 FreeBSD 客户机内的发布物级 E2E 验收后才会发布；校验收敛为按包 SHA256。
+- CI 重构：双架构独立并行链抽取为 reusable workflow，全仓零 `actions/cache`。
+
+### English
+
+- The tool package gains `freebsd_amd64` and `freebsd_arm64` targets, each shipping eight static FreeBSD ELF tools — sysbench, zstd, npb-ep, npb-ft, openssl, stream, fio and iperf3 — with no `ping` or `nexttrace-tiny`.
+- All FreeBSD tools are cross-built on ubuntu-24.04: Clang/LLD builds the C tools, while a from-source GNU 14.2.0 C/Fortran/OpenMP SDK (Binutils 2.43.1, no g++/libstdc++) builds NPB 3.4.4 EP/FT and STREAM. The FreeBSD 15.1 sysroot and the GNU SDK are consumed directly as immutable snapshots pinned by URL+SHA256 in their locks.
+- Before packaging, each architecture must pass the 8/8 runtime gate inside a genuine FreeBSD 15.1 guest (including NPB `Verification = SUCCESSFUL`, STREAM `Solution Validates`, and fio posixaio QD32/QD64 effective queue depth); `bundle-release` assemble depends on that gate.
+- The package carries a per-tool manifest (compiler_family/compiler_version/target_triple/build_host/openmp_runtime); releases run an artifact-level E2E inside a genuine FreeBSD guest, and verification is consolidated to package-level SHA256.
+- CI refactor: the two per-architecture parallel chains were extracted into a reusable workflow, and the repository now has zero `actions/cache`.
+
 ## 0.8.0 — 2026-09-13
 
 ### 中文
