@@ -25,6 +25,15 @@ name: freebsd-sdk-release
 # → 用新 assets 的 SHA256SUMS 更新 tools/freebsd-gnu-openmp.lock.json 的
 # targets[*].prebuilt.sha256（source_commit/generated 同步更新）。
 #
+# 阶段 2–5 合并批次（SDK 裁剪瘦身）：构建后由脚本在发布字节上依次完成
+# share/man + share/info 精确删除（仅这两个目录）→ A 侧 probe/consumer →
+# host ELF --strip-debug（inode 安全）→ 2.6/2.7 不变量校验 → LTO/gcov
+# inventory → B 侧 probe/consumer → A/B 8 类输出 SHF_ALLOC section 等价
+# 校验 → gcc/gfortran -### 调用链检查；GCC configure 追加
+# --disable-lto/--disable-gcov（不手工删除组件）。每架构 job 上传
+# slim-evidence artifact（manifests/逐 ELF 捕获/A·B 输出二进制/调用链日志/
+# inventory/share 清单/evidence.json）供审查。
+#
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与；
 # 永久禁止：FreeBSD VM builder。
 
@@ -64,7 +73,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
-            texinfo file xz-utils curl jq zstd
+            texinfo file xz-utils curl jq zstd python3
 
       - name: Print GNU SDK lock
         run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_amd64 --print-lock
@@ -79,12 +88,21 @@ jobs:
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_amd64" \
             --jobs "$(nproc)"
 
+      - name: Upload GNU SDK slim evidence artifact (freebsd_amd64)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-slim-evidence-freebsd_amd64
+          path: .ci/gnu-sdk-work-freebsd_amd64/slim-evidence/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Package GNU SDK tarball (freebsd_amd64)
         run: |
           set -euo pipefail
           mkdir -p .ci/dist
           tar -C .ci/gnu-sdk -caf \
             .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst freebsd_amd64
+          wc -c .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
           sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
 
       - name: Upload GNU SDK tarball artifact (freebsd_amd64)
@@ -111,7 +129,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
-            texinfo file xz-utils curl jq zstd
+            texinfo file xz-utils curl jq zstd python3
 
       - name: Print GNU SDK lock
         run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target freebsd_arm64 --print-lock
@@ -126,12 +144,21 @@ jobs:
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_arm64" \
             --jobs "$(nproc)"
 
+      - name: Upload GNU SDK slim evidence artifact (freebsd_arm64)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-slim-evidence-freebsd_arm64
+          path: .ci/gnu-sdk-work-freebsd_arm64/slim-evidence/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Package GNU SDK tarball (freebsd_arm64)
         run: |
           set -euo pipefail
           mkdir -p .ci/dist
           tar -C .ci/gnu-sdk -caf \
             .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst freebsd_arm64
+          wc -c .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
           sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
 
       - name: Upload GNU SDK tarball artifact (freebsd_arm64)
