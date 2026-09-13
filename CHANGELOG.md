@@ -23,14 +23,14 @@ the current `v0.8.1` release.
 
 - FreeBSD 8 个发布工具全量 strip（`--strip-unneeded`）：工具包体 22 MiB → 6.1 MiB（`freebsd_amd64`）/ 5.6 MiB（`freebsd_arm64`），strip 前后全部 SHF_ALLOC runtime section 逐字节等价证明，manifest `stripped: true` 与实际字节一致。
 - GNU SDK 裁剪 512 MiB → 50 MiB：host ELF `strip --strip-debug`、GCC `--disable-lto`、`--disable-gcov`、删除 `share/man` 与 `share/info`；A/B 输出等价与 `gcc`/`gfortran -###` 调用链证据。
-- NASA NPB 下载持续 500 期间临时启用镜像回退（消费子树经内嵌 manifest 逐文件校验，lock sha256 钉值不变，官方恢复后回切）。
+- NASA NPB 下载 500 期间曾临时启用镜像回退（消费子树经内嵌 manifest 逐文件校验，lock sha256 钉值不变），官方恢复后已在本发布中回切官方源。
 - SDK 快照发布模型改为版本递增 tag（v1.1 起）：GitHub Immutable Releases 使旧 rolling tag `ci-freebsd-gnu-sdk-v1` 不可重建，`freebsd-sdk-release` 的 publish 改为 create-only，同名 Release/tag 已存在时直接失败。
 
 ### English
 
 - All eight FreeBSD release tools are now fully stripped (`--strip-unneeded`): the tool package shrinks from 22 MiB to 6.1 MiB (`freebsd_amd64`) and 5.6 MiB (`freebsd_arm64`), with byte-for-byte equivalence proven for every SHF_ALLOC runtime section across the strip and the manifest `stripped: true` matching the actual bytes.
 - The GNU SDK is slimmed from 512 MiB to 50 MiB: host ELF `strip --strip-debug`, GCC `--disable-lto` and `--disable-gcov`, and removal of `share/man` and `share/info`; backed by A/B output equivalence and `gcc`/`gfortran -###` driver call-chain evidence.
-- While NASA keeps serving HTTP 500 for NPB downloads, a temporary mirror fallback is in place (the consumed subtree is verified file-by-file against an embedded manifest; the pinned sha256 in the lock is unchanged, and the official source is restored once NASA recovers).
+- A temporary mirror fallback was in effect while NASA kept serving HTTP 500 for NPB downloads (the consumed subtree was verified file-by-file against an embedded manifest; the pinned sha256 in the lock is unchanged), and it has been reverted to the official source in this release after NASA recovered.
 - SDK snapshot publishing moves to version-incrementing tags (from v1.1 on): GitHub Immutable Releases made the old rolling tag `ci-freebsd-gnu-sdk-v1` impossible to recreate, and the `freebsd-sdk-release` publish step is now create-only, failing directly when a Release/tag of the same name already exists.
 
 ## 0.8.0 — 2026-09-13
