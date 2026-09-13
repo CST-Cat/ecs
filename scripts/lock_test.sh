@@ -23,7 +23,9 @@ bundle_file="$repo_root/tools/BUNDLE"
 [[ -f "$bundle_file" ]] || die "missing tools/BUNDLE"
 [[ "$(wc -l < "$bundle_file")" -eq 1 ]] || die "tools/BUNDLE must contain exactly one line"
 bundle_name=$(<"$bundle_file")
-[[ "$bundle_name" =~ ^bundle-v[1-9][0-9]*$ ]] || die "invalid tools/BUNDLE"
+# bundle 版本线允许 bundle-vN(.M)*（如 bundle-v1.1）；与 run.sh 的
+# bundle-v[0-9A-Za-z._+-]* 校验和 bundle-release.yml 的 bundle-v* tag 对齐。
+[[ "$bundle_name" =~ ^bundle-v[1-9][0-9]*(\.[0-9]+)*$ ]] || die "invalid tools/BUNDLE"
 
 jq -e '
   (.architectures | length == 9) and

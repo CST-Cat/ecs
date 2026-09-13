@@ -1,17 +1,17 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.7.31` 及后续 `Unreleased` 的主要变化。
+`v0.1.0` 到当前版本 [v0.8.0](https://github.com/CST-Cat/ecs/releases/tag/v0.8.0) 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.7.31` release and subsequent `Unreleased` changes.
+the current [v0.8.0](https://github.com/CST-Cat/ecs/releases/tag/v0.8.0) release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
-## Unreleased
+## 0.8.0 — 2026-09-13
 
 ### 中文
 
