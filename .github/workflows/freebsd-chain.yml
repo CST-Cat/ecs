@@ -2,10 +2,14 @@ name: freebsd-chain
 
 # per-target FreeBSD 工具链构建链：由 freebsd-tools.yml 并行调用两次
 # （target=freebsd_amd64 与 target=freebsd_arm64），每次独立走完整链条：
-#   SYSROOT → C-DEPS → C-TOOLS → GNU SDK → GNU BENCH → MERGE → VERIFY
+#   SYSROOT → C-DEPS → C-TOOLS ────────┐
+#   SYSROOT → GNU SDK → GNU BENCH ─────┴→ MERGE → VERIFY → REAL GATE
+# GNU SDK 只依赖 sysroot（脚本自装），与 C-tools 无数据关系，两条支路并行。
 # 静态检查与整体依赖（legacy-absent / linux-static / workflow-static）由调用方
-# freebsd-tools.yml 承担，本文件 SYSROOT 无 needs；REAL GATE（真实 FreeBSD VM
-# 内真实执行 8 个工具）同样在 freebsd-tools.yml，不进本链。
+# freebsd-tools.yml 承担，本文件 SYSROOT 无 needs。
+# 每条链末尾的 REAL GATE 在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行
+# 合并 stage 的 8 个工具，VM 只以 consumer/judge 身份出现
+# （scripts/ci/freebsd_tools_gate.sh）。
 # 构建逻辑全部在 scripts/，本 workflow 只做编排；所有构建都在 ubuntu-24.04
 # amd64 宿主交叉完成，无 VM 参与 builder；永久禁止：FreeBSD VM builder。
 #
@@ -155,7 +159,7 @@ jobs:
 
   gnu-sdk:
     name: GNU SDK (${{ inputs.target }})
-    needs: [c-tools]
+    needs: [sysroot]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -315,3 +319,40 @@ jobs:
           bash scripts/verify_tools_stage.sh \
             --target ${{ inputs.target }} \
             --stage-root "$PWD/.ci/freebsd-tools-stage"
+
+  real-gate:
+    name: REAL GATE (${{ inputs.target }})
+    needs: [verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-tools-stage/${{ inputs.target }}
+
+      - name: Start FreeBSD 15.1 VM (consumer/judge)
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: ${{ inputs.target == 'freebsd_amd64' && 'x86_64' || 'aarch64' }}
+          sync: rsync
+          copyback: false
+          custom-shell-name: freebsd
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
+
+      - name: REAL GATE
+        shell: freebsd {0}
+        run: |
+          set -eu
+          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
+            --target ${{ inputs.target }} \
+            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/${{ inputs.target }}"

@@ -1,26 +1,23 @@
 name: freebsd-tools
 
-# 正式生产 workflow：FreeBSD 工具链 CI 编排层（静态检查 + 双构建链 + REAL GATE）。
+# 正式生产 workflow：FreeBSD 工具链 CI 编排层（静态检查 + 双链调用）。
 #
 # 结构（编排只做依赖关系，构建逻辑全在 scripts/ 与 freebsd-chain.yml）：
 #   legacy-absent / linux-static / workflow-static（独立静态检查）
 #   → chain-amd64 ∥ chain-arm64：并行调用 .github/workflows/freebsd-chain.yml
-#     （target=freebsd_amd64 / freebsd_arm64），两条链互不等待；每条链内部
-#     SYSROOT → C-DEPS → C-TOOLS → GNU SDK → GNU BENCH → MERGE → VERIFY，
-#     链实现与 cache 政策见 freebsd-chain.yml
-#   → 两条链全部成功后，REAL GATE AMD64 ∥ REAL GATE ARM64 并行启动：
-#     在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行合并 stage 的 8 个工具，
-#     VM 只以 consumer/judge 身份出现（scripts/ci/freebsd_tools_gate.sh）。
+#     （target=freebsd_amd64 / freebsd_arm64），两条链互不等待。链实现包含
+#     结构验证（VERIFY）与每链一个的真实 FreeBSD 15.1 VM 运行门禁（REAL
+#     GATE：真实执行合并 stage 的 8 个工具，VM 只以 consumer/judge 身份
+#     出现），细节与 cache 政策见 freebsd-chain.yml。
 #
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder；
 # 永久禁止：FreeBSD VM builder。
 #
-# bundle-release.yml 通过 workflow_call 整体复用本 workflow（同 run 内 artifact
-# 按名可取）。
+# 触发只有 workflow_dispatch 与 workflow_call（bundle-release.yml 通过
+# workflow_call 整体复用本 workflow，同 run 内 artifact 按名可取）；Linux
+# 工具同样只在发布时构建，FreeBSD 不再有独立 push 触发器。
 
 on:
-  push:
-    branches: [bsd]
   workflow_dispatch:
   # bundle-release.yml 通过 workflow_call 复用本 workflow 的已 gate 产物。
   workflow_call:
@@ -192,77 +189,3 @@ jobs:
     uses: ./.github/workflows/freebsd-chain.yml
     with:
       target: freebsd_arm64
-
-  real-gate-amd64:
-    name: REAL GATE AMD64
-    needs: [chain-amd64, chain-arm64]
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Download merged FreeBSD tools stage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ecs-freebsd-tools-stage-freebsd_amd64
-          path: .ci/freebsd-tools-stage/freebsd_amd64
-
-      - name: Start FreeBSD 15.1 VM (consumer/judge)
-        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
-        with:
-          release: "15.1"
-          arch: x86_64
-          sync: rsync
-          copyback: false
-          custom-shell-name: freebsd
-          prepare: |
-            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
-
-      - name: REAL GATE
-        shell: freebsd {0}
-        run: |
-          set -eu
-          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
-          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
-            --target freebsd_amd64 \
-            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/freebsd_amd64"
-
-  real-gate-arm64:
-    name: REAL GATE ARM64
-    needs: [chain-amd64, chain-arm64]
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Download merged FreeBSD tools stage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ecs-freebsd-tools-stage-freebsd_arm64
-          path: .ci/freebsd-tools-stage/freebsd_arm64
-
-      - name: Start FreeBSD 15.1 VM (consumer/judge)
-        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
-        with:
-          release: "15.1"
-          arch: aarch64
-          sync: rsync
-          copyback: false
-          custom-shell-name: freebsd
-          prepare: |
-            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
-
-      - name: REAL GATE
-        shell: freebsd {0}
-        run: |
-          set -eu
-          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
-          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
-            --target freebsd_arm64 \
-            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/freebsd_arm64"
