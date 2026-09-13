@@ -4,7 +4,8 @@ set -euo pipefail
 # Linux-hosted FreeBSD GNU C/Fortran/OpenMP SDK (Stage 4).
 #
 # Default mode consumes the immutable prebuilt snapshot pinned in the lock
-# (Release ci-freebsd-gnu-sdk-v1, published by freebsd-sdk-release.yml):
+# (Release tag ci-freebsd-gnu-sdk-v1.1; SDK publishing uses version-incrementing
+# tags since v1.1, and the maintainer re-points the lock after each publish):
 # download, verify SHA256, unpack, then run the full assertion and probe
 # suite. --acquire-only stops after the same download/verify/unpack (no
 # probes, no build, no sysroot install): it re-acquires the exact bytes the

@@ -8,7 +8,8 @@ name: freebsd-sdk-release
 # ubuntu-24.04 runner：work-dir 天然隔离，脚本在 work-dir 下复用的 src/build
 # 树不会跨目标互相污染。
 #
-# 产物发布到固定 tag `ci-freebsd-gnu-sdk-v1` 的 GitHub Release：
+# 产物发布到 GitHub Release：tag 由 dispatch 输入 sdk_version 决定，格式
+# `ci-freebsd-gnu-sdk-v${sdk_version}`（输入 1.2 → tag `ci-freebsd-gnu-sdk-v1.2`）：
 #   - ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
 #   - ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
 #   - SHA256SUMS（两个 tarball 的 sha256，格式 `sha256  filename`）
@@ -17,12 +18,14 @@ name: freebsd-sdk-release
 #
 # 何时需要重发布：lock 的 gcc/binutils 版本或源 SHA256 变化、
 # scripts/ci/freebsd_gnu_openmp_sdk.sh 或 sysroot lock 变化。重跑本 workflow
-# 是合法维护动作：GitHub Immutable Releases 已启用，Release 资产不可原位
-# 增删改，重发布 = 整体删除重建（gh release delete --cleanup-tag 后按同一
-# tag 重新 create），消费方始终以 lock 钉定的 SHA256 与 SHA256SUMS 为准。
+# 是合法维护动作，但必须递增 sdk_version 换新 tag：GitHub Immutable Releases
+# 已启用，曾发布过 Release 的 tag 名被永久保留（含已烧掉的 ci-freebsd-gnu-sdk-v1），
+# delete→create 同名 tag 不可行；publish 为 create-only，同名 Release/tag
+# 已存在时直接失败，消费方始终以 lock 钉定的 SHA256 与 SHA256SUMS 为准。
 #
-# 维护闭环：工具链/脚本变更 → 重跑本 workflow（--from-source 全量源码构建）
-# → 用新 assets 的 SHA256SUMS 更新 tools/freebsd-gnu-openmp.lock.json 的
+# 维护闭环：工具链/脚本变更 → 重跑本 workflow（新 sdk_version，--from-source
+# 全量源码构建）→ 用新 assets 的 SHA256SUMS 更新
+# tools/freebsd-gnu-openmp.lock.json 的
 # targets[*].prebuilt.sha256（source_commit/generated 同步更新）。
 #
 # 阶段 2–5 合并批次（SDK 裁剪瘦身）：构建后由脚本在发布字节上依次完成
@@ -39,18 +42,20 @@ name: freebsd-sdk-release
 
 on:
   workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: 'SDK snapshot version, e.g. 1.2; publishes tag ci-freebsd-gnu-sdk-v1.2 (append-only, bump for every re-publish)'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-# 两次 dispatch 串行排队，防止并行 runs 互相 clobber 同一个 Release；
-# 不取消进行中的 run，宁可排队等待完整构建。
+# 两次 dispatch 串行排队（publish 为 create-only，同版本重复发布会被直接
+# 拒绝）；不取消进行中的 run，宁可排队等待完整构建。
 concurrency:
   group: freebsd-sdk-release
   cancel-in-progress: false
-
-env:
-  SDK_RELEASE_TAG: ci-freebsd-gnu-sdk-v1
 
 jobs:
   sdk-amd64:
@@ -220,29 +225,45 @@ jobs:
             ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
           - 校验 / Verify: sha256sum -c SHA256SUMS
 
-          Release 为 immutable：重发布通过整体删除并重建完成，消费方始终以
-          SHA256SUMS 为准。The Release is immutable: re-publishing deletes
-          and recreates it as a whole, and consumers always defer to
+          SDK 快照按版本递增 tag 发布（append-only；Immutable Releases 下
+          同名 tag 不可删除重建），消费方始终以 SHA256SUMS 为准。SDK
+          snapshots are published under incrementing version tags
+          (append-only; an existing tag cannot be deleted and recreated
+          under Immutable Releases), and consumers always defer to
           SHA256SUMS.
           EOF
 
-      # Release 为 immutable：已存在时不能 --clobber/--edit 原位覆盖（422），
-      # 只能整体删除（连 tag 一起）后按当前 commit 重建。
-      - name: 'Create the SDK Release (immutable: delete and recreate)'
+      # Release 为 immutable：SDK 快照 tag 为 append-only 版本递增模型，
+      # 发布是 create-only——同名 Release/tag 已存在时直接失败（不再 delete、
+      # 不再 cleanup-tag），必须递增 sdk_version 换新 tag。
+      - name: 'Create the SDK Release (create-only: fail if the Release/tag already exists)'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          SDK_RELEASE_TAG: ci-freebsd-gnu-sdk-v${{ inputs.sdk_version }}
+          SDK_VERSION_INPUT: ${{ inputs.sdk_version }}
         run: |
           set -euo pipefail
+          # sdk_version 会拼进永久不可删除的 tag 名，格式必须先钉死
+          # （bundle-vN(.M)* 风格，与 scripts/lock_test.sh 的 bundle 版本线一致）。
+          [[ "$SDK_RELEASE_TAG" =~ ^ci-freebsd-gnu-sdk-v[1-9][0-9]*(\.[0-9]+)*$ ]] || {
+            echo "invalid sdk_version input: '$SDK_VERSION_INPUT' (expected e.g. 1.2)" >&2
+            exit 1
+          }
           cd .ci/dist
           assets=(
             ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
             ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
             SHA256SUMS
           )
-          title='FreeBSD GNU SDK snapshot (ci-freebsd-gnu-sdk-v1)'
+          title="FreeBSD GNU SDK snapshot ($SDK_RELEASE_TAG)"
           if gh release view "$SDK_RELEASE_TAG" >/dev/null 2>&1; then
-            gh release delete "$SDK_RELEASE_TAG" --yes --cleanup-tag
+            echo "Release $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only under Immutable Releases; bump sdk_version and re-dispatch." >&2
+            exit 1
+          fi
+          if gh api "repos/$GH_REPO/git/ref/tags/$SDK_RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only under Immutable Releases; bump sdk_version and re-dispatch." >&2
+            exit 1
           fi
           gh release create "$SDK_RELEASE_TAG" "${assets[@]}" \
             --title "$title" \
