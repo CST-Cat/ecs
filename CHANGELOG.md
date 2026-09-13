@@ -11,7 +11,7 @@ the current `v0.7.31` release.
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
-## Unreleased
+## 0.8.0 — 2026-09-13
 
 ### 中文
 
