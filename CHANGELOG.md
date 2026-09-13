@@ -23,8 +23,12 @@ the current `v0.7.31` release and subsequent `Unreleased` changes.
 - 平台解析下沉到执行计划：`RequiredTools` 新增按平台解析的边界，FreeBSD 不再为延迟、路由和回程模块 stage `ping` 与 `nexttrace-tiny`，模块描述符保持平台无关；Linux 行为不变。
 - FreeBSD 上选中 `ookla` 直接失败（无官方客户端），不再回退到 Linux 的 Packagecloud 路径。
 - 发布与工具包接线扩展到九个平台目标；FreeBSD 工具归档不含 `ping` 与 `nexttrace-tiny`。
-- `freebsd_arm64` 工具包在打包前必须通过真实 FreeBSD/aarch64 客户机上的 fio 功能门禁（qemu-user 建不起 fio 需要的共享内存段），`bundle-release` 的 assemble 现在依赖该门禁。
-- 新增发布物级端到端验收：由 `scripts/package.sh` 产出的真实发布布局在真实 FreeBSD 客户机里驱动真实 `run.sh`，覆盖 SHA-256 校验、`ecs` 解包、Bundle 基址解析、固定工具暂存、平台 `RequiredTools` 解析，以及一次真实基准运行。
+- 统一真实运行门禁：打包前，全部 8 个工具必须在真实 FreeBSD 15.1 客户机（amd64 与 arm64 双架构）内真实执行并通过 8/8 门禁（含 fio posixaio QD32/QD64 有效队列深度、NPB EP/FT `Verification = SUCCESSFUL`、STREAM `Solution Validates`），`bundle-release` 的 assemble 依赖该门禁。
+- 新增发布物级端到端验收：由 `scripts/package.sh` 产出的真实发布布局在真实 FreeBSD 客户机里驱动真实 `run.sh`，覆盖 SHA-256 校验、`ecs` 解包、Bundle 基址解析、固定工具暂存、平台 `RequiredTools` 解析，以及一次真实基准运行；端到端验收只验最终发布包完整性（SHA-256、成员、manifest 与逐工具 sha256 对应），工具真执行由打包前的运行门禁承担。
+- 新增 Linux-hosted FreeBSD 交叉构建管线：钉死 URL+SHA256 的 FreeBSD 15.1 sysroot 合同；Clang/LLD 交叉构建 sysbench、zstd、openssl、fio、iperf3；源码构建 GNU 14.2.0 C/Fortran/OpenMP SDK（Binutils 2.43.1，无 g++/libstdc++）；NPB 3.4.4 EP/FT（Class A、randi8、`-O3 -fopenmp -static`）与 STREAM（复用统一参数）。
+- 工具包带每工具 manifest（`compiler_family`/`compiler_version`/`target_triple`/`build_host`/`openmp_runtime`/逐工具 sha256），结构化验证与任何 builder 解耦；双架构真实 VM 运行门禁 8/8 后才允许打包，并接入 `bundle-release` 的 publish 硬依赖。
+- CI 重构：FreeBSD 双架构拆成各自独立的并行链并抽取为 reusable workflow；全仓零 `actions/cache`（与 main 一致）；GNU SDK 改为消费 immutable Release 快照（lock 钉 SHA256，`ci-freebsd-gnu-sdk-v1`，由维护者触发的 `freebsd-sdk-release` 发布）。
+- `ci.yml` 的 FreeBSD runtime smoke 在 main 推送运行，并修复其休眠的 `freebsd_runtime.sh build` 缺陷（宿主构建 + rsync 进真实 VM 执行）；删除重复的 `bsd.yml`，统一为单一 CI 定义。
 
 ### English
 
@@ -36,8 +40,12 @@ the current `v0.7.31` release and subsequent `Unreleased` changes.
 - Platform resolution moved into the execution plan: `RequiredTools` gained a platform resolver, so FreeBSD no longer stages `ping` or `nexttrace-tiny` for the latency, route and backtrace modules while module descriptors stay platform-independent. Linux behaviour is unchanged.
 - Selecting `ookla` on FreeBSD now fails closed (there is no official client) instead of falling back to the Linux Packagecloud path.
 - Release and tool-package wiring now covers nine platform targets; the FreeBSD tool archives contain neither `ping` nor `nexttrace-tiny`.
-- The `freebsd_arm64` tool package must pass a functional fio gate on a genuine FreeBSD/aarch64 guest before it is packaged (qemu-user cannot set up the shared-memory segment fio needs), and `bundle-release` assemble now depends on that gate.
-- Added an artifact-level end-to-end acceptance: the real release layout produced by `scripts/package.sh` drives the real `run.sh` inside a genuine FreeBSD guest, covering SHA-256 verification, `ecs` extraction, Bundle base resolution, frozen tool staging, platform `RequiredTools` resolution, and one real benchmark run.
+- A unified real-run gate: before packaging, all eight tools must be executed for real inside genuine FreeBSD 15.1 guests (both the amd64 and arm64 architectures) and pass the 8/8 gate (including fio posixaio QD32/QD64 effective queue depth, NPB EP/FT `Verification = SUCCESSFUL`, and STREAM `Solution Validates`); `bundle-release` assemble depends on that gate.
+- Added an artifact-level end-to-end acceptance: the real release layout produced by `scripts/package.sh` drives the real `run.sh` inside a genuine FreeBSD guest, covering SHA-256 verification, `ecs` extraction, Bundle base resolution, frozen tool staging, platform `RequiredTools` resolution, and one real benchmark run; the end-to-end acceptance only verifies final release-package integrity (SHA-256, members, manifest, and per-tool sha256 correspondence), while real tool execution is carried by the pre-packaging run gate.
+- Added a Linux-hosted FreeBSD cross-build pipeline: a FreeBSD 15.1 sysroot contract pinned by URL and SHA-256; Clang/LLD cross-builds of sysbench, zstd, openssl, fio and iperf3; a from-source GNU 14.2.0 C/Fortran/OpenMP SDK (Binutils 2.43.1, no g++/libstdc++); and NPB 3.4.4 EP/FT (Class A, randi8, `-O3 -fopenmp -static`) plus STREAM (reusing the unified parameters).
+- The tool package now carries a per-tool manifest (`compiler_family`/`compiler_version`/`target_triple`/`build_host`/`openmp_runtime`/per-tool sha256); structured verification is decoupled from any builder, and packaging is allowed only after the dual-architecture real-VM run gate passes 8/8, which `bundle-release` publish hard-depends on.
+- CI rework: the two FreeBSD architectures each became an independent parallel chain extracted into a reusable workflow; the repository now uses zero `actions/cache` (consistent with main); the GNU SDK now consumes an immutable Release snapshot (SHA-256-pinned lock, `ci-freebsd-gnu-sdk-v1`, published by the maintainer-triggered `freebsd-sdk-release` workflow).
+- The FreeBSD runtime smoke in `ci.yml` now runs on main pushes, and its dormant `freebsd_runtime.sh build` defect is fixed (host build + rsync into a real VM for execution); the duplicate `bsd.yml` is removed, leaving a single CI definition.
 
 ## 0.7.31 — 2026-09-07
 
