@@ -9,6 +9,20 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.5
+
+### 中文
+
+- 修复 FreeBSD C/GNU 构建器在复用相对 sysroot、目标依赖和 SDK 路径时，进入上游源码子目录后路径失效的问题；两架构构建现在统一解析为绝对路径。
+- 修复 FreeBSD 15.1 VM prepare 对 `pkg add` 错误传入 `-y` 的问题，继续保留精确 package lock、SHA256 校验、4 vCPU guest、真实 REAL GATE 和 ARTIFACT E2E。
+- Bundle 继续消费 immutable `ci-freebsd-gnu-sdk-v1.3`，保持双架构、8 个工具、manifest、运行参数和发布产物语义不变；本版本完整彩排已通过。
+
+### English
+
+- Fixed FreeBSD C/GNU builders losing reused relative sysroot, target-dependency, and SDK paths after entering upstream source directories; both architectures now resolve these paths to absolute paths consistently.
+- Fixed FreeBSD 15.1 VM preparation passing the unsupported `-y` flag to `pkg add`, while retaining the exact package lock, SHA256 checks, 4-vCPU guests, genuine REAL GATE, and ARTIFACT E2E.
+- Bundle continues to consume the immutable `ci-freebsd-gnu-sdk-v1.3` snapshot with the same two architectures, eight tools, manifest, runtime arguments, and release-artifact semantics; the complete rehearsal passed.
+
 ## bundle-v1.4
 
 ### 中文
