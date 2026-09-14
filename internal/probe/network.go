@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -512,17 +511,8 @@ func unavailableIPFieldValue(lookup ipLookup, normalFallback string) model.Value
 
 func lookupIP(ctx context.Context, env Environment, version string) (ipAPIResponse, time.Duration, error) {
 	var data ipAPIResponse
-	network := "tcp" + version
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = func(ctx context.Context, _ string, address string) (net.Conn, error) {
-		return (&net.Dialer{Timeout: env.Config.HTTPTimeout}).DialContext(ctx, network, address)
-	}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   env.Config.HTTPTimeout,
-	}
+	client := newIPVersionHTTPClient(env.Config.HTTPTimeout, version)
+	defer client.CloseIdleConnections()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipapi.is/", nil)
 	if err != nil {
 		return data, 0, err
@@ -538,8 +528,11 @@ func lookupIP(ctx context.Context, env Environment, version string) (ipAPIRespon
 	if response.StatusCode != http.StatusOK {
 		return data, latency, fmt.Errorf("HTTP %d", response.StatusCode)
 	}
-	reader := io.LimitReader(response.Body, 512*1024)
-	if err := json.NewDecoder(reader).Decode(&data); err != nil {
+	body, err := readBoundedBody(response.Body, 512*1024)
+	if err != nil {
+		return data, latency, err
+	}
+	if err := decodeJSON(body, &data); err != nil {
 		return data, latency, err
 	}
 	data = normalizeIPAPIResponse(data)

@@ -19,6 +19,28 @@ type cnFixtureResolver struct {
 	err       error
 }
 
+func TestCNSpeedCarrierAliasesHaveCanonicalKeysAndRawUnknowns(t *testing.T) {
+	for _, test := range []struct {
+		alias, want string
+	}{
+		{alias: "电信", want: "telecom"}, {alias: "中国电信", want: "telecom"}, {alias: "telecom", want: "telecom"}, {alias: "ct", want: "telecom"}, {alias: "chinatelecom", want: "telecom"}, {alias: "China Telecom", want: "telecom"},
+		{alias: "联通", want: "unicom"}, {alias: "中国联通", want: "unicom"}, {alias: "unicom", want: "unicom"}, {alias: "cu", want: "unicom"}, {alias: "chinaunicom", want: "unicom"}, {alias: "China Unicom", want: "unicom"},
+		{alias: "移动", want: "mobile"}, {alias: "中国移动", want: "mobile"}, {alias: "mobile", want: "mobile"}, {alias: "cm", want: "mobile"}, {alias: "chinamobile", want: "mobile"}, {alias: "China Mobile", want: "mobile"},
+	} {
+		if got := carrierKey(test.alias); got != test.want {
+			t.Errorf("CNSpeed carrier key for %q = %q, want %q", test.alias, got, test.want)
+		}
+	}
+	for _, alias := range []string{"", "provider/unknown"} {
+		if got := carrierKey(alias); got == "telecom" || got == "unicom" || got == "mobile" {
+			t.Errorf("unknown CNSpeed carrier %q was classified as %q", alias, got)
+		}
+		if raw, ok := carrierMachineValue(alias).Raw(); !ok || raw != alias {
+			t.Errorf("unknown CNSpeed carrier value %q = %#v, want raw text", alias, carrierMachineValue(alias))
+		}
+	}
+}
+
 func (resolver cnFixtureResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	return resolver.addresses, resolver.err
 }

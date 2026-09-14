@@ -105,6 +105,13 @@ type EvidenceValue struct {
 	Ratio     float64 `json:"ratio,omitempty"`
 }
 
+// DerivedGrade returns the comparison evidence grade from its persisted
+// counters. Keeping this conversion on the comparison value gives builders
+// and renderers one semantic owner without changing the comparison schema.
+func (e EvidenceValue) DerivedGrade() model.EvidenceGrade {
+	return (model.Evidence{Valid: e.Valid, Expected: e.Expected}).DerivedGrade()
+}
+
 type Metric struct {
 	Key            string            `json:"key"`
 	Label          string            `json:"label"`

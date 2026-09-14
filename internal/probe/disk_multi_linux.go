@@ -33,12 +33,3 @@ func discoverMountPoints() []mountPoint {
 	}
 	return mounts
 }
-
-func mountOptionsReadOnly(options string) bool {
-	for _, option := range strings.Split(options, ",") {
-		if option == "ro" {
-			return true
-		}
-	}
-	return false
-}

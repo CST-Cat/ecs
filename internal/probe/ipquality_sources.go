@@ -1017,12 +1017,9 @@ func requestBytesAllowingRedirectHosts(
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		return nil, latency, fmt.Errorf("HTTP %d", response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	body, err := readBoundedBody(response.Body, limit)
 	if err != nil {
-		return nil, latency, errors.New("读取响应失败")
-	}
-	if int64(len(body)) > limit {
-		return nil, latency, errors.New("响应超过大小限制")
+		return nil, latency, err
 	}
 	return body, latency, nil
 }
@@ -1036,10 +1033,28 @@ func hostAllowed(host string, allowed []string) bool {
 	return false
 }
 
+func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("响应超过大小限制")
+	}
+	return data, nil
+}
+
 func decodeJSON(body []byte, destination any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(destination); err != nil {
-		return errors.New("响应不是有效 JSON")
+		return fmt.Errorf("响应不是有效 JSON: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("响应包含多个 JSON 值")
+		}
+		return fmt.Errorf("响应包含尾随数据: %w", err)
 	}
 	return nil
 }

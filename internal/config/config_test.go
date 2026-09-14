@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -325,6 +326,30 @@ func TestApplyFileCopiesAllMeaningfulOverrides(t *testing.T) {
 	file.IPerfTargets[0].Name = "mutated"
 	if runtime.IPerfTargets[0].Name != "edge" {
 		t.Fatal("ApplyFile retained caller-owned endpoint storage")
+	}
+}
+
+func TestExampleFileIPerfDurationMatchesDefaults(t *testing.T) {
+	useEnglish(t)
+	data, err := json.Marshal(ExampleFile())
+	if err != nil {
+		t.Fatalf("marshal ExampleFile = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "example.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("parse ExampleFile = %v", err)
+	}
+	runtime := validRuntime(t)
+	if err := ApplyFile(testModuleCatalog(), &runtime, file); err != nil {
+		t.Fatalf("apply parsed ExampleFile = %v", err)
+	}
+	defaults := validRuntime(t)
+	if runtime.IPerfDuration != defaults.IPerfDuration {
+		t.Fatalf("ExampleFile iperf duration = %s, want default %s", runtime.IPerfDuration, defaults.IPerfDuration)
 	}
 }
 

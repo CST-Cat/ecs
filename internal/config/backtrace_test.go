@@ -218,9 +218,9 @@ func TestParseOoklaServerList(t *testing.T) {
 	for _, test := range []struct {
 		alias, want string
 	}{
-		{alias: "电信", want: OoklaCarrierTelecom}, {alias: "telecom", want: OoklaCarrierTelecom}, {alias: "ct", want: OoklaCarrierTelecom}, {alias: "chinatelecom", want: OoklaCarrierTelecom},
-		{alias: "联通", want: OoklaCarrierUnicom}, {alias: "unicom", want: OoklaCarrierUnicom}, {alias: "cu", want: OoklaCarrierUnicom}, {alias: "chinaunicom", want: OoklaCarrierUnicom},
-		{alias: "移动", want: OoklaCarrierMobile}, {alias: "mobile", want: OoklaCarrierMobile}, {alias: "cm", want: OoklaCarrierMobile}, {alias: "chinamobile", want: OoklaCarrierMobile},
+		{alias: "电信", want: OoklaCarrierTelecom}, {alias: "中国电信", want: OoklaCarrierTelecom}, {alias: "telecom", want: OoklaCarrierTelecom}, {alias: "ct", want: OoklaCarrierTelecom}, {alias: "chinatelecom", want: OoklaCarrierTelecom}, {alias: "China Telecom", want: OoklaCarrierTelecom},
+		{alias: "联通", want: OoklaCarrierUnicom}, {alias: "中国联通", want: OoklaCarrierUnicom}, {alias: "unicom", want: OoklaCarrierUnicom}, {alias: "cu", want: OoklaCarrierUnicom}, {alias: "chinaunicom", want: OoklaCarrierUnicom}, {alias: "China Unicom", want: OoklaCarrierUnicom},
+		{alias: "移动", want: OoklaCarrierMobile}, {alias: "中国移动", want: OoklaCarrierMobile}, {alias: "mobile", want: OoklaCarrierMobile}, {alias: "cm", want: OoklaCarrierMobile}, {alias: "chinamobile", want: OoklaCarrierMobile}, {alias: "China Mobile", want: OoklaCarrierMobile},
 	} {
 		servers, err := ParseOoklaServerList(test.alias + "=42")
 		if err != nil || len(servers) != 1 || servers[0].Carrier != test.want {

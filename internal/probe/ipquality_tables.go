@@ -81,7 +81,7 @@ func (bundle ipQualityBundle) scoreTable() model.Table {
 			scoreTextValue(finding, value),
 			networkRiskValue(finding.Risk),
 			scoreBarValue(finding, bar),
-			networkScoreKindValue(finding.ScoreKind),
+			networkRiskValue(finding.ScoreKind),
 			model.KeyValue(scoreBands(id)),
 			findingAccessValue(finding),
 		})

@@ -11,12 +11,6 @@ import (
 // private ECS_TOOL_BIN staging directory.
 const pingCommand = "ping"
 
-// icmpAvailable reports whether the wrapper supplied the frozen Linux ping.
-func icmpAvailable() bool {
-	_, err := icmpPingPath()
-	return err == nil
-}
-
 func icmpPingPath() (string, error) {
 	return LookupTool(pingCommand)
 }

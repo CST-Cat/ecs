@@ -145,7 +145,7 @@ func TestNetworkBundleWritesStableSourceAndScoreSemantics(t *testing.T) {
 	}
 	for _, value := range []string{
 		bundle.Origin.Label,
-		findingValue(bundle.Findings["ipapi"], bundle.Findings["ipapi"].Usage),
+		findingNormalizedValue(bundle.Findings["ipapi"], bundle.Findings["ipapi"].Usage).Text(),
 		factorSignal(bundle.Findings["ipapi"], bundle.Findings["ipapi"].Proxy),
 		findingStatus(bundle.Findings["ipapi"]),
 		findingAccess(bundle.Findings["ipapi"]),

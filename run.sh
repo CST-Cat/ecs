@@ -1022,7 +1022,6 @@ install_packages() {
   # A failed download is not permission to fall back to a global package
   # install. The caller leaves unresolved selected tools in the list and stops
   # before invoking ecs.
-  [ "$install_status" -eq 0 ] || return 0
   return 0
 }
 
@@ -1057,12 +1056,10 @@ prepare_dependencies() {
       die "FreeBSD 不支持 Ookla speedtest；请用 --skip ookla 或 --only 选择其他模块" \
         "Ookla speedtest is not available on FreeBSD; use --skip ookla or --only to select other modules"
     fi
-    if ! select_package_manager; then
+    select_package_manager ||
       die "找不到 Ookla 所需的包管理器，运行终止" \
         "no package manager is available for the explicit Ookla path; the run will stop"
-    else
-      install_packages
-    fi
+    install_packages
   fi
   if [ -n "$MISSING_TOOLS" ]; then
     die "固定测试组件未能完成准备，运行终止" \
@@ -1094,23 +1091,6 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   [ -n "$SUBMIT_OUTPUT" ] ||
     die "--output 路径不能为空" "--output path must not be empty"
 
-  validate_submit_parent() {
-    submit_parent=$1
-    while :; do
-      [ ! -L "$submit_parent" ] ||
-        die "提交输出父目录不能是符号链接：$submit_parent" "submit output parent must not be a symlink: $submit_parent"
-      [ -d "$submit_parent" ] ||
-        die "提交输出父目录不存在：$submit_parent" "submit output parent does not exist: $submit_parent"
-      case "$submit_parent" in
-        /) break ;;
-        */*) submit_next=${submit_parent%/*}; [ -n "$submit_next" ] || submit_next=/ ;;
-        *) submit_next=. ;;
-      esac
-      [ "$submit_next" = "$submit_parent" ] && break
-      submit_parent=$submit_next
-    done
-  }
-
   # Fail before downloading/running benchmarks when the final destination is
   # plainly unusable.  Submit mode never creates a user directory and never
   # overwrites an existing file; the downloaded ecs binary repeats the same
@@ -1118,7 +1098,6 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   if [ -L "$SUBMIT_OUTPUT" ]; then
     die "提交输出不能是符号链接：$SUBMIT_OUTPUT" "submit output must not be a symlink: $SUBMIT_OUTPUT"
   elif [ -d "$SUBMIT_OUTPUT" ]; then
-    validate_submit_parent "$SUBMIT_OUTPUT"
     [ -w "$SUBMIT_OUTPUT" ] ||
       die "提交输出目录不可写：$SUBMIT_OUTPUT" "submit output directory is not writable: $SUBMIT_OUTPUT"
   else
@@ -1126,7 +1105,10 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
       */*) SUBMIT_OUTPUT_PARENT=${SUBMIT_OUTPUT%/*}; [ -n "$SUBMIT_OUTPUT_PARENT" ] || SUBMIT_OUTPUT_PARENT=/ ;;
       *) SUBMIT_OUTPUT_PARENT=. ;;
     esac
-    validate_submit_parent "$SUBMIT_OUTPUT_PARENT"
+    [ -e "$SUBMIT_OUTPUT_PARENT" ] ||
+      die "提交输出父目录不存在：$SUBMIT_OUTPUT_PARENT" "submit output parent does not exist: $SUBMIT_OUTPUT_PARENT"
+    [ -d "$SUBMIT_OUTPUT_PARENT" ] ||
+      die "提交输出父路径不是目录：$SUBMIT_OUTPUT_PARENT" "submit output parent is not a directory: $SUBMIT_OUTPUT_PARENT"
     [ -w "$SUBMIT_OUTPUT_PARENT" ] ||
       die "提交输出父目录不可写：$SUBMIT_OUTPUT_PARENT" "submit output parent is not writable: $SUBMIT_OUTPUT_PARENT"
     [ ! -e "$SUBMIT_OUTPUT" ] ||
@@ -1236,28 +1218,12 @@ if [ "$SUBMIT_MODE" -eq 1 ]; then
   # ecs submit treats an existing directory as a directory target and a
   # non-existent path as a file target.  This preserves the CLI's file-or-
   # directory contract while keeping the default in TMPDIR.
-  if [ "$SUBMIT_PROVIDER_GIVEN:$SUBMIT_REGION_GIVEN" = "1:1" ]; then
-    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
-        --provider "$SUBMIT_PROVIDER" --region "$SUBMIT_REGION"; then
-      SUBMIT_STATUS=0
-    else
-      SUBMIT_STATUS=$?
-    fi
-  elif [ "$SUBMIT_PROVIDER_GIVEN" -eq 1 ]; then
-    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
-        --provider "$SUBMIT_PROVIDER"; then
-      SUBMIT_STATUS=0
-    else
-      SUBMIT_STATUS=$?
-    fi
-  elif [ "$SUBMIT_REGION_GIVEN" -eq 1 ]; then
-    if "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT" \
-        --region "$SUBMIT_REGION"; then
-      SUBMIT_STATUS=0
-    else
-      SUBMIT_STATUS=$?
-    fi
-  elif "${WORK}/ecs" submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"; then
+  # run.sh is intentionally POSIX /bin/sh, so its positional parameters are
+  # the safe argv array equivalent; unlike a string, they preserve spaces.
+  set -- submit --input "$SUBMIT_REPORT" --output "$SUBMIT_OUTPUT"
+  [ "$SUBMIT_PROVIDER_GIVEN" -eq 1 ] && set -- "$@" --provider "$SUBMIT_PROVIDER"
+  [ "$SUBMIT_REGION_GIVEN" -eq 1 ] && set -- "$@" --region "$SUBMIT_REGION"
+  if "${WORK}/ecs" "$@"; then
     SUBMIT_STATUS=0
   else
     SUBMIT_STATUS=$?

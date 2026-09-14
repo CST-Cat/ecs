@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"ecs/internal/buildinfo"
 	"ecs/internal/termcolor"
 )
 
@@ -28,11 +29,6 @@ func TestRunRejectsInvalidColorAndExposureAtCLIEntry(t *testing.T) {
 	if status == 0 || stdout != "" || !strings.Contains(stderr, "invalid terminal color mode") {
 		t.Fatalf("invalid color with --no-color status=%d stdout=%q stderr=%q", status, stdout, stderr)
 	}
-	status, stdout, stderr = invokeAppMain("run", "--lang", "en", "--version", "--color=terminal-magic")
-	if status == 0 || stdout != "" || !strings.Contains(stderr, "invalid terminal color mode") {
-		t.Fatalf("invalid color on --version status=%d stdout=%q stderr=%q", status, stdout, stderr)
-	}
-
 	for _, raw := range []string{"auto", "none", "basic", "256", "truecolor", "always"} {
 		t.Run("version-"+raw, func(t *testing.T) {
 			status, stdout, stderr := invokeAppMain("run", "--lang", "en", "--version", "--color="+raw)
@@ -51,6 +47,14 @@ func TestRunRejectsInvalidColorAndExposureAtCLIEntry(t *testing.T) {
 				t.Fatalf("invalid exposure %q status=%d stdout=%q stderr=%q", raw, status, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestRunVersionShortCircuitsBeforeColorValidation(t *testing.T) {
+	status, stdout, stderr := invokeAppMain("run", "--lang", "en", "--version", "--color", "bogus")
+	want := buildinfo.Name + " " + buildinfo.Version + "\n"
+	if status != 0 || stdout != want || stderr != "" {
+		t.Fatalf("version with invalid color status=%d stdout=%q stderr=%q, want status=0 stdout=%q stderr empty", status, stdout, stderr, want)
 	}
 }
 

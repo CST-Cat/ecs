@@ -145,3 +145,25 @@ func TestPaletteBarsAndRelativeScales(t *testing.T) {
 		t.Fatalf("invalid relative range = %q", got)
 	}
 }
+
+func TestRelativeDensityUsesBarScale(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		value, min float64
+		max        float64
+		want       DensityLevel
+	}{
+		{name: "low", value: 2, min: 0, max: 10, want: DensityLow},
+		{name: "medium boundary", value: 3.5, min: 0, max: 10, want: DensityMedium},
+		{name: "high boundary", value: 6, min: 0, max: 10, want: DensityHigh},
+		{name: "highest boundary", value: 8.5, min: 0, max: 10, want: DensityHighest},
+		{name: "wide logarithmic range", value: 100, min: 1, max: 10000, want: DensityMedium},
+		{name: "invalid", value: math.NaN(), min: 1, max: 10, want: DensityLow},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := RelativeDensity(test.value, test.min, test.max); got != test.want {
+				t.Fatalf("RelativeDensity(%v, %v, %v) = %d, want %d", test.value, test.min, test.max, got, test.want)
+			}
+		})
+	}
+}

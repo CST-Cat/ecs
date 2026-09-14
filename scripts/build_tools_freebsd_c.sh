@@ -181,7 +181,7 @@ ecs_freebsd_c_build_iperf3 "$work" "$stage" "$jobs"
 # provenance/SHA256SUMS describe them; each binary is then checked against the
 # static FreeBSD ELF contract. The downstream release-artifact verification
 # and real FreeBSD tools gate cover tree-level and runtime behavior.
-ecs_freebsd_c_strip_release_binaries "$stage" "$work"
+ecs_freebsd_c_strip_release_binaries "$stage"
 
 # Licenses: copy upstream LICENSE files when present.
 for tool in sysbench zstd openssl fio iperf3; do

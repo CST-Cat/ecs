@@ -11,19 +11,6 @@ import (
 	"ecs/internal/model"
 )
 
-func findingValue(finding qualityFinding, value string) string {
-	switch {
-	case !finding.Enabled:
-		return "probe.network.status.disabled"
-	case finding.Err != nil:
-		return "probe.network.status.failed"
-	case strings.TrimSpace(value) == "":
-		return networkMissingValue
-	default:
-		return value
-	}
-}
-
 func findingNormalizedValue(finding qualityFinding, value string) model.Value {
 	if !finding.Enabled {
 		return model.KeyValue("probe.network.status.disabled")
@@ -164,13 +151,6 @@ func scoreBarValue(finding qualityFinding, value string) model.Value {
 		return model.KeyValue(value)
 	}
 	return model.RawValue(value)
-}
-
-func networkScoreKindValue(value string) model.Value {
-	if value == "" {
-		return model.KeyValue(networkMissingValue)
-	}
-	return model.KeyValue(value)
 }
 
 func scoreBar(score float64) string {

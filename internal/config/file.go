@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/carrier"
 	"ecs/internal/i18n"
 	"ecs/internal/module"
 )
@@ -193,10 +194,11 @@ func ParseOoklaServerList(raw string) ([]OoklaServer, error) {
 		if len(parts) != 2 {
 			return nil, i18n.Errorf("err.ooklaFormat")
 		}
-		carrier := normalizeOoklaCarrier(parts[0])
-		if carrier == "" {
+		canonicalCarrier, ok := carrier.Parse(parts[0])
+		if !ok {
 			return nil, i18n.Errorf("err.ooklaCarrier", parts[0])
 		}
+		carrier := string(canonicalCarrier)
 		id, err := strconv.Atoi(strings.TrimSpace(parts[1]))
 		if err != nil || id < 1 || id > 99999999 {
 			return nil, i18n.Errorf("err.ooklaIDInvalid", parts[1])
@@ -210,19 +212,6 @@ func ParseOoklaServerList(raw string) ([]OoklaServer, error) {
 	return result, nil
 }
 
-func normalizeOoklaCarrier(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "电信", "telecom", "ct", "chinatelecom":
-		return OoklaCarrierTelecom
-	case "联通", "unicom", "cu", "chinaunicom":
-		return OoklaCarrierUnicom
-	case "移动", "mobile", "cm", "chinamobile":
-		return OoklaCarrierMobile
-	default:
-		return ""
-	}
-}
-
 func ExampleFile() File {
 	reveal := false
 	return File{
@@ -234,7 +223,7 @@ func ExampleFile() File {
 		Formats:          []string{"json", "md", "html"},
 		Output:           "./reports",
 		DiskPath:         ".",
-		IPerfDuration:    "5s",
+		IPerfDuration:    "15s",
 		HTTPTimeout:      "10s",
 	}
 }

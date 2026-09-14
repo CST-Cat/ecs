@@ -53,6 +53,26 @@ func comparisonModuleResult(id, title string, status model.Status, evidence *mod
 	}
 }
 
+func TestEvidenceValueDerivedGradeUsesComparisonOwner(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		valid, expected int
+		want            model.EvidenceGrade
+	}{
+		{name: "not planned", valid: 0, expected: 0, want: model.EvidenceNotPlanned},
+		{name: "complete", valid: 2, expected: 2, want: model.EvidenceComplete},
+		{name: "partial", valid: 1, expected: 2, want: model.EvidencePartial},
+		{name: "insufficient", valid: 0, expected: 2, want: model.EvidenceInsufficient},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := (EvidenceValue{Valid: test.valid, Expected: test.expected}).DerivedGrade()
+			if got != test.want {
+				t.Fatalf("EvidenceValue grade = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func tableColumns(keys, labels []string) []model.TableColumn {
 	if len(keys) != len(labels) {
 		panic("table test columns must have matching keys and labels")
@@ -238,7 +258,7 @@ func TestBuildModulesStatusesEvidenceAndUnion(t *testing.T) {
 		t.Fatalf("union module order = %v", got)
 	}
 	cpu := findModule(data, "cpu")
-	if cpu == nil || cpu.Statuses[0].Status != model.StatusOK || cpu.Statuses[1].Status != model.StatusWarning || cpu.Evidence[0].Valid != 2 || (model.Evidence{Valid: cpu.Evidence[0].Valid, Expected: cpu.Evidence[0].Expected}).DerivedGrade() != model.EvidenceComplete || (model.Evidence{Valid: cpu.Evidence[1].Valid, Expected: cpu.Evidence[1].Expected}).DerivedGrade() != model.EvidencePartial || cpu.Evidence[1].Ratio != 0.5 {
+	if cpu == nil || cpu.Statuses[0].Status != model.StatusOK || cpu.Statuses[1].Status != model.StatusWarning || cpu.Evidence[0].Valid != 2 || cpu.Evidence[0].DerivedGrade() != model.EvidenceComplete || cpu.Evidence[1].DerivedGrade() != model.EvidencePartial || cpu.Evidence[1].Ratio != 0.5 {
 		t.Fatalf("status/evidence normalization = %+v", cpu)
 	}
 	networkModule := findModule(data, "network")

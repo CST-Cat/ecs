@@ -28,6 +28,11 @@ var (
 	pingRTTThreePattern = regexp.MustCompile(`=\s*([0-9.]+)/([0-9.]+)/([0-9.]+)\s*ms`)
 )
 
+func icmpAvailable() bool {
+	_, err := icmpPingPath()
+	return err == nil
+}
+
 // icmpStats 是一次 ICMP 探测的统计结果。
 type icmpStats struct {
 	Available   bool

@@ -15,9 +15,9 @@ func TestOoklaContextCausePrecedesExecuteAndParseClassification(t *testing.T) {
 	cancelCause := errors.New("fixture Ookla cancellation cause")
 	cancelled, cancel := context.WithCancelCause(context.Background())
 	cancel(cancelCause)
-	_, runErr, parseErr, contextDone := runOfficialOokla(cancelled, missingPath, nil)
-	if !contextDone || parseErr != nil || !errors.Is(runErr, cancelCause) || !errors.Is(runErr, context.Canceled) {
-		t.Fatalf("cancelled Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	_, runErr, parseErr := runOfficialOokla(cancelled, missingPath, nil)
+	if parseErr != nil || !errors.Is(runErr, cancelCause) || !errors.Is(runErr, context.Canceled) {
+		t.Fatalf("cancelled Ookla execution/parse = run:%v parse:%v", runErr, parseErr)
 	}
 	if classified := failure.Classify(runErr); classified.Category != model.FailureCanceled {
 		t.Fatalf("cancelled Ookla category = %+v", classified)
@@ -25,18 +25,18 @@ func TestOoklaContextCausePrecedesExecuteAndParseClassification(t *testing.T) {
 
 	deadline, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer deadlineCancel()
-	_, runErr, parseErr, contextDone = runOfficialOokla(deadline, missingPath, nil)
-	if !contextDone || parseErr != nil || !errors.Is(runErr, context.DeadlineExceeded) {
-		t.Fatalf("deadline Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	_, runErr, parseErr = runOfficialOokla(deadline, missingPath, nil)
+	if parseErr != nil || !errors.Is(runErr, context.DeadlineExceeded) {
+		t.Fatalf("deadline Ookla execution/parse = run:%v parse:%v", runErr, parseErr)
 	}
 	if classified := failure.Classify(runErr); classified.Category != model.FailureTimeout {
 		t.Fatalf("deadline Ookla category = %+v", classified)
 	}
 
 	path := writeThroughputExecutable(t, "speedtest", "#!/bin/sh\nprintf '%s' '{bad}'\n")
-	_, runErr, parseErr, contextDone = runOfficialOokla(context.Background(), path, nil)
-	if contextDone || runErr != nil || parseErr == nil {
-		t.Fatalf("parse Ookla execution/parse = context_done:%v run:%v parse:%v", contextDone, runErr, parseErr)
+	_, runErr, parseErr = runOfficialOokla(context.Background(), path, nil)
+	if runErr != nil || parseErr == nil {
+		t.Fatalf("parse Ookla execution/parse = run:%v parse:%v", runErr, parseErr)
 	}
 	if classified := failure.Classify(parseErr); classified.Category != model.FailureParse {
 		t.Fatalf("parse Ookla category = %+v", classified)
@@ -78,13 +78,22 @@ func TestOoklaJSONFixturesAndMeasurements(t *testing.T) {
 	for _, test := range []struct {
 		alias, want string
 	}{
-		{alias: "电信", want: "telecom"}, {alias: "telecom", want: "telecom"}, {alias: "ct", want: "telecom"}, {alias: "chinatelecom", want: "telecom"},
-		{alias: "联通", want: "unicom"}, {alias: "unicom", want: "unicom"}, {alias: "cu", want: "unicom"}, {alias: "chinaunicom", want: "unicom"},
-		{alias: "移动", want: "mobile"}, {alias: "mobile", want: "mobile"}, {alias: "cm", want: "mobile"}, {alias: "chinamobile", want: "mobile"},
+		{alias: "电信", want: "telecom"}, {alias: "中国电信", want: "telecom"}, {alias: "telecom", want: "telecom"}, {alias: "ct", want: "telecom"}, {alias: "chinatelecom", want: "telecom"}, {alias: "China Telecom", want: "telecom"},
+		{alias: "联通", want: "unicom"}, {alias: "中国联通", want: "unicom"}, {alias: "unicom", want: "unicom"}, {alias: "cu", want: "unicom"}, {alias: "chinaunicom", want: "unicom"}, {alias: "China Unicom", want: "unicom"},
+		{alias: "移动", want: "mobile"}, {alias: "中国移动", want: "mobile"}, {alias: "mobile", want: "mobile"}, {alias: "cm", want: "mobile"}, {alias: "chinamobile", want: "mobile"}, {alias: "China Mobile", want: "mobile"},
 	} {
 		if got := ooklaCarrierKey(test.alias); got != test.want {
 			t.Errorf("Ookla carrier key for %q = %q, want %q", test.alias, got, test.want)
 		}
+	}
+	for _, alias := range []string{"", "provider/unknown", "auto"} {
+		if got := ooklaCarrierKey(alias); got == "telecom" || got == "unicom" || got == "mobile" {
+			t.Errorf("unknown Ookla carrier %q was classified as %q", alias, got)
+		}
+	}
+	const rawProvider = "provider/telecom-original"
+	if raw, ok := ooklaCarrierValue(rawProvider).Raw(); !ok || raw != rawProvider {
+		t.Fatalf("unknown Ookla carrier value = %#v, want raw %q", ooklaCarrierValue(rawProvider), rawProvider)
 	}
 	if key, ok := ooklaCarrierValue("auto").Key(); !ok || key != "probe.ookla.carrier.auto" {
 		t.Fatalf("Ookla automatic carrier value = %#v", ooklaCarrierValue("auto"))

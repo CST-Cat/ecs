@@ -203,15 +203,13 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		return result
 	}
 
-	var output fioOutput
-	if err := json.Unmarshal(run.Stdout, &output); err != nil {
+	output, jobs, err := parseFIOJobs(run.Stdout)
+	if err != nil {
 		result.Status = model.StatusError
-		addFailure(&result, "parse", "fio", fmt.Errorf("解析 fio JSON: %w", err))
+		addFailure(&result, "parse", "fio", err)
 		return result
 	}
-	jobs := make(map[string]fioJob, len(output.Jobs))
 	for _, job := range output.Jobs {
-		jobs[job.Name] = job
 		if job.Error != 0 {
 			result.Status = model.StatusWarning
 			result.AddFailure(model.Failure{
@@ -654,16 +652,16 @@ func markFIOQD1LatencyMissing(result *model.Result, missing []string) {
 }
 
 // parseFIOJobs 把 fio 的 JSON 输出按作业名索引。
-func parseFIOJobs(output []byte) (map[string]fioJob, error) {
+func parseFIOJobs(output []byte) (fioOutput, map[string]fioJob, error) {
 	var parsed fioOutput
 	if err := json.Unmarshal(output, &parsed); err != nil {
-		return nil, fmt.Errorf("解析 fio JSON: %w", err)
+		return fioOutput{}, nil, fmt.Errorf("解析 fio JSON: %w", err)
 	}
 	jobs := make(map[string]fioJob, len(parsed.Jobs))
 	for _, job := range parsed.Jobs {
 		jobs[job.Name] = job
 	}
-	return jobs, nil
+	return parsed, jobs, nil
 }
 
 func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, systemSnapshot, error) {

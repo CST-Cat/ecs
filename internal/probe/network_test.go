@@ -1,8 +1,11 @@
 package probe
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -72,5 +75,52 @@ func TestIPAPIResponseNormalizationAndNetworkHelpers(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://fixture.invalid")
 	if !proxyEnvironmentEnabled() {
 		t.Fatal("proxy environment was not detected")
+	}
+}
+
+func TestIPVersionHTTPClientUsesDirectRequestedFamily(t *testing.T) {
+	v4Listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v4Listener.Close()
+	v6Listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v6Listener.Close()
+
+	timeout := 200 * time.Millisecond
+	for _, test := range []struct {
+		name, version string
+		listener      net.Listener
+		other         net.Listener
+	}{
+		{name: "IPv4", version: "4", listener: v4Listener, other: v6Listener},
+		{name: "IPv6", version: "6", listener: v6Listener, other: v4Listener},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := newIPVersionHTTPClient(timeout, test.version)
+			defer client.CloseIdleConnections()
+			transport, ok := client.Transport.(*http.Transport)
+			if !ok || transport.Proxy != nil || client.Timeout != timeout || transport.TLSHandshakeTimeout != timeout {
+				t.Fatalf("%s client transport = %#v, timeout=%s", test.name, client.Transport, client.Timeout)
+			}
+			connection, err := transport.DialContext(context.Background(), "tcp", test.listener.Addr().String())
+			if err != nil {
+				t.Fatalf("%s requested-family dial = %v", test.name, err)
+			}
+			accepted, err := test.listener.Accept()
+			if err != nil {
+				connection.Close()
+				t.Fatal(err)
+			}
+			connection.Close()
+			accepted.Close()
+			if connection, err := transport.DialContext(context.Background(), "tcp", test.other.Addr().String()); err == nil {
+				connection.Close()
+				t.Fatalf("%s client connected to the opposite family", test.name)
+			}
+		})
 	}
 }

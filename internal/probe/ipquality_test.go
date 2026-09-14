@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -67,6 +68,45 @@ func TestIPQualityJSONParsersAndProviderFailures(t *testing.T) {
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+func TestJSONIngressIsStrictAndPreservesDiagnostics(t *testing.T) {
+	var decoded struct {
+		Value int `json:"value"`
+	}
+	if err := decodeJSON([]byte(`{"value":1,"provider_added":true}`), &decoded); err != nil || decoded.Value != 1 {
+		t.Fatalf("valid JSON with unknown provider field = %+v/%v", decoded, err)
+	}
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "second JSON object", body: `{"value":1}{"value":2}`},
+		{name: "trailing garbage", body: `{"value":1} trailing`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := decodeJSON([]byte(test.body), &decoded); err == nil {
+				t.Fatalf("decodeJSON(%q) unexpectedly succeeded", test.body)
+			}
+		})
+	}
+
+	var syntaxErr *json.SyntaxError
+	err := decodeJSON([]byte(`{"value":@}`), &decoded)
+	if err == nil || !errors.As(err, &syntaxErr) {
+		t.Fatalf("malformed JSON error = %v, want wrapped *json.SyntaxError", err)
+	}
+}
+
+func TestBoundedBodyAcceptsExactLimitAndRejectsOneExtra(t *testing.T) {
+	exact := `{"value":1}`
+	body, err := readBoundedBody(strings.NewReader(exact), int64(len(exact)))
+	if err != nil || string(body) != exact {
+		t.Fatalf("exact body limit = %q/%v", body, err)
+	}
+	if body, err := readBoundedBody(strings.NewReader(exact+"x"), int64(len(exact))); err == nil || body != nil || !strings.Contains(err.Error(), "响应超过大小限制") {
+		t.Fatalf("limit+1 body = %q/%v", body, err)
+	}
+}
 
 func TestIPQualityPublicPagesScoresAndSignals(t *testing.T) {
 	const ip = "203.0.113.9"
@@ -197,7 +237,7 @@ func TestIPQualityBundleTablesAndMeasurements(t *testing.T) {
 	if len(failed) != 1 || failed[0] != "ipqs" || len(partial) != 1 || partial[0] != "ip2location" {
 		t.Fatalf("source summaries = failed:%v partial:%v", failed, partial)
 	}
-	if findingValue(bundle.Findings["ipqs"], "x") != "probe.network.status.failed" || findingValue(bundle.Findings["ipsb"], "") != "probe.network.status.disabled" || findingStatus(bundle.Findings["ip2location"]) != "probe.network.status.partial" {
+	if findingNormalizedValue(bundle.Findings["ipqs"], "x").Text() != "probe.network.status.failed" || findingNormalizedValue(bundle.Findings["ipsb"], "").Text() != "probe.network.status.disabled" || findingStatus(bundle.Findings["ip2location"]) != "probe.network.status.partial" {
 		t.Fatal("finding status/value states failed")
 	}
 }

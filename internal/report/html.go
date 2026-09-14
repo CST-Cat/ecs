@@ -432,8 +432,20 @@ func reportValueClass(value model.Value) string {
 	return explicitValueClass(value)
 }
 
+func tableDensityClass(density termcolor.DensityLevel) string {
+	switch density {
+	case termcolor.DensityHigh, termcolor.DensityHighest:
+		return "cell-good"
+	case termcolor.DensityMedium:
+		return "cell-warn"
+	default:
+		return "cell-bad"
+	}
+}
+
 func htmlTableRows(table model.Table) [][]htmlTableCell {
-	rows := tableRowsWithBars(table, termcolor.Palette{Level: termcolor.LevelNone})
+	presentation := buildTableBarPresentation(table)
+	rows := presentation.rowsWithBars(termcolor.Palette{Level: termcolor.LevelNone}, 8)
 	result := make([][]htmlTableCell, len(rows))
 	for rowIndex, row := range rows {
 		result[rowIndex] = make([]htmlTableCell, len(table.Columns))
@@ -453,15 +465,7 @@ func htmlTableRows(table model.Table) [][]htmlTableCell {
 					result[rowIndex][column] = htmlTableCell{Value: value, Class: class}
 					continue
 				}
-				density := "░"
-				if strings.Contains(value, "█") {
-					density = "█"
-				} else if strings.Contains(value, "▓") {
-					density = "▓"
-				} else if strings.Contains(value, "▒") {
-					density = "▒"
-				}
-				class = map[string]string{"█": "cell-good", "▓": "cell-good", "▒": "cell-warn", "░": "cell-bad"}[density]
+				class = tableDensityClass(presentation.cells[rowIndex][column].density)
 			}
 			result[rowIndex][column] = htmlTableCell{Value: value, Class: class}
 		}

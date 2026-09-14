@@ -115,13 +115,18 @@ func diskNotes(result model.Result) []string {
 			notes = append(notes, "probe.disk.note.multidisk")
 		}
 	}
+	return dedupeNotes(notes)
+}
+
+func dedupeNotes(notes []string) []string {
 	seen := make(map[string]bool, len(notes))
 	out := notes[:0]
 	for _, note := range notes {
-		if !seen[note] {
-			seen[note] = true
-			out = append(out, note)
+		if seen[note] {
+			continue
 		}
+		seen[note] = true
+		out = append(out, note)
 	}
 	return out
 }

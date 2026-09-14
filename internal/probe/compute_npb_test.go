@@ -2,13 +2,14 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -71,7 +72,7 @@ func TestParseNPBOutputAndFailureCategories(t *testing.T) {
 		{name: "thread warning", output: output + "\nWarning: Threads used differ from threads available\n", marker: "线程使用"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := parseNPBBenchmarkOutput(test.output, spec, 2); err == nil || !strings.Contains(err.Error(), test.marker) {
+			if _, err := parseNPBBenchmarkOutput(test.output, spec, 2); err == nil || !errors.Is(err, failure.ErrParse) || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("NPB error = %v, want %q", err, test.marker)
 			}
 		})
@@ -91,24 +92,19 @@ func TestParseNPBOutputAndFailureCategories(t *testing.T) {
 	if _, err := executeNPBBenchmark(context.Background(), "unused", spec, 0); err == nil || !strings.Contains(err.Error(), "线程数必须为正数") {
 		t.Fatalf("NPB invalid execute input = %v", err)
 	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	deadline, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer stop()
 	for _, test := range []struct {
 		name string
-		ctx  context.Context
 		err  error
 		want model.FailureCategory
 	}{
-		{name: "cancelled", ctx: cancelled, err: fmt.Errorf("stopped"), want: model.FailureCanceled},
-		{name: "timeout", ctx: deadline, err: fmt.Errorf("stopped"), want: model.FailureTimeout},
-		{name: "permission", ctx: context.Background(), err: fmt.Errorf("permission denied"), want: model.FailurePermissionDenied},
-		{name: "parse", ctx: context.Background(), err: fmt.Errorf("NPB 输出无效"), want: model.FailureParse},
-		{name: "unknown", ctx: context.Background(), err: fmt.Errorf("other failure"), want: model.FailureUnknown},
+		{name: "cancelled", err: context.Canceled, want: model.FailureCanceled},
+		{name: "timeout", err: context.DeadlineExceeded, want: model.FailureTimeout},
+		{name: "permission", err: fmt.Errorf("permission denied"), want: model.FailurePermissionDenied},
+		{name: "parse", err: fmt.Errorf("NPB output changed: %w", failure.ErrParse), want: model.FailureParse},
+		{name: "unknown", err: fmt.Errorf("other failure"), want: model.FailureUnknown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := benchmarkFailureCategory(test.ctx, test.err); got != test.want {
+			if got := failure.Classify(test.err).Category; got != test.want {
 				t.Fatalf("failure category = %q, want %q", got, test.want)
 			}
 		})

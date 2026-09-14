@@ -84,7 +84,7 @@ func missingZstdResult(target string, err error) model.Result {
 	allowance := detectCPUAllowance()
 	result := model.NewResult("zstd", "module.zstd.title")
 	result.Description = "probe.zstd.description"
-	result.Methodology = zstdMethodology(defaultZstdContract)
+	result.Methodology = zstdMethodology()
 	result.Methodology.Parameters = newComparisonParameters()
 	result.Status = model.StatusWarning
 	message := ""
@@ -98,7 +98,7 @@ func missingZstdResult(target string, err error) model.Result {
 	return result
 }
 
-func zstdMethodology(contract zstdBenchmarkContract) model.Methodology {
+func zstdMethodology() model.Methodology {
 	return model.Methodology{
 		Kind:            "standard-benchmark",
 		Label:           "methodology.standard-benchmark",
@@ -176,7 +176,7 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 	start := time.Now()
 	result := model.NewResult("zstd", "module.zstd.title")
 	result.Description = "probe.zstd.description"
-	result.Methodology = zstdMethodology(contract)
+	result.Methodology = zstdMethodology()
 	result.Methodology.Parameters = newComparisonParameters()
 	threadCounts := distinctBenchmarkThreadCounts(allowance.Threads)
 
@@ -559,16 +559,7 @@ func zstdNotes(result model.Result, allowance cpuAllowance) []string {
 			notes = append(notes, "probe.zstd.note.run_failure")
 		}
 	}
-	seen := make(map[string]bool, len(notes))
-	out := notes[:0]
-	for _, note := range notes {
-		if seen[note] {
-			continue
-		}
-		seen[note] = true
-		out = append(out, note)
-	}
-	return out
+	return dedupeNotes(notes)
 }
 
 func zstdSummaryMessage(result model.Result, workers int) model.Message {

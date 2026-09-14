@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -25,25 +26,21 @@ const (
 var npbBannerPattern = regexp.MustCompile(`(?m)^\s*NAS Parallel Benchmarks \(NPB3\.4-OMP\) - (EP|FT) Benchmark\s*$`)
 
 type npbBenchmarkSpec struct {
-	Name             string
-	Binary           string
-	ExpectedSize     string
-	ExpectedIters    int
-	ExpectedOp       string
-	Description      string
-	MeasurementLabel string
+	Name          string
+	Binary        string
+	ExpectedSize  string
+	ExpectedIters int
+	ExpectedOp    string
 }
 
 var npbBenchmarkSpecs = []npbBenchmarkSpec{
 	{
 		Name: "EP", Binary: "npb-ep", ExpectedSize: "536870912", ExpectedIters: 0,
-		ExpectedOp: "Random numbers generated", Description: "浮点随机数与高斯对计算",
-		MeasurementLabel: "EP 浮点计算吞吐",
+		ExpectedOp: "Random numbers generated",
 	},
 	{
 		Name: "FT", Binary: "npb-ft", ExpectedSize: "256x256x128", ExpectedIters: 6,
-		ExpectedOp: "floating point", Description: "3D FFT、浮点与 cache/memory access 综合负载",
-		MeasurementLabel: "FT FFT/浮点吞吐",
+		ExpectedOp: "floating point",
 	},
 }
 
@@ -126,10 +123,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 			}
 			result.Status = model.StatusWarning
 			contextName := fmt.Sprintf("%s %dT", spec.Name, threads)
-			result.AddFailure(model.Failure{
-				Category: benchmarkFailureCategory(ctx, runErr), Stage: "benchmark_run", Target: contextName,
-				Count: 1, Message: runErr.Error(),
-			})
+			result.AddFailure(failure.FromError("benchmark_run", contextName, runErr))
 		}
 		if singleCore && len(runs[spec.Name]) == 1 {
 			clone := runs[spec.Name][0]
@@ -246,8 +240,13 @@ func npbEnvironmentParameters(threads int) []string {
 	}
 }
 
-func parseNPBBenchmarkOutput(output string, spec npbBenchmarkSpec, requestedThreads int) (npbBenchmarkSample, error) {
-	sample := npbBenchmarkSample{Benchmark: spec.Name, Threads: requestedThreads}
+func parseNPBBenchmarkOutput(output string, spec npbBenchmarkSpec, requestedThreads int) (sample npbBenchmarkSample, err error) {
+	sample = npbBenchmarkSample{Benchmark: spec.Name, Threads: requestedThreads}
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", failure.ErrParse, err)
+		}
+	}()
 	banners := npbBannerPattern.FindAllStringSubmatch(output, -1)
 	if len(banners) != 1 || len(banners[0]) != 2 || banners[0][1] != spec.Name {
 		return sample, fmt.Errorf("NPB %s 输出缺少唯一官方 benchmark header", spec.Name)
@@ -363,22 +362,6 @@ func npbFloatField(field func(string) (string, error), label string) (float64, e
 		return 0, fmt.Errorf("NPB float field %s is invalid", label)
 	}
 	return parsed, nil
-}
-
-func benchmarkFailureCategory(ctx context.Context, err error) model.FailureCategory {
-	if ctx.Err() == context.Canceled {
-		return model.FailureCanceled
-	}
-	if ctx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
-		return model.FailureTimeout
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "permission denied") {
-		return model.FailurePermissionDenied
-	}
-	if strings.Contains(err.Error(), "输出") || strings.Contains(err.Error(), "Verification") || strings.Contains(err.Error(), "field") {
-		return model.FailureParse
-	}
-	return model.FailureUnknown
 }
 
 func appendNPBMeasurements(result *model.Result, specs []npbBenchmarkSpec, runs map[string][]npbBenchmarkSample, workers int) {
@@ -510,16 +493,7 @@ func npbNotes(result model.Result, allowance cpuAllowance) []string {
 			notes = append(notes, "probe.npb.note.run_failure")
 		}
 	}
-	seen := make(map[string]bool, len(notes))
-	out := notes[:0]
-	for _, note := range notes {
-		if seen[note] {
-			continue
-		}
-		seen[note] = true
-		out = append(out, note)
-	}
-	return out
+	return dedupeNotes(notes)
 }
 
 func npbSummaryMessage(result model.Result, workers int) model.Message {

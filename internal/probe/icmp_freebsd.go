@@ -14,11 +14,6 @@ import (
 // utility to recreate that privilege boundary.
 const pingCommand = "/sbin/ping"
 
-func icmpAvailable() bool {
-	_, err := icmpPingPath()
-	return err == nil
-}
-
 func icmpPingPath() (string, error) {
 	info, err := os.Stat(pingCommand)
 	if err != nil {

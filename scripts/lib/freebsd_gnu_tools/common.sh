@@ -166,8 +166,7 @@ ecs_freebsd_gnu_assert_libgomp() {
 # ---------------------------------------------------------------------------
 
 ecs_freebsd_gnu_strip_release_binaries() {
-  local stage=$1 work=$2 sdk_prefix=$3 triple=$4 file_machine=$5
-  # Keep the work-directory parameter for compatibility with existing callers.
+  local stage=$1 sdk_prefix=$2 triple=$3 file_machine=$4
   local strip_bin="$sdk_prefix/bin/${triple}-strip"
   [[ -x "$strip_bin" ]] ||
     ecs_freebsd_gnu_die "target strip missing in the GNU SDK: $strip_bin"

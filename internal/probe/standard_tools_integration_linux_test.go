@@ -83,7 +83,7 @@ func TestIntegrationFIO(t *testing.T) {
 		t.Fatalf("fio failed: %v: %s", runErr, tailText(sanitizeCommandOutput(stderr.Bytes()), 800))
 	}
 
-	jobs, err := parseFIOJobs(stdout.Bytes())
+	_, jobs, err := parseFIOJobs(stdout.Bytes())
 	if err != nil {
 		t.Fatalf("parseFIOJobs(): %v", err)
 	}

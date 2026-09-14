@@ -2,7 +2,7 @@ name: bundle-release
 
 # 独立发布 benchmark bundle。Bundle 不参与 ECS application release。
 #
-# Stage 9 状态：FreeBSD 路径重新接入。唯一 FreeBSD build path 是
+# FreeBSD 路径：唯一 FreeBSD build path 是
 # freebsd-tools.yml，通过 workflow_call 整体复用（同 run 内 artifact 按名可
 # 取）；本 workflow 不构建 FreeBSD tools，也不复制任何 builder 逻辑。
 #
@@ -10,7 +10,7 @@ name: bundle-release
 #   tools ×7（Linux，目标架构容器构建）
 #   FREEBSD BUILD（workflow_call 复用 freebsd-tools.yml：SYSROOT→C-DEPS→
 #     C-TOOLS→GNU SDK→GNU BENCH→MERGE→VERIFY×2→REAL GATE AMD64 ∥ REAL GATE
-#     ARM64；19 个 job 全绿才算通过）
+#     ARM64；两条链全部通过才算通过）
 #     → PACKAGE（scripts/ci/freebsd_artifact_layout.sh 每个目标调用真
 #       scripts/package.sh，产出 ecs-release 与 bundle-release 发布布局）
 #     → ARTIFACT E2E AMD64 ∥ ARTIFACT E2E ARM64（并行，在真实 FreeBSD 15.1

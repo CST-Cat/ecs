@@ -205,18 +205,41 @@ func lerp(from, to uint8, position float64) uint8 {
 // 这四个字符在等宽字体里同宽，且在纯文本、日志、被 grep 过的输出里都保留层次。
 var densityRunes = []rune{'░', '▒', '▓', '█'}
 
-// density 返回该比例对应的密度字符。
-func density(ratio float64) rune {
+// DensityLevel is the semantic density used by relative bars, from least to
+// most full.  Renderers can use it for their own presentation without
+// inspecting the bar's glyphs.
+type DensityLevel uint8
+
+const (
+	DensityLow DensityLevel = iota
+	DensityMedium
+	DensityHigh
+	DensityHighest
+)
+
+// RelativeDensity returns the density level for a value in a relative range.
+// It uses the same scale as BarRelativeRange without exposing terminal glyphs
+// to callers that need semantic presentation.
+func RelativeDensity(value, groupMin, groupMax float64) DensityLevel {
+	return densityLevel(relativeRatio(value, groupMin, groupMax))
+}
+
+func densityLevel(ratio float64) DensityLevel {
 	switch {
 	case ratio < 0.35:
-		return densityRunes[0]
+		return DensityLow
 	case ratio < 0.60:
-		return densityRunes[1]
+		return DensityMedium
 	case ratio < 0.85:
-		return densityRunes[2]
+		return DensityHigh
 	default:
-		return densityRunes[3]
+		return DensityHighest
 	}
+}
+
+// density 返回该比例对应的密度字符。
+func density(ratio float64) rune {
+	return densityRunes[densityLevel(ratio)]
 }
 
 // ansi256 把 RGB 映射到 256 色调色板。

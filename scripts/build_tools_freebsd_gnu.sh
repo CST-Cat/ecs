@@ -184,7 +184,7 @@ ecs_freebsd_gnu_build_stream "$work" "$stage" "$wrap_bin" "$file_machine"
 # final-byte SHA-256s; each binary is then checked against the static FreeBSD
 # ELF contract. The downstream release-artifact verification and real FreeBSD
 # tools gate cover tree-level and runtime behavior.
-ecs_freebsd_gnu_strip_release_binaries "$stage" "$work" "$sdk_prefix" "$triple" "$file_machine"
+ecs_freebsd_gnu_strip_release_binaries "$stage" "$sdk_prefix" "$triple" "$file_machine"
 
 ecs_freebsd_gnu_write_provenance "$stage" "$target" "$triple" "$gcc_version" \
   "$ECS_NPB_URL" "$ECS_NPB_SHA256" "$ECS_STREAM_URL" "$ECS_STREAM_SOURCE_SHA256"

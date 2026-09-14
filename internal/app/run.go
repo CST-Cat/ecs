@@ -36,14 +36,14 @@ func runCommand(app application, ctx context.Context, args []string, stdout, std
 		return 1
 	}
 	cfg := resolved.Runtime
+	if resolved.Version {
+		fmt.Fprintf(stdout, "%s %s\n", buildinfo.Name, buildinfo.Version)
+		return 0
+	}
 	terminalColor, colorErr := resolveTerminalColor(resolved.Color, cfg.NoColor, stdout)
 	if colorErr != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", i18n.T("cli.error"), colorErr)
 		return 1
-	}
-	if resolved.Version {
-		fmt.Fprintf(stdout, "%s %s\n", buildinfo.Name, buildinfo.Version)
-		return 0
 	}
 	if resolved.Interactive && !resolved.Yes {
 		wizardOK, wizardErr := runWizard(ctx, app.modules, &cfg)

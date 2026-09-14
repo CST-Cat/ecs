@@ -70,7 +70,7 @@ func Build(reports []model.Report, options Options) (Report, error) {
 				continue
 			}
 			base := module.Evidence[reference]
-			if base.Available && (!nearlyEqual(base.Ratio, evidence.Ratio) || derivedEvidenceGrade(base) != derivedEvidenceGrade(evidence) || base.Expected != evidence.Expected) {
+			if base.Available && (!nearlyEqual(base.Ratio, evidence.Ratio) || base.DerivedGrade() != evidence.DerivedGrade() || base.Expected != evidence.Expected) {
 				out.Summary.EvidenceChanges++
 			}
 		}
@@ -235,10 +235,6 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 		module.Comparability = Comparable
 	}
 	return module
-}
-
-func derivedEvidenceGrade(evidence EvidenceValue) model.EvidenceGrade {
-	return (model.Evidence{Valid: evidence.Valid, Expected: evidence.Expected}).DerivedGrade()
 }
 
 func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIssue) {

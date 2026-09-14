@@ -14,7 +14,7 @@ func TestFIOParserAndLatency(t *testing.T) {
 {"jobname":"seqwrite","write":{"io_bytes":4096,"bw_bytes":2097152,"iops":20}},
 {"jobname":"latency_qd1","read":{"io_bytes":4096,"clat_ns":{"mean":1000000,"max":2000000,"percentile":{"95.00":1500000,"99.00":1800000}}}}
 ]}`)
-	jobs, err := parseFIOJobs(output)
+	_, jobs, err := parseFIOJobs(output)
 	if err != nil || len(jobs) != 2 || fioBandwidthMiB(jobs["seqwrite"].Write) != 2 {
 		t.Fatalf("fio jobs = %v/%v", jobs, err)
 	}
@@ -28,7 +28,7 @@ func TestFIOParserAndLatency(t *testing.T) {
 	if converted, ok := fioLatencyStatsFor(fioDirection{ClatUS: fioClat{Mean: 1000, Max: 2000}}); !ok || converted.AvgMS != 1 || converted.MaxMS != 2 {
 		t.Fatalf("fio microsecond latency = %+v/%v", converted, ok)
 	}
-	if _, err := parseFIOJobs([]byte(`{"jobs":`)); err == nil || !strings.Contains(err.Error(), "解析 fio JSON") {
+	if _, _, err := parseFIOJobs([]byte(`{"jobs":`)); err == nil || !strings.Contains(err.Error(), "解析 fio JSON") {
 		t.Fatal("malformed fio JSON did not retain diagnostic")
 	}
 

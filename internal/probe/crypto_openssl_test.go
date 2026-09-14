@@ -2,10 +2,12 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -40,7 +42,7 @@ func TestParseOpenSSLOutputAndErrors(t *testing.T) {
 		{name: "F throughput", output: strings.Replace(output, "4000000000.00", "0.00", 1), workers: 2, marker: "throughput 无效"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := parseOpenSSLSpeedOutput(test.output, spec, test.workers, 1, 16384); err == nil || !strings.Contains(err.Error(), test.marker) {
+			if _, err := parseOpenSSLSpeedOutput(test.output, spec, test.workers, 1, 16384); err == nil || !errors.Is(err, failure.ErrParse) || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("OpenSSL error = %v, want %q", err, test.marker)
 			}
 		})

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	carrierids "ecs/internal/carrier"
 	"ecs/internal/model"
 )
 
@@ -292,7 +293,8 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 
 	byCarrier := make(map[string][]cnNode)
 	for _, node := range nodes {
-		byCarrier[node.Operator] = append(byCarrier[node.Operator], node)
+		key := carrierKey(node.Operator)
+		byCarrier[key] = append(byCarrier[key], node)
 	}
 
 	// 每个运营商最多试这么多节点来选最快的，避免把清单里几十个节点全 ping 一遍。
@@ -304,7 +306,7 @@ func (cnSpeedProbe) Run(ctx context.Context, env Environment) model.Result {
 		wg.Add(1)
 		go func(index int, carrier string) {
 			defer wg.Done()
-			results[index] = measureCarrier(ctx, env, byCarrier[carrier], carrier, probeCandidates)
+			results[index] = measureCarrier(ctx, env, byCarrier[carrierKey(carrier)], carrier, probeCandidates)
 		}(index, carrier)
 	}
 	wg.Wait()
@@ -447,29 +449,17 @@ func measureCarrier(ctx context.Context, env Environment, candidates []cnNode, c
 
 // carrierKey 把运营商名转成指标键用的拉丁标识。
 func carrierKey(carrier string) string {
-	switch carrier {
-	case "电信":
-		return "telecom"
-	case "联通":
-		return "unicom"
-	case "移动":
-		return "mobile"
-	default:
-		return "other"
+	if canonical, ok := carrierids.Parse(carrier); ok {
+		return string(canonical)
 	}
+	return "other"
 }
 
 func carrierMachineValue(value string) model.Value {
-	switch strings.TrimSpace(value) {
-	case "电信", "China Telecom", "telecom":
-		return model.KeyValue("probe.cnspeed.carrier.telecom")
-	case "联通", "China Unicom", "unicom":
-		return model.KeyValue("probe.cnspeed.carrier.unicom")
-	case "移动", "China Mobile", "mobile":
-		return model.KeyValue("probe.cnspeed.carrier.mobile")
-	default:
-		return model.RawValue(value)
+	if canonical, ok := carrierids.Parse(value); ok {
+		return model.KeyValue("probe.cnspeed.carrier." + string(canonical))
 	}
+	return model.RawValue(value)
 }
 
 func cnSpeedMachineSummary(result model.Result) string {

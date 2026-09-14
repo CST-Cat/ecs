@@ -28,6 +28,15 @@ type mountPoint struct {
 	ReadOnly bool
 }
 
+func mountOptionsReadOnly(options string) bool {
+	for _, option := range strings.Split(options, ",") {
+		if option == "ro" {
+			return true
+		}
+	}
+	return false
+}
+
 // virtualFilesystems 是不代表真实块设备的文件系统类型。
 //
 // tmpfs 尤其要排除：它是内存盘，测出来的是内存带宽而不是磁盘性能，
@@ -258,7 +267,7 @@ func runMultiDiskFIO(ctx context.Context, fioPath, mountPath string, engine fioE
 	if run.Err != nil {
 		return sample, run.Err
 	}
-	jobs, err := parseFIOJobs(run.Stdout)
+	_, jobs, err := parseFIOJobs(run.Stdout)
 	if err != nil {
 		return sample, err
 	}

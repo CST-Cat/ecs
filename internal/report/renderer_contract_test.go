@@ -654,6 +654,33 @@ func TestRawValuesRemainNeutralAcrossTextAndHTML(t *testing.T) {
 	}
 }
 
+func TestHTMLTableClassesUseSemanticDensity(t *testing.T) {
+	table := model.Table{
+		Key: "network.iperf3.results",
+		Columns: []model.TableColumn{{
+			Key: "upload_mbps", Label: "Upload", Numeric: true, HigherIsBetter: true,
+		}},
+		Rows: [][]model.Value{
+			{model.RawValue("10 Mbps")},
+			{model.RawValue("20 Mbps")},
+			{model.RawValue("40 Mbps")},
+		},
+	}
+	rows := htmlTableRows(table)
+	want := []struct {
+		value, class string
+	}{
+		{value: "10 Mbps ░░······", class: "cell-bad"},
+		{value: "20 Mbps ▒▒▒▒····", class: "cell-warn"},
+		{value: "40 Mbps ████████", class: "cell-good"},
+	}
+	for index, expected := range want {
+		if got := rows[index][0]; got.Value != expected.value || got.Class != expected.class {
+			t.Errorf("HTML semantic table row %d = %#v, want value %q and class %q", index, got, expected.value, expected.class)
+		}
+	}
+}
+
 func assertTextTokenStyle(t *testing.T, output, token string, wantStyled bool) {
 	t.Helper()
 	found := false

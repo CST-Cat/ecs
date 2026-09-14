@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -99,8 +100,13 @@ func IsOfficialStreamBinary(path string) bool {
 // valid result must contain exactly one rate row for each of Copy, Scale, Add,
 // and Triad, all four timing columns must be finite numbers, and the header
 // must declare a supported rate unit.
-func parseStreamOutput(output string) (streamParsedOutput, error) {
-	result := streamParsedOutput{Samples: make(map[string]streamSample)}
+func parseStreamOutput(output string) (result streamParsedOutput, err error) {
+	result = streamParsedOutput{Samples: make(map[string]streamSample)}
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", failure.ErrParse, err)
+		}
+	}()
 	headers := streamRateHeaderPattern.FindAllStringSubmatch(output, -1)
 	if len(headers) != 1 || len(headers[0]) != 2 {
 		return streamParsedOutput{}, fmt.Errorf("STREAM 输出缺少唯一的 Best Rate 单位表头")
@@ -223,10 +229,10 @@ func executeStreamMemory(ctx context.Context, path string, threads int) (streamM
 		return run, parseErr
 	}
 	if parsed.RequestedThreads == 0 {
-		return run, fmt.Errorf("STREAM 输出缺少 Number of Threads requested，无法验证 OMP_NUM_THREADS=%d 已生效", threads)
+		return run, fmt.Errorf("%w: STREAM 输出缺少 Number of Threads requested，无法验证 OMP_NUM_THREADS=%d 已生效", failure.ErrParse, threads)
 	}
 	if parsed.RequestedThreads != threads {
-		return run, fmt.Errorf("STREAM 声明线程数为 %d，期望 %d", parsed.RequestedThreads, threads)
+		return run, fmt.Errorf("%w: STREAM 声明线程数为 %d，期望 %d", failure.ErrParse, parsed.RequestedThreads, threads)
 	}
 	run.Sample = parsed
 	return run, nil
@@ -290,13 +296,7 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 				stage = "stream_nt"
 				target = "NT"
 			}
-			result.AddFailure(model.Failure{
-				Category: benchmarkFailureCategory(ctx, err),
-				Stage:    stage,
-				Target:   target,
-				Count:    1,
-				Message:  err.Error(),
-			})
+			result.AddFailure(failure.FromError(stage, target, err))
 		} else {
 			validRuns++
 		}

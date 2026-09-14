@@ -218,12 +218,9 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 		}
 		seenIPerfTargets[key] = true
 	}
-	abs, err := filepath.Abs(runtime.DiskPath)
+	_, err := filepath.Abs(runtime.DiskPath)
 	if err != nil {
 		return i18n.Errorf("err.diskPathWrap", err)
-	}
-	if strings.TrimSpace(abs) == "" {
-		return i18n.Errorf("err.diskPathInvalid")
 	}
 	return nil
 }

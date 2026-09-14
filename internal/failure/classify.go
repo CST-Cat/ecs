@@ -25,6 +25,11 @@ type Classified struct {
 	Retryable bool
 }
 
+// ErrParse marks malformed, incomplete, or otherwise unusable structured
+// output produced by a parser. Callers should wrap it with the human-readable
+// diagnostic so classification does not depend on that diagnostic's wording.
+var ErrParse = errors.New("parse failure")
+
 // FromError builds a complete report entry while preserving the original
 // message for diagnostics.
 func FromError(stage, target string, err error) model.Failure {
@@ -98,6 +103,9 @@ func Classify(err error) Classified {
 	}
 	var typeError *json.UnmarshalTypeError
 	if errors.As(err, &typeError) {
+		return Classified{Category: model.FailureParse}
+	}
+	if errors.Is(err, ErrParse) {
 		return Classified{Category: model.FailureParse}
 	}
 	return classifyText(err.Error())

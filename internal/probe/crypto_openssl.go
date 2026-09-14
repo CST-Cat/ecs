@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ecs/internal/failure"
 	"ecs/internal/model"
 )
 
@@ -149,10 +150,7 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 			}
 			result.Status = model.StatusWarning
 			contextName := fmt.Sprintf("%s %d worker", spec.Label, workerCount)
-			result.AddFailure(model.Failure{
-				Category: benchmarkFailureCategory(ctx, runErr), Stage: "benchmark_run", Target: contextName,
-				Count: 1, Message: runErr.Error(),
-			})
+			result.AddFailure(failure.FromError("benchmark_run", contextName, runErr))
 		}
 		if singleCore && len(runs[spec.Key]) == 1 {
 			clone := runs[spec.Key][0]
@@ -236,7 +234,7 @@ func queryOpenSSLVersion(ctx context.Context, path string) (string, string, erro
 	}
 	matches := openSSLVersionPattern.FindAllStringSubmatch(text, -1)
 	if len(matches) != 1 || len(matches[0]) != 2 {
-		return text, "", fmt.Errorf("无法解析唯一 OpenSSL version")
+		return text, "", fmt.Errorf("%w: 无法解析唯一 OpenSSL version", failure.ErrParse)
 	}
 	return text, matches[0][1], nil
 }
@@ -299,8 +297,13 @@ func executeOpenSSLSpeed(ctx context.Context, path string, spec openSSLAlgorithm
 	return parsed, nil
 }
 
-func parseOpenSSLSpeedOutput(output string, spec openSSLAlgorithmSpec, workers, seconds, blockBytes int) (openSSLSpeedSample, error) {
-	sample := openSSLSpeedSample{Algorithm: spec.Key, Workers: workers, Duration: seconds, BlockBytes: blockBytes}
+func parseOpenSSLSpeedOutput(output string, spec openSSLAlgorithmSpec, workers, seconds, blockBytes int) (sample openSSLSpeedSample, err error) {
+	sample = openSSLSpeedSample{Algorithm: spec.Key, Workers: workers, Duration: seconds, BlockBytes: blockBytes}
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", failure.ErrParse, err)
+		}
+	}()
 	dtLines := openSSLDTLine.FindAllStringSubmatch(output, -1)
 	if len(dtLines) != workers {
 		return sample, fmt.Errorf("OpenSSL speed %s +DT worker 记录数为 %d，期望 %d", spec.Label, len(dtLines), workers)
@@ -463,16 +466,7 @@ func cryptoNotes(result model.Result, allowance cpuAllowance) []string {
 			notes = append(notes, "probe.crypto.note.run_failure")
 		}
 	}
-	seen := make(map[string]bool, len(notes))
-	out := notes[:0]
-	for _, note := range notes {
-		if seen[note] {
-			continue
-		}
-		seen[note] = true
-		out = append(out, note)
-	}
-	return out
+	return dedupeNotes(notes)
 }
 
 func firstFailureAt(result *model.Result, stage string) *model.Failure {

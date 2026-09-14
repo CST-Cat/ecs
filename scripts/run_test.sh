@@ -940,6 +940,96 @@ mapfile -d '' -t submit_argv <"$submit_logs/submit.argv"
 [[ "${submit_argv[5]}" == --provider && "${submit_argv[6]}" == 'Cloud Alpha' ]] || fail "wrapper provider was not consumed and reconstructed correctly"
 [[ "${submit_argv[7]}" == --region && "${submit_argv[8]}" == 'East Zone' ]] || fail "wrapper region was not consumed and reconstructed correctly"
 
+run_submit_preflight_case() {
+  local case_name=$1 output_path=$2 marker=$3
+  local case_tmp="$test_root/submit-preflight-$case_name-tmp"
+  local case_logs="$fixture_logs/submit-preflight-$case_name"
+  mkdir -p "$case_tmp" "$case_logs"
+  set +e
+  ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$case_tmp" PATH="$test_path" \
+    ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+    ECS_TEST_LOG_ROOT="$case_logs" \
+    ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=false \
+    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+    ECS_TEST_ASSET="$fixture_asset" \
+    sh "$repo_root/run.sh" --submit --output "$output_path" -- --profile standard --only noop \
+    >"$test_root/submit-preflight-$case_name.stdout" \
+    2>"$test_root/submit-preflight-$case_name.stderr"
+  local case_status=$?
+  set -e
+  [[ "$case_status" -ne 0 ]] || fail "submit preflight $case_name unexpectedly succeeded"
+  grep -F "$marker" "$test_root/submit-preflight-$case_name.stderr" >/dev/null ||
+    fail "submit preflight $case_name omitted its usability error"
+  [[ ! -e "$case_logs/fetch.log" ]] || fail "submit preflight $case_name downloaded before failing"
+  [[ ! -e "$case_logs/run.argv" ]] || fail "submit preflight $case_name invoked ecs run"
+  [[ ! -e "$case_logs/submit.argv" ]] || fail "submit preflight $case_name invoked ecs submit"
+  assert_empty_dir "$case_tmp" "submit preflight $case_name"
+}
+
+# Shell preflight catches plainly unusable destinations before any release
+# download. The Go submit command remains the final owner of symlink and race
+# safety after this usability-only check.
+preflight_existing="$test_root/submit-preflight-existing.json"
+printf '%s\n' existing >"$preflight_existing"
+run_submit_preflight_case existing "$preflight_existing" "submit output file already exists"
+
+preflight_missing_parent="$test_root/submit-preflight-missing-parent/submission.json"
+run_submit_preflight_case missing-parent "$preflight_missing_parent" "submit output parent does not exist"
+
+preflight_parent_file="$test_root/submit-preflight-parent-file"
+printf '%s\n' file >"$preflight_parent_file"
+run_submit_preflight_case parent-not-directory "$preflight_parent_file/submission.json" "submit output parent is not a directory"
+
+preflight_unwritable="$test_root/submit-preflight-unwritable"
+mkdir -p "$preflight_unwritable"
+chmod 0555 "$preflight_unwritable"
+run_submit_preflight_case unwritable "$preflight_unwritable/submission.json" "submit output parent is not writable"
+chmod 0755 "$preflight_unwritable"
+
+run_submit_argv_case() {
+  local case_name=$1 provider=$2 region=$3
+  local case_tmp="$test_root/submit-argv-$case_name-tmp"
+  local case_logs="$fixture_logs/submit-argv-$case_name"
+  local case_output="$test_root/submit-argv-$case_name.json"
+  local -a wrapper_args expected_submit run_argv submit_argv
+  mkdir -p "$case_tmp" "$case_logs"
+  wrapper_args=(--submit --output "$case_output")
+  [ -n "$provider" ] && wrapper_args+=(--provider "$provider")
+  [ -n "$region" ] && wrapper_args+=(--region "$region")
+  wrapper_args+=(-- --profile standard --only noop --yes)
+  if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$case_tmp" PATH="$test_path" \
+      ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+      ECS_TEST_LOG_ROOT="$case_logs" \
+      ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=false \
+      ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+      ECS_TEST_ASSET="$fixture_asset" \
+      sh "$repo_root/run.sh" "${wrapper_args[@]}" \
+      >"$test_root/submit-argv-$case_name.stdout" \
+      2>"$test_root/submit-argv-$case_name.stderr"; then
+    fail "submit argv $case_name fixture returned a failure: $(<"$test_root/submit-argv-$case_name.stderr")"
+  fi
+  mapfile -d '' -t run_argv <"$case_logs/run.argv"
+  [[ "${#run_argv[@]}" -eq 9 && "${run_argv[7]}" == --output ]] ||
+    fail "submit argv $case_name changed the intermediate run arguments"
+  expected_submit=(submit --input "${run_argv[8]}/fixture.json" --output "$case_output")
+  [ -n "$provider" ] && expected_submit+=(--provider "$provider")
+  [ -n "$region" ] && expected_submit+=(--region "$region")
+  mapfile -d '' -t submit_argv <"$case_logs/submit.argv"
+  [[ "${#submit_argv[@]}" -eq "${#expected_submit[@]}" ]] ||
+    fail "submit argv $case_name has ${#submit_argv[@]} arguments, want ${#expected_submit[@]}"
+  for index in "${!expected_submit[@]}"; do
+    [[ "${submit_argv[$index]}" == "${expected_submit[$index]}" ]] ||
+      fail "submit argv $case_name token $index changed"
+  done
+  [[ "$(wc -l <"$case_logs/fetch.log")" -eq 2 ]] || fail "submit argv $case_name did not use the local downloads"
+  assert_empty_dir "$case_tmp" "submit argv $case_name"
+}
+
+run_submit_argv_case neither "" ""
+run_submit_argv_case provider-only 'Cloud Alpha' ""
+run_submit_argv_case region-only "" 'East Zone'
+run_submit_argv_case provider-and-region 'Cloud Alpha' 'East Zone'
+
 # Option-looking values after the boundary belong wholly to Go.  In
 # particular, --submit must not activate wrapper mode when it is --name's
 # value, and no wrapper option may disappear from the recorded run argv.

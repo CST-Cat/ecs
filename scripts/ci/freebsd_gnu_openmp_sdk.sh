@@ -4,7 +4,7 @@ set -euo pipefail
 # Linux-hosted FreeBSD GNU C/Fortran/OpenMP SDK (Stage 4).
 #
 # Default mode consumes the immutable prebuilt snapshot pinned in the lock
-# (Release tag ci-freebsd-gnu-sdk-v1.1; SDK publishing uses version-incrementing
+# (Release tag ci-freebsd-gnu-sdk-v1.2; SDK publishing uses version-incrementing
 # tags since v1.1, and the maintainer re-points the lock after each publish):
 # download, verify SHA256, unpack, then run the full assertion and probe
 # suite. --acquire-only stops after the same download/verify/unpack (no
@@ -208,471 +208,16 @@ echo "freebsd-gnu-openmp-sdk: target=$target triple=$gnu_triple gcc=$gcc_version
 echo "freebsd-gnu-openmp-sdk: mode=$sdk_mode acquire_only=$acquire_only" >&2
 
 # ---------------------------------------------------------------------------
-# Stage 2 machinery (from-source publisher only); the stage 3/4/5 helpers
-# (driver_chain_check, feature_inventory, slim_remove_docs) follow it.
-#
-# Host ELF selection is byte identity, never a filename whitelist: an ELF
-# whose e_machine == EM_X86_64 (0x3E) and OS/ABI != FreeBSD (9). Both SDK
-# snapshots are produced on ubuntu-24.04 amd64 hosts, so every host-side
-# binary (drivers, cc1/f951/lto1, binutils, shared host libs) carries this
-# identity; FreeBSD target ELFs never match (amd64 target crt carries
-# OS/ABI == 9; the arm64 target toolchain carries e_machine == 0xB7).
-#
-# The strip pass is `strip --strip-debug` (never --strip-all or
-# --strip-unneeded) and it is inode-safe: one physical (st_dev, st_ino)
-# object is stripped once and the stripped bytes are written back through
-# the original path, so hardlink aliases keep sharing one inode with the
-# new content (contract 2.5: no double processing, no orphaned alias).
-#
-# Proof (contract 2.6/2.7): the whole tree is manifested before/after and
-# every regular file outside the host-ELF set must stay byte-identical with
-# unchanged inode, while every host ELF loses all of its .debug_* sections.
-# ---------------------------------------------------------------------------
-
-write_phase2_python() {
-  local dest=$1
-  cat >"$dest" <<'SDK_PHASE2_PY'
-#!/usr/bin/env python3
-"""Phase 2 SDK host-debug-strip support (REQUIREMENTS.md stage 2).
-
-Host ELF identification is byte identity, never a filename whitelist: an ELF
-whose e_machine == EM_X86_64 (0x3E = 62) and OS/ABI != FreeBSD (9). Both SDK
-snapshots are produced on ubuntu-24.04 amd64 hosts, so every host-side tool
-binary (gcc/gfortran drivers, cc1/f951, binutils, shared host libs)
-carries this identity. FreeBSD target ELFs never match: amd64 target crt
-objects carry OS/ABI == 9 and the arm64 target toolchain carries
-e_machine == 0xB7 (AArch64).
-
-Subcommands:
-  manifest <root> <out.tsv>
-      Full-tree manifest of every regular file: relpath, "dev:ino" identity,
-      sha256, ELF-identity kind, summed .debug_* section bytes, file size.
-      Symlinks are recorded (they are never processed); anything else that is
-      neither regular file nor symlink is a hard error.
-  host-elfs <manifest.tsv> <out.tsv>
-      Contract 2.5 inode deduplication: one representative path per unique
-      (dev,ino) host-ELF inode plus its full alias list.
-  verify-tree <before.tsv> <after.tsv> <host-elfs.tsv>
-      Contract 2.6/2.7 verification: same path set, hardlink groups intact,
-      every file keeps its inode and kind, every non-host-ELF regular file is
-      byte-identical, every host ELF lost all .debug_* sections.
-  evidence <target> <dir> <out.json>
-      Assemble the phase 2 evidence summary from the manifest pair and the
-      host inode list.
-"""
-
-import hashlib
-import json
-import os
-import re
-import stat as stat_mod
-import struct
-import subprocess
-import sys
-from collections import defaultdict
-
-EM_X86_64 = 62          # 0x3E
-OSABI_FREEBSD = 9
-
-SECTION_LINE = re.compile(r"^\s*\[\s*(\d+)\]\s*(.*)$")
-
-
-def die(msg):
-    raise SystemExit("sdk-phase2: " + msg)
-
-
-def run(args):
-    proc = subprocess.run(args, check=True, capture_output=True, text=True,
-                          env=dict(os.environ, LC_ALL="C"))
-    return proc.stdout
-
-
-def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def elf_kind(head):
-    if head[:4] != b"\x7fELF":
-        return None
-    osabi = head[7]
-    e_type, e_machine = struct.unpack_from("<HH", head, 16)
-    return "elf:m%d:t%d:o%d" % (e_machine, e_type, osabi)
-
-
-def is_host_kind(kind):
-    if kind is None:
-        return False
-    m = re.fullmatch(r"elf:m(\d+):t(\d+):o(\d+)", kind)
-    return bool(m and int(m.group(1)) == EM_X86_64
-                and int(m.group(3)) != OSABI_FREEBSD)
-
-
-def parse_sections(readelf_sw):
-    """Right-anchored parse of `readelf -SW` rows (Phase 0 baseline method)."""
-    out = []
-    for line in readelf_sw.splitlines():
-        m = SECTION_LINE.match(line)
-        if not m:
-            continue
-        nr = int(m.group(1))
-        toks = m.group(2).split()
-        if re.fullmatch(r"[0-9a-f]{1,2}", toks[-4]):
-            flg, es = "", toks[-4]
-            size, off, addr, typ = toks[-5], toks[-6], toks[-7], toks[-8]
-        else:
-            flg, es = toks[-4], toks[-5]
-            size, off, addr, typ = toks[-6], toks[-7], toks[-8], toks[-9]
-        if nr == 0:
-            name = ""
-        else:
-            name = toks[0]
-            if toks[1] != typ:
-                die("token/type mismatch on [%d]: %s" % (nr, line))
-        out.append({"nr": nr, "name": name, "type": typ,
-                    "address": "0x" + addr, "offset": "0x" + off,
-                    "size": int(size, 16), "flags": flg})
-    return out
-
-
-def debug_section_bytes(path):
-    """Sum of the .debug_* section sizes (manifest/verification counter)."""
-    sections = parse_sections(run(["readelf", "-SW", path]))
-    return sum(sec["size"] for sec in sections
-               if sec["name"].startswith(".debug_"))
-
-
-def cmd_manifest(root, out_path):
-    rows = []
-    debug_cache = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        for fn in sorted(filenames):
-            path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(path, root)
-            if "\t" in rel or "\n" in rel:
-                die("path with tab/newline cannot be manifested: %r" % rel)
-            st = os.lstat(path)
-            if stat_mod.S_ISLNK(st.st_mode):
-                rows.append((rel, "link", os.readlink(path), "symlink", "-", 0))
-                continue
-            if not stat_mod.S_ISREG(st.st_mode):
-                die("unexpected non-regular path: %s" % path)
-            with open(path, "rb") as fh:
-                kind = elf_kind(fh.read(20))
-            inode_id = "%d:%d" % (st.st_dev, st.st_ino)
-            debug = 0
-            if kind is not None:
-                if inode_id not in debug_cache:
-                    debug_cache[inode_id] = debug_section_bytes(path)
-                debug = debug_cache[inode_id]
-            rows.append((rel, inode_id, sha256_file(path),
-                         kind if kind is not None else "file", str(debug),
-                         st.st_size))
-    rows.sort(key=lambda r: r[0])
-    with open(out_path, "w") as fh:
-        for rel, inode_id, sha, kind, debug, size in rows:
-            fh.write("\t".join((rel, inode_id, sha, kind, debug, str(size)))
-                     + "\n")
-    print("manifest: %d entries -> %s" % (len(rows), out_path))
-
-
-def parse_manifest(path):
-    entries = {}
-    with open(path) as fh:
-        for line in fh:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            rel, inode_id, third, kind, debug, size = line.split("\t")
-            entries[rel] = {"id": inode_id, "sha": third, "kind": kind,
-                            "debug": debug, "size": int(size)}
-    return entries
-
-
-def cmd_host_elfs(manifest_path, out_path):
-    entries = parse_manifest(manifest_path)
-    groups = defaultdict(list)
-    for rel, entry in entries.items():
-        if is_host_kind(entry["kind"]):
-            groups[entry["id"]].append(rel)
-    with open(out_path, "w") as fh:
-        for inode_id in sorted(groups):
-            paths = sorted(groups[inode_id])
-            fh.write("\t".join((paths[0], inode_id, ",".join(paths))) + "\n")
-    print("host-elfs: %d paths, %d unique inodes -> %s" %
-          (sum(len(v) for v in groups.values()), len(groups), out_path))
-
-
-def host_alias_set(host_elfs_path):
-    aliases = set()
-    with open(host_elfs_path) as fh:
-        for line in fh:
-            line = line.rstrip("\n")
-            if line:
-                aliases.update(line.split("\t")[2].split(","))
-    return aliases
-
-
-def cmd_verify_tree(before_path, after_path, host_elfs_path):
-    before = parse_manifest(before_path)
-    after = parse_manifest(after_path)
-    hosts = host_alias_set(host_elfs_path)
-
-    def hardlink_groups(entries):
-        groups = defaultdict(set)
-        for rel, entry in entries.items():
-            if entry["id"] != "link":
-                groups[entry["id"]].add(rel)
-        return {k: frozenset(v) for k, v in groups.items()}
-
-    problems = []
-    for rel in sorted(set(before) - set(after)):
-        problems.append("file disappeared: %s" % rel)
-    for rel in sorted(set(after) - set(before)):
-        problems.append("file appeared: %s" % rel)
-    if hardlink_groups(before) != hardlink_groups(after):
-        problems.append("hardlink group membership changed (contract 2.5)")
-    missing_host = hosts - set(before)
-    if missing_host:
-        problems.append("host list paths not in manifest: %s" %
-                        sorted(missing_host)[:5])
-    manifest_hosts = {rel for rel, entry in before.items()
-                      if is_host_kind(entry["kind"])}
-    if manifest_hosts != hosts:
-        problems.append("host-ELF set mismatch: manifest-only=%s list-only=%s"
-                        % (sorted(manifest_hosts - hosts)[:5],
-                           sorted(hosts - manifest_hosts)[:5]))
-    for rel in sorted(set(before) & set(after)):
-        b, a = before[rel], after[rel]
-        if b["id"] != a["id"]:
-            problems.append("inode changed for %s: %s -> %s"
-                            % (rel, b["id"], a["id"]))
-            continue
-        if b["kind"] != a["kind"]:
-            problems.append("kind changed for %s: %s -> %s"
-                            % (rel, b["kind"], a["kind"]))
-            continue
-        if rel in hosts:
-            if int(a["debug"]) != 0:
-                problems.append("host ELF %s still has %s .debug_* bytes"
-                                % (rel, a["debug"]))
-            if a["sha"] == b["sha"] and int(b["debug"]) > 0:
-                problems.append("host ELF %s had %s .debug_* bytes but is "
-                                "byte-identical after strip"
-                                % (rel, b["debug"]))
-        elif b["sha"] != a["sha"]:
-            problems.append("non-host file changed: %s" % rel)
-
-    if problems:
-        for problem in problems[:50]:
-            print("verify-tree FAIL: %s" % problem)
-        die("tree verification failed with %d problem(s)" % len(problems))
-    debug_before = sum(int(e["debug"]) for e in before.values()
-                       if e["debug"] != "-")
-    debug_after = sum(int(e["debug"]) for e in after.values()
-                      if e["debug"] != "-")
-    print("verify-tree OK: %d files (%d host ELF paths, %d hardlink groups); "
-          ".debug_* bytes %d -> %d; all non-host files byte-identical" %
-          (len(before), len(hosts),
-           len(hardlink_groups(before)), debug_before, debug_after))
-
-
-def cmd_evidence(target, directory, out_path):
-    before = parse_manifest(os.path.join(directory, "manifest.before.tsv"))
-    after = parse_manifest(os.path.join(directory, "manifest.after.tsv"))
-    host_paths = host_alias_set(
-        os.path.join(directory, "host-elf-inodes.tsv"))
-    groups = defaultdict(list)
-    for rel, entry in before.items():
-        if entry["id"] != "link":
-            groups[entry["id"]].append(rel)
-    hardlink_groups = {k: v for k, v in groups.items() if len(v) > 1}
-
-    def tree_bytes(entries, unique_inodes):
-        if unique_inodes:
-            seen = set()
-            total = 0
-            for rel, entry in entries.items():
-                if entry["id"] in seen or entry["id"] == "link":
-                    continue
-                seen.add(entry["id"])
-                total += entry["size"]
-            return total
-        return sum(entry["size"] for entry in entries.values())
-
-    evidence = {
-        "target": target,
-        "strip": {
-            "command": "strip --strip-debug (host GNU strip)",
-            "host_selection": "e_machine==x86-64 && OS/ABI!=FreeBSD "
-                              "(byte identity, inode-deduplicated)",
-            "host_elf_paths": len(host_paths),
-            "host_elf_unique_inodes": len(
-                {entry["id"] for rel, entry in before.items()
-                 if rel in host_paths}),
-            "hardlink_group_count": len(hardlink_groups),
-            "debug_bytes_before": sum(int(e["debug"])
-                                      for e in before.values()
-                                      if e["debug"] != "-"),
-            "debug_bytes_after": sum(int(e["debug"])
-                                     for e in after.values()
-                                     if e["debug"] != "-"),
-            "tree_bytes_unique_inodes_before":
-                tree_bytes(before, unique_inodes=True),
-            "tree_bytes_unique_inodes_after":
-                tree_bytes(after, unique_inodes=True),
-            "tree_bytes_all_paths_before":
-                tree_bytes(before, unique_inodes=False),
-            "tree_bytes_all_paths_after":
-                tree_bytes(after, unique_inodes=False),
-        },
-    }
-    with open(out_path, "w") as fh:
-        json.dump(evidence, fh, indent=1)
-        fh.write("\n")
-    print("evidence: %s" % out_path)
-
-
-def main(argv):
-    if len(argv) == 4 and argv[1] == "manifest":
-        cmd_manifest(argv[2], argv[3])
-    elif len(argv) == 4 and argv[1] == "host-elfs":
-        cmd_host_elfs(argv[2], argv[3])
-    elif len(argv) == 5 and argv[1] == "verify-tree":
-        cmd_verify_tree(argv[2], argv[3], argv[4])
-    elif len(argv) == 5 and argv[1] == "evidence":
-        cmd_evidence(argv[2], argv[3], argv[4])
-    else:
-        raise SystemExit(__doc__)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))
-SDK_PHASE2_PY
-}
-
-phase2_strip_and_verify() {
-  local rep inode_id paths path tmp
-  while IFS=$'\t' read -r rep inode_id paths; do
-    path="$prefix/$rep"
-    tmp="$path.ecs-strip-tmp"
-    if ! strip --strip-debug -o "$tmp" "$path"; then
-      rm -f "$tmp"
-      die "phase2: strip --strip-debug failed for $rep"
-    fi
-    # Write the stripped bytes back through the original path: the inode
-    # (and therefore every hardlink alias of this object) keeps its
-    # identity and picks up the stripped content in place.
-    cat "$tmp" >"$path"
-    rm -f "$tmp"
-  done <"$evidence_dir/host-elf-inodes.tsv"
-  python3 "$phase2_py" manifest "$prefix" "$evidence_dir/manifest.after.tsv"
-  python3 "$phase2_py" verify-tree "$evidence_dir/manifest.before.tsv" \
-    "$evidence_dir/manifest.after.tsv" "$evidence_dir/host-elf-inodes.tsv"
-}
-
-# Stage 3 (contract 3.4): the drivers must resolve a complete internal
-# toolchain on the final SDK bytes. Every cc1/f951/collect2/as/ld/plugin/
-# wrapper path the driver prints for -### must exist on disk, and any
-# "cannot find / cannot load / missing lto" report is a hard failure (a
-# --disable-lto build must not reference absent LTO components). -### only
-# prints the resolved specs and executes nothing, so this adds seconds.
-chain_case() {
-  local name=$1
-  shift
-  local log="chain-$name.log"
-  if ! "$@" >"$log" 2>&1; then
-    sed -n '1,40p' "$log" >&2
-    die "driver chain ($name): driver exited non-zero (contract 3.4)"
-  fi
-  if grep -Eqi 'cannot find|cannot load|missing lto' "$log"; then
-    grep -Ei 'cannot find|cannot load|missing lto' "$log" | head -5 >&2
-    die "driver chain ($name): unresolved component reference (contract 3.4)"
-  fi
-  local tok base cand problems=0
-  while IFS= read -r tok; do
-    tok=${tok//\"/}
-    [[ "$tok" == */* ]] || continue
-    base=${tok##*/}
-    case "$base" in
-      cc1 | f951 | collect2 | as | ld | lto1 | lto-wrapper | lto-dump | liblto_plugin.so | liblto_plugin.la)
-        cand="/${tok#*/}"
-        if [[ ! -e "$cand" ]]; then
-          echo "driver chain ($name): referenced tool does not exist: $cand" >&2
-          problems=$((problems + 1))
-        fi
-        ;;
-    esac
-  done < <(tr ' ' '\n' <"$log")
-  [[ "$problems" -eq 0 ]] ||
-    die "driver chain ($name): $problems referenced tool(s) missing (contract 3.4)"
-  echo "freebsd-gnu-openmp-sdk: [stage3] driver chain OK: $name" >&2
-}
-
-driver_chain_check() {
-  # Runs inside the probe output dir (the probe sources are already there)
-  # and keeps the five -### spec logs next to the probe binaries.
-  local out_dir=$1
-  (
-    cd "$out_dir"
-    chain_case c-compile "$gcc_bin" -### --sysroot="$sysroot" -c hello.c
-    chain_case c-static-link "$gcc_bin" -### --sysroot="$sysroot" -static hello.c -o chain-c
-    chain_case f-static-link "$gfortran_bin" -### --sysroot="$sysroot" -static hello.f90 -o chain-f
-    chain_case c-openmp-link "$gcc_bin" -### --sysroot="$sysroot" -fopenmp omp.c -o chain-omp-c
-    chain_case f-openmp-link "$gfortran_bin" -### --sysroot="$sysroot" -fopenmp omp.f90 -o chain-omp-f
-  )
-  # The target assembler/linker are always part of the SDK contract (0.3).
-  [[ -x "$prefix/bin/${gnu_triple}-as" ]] ||
-    die "driver chain: missing $prefix/bin/${gnu_triple}-as (contract 3.4)"
-  [[ -x "$prefix/bin/${gnu_triple}-ld" ]] ||
-    die "driver chain: missing $prefix/bin/${gnu_triple}-ld (contract 3.4)"
-}
-
-# Stages 3/4 (contracts 3.3/4.3): record what the --disable-lto and
-# --disable-gcov builds still install. Existence is evidence only — hand
-# deleting LTO or gcov components is forbidden (contract 3.2), so whatever
-# GCC still installs stays in the snapshot.
-feature_inventory() {
-  local out=$1
-  : >"$out"
-  local pattern paths
-  for pattern in lto1 lto-wrapper lto-dump liblto_plugin* '*gcov*'; do
-    paths=$(find "$prefix" -name "$pattern" | LC_ALL=C sort)
-    if [[ -n "$paths" ]]; then
-      while IFS= read -r p; do
-        printf '%s\tpresent\t%s\n' "$pattern" "$p"
-      done <<<"$paths" >>"$out"
-    else
-      printf '%s\tabsent\t-\n' "$pattern" >>"$out"
-    fi
-  done
-  cat "$out" >&2
-}
-
-# Stage 5 (contract 5.2): remove exactly $prefix/share/man and
-# $prefix/share/info from the snapshot. The full share/ listings before and
-# after prove the removal stayed inside the two whitelisted directories.
-slim_remove_docs() {
-  if [[ -d "$prefix/share" ]]; then
-    (cd "$prefix" && find share -mindepth 1 | LC_ALL=C sort) \
-      >"$evidence_dir/share-before.txt"
-  else
-    : >"$evidence_dir/share-before.txt"
-  fi
-  rm -rf "$prefix/share/man" "$prefix/share/info"
-  if [[ -d "$prefix/share" ]]; then
-    (cd "$prefix" && find share -mindepth 1 | LC_ALL=C sort) \
-      >"$evidence_dir/share-after.txt"
-  else
-    : >"$evidence_dir/share-after.txt"
-  fi
-  echo "freebsd-gnu-openmp-sdk: [stage5] share/ entries $(wc -l <"$evidence_dir/share-before.txt") -> $(wc -l <"$evidence_dir/share-after.txt") (removed share/man + share/info only)" >&2
-}
+# Low-frequency publisher machinery lives outside this orchestration script.
+# It owns the from-source tree evidence/slimming pass and the shared driver-chain
+# proof; the runtime probes remain in this script because both acquisition modes
+# execute them on the bytes being consumed or published.
+sdk_tree_verifier="$ECS_REPO_ROOT/scripts/lib/freebsd_gnu_sdk/tree_verify.py"
+sdk_publisher_lib="$ECS_REPO_ROOT/scripts/lib/freebsd_gnu_sdk/publisher.sh"
+[[ -r "$sdk_tree_verifier" ]] || die "missing SDK tree verifier: $sdk_tree_verifier"
+[[ -r "$sdk_publisher_lib" ]] || die "missing SDK publisher library: $sdk_publisher_lib"
+# shellcheck source=scripts/lib/freebsd_gnu_sdk/publisher.sh
+source "$sdk_publisher_lib"
 
 # The five release probes, run against the given output directory on the
 # final published bytes with the full assertion set.
@@ -818,8 +363,7 @@ if [[ "$sdk_mode" == "from-source" ]]; then
   evidence_dir="$work_dir/slim-evidence"
   rm -rf "$evidence_dir"
   mkdir -p "$evidence_dir"
-  write_phase2_python "$evidence_dir/sdk_phase2.py"
-  phase2_py="$evidence_dir/sdk_phase2.py"
+  # The immutable repository verifier is invoked directly for publisher evidence.
 fi
 
 if [[ "$acquire_only" -eq 1 ]]; then
@@ -905,7 +449,7 @@ else
   # Stage 5 (contract 5.2): drop exactly the two documentation directories
   # from the CI snapshot. Nothing else under share/ is touched; the
   # before/after listings are part of the release evidence.
-  slim_remove_docs
+  ecs_freebsd_gnu_sdk_slim_remove_docs
 fi
 
 gcc_bin="$prefix/bin/${gnu_triple}-gcc"
@@ -937,16 +481,16 @@ done <<<"$required_libs"
 
 if [[ "$sdk_mode" == "from-source" ]]; then
   echo "freebsd-gnu-openmp-sdk: [stage2] manifest before strip" >&2
-  python3 "$phase2_py" manifest "$prefix" "$evidence_dir/manifest.before.tsv"
-  python3 "$phase2_py" host-elfs "$evidence_dir/manifest.before.tsv" \
+  python3 "$sdk_tree_verifier" manifest "$prefix" "$evidence_dir/manifest.before.tsv"
+  python3 "$sdk_tree_verifier" host-elfs "$evidence_dir/manifest.before.tsv" \
     "$evidence_dir/host-elf-inodes.tsv"
 
   echo "freebsd-gnu-openmp-sdk: [stage2] host ELF debug strip + invariants" >&2
-  phase2_strip_and_verify
-  python3 "$phase2_py" evidence "$target" "$evidence_dir" "$evidence_dir/evidence.json"
+  ecs_freebsd_gnu_sdk_phase2_strip_and_verify
+  python3 "$sdk_tree_verifier" evidence "$target" "$evidence_dir" "$evidence_dir/evidence.json"
 
   echo "freebsd-gnu-openmp-sdk: [stage3/4] LTO/gcov feature inventory" >&2
-  feature_inventory "$evidence_dir/feature-inventory.tsv"
+  ecs_freebsd_gnu_sdk_feature_inventory "$evidence_dir/feature-inventory.tsv"
 fi
 
 # Gate probes run on exactly the bytes that get published: post-strip in
@@ -956,7 +500,7 @@ run_probes "$work_dir/probe"
 
 # Stage 3 gate on the bytes about to be published (and, in prebuilt mode, on
 # the consumed snapshot): every -###-referenced tool must exist.
-driver_chain_check "$work_dir/probe"
+ecs_freebsd_gnu_sdk_driver_chain_check "$work_dir/probe"
 
 if [[ "$sdk_mode" == "from-source" ]]; then
   # Consumer build gate (contract 2.9): the release must build NPB EP/FT
@@ -964,11 +508,7 @@ if [[ "$sdk_mode" == "from-source" ]]; then
   # bytes; set -e turns any build failure into a release failure. Nothing
   # is kept afterwards. Prebuilt mode skips this: the gnu-bench chain
   # already builds the same workloads through this builder on every run.
-  echo "freebsd-gnu-openmp-sdk: [stage2] consumer build gate (contract 2.9)" >&2
-  bash "$ECS_REPO_ROOT/scripts/build_tools_freebsd_gnu.sh" \
-    --target "$target" \
-    --stage-root "$work_dir/consumer-stage" \
-    --sdk-prefix "$prefix"
+  ecs_freebsd_gnu_sdk_consumer_build_gate
 fi
 
 if [[ "$sdk_mode" == "prebuilt" ]]; then

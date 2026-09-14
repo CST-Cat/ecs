@@ -110,8 +110,7 @@ ecs_freebsd_c_clone_tool() {
 # ---------------------------------------------------------------------------
 
 ecs_freebsd_c_strip_release_binaries() {
-  local stage=$1 work=$2
-  # Keep the work-directory parameter for compatibility with existing callers.
+  local stage=$1
   command -v "$STRIP" >/dev/null 2>&1 ||
     ecs_freebsd_c_die "strip tool is missing: $STRIP"
   local tool bin

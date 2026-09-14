@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	carrierids "ecs/internal/carrier"
 	"ecs/internal/config"
 	"ecs/internal/model"
 )
@@ -152,7 +153,7 @@ func (ooklaProbe) Run(ctx context.Context, env Environment) model.Result {
 		if target.ID > 0 {
 			targetArgs = append(targetArgs, "--server-id", strconv.Itoa(target.ID))
 		}
-		parsed, runErr, parseErr, _ := runOfficialOokla(ctx, path, targetArgs)
+		parsed, runErr, parseErr := runOfficialOokla(ctx, path, targetArgs)
 		label := target.Carrier
 		if parseErr != nil {
 			addFailure(&result, "parse", label, parseErr)
@@ -319,7 +320,7 @@ func ooklaNextStepValue(nextStep string) model.Value {
 	}
 }
 
-func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaResult, error, error, bool) {
+func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaResult, error, error) {
 	var parsed ooklaResult
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -327,10 +328,10 @@ func runOfficialOokla(ctx context.Context, path string, args []string) (ooklaRes
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	run := command.RunCombined(probeCommandOoklaLimit)
 	if cause := contextCauseError(runCtx); cause != nil {
-		return parsed, cause, nil, true
+		return parsed, cause, nil
 	}
 	parsed, parseErr := parseOoklaJSON(run.Combined)
-	return parsed, run.Err, parseErr, contextCauseError(runCtx) != nil
+	return parsed, run.Err, parseErr
 }
 
 func formatOoklaServer(parsed ooklaResult) string {
@@ -351,16 +352,10 @@ func formatOoklaServer(parsed ooklaResult) string {
 }
 
 func ooklaCarrierKey(carrier string) string {
-	switch strings.ToLower(strings.TrimSpace(carrier)) {
-	case "电信", config.OoklaCarrierTelecom, "ct", "chinatelecom":
-		return "telecom"
-	case "联通", config.OoklaCarrierUnicom, "cu", "chinaunicom":
-		return "unicom"
-	case "移动", config.OoklaCarrierMobile, "cm", "chinamobile":
-		return "mobile"
-	default:
-		return "auto"
+	if canonical, ok := carrierids.Parse(carrier); ok {
+		return string(canonical)
 	}
+	return config.OoklaCarrierAuto
 }
 
 func ooklaCarrierValue(carrier string) model.Value {

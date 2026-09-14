@@ -445,22 +445,75 @@ func knownMixedBlock(block string) bool {
 }
 
 func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBarWidth ...int) [][]string {
+	presentation := buildTableBarPresentation(table)
+	cellBarWidth := 8
+	if len(requestedBarWidth) > 0 {
+		cellBarWidth = max(0, requestedBarWidth[0])
+	}
+	return presentation.rowsWithBars(palette, cellBarWidth)
+}
+
+// tableBarPresentation is the small semantic boundary shared by terminal and
+// HTML table renderers. It carries display text separately from the relative
+// scale, so a renderer never has to infer meaning from a rendered glyph.
+type tableBarPresentation struct {
+	rows        [][]string
+	cells       [][]tableBarCell
+	valueWidths map[int]int
+}
+
+type tableBarCell struct {
+	value   float64
+	min     float64
+	max     float64
+	density termcolor.DensityLevel
+	scaled  bool
+}
+
+func (p tableBarPresentation) rowsWithBars(palette termcolor.Palette, cellBarWidth int) [][]string {
+	rows := make([][]string, len(p.rows))
+	for rowIndex, original := range p.rows {
+		rows[rowIndex] = append([]string(nil), original...)
+		for column, cell := range p.cells[rowIndex] {
+			if !cell.scaled || column >= len(rows[rowIndex]) {
+				continue
+			}
+			// Reserve one stable value field before the bar. Without this
+			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
+			// row and the visual column drifts with digit count or unit text.
+			value := textwidth.Pad(rows[rowIndex][column], p.valueWidths[column])
+			if cellBarWidth > 0 {
+				rows[rowIndex][column] = value + " " + palette.BarRelativeRange(cell.value, cell.min, cell.max, cellBarWidth)
+			}
+		}
+	}
+	return rows
+}
+
+func buildTableBarPresentation(table model.Table) tableBarPresentation {
 	rows := displayTableRows(table)
+	presentation := tableBarPresentation{
+		rows:        rows,
+		cells:       make([][]tableBarCell, len(rows)),
+		valueWidths: make(map[int]int),
+	}
+	for rowIndex := range rows {
+		presentation.cells[rowIndex] = make([]tableBarCell, len(table.Columns))
+	}
 	numericColumns := numericTableColumnIndexes(table)
 	if len(numericColumns) == 0 || len(rows) == 0 {
-		return rows
+		return presentation
 	}
-	// A table column is not necessarily a metric group.  Crystal/ATTO, for
+	// A table column is not necessarily a metric group. Crystal/ATTO, for
 	// example, put read and write throughput in adjacent columns; calculating a
 	// maximum independently for each column makes a 4.63 MiB/s read hit a full
 	// bar when that column has no faster read, even though a 1000 MiB/s write in
-	// the same table is orders of magnitude faster.  Group columns by metric and
-	// unit first, then scale every member against the group's range.  The shared
+	// the same table is orders of magnitude faster. Group columns by metric and
+	// unit first, then scale every member against the group's range. The shared
 	// helper keeps compact ranges linear and switches wide ranges to a
 	// min-relative logarithmic scale, while the table itself remains the scope
 	// so values from different matrices never borrow a scale.
 	stats := make(map[tableBarGroup]tableBarStats, len(numericColumns))
-	valueWidths := make(map[int]int, len(numericColumns))
 	semantics := make(map[int]string, len(numericColumns))
 	directions := make(map[int]bool, len(numericColumns))
 	for _, column := range numericColumns {
@@ -486,7 +539,7 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 				continue
 			}
 			group := tableBarGroup{semantic: semantics[column], unit: unit, higher: higher}
-			valueWidths[column] = max(valueWidths[column], textwidth.Width(row[column]))
+			presentation.valueWidths[column] = max(presentation.valueWidths[column], textwidth.Width(row[column]))
 			if value == 0 {
 				entry := stats[group]
 				entry.zero = true
@@ -515,18 +568,12 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 		}
 		stats[group] = entry
 	}
-	cellBarWidth := 8
-	if len(requestedBarWidth) > 0 {
-		cellBarWidth = max(0, requestedBarWidth[0])
-	}
-	barRows := make([][]string, len(rows))
-	for rowIndex, original := range rows {
-		barRows[rowIndex] = append([]string(nil), original...)
+	for rowIndex, row := range rows {
 		for _, column := range numericColumns {
-			if column >= len(barRows[rowIndex]) {
+			if column >= len(row) {
 				continue
 			}
-			value, unit, ok := numericCell(barRows[rowIndex][column])
+			value, unit, ok := numericCell(row[column])
 			if !ok || value < 0 {
 				continue
 			}
@@ -541,16 +588,16 @@ func tableRowsWithBars(table model.Table, palette termcolor.Palette, requestedBa
 			} else if !higher {
 				value = 1 / value
 			}
-			// Reserve one stable value field before the bar.  Without this
-			// padding, a 1 MiB/s row starts its bar earlier than a 1000 MiB/s
-			// row and the visual column drifts with digit count or unit text.
-			cell := textwidth.Pad(barRows[rowIndex][column], valueWidths[column])
-			if cellBarWidth > 0 {
-				barRows[rowIndex][column] = cell + " " + palette.BarRelativeRange(value, entry.min, entry.max, cellBarWidth)
+			presentation.cells[rowIndex][column] = tableBarCell{
+				value:   value,
+				min:     entry.min,
+				max:     entry.max,
+				density: termcolor.RelativeDensity(value, entry.min, entry.max),
+				scaled:  true,
 			}
 		}
 	}
-	return barRows
+	return presentation
 }
 
 func numericTableColumnIndexes(table model.Table) []int {

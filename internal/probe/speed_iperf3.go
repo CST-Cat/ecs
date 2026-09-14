@@ -349,9 +349,7 @@ func runIPerfSpeed(ctx context.Context, env Environment, path string) model.Resu
 	completedDirections := 0
 	for rowIndex, row := range rows {
 		statusKey := speedStatusKey(row.Upload.Mbps, row.Download.Mbps)
-		if !isPositiveFinite(row.Upload.Mbps) && !isPositiveFinite(row.Download.Mbps) {
-			failures++
-		} else if !isPositiveFinite(row.Upload.Mbps) || !isPositiveFinite(row.Download.Mbps) {
+		if !isPositiveFinite(row.Upload.Mbps) || !isPositiveFinite(row.Download.Mbps) {
 			failures++
 		}
 		if isPositiveFinite(row.Upload.Mbps) {

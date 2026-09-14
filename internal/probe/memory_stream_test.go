@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"ecs/internal/failure"
 )
 
 const streamFixture = `-------------------------------------------------------------
@@ -46,7 +48,7 @@ func TestStreamParserAndTable(t *testing.T) {
 		{name: "invalid threads", output: strings.Replace(streamFixture, "Number of Threads requested = 4", "Number of Threads requested = 0", 1), marker: "线程数声明无效"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := parseStreamOutput(test.output); err == nil || !strings.Contains(err.Error(), test.marker) {
+			if _, err := parseStreamOutput(test.output); err == nil || !errors.Is(err, failure.ErrParse) || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("STREAM error = %v, want %q", err, test.marker)
 			}
 		})

@@ -434,12 +434,6 @@ func populateRank(out *Report, baseline Baseline) {
 		out.RankStatus = RankStatusInsufficient
 		return
 	}
-	if len(baseline.ScoreSamples) == 0 {
-		// A zero threshold is invalid, but keep this guard defensive for callers
-		// constructing a Baseline directly rather than loading one from disk.
-		out.RankStatus = RankStatusUnavailable
-		return
-	}
 	countAtOrAbove := 0
 	for _, sample := range baseline.ScoreSamples {
 		if sample >= out.Total {

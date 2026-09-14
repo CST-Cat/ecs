@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os/exec"
@@ -19,6 +20,13 @@ type timeoutError struct{}
 func (timeoutError) Error() string   { return "timed out" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
+
+type parseDiagnosticError struct {
+	message string
+}
+
+func (err parseDiagnosticError) Error() string { return err.message }
+func (parseDiagnosticError) Unwrap() error     { return ErrParse }
 
 func TestClassifyCoversTypedAndTextFailureCategories(t *testing.T) {
 	cases := []struct {
@@ -43,6 +51,8 @@ func TestClassifyCoversTypedAndTextFailureCategories(t *testing.T) {
 		{name: "hostname tls", err: x509.HostnameError{}, category: model.FailureTLS},
 		{name: "json", err: &json.SyntaxError{Offset: 1}, category: model.FailureParse},
 		{name: "json type", err: &json.UnmarshalTypeError{}, category: model.FailureParse},
+		{name: "typed parse", err: ErrParse, category: model.FailureParse},
+		{name: "wrapped typed parse", err: fmt.Errorf("benchmark output incomplete: %w", ErrParse), category: model.FailureParse},
 		{name: "opaque", err: errors.New("something unusual happened"), category: model.FailureUnknown},
 	}
 	for _, test := range cases {
@@ -56,6 +66,15 @@ func TestClassifyCoversTypedAndTextFailureCategories(t *testing.T) {
 	wrapped := errors.Join(errors.New("timeout text"), context.Canceled)
 	if got := Classify(wrapped); got.Category != model.FailureCanceled || got.Retryable {
 		t.Fatalf("typed cancellation should take precedence = %+v", got)
+	}
+}
+
+func TestClassifyParseMarkerIgnoresHumanDiagnosticText(t *testing.T) {
+	for _, message := range []string{"verification failed", "field was renamed", "totally different parser diagnostic"} {
+		err := parseDiagnosticError{message: message}
+		if got := Classify(err); got.Category != model.FailureParse {
+			t.Fatalf("Classify(%q) = %+v, want parse_error", message, got)
+		}
 	}
 }
 

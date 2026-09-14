@@ -447,7 +447,7 @@ func (r *comparisonTextRenderer) styleComparability(value comparison.Comparabili
 }
 
 func derivedComparisonEvidenceGrade(evidence comparison.EvidenceValue) model.EvidenceGrade {
-	return (model.Evidence{Valid: evidence.Valid, Expected: evidence.Expected}).DerivedGrade()
+	return evidence.DerivedGrade()
 }
 
 func comparisonEvidenceGrade(grade model.EvidenceGrade) string {
