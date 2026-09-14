@@ -171,6 +171,7 @@ done
 # CI must add both Windows gates without serializing the existing matrix, and
 # the release chains must consume the ten-target arrays/artifacts.
 assert_contains .github/workflows/ci.yml 'win/candidate-c'
+assert_contains .github/workflows/ci.yml 'win-candidate-c'
 assert_contains .github/workflows/ci.yml 'windows-runtime'
 assert_contains .github/workflows/ci.yml 'windows-tools'
 assert_contains .github/workflows/ci.yml 'windows-2022'

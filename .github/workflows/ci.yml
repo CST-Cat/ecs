@@ -14,7 +14,7 @@ name: ci
 
 on:
   push:
-    branches: ["main", "bsd", "win/candidate-c"]
+    branches: ["main", "bsd", "win/candidate-c", "win-candidate-c"]
   pull_request:
 
 permissions:
