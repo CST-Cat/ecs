@@ -29,10 +29,11 @@ name: freebsd-sdk-release
 # targets[*].prebuilt.sha256（source_commit/generated 同步更新）。
 #
 # 阶段 2–5 合并批次（SDK 裁剪瘦身）：构建后由脚本在发布字节上依次完成
-# share/man + share/info 精确删除（仅这两个目录）→ A 侧 probe/consumer →
-# host ELF --strip-debug（inode 安全）→ 2.6/2.7 不变量校验 → LTO/gcov
-# inventory → B 侧 probe/consumer → A/B 8 类输出 SHF_ALLOC section 等价
-# 校验 → gcc/gfortran -### 调用链检查；GCC configure 追加
+# share/man + share/info 精确删除（仅这两个目录）→ host ELF --strip-debug
+# （inode 安全）→ manifest before/after + verify-tree 全树校验（非 host 文件
+# 逐字节不变、硬链接组不变、.debug_* 清零）→ LTO/gcov inventory → 最终字节
+# 上的 5 项 probe 与 gcc/gfortran -### 调用链检查 → 单次 consumer 构建门禁
+# （NPB EP/FT Class A + STREAM）；GCC configure 追加
 # --disable-lto/--disable-gcov（不手工删除组件）。验证工作文件留在
 # job 临时目录，不作为 artifact 上传。
 #

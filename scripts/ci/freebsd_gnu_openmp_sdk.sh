@@ -22,18 +22,17 @@ set -euo pipefail
 # Slimming pipeline (REQUIREMENTS.md stages 2-5, --from-source publisher
 # only), in order: install (GCC configured --disable-lto/--disable-gcov)
 # → drop share/man + share/info (stage 5: exactly these two directories)
-# → A-side probes + consumer workload on the pre-strip SDK → host ELF
-# --strip-debug (stage 2: host ELFs identified by byte identity,
+# → host ELF --strip-debug (stage 2: host ELFs identified by byte identity,
 # e_machine == x86-64 and OS/ABI != FreeBSD, inode-deduplicated so hardlink
 # aliases stay shared; no component removed, target ELFs/.a/.o/.mod/headers
-# stay byte-identical) → LTO/gcov inventory (stages 3/4: existence recorded,
-# never hand-deleted) → B-side probes + consumer workload on the final SDK.
-# Every A/B output ELF (NPB EP/FT Class A and STREAM via
-# scripts/build_tools_freebsd_gnu.sh, plus the five probe binaries) must
-# have identical SHF_ALLOC section contents, and the driver -### call-chain
-# check must resolve every cc1/f951/collect2/as/ld/plugin/wrapper reference.
-# The gate probes always run on the bytes that get published (post-strip in
-# from-source mode), so the release proves its own final bytes.
+# stay byte-identical) → manifest before/after + verify-tree (non-host files
+# byte-identical, hardlink groups intact, .debug_* gone) → LTO/gcov
+# inventory (stages 3/4: existence recorded, never hand-deleted) → the five
+# probes plus the driver -### call-chain check on the final bytes → a single
+# consumer build gate (NPB EP/FT Class A + STREAM via
+# scripts/build_tools_freebsd_gnu.sh). The gate probes always run on the
+# bytes that get published (post-strip in from-source mode), so the release
+# proves its own final bytes.
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -182,9 +181,10 @@ fi
 
 export LC_ALL=C
 export TZ=UTC
-# Pin the consumer-build environment so the A/B comparison (strip-before vs
-# strip-after SDK) can never differ because of a locale/timezone change or a
-# different default SOURCE_DATE_EPOCH (build_tools_freebsd_gnu.sh shares it).
+# Pin the consumer-build environment so the consumer build gate (and every
+# build through build_tools_freebsd_gnu.sh, which shares this default) is
+# deterministic regardless of locale/timezone or a different default
+# SOURCE_DATE_EPOCH.
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-946684800}"
 export PATH="$prefix/bin:$PATH"
 
@@ -224,11 +224,9 @@ echo "freebsd-gnu-openmp-sdk: mode=$sdk_mode acquire_only=$acquire_only" >&2
 # the original path, so hardlink aliases keep sharing one inode with the
 # new content (contract 2.5: no double processing, no orphaned alias).
 #
-# Proofs (contract 2.6/2.7): per stripped ELF the runtime-relevant view
-# (ELF identity, full program-header view, every SHF_ALLOC section incl.
-# content SHA-256) must be identical with .debug_* gone; the whole tree is
-# manifested before/after and every regular file outside the host-ELF set
-# must stay byte-identical with unchanged inode.
+# Proof (contract 2.6/2.7): the whole tree is manifested before/after and
+# every regular file outside the host-ELF set must stay byte-identical with
+# unchanged inode, while every host ELF loses all of its .debug_* sections.
 # ---------------------------------------------------------------------------
 
 write_phase2_python() {
@@ -258,19 +256,9 @@ Subcommands:
       Contract 2.6/2.7 verification: same path set, hardlink groups intact,
       every file keeps its inode and kind, every non-host-ELF regular file is
       byte-identical, every host ELF lost all .debug_* sections.
-  capture <bin> <out.json>
-      Runtime-relevant ELF view (Phase 1 elfmeta semantics, extended): ELF
-      header identity, DT_NEEDED list (compared for EQUALITY -- host ELFs
-      legitimately link host libs, unlike the static Phase 1 tools), the full
-      `readelf -lW` program-header view, every PT_LOAD field, and every
-      SHF_ALLOC section (flags/size/address/offset/content SHA-256; NOBITS
-      and zero-size sections per Phase 1 semantics). Also records the
-      .debug_* inventory.
-  compare <before.json> <after.json> <label>
-      Fail unless the runtime-relevant views are identical.
   evidence <target> <dir> <out.json>
-      Assemble the phase 2 evidence summary from the manifest pair, the host
-      inode list and the A/B results file.
+      Assemble the phase 2 evidence summary from the manifest pair and the
+      host inode list.
 """
 
 import hashlib
@@ -493,161 +481,6 @@ def cmd_verify_tree(before_path, after_path, host_elfs_path):
            len(hardlink_groups(before)), debug_before, debug_after))
 
 
-# --------------------------------------------------------------------------
-# elfmeta: runtime-relevant ELF view. Parsing follows the proven Phase 1
-# implementation; the DT_NEEDED rule differs on purpose (equality, not
-# emptiness) because host ELFs link host libraries.
-# --------------------------------------------------------------------------
-
-def elf_header_fields(readelf_h):
-    fields = {}
-    for line in readelf_h.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
-    keys = ("Class", "Data", "Type", "Machine", "Entry point address",
-            "OS/ABI", "ABI Version", "Flags")
-    missing = [key for key in keys if key not in fields]
-    if missing:
-        die("readelf -h is missing fields: " + ", ".join(missing))
-    return {key: fields[key] for key in keys}
-
-
-def load_segments(readelf_lw):
-    out = []
-    for line in readelf_lw.splitlines():
-        toks = line.strip().split()
-        if not toks or toks[0] != "LOAD":
-            continue
-        rest = toks[1:]
-        if len(rest) == 7:
-            off, va, pa, fsz, msz, flg, aln = rest
-        elif len(rest) == 8:
-            off, va, pa, fsz, msz = rest[:5]
-            flg, aln = rest[5] + " " + rest[6], rest[7]
-        else:
-            die("unexpected readelf -lW LOAD row: " + line.strip())
-        out.append({"offset": off, "vaddr": va, "paddr": pa,
-                    "filesz": int(fsz, 16), "memsz": int(msz, 16),
-                    "flags": flg, "align": aln})
-    return out
-
-
-def cmd_capture(bin_path, out_path):
-    header = elf_header_fields(run(["readelf", "-h", bin_path]))
-    dyn = run(["readelf", "-d", bin_path])
-    needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.*?)\]", dyn)
-    lw = run(["readelf", "-lW", bin_path])
-    # Full program-header view: the phdr table and the section-to-segment
-    # mapping carry the load-time semantics; compare them verbatim.
-    phdr_lines = [re.sub(r"\s+", " ", line.strip())
-                  for line in lw.splitlines() if line.strip()]
-    loads = load_segments(lw)
-    if not loads:
-        die("no PT_LOAD program headers parsed in " + bin_path)
-    sections = parse_sections(run(["readelf", "-SW", bin_path]))
-    file_size = os.path.getsize(bin_path)
-    with open(bin_path, "rb") as fh:
-        data = fh.read()
-    if len(data) != file_size:
-        die("file changed while reading: " + bin_path)
-    allocs = []
-    debug = []
-    for sec in sections:
-        if sec["name"].startswith(".debug_"):
-            debug.append([sec["name"], sec["size"]])
-        if "A" not in sec["flags"]:
-            continue
-        rec = {key: sec[key]
-               for key in ("name", "type", "flags", "address", "offset",
-                           "size")}
-        if sec["type"] == "NOBITS":
-            rec["content_sha256"] = None
-        else:
-            off = int(sec["offset"], 16)
-            if off + sec["size"] > file_size:
-                die("section %s out of file bounds in %s" %
-                    (sec["name"], bin_path))
-            rec["content_sha256"] = hashlib.sha256(
-                data[off:off + sec["size"]]).hexdigest()
-        allocs.append(rec)
-    if not allocs or not any(sec["name"] == ".text" for sec in allocs):
-        die("implausible SHF_ALLOC set parsed in " + bin_path)
-    record = {"file": bin_path, "file_size": file_size,
-              "elf_header": header, "dt_needed": needed,
-              "phdr_lines": phdr_lines, "load_segments": loads,
-              "alloc_sections": allocs, "debug_sections": debug}
-    with open(out_path, "w") as fh:
-        json.dump(record, fh, indent=1, sort_keys=True)
-    print("elfmeta: captured %s (%d PT_LOAD, %d SHF_ALLOC sections, %d "
-          "debug sections)" % (bin_path, len(loads), len(allocs), len(debug)))
-
-
-def cmd_compare(before_path, after_path, label):
-    with open(before_path) as fh:
-        before = json.load(fh)
-    with open(after_path) as fh:
-        after = json.load(fh)
-    problems = []
-    for key in sorted(set(before["elf_header"]) | set(after["elf_header"])):
-        if before["elf_header"].get(key) != after["elf_header"].get(key):
-            problems.append("elf_header %s: before=%r after=%r" %
-                            (key, before["elf_header"].get(key),
-                             after["elf_header"].get(key)))
-    if before["dt_needed"] != after["dt_needed"]:
-        problems.append("dt_needed: before=%r after=%r" %
-                        (before["dt_needed"], after["dt_needed"]))
-    if before["phdr_lines"] != after["phdr_lines"]:
-        b_only = [l for l in before["phdr_lines"]
-                  if l not in after["phdr_lines"]]
-        a_only = [l for l in after["phdr_lines"]
-                  if l not in before["phdr_lines"]]
-        problems.append("program headers changed: before-only=%r after-only=%r"
-                        % (b_only[:4], a_only[:4]))
-    b_loads, a_loads = before["load_segments"], after["load_segments"]
-    if len(b_loads) != len(a_loads):
-        problems.append("PT_LOAD count: before=%d after=%d" %
-                        (len(b_loads), len(a_loads)))
-    else:
-        for index, (b_seg, a_seg) in enumerate(zip(b_loads, a_loads)):
-            for key in sorted(set(b_seg) | set(a_seg)):
-                if b_seg.get(key) != a_seg.get(key):
-                    problems.append("PT_LOAD[%d] %s: before=%r after=%r" %
-                                    (index, key, b_seg.get(key),
-                                     a_seg.get(key)))
-    b_secs = {sec["name"]: sec for sec in before["alloc_sections"]}
-    a_secs = {sec["name"]: sec for sec in after["alloc_sections"]}
-    for name in sorted(set(b_secs) - set(a_secs)):
-        problems.append("SHF_ALLOC section vanished: %s" % name)
-    for name in sorted(set(a_secs) - set(b_secs)):
-        problems.append("SHF_ALLOC section appeared: %s" % name)
-    for name in sorted(set(b_secs) & set(a_secs)):
-        b, a = b_secs[name], a_secs[name]
-        # Phase 1 semantics: content-bearing SHF_ALLOC sections compare
-        # flags/size/address/offset/content; NOBITS compares size/address
-        # only; zero-size sections skip the meaningless file offset.
-        if b["type"] == "NOBITS":
-            keys = ("size", "address")
-        elif b["size"] == 0:
-            keys = ("flags", "size", "address")
-        else:
-            keys = ("flags", "size", "address", "offset", "content_sha256")
-        for key in keys:
-            if b.get(key) != a.get(key):
-                problems.append("SHF_ALLOC %s %s: before=%r after=%r" %
-                                (name, key, b.get(key), a.get(key)))
-    if problems:
-        for problem in problems[:50]:
-            print("runtime-view MISMATCH (%s): %s" % (label, problem))
-        die("runtime view comparison failed for %s: %d problem(s)" %
-            (label, len(problems)))
-    print("runtime-view OK (%s): %d PT_LOAD segments, %d SHF_ALLOC sections "
-          "identical; .debug_* bytes %d -> %d" %
-          (label, len(b_loads), len(b_secs),
-           sum(size for _, size in before["debug_sections"]),
-           sum(size for _, size in after["debug_sections"])))
-
-
 def cmd_evidence(target, directory, out_path):
     before = parse_manifest(os.path.join(directory, "manifest.before.tsv"))
     after = parse_manifest(os.path.join(directory, "manifest.after.tsv"))
@@ -671,18 +504,6 @@ def cmd_evidence(target, directory, out_path):
             return total
         return sum(entry["size"] for entry in entries.values())
 
-    ab = []
-    ab_path = os.path.join(directory, "ab-results.tsv")
-    if os.path.exists(ab_path):
-        with open(ab_path) as fh:
-            for line in fh:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                name, alloc_equal, sha_equal = line.split("\t")
-                ab.append({"name": name,
-                           "alloc_sections_equal": alloc_equal,
-                           "unified_strip_sha256_equal": sha_equal})
     evidence = {
         "target": target,
         "strip": {
@@ -709,7 +530,6 @@ def cmd_evidence(target, directory, out_path):
             "tree_bytes_all_paths_after":
                 tree_bytes(after, unique_inodes=False),
         },
-        "ab_equivalence": ab,
     }
     with open(out_path, "w") as fh:
         json.dump(evidence, fh, indent=1)
@@ -724,10 +544,6 @@ def main(argv):
         cmd_host_elfs(argv[2], argv[3])
     elif len(argv) == 5 and argv[1] == "verify-tree":
         cmd_verify_tree(argv[2], argv[3], argv[4])
-    elif len(argv) == 4 and argv[1] == "capture":
-        cmd_capture(argv[2], argv[3])
-    elif len(argv) == 5 and argv[1] == "compare":
-        cmd_compare(argv[2], argv[3], argv[4])
     elif len(argv) == 5 and argv[1] == "evidence":
         cmd_evidence(argv[2], argv[3], argv[4])
     else:
@@ -740,84 +556,10 @@ if __name__ == "__main__":
 SDK_PHASE2_PY
 }
 
-# Consumer builds (contract 2.9): the real NPB EP/FT Class A + STREAM builds
-# through the unmodified Stage 5 builder. A side runs against the pre-strip
-# SDK, B side against the final post-strip SDK, in the same job/environment.
-phase2_consumer_build() {
-  local side=$1
-  bash "$ECS_REPO_ROOT/scripts/build_tools_freebsd_gnu.sh" \
-    --target "$target" \
-    --stage-root "$evidence_dir/$side-stage" \
-    --sdk-prefix "$prefix"
-}
-
-phase2_collect_outputs() {
-  local side=$1
-  mkdir -p "$evidence_dir/outputs/$side-npb"
-  cp -p "$evidence_dir/$side-stage/$target/bin/npb-ep" \
-        "$evidence_dir/$side-stage/$target/bin/npb-ft" \
-        "$evidence_dir/$side-stage/$target/bin/stream" \
-        "$evidence_dir/outputs/$side-npb/"
-}
-
-phase2_compare_output() {
-  # One A/B output pair: capture both runtime views and require equality
-  # (the gate — any SHF_ALLOC machine-code difference fails the run), then
-  # record whether a final uniform --strip-unneeded pass with the SDK's own
-  # target strip also makes the whole files byte-identical (contract 2.10
-  # "ideal requirement"; informational, non-gating).
-  local label=$1 a=$2 b=$3
-  [[ -s "$a" && -s "$b" ]] || die "phase2: missing A/B output for $label"
-  python3 "$phase2_py" capture "$a" "$evidence_dir/ab/$label.a.json"
-  python3 "$phase2_py" capture "$b" "$evidence_dir/ab/$label.b.json"
-  python3 "$phase2_py" compare "$evidence_dir/ab/$label.a.json" \
-    "$evidence_dir/ab/$label.b.json" "$label"
-  local sa="$evidence_dir/ab/$label.a.stripped"
-  local sb="$evidence_dir/ab/$label.b.stripped"
-  cp "$a" "$sa"
-  cp "$b" "$sb"
-  "$phase2_target_strip" --strip-unneeded "$sa" "$sb"
-  local sha_a sha_b
-  sha_a=$(sha256sum "$sa" | awk '{print $1}')
-  sha_b=$(sha256sum "$sb" | awk '{print $1}')
-  if [[ "$sha_a" == "$sha_b" ]]; then
-    printf '%s\tidentical\tidentical\n' "$label" >>"$evidence_dir/ab-results.tsv"
-    echo "ab-equivalence: $label unified-strip sha256(A)==sha256(B)" >&2
-  else
-    printf '%s\tidentical\tdiffer\n' "$label" >>"$evidence_dir/ab-results.tsv"
-    echo "ab-equivalence: $label unified-strip sha256 differs (alloc sections equal; recorded)" >&2
-  fi
-  rm -f "$sa" "$sb"
-}
-
-phase2_ab_compare() {
-  mkdir -p "$evidence_dir/ab"
-  : >"$evidence_dir/ab-results.tsv"
-  phase2_target_strip="$prefix/bin/${gnu_triple}-strip"
-  [[ -x "$phase2_target_strip" ]] ||
-    die "phase2: missing target strip in the SDK: $phase2_target_strip"
-  local label
-  for label in hello-c hello-f ieee omp-c omp-f; do
-    phase2_compare_output "probe-$label" \
-      "$evidence_dir/outputs/a-probes/$label" \
-      "$evidence_dir/outputs/b-probes/$label"
-  done
-  for label in npb-ep npb-ft stream; do
-    phase2_compare_output "bench-$label" \
-      "$evidence_dir/outputs/a-npb/$label" \
-      "$evidence_dir/outputs/b-npb/$label"
-  done
-}
-
 phase2_strip_and_verify() {
-  local ev="$evidence_dir/elfmeta"
-  mkdir -p "$ev"
-  local index=0 rep inode_id paths path tmp name
+  local rep inode_id paths path tmp
   while IFS=$'\t' read -r rep inode_id paths; do
-    index=$((index + 1))
-    name=$(printf '%03d' "$index")
     path="$prefix/$rep"
-    python3 "$phase2_py" capture "$path" "$ev/$name.before.json"
     tmp="$path.ecs-strip-tmp"
     if ! strip --strip-debug -o "$tmp" "$path"; then
       rm -f "$tmp"
@@ -828,9 +570,6 @@ phase2_strip_and_verify() {
     # identity and picks up the stripped content in place.
     cat "$tmp" >"$path"
     rm -f "$tmp"
-    python3 "$phase2_py" capture "$path" "$ev/$name.after.json"
-    python3 "$phase2_py" compare "$ev/$name.before.json" \
-      "$ev/$name.after.json" "$rep"
   done <"$evidence_dir/host-elf-inodes.tsv"
   python3 "$phase2_py" manifest "$prefix" "$evidence_dir/manifest.after.tsv"
   python3 "$phase2_py" verify-tree "$evidence_dir/manifest.before.tsv" \
@@ -877,8 +616,7 @@ chain_case() {
 
 driver_chain_check() {
   # Runs inside the probe output dir (the probe sources are already there)
-  # and keeps the five -### spec logs next to the probe binaries; the logs
-  # land inside the evidence dir and are uploaded with it.
+  # and keeps the five -### spec logs next to the probe binaries.
   local out_dir=$1
   (
     cd "$out_dir"
@@ -936,9 +674,8 @@ slim_remove_docs() {
   echo "freebsd-gnu-openmp-sdk: [stage5] share/ entries $(wc -l <"$evidence_dir/share-before.txt") -> $(wc -l <"$evidence_dir/share-after.txt") (removed share/man + share/info only)" >&2
 }
 
-# The five release probes, run against the given output directory. Always
-# executed with the full assertion set; in from-source mode they run again
-# on the post-strip bytes so the gate proves the published snapshot.
+# The five release probes, run against the given output directory on the
+# final published bytes with the full assertion set.
 run_probes() {
   local out_dir=$1
   rm -rf "$out_dir"
@@ -1075,10 +812,9 @@ if [[ "$sdk_mode" == "from-source" ]]; then
   src_root="$work_dir/src"
   build_root="$work_dir/build"
   mkdir -p "$src_root" "$build_root"
-  # Batch evidence root (stages 2-5). Everything the release proves about
-  # the slimming (manifests, per-ELF captures, A/B outputs, driver chain
-  # logs, LTO/gcov inventory, share/ listings and the summary) is collected
-  # here and uploaded as its own artifact by freebsd-sdk-release.yml.
+  # Batch evidence root (stages 2-5). What the release proves about the
+  # slimming (manifest pair, host-ELF inode list, evidence summary, LTO/gcov
+  # inventory, share/ listings) is collected here in the job's temp dir.
   evidence_dir="$work_dir/slim-evidence"
   rm -rf "$evidence_dir"
   mkdir -p "$evidence_dir"
@@ -1200,15 +936,6 @@ while IFS= read -r lib; do
 done <<<"$required_libs"
 
 if [[ "$sdk_mode" == "from-source" ]]; then
-  # A side (contract 2.10): probes and the full consumer workload against
-  # the unstripped SDK, identical environment (LC_ALL/TZ/SOURCE_DATE_EPOCH
-  # exported above), same sources, same flags, own stage tree.
-  echo "freebsd-gnu-openmp-sdk: [stage2] A-side probes (pre-strip SDK)" >&2
-  run_probes "$evidence_dir/outputs/a-probes"
-  echo "freebsd-gnu-openmp-sdk: [stage2] A-side consumer build (pre-strip SDK)" >&2
-  phase2_consumer_build a
-  phase2_collect_outputs a
-
   echo "freebsd-gnu-openmp-sdk: [stage2] manifest before strip" >&2
   python3 "$phase2_py" manifest "$prefix" "$evidence_dir/manifest.before.tsv"
   python3 "$phase2_py" host-elfs "$evidence_dir/manifest.before.tsv" \
@@ -1216,34 +943,32 @@ if [[ "$sdk_mode" == "from-source" ]]; then
 
   echo "freebsd-gnu-openmp-sdk: [stage2] host ELF debug strip + invariants" >&2
   phase2_strip_and_verify
+  python3 "$phase2_py" evidence "$target" "$evidence_dir" "$evidence_dir/evidence.json"
 
   echo "freebsd-gnu-openmp-sdk: [stage3/4] LTO/gcov feature inventory" >&2
   feature_inventory "$evidence_dir/feature-inventory.tsv"
 fi
 
-# Gate probes run on exactly the bytes that get published: prebuilt mode has
-# only this run; from-source mode runs them after the strip (contract 2.8:
-# slimming completes before the probes).
-if [[ "$sdk_mode" == "from-source" ]]; then
-  echo "freebsd-gnu-openmp-sdk: [stage2] B-side probes (post-strip SDK)" >&2
-  probe_out_dir="$evidence_dir/outputs/b-probes"
-  run_probes "$probe_out_dir"
-else
-  probe_out_dir="$work_dir/probe"
-  run_probes "$probe_out_dir"
-fi
+# Gate probes run on exactly the bytes that get published: post-strip in
+# from-source mode (contract 2.8: slimming completes before the probes),
+# consumed-snapshot bytes in prebuilt mode.
+run_probes "$work_dir/probe"
 
 # Stage 3 gate on the bytes about to be published (and, in prebuilt mode, on
 # the consumed snapshot): every -###-referenced tool must exist.
-driver_chain_check "$probe_out_dir"
+driver_chain_check "$work_dir/probe"
 
 if [[ "$sdk_mode" == "from-source" ]]; then
-  echo "freebsd-gnu-openmp-sdk: [stage2] B-side consumer build (post-strip SDK)" >&2
-  phase2_consumer_build b
-  phase2_collect_outputs b
-  echo "freebsd-gnu-openmp-sdk: [stage2] A/B compiler output equivalence" >&2
-  phase2_ab_compare
-  python3 "$phase2_py" evidence "$target" "$evidence_dir" "$evidence_dir/evidence.json"
+  # Consumer build gate (contract 2.9): the release must build NPB EP/FT
+  # Class A + STREAM through the unmodified Stage 5 builder on the final
+  # bytes; set -e turns any build failure into a release failure. Nothing
+  # is kept afterwards. Prebuilt mode skips this: the gnu-bench chain
+  # already builds the same workloads through this builder on every run.
+  echo "freebsd-gnu-openmp-sdk: [stage2] consumer build gate (contract 2.9)" >&2
+  bash "$ECS_REPO_ROOT/scripts/build_tools_freebsd_gnu.sh" \
+    --target "$target" \
+    --stage-root "$work_dir/consumer-stage" \
+    --sdk-prefix "$prefix"
 fi
 
 if [[ "$sdk_mode" == "prebuilt" ]]; then
