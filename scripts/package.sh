@@ -78,7 +78,7 @@ zip_stage() {
   local archive=$1 stage=$2
   shift 2
   if command -v zip >/dev/null 2>&1; then
-    (cd "$stage" && zip -X -q "$archive" "$@")
+    (cd "$stage" && zip -X -q -r "$archive" "$@")
   elif command -v 7z >/dev/null 2>&1; then
     (cd "$stage" && 7z a -bd -mtc=off -tzip "$archive" "$@" >/dev/null)
   else

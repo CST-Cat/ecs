@@ -307,18 +307,34 @@ jobs:
             return $output
           }
 
+          function Get-JsonPropertyValue {
+            param(
+              [Parameter(Mandatory)][object]$Object,
+              [Parameter(Mandatory)][string]$Name,
+              [Parameter(Mandatory)][string]$Context
+            )
+            if ($null -eq $Object) { throw "$Context JSON object is null while reading '$Name'" }
+            $objects = @($Object)
+            if ($objects.Count -ne 1) { throw "$Context expected one JSON object while reading '$Name', got $($objects.Count)" }
+            $properties = @($objects[0].PSObject.Properties | Where-Object { $_.Name -ieq $Name })
+            if ($properties.Count -ne 1) {
+              $available = @($objects[0].PSObject.Properties | ForEach-Object { $_.Name }) -join ', '
+              throw "$Context missing JSON property '$Name'; available properties: $available"
+            }
+            if ($null -eq $properties[0].Value) { throw "$Context JSON property '$Name' is null" }
+            return $properties[0].Value
+          }
+
           function Get-SystemFieldRaw {
             param(
               [Parameter(Mandatory)][object]$Result,
               [Parameter(Mandatory)][string]$Key
             )
-            $fieldMatches = @($Result.fields | Where-Object { [string]$_.key -eq $Key })
+            $fields = @(Get-JsonPropertyValue -Object $Result -Name 'fields' -Context 'system result')
+            $fieldMatches = @($fields | Where-Object { [string]$_.key -eq $Key })
             if ($fieldMatches.Count -ne 1) { throw "system JSON must contain one field named $Key" }
-            $value = $fieldMatches[0].value
-            if ($null -eq $value -or $value.PSObject.Properties.Name -notcontains 'raw') {
-              throw "system JSON field $Key is not a raw value"
-            }
-            $raw = [string]$value.raw
+            $value = Get-JsonPropertyValue -Object $fieldMatches[0] -Name 'value' -Context "system JSON field $Key"
+            $raw = [string](Get-JsonPropertyValue -Object $value -Name 'raw' -Context "system JSON field $Key value")
             if ([string]::IsNullOrWhiteSpace($raw)) { throw "system JSON field $Key is empty" }
             return $raw
           }
@@ -363,7 +379,10 @@ jobs:
 
           function Assert-WindowsSystemFacts {
             param([Parameter(Mandatory)][object]$Report)
-            $systemMatches = @($Report.results | Where-Object { [string]$_.id -eq 'system' })
+            $schemaVersion = [string](Get-JsonPropertyValue -Object $Report -Name 'schema_version' -Context 'system report')
+            if ($schemaVersion -ne 'ecs.report/v1') { throw "system report has unexpected schema_version: $schemaVersion" }
+            $results = @(Get-JsonPropertyValue -Object $Report -Name 'results' -Context 'system report')
+            $systemMatches = @($results | Where-Object { [string]$_.id -eq 'system' })
             if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
             $system = $systemMatches[0]
             $os = Get-SystemFieldRaw -Result $system -Key 'os'
@@ -372,11 +391,12 @@ jobs:
             [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'memory_total') -Name 'memory_total')
             [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'disk_total') -Name 'disk_total')
             [void](Convert-PositiveMachineSeconds -Raw (Get-SystemFieldRaw -Result $system -Key 'uptime_seconds') -Name 'uptime_seconds')
-            $logicalMatches = @($system.measurements | Where-Object { [string]$_.key -eq 'logical_cpus' })
+            $measurements = @(Get-JsonPropertyValue -Object $system -Name 'measurements' -Context 'system result')
+            $logicalMatches = @($measurements | Where-Object { [string]$_.key -eq 'logical_cpus' })
             if ($logicalMatches.Count -ne 1) { throw 'system JSON must contain one logical_cpus measurement' }
-            $logicalCPUs = [double]$logicalMatches[0].value
+            $logicalCPUs = [double](Get-JsonPropertyValue -Object $logicalMatches[0] -Name 'value' -Context 'logical_cpus measurement')
             if ([double]::IsNaN($logicalCPUs) -or [double]::IsInfinity($logicalCPUs) -or $logicalCPUs -le 0) {
-              throw "logical_cpus is not positive: $($logicalMatches[0].value)"
+              throw "logical_cpus is not positive: $logicalCPUs"
             }
           }
 

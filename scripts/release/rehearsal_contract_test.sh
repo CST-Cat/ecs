@@ -107,7 +107,10 @@ assert_contains "$windows" "ecs.exe"
 assert_contains "$windows" "--version"
 assert_contains "$windows" "plan', '--profile', 'standard"
 assert_contains "$windows" "Assert-WindowsSystemFacts"
+assert_contains "$windows" "Get-JsonPropertyValue"
 assert_contains "$windows" "Get-SystemFieldRaw"
+assert_contains "$windows" "PSObject.Properties"
+assert_contains "$windows" "missing JSON property"
 assert_contains "$windows" "memory_total"
 assert_contains "$windows" "disk_total"
 assert_contains "$windows" "uptime_seconds"
@@ -178,7 +181,10 @@ assert_contains .github/workflows/ci.yml 'windows-2022'
 assert_contains .github/workflows/ci.yml 'windows-2025'
 assert_contains .github/workflows/ci.yml 'needs: [unit, compat, quality, integration, race, cross, freebsd, windows-runtime, windows-tools, submissions]'
 assert_contains .github/workflows/ci.yml 'Assert-WindowsSystemFacts'
+assert_contains .github/workflows/ci.yml 'Get-JsonPropertyValue'
 assert_contains .github/workflows/ci.yml 'Get-SystemFieldRaw'
+assert_contains .github/workflows/ci.yml 'PSObject.Properties'
+assert_contains .github/workflows/ci.yml 'missing JSON property'
 assert_contains .github/workflows/ci.yml 'memory_total'
 assert_contains .github/workflows/ci.yml 'disk_total'
 assert_contains .github/workflows/ci.yml 'uptime_seconds'

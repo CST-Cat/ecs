@@ -1,11 +1,12 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'FullGate')]
 param(
-    [Parameter(Mandatory)][string]$StageRoot,
-    [Parameter(Mandatory)][string]$ManifestPath,
-    [Parameter(Mandatory)][string]$LockPath,
-    [Parameter(Mandatory)][string]$CorpusPath,
-    [Parameter(Mandatory)][string]$ObjdumpPath,
-    [int]$TimeoutSeconds = 180
+    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$StageRoot,
+    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$ManifestPath,
+    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$LockPath,
+    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$CorpusPath,
+    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$ObjdumpPath,
+    [Parameter(ParameterSetName = 'FullGate')][int]$TimeoutSeconds = 180,
+    [Parameter(Mandatory, ParameterSetName = 'OrdinaryUser')][switch]$CheckOrdinaryUser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -145,6 +146,157 @@ public static class EcsWindowsJobObject
     }
 }
 '@
+}
+
+function Ensure-EcsWindowsTokenType {
+    if ('EcsWindowsToken' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class EcsWindowsToken
+{
+    private const int TokenElevationTypeInformation = 18;
+    private const int TokenElevationInformation = 20;
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(
+        IntPtr token,
+        int informationClass,
+        IntPtr information,
+        int informationLength,
+        out int returnLength);
+
+    private static int ReadInformation(IntPtr token, int informationClass)
+    {
+        IntPtr buffer = Marshal.AllocHGlobal(sizeof(int));
+        try
+        {
+            int returnLength;
+            if (!GetTokenInformation(token, informationClass, buffer, sizeof(int), out returnLength))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation");
+            }
+            return Marshal.ReadInt32(buffer);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public static bool IsElevated(IntPtr token)
+    {
+        return ReadInformation(token, TokenElevationInformation) != 0;
+    }
+
+    public static int GetElevationType(IntPtr token)
+    {
+        return ReadInformation(token, TokenElevationTypeInformation);
+    }
+}
+'@
+}
+
+function Get-EcsWindowsTokenEvidence {
+    Ensure-EcsWindowsTokenType
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $identity
+        $elevated = [EcsWindowsToken]::IsElevated($identity.Token)
+        $elevationType = [EcsWindowsToken]::GetElevationType($identity.Token)
+        $elevationTypeName = switch ($elevationType) {
+            1 { 'Default'; break }
+            2 { 'Full'; break }
+            3 { 'Limited'; break }
+            default { "Unknown($elevationType)" }
+        }
+        return [pscustomobject]@{
+            User = [string]$identity.Name
+            AdministratorGroupMembership = [bool]($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
+            TokenElevated = [bool]$elevated
+            ElevationType = [int]$elevationType
+            ElevationTypeName = $elevationTypeName
+        }
+    } finally {
+        $identity.Dispose()
+    }
+}
+
+function Test-EcsPathUnderRoot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Root
+    )
+    $candidate = [IO.Path]::GetFullPath($Path)
+    $rootPath = [IO.Path]::GetFullPath($Root)
+    if ($rootPath.Length -gt 3) { $rootPath = $rootPath.TrimEnd([IO.Path]::DirectorySeparatorChar) }
+    return $candidate.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.StartsWith($rootPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-EcsProtectedInstallRoots {
+    return @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique
+}
+
+function Invoke-EcsOrdinaryUserCheck {
+    param([Parameter(Mandatory)][string]$StageRoot)
+
+    $token = Get-EcsWindowsTokenEvidence
+    Write-Host ("ordinary-user token evidence: user={0}; administrator_group_membership={1}; token_elevated={2}; token_elevation_type={3}" -f $token.User, $token.AdministratorGroupMembership, $token.TokenElevated, $token.ElevationTypeName)
+    if ($token.TokenElevated -or $token.ElevationType -eq 2) {
+        Write-Host 'ordinary-user token evidence: actual token is elevated; continuing only with the no-admin-operation checks below'
+    }
+
+    $stagePath = [IO.Path]::GetFullPath($StageRoot)
+    foreach ($root in Get-EcsProtectedInstallRoots) {
+        if (Test-EcsPathUnderRoot -Path $stagePath -Root $root) {
+            Stop-EcsWindowsGate "ordinary-user evidence path is under protected Program Files root: $stagePath"
+        }
+    }
+
+    $machinePathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+    $userPathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ("ecs-ordinary-user." + [guid]::NewGuid().ToString('N') + '.tmp')
+    foreach ($root in Get-EcsProtectedInstallRoots) {
+        if (Test-EcsPathUnderRoot -Path $probe -Root $root) {
+            Stop-EcsWindowsGate "ordinary-user probe is under protected Program Files root: $probe"
+        }
+    }
+    $probeText = 'ecs ordinary-user execution evidence'
+    try {
+        [IO.File]::WriteAllText($probe, $probeText)
+        if ([IO.File]::ReadAllText($probe) -cne $probeText) {
+            Stop-EcsWindowsGate 'ordinary-user temporary write/read evidence did not round-trip'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $probe -PathType Leaf) { Remove-Item -LiteralPath $probe -Force }
+    }
+    $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+    $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+    if ($machinePathBefore -cne $machinePathAfter -or $userPathBefore -cne $userPathAfter) {
+        Stop-EcsWindowsGate 'ordinary-user evidence detected a Machine or User PATH mutation'
+    }
+
+    Write-Host 'ordinary-user execution evidence: temp_write=passed; protected_install_path=not_used; machine_path=unchanged; user_path=unchanged'
+    return [pscustomobject]@{
+        MachinePath = $machinePathBefore
+        UserPath = $userPathBefore
+    }
+}
+
+function Assert-EcsGlobalPathUnchanged {
+    param([Parameter(Mandatory)][pscustomobject]$Evidence)
+    $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+    $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+    if ($Evidence.MachinePath -cne $machinePathAfter -or $Evidence.UserPath -cne $userPathAfter) {
+        Stop-EcsWindowsGate 'real workload changed the Machine or User PATH'
+    }
+    Write-Host 'ordinary-user execution evidence: real workload Machine/User PATH remained unchanged'
 }
 
 function Invoke-EcsWindowsProcess {
@@ -311,6 +463,12 @@ function New-EcsFixedSample {
     }
 }
 
+if ($CheckOrdinaryUser) {
+    $null = Invoke-EcsOrdinaryUserCheck -StageRoot (Get-Location).Path
+    Write-Output 'windows-tools-gate: ordinary-user/no-admin-operation check passed; real workload gate remains required'
+    exit 0
+}
+
 $lock = Get-EcsGateJson $LockPath
 $manifest = Get-EcsGateJson $ManifestPath
 $expectedTools = @($lock.windows_tools)
@@ -407,10 +565,7 @@ if (@(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter '*.dll').Coun
     Stop-EcsWindowsGate 'bundle contains a non-system DLL'
 }
 
-$admin = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
-if ($admin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Stop-EcsWindowsGate 'gate must run under an ordinary non-elevated user token'
-}
+$ordinaryEvidence = Invoke-EcsOrdinaryUserCheck -StageRoot $StageRoot
 
 foreach ($binaryFile in $binaries) {
     $peFacts = Get-EcsPeFacts -Objdump $ObjdumpPath -Binary $binaryFile.FullName -Allowlist @($lock.windows_dll_allowlist)
@@ -433,6 +588,11 @@ $gateWork = New-EcsGateWorkDirectory
 $originalPath = $env:PATH
 $systemPath = "$env:SystemRoot\System32;$env:SystemRoot"
 try {
+    foreach ($root in Get-EcsProtectedInstallRoots) {
+        if (Test-EcsPathUnderRoot -Path $gateWork -Root $root) {
+            Stop-EcsWindowsGate "real workload directory is under protected Program Files root: $gateWork"
+        }
+    }
     $env:PATH = $systemPath
     $zstd = Join-Path $binDir 'zstd.exe'
     $npbEP = Join-Path $binDir 'npb-ep.exe'
@@ -505,6 +665,7 @@ try {
     Assert-EcsProcessSucceeded -Result $enghelp -Description 'fio engine list'
     Assert-EcsText -Text ($enghelp.Stdout + $enghelp.Stderr) -Pattern '(?im)^\s*windowsaio\b' -Description 'fio windowsaio engine'
 
+    Assert-EcsGlobalPathUnchanged -Evidence $ordinaryEvidence
     Write-Output "windows-tools-gate: $($expectedTools.Count)/$($expectedTools.Count) real functional checks passed; performance_valid=false; route/backtrace=unsupported; NextTrace=not bundled"
 } finally {
     $env:PATH = $originalPath
