@@ -20,6 +20,18 @@ else
   ECS_REPO_ROOT=$(git rev-parse --show-toplevel)
 fi
 
+# Resolve caller-provided paths after scripts have changed to ECS_REPO_ROOT.
+# A path which is passed to a compiler wrapper may later be used from an
+# upstream source directory, so keeping it relative would make the wrapper
+# resolve a different sysroot or dependency prefix there.
+ecs_absolute_path() {
+  local path=$1
+  case "$path" in
+    /*) printf '%s\n' "$path" ;;
+    *) printf '%s/%s\n' "$ECS_REPO_ROOT" "$path" ;;
+  esac
+}
+
 # ---- locked build facts ----
 #
 # Architectures, tool identities, upstream pins and corpus facts are kept in

@@ -133,6 +133,9 @@ fi
   die "--sdk-prefix is required (installed Stage 4 GNU SDK prefix)"
 }
 
+stage_root=$(ecs_absolute_path "$stage_root")
+sdk_prefix=$(ecs_absolute_path "$sdk_prefix")
+
 for command_name in curl jq sha256sum make gcc file tar nm readelf strings; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
@@ -155,8 +158,8 @@ trap cleanup EXIT
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
-sysroot="${FREEBSD_GNU_SYSROOT_DIR:-$work/sysroot}"
-sysroot_work="${FREEBSD_GNU_SYSROOT_WORK_DIR:-$work/sysroot-work}"
+sysroot=$(ecs_absolute_path "${FREEBSD_GNU_SYSROOT_DIR:-$work/sysroot}")
+sysroot_work=$(ecs_absolute_path "${FREEBSD_GNU_SYSROOT_WORK_DIR:-$work/sysroot-work}")
 
 echo "build-tools-freebsd-gnu: installing FreeBSD $release sysroot for $target" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \

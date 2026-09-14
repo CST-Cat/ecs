@@ -110,6 +110,8 @@ fi
   die "--stage-root is required"
 }
 
+stage_root=$(ecs_absolute_path "$stage_root")
+
 for command_name in curl git jq sha256sum clang lld file make tar gcc perl pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
@@ -132,10 +134,10 @@ trap cleanup EXIT
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
-sysroot="${FREEBSD_C_SYSROOT_DIR:-$work/sysroot}"
-sysroot_work="${FREEBSD_C_SYSROOT_WORK_DIR:-$work/sysroot-work}"
-deps_prefix="${FREEBSD_C_DEPS_PREFIX:-$work/deps}"
-deps_work="${FREEBSD_C_DEPS_WORK_DIR:-$work/deps-work}"
+sysroot=$(ecs_absolute_path "${FREEBSD_C_SYSROOT_DIR:-$work/sysroot}")
+sysroot_work=$(ecs_absolute_path "${FREEBSD_C_SYSROOT_WORK_DIR:-$work/sysroot-work}")
+deps_prefix=$(ecs_absolute_path "${FREEBSD_C_DEPS_PREFIX:-$work/deps}")
+deps_work=$(ecs_absolute_path "${FREEBSD_C_DEPS_WORK_DIR:-$work/deps-work}")
 
 echo "build-tools-freebsd-c: installing FreeBSD $release sysroot for $target" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
