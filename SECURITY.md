@@ -30,26 +30,31 @@ Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显�
 
 ### Release 供应链拓扑
 
-ECS Release 与 Bundle Release 是两条独立的发布链：
+仓库有三条彼此独立、版本线不同的发布链：ECS application Release、Bundle Release 和仅供 CI 消费的 FreeBSD GNU SDK immutable snapshot。
 
 ```text
-ECS Release:    preflight → ecs-build × 9 → assemble → verify → publish
-Bundle Release: tools × 9 → assemble → publish
+ECS Release:    freeze → source-checks / ecs-build × 9 → assemble → verify → rehearsal | publish
+Bundle Release: tools × 9 → assemble → rehearsal | publish
+GNU SDK:        intent → SDK build × 2 → prepare → rehearsal | publish
 ```
 
-ECS Release 只发布九目标主程序归档及其 `checksums.txt`（七个 Linux 架构加 FreeBSD `amd64`、`arm64`）。Bundle Release 独立发布固定的 benchmark runtime、工具归档、corpus 及其自己的 `checksums.txt`；ECS 主程序携带所依赖的 Bundle 标识，客户端据此选择 Bundle，而不是从移动中的 `main` 读取或接受用户覆盖。
+ECS Release 只发布九目标主程序归档及其 `checksums.txt`（七个 Linux 架构加 FreeBSD `amd64`、`arm64`）。Bundle Release 独立发布固定的 benchmark runtime、工具归档、corpus 及其自己的 `checksums.txt`；ECS 主程序携带所依赖的 Bundle 标识，客户端据此选择 Bundle，而不是从移动中的 `main` 读取或接受用户覆盖。GNU SDK snapshot 不属于用户工具包或 ECS 软件发布，只作为 FreeBSD GNU 构建链按 lock 中 URL+SHA256 消费的 immutable CI 依赖。
 
-ECS Release 发布入口确认候选提交等于当时远端 `main`，随后该流程只使用冻结 SHA；Bundle Release 只使用 workflow 触发时的固定 SHA。两条发布流程都要求 Git 工作区洁净。Bundle 的工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败，而 FreeBSD 工具归档不含 NextTrace 与 `ping`，因此该断言只作用于 Linux 工具包。工具 manifest 记录来源与构建参数。每条 Release 各自产生 `checksums.txt`；完整性校验只设在下载边界，发布链内部不重复校验自己刚产出的字节。
+三条链的“彩排”都具有**零永久远端副作用**。ECS 与 Bundle 的 `workflow_dispatch` 无条件代表 rehearsal：即使维护者在 Actions UI 中选择了一个形如 `v*` / `bundle-v*` 的 tag ref，正式 `publish` 仍额外要求 `github.event_name == push`，因此 dispatch 不可能获得发布写路径。ECS/Bundle 彩排会消费与正式发布相同的最终 Actions artifact，并让 `publish.sh --check-only` 校验发布边界；该模式在任何 `gh release` 操作之前返回。FreeBSD GNU SDK 的手动入口默认 `release_mode=rehearsal`，会完成双架构源码构建、裁剪、验证、consumer gate、打包、SHA256SUMS 和 release notes，只留下 7 天 Actions artifact；只有显式选择 `release_mode=publish` 并提供合法的新 `sdk_version` 才进入唯一的 `contents:write` job。
+
+ECS Release 发布入口确认候选提交等于当时远端 `main`，随后该流程只使用冻结 SHA。正式 Bundle push 还要求触发 tag 精确等于该提交中的 `tools/BUNDLE`，防止“推 A tag 却按文件内容创建 B Release/tag”。GNU SDK 的正式 publish 在昂贵构建前确认候选 SHA 是当时远端 `main` 并检查目标 Release/tag 尚不存在，构建完成后在真正写入前再次检查一次；rehearsal 不要求 `sdk_version`，也不会消耗 append-only tag 名。Bundle rehearsal 与正式发布都只使用 workflow 触发时的固定 SHA。三条链的构建、校验、prepare/rehearsal job 都只有 `contents:read`；每条链只有唯一正式 `publish` job 持有 `contents:write`。
+
+Bundle 的工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败，而 FreeBSD 工具归档不含 NextTrace 与 `ping`，因此该断言只作用于 Linux 工具包。工具 manifest 记录来源与构建参数。每条用户可下载 Release 各自产生 `checksums.txt`；GNU SDK snapshot 产生独立 `SHA256SUMS`。完整性校验只设在下载边界，发布链内部不重复校验自己刚产出的字节。
 
 ### Immutable Releases
 
-已发布的 Release 使用 GitHub Immutable Releases。发布流程先创建 draft、上传资产再 publish；发布后 Release 的不可变性由 GitHub 平台保证：资产不可替换或删除、对应 Git tag 不可移动。CI 不在内部重复执行 attestation verification。
+已发布的 ECS/Bundle Release 使用 GitHub Immutable Releases。发布流程先创建 draft、上传资产再 publish；发布后 Release 的不可变性由 GitHub 平台保证：资产不可替换或删除、对应 Git tag 不可移动。GNU SDK snapshot 采用 create-only append-only tag：prepare 阶段先把最终 tarball、`SHA256SUMS` 与 release notes 固定为同一 Actions artifact，正式 publish 只消费这份候选字节并创建新的 immutable Release/tag，不删除或重建旧 tag。CI 不在内部重复执行 attestation verification。
 
 Release immutability 是 repository-level administrative prerequisite：管理员必须在首次正式发布前启用它。Release workflows 不持有 repository Administration 权限，也不在每次发布中重复查询这一 repository-level invariant；该策略由仓库管理员维护。
 
-普通 CI、排行榜重建、security 与 Release workflow 直接通过 `actions/setup-go@v7` 的 `stable` 和 `check-latest` 选择当前官方稳定 Go；根 `go.mod` 的 `go 1.22` 仅声明最低源码兼容版本，`ci.yml` 的 `compat` job 仍固定使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`。`devtools/go.mod` 只记录工具 module 的最低 Go 版本要求与工具依赖清单，不是 compiler selector。项目不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。供应链完整性与漏洞运营是不同问题；上述门禁只说明发布字节与固定输入、提交及工作流之间的关系。
+Go 工具链按职责分开：根 `go.mod` 的 `go 1.22` 只声明最低源码兼容版本，`ci.yml` 的 `compat` job 固定验证 Go `1.22.x`；普通 CI、ECS Release、Bundle 与 FreeBSD 工具链中需要 Go 的 job 固定使用 Go `1.27.1`、`check-latest: false` 和 `GOTOOLCHAIN=local`，以免发布字节随官方 stable 漂移。`security.yml` 与 `leaderboard.yml` 则有意使用 `stable` + `check-latest: true`，分别承担当前官方稳定工具链上的漏洞检查和排行榜维护。`devtools/go.mod` 只记录工具 module 的最低 Go 版本要求与工具依赖清单，不是 compiler selector。项目不根据漏洞记录中的修复版本字段自动作升级判断，也不自动创建拉取请求。
 
-`actions/setup-go@v7` 是本任务为跟随官方稳定版本明确允许的浮动引用例外；除此之外，所有 GitHub Actions `uses` 引用仍固定到完整 40 位 commit SHA。组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。客户端下载边界是各自 Release 的 `checksums.txt` 与 SHA-256：`install.sh` 和 `compare.sh` 只校验 ECS Release，`run.sh` 先校验 ECS Release，再校验 Bundle Release 的工具和 corpus；CI 不替代下载方校验，也不在 CI 内重复执行 attestation verification。
+所有 GitHub Actions `uses` 引用（包括 `actions/setup-go`）都固定到完整 40 位 commit SHA；`stable` 只是少数 workflow 传给 setup-go 的编译器选择值，不是浮动的 Action 引用。ECS Release 组装阶段记录实际 `go env GOVERSION`；验证阶段解包每个实际主程序，用 `go version -m` 确认 Go 工具链、`vcs.revision` 等于冻结 SHA、`vcs.modified=false`。客户端下载边界是各自 Release 的 `checksums.txt` 与 SHA-256：`install.sh` 和 `compare.sh` 只校验 ECS Release，`run.sh` 先校验 ECS Release，再校验 Bundle Release 的工具和 corpus；CI 不替代下载方校验，也不在 CI 内重复执行 attestation verification。
 
 ## 报告安全问题
 

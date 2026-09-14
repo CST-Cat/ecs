@@ -7,6 +7,10 @@ set -euo pipefail
 # 到这里输出的 SHA——不再拿移动中的 main 和已经冻结的 tag 做比较。那种比较
 # 会在发布过程中有人推 main 时莫名其妙地失败。
 #
+# workflow_dispatch 永远是演练事件：即使维护者在 Actions UI 里选中了一个 v*
+# tag 作为 dispatch ref，也只能得到 version=dev，绝不能因为 ref 看起来像发布 tag
+# 就越过事件边界。正式版本只允许由 push 到 refs/tags/v* 解析。
+#
 # 输出是 GitHub Actions 的 key=value，写到 stdout；诊断信息一律走 stderr。
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
@@ -57,18 +61,28 @@ done
   die "--event 与 --ref 必填"
 }
 
-case "$ref" in
-  refs/tags/v*)
-    tag=${ref#refs/tags/}
-    candidate=$(git rev-list -n 1 "$tag")
-    version=${tag#v}
-    ;;
-  *)
-    [[ "$event" == "workflow_dispatch" ]] ||
-      die "不支持的发布事件：$event / $ref"
+# 事件类型拥有最高优先级，不能让一个 workflow_dispatch 的 tag ref 冒充正式
+# tag push。正式发布与演练首先由 event 分流，再在正式发布分支里解析 tag。
+case "$event" in
+  workflow_dispatch)
     [[ -n "$sha" ]] || die "workflow_dispatch 需要 --sha"
     candidate=$sha
     version=dev
+    ;;
+  push)
+    case "$ref" in
+      refs/tags/v*)
+        tag=${ref#refs/tags/}
+        candidate=$(git rev-list -n 1 "$tag")
+        version=${tag#v}
+        ;;
+      *)
+        die "不支持的正式发布 ref：$event / $ref"
+        ;;
+    esac
+    ;;
+  *)
+    die "不支持的发布事件：$event / $ref"
     ;;
 esac
 

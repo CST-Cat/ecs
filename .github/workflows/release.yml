@@ -3,27 +3,31 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# freeze → source-checks/ecs-build×7 → assemble → verify → publish。
+# freeze → source-checks/ecs-build×9 → assemble → verify → rehearsal/publish。
 #
-#   freeze     contents: read    冻结 SHA，校验发布说明
-#   source-checks contents: read  跑确定性源码检查
-#   ecs-build × 9 contents: read 九个平台目标构建主程序
-#   assemble   contents: read    组装全部发布物，记录实测 Go 版本
-#   verify     contents: read    校验解包出来的实际二进制
-#   publish    contents: write   唯一持有写权限的 job
+#   freeze       contents: read    冻结 SHA，校验发布说明
+#   source-checks contents: read   跑确定性源码检查
+#   ecs-build × 9 contents: read   九个平台目标构建主程序
+#   assemble     contents: read    组装全部发布物，记录实测 Go 版本
+#   verify       contents: read    校验解包出来的实际二进制
+#   rehearsal    contents: read    零远端副作用验证发布边界
+#   publish      contents: write   唯一持有写权限的 job
 #
 # 红灯语义：release 红表示发布门禁没过，不能把候选制品转成正式 Release。
 #
-# 编译器、打包工具和构建脚本都跑在没有仓库写权限的 job 里。
-# 真正拿到 contents: write 的只有最后那个上传步骤。
+# workflow_dispatch 永远是发布演练，即使维护者在 Actions UI 里选中了 v* tag
+# 作为运行 ref；正式发布必须同时满足 event=push 与 refs/tags/v*。编译器、打包
+# 工具和构建脚本都跑在没有仓库写权限的 job 里，真正拿到 contents: write 的
+# 只有最后那个正式上传步骤。
 #
 # 构建实现全部在 scripts/ 下。这里只决定 when / where / permission / dependency。
 
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 freeze → source-checks/ecs-build×7 → assemble → verify
-  # 的全部检查，但 publish 只在 tag 上运行，因此不会发出任何东西。
+  # 手动触发是发布演练：走完 freeze → source-checks/ecs-build×9 → assemble →
+  # verify → rehearsal 的全部检查；无论 dispatch 选择 branch 还是 tag ref，
+  # publish 都因为 event 不是 push 而跳过。
   workflow_dispatch:
 
 permissions:
@@ -68,9 +72,10 @@ jobs:
             | tee -a "$GITHUB_OUTPUT"
 
       # 忘写发布说明必须在九目标构建前失败，不能等到最后的 publish 才发现。
-      # workflow_dispatch 的 dev 演练没有对应版本章节，因此只对实际 tag 校验。
+      # workflow_dispatch 永远是 dev 演练，即使它选择了一个 tag ref；只有真正的
+      # tag push 才要求已经存在对应版本章节。
       - name: Validate release changelog
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           VERSION: ${{ steps.freeze.outputs.version }}
         run: ./scripts/release/check_changelog.sh --version "$VERSION"
@@ -232,10 +237,50 @@ jobs:
             --build-go-version "$BUILD_GO_VERSION" \
             --revision "$REVISION"
 
-  # 唯一持有 contents: write 的 job。它只做上传：到这一步为止，制品已经被
-  # verify 校验过。
+  # workflow_dispatch 专用的零副作用发布边界检查。它下载与正式 publish 相同的
+  # release-dist，并调用同一个 publish.sh，只是 --check-only 在任何 gh 操作之前
+  # 返回。这样彩排能验证资产清单和 Bundle/SDK 引用，而不是单纯“少跑最后一个 job”。
+  rehearsal:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [freeze, assemble, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.freeze.outputs.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+          path: dist
+      - name: Validate publication boundary without remote mutation
+        env:
+          REVISION: ${{ needs.freeze.outputs.sha }}
+          VERSION: ${{ needs.freeze.outputs.version }}
+          REHEARSAL_TAG: rehearsal-${{ github.run_id }}
+        run: |
+          ./scripts/release/publish.sh \
+            --kind ecs \
+            --tag "$REHEARSAL_TAG" \
+            --version "$VERSION" \
+            --revision "$REVISION" \
+            --dist dist \
+            --check-only
+          {
+            echo '### ECS release rehearsal passed'
+            echo
+            echo "- Candidate: \`$REVISION\`"
+            echo '- Git tag created: **no**'
+            echo '- GitHub Release created/edited: **no**'
+            echo '- `release-dist` remains only a 7-day Actions artifact.'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # 唯一持有 contents: write 的 job。正式发布需要“双钥匙”：事件必须是 push，
+  # ref 还必须是 v* tag。workflow_dispatch 即使选中同名 tag 也永远进不来。
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [freeze, assemble, verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 20

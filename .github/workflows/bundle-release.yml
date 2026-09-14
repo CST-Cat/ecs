@@ -17,11 +17,12 @@ name: bundle-release
 #      已通过 VERIFY 的 stage；VM 真实执行，不重新构建任何东西）
 #   → ASSEMBLE（九个平台目标的 stage 由 scripts/package.sh --all-targets
 #     一次打包，统一 checksums）
-#   → PUBLISH。
+#   → REHEARSAL / PUBLISH。
 #
-# 触发语义与 release.yml 一致：workflow_dispatch 是全链彩排，publish 只在
-# bundle tag（refs/tags/bundle-v*）上运行，因此彩排不会发出任何东西；正式
-# 发布 = 推送 tools/BUNDLE 指向的 bundle tag。
+# 触发语义与 release.yml 一致：workflow_dispatch 永远是全链彩排，即使运行 ref
+# 选中了 bundle-v* tag；正式发布必须同时是 push 事件与 refs/tags/bundle-v*，
+# 且触发 tag 必须精确等于 tools/BUNDLE。彩排会通过 publish.sh --check-only
+# 验证 Bundle notes 与最终资产清单，但不会访问或修改 GitHub Release/tag。
 #
 # FreeBSD 消费者基础设施（全部复用，不重新实现）：
 #   scripts/ci/freebsd_artifact_layout.sh
@@ -181,12 +182,52 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # workflow_dispatch 专用的发布边界彩排。Bundle 已经有 tools/BUNDLE 作为确切
+  # 候选版本，因此这里能够连对应 BUNDLE_NOTES 双语章节一起验证；check-only 在
+  # 任何 gh 操作之前返回，最终制品只留在 Actions artifact 中。
+  rehearsal:
+    if: github.event_name == 'workflow_dispatch'
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bundle-dist
+          path: dist
+      - name: Validate publication boundary without remote mutation
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag=$(<tools/BUNDLE)
+          ./scripts/release/publish.sh \
+            --kind bundle \
+            --tag "$tag" \
+            --version "$tag" \
+            --revision "$REVISION" \
+            --dist dist \
+            --check-only
+          {
+            echo '### Bundle release rehearsal passed'
+            echo
+            echo "- Candidate Bundle: \`$tag\`"
+            echo "- Candidate commit: \`$REVISION\`"
+            echo '- Git tag created: **no**'
+            echo '- GitHub Release created/edited: **no**'
+            echo '- `bundle-dist` remains only a 7-day Actions artifact.'
+          } >>"$GITHUB_STEP_SUMMARY"
+
   # 唯一发布出口：依赖图上经过 assemble 的全部前置（tools 与 freebsd-build；
-  # 后者内部已等待 package、两个 ARTIFACT E2E 和两个 REAL GATE）。运行条件与
-  # release.yml 的 publish 相同——
-  # 只在正式发布触发（bundle tag）上满足；workflow_dispatch 彩排按设计跳过。
+  # 后者内部已等待 package、两个 ARTIFACT E2E 和两个 REAL GATE）。正式发布需要
+  # event=push + bundle-v* ref；dispatch 即使选中 tag ref 也永远跳过。
   publish:
-    if: startsWith(github.ref, 'refs/tags/bundle-v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bundle-v')
     needs: assemble
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -204,11 +245,15 @@ jobs:
           name: bundle-dist
           path: dist
 
-      - name: Read the bundle release tag
+      - name: Read and validate the bundle release tag
         id: bundle
         run: |
           set -euo pipefail
           bundle=$(<tools/BUNDLE)
+          if [[ "$GITHUB_REF_NAME" != "$bundle" ]]; then
+            echo "bundle trigger tag '$GITHUB_REF_NAME' does not match tools/BUNDLE '$bundle'" >&2
+            exit 1
+          fi
           printf 'tag=%s\n' "$bundle" >>"$GITHUB_OUTPUT"
 
       - name: Publish the bundle release

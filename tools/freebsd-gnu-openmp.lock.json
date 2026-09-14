@@ -25,7 +25,7 @@
       "prebuilt": {
         "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.3/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst",
         "sha256": "1efbd74d1309fea0b9869e78e17e91ebfeaa18cc66ee4b8a0c46e6dab28cfd57",
-        "source_commit": "94d7960034464bea472cb12f80fd83e7eca08f18",
+        "source_commit": "22d81b1dd905e37ceb497bf6503ad9b01fdde3e9",
         "generated": "2026-09-14",
         "kind": "immutable-ci-dependency-snapshot",
         "not_an": ["ecs-software-release", "bundle-vN", "user-tool-package"]
@@ -38,7 +38,7 @@
       "prebuilt": {
         "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.3/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst",
         "sha256": "4a2487a0b2e8678c1709369b27e807f37118a9510f99a154f96a7f33e9a40ac0",
-        "source_commit": "94d7960034464bea472cb12f80fd83e7eca08f18",
+        "source_commit": "22d81b1dd905e37ceb497bf6503ad9b01fdde3e9",
         "generated": "2026-09-14",
         "kind": "immutable-ci-dependency-snapshot",
         "not_an": ["ecs-software-release", "bundle-vN", "user-tool-package"]

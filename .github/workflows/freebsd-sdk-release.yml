@@ -1,32 +1,36 @@
 name: freebsd-sdk-release
 
-# 维护者手动触发的 FreeBSD GNU C/Fortran/OpenMP SDK immutable 快照发布器。
+# 维护者手动触发的 FreeBSD GNU C/Fortran/OpenMP SDK immutable 快照流水线。
 #
-# 仅 workflow_dispatch 触发（push/pull_request 永不触发）。构建逻辑完全复用
-# scripts/ci/freebsd_gnu_openmp_sdk.sh（与 freebsd-chain.yml 的 gnu-sdk job
-# 同一脚本、同一 lock，本 workflow 只做编排），两个目标并行各占一台
+# workflow_dispatch 默认 release_mode=rehearsal：完整从源码构建两架构 SDK，
+# 生成最终 tarball、SHA256SUMS 与 release notes，并把它们保留为 7 天 Actions
+# artifact；不创建 Git tag，不创建/编辑 GitHub Release。只有维护者显式选择
+# release_mode=publish 且提供合法 sdk_version，最终 publish job 才获得
+# contents:write。SDK 仍采用 create-only append-only immutable tag 模型。
+#
+# 构建逻辑完全复用 scripts/ci/freebsd_gnu_openmp_sdk.sh（与 freebsd-chain.yml 的
+# gnu-sdk job 同一脚本、同一 lock，本 workflow 只做编排），两个目标并行各占一台
 # ubuntu-24.04 runner：work-dir 天然隔离，脚本在 work-dir 下复用的 src/build
 # 树不会跨目标互相污染。
 #
-# 产物发布到 GitHub Release：tag 由 dispatch 输入 sdk_version 决定，格式
-# `ci-freebsd-gnu-sdk-v${sdk_version}`（输入 1.2 → tag `ci-freebsd-gnu-sdk-v1.2`）：
+# 正式发布 tag 由 sdk_version 决定，格式
+# `ci-freebsd-gnu-sdk-v${sdk_version}`（输入 1.4 → tag `ci-freebsd-gnu-sdk-v1.4`）：
 #   - ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
 #   - ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
 #   - SHA256SUMS（两个 tarball 的 sha256，格式 `sha256  filename`）
 # CI 按 tools/freebsd-gnu-openmp.lock.json 钉定的 SHA256 消费这些 assets，
 # 下载后可用 `sha256sum -c SHA256SUMS` 校验。
 #
-# 何时需要重发布：lock 的 gcc/binutils 版本或源 SHA256 变化、
-# scripts/ci/freebsd_gnu_openmp_sdk.sh 或 sysroot lock 变化。重跑本 workflow
-# 是合法维护动作，但必须递增 sdk_version 换新 tag：GitHub Immutable Releases
-# 已启用，曾发布过 Release 的 tag 名被永久保留（含已烧掉的 ci-freebsd-gnu-sdk-v1），
-# delete→create 同名 tag 不可行；publish 为 create-only，同名 Release/tag
-# 已存在时直接失败，消费方始终以 lock 钉定的 SHA256 与 SHA256SUMS 为准。
+# 何时需要正式重发布：lock 的 gcc/binutils 版本或源 SHA256 变化、
+# scripts/ci/freebsd_gnu_openmp_sdk.sh 或 sysroot lock 变化。正式 publish 必须使用
+# 严格大于仓库现有最大 SDK 版本的新 sdk_version：GitHub Immutable Releases 已启用，
+# 曾发布过 Release 的 tag 名被永久保留，delete→create 同名 tag 不可行；同名
+# Release/tag 已存在时在昂贵构建前和真正写入前各检查一次。
 #
-# 维护闭环：工具链/脚本变更 → 重跑本 workflow（新 sdk_version，--from-source
-# 全量源码构建）→ 用新 assets 的 SHA256SUMS 更新
-# tools/freebsd-gnu-openmp.lock.json 的
-# targets[*].prebuilt.sha256（source_commit/generated 同步更新）。
+# 维护闭环：工具链/脚本变更 → 先以默认 rehearsal 全量源码构建并验收 → 选择
+# publish + 新 sdk_version 正式生成 immutable 快照 → 用新 assets 的 SHA256SUMS 更新
+# tools/freebsd-gnu-openmp.lock.json 的 targets[*].prebuilt.sha256
+# （source_commit/generated 同步更新）。
 #
 # 阶段 2–5 合并批次（SDK 裁剪瘦身）：构建后由脚本在发布字节上依次完成
 # share/man + share/info 精确删除（仅这两个目录）→ host ELF --strip-debug
@@ -43,22 +47,130 @@ name: freebsd-sdk-release
 on:
   workflow_dispatch:
     inputs:
-      sdk_version:
-        description: 'SDK snapshot version, e.g. 1.2; publishes tag ci-freebsd-gnu-sdk-v1.2 (append-only, bump for every re-publish)'
+      release_mode:
+        description: 'rehearsal builds and prepares everything without a tag/Release; publish explicitly creates the immutable snapshot'
         required: true
+        default: rehearsal
+        type: choice
+        options:
+          - rehearsal
+          - publish
+      sdk_version:
+        description: 'SDK snapshot version, e.g. 1.4; required only for publish (must be newer than every existing SDK tag)'
+        required: false
         type: string
 
 permissions:
   contents: read
 
-# 两次 dispatch 串行排队（publish 为 create-only，同版本重复发布会被直接
-# 拒绝）；不取消进行中的 run，宁可排队等待完整构建。
+# SDK 源码构建很重，仍将 dispatch 串行排队；rehearsal 与 publish 都不取消进行中
+# 的 run，避免同一维护窗口内多份昂贵构建互相打断。
 concurrency:
   group: freebsd-sdk-release
   cancel-in-progress: false
 
 jobs:
+  # 在两份昂贵 SDK 源码构建前先解析操作意图。rehearsal 不要求版本号；publish
+  # 必须提供合法、严格大于现有最大版本且尚未使用的版本，并且只能发布当前远端 main。
+  preflight:
+    name: SDK release intent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.intent.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - name: Validate rehearsal/publish intent
+        id: intent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MODE: ${{ inputs.release_mode }}
+          SDK_VERSION_INPUT: ${{ inputs.sdk_version }}
+        run: |
+          set -euo pipefail
+          tag=""
+          if [[ -n "$SDK_VERSION_INPUT" ]]; then
+            tag="ci-freebsd-gnu-sdk-v${SDK_VERSION_INPUT}"
+            [[ "$tag" =~ ^ci-freebsd-gnu-sdk-v[1-9][0-9]*(\.(0|[1-9][0-9]*))*$ ]] || {
+              echo "invalid sdk_version input: '$SDK_VERSION_INPUT' (expected e.g. 1.4, no leading-zero components)" >&2
+              exit 1
+            }
+          fi
+
+          case "$MODE" in
+            rehearsal)
+              echo 'SDK rehearsal selected: no Git tag or GitHub Release will be created.'
+              ;;
+            publish)
+              [[ -n "$tag" ]] || {
+                echo 'sdk_version is required when release_mode=publish' >&2
+                exit 1
+              }
+              git fetch --no-tags origin main
+              main_commit=$(git rev-parse refs/remotes/origin/main)
+              [[ "$GITHUB_SHA" == "$main_commit" ]] || {
+                echo "SDK publish candidate $GITHUB_SHA is not remote main $main_commit" >&2
+                exit 1
+              }
+
+              # 仓库约束是单调递增版本线，不只是“名字没用过”。matching-refs
+              # 读取现有 SDK tag，sort -V 做点分数字版本比较；API 失败不能静默放行。
+              refs=$(gh api --paginate \
+                "repos/$GH_REPO/git/matching-refs/tags/ci-freebsd-gnu-sdk-v" \
+                --jq '.[].ref')
+              latest_version=$(
+                printf '%s\n' "$refs" \
+                  | sed 's#^refs/tags/ci-freebsd-gnu-sdk-v##' \
+                  | grep -E '^[1-9][0-9]*(\.(0|[1-9][0-9]*))*$' \
+                  | sort -V \
+                  | tail -n1 \
+                  || true
+              )
+              if [[ -n "$latest_version" ]]; then
+                newest=$(printf '%s\n%s\n' "$latest_version" "$SDK_VERSION_INPUT" \
+                  | sort -V | tail -n1)
+                [[ "$newest" == "$SDK_VERSION_INPUT" && "$SDK_VERSION_INPUT" != "$latest_version" ]] || {
+                  echo "sdk_version $SDK_VERSION_INPUT must be strictly newer than existing maximum $latest_version" >&2
+                  exit 1
+                }
+              fi
+
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "Release $tag already exists: SDK snapshot tags are append-only; bump sdk_version." >&2
+                exit 1
+              fi
+              if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+                echo "Tag $tag already exists: SDK snapshot tags are append-only; bump sdk_version." >&2
+                exit 1
+              fi
+              echo "SDK publish selected for $tag at $GITHUB_SHA"
+              ;;
+            *)
+              echo "unsupported release_mode: '$MODE'" >&2
+              exit 1
+              ;;
+          esac
+
+          printf 'tag=%s\n' "$tag" >>"$GITHUB_OUTPUT"
+          {
+            echo '### FreeBSD GNU SDK release intent'
+            echo
+            echo "- Mode: \`$MODE\`"
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            if [[ -n "$tag" ]]; then
+              echo "- Candidate tag: \`$tag\`"
+            else
+              echo '- Candidate tag: *(none; rehearsal does not require a version)*'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
   sdk-amd64:
+    needs: preflight
     name: GNU SDK (freebsd_amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -113,6 +225,7 @@ jobs:
           retention-days: 7
 
   sdk-arm64:
+    needs: preflight
     name: GNU SDK (freebsd_arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -162,13 +275,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
-    name: Publish SDK Release
-    needs: [sdk-amd64, sdk-arm64]
+  # rehearsal 与 publish 共用同一份候选发布物。这个 job 只有 contents:read：
+  # 生成 SHA256SUMS 与最终 release notes 后整体上传 Actions artifact，正式 publish
+  # 只下载这些已准备好的字节，不再重新计算或拼第二份说明。
+  prepare:
+    name: Prepare SDK release candidate
+    needs: [preflight, sdk-amd64, sdk-arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -201,7 +315,7 @@ jobs:
           gcc_sha=$(jq -er '.sources.gcc.sha256' tools/freebsd-gnu-openmp.lock.json)
           binutils_sha=$(jq -er '.sources.binutils.sha256' tools/freebsd-gnu-openmp.lock.json)
           sysroot_release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
-          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          cat > .ci/dist/RELEASE_NOTES.md <<EOF
           ### 中文
 
           FreeBSD GNU C/Fortran/OpenMP SDK immutable 快照，供 CI 按
@@ -238,21 +352,74 @@ jobs:
           consumers always defer to SHA256SUMS.
           EOF
 
-      # Release 为 immutable：SDK 快照 tag 为 append-only 版本递增模型，
-      # 发布是 create-only——同名 Release/tag 已存在时直接失败（不再 delete、
-      # 不再 cleanup-tag），必须递增 sdk_version 换新 tag。
-      - name: 'Create the SDK Release (create-only: fail if the Release/tag already exists)'
+      - name: Upload prepared SDK release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-release-candidate
+          path: |
+            .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
+            .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
+            .ci/dist/SHA256SUMS
+            .ci/dist/RELEASE_NOTES.md
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  # 默认终点。prepare 成功即意味着正式发布前的全部构建、裁剪、probe、consumer
+  # gate、打包、摘要与说明都已经完成；此 job 只把“没有永久副作用”明确写进 UI。
+  rehearsal:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_mode == 'rehearsal'
+    name: SDK rehearsal complete
+    needs: [preflight, prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record zero-side-effect rehearsal result
+        env:
+          CANDIDATE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          {
+            echo '### FreeBSD GNU SDK rehearsal passed'
+            echo
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            if [[ -n "$CANDIDATE_TAG" ]]; then
+              echo "- Hypothetical tag: \`$CANDIDATE_TAG\`"
+            else
+              echo '- Hypothetical tag: *(not supplied)*'
+            fi
+            echo '- Git tag created: **no**'
+            echo '- GitHub Release created/edited: **no**'
+            echo '- Prepared release candidate is retained only as a 7-day Actions artifact.'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # 唯一写权限出口。preflight 已经验证 mode/version/main/append-only；这里在真正
+  # 写入前再次检查 Release/tag 不存在，关闭构建期间的 TOCTOU 窗口。
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_mode == 'publish'
+    name: Publish SDK Release
+    needs: [preflight, prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download prepared SDK release candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-gnu-sdk-release-candidate
+          path: .ci/dist
+
+      # Release 为 immutable：SDK 快照 tag 为 append-only 版本递增模型，发布是
+      # create-only；同名 Release/tag 已存在时失败，不做 delete/cleanup-tag。
+      - name: 'Create the SDK Release (create-only)'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          SDK_RELEASE_TAG: ci-freebsd-gnu-sdk-v${{ inputs.sdk_version }}
-          SDK_VERSION_INPUT: ${{ inputs.sdk_version }}
+          SDK_RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-          # sdk_version 会拼进永久不可删除的 tag 名，格式必须先钉死
-          # （bundle-vN(.M)* 风格，与 scripts/lock_test.sh 的 bundle 版本线一致）。
-          [[ "$SDK_RELEASE_TAG" =~ ^ci-freebsd-gnu-sdk-v[1-9][0-9]*(\.[0-9]+)*$ ]] || {
-            echo "invalid sdk_version input: '$SDK_VERSION_INPUT' (expected e.g. 1.2)" >&2
+          [[ -n "$SDK_RELEASE_TAG" ]] || {
+            echo 'preflight did not provide SDK_RELEASE_TAG' >&2
             exit 1
           }
           cd .ci/dist
@@ -261,18 +428,28 @@ jobs:
             ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
             SHA256SUMS
           )
-          title="FreeBSD GNU SDK snapshot ($SDK_RELEASE_TAG)"
+          for asset in "${assets[@]}"; do
+            [[ -s "$asset" ]] || {
+              echo "missing prepared SDK release asset: $asset" >&2
+              exit 1
+            }
+          done
+          [[ -s RELEASE_NOTES.md ]] || {
+            echo 'missing prepared SDK RELEASE_NOTES.md' >&2
+            exit 1
+          }
           if gh release view "$SDK_RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only under Immutable Releases; bump sdk_version and re-dispatch." >&2
+            echo "Release $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only; bump sdk_version." >&2
             exit 1
           fi
           if gh api "repos/$GH_REPO/git/ref/tags/$SDK_RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only under Immutable Releases; bump sdk_version and re-dispatch." >&2
+            echo "Tag $SDK_RELEASE_TAG already exists: SDK snapshot tags are append-only; bump sdk_version." >&2
             exit 1
           fi
+          title="FreeBSD GNU SDK snapshot ($SDK_RELEASE_TAG)"
           gh release create "$SDK_RELEASE_TAG" "${assets[@]}" \
             --title "$title" \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --notes-file RELEASE_NOTES.md \
             --target "$GITHUB_SHA"
           gh release view "$SDK_RELEASE_TAG" --json tagName,assets --jq \
             '.tagName, (.assets[] | .name + " " + (.size|tostring) + " bytes")'

@@ -20,20 +20,21 @@
 
 工具源码或构建脚本的修改不等于自动重新发布 Bundle。只有维护者明确决定发布新的 benchmark runtime 时，才将 `bundle-vN` 升为 `bundle-vN+1`，并更新 `tools/BUNDLE`；普通 ECS Release 继续使用该文件声明的 Bundle 依赖。
 
+发布维护遵循统一的“彩排先行、永久副作用显式授权”边界：ECS 与 Bundle 的 `workflow_dispatch` 永远只是 rehearsal，即使从 Actions UI 选择一个 tag ref 运行也不会获得 publish 权限；ECS/Bundle 正式发布只由对应 tag **push** 触发。FreeBSD GNU SDK 的 `workflow_dispatch` 默认 `release_mode=rehearsal`，不要求 `sdk_version`，会生成完整候选 artifact 但不创建 tag/Release；只有显式选择 `release_mode=publish` 并填写新的合法 `sdk_version` 才允许 create-only 发布。三条链的 rehearsal 都不得持有 `contents:write`，发布边界由 `scripts/release/rehearsal_contract_test.sh` 纳入 `make check` 固定。
+
 本地检查：
 
 Go 版本与源码格式化工具按四层职责管理：
 
 1. 根 `go.mod` 的 `go 1.22` 是源码最低兼容版本，不代表当前开发工具链版本。
 2. `.github/workflows/ci.yml` 的 `compat` job 显式使用 Go `1.22.x` 并设置 `GOTOOLCHAIN=local`；它是唯一的最低版本验证入口。
-3. 普通 CI、leaderboard、security 和正式 Release workflow 通过固定完整 SHA 的 `actions/setup-go` v7 请求 `stable` 并启用 `check-latest`；Action 引用已固定，但编译器仍跟随当前官方稳定版本。Release 的 assemble 会记录实际 `GOVERSION`，再由 verify 校验。
+3. 普通 CI、ECS Release、Bundle 与 FreeBSD 工具链中需要 Go 的 job 固定使用 Go `1.27.1`、`check-latest: false` 和 `GOTOOLCHAIN=local`；`leaderboard` 与 `security` 有意使用 `stable` + `check-latest: true`，分别验证当前官方稳定工具链上的维护路径。所有 `actions/setup-go` 引用本身都固定到完整 commit SHA。ECS Release 的 assemble 会记录实际 `GOVERSION`，再由 verify 校验。
 4. `scripts/gofmt.sh` 是固定版本的源码 canonical formatter，具体版本以该脚本为唯一事实源。
 
 `devtools/go.mod` 是工具 module 的最低 Go 版本要求与工具依赖清单（用于构建 `staticcheck`/`govulncheck`），不是 compiler selector。
 主模块 `go.mod` 保持零依赖，因此从源码构建 ecs 不下载任何模块。运行 Release binary 不需要 Go。
 
-GitHub Actions、`staticcheck` 及其他工具的升级均由维护者手工审查后决定；普通工作流的 Go 编译器版本由
-setup-go `stable` 跟随当前官方稳定版本，仓库不会为版本升级生成拉取请求。
+GitHub Actions、`staticcheck` 及其他工具的升级均由维护者手工审查后决定；普通 CI 与发布构建的 Go 编译器版本固定在 workflow 明示的 `1.27.1`，不会随 `stable` 自动漂移；只有 `leaderboard` 与 `security` 明确承担跟随官方稳定 Go 的职责。仓库不会为版本升级自动创建拉取请求。
 
 ```bash
 make fmt
@@ -45,7 +46,7 @@ go test -race ./...
 
 `make check` 与 CI 的 `quality` job、Release 的 preflight 共用 `scripts/ci/check.sh`。它检查 Go 格式，
 在默认、`integration` 两种 build tag 组合下运行 `go vet` 与固定版本的 `staticcheck`，并检查工具 manifest 示例、
-shell 语法、发布中间目录忽略规则、工具包布局回归和各架构构建定义。首次构建 `staticcheck` 时可能下载
+shell 语法、发布彩排/正式发布边界、发布中间目录忽略规则、工具包布局回归和各架构构建定义。首次构建 `staticcheck` 时可能下载
 `devtools/go.mod` 与 `devtools/go.sum` 固定的依赖。
 
 测试按"需要什么"分两类；集成测试的分类写在源码的 build tag 里，不写在 CI 配置里：
@@ -87,5 +88,4 @@ sh -n run.sh
 
 `run.sh` 下载 `ecs` 二进制后会调用 `plan`，读取稳定的模块、配置档、暴露级别、reveal 和工具 ID，
 按该结果准备依赖并运行；该输出缺失或非法会直接停止，不会使用另一套过期模块列表。只有
-`internal/score.Dimensions()` 中定义的模块才能进入排行榜；评分成员资格与指标定义均由
-`internal/score` 单独维护。
+`internal/score.Dimensions()` 中定义的模块才能进入排行榜；评分成员资格与指标定义均由 `internal/score` 单独维护。
