@@ -80,6 +80,20 @@ func TestTerminalGlueAndProgressPolicy(t *testing.T) {
 			t.Errorf("%s progress policy = %v, want %v", test.name, got, test.want)
 		}
 	}
+	for _, test := range []struct {
+		name, term, mode string
+		stdoutTTY, ci    bool
+		want             bool
+	}{
+		{name: "static native console", stdoutTTY: true, want: true},
+		{name: "static dumb", term: "dumb", stdoutTTY: true, want: false},
+		{name: "static ci", term: "xterm", stdoutTTY: true, ci: true, want: false},
+		{name: "static plain", term: "xterm", stdoutTTY: true, mode: "plain", want: false},
+	} {
+		if got := progressStaticAllowed(test.stdoutTTY, test.term, test.ci, test.mode); got != test.want {
+			t.Errorf("%s progress policy = %v, want %v", test.name, got, test.want)
+		}
+	}
 }
 
 func TestLiveProgressErasesAndFitsNarrowTerminals(t *testing.T) {
@@ -93,5 +107,17 @@ func TestLiveProgressErasesAndFitsNarrowTerminals(t *testing.T) {
 	view.Stop()
 	if !strings.Contains(output.String(), progressAnchorSequence) || !strings.Contains(output.String(), progressEraseLineSequence) {
 		t.Fatalf("live progress did not render/erase: %q", output.String())
+	}
+}
+
+func TestStaticProgressUsesPlainLinesWithoutANSI(t *testing.T) {
+	var output bytes.Buffer
+	terminal := &Terminal{out: &output, tty: true, staticProgress: true}
+	view := terminal.BeginProgress(1)
+	view.Update(runner.Progress{Phase: runner.PhaseStart, Index: 1, Total: 1, Title: "fixture"})
+	view.Update(runner.Progress{Phase: runner.PhaseDone, Index: 1, Total: 1, Result: model.Result{Status: model.StatusOK}})
+	view.Stop()
+	if output.Len() == 0 || strings.Contains(output.String(), "\x1b") {
+		t.Fatalf("static progress output = %q, want plain progress lines", output.String())
 	}
 }

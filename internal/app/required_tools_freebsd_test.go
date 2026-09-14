@@ -16,6 +16,14 @@ func wantSelectedModuleTools() []string {
 	return []string{"speedtest", "zstd", "sysbench"}
 }
 
+func wantPlanJSONRequiredTools() []string {
+	return []string{"sysbench", "zstd", "speedtest"}
+}
+
+func wantPlanJSONExternalServices() []string {
+	return []string{"third-party-provider", "ookla"}
+}
+
 // TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD pins the FreeBSD
 // platform boundary. Only ping and nexttrace-tiny have a base-system
 // substitute; every other declared tool is still downloaded and staged.

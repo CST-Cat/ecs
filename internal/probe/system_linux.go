@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-func platformDFCommand() string    { return "df" }
-func platformUnameCommand() string { return "uname" }
+func platformDFCommand() string             { return "df" }
+func platformUnameCommand() string          { return "uname" }
+func platformLogicalCPUCountMethod() string { return "runtime-numcpu-v1" }
 
 // collectPlatformSystem contains the Linux-only system interfaces.  The
 // shared system snapshot deliberately does not know about /proc, cgroups, or

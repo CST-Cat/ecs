@@ -89,14 +89,68 @@ func TestFreeBSDManifestUsesPlatformToolSet(t *testing.T) {
 	}
 }
 
+func TestUnsupportedGOOSDoesNotUseLinuxManifestLists(t *testing.T) {
+	for _, goos := range []string{"plan9", "illumos"} {
+		if got := targetArchitectures(goos); got != nil {
+			t.Fatalf("%s architectures = %v, want unsupported", goos, got)
+		}
+		if got := targetToolNames(goos); got != nil {
+			t.Fatalf("%s tools = %v, want unsupported", goos, got)
+		}
+		if got := targetIDs(goos); len(got) != 0 {
+			t.Fatalf("%s targets = %v, want unsupported", goos, got)
+		}
+	}
+}
+
+func TestWindowsManifestUsesFrozenToolSet(t *testing.T) {
+	object := exampleManifestObject(t)
+	object["target"] = "windows_amd64"
+	object["goos"] = "windows"
+	object["goarch"] = "amd64"
+	object["architecture"] = "amd64"
+	object["supported_architectures"] = []any{"amd64"}
+	object["supported_targets"] = []any{"windows_amd64"}
+
+	windowsToolSet := map[string]bool{}
+	for _, name := range windowsToolNames {
+		windowsToolSet[name] = true
+	}
+	tools := object["tools"].([]any)
+	filtered := make([]any, 0, len(windowsToolNames))
+	for _, value := range tools {
+		tool := value.(map[string]any)
+		if windowsToolSet[tool["name"].(string)] {
+			filtered = append(filtered, value)
+		}
+	}
+	object["tools"] = filtered
+
+	manifest, err := Parse(manifestBytes(t, object))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Target != "windows_amd64" || manifest.GOOS != "windows" ||
+		manifest.GOARCH != "amd64" || len(manifest.Tools) != len(windowsToolNames) {
+		t.Fatalf("Windows manifest = target %q os %q arch %q tools %d", manifest.Target, manifest.GOOS, manifest.GOARCH, len(manifest.Tools))
+	}
+	for index, name := range windowsToolNames {
+		if manifest.Tools[index].Name != name {
+			t.Fatalf("Windows tool %d = %q, want %q", index, manifest.Tools[index].Name, name)
+		}
+	}
+}
+
 // TestCanonicalManifestLists pins the architecture and tool allowlists. Both
 // are part of the ecs-tools manifest contract: adding or reordering an entry
 // changes which packages validate, so it must be a deliberate edit here too.
 func TestCanonicalManifestLists(t *testing.T) {
 	wantArchitectures := []string{"amd64", "arm64", "armv7", "386", "s390x", "riscv64", "ppc64le"}
 	wantFreeBSDArchitectures := []string{"amd64", "arm64"}
+	wantWindowsArchitectures := []string{"amd64"}
 	wantToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3", "nexttrace-tiny", "ping"}
 	wantFreeBSDToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3"}
+	wantWindowsToolNames := []string{"zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio"}
 	wantTargets := []targetSpec{
 		{Target: "linux_amd64", GOOS: "linux", GOARCH: "amd64", Package: "amd64"},
 		{Target: "linux_arm64", GOOS: "linux", GOARCH: "arm64", Package: "arm64"},
@@ -107,6 +161,7 @@ func TestCanonicalManifestLists(t *testing.T) {
 		{Target: "linux_ppc64le", GOOS: "linux", GOARCH: "ppc64le", Package: "ppc64le"},
 		{Target: "freebsd_amd64", GOOS: "freebsd", GOARCH: "amd64", Package: "amd64"},
 		{Target: "freebsd_arm64", GOOS: "freebsd", GOARCH: "arm64", Package: "arm64"},
+		{Target: "windows_amd64", GOOS: "windows", GOARCH: "amd64", Package: "amd64"},
 	}
 	if !reflect.DeepEqual(linuxArchitectures[:], wantArchitectures) {
 		t.Fatalf("canonical Linux architectures = %v", linuxArchitectures)
@@ -114,11 +169,17 @@ func TestCanonicalManifestLists(t *testing.T) {
 	if !reflect.DeepEqual(freeBSDArchitectures[:], wantFreeBSDArchitectures) {
 		t.Fatalf("canonical FreeBSD architectures = %v", freeBSDArchitectures)
 	}
+	if !reflect.DeepEqual(windowsArchitectures[:], wantWindowsArchitectures) {
+		t.Fatalf("canonical Windows architectures = %v", windowsArchitectures)
+	}
 	if !reflect.DeepEqual(linuxToolNames[:], wantToolNames) {
 		t.Fatalf("canonical Linux tool names = %v", linuxToolNames)
 	}
 	if !reflect.DeepEqual(freeBSDToolNames[:], wantFreeBSDToolNames) {
 		t.Fatalf("canonical FreeBSD tool names = %v", freeBSDToolNames)
+	}
+	if !reflect.DeepEqual(windowsToolNames[:], wantWindowsToolNames) {
+		t.Fatalf("canonical Windows tool names = %v", windowsToolNames)
 	}
 	if !reflect.DeepEqual(targetSpecs[:], wantTargets) {
 		t.Fatalf("canonical targets = %#v", targetSpecs)

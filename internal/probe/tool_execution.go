@@ -29,7 +29,7 @@ func LookupTool(name string) (string, error) {
 }
 
 func lookupToolInBin(bin, name string) (string, error) {
-	path, err := exec.LookPath(filepath.Join(bin, name))
+	path, err := exec.LookPath(filepath.Join(bin, toolFilename(name)))
 	if errors.Is(err, os.ErrNotExist) {
 		return "", exec.ErrNotFound
 	}

@@ -24,6 +24,8 @@ var linuxArchitectures = [...]string{
 
 var freeBSDArchitectures = [...]string{"amd64", "arm64"}
 
+var windowsArchitectures = [...]string{"amd64"}
+
 var linuxToolNames = [...]string{
 	"sysbench",
 	"zstd",
@@ -48,6 +50,15 @@ var freeBSDToolNames = [...]string{
 	"iperf3",
 }
 
+var windowsToolNames = [...]string{
+	"zstd",
+	"npb-ep",
+	"npb-ft",
+	"openssl",
+	"stream",
+	"fio",
+}
+
 type targetSpec struct {
 	Target  string
 	GOOS    string
@@ -65,6 +76,7 @@ var targetSpecs = [...]targetSpec{
 	{Target: "linux_ppc64le", GOOS: "linux", GOARCH: "ppc64le", Package: "ppc64le"},
 	{Target: "freebsd_amd64", GOOS: "freebsd", GOARCH: "amd64", Package: "amd64"},
 	{Target: "freebsd_arm64", GOOS: "freebsd", GOARCH: "arm64", Package: "arm64"},
+	{Target: "windows_amd64", GOOS: "windows", GOARCH: "amd64", Package: "amd64"},
 }
 
 // Manifest describes one platform target's ecs-tools package. Architecture is
@@ -267,20 +279,42 @@ func targetSpecFor(target string) (targetSpec, bool) {
 }
 
 func targetArchitectures(goos string) []string {
-	if goos == "freebsd" {
+	switch goos {
+	case "linux":
+		return linuxArchitectures[:]
+	case "freebsd":
 		return freeBSDArchitectures[:]
+	case "windows":
+		return windowsArchitectures[:]
+	default:
+		return nil
 	}
-	return linuxArchitectures[:]
 }
 
 func targetToolNames(goos string) []string {
-	if goos == "freebsd" {
+	switch goos {
+	case "linux":
+		return linuxToolNames[:]
+	case "freebsd":
 		return freeBSDToolNames[:]
+	case "windows":
+		return windowsToolNames[:]
+	default:
+		return nil
 	}
-	return linuxToolNames[:]
 }
 
 func targetIDs(goos string) []string {
+	switch goos {
+	case "linux":
+		// Continue below for the supported Linux manifest platform.
+	case "freebsd":
+		// Continue below for the supported FreeBSD manifest platform.
+	case "windows":
+		// Continue below for the supported Windows manifest platform.
+	default:
+		return nil
+	}
 	ids := make([]string, 0, len(targetSpecs))
 	for _, spec := range targetSpecs {
 		if spec.GOOS == goos {

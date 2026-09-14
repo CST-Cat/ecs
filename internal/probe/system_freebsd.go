@@ -15,8 +15,9 @@ import (
 const freeBSDSysctlPath = "/sbin/sysctl"
 const freeBSDClockMonotonic = 4
 
-func platformDFCommand() string    { return "/bin/df" }
-func platformUnameCommand() string { return "/usr/bin/uname" }
+func platformDFCommand() string             { return "/bin/df" }
+func platformUnameCommand() string          { return "/usr/bin/uname" }
+func platformLogicalCPUCountMethod() string { return "runtime-numcpu-v1" }
 
 // collectPlatformSystem contains the FreeBSD-only system interfaces.  None
 // of the Linux procfs, sysfs, cgroup, PSI, or steal counters are consulted in

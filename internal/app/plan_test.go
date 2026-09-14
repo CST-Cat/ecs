@@ -18,10 +18,10 @@ import (
 
 // TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices pins the
 // platform-resolved tool contract for one mixed selection. The expected tool
-// set comes from the platform test file: linux stages every declared tool,
-// while FreeBSD substitutes base-system ping and traceroute and therefore drops
-// the matching downloads. External services are platform-independent and are
-// asserted inline.
+// set comes from the platform test file: Linux stages every declared tool,
+// FreeBSD substitutes base-system ping and traceroute, and Windows omits
+// unsupported Unix adapters. External services are asserted by the same
+// platform helper.
 func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T) {
 	application := newApplication()
 	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
@@ -30,7 +30,7 @@ func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T)
 	if !reflect.DeepEqual(plan.RequiredTools, wantSelectedModuleTools()) {
 		t.Fatalf("required tools = %v, want %v", plan.RequiredTools, wantSelectedModuleTools())
 	}
-	if !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) {
+	if !reflect.DeepEqual(plan.ExternalServices, wantPlanJSONExternalServices()) {
 		t.Fatalf("external services = %v", plan.ExternalServices)
 	}
 }
@@ -50,7 +50,7 @@ func TestBuildExecutionPlanUsesToolServiceMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	renamedPlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"renamed-client"}})
-	if !reflect.DeepEqual(renamedPlan.ExternalServices, []string{"third-party-provider", "ookla"}) {
+	if !reflect.DeepEqual(renamedPlan.ExternalServices, wantPlanJSONExternalServices()) {
 		t.Fatalf("renamed tool service facts = %v", renamedPlan.ExternalServices)
 	}
 	barePlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"ookla"}})
@@ -94,7 +94,7 @@ func TestPlanJSONUsesRunResolverAndDescribesRequiredTools(t *testing.T) {
 	if got := []string{plan.Modules[0].ID, plan.Modules[1].ID, plan.Modules[2].ID}; !strings.EqualFold(strings.Join(got, ","), "cpu,zstd,ookla") {
 		t.Fatalf("selected modules = %v", got)
 	}
-	if len(plan.RequiredTools) != 3 || !reflect.DeepEqual(plan.ExternalServices, []string{"third-party-provider", "ookla"}) || plan.NeedsEgressIP {
+	if !reflect.DeepEqual(plan.RequiredTools, wantPlanJSONRequiredTools()) || !reflect.DeepEqual(plan.ExternalServices, wantPlanJSONExternalServices()) || plan.NeedsEgressIP {
 		t.Fatalf("machine tool/external metadata = %#v / %#v / %v", plan.RequiredTools, plan.ExternalServices, plan.NeedsEgressIP)
 	}
 	if strings.Contains(stdout.String(), "标准") || strings.Contains(stdout.String(), "完整配置") {
