@@ -9,6 +9,20 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.3
+
+### 中文
+
+- FreeBSD 工具包继续使用原有双架构、8 个工具和真实 FreeBSD 门禁；本版本收口私有构建 helper 的参数与调用链，不改变工具集合、运行参数或 manifest 语义。
+- GNU SDK 发布器拆分为编排层与私有 publisher/verifier，保留 `share/man`/`share/info` 精确裁剪、host ELF debug strip、非 host 字节不变、硬链接组不变、driver-chain 证明，以及 NPB EP/FT + STREAM consumer gate；上述门禁已在 `ci-freebsd-gnu-sdk-v1.2` 双架构快照上通过。
+- Bundle 发布链改为消费 lock 钉定的 `ci-freebsd-gnu-sdk-v1.2` immutable SDK 快照；工具依赖、双架构并行拓扑和真实客户机验收合同不变。
+
+### English
+
+- The FreeBSD tool package keeps the existing two architectures, eight tools and genuine FreeBSD gates; this release closes the private build-helper argument and call-chain cleanup without changing the tool set, runtime arguments or manifest semantics.
+- The GNU SDK publisher is split into orchestration and private publisher/verifier layers while retaining exact `share/man`/`share/info` slimming, host-ELF debug stripping, non-host byte identity, hardlink-group identity, driver-chain proof, and the NPB EP/FT plus STREAM consumer gate; all of these gates passed on the dual-architecture `ci-freebsd-gnu-sdk-v1.2` snapshot.
+- The Bundle release path now consumes the lock-pinned `ci-freebsd-gnu-sdk-v1.2` immutable SDK snapshot; tool dependencies, dual-architecture parallel topology and genuine-client acceptance contract are unchanged.
+
 ## bundle-v1.2
 
 ### 中文
