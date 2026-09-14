@@ -155,13 +155,14 @@ trap cleanup EXIT
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
-sysroot="$work/sysroot"
+sysroot="${FREEBSD_GNU_SYSROOT_DIR:-$work/sysroot}"
+sysroot_work="${FREEBSD_GNU_SYSROOT_WORK_DIR:-$work/sysroot-work}"
 
 echo "build-tools-freebsd-gnu: installing FreeBSD $release sysroot for $target" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --target "$target" \
   --sysroot-dir "$sysroot" \
-  --work-dir "$work/sysroot-work"
+  --work-dir "$sysroot_work"
 
 echo "build-tools-freebsd-gnu: validating Stage 4 GNU SDK at $sdk_prefix" >&2
 ecs_freebsd_gnu_restore_sdk_exec_bits "$sdk_prefix" "$triple"

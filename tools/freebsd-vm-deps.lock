@@ -1,0 +1,20 @@
+# ecs.freebsd-vm-deps.lock/v1
+# target|name|version|exact package URL|sha256
+#
+# The quarterly repository is a source location only. The package filename,
+# version and SHA256 below are the contract; a missing or changed object fails
+# preparation instead of silently resolving a newer package.
+amd64|indexinfo|0.3.1_1|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/indexinfo-0.3.1_1~4ff7953b1a.pkg|4ff7953b1a8b1d8f8b0d998be66cee205b4c095ed532cb143d54eaa1d1757524
+amd64|gettext-runtime|1.0_1|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/gettext-runtime-1.0_1~3fc3a4eec5.pkg|3fc3a4eec5121c09e853d2c0ad587cdb1f438656c8eaa823dc661cf7abbd1073
+amd64|oniguruma|6.9.10|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/oniguruma-6.9.10~8b9d2dee1c.pkg|8b9d2dee1c74632c28a170a3ba9978dc52b2d19abfdbb3ecee4bf79ffa9e45d4
+amd64|bash|5.3.15|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/bash-5.3.15~e07de815d5.pkg|e07de815d531f7cfed98b07c84621fcf21a9e95eff2d9ab40a5f427e1633db24
+amd64|jq|1.8.2|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/jq-1.8.2~891030011e.pkg|891030011eb0c29c3abb4dd96f060adde7b0f58838f1d2259325be49ab456098
+amd64|file|5.46|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/file-5.46~d2234a4271.pkg|d2234a42716f0cb6c4540e88c223a2d30318148bb63d8016a5968667ae72514c
+amd64|ca_root_nss|3.129|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/ca_root_nss-3.129~26bf924ec8.pkg|26bf924ec85013bb7f76e810ba3c115ae3000ea26ef583da5b3d74382c7cb6ab
+aarch64|indexinfo|0.3.1_1|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/indexinfo-0.3.1_1~84e8649eaf.pkg|84e8649eaff3f97a77eb0029a3e24a9e2f6800f794ce2f85a6833b8a684a3ad0
+aarch64|gettext-runtime|1.0_1|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/gettext-runtime-1.0_1~e7c20b3873.pkg|e7c20b3873c2aebb4cfa1963f8707677b50aafe77c292a17a3949dbeda1ace2a
+aarch64|oniguruma|6.9.10|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/oniguruma-6.9.10~153dd83d44.pkg|153dd83d44e461c14c5a67ac9d9fb4d11fd237a208584a4fb61d517e12ace099
+aarch64|bash|5.3.15|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/bash-5.3.15~4efa236a33.pkg|4efa236a33bea121a2962a0d66bca9ab28c5549c6c64ce60be17fdaf4de2e176
+aarch64|jq|1.8.2|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/jq-1.8.2~65e7c0874b.pkg|65e7c0874b4e57a82b10b74adec74150868d1aec0a6889be3b1d1c8668b2c448
+aarch64|file|5.46|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/file-5.46~5d52a84e47.pkg|5d52a84e47060b4d5bb886a258274839fc28bdc7ce0915bd9604dde74a2ba778
+aarch64|ca_root_nss|3.129|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/ca_root_nss-3.129~867b7d3ff2.pkg|867b7d3ff2e9e9ac98a1f9e6e59195a7d526a0133295c0a67bee01f3a2f5809a

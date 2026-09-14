@@ -15,7 +15,15 @@ the current `v0.8.2` release.
 
 ### 中文
 
+- 优化 GitHub Actions FreeBSD 构建拓扑：VERIFY 通过后 REAL GATE 与 Bundle PACKAGE/E2E 并行，ASSEMBLE 等待两条路径；C/GNU 构建在同一 job/work-dir 内复用已下载并校验的 sysroot、依赖和 SDK。
+- 固定公开标准 runner 与 FreeBSD 15.1 guest 均使用 4 vCPU；新增缓存 VM 的每次运行契约、精确 package 版本与 SHA256 lock，缓存不承担正确性；完整 REAL GATE、runtime、driver-chain 与 consumer gate 保留。
+- 对预压缩 artifact 使用零压缩中转，普通 job 使用 shallow checkout 与固定 Go 1.27.1；不改变 CGO、build tags、发布 provenance、产物字节语义或双架构并行隔离。
+
 ### English
+
+- Optimized the GitHub Actions FreeBSD topology: REAL GATE and the Bundle PACKAGE/E2E path now run in parallel after VERIFY, while ASSEMBLE waits for both; the C/GNU builds reuse downloaded and verified sysroot, dependency, and SDK inputs within one job/work directory.
+- Fixed public standard runners and FreeBSD 15.1 guests at 4 vCPUs; added a per-run contract for cached VMs plus exact package-version and SHA256 locking, with cache kept out of correctness ownership; all REAL GATE, runtime, driver-chain, and consumer gates remain intact.
+- Enabled zero-compression transit only for pre-compressed artifacts, and use shallow checkout plus fixed Go 1.27.1 in ordinary jobs; CGO, build tags, release provenance, artifact-byte semantics, and dual-architecture failure isolation are unchanged.
 
 ## 0.8.2 — 2026-09-14
 

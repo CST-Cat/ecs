@@ -2,25 +2,31 @@ name: freebsd-tools
 
 # 正式生产 workflow：FreeBSD 工具链 CI 编排层（静态检查 + 双链调用）。
 #
-# 结构（编排只做依赖关系，构建逻辑全在 scripts/ 与 freebsd-chain.yml）：
+# 结构（编排只做依赖关系，构建逻辑全在 scripts/ 与 reusable workflows）：
 #   legacy-absent / linux-static / workflow-static（独立静态检查）
 #   → chain-amd64 ∥ chain-arm64：并行调用 .github/workflows/freebsd-chain.yml
-#     （target=freebsd_amd64 / freebsd_arm64），两条链互不等待。链实现包含
-#     结构验证（VERIFY）与每链一个的真实 FreeBSD 15.1 VM 运行门禁（REAL
-#     GATE：真实执行合并 stage 的 8 个工具，VM 只以 consumer/judge 身份
-#     出现），细节与 cache 政策见 freebsd-chain.yml。
+#     （target=freebsd_amd64 / freebsd_arm64），两条链互不等待；链实现到
+#     VERIFY 为止。之后 real-gate-amd64 ∥ real-gate-arm64 调用
+#     freebsd-gate.yml。Bundle 调用时，PACKAGE 与两个 REAL GATE 并行，随后
+#     ARTIFACT E2E 继续并行消费 PACKAGE 的布局。
 #
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与 builder；
 # 永久禁止：FreeBSD VM builder。
 #
-# 触发只有 workflow_dispatch 与 workflow_call（bundle-release.yml 通过
-# workflow_call 整体复用本 workflow，同 run 内 artifact 按名可取）；Linux
-# 工具同样只在发布时构建，FreeBSD 不再有独立 push 触发器。
+# 触发只有 workflow_dispatch 与 workflow_call。workflow_dispatch 只构建并
+# 验收工具链；bundle-release.yml 通过 workflow_call 传入 run_bundle_e2e=true，
+# 在同一 run 内追加 PACKAGE/E2E。Linux 工具同样只在发布时构建，FreeBSD
+# 不再有独立 push 触发器。
 
 on:
   workflow_dispatch:
-  # bundle-release.yml 通过 workflow_call 复用本 workflow 的已 gate 产物。
   workflow_call:
+    inputs:
+      run_bundle_e2e:
+        description: 'Build Bundle layouts and run artifact E2E consumers'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -38,7 +44,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - name: Assert legacy builder files are gone
         run: |
@@ -109,12 +116,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
 
       - name: Run scripts/ci/check.sh
@@ -128,7 +136,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - name: Validate YAML parses
         run: |
@@ -169,7 +178,7 @@ jobs:
           fi
           mapfile -t freebsd_workflows < <(ls .github/workflows | grep -i freebsd || true)
           for wf in "${freebsd_workflows[@]}"; do
-            if [[ "$wf" != 'freebsd-tools.yml' && "$wf" != 'freebsd-chain.yml' && "$wf" != 'freebsd-sdk-release.yml' ]]; then
+            if [[ "$wf" != 'freebsd-tools.yml' && "$wf" != 'freebsd-chain.yml' && "$wf" != 'freebsd-gate.yml' && "$wf" != 'freebsd-sdk-release.yml' ]]; then
               echo "unexpected FreeBSD workflow present: $wf" >&2
               exit 1
             fi
@@ -189,3 +198,228 @@ jobs:
     uses: ./.github/workflows/freebsd-chain.yml
     with:
       target: freebsd_arm64
+
+  # VERIFY 通过后才进入 REAL GATE；两个 guest 与 Bundle PACKAGE 互不等待。
+  real-gate-amd64:
+    name: real gate freebsd_amd64
+    needs: [chain-amd64]
+    uses: ./.github/workflows/freebsd-gate.yml
+    with:
+      target: freebsd_amd64
+
+  real-gate-arm64:
+    name: real gate freebsd_arm64
+    needs: [chain-arm64]
+    uses: ./.github/workflows/freebsd-gate.yml
+    with:
+      target: freebsd_arm64
+
+  # Bundle-only consumer path. It starts after VERIFY (chain-*) and therefore
+  # runs in parallel with real-gate-amd64/arm64. The called workflow completes
+  # only after both this path and both real gates pass.
+  #
+  # Bundle 专用消费者路径：只依赖 VERIFY（chain-*），因此与两个 REAL GATE
+  # 并行。整个 reusable workflow 只有在两条路径全部通过后才向 caller 返回。
+  package:
+    if: ${{ inputs.run_bundle_e2e }}
+    name: PACKAGE
+    needs: [chain-amd64, chain-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - name: Download the verified FreeBSD tools stages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-freebsd-tools-stage-*
+          path: freebsd-stage-artifacts
+
+      - name: Restore the verified FreeBSD tools stages
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          mkdir -p .ci/freebsd-tools-stage
+          for target in "${ECS_FREEBSD_TARGET_IDS[@]}"; do
+            source_dir="freebsd-stage-artifacts/ecs-freebsd-tools-stage-${target}"
+            stage_dir=".ci/freebsd-tools-stage/${target}"
+            test -d "$source_dir/bin"
+            test -s "$source_dir/manifest.json"
+            mkdir -p "$stage_dir"
+            cp -a "$source_dir/." "$stage_dir/"
+            # upload-artifact may not preserve executable bits; package.sh
+            # restores the release mode after copying the verified bytes.
+            chmod -R a+rX "$stage_dir"
+          done
+
+      - name: Build the FreeBSD release layouts
+        run: |
+          set -euo pipefail
+          for target in freebsd_amd64 freebsd_arm64; do
+            bash scripts/ci/freebsd_artifact_layout.sh \
+              --stage-root "$PWD/.ci/freebsd-tools-stage" \
+              --layout "$PWD/.ci/freebsd-artifact-layout/${target}" \
+              --target "$target"
+          done
+
+      - name: Upload the freebsd_amd64 release layout
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_amd64
+          path: .ci/freebsd-artifact-layout/freebsd_amd64
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the freebsd_arm64 release layout
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_arm64
+          path: .ci/freebsd-artifact-layout/freebsd_arm64
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  artifact-e2e-amd64:
+    if: ${{ inputs.run_bundle_e2e }}
+    name: ARTIFACT E2E AMD64
+    needs: [package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Download the freebsd_amd64 release layout
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_amd64
+          path: .ci/freebsd-artifact-layout/freebsd_amd64
+
+      - name: Start FreeBSD 15.1 VM (artifact consumer)
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: x86_64
+          cpu: 4
+          sync: rsync
+          copyback: false
+          cache-after-prepare: true
+          custom-shell-name: freebsd
+          prepare: |
+            # freebsd_vm_prepare.sh/v1 + freebsd-vm-deps.lock/v1
+            /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_prepare.sh"
+
+      - name: VM CONTRACT
+        id: vm_contract
+        shell: freebsd {0}
+        run: |
+          set -eu
+          guest_arch=$(uname -m)
+          /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_contract.sh" \
+            freebsd_amd64 locked-packages
+          layout="$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_amd64"
+          [ -s "$layout/ecs-release/ecs_freebsd_amd64.tar.gz" ] ||
+            { echo 'ECS release line did not reach the guest' >&2; exit 1; }
+          [ -s "$layout/bundle-release/ecs-tools_freebsd_amd64.tar.gz" ] ||
+            { echo 'bundle release line did not reach the guest' >&2; exit 1; }
+          if ! id ecsci >/dev/null 2>&1; then
+            pw useradd ecsci -m -s /bin/sh
+          fi
+          chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+          printf 'target=freebsd_amd64\n'
+          printf 'guest_uname=%s\n' "$guest_arch"
+          printf 'phase_contract=ARTIFACT_E2E\n'
+
+      - name: ARTIFACT E2E
+        id: artifact_e2e
+        timeout-minutes: 120
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_artifact_e2e.sh' \
+              --layout '$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_amd64' \
+              --target freebsd_amd64"
+
+  artifact-e2e-arm64:
+    if: ${{ inputs.run_bundle_e2e }}
+    name: ARTIFACT E2E ARM64
+    needs: [package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Download the freebsd_arm64 release layout
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-artifact-layout-freebsd_arm64
+          path: .ci/freebsd-artifact-layout/freebsd_arm64
+
+      - name: Start FreeBSD 15.1 VM (artifact consumer)
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: aarch64
+          cpu: 4
+          sync: rsync
+          copyback: false
+          cache-after-prepare: true
+          custom-shell-name: freebsd
+          prepare: |
+            # freebsd_vm_prepare.sh/v1 + freebsd-vm-deps.lock/v1
+            /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_prepare.sh"
+
+      - name: VM CONTRACT
+        id: vm_contract
+        shell: freebsd {0}
+        run: |
+          set -eu
+          guest_arch=$(uname -m)
+          /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_contract.sh" \
+            freebsd_arm64 locked-packages
+          layout="$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_arm64"
+          [ -s "$layout/ecs-release/ecs_freebsd_arm64.tar.gz" ] ||
+            { echo 'ECS release line did not reach the guest' >&2; exit 1; }
+          [ -s "$layout/bundle-release/ecs-tools_freebsd_arm64.tar.gz" ] ||
+            { echo 'bundle release line did not reach the guest' >&2; exit 1; }
+          if ! id ecsci >/dev/null 2>&1; then
+            pw useradd ecsci -m -s /bin/sh
+          fi
+          chown -R ecsci:ecsci "$GITHUB_WORKSPACE"
+          printf 'target=freebsd_arm64\n'
+          printf 'guest_uname=%s\n' "$guest_arch"
+          printf 'phase_contract=ARTIFACT_E2E\n'
+
+      - name: ARTIFACT E2E
+        id: artifact_e2e
+        timeout-minutes: 120
+        shell: freebsd {0}
+        run: |
+          set -eu
+          su -m ecsci -c \
+            "HOME=/home/ecsci PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
+            /usr/local/bin/bash '$GITHUB_WORKSPACE/scripts/ci/freebsd_artifact_e2e.sh' \
+              --layout '$GITHUB_WORKSPACE/.ci/freebsd-artifact-layout/freebsd_arm64' \
+              --target freebsd_arm64"

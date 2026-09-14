@@ -1,24 +1,25 @@
 name: freebsd-chain
 
 # per-target FreeBSD 工具链构建链：由 freebsd-tools.yml 并行调用两次
-# （target=freebsd_amd64 与 target=freebsd_arm64），每次独立走完整链条：
-#   SYSROOT → C-DEPS → C-TOOLS ────────┐
-#   SYSROOT → GNU SDK（纯门禁）────────┴→ MERGE → VERIFY → REAL GATE
-#             └→ GNU BENCH：不经 artifact 中继，按同一 lock 直接从 immutable
-#                Release 消费同一份 SDK 字节（--acquire-only）。
-# GNU SDK 门禁 job 只依赖 sysroot（脚本自装），与 C-tools 无数据关系，两条
-# 支路并行；门禁对 lock 钉定 URL 下载的 prebuilt 快照跑全部既有断言与 5 项
-# probe，字节由 SHA256 钉死，GNU BENCH 据此直接从 Release 取同一字节。
+# （target=freebsd_amd64 与 freebsd_arm64）。每个目标内部保持两条真正独立的
+# 支路并行：C-TOOLS（SYSROOT → C-DEPS → C build）∥ GNU（SDK gate → bench），
+# 最后 MERGE → VERIFY。C-DEPS 与 GNU BENCH 不再作为只为传递状态而存在的独立
+# job；其 lock/下载/验证步骤仍在同一 build job 内完整执行并复用工作目录。
+#
+# per-target FreeBSD toolchain chain, called in parallel for amd64 and arm64.
+# The two independent branches remain parallel: C-TOOLS (SYSROOT → C-DEPS →
+# C build) ∥ GNU (SDK gate → benchmark), followed by MERGE → VERIFY. The
+# original lock and verification gates remain, but no longer create a second
+# job only to wait and download the same inputs.
 # 静态检查与整体依赖（legacy-absent / linux-static / workflow-static）由调用方
-# freebsd-tools.yml 承担，本文件 SYSROOT 无 needs。
-# 每条链末尾的 REAL GATE 在真实 FreeBSD 15.1 VM（x86_64/aarch64）内真实执行
-# 合并 stage 的 8 个工具，VM 只以 consumer/judge 身份出现
-# （scripts/ci/freebsd_tools_gate.sh）。
+# freebsd-tools.yml 承担。
+# VERIFY 之后的 REAL GATE 由 freebsd-gate.yml 负责。把 VM gate 从本链拆出后，
+# Bundle 可以让 PACKAGE/E2E 与 REAL GATE 共享同一份已验证 stage 并行执行。
 # 构建逻辑全部在 scripts/，本 workflow 只做编排；所有构建都在 ubuntu-24.04
 # amd64 宿主交叉完成，无 VM 参与 builder；永久禁止：FreeBSD VM builder。
 #
-# 零 cache（与 main 一致）：GNU SDK 来自 immutable Release
-# `ci-freebsd-gnu-sdk-v1.1`（lock 钉 SHA256，见 freebsd_gnu_openmp_sdk.sh），
+# 构建输出不使用共享 cache（与 main 一致）：GNU SDK 来自 immutable Release
+# `ci-freebsd-gnu-sdk-v1.2`（lock 钉 SHA256，见 freebsd_gnu_openmp_sdk.sh），
 # 其余产物每次冷构建；VM builder 永久禁止。
 #
 # 注意：不放 concurrency 块——freebsd-tools.yml 会用两个 job 并行调用本
@@ -36,34 +37,40 @@ permissions:
   contents: read
 
 jobs:
-  sysroot:
-    name: SYSROOT (${{ inputs.target }})
+  c-tools:
+    name: C-TOOLS (${{ inputs.target }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
+    env:
+      FREEBSD_C_SYSROOT_DIR: .ci/freebsd-c-preflight/sysroot
+      FREEBSD_C_SYSROOT_WORK_DIR: .ci/freebsd-c-preflight/sysroot-work
+      FREEBSD_C_DEPS_PREFIX: .ci/freebsd-c-preflight/deps
+      FREEBSD_C_DEPS_WORK_DIR: .ci/freebsd-c-preflight/deps-work
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
-      - name: Install clang/lld toolchain
+      - name: Install clang/lld and build dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm file xz-utils
-
-      - name: Print resolved sysroot lock
-        run: bash scripts/ci/freebsd_sysroot.sh --target ${{ inputs.target }} --print-lock
+          sudo apt-get install -y \
+            clang lld llvm file xz-utils zstd libarchive-tools \
+            autoconf automake libtool libtool-bin pkg-config \
+            make git curl jq perl
 
       - name: Install and probe FreeBSD sysroot (${{ inputs.target }})
         run: |
           set -euo pipefail
           bash scripts/ci/freebsd_sysroot.sh \
             --target ${{ inputs.target }} \
-            --sysroot-dir "$PWD/.ci/sysroot/${{ inputs.target }}" \
-            --work-dir "$PWD/.ci/sysroot-work"
+            --sysroot-dir "$FREEBSD_C_SYSROOT_DIR" \
+            --work-dir "$FREEBSD_C_SYSROOT_WORK_DIR"
 
-      - name: Assert both sysroot targets are locked to 15.1-RELEASE
+      - name: Assert the sysroot lock is release-pinned
         run: |
           set -euo pipefail
           release=$(jq -er '.freebsd_release' tools/freebsd-sysroot.lock.json)
@@ -81,37 +88,16 @@ jobs:
                 ;;
             esac
           done
-          echo 'sysroot locks are release-pinned'
 
-  c-deps:
-    name: C-DEPS (${{ inputs.target }})
-    needs: [sysroot]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Install package extract tools
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y zstd libarchive-tools curl jq
-
-      - name: Print target deps lock
-        run: bash scripts/ci/freebsd_target_deps.sh --target ${{ inputs.target }} --print-lock
-
-      - name: Fetch immutable LuaJIT/CK snapshot
+      - name: Fetch and verify immutable target dependencies (${{ inputs.target }})
         run: |
           set -euo pipefail
           bash scripts/ci/freebsd_target_deps.sh \
             --target ${{ inputs.target }} \
-            --prefix "$PWD/.ci/target-deps/${{ inputs.target }}" \
-            --work-dir "$PWD/.ci/target-deps-work"
+            --prefix "$FREEBSD_C_DEPS_PREFIX" \
+            --work-dir "$FREEBSD_C_DEPS_WORK_DIR"
 
-      - name: Assert no rolling package URLs in lock
+      - name: Assert target dependencies use the immutable snapshot
         run: |
           set -euo pipefail
           if jq -e '.. | objects | select(has("snapshot_url")) | .snapshot_url' \
@@ -120,27 +106,6 @@ jobs:
             exit 1
           fi
           test "$(jq -er '.snapshot.id' tools/freebsd-target-deps.lock.json)" = 'ci-freebsd-deps-v1'
-          echo 'target deps lock is snapshot-pinned'
-
-  c-tools:
-    name: C-TOOLS (${{ inputs.target }})
-    needs: [c-deps]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Install clang/lld and build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang lld llvm file xz-utils zstd libarchive-tools \
-            autoconf automake libtool libtool-bin pkg-config \
-            make git curl jq perl
 
       - name: Print builder params
         run: bash scripts/build_tools_freebsd_c.sh --target ${{ inputs.target }} --print-params
@@ -163,14 +128,17 @@ jobs:
 
   gnu-sdk:
     name: GNU SDK (${{ inputs.target }})
-    needs: [sysroot]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      FREEBSD_GNU_SYSROOT_DIR: .ci/gnu-sdk-work/sysroot
+      FREEBSD_GNU_SYSROOT_WORK_DIR: .ci/gnu-sdk-work/sysroot-work
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - name: Install toolchain build dependencies
         run: |
@@ -178,7 +146,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential flex bison libgmp-dev libmpfr-dev libmpc-dev \
-            texinfo file xz-utils curl jq zstd
+            texinfo file xz-utils curl jq zstd clang lld llvm
 
       - name: Print GNU SDK lock
         run: bash scripts/ci/freebsd_gnu_openmp_sdk.sh --target ${{ inputs.target }} --print-lock
@@ -195,35 +163,9 @@ jobs:
             --work-dir "$PWD/.ci/gnu-sdk-work" \
             --jobs "$(nproc)"
 
-  gnu-bench:
-    name: GNU BENCH (${{ inputs.target }})
-    needs: [gnu-sdk]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Install host build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y clang lld build-essential file jq curl xz-utils zstd
-
-      # 直接消费 immutable Release：下载 lock 钉 URL 的 prebuilt 快照 →
-      # SHA256 校验 → 解包 → 清理残留 marker 后退出（不跑 probe、不构建；
-      # probe 已由 GNU SDK 门禁 job 对同一字节完成）。zstd 用于 .tar.zst 解包。
-      - name: Acquire prebuilt GNU SDK
-        run: |
-          set -euo pipefail
-          bash scripts/ci/freebsd_gnu_openmp_sdk.sh \
-            --acquire-only \
-            --target ${{ inputs.target }} \
-            --prefix "$PWD/.ci/gnu-sdk/${{ inputs.target }}" \
-            --work-dir "$PWD/.ci/gnu-sdk-work"
-
+      # The gate leaves the exact SHA-pinned SDK in this job's workspace. The
+      # benchmark consumes that directory directly, so the SDK is not fetched
+      # and unpacked a second time in a downstream job.
       - name: Print builder params
         run: bash scripts/build_tools_freebsd_gnu.sh --target ${{ inputs.target }} --print-params
 
@@ -245,14 +187,15 @@ jobs:
 
   merge:
     name: MERGE (${{ inputs.target }})
-    needs: [c-tools, gnu-bench]
+    needs: [c-tools, gnu-sdk]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - name: Install merge dependencies
         run: |
@@ -298,12 +241,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
 
       - name: Install verification dependencies
@@ -324,40 +268,3 @@ jobs:
           bash scripts/verify_tools_stage.sh \
             --target ${{ inputs.target }} \
             --stage-root "$PWD/.ci/freebsd-tools-stage"
-
-  real-gate:
-    name: REAL GATE (${{ inputs.target }})
-    needs: [verify]
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Download merged FreeBSD tools stage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ecs-freebsd-tools-stage-${{ inputs.target }}
-          path: .ci/freebsd-tools-stage/${{ inputs.target }}
-
-      - name: Start FreeBSD 15.1 VM (consumer/judge)
-        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
-        with:
-          release: "15.1"
-          arch: ${{ inputs.target == 'freebsd_amd64' && 'x86_64' || 'aarch64' }}
-          sync: rsync
-          copyback: false
-          custom-shell-name: freebsd
-          prepare: |
-            env ASSUME_ALWAYS_YES=yes pkg install -y bash jq file ca_root_nss
-
-      - name: REAL GATE
-        shell: freebsd {0}
-        run: |
-          set -eu
-          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
-          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
-            --target ${{ inputs.target }} \
-            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/${{ inputs.target }}"

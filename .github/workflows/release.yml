@@ -29,7 +29,7 @@ on:
 permissions:
   contents: read
 
-# 正式发布中需要 Go 的 job 直接通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，
+# 正式发布中需要 Go 的 job 使用与 canonical formatter 对齐的 Go 1.27.1，
 # 不从主模块 go.mod 自动选择工具链。所有会运行 Go 命令的 release job（包括被脚本间接调用的
 # go build/go test/go run）都禁止 go 命令根据 go.mod 自动切换工具链；ecs-build 记录
 # 实际 go env GOVERSION，assemble 从 amd64 构建 artifact 读取并原样交给 verify 校验。
@@ -48,7 +48,7 @@ jobs:
   #
   # 确定性的源码检查在独立的 source-checks job 中执行。
   freeze:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       sha: ${{ steps.freeze.outputs.sha }}
@@ -77,17 +77,18 @@ jobs:
 
   source-checks:
     needs: freeze
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.freeze.outputs.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
 
       - name: Deterministic source checks
@@ -102,7 +103,7 @@ jobs:
   ecs-build:
     needs: freeze
     name: ecs-build (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -121,11 +122,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.freeze.outputs.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - name: Build the ECS binary
         env:
@@ -147,13 +149,13 @@ jobs:
 
   # 组装全部发布物，并记录**实测**的 Go 版本。
   #
-  # ecs-build 通过 setup-go 的 stable/check-latest 选择当前官方稳定 Go，不另写
-  # expected_go=... 这种可能分叉的期望值。ecs-build 将实际的 go env GOVERSION 随同
+  # ecs-build 通过 setup-go 固定使用 Go 1.27.1，不另写 expected_go=... 这种可能
+  # 分叉的期望值。ecs-build 将实际的 go env GOVERSION 随同
   # 每个主程序 artifact 交给 assemble；assemble 从 linux_amd64 artifact 取出并通过
   # --build-go-version 交给 verify 校验二进制里的元数据。
   assemble:
     needs: [freeze, source-checks, ecs-build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       build_go_version: ${{ steps.build.outputs.build_go_version }}
@@ -161,7 +163,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.freeze.outputs.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ecs-binary-*
@@ -197,13 +200,14 @@ jobs:
         with:
           name: release-dist
           path: dist
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
 
   # 这组制品真的出自这次提交、这条工具链吗？
   verify:
     needs: [freeze, assemble]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -211,8 +215,8 @@ jobs:
           ref: ${{ needs.freeze.outputs.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -233,7 +237,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [freeze, assemble, verify]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
@@ -241,7 +245,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.freeze.outputs.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-dist

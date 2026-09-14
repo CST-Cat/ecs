@@ -8,8 +8,9 @@ name: ci
 # 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
 #
 # compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
-# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 直接通过
-# setup-go 请求官方 stable 并启用 check-latest；compat 仍固定验证最低支持版本 1.22.x。
+# 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 使用仓库
+# canonical toolchain Go 1.27.1，并关闭不必要的 latest 探测；compat 仍固定验证
+# 最低支持版本 1.22.x。
 
 on:
   push:
@@ -28,14 +29,14 @@ concurrency:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - name: Unit and parser tests
         env:
@@ -44,7 +45,7 @@ jobs:
 
   compat:
     name: compat (${{ matrix.go-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -62,44 +63,44 @@ jobs:
         run: go test ./...
 
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - run: ./scripts/ci/check.sh
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - run: ./scripts/ci/integration.sh
 
   race:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - run: go test -race ./...
 
   cross:
     name: cross (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -116,8 +117,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - run: ./scripts/cross.sh --target "$TARGET"
         env:
@@ -127,7 +128,7 @@ jobs:
   # 同一形态：宿主机交叉构建，真实 FreeBSD VM 内执行消费）。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -137,8 +138,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
 
       # BUILD verifies the exact FreeBSD target on the fast host. Runtime support
@@ -172,16 +173,31 @@ jobs:
         with:
           release: "15.1"
           arch: ${{ matrix.arch }}
+          cpu: 4
           sync: rsync
           copyback: false
           cache-after-prepare: true
           custom-shell-name: freebsd
           prepare: |
+            # FreeBSD runtime VM prepare contract/v1; bump this token if it changes.
             pw useradd ecsci -m -s /bin/sh
+
+      - name: VM CONTRACT
+        id: freebsd_vm_contract
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
+        shell: freebsd {0}
+        run: |
+          set -eu
+          case "${{ matrix.arch }}" in
+            x86_64) target=freebsd_amd64 ;;
+            aarch64) target=freebsd_arm64 ;;
+            *) echo "unsupported FreeBSD CI arch: ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
+          /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_contract.sh" "$target"
 
       - name: SYSTEM
         id: freebsd_system
-        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' && steps.freebsd_vm_contract.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -191,7 +207,7 @@ jobs:
 
       - name: PING
         id: freebsd_ping
-        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' && steps.freebsd_vm_contract.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -201,7 +217,7 @@ jobs:
 
       - name: ROUTE
         id: freebsd_route
-        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' && steps.freebsd_vm_contract.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -211,7 +227,7 @@ jobs:
 
       - name: BACKTRACE
         id: freebsd_backtrace
-        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' }}
+        if: ${{ always() && steps.freebsd_build.outcome == 'success' && steps.freebsd_vm.outcome == 'success' && steps.freebsd_vm_contract.outcome == 'success' }}
         shell: freebsd {0}
         run: |
           set -eu
@@ -223,6 +239,7 @@ jobs:
         if: always()
         env:
           BUILD_OUTCOME: ${{ steps.freebsd_build.outcome }}
+          CONTRACT_OUTCOME: ${{ steps.freebsd_vm_contract.outcome }}
           SYSTEM_OUTCOME: ${{ steps.freebsd_system.outcome }}
           PING_OUTCOME: ${{ steps.freebsd_ping.outcome }}
           ROUTE_OUTCOME: ${{ steps.freebsd_route.outcome }}
@@ -232,6 +249,7 @@ jobs:
           failed=0
           for item in \
             "BUILD=$BUILD_OUTCOME" \
+            "CONTRACT=$CONTRACT_OUTCOME" \
             "SYSTEM=$SYSTEM_OUTCOME" \
             "PING=$PING_OUTCOME" \
             "ROUTE=$ROUTE_OUTCOME" \
@@ -248,14 +266,14 @@ jobs:
           exit "$failed"
 
   submissions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version: '1.27.1'
+          check-latest: false
           cache: false
       - name: Validate submissions
         env:
@@ -275,7 +293,7 @@ jobs:
   required:
     if: always()
     needs: [unit, compat, quality, integration, race, cross, freebsd, submissions]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every check to pass

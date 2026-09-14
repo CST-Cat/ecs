@@ -53,6 +53,9 @@ go run ./cmd/tools-manifest-check --target linux_amd64 tools/manifest.example.js
 ecs_step "工具锁定事实"
 bash scripts/lock_test.sh
 
+ecs_step "FreeBSD VM package lock"
+bash scripts/ci/freebsd_vm_deps_test.sh
+
 ecs_step "分析工具缓存锁"
 bash scripts/devtools_cache_test.sh
 

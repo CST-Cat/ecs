@@ -1,0 +1,69 @@
+name: freebsd-real-gate
+
+# Reusable consumer/judge workflow for one verified FreeBSD tools stage.
+# The builder stays in freebsd-chain.yml; this workflow only downloads the
+# verified stage and executes the real eight-tool gate inside FreeBSD.
+#
+# 单目标真实消费者门禁：构建与 VERIFY 留在 freebsd-chain.yml；本 workflow
+# 只下载已经验证的 stage，并在真实 FreeBSD guest 内执行八个工具。
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'FreeBSD target to gate: freebsd_amd64 or freebsd_arm64'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  real-gate:
+    name: REAL GATE (${{ inputs.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Download merged FreeBSD tools stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-freebsd-tools-stage-${{ inputs.target }}
+          path: .ci/freebsd-tools-stage/${{ inputs.target }}
+
+      - name: Start FreeBSD 15.1 VM (consumer/judge)
+        id: freebsd_vm
+        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        with:
+          release: "15.1"
+          arch: ${{ inputs.target == 'freebsd_amd64' && 'x86_64' || 'aarch64' }}
+          cpu: 4
+          sync: rsync
+          copyback: false
+          cache-after-prepare: true
+          custom-shell-name: freebsd
+          prepare: |
+            # freebsd_vm_prepare.sh/v1 + freebsd-vm-deps.lock/v1
+            /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_prepare.sh"
+
+      - name: VM CONTRACT
+        shell: freebsd {0}
+        run: |
+          set -eu
+          /bin/sh "$GITHUB_WORKSPACE/scripts/ci/freebsd_vm_contract.sh" \
+            "${{ inputs.target }}" locked-packages
+          printf 'phase_contract=REAL_GATE\n'
+
+      - name: REAL GATE
+        shell: freebsd {0}
+        run: |
+          set -eu
+          export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+          bash "$GITHUB_WORKSPACE/scripts/ci/freebsd_tools_gate.sh" \
+            --target ${{ inputs.target }} \
+            --stage-dir "$GITHUB_WORKSPACE/.ci/freebsd-tools-stage/${{ inputs.target }}"

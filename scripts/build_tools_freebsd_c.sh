@@ -132,20 +132,22 @@ trap cleanup EXIT
 
 mkdir -p "$stage/bin" "$stage/LICENSES"
 
-sysroot="$work/sysroot"
-deps_prefix="$work/deps"
+sysroot="${FREEBSD_C_SYSROOT_DIR:-$work/sysroot}"
+sysroot_work="${FREEBSD_C_SYSROOT_WORK_DIR:-$work/sysroot-work}"
+deps_prefix="${FREEBSD_C_DEPS_PREFIX:-$work/deps}"
+deps_work="${FREEBSD_C_DEPS_WORK_DIR:-$work/deps-work}"
 
 echo "build-tools-freebsd-c: installing FreeBSD $release sysroot for $target" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_sysroot.sh" \
   --target "$target" \
   --sysroot-dir "$sysroot" \
-  --work-dir "$work/sysroot-work"
+  --work-dir "$sysroot_work"
 
 echo "build-tools-freebsd-c: installing immutable target deps for $target" >&2
 bash "$ECS_REPO_ROOT/scripts/ci/freebsd_target_deps.sh" \
   --target "$target" \
   --prefix "$deps_prefix" \
-  --work-dir "$work/deps-work"
+  --work-dir "$deps_work"
 
 wrap_bin=$(ecs_freebsd_c_write_wrappers "$work" "$triple" "$sysroot")
 
