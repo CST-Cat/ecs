@@ -61,7 +61,9 @@ done < "$lock"
 
 printf '%s\n' "$package_files" | sed '/^$/d' |
 while IFS= read -r package_file; do
-  env ASSUME_ALWAYS_YES=yes pkg add -y "$package_file"
+  # FreeBSD 15's `pkg add` has no `-y` option; ASSUME_ALWAYS_YES is the
+  # non-interactive confirmation mechanism shared by the package commands.
+  env ASSUME_ALWAYS_YES=yes pkg add "$package_file"
 done
 
 installed=$(pkg query '%n|%v')
