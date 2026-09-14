@@ -12,15 +12,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 )
 
 const (
-	windowsTreeRoleEnv   = "ECS_WINDOWS_TREE_ROLE"
-	windowsTreeModeEnv   = "ECS_WINDOWS_TREE_MODE"
-	windowsTreeMarkerEnv = "ECS_WINDOWS_TREE_MARKER"
+	windowsTreeRoleEnv         = "ECS_WINDOWS_TREE_ROLE"
+	windowsTreeModeEnv         = "ECS_WINDOWS_TREE_MODE"
+	windowsTreeMarkerEnv       = "ECS_WINDOWS_TREE_MARKER"
+	windowsTreeOverflowGateEnv = "ECS_WINDOWS_TREE_OVERFLOW_GATE"
 )
 
 func TestLookupToolUsesPrivateWindowsExecutable(t *testing.T) {
@@ -76,15 +78,12 @@ func TestProbeCommandWindowsProcessTree(t *testing.T) {
 	})
 	t.Run("interrupt cancellation callback", func(t *testing.T) {
 		runWindowsTreeCase(t, "interrupt", 0, func(command *probeCommand, ctx context.Context, cancel context.CancelFunc) {
-			// os/signal delivers Ctrl+C to the application context; exec.Cmd then
-			// calls this same production callback. Calling it directly keeps the
-			// test independent of the runner's console attachment while exercising
-			// the actual interrupt cleanup path and all tree assertions.
-			if err := command.Cancel(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				t.Fatalf("interrupt cancellation callback: %v", err)
-			}
+			// os/signal delivers Ctrl+C to the application context; the
+			// CommandContext watcher then invokes the production callback. Cancel
+			// the context here so Wait observes the same interrupt error path.
+			_ = command
 			_ = ctx
-			_ = cancel
+			cancel()
 		})
 	})
 	t.Run("output overflow", func(t *testing.T) {
@@ -97,12 +96,25 @@ func runWindowsTreeCase(t *testing.T, mode string, outputLimit int, trigger func
 	markerDirectory := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	overflowGate := ""
+	if mode == "overflow" {
+		overflowGate = filepath.Join(markerDirectory, "overflow.ready")
+	}
 	command := newProbeCommand(ctx, os.Args[0], "-test.run=TestProbeCommandWindowsProcessTree", "-test.count=1")
 	command.Env = append(os.Environ(),
 		windowsTreeRoleEnv+"=root",
 		windowsTreeModeEnv+"="+mode,
 		windowsTreeMarkerEnv+"="+markerDirectory,
+		windowsTreeOverflowGateEnv+"="+overflowGate,
 	)
+	var interruptCallbackCalled atomic.Bool
+	if mode == "interrupt" {
+		cancelCallback := command.Cancel
+		command.Cancel = func() error {
+			interruptCallbackCalled.Store(true)
+			return cancelCallback()
+		}
+	}
 	resultChannel := make(chan probeCommandResult, 1)
 	go func() {
 		if outputLimit > 0 {
@@ -121,6 +133,11 @@ func runWindowsTreeCase(t *testing.T, mode string, outputLimit int, trigger func
 
 	childPID, grandchildPID := waitWindowsTreePIDs(t, markerDirectory)
 	_ = waitWindowsTreeMarker(t, filepath.Join(markerDirectory, "grandchild.port"))
+	if overflowGate != "" {
+		if err := os.WriteFile(overflowGate, []byte("ready"), 0o600); err != nil {
+			t.Fatalf("release Windows overflow helper: %v", err)
+		}
+	}
 	if trigger != nil {
 		trigger(command, ctx, cancel)
 	} else {
@@ -136,10 +153,11 @@ func runWindowsTreeCase(t *testing.T, mode string, outputLimit int, trigger func
 			t.Fatalf("context-cancelled tree error = %v, want context.Canceled", result.Err)
 		}
 	case "interrupt":
-		// The direct callback has no parent context cause, but it must still
-		// terminate the process and complete Wait without a successful result.
-		if result.Err == nil {
-			t.Fatal("interrupt callback returned a successful result")
+		if !interruptCallbackCalled.Load() {
+			t.Fatal("context interrupt did not invoke the production cancellation callback")
+		}
+		if !errors.Is(result.Err, context.Canceled) {
+			t.Fatalf("interrupt callback result error = %v, want context.Canceled", result.Err)
 		}
 	case "overflow":
 		if !errors.Is(result.Err, errProbeCommandOutputLimit) || result.Combined != nil {
@@ -160,6 +178,7 @@ func runWindowsTreeHelper(role string) {
 	case "root":
 		child := startWindowsTreeHelper(markerDirectory, "child")
 		if os.Getenv(windowsTreeModeEnv) == "overflow" {
+			waitWindowsTreeOverflowGate(os.Getenv(windowsTreeOverflowGateEnv))
 			payload := []byte(strings.Repeat("x", 4096))
 			for {
 				if _, err := os.Stdout.Write(payload); err != nil {
@@ -198,11 +217,25 @@ func startWindowsTreeHelper(markerDirectory, role string) *os.Process {
 		windowsTreeRoleEnv+"="+role,
 		windowsTreeModeEnv+"="+os.Getenv(windowsTreeModeEnv),
 		windowsTreeMarkerEnv+"="+markerDirectory,
+		windowsTreeOverflowGateEnv+"="+os.Getenv(windowsTreeOverflowGateEnv),
 	)
 	if err := command.Start(); err != nil {
 		panic(fmt.Sprintf("start Windows tree role %s: %v", role, err))
 	}
 	return command.Process
+}
+
+func waitWindowsTreeOverflowGate(path string) {
+	if path == "" {
+		panic("missing Windows tree overflow gate")
+	}
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(data)) == "ready" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func writeWindowsTreePID(directory, role string, pid int) {
