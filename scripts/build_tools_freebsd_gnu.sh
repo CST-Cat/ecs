@@ -133,7 +133,7 @@ fi
   die "--sdk-prefix is required (installed Stage 4 GNU SDK prefix)"
 }
 
-for command_name in curl jq sha256sum make gcc file tar nm readelf strings python3; do
+for command_name in curl jq sha256sum make gcc file tar nm readelf strings; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
@@ -179,11 +179,11 @@ ecs_freebsd_gnu_probe_wrappers "$work" "$file_machine"
 ecs_freebsd_gnu_build_npb "$work" "$stage" "$wrap_bin" "$file_machine"
 ecs_freebsd_gnu_build_stream "$work" "$stage" "$wrap_bin" "$file_machine"
 
-# Stage policy strip (contract Phase 1): both builds and their pre-strip
-# GOMP_/__kmpc_ proofs are done, so strip the final release binaries BEFORE
-# provenance computes the final-byte SHA-256s, with a hard before/after
-# runtime-section equivalence proof. This is post-processing policy for the
-# whole stage, not per-tool build logic.
+# Stage policy strip: both builds and their pre-strip GOMP_/__kmpc_ proofs are
+# done, so strip each final release binary once BEFORE provenance computes the
+# final-byte SHA-256s; each binary is then checked against the static FreeBSD
+# ELF contract. The downstream release-artifact verification and real FreeBSD
+# tools gate cover tree-level and runtime behavior.
 ecs_freebsd_gnu_strip_release_binaries "$stage" "$work" "$sdk_prefix" "$triple" "$file_machine"
 
 ecs_freebsd_gnu_write_provenance "$stage" "$target" "$triple" "$gcc_version" \

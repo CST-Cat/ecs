@@ -110,7 +110,7 @@ fi
   die "--stage-root is required"
 }
 
-for command_name in curl git jq sha256sum clang lld file make tar gcc perl pkg-config python3; do
+for command_name in curl git jq sha256sum clang lld file make tar gcc perl pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
@@ -177,10 +177,10 @@ ecs_freebsd_c_build_openssl "$work" "$stage" "$jobs"
 ecs_freebsd_c_build_fio "$work" "$stage" "$jobs"
 ecs_freebsd_c_build_iperf3 "$work" "$stage" "$jobs"
 
-# Stage policy strip (contract Phase 1): all five tools are built, so strip
-# the final release binaries BEFORE provenance/SHA256SUMS describe them,
-# with a hard before/after runtime-section equivalence proof. This is
-# post-processing policy for the whole stage, not per-tool build logic.
+# Stage policy strip: all five final tools are stripped once BEFORE
+# provenance/SHA256SUMS describe them; each binary is then checked against the
+# static FreeBSD ELF contract. The downstream release-artifact verification
+# and real FreeBSD tools gate cover tree-level and runtime behavior.
 ecs_freebsd_c_strip_release_binaries "$stage" "$work"
 
 # Licenses: copy upstream LICENSE files when present.
