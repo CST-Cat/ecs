@@ -111,6 +111,11 @@ assert_contains "$windows" "Get-JsonPropertyValue"
 assert_contains "$windows" "Get-SystemFieldRaw"
 assert_contains "$windows" "PSObject.Properties"
 assert_contains "$windows" "missing JSON property"
+assert_contains "$windows" "system JSON has no structured facts"
+assert_contains "$windows" "evidence.valid"
+assert_contains "$windows" "evidence.expected"
+assert_contains "$windows" "evidence.unit"
+assert_contains "$windows" 'failures=$failureText'
 assert_contains "$windows" "memory_total"
 assert_contains "$windows" "disk_total"
 assert_contains "$windows" "uptime_seconds"
@@ -185,6 +190,11 @@ assert_contains .github/workflows/ci.yml 'Get-JsonPropertyValue'
 assert_contains .github/workflows/ci.yml 'Get-SystemFieldRaw'
 assert_contains .github/workflows/ci.yml 'PSObject.Properties'
 assert_contains .github/workflows/ci.yml 'missing JSON property'
+assert_contains .github/workflows/ci.yml 'system JSON has no structured facts'
+assert_contains .github/workflows/ci.yml 'evidence.valid'
+assert_contains .github/workflows/ci.yml 'evidence.expected'
+assert_contains .github/workflows/ci.yml 'evidence.unit'
+assert_contains .github/workflows/ci.yml 'failures=$failureText'
 assert_contains .github/workflows/ci.yml 'memory_total'
 assert_contains .github/workflows/ci.yml 'disk_total'
 assert_contains .github/workflows/ci.yml 'uptime_seconds'

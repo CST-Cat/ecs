@@ -290,6 +290,27 @@ jobs:
             $systemMatches = @($results | Where-Object { [string]$_.id -eq 'system' })
             if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
             $system = $systemMatches[0]
+            $fieldsProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'fields' })
+            if ($fieldsProperty.Count -ne 1) {
+              $status = [string](Get-JsonPropertyValue -Object $system -Name 'status' -Context 'system result')
+              $evidence = Get-JsonPropertyValue -Object $system -Name 'evidence' -Context 'system result'
+              $evidenceValid = Get-JsonPropertyValue -Object $evidence -Name 'valid' -Context 'system evidence'
+              $evidenceExpected = Get-JsonPropertyValue -Object $evidence -Name 'expected' -Context 'system evidence'
+              $evidenceUnit = [string](Get-JsonPropertyValue -Object $evidence -Name 'unit' -Context 'system evidence')
+              $failureProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'failures' })
+              $failureText = '<missing>'
+              if ($failureProperty.Count -eq 1) {
+                $failureItems = @($failureProperty[0].Value)
+                if ($failureItems.Count -eq 0) {
+                  $failureText = '<empty>'
+                } else {
+                  $failureText = @($failureItems | ForEach-Object {
+                    [string](Get-JsonPropertyValue -Object $_ -Name 'message' -Context 'system failure')
+                  }) -join ' | '
+                }
+              }
+              throw "system JSON has no structured facts; status=$status evidence.valid=$evidenceValid evidence.expected=$evidenceExpected evidence.unit=$evidenceUnit failures=$failureText"
+            }
             $os = Get-SystemFieldRaw -Result $system -Key 'os'
             if ($os -notmatch '(?i)^Windows(?:\s+Server)?\b') { throw "system OS is not Windows: $os" }
             if ((Get-SystemFieldRaw -Result $system -Key 'arch') -ne 'amd64') { throw 'system arch is not amd64' }
@@ -567,6 +588,27 @@ jobs:
             $systemMatches = @($results | Where-Object { [string]$_.id -eq 'system' })
             if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
             $system = $systemMatches[0]
+            $fieldsProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'fields' })
+            if ($fieldsProperty.Count -ne 1) {
+              $status = [string](Get-JsonPropertyValue -Object $system -Name 'status' -Context 'system result')
+              $evidence = Get-JsonPropertyValue -Object $system -Name 'evidence' -Context 'system result'
+              $evidenceValid = Get-JsonPropertyValue -Object $evidence -Name 'valid' -Context 'system evidence'
+              $evidenceExpected = Get-JsonPropertyValue -Object $evidence -Name 'expected' -Context 'system evidence'
+              $evidenceUnit = [string](Get-JsonPropertyValue -Object $evidence -Name 'unit' -Context 'system evidence')
+              $failureProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'failures' })
+              $failureText = '<missing>'
+              if ($failureProperty.Count -eq 1) {
+                $failureItems = @($failureProperty[0].Value)
+                if ($failureItems.Count -eq 0) {
+                  $failureText = '<empty>'
+                } else {
+                  $failureText = @($failureItems | ForEach-Object {
+                    [string](Get-JsonPropertyValue -Object $_ -Name 'message' -Context 'system failure')
+                  }) -join ' | '
+                }
+              }
+              throw "system JSON has no structured facts; status=$status evidence.valid=$evidenceValid evidence.expected=$evidenceExpected evidence.unit=$evidenceUnit failures=$failureText"
+            }
             $os = Get-SystemFieldRaw -Result $system -Key 'os'
             if ($os -notmatch '(?i)^Windows(?:\s+Server)?\b') { throw "system OS is not Windows: $os" }
             if ((Get-SystemFieldRaw -Result $system -Key 'arch') -ne 'amd64') { throw 'system arch is not amd64' }
