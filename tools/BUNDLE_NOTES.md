@@ -9,6 +9,20 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.6
+
+### 中文
+
+- 新增 Windows Server 2022+ x64 的 `windows_amd64` 工具 Bundle contract，资产格式为 `ecs-tools_windows_amd64.zip`；主程序对应的 Windows ZIP asset 为 `ecs_windows_amd64.zip`。
+- Windows frozen benchmark set 只包含 `zstd`、NPB EP、NPB FT、OpenSSL、STREAM 和 `fio`；Windows gate 要求 fio 的 `windowsaio` engine，并保留每个工具的 manifest、PE/DLL allowlist 和上游许可证文件。
+- Windows 的系统与 ICMP 事实由主程序的 native Win32 probes 提供，不在工具 Bundle 中增加 `ping.exe`；NextTrace 不进入 Bundle，Windows route/backtrace 仍 unsupported。GitHub Actions 的真实 Windows gate 尚待彩排验证，本节不将其写成已通过。
+
+### English
+
+- Added the Windows Server 2022+ x64 `windows_amd64` tool Bundle contract, with `ecs-tools_windows_amd64.zip` as its asset; the corresponding Windows main-program ZIP asset is `ecs_windows_amd64.zip`.
+- The Windows frozen benchmark set contains only `zstd`, NPB EP, NPB FT, OpenSSL, STREAM and `fio`; the Windows gate requires fio's `windowsaio` engine and retains each tool's manifest, PE/DLL allowlist and upstream license files.
+- Windows system and ICMP facts come from the main program's native Win32 probes, so the tool Bundle adds no `ping.exe`; NextTrace is not in the Bundle, and Windows route/backtrace remain unsupported. The genuine GitHub Actions Windows gate still awaits rehearsal and is not described as passed here.
+
 ## bundle-v1.5
 
 ### 中文
