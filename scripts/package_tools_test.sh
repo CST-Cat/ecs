@@ -48,14 +48,15 @@ cp -a \
 # These are prebuilt main-program fixtures. They are deliberately labeled shell
 # files: this regression checks packaging layout and ownership, never adapter
 # execution or measurement validity.
-for target_record in "${ECS_TARGETS[@]}"; do
+for target_record in "${ECS_RELEASE_TARGETS[@]}"; do
   read -r target goos _goarch arch <<<"$target_record"
-  binary="$binary_root/ecs_$target"
+  binary_name=$(ecs_target_asset_name "$target" binary)
+  binary="$binary_root/$binary_name"
   printf '%s\n' '#!/bin/sh' "# prebuilt package fixture: $target" 'exit 0' >"$binary"
   chmod 0755 "$binary"
 done
 
-for target_record in "${ECS_TARGETS[@]}"; do
+for target_record in "${ECS_RELEASE_TARGETS[@]}"; do
   read -r target goos _goarch arch <<<"$target_record"
   stage_dir="$stage_root/$target"
   mkdir -p \
@@ -70,8 +71,9 @@ for target_record in "${ECS_TARGETS[@]}"; do
 
   mapfile -t target_tools < <(ecs_target_tool_names "$target")
   for tool in "${target_tools[@]}"; do
-    printf '%s\n' '#!/bin/sh' "# package fixture: $target/$tool" 'exit 0' >"$stage_dir/bin/$tool"
-    chmod 0755 "$stage_dir/bin/$tool"
+    tool_file=$(ecs_target_asset_name "$target" tool "$tool")
+    printf '%s\n' '#!/bin/sh' "# package fixture: $target/$tool" 'exit 0' >"$stage_dir/bin/$tool_file"
+    chmod 0755 "$stage_dir/bin/$tool_file"
   done
 done
 
@@ -198,15 +200,36 @@ assert_checksums 1
 [[ -s "$dist_root/ecs_freebsd_arm64.tar.gz" ]] ||
   fail "target-selected ECS package did not write the FreeBSD archive"
 
+# Windows uses the canonical ZIP asset and the .exe member name. Its input
+# binary is intentionally still a shell fixture: this test covers packaging
+# layout and naming, while the real PE/runtime gate belongs to Windows CI.
+if ! package_output=$(env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \
+  --binaries-dir "$binary_root" --target windows_amd64 2>&1); then
+  fail "Windows ECS package invocation failed:\n$package_output"
+fi
+assert_checksums 1
+[[ -s "$dist_root/ecs_windows_amd64.zip" ]] ||
+  fail "Windows ECS package did not write the canonical ZIP asset"
+windows_listing=$(unzip -Z1 "$dist_root/ecs_windows_amd64.zip") ||
+  fail "could not inspect the Windows ECS ZIP"
+for member in ecs.exe LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md; do
+  grep -F -x "$member" <<<"$windows_listing" >/dev/null ||
+    fail "Windows ECS ZIP omitted $member"
+done
+if grep -F -x ecs <<<"$windows_listing" >/dev/null; then
+  fail "Windows ECS ZIP used the Unix ecs member name"
+fi
+
 # Case D: --all-targets is how release and bundle wiring promote every platform
-# target, including the two FreeBSD stages, in one invocation. The default stays
-# Linux-only, so this is the path that emits the FreeBSD tool archives.
+# target, including the two FreeBSD stages and the Windows stage, in one
+# invocation. The default stays Linux-only, so this is the path that emits the
+# non-Linux tool archives.
 if ! package_output=$(env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \
   --tools-stage "$stage_root" --all-targets 2>&1); then
   fail "all-targets bundle invocation failed:\n$package_output"
 fi
 assert_archives ecs-tools_ "${#ECS_TARGETS[@]}"
-assert_checksums "$((${#ECS_TARGETS[@]} + 1))"
+assert_checksums "$((${#ECS_RELEASE_TARGETS[@]} + 1))"
 [[ -z "$(find "$dist_root" -mindepth 1 -maxdepth 1 -type f -name 'ecs_linux_*.tar.gz' -print -quit)" ]] ||
   fail "all-targets bundle unexpectedly wrote ECS archives"
 [[ -s "$dist_root/$ECS_CORPUS_ARCHIVE" ]] ||
@@ -225,6 +248,20 @@ for target_record in "${ECS_FREEBSD_TARGETS[@]}"; do
       fail "$target tools archive omitted bin/$tool"
   done
 done
+
+[[ -s "$dist_root/ecs-tools_windows_amd64.zip" ]] ||
+  fail "all-targets bundle did not write the canonical Windows tools ZIP"
+windows_tools_listing=$(unzip -Z1 "$dist_root/ecs-tools_windows_amd64.zip") ||
+  fail "could not inspect the Windows tools ZIP"
+mapfile -t windows_tools < <(ecs_target_tool_names windows_amd64)
+for tool in "${windows_tools[@]}"; do
+  tool_file=$(ecs_target_asset_name windows_amd64 tool "$tool")
+  grep -F -x "bin/$tool_file" <<<"$windows_tools_listing" >/dev/null ||
+    fail "Windows tools ZIP omitted bin/$tool_file"
+done
+if grep -F -x 'bin/zstd' <<<"$windows_tools_listing" >/dev/null; then
+  fail "Windows tools ZIP used a non-.exe tool member"
+fi
 
 # --all-targets and --target answer the same question; asking both is ambiguous
 # input rather than a union, and must not silently pick one interpretation.

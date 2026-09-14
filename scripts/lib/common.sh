@@ -55,9 +55,23 @@ ECS_LOCK_SCHEMA_VERSION=$(jq -er '.schema_version' "$ECS_LOCK_FILE") || return 1
 }
 
 ECS_TARGETS=()
+ECS_WINDOWS_TARGETS=()
 while IFS=$'\t' read -r ecs_target ecs_goos ecs_goarch ecs_package; do
   [[ -n "$ecs_target" && -n "$ecs_package" ]] || continue
-  ECS_TARGETS+=("$ecs_target $ecs_goos $ecs_goarch $ecs_package")
+  case "$ecs_goos" in
+    linux | freebsd)
+      ECS_TARGETS+=("$ecs_target $ecs_goos $ecs_goarch $ecs_package")
+      ;;
+    windows)
+      # Keep the Phase 6 builder target separate from the existing
+      # Linux/FreeBSD package and release target arrays.
+      ECS_WINDOWS_TARGETS+=("$ecs_target $ecs_goos $ecs_goarch $ecs_package")
+      ;;
+    *)
+      echo "common: unsupported target OS in tools lock: $ecs_goos" >&2
+      return 1
+      ;;
+  esac
 done < <(jq -er '.architectures[] | [.target, .goos, .goarch, .package] | @tsv' "$ECS_LOCK_FILE") || return 1
 
 # ECS_ARCHES is intentionally the seven Linux package architecture labels used
@@ -69,8 +83,10 @@ ECS_LINUX_TARGETS=()
 ECS_FREEBSD_TARGETS=()
 ECS_LINUX_TARGET_IDS=()
 ECS_FREEBSD_TARGET_IDS=()
+ECS_WINDOWS_TARGET_IDS=()
 ECS_LINUX_ARCHES=()
 ECS_FREEBSD_ARCHES=()
+ECS_WINDOWS_ARCHES=()
 ECS_TARGET_IDS=()
 for ecs_target_record in "${ECS_TARGETS[@]}"; do
   read -r ecs_target ecs_goos ecs_goarch ecs_arch <<<"$ecs_target_record"
@@ -92,7 +108,19 @@ for ecs_target_record in "${ECS_TARGETS[@]}"; do
       ;;
   esac
 done
+for ecs_target_record in "${ECS_WINDOWS_TARGETS[@]}"; do
+  read -r ecs_target _ecs_goos _ecs_goarch ecs_arch <<<"$ecs_target_record"
+  ECS_WINDOWS_TARGET_IDS+=("$ecs_target")
+  ECS_WINDOWS_ARCHES+=("$ecs_arch")
+done
 ECS_ARCHES=("${ECS_LINUX_ARCHES[@]}")
+
+# ECS_TARGETS intentionally remains the Unix-only set used by the existing
+# Linux/FreeBSD builders and lock checks. Release packaging has one additional
+# native target, so keep that contract explicit rather than silently changing
+# every existing consumer of ECS_TARGETS.
+ECS_RELEASE_TARGETS=("${ECS_TARGETS[@]}" "${ECS_WINDOWS_TARGETS[@]}")
+ECS_RELEASE_TARGET_IDS=("${ECS_TARGET_IDS[@]}" "${ECS_WINDOWS_TARGET_IDS[@]}")
 
 ECS_TOOL_NAMES=()
 while IFS= read -r ecs_tool_name; do
@@ -117,14 +145,104 @@ ecs_lock_target_field() {
     '.architectures[] | select(.target == $target) | .[$field] // empty' "$ECS_LOCK_FILE"
 }
 
-ecs_target_tool_names() {
-  local target=$1 goos
-  goos=$(ecs_lock_target_field "$target" goos) || return 1
-  if [[ "$goos" == "freebsd" ]]; then
-    jq -er '.tools[].name | select(. != "ping" and . != "nexttrace-tiny")' "$ECS_LOCK_FILE"
-  else
-    jq -er '.tools[].name' "$ECS_LOCK_FILE"
+ecs_target_os() {
+  local target=${1:-} goos
+  [[ -n "$target" ]] || {
+    echo "common: target is required" >&2
+    return 1
+  }
+  if ! goos=$(ecs_lock_target_field "$target" goos); then
+    echo "common: unsupported target: $target" >&2
+    return 1
   fi
+  printf '%s\n' "$goos"
+}
+
+# ecs_target_asset_name TARGET KIND [TOOL]
+#
+# This is the single naming contract for target-specific binaries and release
+# assets. KIND is one of:
+#
+#   binary       cross.sh output (ecs_<target>[.exe])
+#   main         ECS release archive (tar.gz on Unix, zip on Windows)
+#   tools        tools bundle archive (tar.gz on Unix, zip on Windows)
+#   main-member  executable name inside the ECS release archive
+#   tool         executable name for a logical tool inside a tools bundle
+#
+# Keeping the platform suffix and archive format here prevents a second,
+# subtly different "Windows branch" from appearing in each caller.
+ecs_target_asset_name() {
+  local target=${1:-} kind=${2:-} tool=${3:-} goos
+  [[ -n "$target" && -n "$kind" ]] || {
+    echo "common: target and asset kind are required" >&2
+    return 1
+  }
+  goos=$(ecs_target_os "$target") || return 1
+
+  case "$kind:$goos" in
+    binary:linux | binary:freebsd)
+      printf 'ecs_%s\n' "$target"
+      ;;
+    binary:windows)
+      printf 'ecs_%s.exe\n' "$target"
+      ;;
+    main:linux | main:freebsd)
+      printf 'ecs_%s.tar.gz\n' "$target"
+      ;;
+    main:windows)
+      printf 'ecs_%s.zip\n' "$target"
+      ;;
+    tools:linux | tools:freebsd)
+      printf 'ecs-tools_%s.tar.gz\n' "$target"
+      ;;
+    tools:windows)
+      printf 'ecs-tools_%s.zip\n' "$target"
+      ;;
+    main-member:linux | main-member:freebsd)
+      printf 'ecs\n'
+      ;;
+    main-member:windows)
+      printf 'ecs.exe\n'
+      ;;
+    tool:linux | tool:freebsd)
+      [[ -n "$tool" ]] || {
+        echo "common: logical tool name is required" >&2
+        return 1
+      }
+      printf '%s\n' "$tool"
+      ;;
+    tool:windows)
+      [[ -n "$tool" ]] || {
+        echo "common: logical tool name is required" >&2
+        return 1
+      }
+      printf '%s.exe\n' "$tool"
+      ;;
+    *)
+      echo "common: unsupported asset kind/target OS: $kind/$goos" >&2
+      return 1
+      ;;
+  esac
+}
+
+ecs_target_tool_names() {
+  local target=${1:-} goos
+  goos=$(ecs_target_os "$target") || return 1
+  case "$goos" in
+    linux)
+      jq -er '.tools[].name' "$ECS_LOCK_FILE"
+      ;;
+    freebsd)
+      jq -er '.tools[].name | select(. != "ping" and . != "nexttrace-tiny")' "$ECS_LOCK_FILE"
+      ;;
+    windows)
+      jq -er '.windows_tools[]' "$ECS_LOCK_FILE"
+      ;;
+    *)
+      echo "common: unsupported target OS in tool set helper: $goos" >&2
+      return 1
+      ;;
+  esac
 }
 
 ecs_lock_corpus_field() {
@@ -169,28 +287,103 @@ ecs_retry() {
 
 # ecs_release_binaries DIST_DIR OUT_DIR
 #
-# 从 dist 目录里解出全部主程序二进制，每行输出 "归档名<TAB>二进制路径"。
-# 归档数不等于发布架构数时失败——少一个架构就发布是这套流程最该挡住的事。
-#
-# verify 的归档校验需要统一解开全部九个平台目标的主程序归档，所以该逻辑
-# 作为共享辅助函数保留在这里。
+# 从 dist 目录里解出全部主程序二进制，每行输出 "target<TAB>二进制路径"。
+# 归档数不等于发布架构数时失败——少一个架构或多一个未知目标都必须挡住。
+# 解包前还严格检查主程序归档的成员集合与路径，避免把目录穿越交给 tar/unzip。
 ecs_release_binaries() {
   local dist=$1 out=$2
-  local archive name directory
-  local -a archives
+  local archive target target_id name directory member listing expected_listing actual_listing
+  local -a archives expected_members members
 
-  mapfile -t archives < <(find "$dist" -maxdepth 1 -type f -name 'ecs_*.tar.gz' -print | sort)
-  if [[ "${#archives[@]}" -ne "${#ECS_TARGETS[@]}" ]]; then
-    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_TARGETS[@]}" >&2
+  [[ -d "$dist" && -d "$out" ]] || {
+    echo "release binaries: dist and output directories are required" >&2
+    return 1
+  }
+
+  mapfile -t archives < <(find "$dist" -maxdepth 1 \( -type f -o -type l \) \
+    \( -name 'ecs_*.tar.gz' -o -name 'ecs_*.zip' \) -print | sort)
+  if [[ "${#archives[@]}" -ne "${#ECS_RELEASE_TARGET_IDS[@]}" ]]; then
+    echo "主程序归档 = ${#archives[@]} 个，want ${#ECS_RELEASE_TARGET_IDS[@]}" >&2
     return 1
   fi
 
+  for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+    archive="$dist/$(ecs_target_asset_name "$target" main)" || return 1
+    [[ -s "$archive" ]] || {
+      echo "release binaries: missing archive for target $target: $archive" >&2
+      return 1
+    }
+  done
   for archive in "${archives[@]}"; do
-    name=$(basename "$archive" .tar.gz)
-    directory="$out/$name"
+    [[ -f "$archive" && ! -L "$archive" ]] || {
+      echo "release binaries: archive is not a regular file: $archive" >&2
+      return 1
+    }
+    name=$(basename "$archive")
+    target=""
+    for target_id in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+      [[ "$name" == "$(ecs_target_asset_name "$target_id" main)" ]] || continue
+      target=$target_id
+      break
+    done
+    [[ -n "$target" ]] || {
+      echo "release binaries: unexpected main-program archive: $name" >&2
+      return 1
+    }
+  done
+
+  for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+    archive="$dist/$(ecs_target_asset_name "$target" main)"
+    directory="$out/$target"
+    member=$(ecs_target_asset_name "$target" main-member) || return 1
     mkdir -p "$directory"
-    tar -xzf "$archive" -C "$directory" ecs || return 1
-    printf '%s\t%s\n' "$name" "$directory/ecs"
+    expected_members=("$member" LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md)
+
+    case "$archive" in
+      *.tar.gz)
+        if ! listing=$(tar -tzf "$archive"); then
+          echo "release binaries: cannot list $archive" >&2
+          return 1
+        fi
+        ;;
+      *.zip)
+        if ! listing=$(unzip -Z1 "$archive"); then
+          echo "release binaries: cannot list $archive" >&2
+          return 1
+        fi
+        ;;
+      *)
+        echo "release binaries: unsupported archive suffix: $archive" >&2
+        return 1
+        ;;
+    esac
+    mapfile -t members <<<"$listing"
+    for name in "${members[@]}"; do
+      [[ "$name" != /* && "$name" != *'\\'* && "/$name/" != */../* ]] || {
+        echo "release binaries: unsafe archive member in $archive: $name" >&2
+        return 1
+      }
+    done
+    expected_listing=$(printf '%s\n' "${expected_members[@]}" | LC_ALL=C sort)
+    actual_listing=$(printf '%s\n' "${members[@]}" | LC_ALL=C sort)
+    [[ "$actual_listing" == "$expected_listing" ]] || {
+      echo "release binaries: unexpected member set in $archive" >&2
+      echo "want:" >&2
+      printf '%s\n' "$expected_listing" >&2
+      echo "got:" >&2
+      printf '%s\n' "$actual_listing" >&2
+      return 1
+    }
+
+    case "$archive" in
+      *.tar.gz) tar -xzf "$archive" -C "$directory" || return 1 ;;
+      *.zip) unzip -qq "$archive" -d "$directory" || return 1 ;;
+    esac
+    [[ -f "$directory/$member" && ! -L "$directory/$member" ]] || {
+      echo "release binaries: archive did not produce a regular $member for $target" >&2
+      return 1
+    }
+    printf '%s\t%s\n' "$target" "$directory/$member"
   done
 }
 
