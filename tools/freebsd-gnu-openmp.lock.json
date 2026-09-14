@@ -23,10 +23,10 @@
       "gnu_target_triple": "x86_64-unknown-freebsd15.1",
       "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a", "libquadmath.a"],
       "prebuilt": {
-        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.1/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst",
-        "sha256": "4190d8f318d3b6a49e133f107287bdbce7fd7d78fb53c63f26cac8b6669556a1",
-        "source_commit": "e18cb8b59e35a27a5972d9ba18b4d858f847ec60",
-        "generated": "2026-09-13",
+        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.2/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst",
+        "sha256": "aff83e711c96485e6e37e75b22fe17be0c3364ec76fa49a643b31026e7086b27",
+        "source_commit": "94d7960034464bea472cb12f80fd83e7eca08f18",
+        "generated": "2026-09-14",
         "kind": "immutable-ci-dependency-snapshot",
         "not_an": ["ecs-software-release", "bundle-vN", "user-tool-package"]
       }
@@ -36,10 +36,10 @@
       "gnu_target_triple": "aarch64-unknown-freebsd15.1",
       "required_libraries": ["libgcc.a", "libgfortran.a", "libgomp.a"],
       "prebuilt": {
-        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.1/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst",
-        "sha256": "a08c7462266c701ba95a743e26beb0e5d8adaf4118afb432c2d09e7f5e735882",
-        "source_commit": "e18cb8b59e35a27a5972d9ba18b4d858f847ec60",
-        "generated": "2026-09-13",
+        "url": "https://github.com/CST-Cat/ecs/releases/download/ci-freebsd-gnu-sdk-v1.2/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst",
+        "sha256": "d7627f948b044e3879d798d94495cabd0df9223117c97c5644a8f8390bb71ec3",
+        "source_commit": "94d7960034464bea472cb12f80fd83e7eca08f18",
+        "generated": "2026-09-14",
         "kind": "immutable-ci-dependency-snapshot",
         "not_an": ["ecs-software-release", "bundle-vN", "user-tool-package"]
       }
