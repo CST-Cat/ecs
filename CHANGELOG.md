@@ -1,10 +1,10 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.8.1` 的主要变化。
+`v0.1.0` 到当前版本 `v0.8.2` 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.8.1` release.
+the current `v0.8.2` release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -16,6 +16,24 @@ the current `v0.8.1` release.
 ### 中文
 
 ### English
+
+## 0.8.2 — 2026-09-14
+
+### 中文
+
+- 修复 `ecs run --version` 在非法颜色配置下未提前短路的问题，并用契约测试保证 example iperf 时长与内置 `15s` 默认值一致。
+- 统一 benchmark parse failure 语义，移除重复的 failure classifier；JSON ingress 现在严格接受单个完整值并执行 body hard limit，同时保留 provider 扩展字段容忍度以及 IP 地址族、代理和超时语义。
+- 收拢 carrier identity 与 comparison evidence grade 的语义 owner，解除 HTML 对 terminal glyph 的语义反向依赖，并完成不改变平台行为的 Go 重复清理。
+- 简化 `run.sh` 的 usability preflight 与 submit 参数组装，同时保留 Go 侧 atomic hard-link 发布、`fsync`、禁止覆盖和 symlink 防护。
+- 拆分 FreeBSD GNU SDK 的发布与验证生命周期，保留 tree、hardlink、runtime probe、compiler driver-chain、NPB/STREAM 等完整门禁；发布 `ci-freebsd-gnu-sdk-v1.2` 与双架构 `bundle-v1.3`。
+
+### English
+
+- Fixed `ecs run --version` so it short-circuits before invalid color configuration is validated, and added a contract test keeping the example iperf duration aligned with the built-in `15s` default.
+- Unified benchmark parse-failure semantics and removed the duplicate failure classifier; JSON ingress now accepts only one complete value under a hard body limit while retaining provider extension-field tolerance and the existing IP-family, proxy, and timeout semantics.
+- Consolidated the semantic owners for carrier identity and comparison evidence grades, removed HTML's reverse dependency on terminal glyphs for classification, and completed Go deduplication without changing platform behavior.
+- Simplified `run.sh` usability preflight and submit argument assembly while retaining Go-side atomic hard-link publication, `fsync`, no-overwrite, and symlink protections.
+- Split the FreeBSD GNU SDK publisher and verifier lifecycles while retaining the full tree, hardlink, runtime-probe, compiler-driver-chain, NPB, and STREAM gates; released `ci-freebsd-gnu-sdk-v1.2` and the dual-architecture `bundle-v1.3`.
 
 ## 0.8.1 — 2026-09-14
 
