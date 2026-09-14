@@ -33,9 +33,8 @@ name: freebsd-sdk-release
 # host ELF --strip-debug（inode 安全）→ 2.6/2.7 不变量校验 → LTO/gcov
 # inventory → B 侧 probe/consumer → A/B 8 类输出 SHF_ALLOC section 等价
 # 校验 → gcc/gfortran -### 调用链检查；GCC configure 追加
-# --disable-lto/--disable-gcov（不手工删除组件）。每架构 job 上传
-# slim-evidence artifact（manifests/逐 ELF 捕获/A·B 输出二进制/调用链日志/
-# inventory/share 清单/evidence.json）供审查。
+# --disable-lto/--disable-gcov（不手工删除组件）。验证工作文件留在
+# job 临时目录，不作为 artifact 上传。
 #
 # 所有构建都在 ubuntu-24.04 amd64 宿主交叉完成，无 VM 参与；
 # 永久禁止：FreeBSD VM builder。
@@ -93,14 +92,6 @@ jobs:
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_amd64" \
             --jobs "$(nproc)"
 
-      - name: Upload GNU SDK slim evidence artifact (freebsd_amd64)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ecs-freebsd-gnu-sdk-slim-evidence-freebsd_amd64
-          path: .ci/gnu-sdk-work-freebsd_amd64/slim-evidence/
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Package GNU SDK tarball (freebsd_amd64)
         run: |
           set -euo pipefail
@@ -148,14 +139,6 @@ jobs:
             --prefix "$PWD/.ci/gnu-sdk/freebsd_arm64" \
             --work-dir "$PWD/.ci/gnu-sdk-work-freebsd_arm64" \
             --jobs "$(nproc)"
-
-      - name: Upload GNU SDK slim evidence artifact (freebsd_arm64)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ecs-freebsd-gnu-sdk-slim-evidence-freebsd_arm64
-          path: .ci/gnu-sdk-work-freebsd_arm64/slim-evidence/
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Package GNU SDK tarball (freebsd_arm64)
         run: |

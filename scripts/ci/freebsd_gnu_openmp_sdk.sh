@@ -708,12 +708,8 @@ def cmd_evidence(target, directory, out_path):
                 tree_bytes(before, unique_inodes=False),
             "tree_bytes_all_paths_after":
                 tree_bytes(after, unique_inodes=False),
-            "non_host_files_unchanged": True,
-            "hardlink_groups_intact": True,
         },
         "ab_equivalence": ab,
-        "consumer_builds": {"a_side_pre_strip": "pass",
-                            "b_side_post_strip": "pass"},
     }
     with open(out_path, "w") as fh:
         json.dump(evidence, fh, indent=1)
