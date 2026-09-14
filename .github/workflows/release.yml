@@ -3,11 +3,11 @@ name: release
 # 当前这个 immutable commit 能否生成并发布可信 Release？
 #
 # 发布链按"权限和制品交接"拆 job：
-# freeze → source-checks/ecs-build×9 → assemble → verify → rehearsal/publish。
+# freeze → source-checks/ecs-build×10 → assemble → verify → rehearsal/publish。
 #
 #   freeze       contents: read    冻结 SHA，校验发布说明
 #   source-checks contents: read   跑确定性源码检查
-#   ecs-build × 9 contents: read   九个平台目标构建主程序
+#   ecs-build × 10 contents: read  十个平台目标构建主程序
 #   assemble     contents: read    组装全部发布物，记录实测 Go 版本
 #   verify       contents: read    校验解包出来的实际二进制
 #   rehearsal    contents: read    零远端副作用验证发布边界
@@ -25,7 +25,7 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动触发是发布演练：走完 freeze → source-checks/ecs-build×9 → assemble →
+  # 手动触发是发布演练：走完 freeze → source-checks/ecs-build×10 → assemble →
   # verify → rehearsal 的全部检查；无论 dispatch 选择 branch 还是 tag ref，
   # publish 都因为 event 不是 push 而跳过。
   workflow_dispatch:
@@ -71,7 +71,7 @@ jobs:
           ./scripts/release/freeze.sh --event "$EVENT" --ref "$REF" --sha "$SHA" \
             | tee -a "$GITHUB_OUTPUT"
 
-      # 忘写发布说明必须在九目标构建前失败，不能等到最后的 publish 才发现。
+      # 忘写发布说明必须在十目标构建前失败，不能等到最后的 publish 才发现。
       # workflow_dispatch 永远是 dev 演练，即使它选择了一个 tag ref；只有真正的
       # tag push 才要求已经存在对应版本章节。
       - name: Validate release changelog
@@ -104,7 +104,7 @@ jobs:
           ECS_I18N_SAMPLES: ${{ github.workspace }}/internal/report/testdata
         run: go test ./...
 
-  # 九目标主程序独立构建，完成后由 assemble 统一打包。
+  # 十目标主程序独立构建，完成后由 assemble 统一打包。
   ecs-build:
     needs: freeze
     name: ecs-build (${{ matrix.target }})
@@ -123,6 +123,7 @@ jobs:
           - linux_ppc64le
           - freebsd_amd64
           - freebsd_arm64
+          - windows_amd64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -180,12 +181,13 @@ jobs:
           set -euo pipefail
           source scripts/lib/common.sh
           mkdir -p artifact/ecs-binaries
-          for target in "${ECS_TARGET_IDS[@]}"; do
+          for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
             source_dir="artifact/ecs-binaries-artifacts/ecs-binary-${target}"
-            test -s "$source_dir/ecs_${target}"
+            binary_name=$(ecs_target_asset_name "$target" binary)
+            test -s "$source_dir/$binary_name"
             test -s "$source_dir/build-go-version"
-            cp "$source_dir/ecs_${target}" "artifact/ecs-binaries/ecs_${target}"
-            chmod +x "artifact/ecs-binaries/ecs_${target}"
+            cp "$source_dir/$binary_name" "artifact/ecs-binaries/$binary_name"
+            chmod +x "artifact/ecs-binaries/$binary_name"
           done
 
       # 洁净源码检查在 build.sh 里，与本地演练共用同一份实现。

@@ -15,7 +15,9 @@ name: bundle-release
 #         scripts/package.sh）→ ARTIFACT E2E AMD64 ∥ ARTIFACT E2E ARM64
 #     （REAL GATE 与 PACKAGE/E2E 在同一 reusable workflow 内并行，均消费
 #      已通过 VERIFY 的 stage；VM 真实执行，不重新构建任何东西）
-#   → ASSEMBLE（九个平台目标的 stage 由 scripts/package.sh --all-targets
+#   WINDOWS BUILD（workflow_call 复用 windows-tools.yml：LOCK/CHECK→BUILD→
+#     VERIFY×2→PACKAGE→E2E×2）
+#   → ASSEMBLE（十个平台目标的 stage 由 scripts/package.sh --all-targets
 #     一次打包，统一 checksums）
 #   → REHEARSAL / PUBLISH。
 #
@@ -53,6 +55,14 @@ jobs:
     uses: ./.github/workflows/freebsd-tools.yml
     with:
       run_bundle_e2e: true
+
+  # Windows 唯一 build path：整体复用 windows-tools.yml，包含两个真实 runner
+  # 的 gate、打包和 artifact E2E；本 workflow 不复制任何 Windows builder 逻辑。
+  windows-build:
+    name: WINDOWS BUILD
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-tools.yml
 
   tools:
     name: tools (${{ matrix.target }})
@@ -123,11 +133,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ASSEMBLE 等待 freebsd-build reusable workflow 返回；该 workflow 内部已经
-  # 等待 VERIFY、REAL GATE、PACKAGE 和两个 ARTIFACT E2E。九个目标的打包仍只
+  # ASSEMBLE 等待两个 reusable workflow 返回；它们内部已经等待 VERIFY、REAL
+  # GATE、PACKAGE 和两个 ARTIFACT E2E。十个目标的打包仍只
   # 由 scripts/package.sh 完成。
   assemble:
-    needs: [tools, freebsd-build]
+    needs: [tools, freebsd-build, windows-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -145,6 +155,11 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ecs-freebsd-tools-stage-*
+          path: tools-artifacts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ecs-windows-tools-stage-*
           path: tools-artifacts
 
       - name: Normalize the downloaded tools stages
@@ -169,9 +184,18 @@ jobs:
             cp -a "$source_dir/." "$stage_dir/"
             chmod +x "$stage_dir/bin/"*
           done
+          for target in "${ECS_WINDOWS_TARGET_IDS[@]}"; do
+            source_dir=$(find "tools-artifacts/ecs-windows-tools-stage-${target}" -type d -name "$target" -print -quit)
+            stage_dir="tools-stage/${target}"
+            test -n "$source_dir"
+            test -s "$source_dir/manifest.json"
+            mkdir -p "$stage_dir"
+            cp -a "$source_dir/." "$stage_dir/"
+            chmod +x "$stage_dir/bin/"*
+          done
 
       - name: Package the bundle
-        # 九个平台目标一次打包：Linux 七个 + freebsd_amd64/arm64，统一 checksums。
+        # 十个平台目标一次打包：Linux 七个 + FreeBSD 两个 + Windows amd64，统一 checksums。
         run: ./scripts/package.sh --tools-stage tools-stage --all-targets
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

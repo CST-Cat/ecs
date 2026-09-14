@@ -14,7 +14,7 @@ name: ci
 
 on:
   push:
-    branches: ["main", "bsd"]
+    branches: ["main", "bsd", "win/candidate-c"]
   pull_request:
 
 permissions:
@@ -265,6 +265,221 @@ jobs:
           done
           exit "$failed"
 
+  windows-runtime:
+    name: windows runtime (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - name: Build ecs.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          go build -trimpath -o ecs.exe ./cmd/ecs
+          if (-not (Test-Path -LiteralPath ecs.exe -PathType Leaf)) { throw 'ecs.exe was not built' }
+
+      - name: Runtime command contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          function Invoke-Ecs {
+            param([Parameter(Mandatory, Position = 0)][string[]]$Arguments)
+            $output = @(& .\ecs.exe @Arguments 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              $details = $output -join "`n"
+              throw "ecs.exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE`n$details"
+            }
+            return $output
+          }
+
+          function Get-SystemFieldRaw {
+            param(
+              [Parameter(Mandatory)][object]$Result,
+              [Parameter(Mandatory)][string]$Key
+            )
+            $fieldMatches = @($Result.fields | Where-Object { [string]$_.key -eq $Key })
+            if ($fieldMatches.Count -ne 1) { throw "system JSON must contain one field named $Key" }
+            $value = $fieldMatches[0].value
+            if ($null -eq $value -or $value.PSObject.Properties.Name -notcontains 'raw') {
+              throw "system JSON field $Key is not a raw value"
+            }
+            $raw = [string]$value.raw
+            if ([string]::IsNullOrWhiteSpace($raw)) { throw "system JSON field $Key is empty" }
+            return $raw
+          }
+
+          function Convert-PositiveMachineBytes {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<number>[0-9]+(?:\.[0-9]+)?)\s*(?<unit>B|KiB|MiB|GiB|TiB|PiB)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable byte value: $Raw" }
+            $number = [double]::Parse($match.Groups['number'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $exponent = switch ($match.Groups['unit'].Value) {
+              'B' { 0 }
+              'KiB' { 1 }
+              'MiB' { 2 }
+              'GiB' { 3 }
+              'TiB' { 4 }
+              'PiB' { 5 }
+              default { throw "$Name has an unknown byte unit: $Raw" }
+            }
+            $bytes = $number * [math]::Pow(1024, $exponent)
+            if ([double]::IsNaN($bytes) -or [double]::IsInfinity($bytes) -or $bytes -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $bytes
+          }
+
+          function Convert-PositiveMachineSeconds {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<seconds>[0-9]+(?:\.[0-9]+)?)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable seconds value: $Raw" }
+            $seconds = [double]::Parse($match.Groups['seconds'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ([double]::IsNaN($seconds) -or [double]::IsInfinity($seconds) -or $seconds -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $seconds
+          }
+
+          function Assert-WindowsSystemFacts {
+            param([Parameter(Mandatory)][object]$Report)
+            $systemMatches = @($Report.results | Where-Object { [string]$_.id -eq 'system' })
+            if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
+            $system = $systemMatches[0]
+            $os = Get-SystemFieldRaw -Result $system -Key 'os'
+            if ($os -notmatch '(?i)^Windows(?:\s+Server)?\b') { throw "system OS is not Windows: $os" }
+            if ((Get-SystemFieldRaw -Result $system -Key 'arch') -ne 'amd64') { throw 'system arch is not amd64' }
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'memory_total') -Name 'memory_total')
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'disk_total') -Name 'disk_total')
+            [void](Convert-PositiveMachineSeconds -Raw (Get-SystemFieldRaw -Result $system -Key 'uptime_seconds') -Name 'uptime_seconds')
+            $logicalMatches = @($system.measurements | Where-Object { [string]$_.key -eq 'logical_cpus' })
+            if ($logicalMatches.Count -ne 1) { throw 'system JSON must contain one logical_cpus measurement' }
+            $logicalCPUs = [double]$logicalMatches[0].value
+            if ([double]::IsNaN($logicalCPUs) -or [double]::IsInfinity($logicalCPUs) -or $logicalCPUs -le 0) {
+              throw "logical_cpus is not positive: $($logicalMatches[0].value)"
+            }
+          }
+
+          function Assert-EcsLoopbackLatencyReport {
+            param(
+              [Parameter(Mandatory)][string]$Root,
+              [Parameter(Mandatory)][string]$Language
+            )
+            $reportItem = Get-ChildItem -LiteralPath $Root -Filter '*.json' -File -Recurse | Select-Object -First 1
+            if ($null -eq $reportItem) { throw "loopback $Language JSON report was not written" }
+            $report = Get-Content -Raw -LiteralPath $reportItem.FullName | ConvertFrom-Json
+            if ([string]$report.schema_version -ne 'ecs.report/v1') {
+              throw "loopback $Language JSON has unexpected schema_version: $($report.schema_version)"
+            }
+            $latencyMatches = @($report.results | Where-Object { [string]$_.id -eq 'latency' })
+            if ($latencyMatches.Count -ne 1) { throw "loopback $Language JSON has no unique latency result" }
+            $icmpMeasurements = @($latencyMatches[0].measurements | Where-Object {
+              [string]$_.key -match '^icmp_.*_loopback_ipv4$' -and [string]$_.method -eq 'icmp-echo-v1'
+            })
+            if ($icmpMeasurements.Count -eq 0) {
+              throw "loopback $Language JSON has no native ICMP measurement"
+            }
+            $lossMatches = @($latencyMatches[0].measurements | Where-Object { [string]$_.key -eq 'icmp_loss_percent_loopback_ipv4' -and [string]$_.method -eq 'icmp-echo-v1' })
+            if ($lossMatches.Count -ne 1 -or [double]$lossMatches[0].value -ne 0) {
+              throw "loopback $Language JSON did not report zero native ICMP loss"
+            }
+            if (@($latencyMatches[0].measurements | Where-Object { [string]$_.key -match '^icmp_' -and [string]$_.method -ne 'icmp-echo-v1' }).Count -ne 0) {
+              throw "loopback $Language JSON contains an ICMP measurement with an unexpected method"
+            }
+          }
+
+          $version = (Invoke-Ecs @('--version')) -join "`n"
+          if ($version -notmatch '(?i)ecs\s') { throw "--version output is invalid: $version" }
+
+          $list = (Invoke-Ecs @('list')) -join "`n"
+          foreach ($marker in @('standard', 'full', 'system')) {
+            if ($list -notmatch [regex]::Escape($marker)) { throw "list output is missing $marker" }
+          }
+
+          $planText = (Invoke-Ecs @('plan', '--profile', 'standard')) -join "`n"
+          $plan = $planText | ConvertFrom-Json
+          if ([string]$plan.schema_version -ne 'ecs.plan/v1' -or [string]$plan.profile -ne 'standard') { throw 'standard plan contract failed' }
+
+          $jsonRoot = Join-Path $env:RUNNER_TEMP 'ecs-system-json'
+          $jsonOutput = Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'json', '--output', $jsonRoot, '--no-color')
+          $jsonFile = Get-ChildItem -LiteralPath $jsonRoot -Filter '*.json' -File -Recurse | Select-Object -First 1
+          if ($null -eq $jsonFile) { throw 'system JSON report was not written' }
+          $report = Get-Content -Raw $jsonFile.FullName | ConvertFrom-Json
+          Assert-WindowsSystemFacts -Report $report
+
+          $textRoot = Join-Path $env:RUNNER_TEMP 'ecs-system-text'
+          [void](Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', $textRoot, '--no-color'))
+          $textFile = Get-ChildItem -LiteralPath $textRoot -Filter '*.md' -File -Recurse | Select-Object -First 1
+          if ($null -eq $textFile -or $textFile.Length -eq 0) { throw 'system text report was not written' }
+
+          $redirected = Join-Path $env:RUNNER_TEMP 'ecs-redirected.txt'
+          & .\ecs.exe run --lang en --only system --yes --format md --output (Join-Path $env:RUNNER_TEMP 'ecs-redirected-report') *> $redirected
+          if ($LASTEXITCODE -ne 0) { throw 'redirected ecs.exe run failed' }
+          if ((Get-Content -Raw $redirected) -match "`e\[") { throw 'redirected output contains ANSI escape sequences' }
+
+          $env:NO_COLOR = ''
+          try {
+            $noColorOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-no-color-report')))
+            if (($noColorOutput -join "`n") -match "`e\[") { throw 'NO_COLOR did not suppress ANSI output' }
+          } finally { Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue }
+
+          $noColorFlagOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-no-color-flag-report'), '--no-color'))
+          if (($noColorFlagOutput -join "`n") -match "`e\[") { throw '--no-color did not suppress ANSI output' }
+
+          $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          try {
+            $port = $listener.LocalEndpoint.Port
+            foreach ($language in @('en-US', 'zh-CN')) {
+              $latencyRoot = Join-Path $env:RUNNER_TEMP ("ecs-loopback-$language")
+              [void](Invoke-Ecs @('run', '--lang', $language, '--only', 'latency', '--exposure', 'any', '--ip-version', '4', '--latency-attempts', '2', '--latency-targets', "loopback=127.0.0.1:$port", '--yes', '--format', 'json', '--output', $latencyRoot, '--no-color'))
+              Assert-EcsLoopbackLatencyReport -Root $latencyRoot -Language $language
+            }
+          } finally { $listener.Stop() }
+
+          Write-Output 'ecs.exe runtime command contract passed: version/list/plan, system JSON/text, redirect, NO_COLOR, --no-color, and native loopback ICMP'
+
+      - name: Process-tree cancellation and Windows console/TTY tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPLoopback$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'TestWindowsNativeICMPLoopback failed' }
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPDeadlineDoesNotHang$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'TestWindowsNativeICMPDeadlineDoesNotHang failed' }
+          go test ./internal/probe -run '^TestProbeCommandWindowsProcessTree$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'TestProbeCommandWindowsProcessTree failed' }
+          go test ./internal/ui -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'internal/ui tests failed' }
+          go test ./cmd/ecs -run '^TestNotifyContextHandlesConsoleInterrupt$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'TestNotifyContextHandlesConsoleInterrupt failed' }
+
+  windows-tools:
+    name: windows-tools
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-tools.yml
+
   submissions:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -292,7 +507,7 @@ jobs:
 
   required:
     if: always()
-    needs: [unit, compat, quality, integration, race, cross, freebsd, submissions]
+    needs: [unit, compat, quality, integration, race, cross, freebsd, windows-runtime, windows-tools, submissions]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -305,6 +520,8 @@ jobs:
           RACE_RESULT: ${{ needs.race.result }}
           CROSS_RESULT: ${{ needs.cross.result }}
           FREEBSD_RESULT: ${{ needs.freebsd.result }}
+          WINDOWS_RUNTIME_RESULT: ${{ needs['windows-runtime'].result }}
+          WINDOWS_TOOLS_RESULT: ${{ needs['windows-tools'].result }}
           SUBMISSIONS_RESULT: ${{ needs.submissions.result }}
         run: |
           set -euo pipefail
@@ -316,6 +533,8 @@ jobs:
             "race=$RACE_RESULT"
             "cross=$CROSS_RESULT"
             "freebsd=$FREEBSD_RESULT"
+            "windows-runtime=$WINDOWS_RUNTIME_RESULT"
+            "windows-tools=$WINDOWS_TOOLS_RESULT"
             "submissions=$SUBMISSIONS_RESULT"
           )
           printf '上游 job 结果：%s\n' "${summary[*]}"
