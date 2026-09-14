@@ -145,6 +145,18 @@ func TestWindowsUptimeDoesNotPromoteZeroToKnown(t *testing.T) {
 	}
 }
 
+func TestWindowsDisplayBindingUsesOptionalUser32API(t *testing.T) {
+	if windowsUser32DLL != "user32.dll" {
+		t.Fatalf("EnumDisplayDevicesW DLL = %q, want user32.dll", windowsUser32DLL)
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("optional display inventory panicked: %v", recovered)
+		}
+	}()
+	_ = collectWindowsGPUs()
+}
+
 func TestWindowsEnvironmentKeepsLinuxOnlyFactsUnavailable(t *testing.T) {
 	var snapshot EnvironmentSnapshot
 	capturePlatformEnvironment(&snapshot)

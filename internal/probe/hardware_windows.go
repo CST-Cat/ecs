@@ -12,6 +12,7 @@ import (
 
 const (
 	windowsRawSMBIOSProvider = 0x52534d42 // provider signature "RSMB"
+	windowsUser32DLL         = "user32.dll"
 	windowsDisplayMirroring  = 0x00000008
 	windowsAdaptersBuffer    = 15 * 1024
 	windowsAdaptersMax       = 4 << 20
@@ -20,7 +21,8 @@ const (
 
 var (
 	windowsGetSystemFirmwareTable = windowsSystemKernel32.NewProc("GetSystemFirmwareTable")
-	windowsEnumDisplayDevices     = windowsSystemKernel32.NewProc("EnumDisplayDevicesW")
+	windowsDisplayUser32          = syscall.NewLazyDLL(windowsUser32DLL)
+	windowsEnumDisplayDevices     = windowsDisplayUser32.NewProc("EnumDisplayDevicesW")
 	windowsGetAdaptersAddresses   = syscall.NewLazyDLL("iphlpapi.dll").NewProc("GetAdaptersAddresses")
 )
 
@@ -54,6 +56,9 @@ func unknownWindowsHardwareInventory() hardwareInventory {
 // is consumed immediately by the parser below; no raw firmware bytes enter a
 // report.
 func readWindowsSMBIOS() []byte {
+	if err := windowsGetSystemFirmwareTable.Find(); err != nil {
+		return nil
+	}
 	size, _, _ := windowsGetSystemFirmwareTable.Call(uintptr(windowsRawSMBIOSProvider), 0, 0, 0)
 	if size < 8 || size > windowsAdaptersMax {
 		return nil
@@ -160,6 +165,9 @@ type windowsDisplayDevice struct {
 }
 
 func collectWindowsGPUs() []string {
+	if err := windowsEnumDisplayDevices.Find(); err != nil {
+		return nil
+	}
 	seen := make(map[string]bool)
 	var result []string
 	for index := uint32(0); index < 64; index++ {
@@ -206,6 +214,9 @@ type windowsIPAdapterAddresses struct {
 }
 
 func collectWindowsNICs() []string {
+	if err := windowsGetAdaptersAddresses.Find(); err != nil {
+		return nil
+	}
 	size := uint32(windowsAdaptersBuffer)
 	for attempt := 0; attempt < 3; attempt++ {
 		if size == 0 || size > windowsAdaptersMax {

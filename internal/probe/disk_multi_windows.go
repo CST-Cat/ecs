@@ -23,6 +23,12 @@ func discoverMountPoints() []mountPoint {
 }
 
 func windowsFixedDriveMounts() []mountPoint {
+	if err := windowsGetLogicalDrives.Find(); err != nil {
+		return nil
+	}
+	if err := windowsGetDriveType.Find(); err != nil {
+		return nil
+	}
 	mask, _, _ := windowsGetLogicalDrives.Call()
 	if mask == 0 {
 		return nil
