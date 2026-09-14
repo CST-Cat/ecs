@@ -9,6 +9,20 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.4
+
+### 中文
+
+- FreeBSD 工具包继续使用双架构、8 个工具和完整真实客户机门禁；本版本将 REAL GATE 与 PACKAGE/E2E 解耦并行，ASSEMBLE 仍等待两条路径全部通过。
+- C/GNU 构建在同一 job/work-dir 内复用已下载并校验的 sysroot、目标依赖和 GNU SDK；Bundle lock 更新为 immutable `ci-freebsd-gnu-sdk-v1.3`，并固定其双架构 SHA256。
+- FreeBSD 15.1 consumer VM 固定 4 vCPU，启用可验证的 prepare cache 和精确 package lock；预压缩中转使用零压缩，不改变工具、manifest、运行参数或发布字节语义。
+
+### English
+
+- The FreeBSD tool package keeps its two architectures, eight tools, and complete genuine-client gates; this release separates REAL GATE from PACKAGE/E2E so they run in parallel, while ASSEMBLE still waits for both paths.
+- The C/GNU builds reuse downloaded and verified sysroot, target dependencies, and GNU SDK inputs within one job/work directory; the Bundle lock now consumes the immutable `ci-freebsd-gnu-sdk-v1.3` snapshot pinned by both architecture SHA256 values.
+- FreeBSD 15.1 consumer VMs are fixed at 4 vCPUs with a verifiable prepare cache and exact package lock; zero compression is used for pre-compressed transit without changing the tools, manifest, runtime arguments, or release-byte semantics.
+
 ## bundle-v1.3
 
 ### 中文

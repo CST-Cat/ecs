@@ -19,7 +19,7 @@ name: freebsd-chain
 # amd64 宿主交叉完成，无 VM 参与 builder；永久禁止：FreeBSD VM builder。
 #
 # 构建输出不使用共享 cache（与 main 一致）：GNU SDK 来自 immutable Release
-# `ci-freebsd-gnu-sdk-v1.2`（lock 钉 SHA256，见 freebsd_gnu_openmp_sdk.sh），
+# `ci-freebsd-gnu-sdk-v1.3`（lock 钉 SHA256，见 freebsd_gnu_openmp_sdk.sh），
 # 其余产物每次冷构建；VM builder 永久禁止。
 #
 # 注意：不放 concurrency 块——freebsd-tools.yml 会用两个 job 并行调用本
