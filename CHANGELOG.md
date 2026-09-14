@@ -1,29 +1,35 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.8.2` 的主要变化。
+`v0.1.0` 到当前版本 `v0.8.3` 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.8.2` release.
+the current `v0.8.3` release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
-## Unreleased
+## 0.8.3 — 2026-09-14
 
 ### 中文
 
 - 优化 GitHub Actions FreeBSD 构建拓扑：VERIFY 通过后 REAL GATE 与 Bundle PACKAGE/E2E 并行，ASSEMBLE 等待两条路径；C/GNU 构建在同一 job/work-dir 内复用已下载并校验的 sysroot、依赖和 SDK。
 - 固定公开标准 runner 与 FreeBSD 15.1 guest 均使用 4 vCPU；新增缓存 VM 的每次运行契约、精确 package 版本与 SHA256 lock，缓存不承担正确性；完整 REAL GATE、runtime、driver-chain 与 consumer gate 保留。
 - 对预压缩 artifact 使用零压缩中转，普通 job 使用 shallow checkout 与固定 Go 1.27.1；不改变 CGO、build tags、发布 provenance、产物字节语义或双架构并行隔离。
+- 修复 C/GNU 构建器在进入上游源码子目录后无法解析相对 sysroot、目标依赖和 SDK 路径的问题；两架构均通过重新构建与 VERIFY。
+- 修复 FreeBSD 15.1 VM prepare 对 `pkg add` 错误传入 `-y` 的问题；双架构 REAL GATE 与 artifact E2E 均完整通过。
+- 发布 immutable `ci-freebsd-gnu-sdk-v1.3` 与双架构 `bundle-v1.5`。
 
 ### English
 
 - Optimized the GitHub Actions FreeBSD topology: REAL GATE and the Bundle PACKAGE/E2E path now run in parallel after VERIFY, while ASSEMBLE waits for both; the C/GNU builds reuse downloaded and verified sysroot, dependency, and SDK inputs within one job/work directory.
 - Fixed public standard runners and FreeBSD 15.1 guests at 4 vCPUs; added a per-run contract for cached VMs plus exact package-version and SHA256 locking, with cache kept out of correctness ownership; all REAL GATE, runtime, driver-chain, and consumer gates remain intact.
 - Enabled zero-compression transit only for pre-compressed artifacts, and use shallow checkout plus fixed Go 1.27.1 in ordinary jobs; CGO, build tags, release provenance, artifact-byte semantics, and dual-architecture failure isolation are unchanged.
+- Fixed C/GNU builders losing relative sysroot, target-dependency, and SDK paths after entering upstream source directories; both architectures passed a fresh rebuild and VERIFY.
+- Fixed FreeBSD 15.1 VM preparation passing the unsupported `-y` flag to `pkg add`; both architecture REAL GATE and artifact E2E paths passed completely.
+- Released the immutable `ci-freebsd-gnu-sdk-v1.3` snapshot and the dual-architecture `bundle-v1.5` package.
 
 ## 0.8.2 — 2026-09-14
 
