@@ -339,14 +339,16 @@ try {
         Save-EcsVerifiedDownload -Uri $package.source_url -Sha256 $package.source_sha256 -Destination $packageFile -Description "MSYS2 package $($package.name)"
     }
 
+    $msysUsrBin = Join-Path $msysRoot 'usr\bin'
+    $ucrtBin = Join-Path $msysRoot 'ucrt64\bin'
     $msysContext = [pscustomobject]@{
         Bash = $bash
         MsysRoot = $msysRoot
-        MsysUsrBin = Join-Path $msysRoot 'usr\bin'
-        UcrtBin = Join-Path $msysRoot 'ucrt64\bin'
+        MsysUsrBin = $msysUsrBin
+        MsysUsrBinPosix = ConvertTo-EcsMsysPath $msysUsrBin
+        UcrtBin = $ucrtBin
+        UcrtBinPosix = ConvertTo-EcsMsysPath $ucrtBin
     }
-    $msysContext.MsysUsrBinPosix = ConvertTo-EcsMsysPath $msysContext.MsysUsrBin
-    $msysContext.UcrtBinPosix = ConvertTo-EcsMsysPath $msysContext.UcrtBin
     $packageFiles = @($toolchain.packages | ForEach-Object {
         ConvertTo-EcsMsysPath (Join-Path $packageRoot (Split-Path -Leaf ([Uri]$_.source_url).AbsolutePath))
     })
