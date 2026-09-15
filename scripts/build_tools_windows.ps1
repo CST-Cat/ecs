@@ -362,6 +362,14 @@ try {
     $installScript = @"
 export PATH=$(ConvertTo-EcsBashLiteral $msysContext.UcrtBinPosix):$(ConvertTo-EcsBashLiteral $msysContext.MsysUsrBinPosix)
 set -eu
+# The locked base archive carries the official MSYS2 keyring files, but the
+# raw archive does not run the msys2-keyring package's post-install hook.
+# Initialize and populate that keyring from the archive before verifying the
+# locked local package transaction; no keyserver or package database update is
+# involved.
+pacman-key --init
+pacman-key --populate msys2
+gpgconf --kill all
 $(($basePackageCheckLines -join "`n"))
 pacman -U --noconfirm $($packageInstallArgs -join ' ')
 "@
