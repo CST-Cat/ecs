@@ -698,6 +698,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 internal/ui tests failed' }
           Write-Output 'VERIFY-2025 ecs.exe runtime passed: version/list/plan, system JSON, native loopback ICMP, process-tree cancellation, TTY/redirect, NO_COLOR, and --no-color'
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-2025
+          path: .ci/windows-tools-gate-inputs
+          if-no-files-found: error
+          retention-days: 7
+
   package:
     name: PACKAGE windows_amd64
     needs: [verify-2022, verify-2025]
