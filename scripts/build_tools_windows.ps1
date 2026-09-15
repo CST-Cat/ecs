@@ -117,7 +117,16 @@ function Get-EcsWindowsPeFacts {
     if ($LASTEXITCODE -ne 0) {
         Stop-EcsWindowsBuild "PE symbol inspection failed for $([IO.Path]::GetFileName($BinaryPath))"
     }
-    $stripped = ($sectionOutput -notmatch '(?im)^\s*\d+\s+\.(debug_|stab|gnu_debuglink)') -and ($symbolOutput -match '(?im)\bno symbols\b')
+    $sectionNames = @(
+        [regex]::Matches($sectionOutput, '(?im)^\s*\d+\s+(?<name>\.[^\s]+)(?:\s|$)') |
+            ForEach-Object { $_.Groups['name'].Value }
+    )
+    $forbiddenSections = @($sectionNames | Where-Object {
+        $_ -match '^\.(?:debug|zdebug|stab|gnu_debug|symtab|strtab)'
+    })
+    $hasDebuggingSectionFlag = $sectionOutput -match '(?im)^\s+.*\bDEBUGGING\b'
+    $noSymbols = $symbolOutput -match '(?im)^\s*no symbols\s*$'
+    $stripped = ($forbiddenSections.Count -eq 0) -and (-not $hasDebuggingSectionFlag) -and $noSymbols
     return [ordered]@{
         pe_machine = $machine
         imports = @($imports)
@@ -264,8 +273,9 @@ $fortranPackage = @($toolchain.packages | Where-Object { $_.name -eq 'mingw-w64-
 $libgompPackage = @($toolchain.packages | Where-Object { $_.name -eq 'mingw-w64-ucrt-x86_64-gcc-libs' })[0]
 $nasmPackage = @($toolchain.packages | Where-Object { $_.name -eq 'mingw-w64-ucrt-x86_64-nasm' })[0]
 $makePackage = @($toolchain.packages | Where-Object { $_.name -eq 'make' })[0]
-if ($null -eq $gccPackage -or $null -eq $fortranPackage -or $null -eq $libgompPackage -or $null -eq $nasmPackage -or $null -eq $makePackage) {
-    Stop-EcsWindowsBuild 'Windows toolchain lock omits a required compiler, OpenMP, NASM, or make package'
+$binutilsPackage = @($toolchain.packages | Where-Object { $_.name -eq 'mingw-w64-ucrt-x86_64-binutils' })[0]
+if ($null -eq $gccPackage -or $null -eq $fortranPackage -or $null -eq $libgompPackage -or $null -eq $nasmPackage -or $null -eq $makePackage -or $null -eq $binutilsPackage) {
+    Stop-EcsWindowsBuild 'Windows toolchain lock omits a required compiler, binutils, OpenMP, NASM, or make package'
 }
 if (@($libgompPackage.runtime_components) -notcontains 'libgomp') {
     Stop-EcsWindowsBuild 'Windows toolchain lock does not identify the pinned libgomp runtime component'
@@ -448,6 +458,16 @@ $($packageCheckLines -join "`n")
     $cFlags = $cFlagList -join ' '
     $fortranFlags = $fortranFlagList -join ' '
     $linkerFlags = $linkerFlagList -join ' '
+    $stripPath = Join-Path $msysRoot 'ucrt64\bin\strip.exe'
+    $objdumpPath = Join-Path $msysRoot 'ucrt64\bin\objdump.exe'
+    if (-not (Test-Path -LiteralPath $stripPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $objdumpPath -PathType Leaf)) {
+        Stop-EcsWindowsBuild 'pinned binutils did not provide ucrt64/bin/strip.exe and objdump.exe'
+    }
+    $stripPathPosix = ConvertTo-EcsMsysPath $stripPath
+    $objdumpPathPosix = ConvertTo-EcsMsysPath $objdumpPath
+    $stripCommand = ConvertTo-EcsBashLiteral $stripPathPosix
+    $objdumpCommand = ConvertTo-EcsBashLiteral $objdumpPathPosix
     $preamble = @"
 export PATH=$(ConvertTo-EcsBashLiteral $msysContext.UcrtBinPosix):$(ConvertTo-EcsBashLiteral $msysContext.MsysUsrBinPosix)
 export CC=gcc
@@ -455,7 +475,7 @@ export CXX=g++
 export FC=gfortran
 export AR=ar
 export RANLIB=ranlib
-export STRIP=strip
+export STRIP=$stripCommand
 export CFLAGS=$(ConvertTo-EcsBashLiteral $cFlags)
 export CXXFLAGS=$(ConvertTo-EcsBashLiteral $cFlags)
 export LDFLAGS=$(ConvertTo-EcsBashLiteral $linkerFlags)
@@ -470,15 +490,19 @@ gfortran -dumpmachine
 gcc --version | sed -n '1p'
 gfortran --version | sed -n '1p'
 nasm -v | sed -n '1p'
+$($stripCommand) --version | sed -n '1p'
+$($objdumpCommand) --version | sed -n '1p'
 "@
     $toolchainProbe = @(Invoke-EcsWindowsBash -Context $msysContext -Script $toolchainProbeScript -CaptureOutput | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
-    if ($toolchainProbe.Count -lt 5 -or $toolchainProbe[0] -ne 'x86_64-w64-mingw32' -or $toolchainProbe[1] -ne 'x86_64-w64-mingw32') {
+    if ($toolchainProbe.Count -lt 7 -or $toolchainProbe[0] -ne 'x86_64-w64-mingw32' -or $toolchainProbe[1] -ne 'x86_64-w64-mingw32') {
         Stop-EcsWindowsBuild "fixed UCRT64 toolchain probe failed: $($toolchainProbe -join ' | ')"
     }
     if ($toolchainProbe[2] -notmatch [regex]::Escape(([string]$gccPackage.version).Split('-')[0]) -or
         $toolchainProbe[3] -notmatch [regex]::Escape(([string]$fortranPackage.version).Split('-')[0]) -or
-        $toolchainProbe[4] -notmatch [regex]::Escape(([string]$nasmPackage.version).Split('-')[0])) {
-        Stop-EcsWindowsBuild "fixed compiler version probe failed: $($toolchainProbe -join ' | ')"
+        $toolchainProbe[4] -notmatch [regex]::Escape(([string]$nasmPackage.version).Split('-')[0]) -or
+        $toolchainProbe[5] -notmatch [regex]::Escape(([string]$binutilsPackage.version).Split('-')[0]) -or
+        $toolchainProbe[6] -notmatch [regex]::Escape(([string]$binutilsPackage.version).Split('-')[0])) {
+        Stop-EcsWindowsBuild "fixed compiler/binutils version probe failed: $($toolchainProbe -join ' | ')"
     }
     $toolchainFacts = [ordered]@{
         compiler_family = 'MinGW-w64 GCC'
@@ -486,6 +510,9 @@ nasm -v | sed -n '1p'
         fortran_version = $toolchainProbe[3]
         assembler_family = 'NASM'
         assembler_version = $toolchainProbe[4]
+        binutils_version = $toolchainProbe[5]
+        objdump_version = $toolchainProbe[6]
+        binutils_package_version = [string]$binutilsPackage.version
         compiler_package_version = [string]$gccPackage.version
         fortran_package_version = [string]$fortranPackage.version
         libgomp_package_version = [string]$libgompPackage.version
@@ -562,18 +589,14 @@ nasm -v | sed -n '1p'
         if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -LiteralPath $binary).Length -eq 0) {
             Stop-EcsWindowsBuild "tool output is missing or empty: $name"
         }
-        $stripScript = "$($context.Preamble)`nset -eu`nstrip --strip-unneeded $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))`ntest -s $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))"
+        $stripScript = "$($context.Preamble)`nset -eu`n$stripCommand --strip-all $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))`ntest -s $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))"
         Invoke-EcsWindowsBash -Context $context -Script $stripScript
-    }
-    $objdumpPath = Join-Path $msysRoot 'ucrt64\bin\objdump.exe'
-    if (-not (Test-Path -LiteralPath $objdumpPath -PathType Leaf)) {
-        Stop-EcsWindowsBuild 'pinned binutils did not provide ucrt64/bin/objdump.exe'
     }
     $peFactsByTool = @{}
     foreach ($name in $windowToolNames) {
         $peFacts = Get-EcsWindowsPeFacts -ObjdumpPath $objdumpPath -BinaryPath $context.Binaries[$name] -Allowlist $allowlist
         if (-not [bool]$peFacts['stripped']) {
-            Stop-EcsWindowsBuild "$name binary still contains debug sections after strip"
+            Stop-EcsWindowsBuild "$name binary still contains debug or symbol sections after locked strip"
         }
         $peFactsByTool[$name] = $peFacts
     }

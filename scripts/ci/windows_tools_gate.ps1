@@ -413,7 +413,18 @@ function Get-EcsPeFacts {
     Assert-EcsProcessSucceeded -Result $sections -Description "PE section inspection of $([IO.Path]::GetFileName($Binary))"
     $symbols = Invoke-EcsWindowsProcess -FilePath $Objdump -ArgumentList @('-t', $Binary) -WorkingDirectory (Split-Path -Parent $Binary) -Timeout 30
     Assert-EcsProcessSucceeded -Result $symbols -Description "PE symbol inspection of $([IO.Path]::GetFileName($Binary))"
-    $stripped = (($sections.Stdout + $sections.Stderr) -notmatch '(?im)^\s*\d+\s+\.(debug_|stab|gnu_debuglink)') -and (($symbols.Stdout + $symbols.Stderr) -match '(?im)\bno symbols\b')
+    $sectionText = $sections.Stdout + $sections.Stderr
+    $symbolText = $symbols.Stdout + $symbols.Stderr
+    $sectionNames = @(
+        [regex]::Matches($sectionText, '(?im)^\s*\d+\s+(?<name>\.[^\s]+)(?:\s|$)') |
+            ForEach-Object { $_.Groups['name'].Value }
+    )
+    $forbiddenSections = @($sectionNames | Where-Object {
+        $_ -match '^\.(?:debug|zdebug|stab|gnu_debug|symtab|strtab)'
+    })
+    $hasDebuggingSectionFlag = $sectionText -match '(?im)^\s+.*\bDEBUGGING\b'
+    $noSymbols = $symbolText -match '(?im)^\s*no symbols\s*$'
+    $stripped = ($forbiddenSections.Count -eq 0) -and (-not $hasDebuggingSectionFlag) -and $noSymbols
     return [pscustomobject]@{
         Machine = $machine
         Imports = @($imports)
