@@ -954,7 +954,9 @@ jobs:
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
-              Write-Output ("READY:" + $listener.LocalEndpoint.Port)
+              $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
+              Write-Output ("LISTENER_ENDPOINT family={0}; address={1}; port={2}" -f $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString, $endpoint.Port)
+              Write-Output ("READY:" + $endpoint.Port)
               try {
                 while ($true) {
                   $client = $listener.AcceptTcpClient()
@@ -998,6 +1000,14 @@ jobs:
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
             $port = [int](([string]$readyLine) -replace '^READY:', '')
+            $listenerEndpointLines = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^LISTENER_ENDPOINT family=[^;]+; address=[^;]+; port=[0-9]+$' })
+            if ($listenerEndpointLines.Count -ne 1) { throw 'HTTPS fixture did not report one listener endpoint' }
+            Write-Output ("bootstrap fixture listener endpoint: " + [string]$listenerEndpointLines[0])
+            $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
+            if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
+            foreach ($localhostAddress in $localhostAddresses) {
+              Write-Output ("bootstrap localhost resolution family={0}; address={1}" -f $localhostAddress.AddressFamily, $localhostAddress.IPAddressToString)
+            }
             $mainBase = "https://localhost:$port/main"
             $bundleBase = "https://localhost:$port/bundle"
 
@@ -1015,6 +1025,7 @@ jobs:
             if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
               throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
             }
+            Write-Output ("bootstrap fixture URIs main={0}; bundle={1}" -f [string]$env:ECS_RELEASE_BASE, [string]$env:ECS_BUNDLE_RELEASE_BASE)
             $env:ECS_REPOSITORY = 'CST-Cat/ecs'
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
@@ -1037,6 +1048,12 @@ jobs:
             try {
               $PSDefaultParameterValues[$certificateCheckParameterName] = $true
               $PSDefaultParameterValues[$noProxyParameterName] = $true
+              $probeFile = Join-Path $fixtureRoot 'probe-checksums.txt'
+              Invoke-WebRequest -UseBasicParsing -Uri "$($env:ECS_RELEASE_BASE)/checksums.txt" -OutFile $probeFile -NoProxy -ErrorAction Stop
+              if (-not (Test-Path -LiteralPath $probeFile -PathType Leaf) -or (Get-Item -LiteralPath $probeFile).Length -eq 0) {
+                throw 'localhost HTTPS fixture probe returned no file'
+              }
+              Write-Output ("bootstrap localhost HTTPS probe succeeded uri={0}/checksums.txt" -f [string]$env:ECS_RELEASE_BASE)
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
@@ -1359,7 +1376,9 @@ jobs:
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
-              Write-Output ("READY:" + $listener.LocalEndpoint.Port)
+              $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
+              Write-Output ("LISTENER_ENDPOINT family={0}; address={1}; port={2}" -f $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString, $endpoint.Port)
+              Write-Output ("READY:" + $endpoint.Port)
               try {
                 while ($true) {
                   $client = $listener.AcceptTcpClient()
@@ -1403,6 +1422,14 @@ jobs:
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
             $port = [int](([string]$readyLine) -replace '^READY:', '')
+            $listenerEndpointLines = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^LISTENER_ENDPOINT family=[^;]+; address=[^;]+; port=[0-9]+$' })
+            if ($listenerEndpointLines.Count -ne 1) { throw 'HTTPS fixture did not report one listener endpoint' }
+            Write-Output ("bootstrap fixture listener endpoint: " + [string]$listenerEndpointLines[0])
+            $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
+            if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
+            foreach ($localhostAddress in $localhostAddresses) {
+              Write-Output ("bootstrap localhost resolution family={0}; address={1}" -f $localhostAddress.AddressFamily, $localhostAddress.IPAddressToString)
+            }
             $mainBase = "https://localhost:$port/main"
             $bundleBase = "https://localhost:$port/bundle"
 
@@ -1420,6 +1447,7 @@ jobs:
             if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
               throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
             }
+            Write-Output ("bootstrap fixture URIs main={0}; bundle={1}" -f [string]$env:ECS_RELEASE_BASE, [string]$env:ECS_BUNDLE_RELEASE_BASE)
             $env:ECS_REPOSITORY = 'CST-Cat/ecs'
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
@@ -1442,6 +1470,12 @@ jobs:
             try {
               $PSDefaultParameterValues[$certificateCheckParameterName] = $true
               $PSDefaultParameterValues[$noProxyParameterName] = $true
+              $probeFile = Join-Path $fixtureRoot 'probe-checksums.txt'
+              Invoke-WebRequest -UseBasicParsing -Uri "$($env:ECS_RELEASE_BASE)/checksums.txt" -OutFile $probeFile -NoProxy -ErrorAction Stop
+              if (-not (Test-Path -LiteralPath $probeFile -PathType Leaf) -or (Get-Item -LiteralPath $probeFile).Length -eq 0) {
+                throw 'localhost HTTPS fixture probe returned no file'
+              }
+              Write-Output ("bootstrap localhost HTTPS probe succeeded uri={0}/checksums.txt" -f [string]$env:ECS_RELEASE_BASE)
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
