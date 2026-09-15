@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,10 @@ func TestNotifyContextHandlesConsoleInterrupt(t *testing.T) {
 	if readyPath := os.Getenv(windowsSignalReadyEnv); readyPath != "" {
 		ctx, stop := notifyContext()
 		defer stop()
+		if err := confirmWindowsConsoleAttachment(); err != nil {
+			_ = os.WriteFile(readyPath, []byte("error: "+err.Error()), 0o600)
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(readyPath, []byte("ready"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -65,11 +70,6 @@ func prepareWindowsTestConsole() (func(), error) {
 	if err != nil {
 		return func() {}, err
 	}
-	getConsoleWindow, err := dll.FindProc("GetConsoleWindow")
-	if err != nil {
-		_ = dll.Release()
-		return func() {}, err
-	}
 	allocConsole, err := dll.FindProc("AllocConsole")
 	if err != nil {
 		_ = dll.Release()
@@ -80,22 +80,47 @@ func prepareWindowsTestConsole() (func(), error) {
 		_ = dll.Release()
 		return func() {}, err
 	}
-	window, _, _ := getConsoleWindow.Call()
-	if window != 0 {
-		return func() { _ = dll.Release() }, nil
-	}
-	result, _, callErr := allocConsole.Call()
-	if result == 0 {
-		_ = dll.Release()
-		if callErr == nil {
-			callErr = syscall.EINVAL
+
+	// GetConsoleWindow is not a reliable attachment check for a hosted
+	// pseudo-console: an attached console can legitimately have no window.
+	// CONOUT$ is the real console device and therefore avoids calling
+	// AllocConsole on an already-attached process (which returns ACCESS_DENIED).
+	output, openErr := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	allocated := false
+	if openErr != nil {
+		result, _, callErr := allocConsole.Call()
+		if result == 0 {
+			_ = dll.Release()
+			if callErr == nil {
+				callErr = syscall.EINVAL
+			}
+			return func() {}, fmt.Errorf("open CONOUT$ failed (%v); AllocConsole failed: %w", openErr, callErr)
 		}
-		return func() {}, callErr
+		allocated = true
+		output, openErr = os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	}
+	if openErr != nil {
+		if allocated {
+			_, _, _ = freeConsole.Call()
+		}
+		_ = dll.Release()
+		return func() {}, fmt.Errorf("open CONOUT$ after console setup: %w", openErr)
 	}
 	return func() {
-		_, _, _ = freeConsole.Call()
+		_ = output.Close()
+		if allocated {
+			_, _, _ = freeConsole.Call()
+		}
 		_ = dll.Release()
 	}, nil
+}
+
+func confirmWindowsConsoleAttachment() error {
+	output, err := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("signal helper is not attached to the inherited console: %w", err)
+	}
+	return output.Close()
 }
 
 func sendWindowsCtrlBreak(pid int) error {
@@ -123,8 +148,14 @@ func waitForWindowsSignalReady(t *testing.T, path string) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
-		if err == nil && string(data) == "ready" {
-			return
+		if err == nil {
+			marker := string(data)
+			if marker == "ready" {
+				return
+			}
+			if len(marker) >= len("error: ") && marker[:len("error: ")] == "error: " {
+				t.Fatalf("signal helper failed before readiness: %s", marker)
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
