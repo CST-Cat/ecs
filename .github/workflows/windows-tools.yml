@@ -998,7 +998,9 @@ jobs:
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
-            $readyMatch = [regex]::Match([string]$readyLine, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            $readyText = ([string]$readyLine).Trim()
+            Write-Output ("bootstrap fixture ready signal: <{0}>" -f $readyText)
+            $readyMatch = [regex]::Match($readyText, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
             if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
             $port = [int]$readyMatch.Groups['port'].Value
             Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
@@ -1419,7 +1421,9 @@ jobs:
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
-            $readyMatch = [regex]::Match([string]$readyLine, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            $readyText = ([string]$readyLine).Trim()
+            Write-Output ("bootstrap fixture ready signal: <{0}>" -f $readyText)
+            $readyMatch = [regex]::Match($readyText, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
             if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
             $port = [int]$readyMatch.Groups['port'].Value
             Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
