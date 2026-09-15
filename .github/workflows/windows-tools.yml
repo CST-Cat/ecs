@@ -952,7 +952,7 @@ jobs:
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
               Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
@@ -1375,7 +1375,7 @@ jobs:
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
               Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
