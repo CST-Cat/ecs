@@ -849,15 +849,18 @@ jobs:
           $certificate = $null
           $installDirectory = $null
           $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
+          $runWorkBefore = $null
+          $skipCertificateCheckWasPresent = $false
+          $skipCertificateCheckOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
               [Parameter(Mandatory)][string]$Root,
               [Parameter(Mandatory)][string]$Filter
             )
-            $item = Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse | Select-Object -First 1
-            if ($null -eq $item) { throw "artifact file $Filter is missing below $Root" }
-            return $item
+            $items = @(Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse)
+            if ($items.Count -ne 1) { throw "artifact file $Filter is missing or ambiguous below $Root" }
+            return $items[0]
           }
 
           function Get-ArtifactChecksum {
@@ -889,8 +892,10 @@ jobs:
           }
 
           try {
-            $admin = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
-            if ($admin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'bootstrap E2E must run as an ordinary user' }
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+            $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output ("bootstrap identity name={0}; administrator={1}" -f $identity.Name, $isAdministrator)
 
             $commitFile = Get-ArtifactFile -Root $artifactRoot -Filter 'CURRENT_COMMIT'
             if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA) {
@@ -939,7 +944,6 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
-            Import-Certificate -FilePath $certificateFile -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
 
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
@@ -1001,46 +1005,165 @@ jobs:
             $env:ECS_TOOL_BIN = $sentinelToolBin
             $env:ECS_RELEASE_BASE = $mainBase
             $env:ECS_BUNDLE_RELEASE_BASE = $bundleBase
+            $releaseBaseUri = [Uri]::new([string]$env:ECS_RELEASE_BASE)
+            $bundleReleaseBaseUri = [Uri]::new([string]$env:ECS_BUNDLE_RELEASE_BASE)
+            if (-not $releaseBaseUri.IsAbsoluteUri -or $releaseBaseUri.Scheme -cne 'https' -or $releaseBaseUri.Host -cne 'localhost' -or $releaseBaseUri.Port -ne $port) {
+              throw 'ECS_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
+              throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
+            }
             $env:ECS_REPOSITORY = 'CST-Cat/ecs'
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
-            & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
-            if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
-            if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
-            $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
-            $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
-            $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
-            if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
-            $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
-            if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
+            $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+            $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $skipCertificateCheckWasPresent = $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')
+            $skipCertificateCheckOriginalValue = $null
+            if ($skipCertificateCheckWasPresent) {
+              $skipCertificateCheckOriginalValue = $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck']
+            }
+            try {
+              $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+              & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
+              if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
+              $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterRun -or $userPathBaseline -cne $userPathAfterRun) { throw 'run.ps1 changed the Machine or User PATH' }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
+              $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
+              $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
+              $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
+              if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+              $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+              if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
 
-            $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
-            $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
-            $installFull = [IO.Path]::GetFullPath($installDirectory)
-            if (-not $installFull.StartsWith($localAppDataFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA' }
-            & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
-            if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
-            $installedEcs = Join-Path $installDirectory 'ecs.exe'
-            if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
-            $installedVersion = @(& $installedEcs --version 2>&1)
-            if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
-            Remove-Item -LiteralPath $installDirectory -Recurse -Force
-            if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
-            $installDirectory = $null
-            Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              $protectedInstallTargets = @(
+                (Join-Path $env:ProgramFiles 'ecs-e2e-forbidden')
+                (Join-Path $env:ProgramData 'ecs-e2e-forbidden')
+                (Join-Path $env:SystemRoot 'ecs-e2e-forbidden')
+                (Join-Path $PWD.Path 'ecs-e2e-forbidden')
+                (Join-Path $env:RUNNER_TEMP 'ecs-e2e-forbidden')
+              )
+              $expectedProtectedInstallError = 'ecs install: install directory must remain under the current user local-data directory'
+              foreach ($protectedInstallTarget in $protectedInstallTargets) {
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target already exists: $protectedInstallTarget" }
+                $tempInstallBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                $protectedInstallOutput = @()
+                $protectedInstallException = $null
+                $protectedInstallSucceeded = $true
+                try {
+                  $protectedInstallOutput = @(& $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $protectedInstallTarget 2>&1)
+                } catch {
+                  $protectedInstallSucceeded = $false
+                  $protectedInstallException = $_
+                }
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target was created: $protectedInstallTarget" }
+                $tempInstallAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                if (@($tempInstallAfter | Where-Object { $tempInstallBefore -notcontains $_ }).Count -ne 0) { throw "protected install created a temporary work directory for $protectedInstallTarget" }
+                if ($protectedInstallSucceeded) { throw "install.ps1 unexpectedly accepted protected install target: $protectedInstallTarget" }
+                $protectedInstallFailureText = ((@($protectedInstallOutput) + @($protectedInstallException)) | Out-String)
+                if ($protectedInstallFailureText -notmatch [regex]::Escape($expectedProtectedInstallError)) { throw "protected install did not preserve the expected path rejection for $protectedInstallTarget" }
+              }
+
+              $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+              $localAppDataEcsFull = [IO.Path]::GetFullPath($localAppDataFull + '\ecs').TrimEnd('\')
+              $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
+              $installFull = [IO.Path]::GetFullPath($installDirectory)
+              if (-not $installFull.StartsWith($localAppDataEcsFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA\ecs' }
+              & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
+              if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
+              $machinePathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }
+              $installedEcs = Join-Path $installDirectory 'ecs.exe'
+              if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
+              $installedVersion = @(& $installedEcs --version 2>&1)
+              if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
+              $machinePathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterVersion -or $userPathBaseline -cne $userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }
+              Remove-Item -LiteralPath $installDirectory -Recurse -Force
+              if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
+              $installDirectory = $null
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+            } finally {
+              if ($skipCertificateCheckWasPresent) {
+                $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $skipCertificateCheckOriginalValue
+                if (-not $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck') -or
+                    $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] -cne $skipCertificateCheckOriginalValue) {
+                  throw 'Invoke-WebRequest SkipCertificateCheck default was not restored exactly'
+                }
+              } else {
+                [void]$PSDefaultParameterValues.Remove('Invoke-WebRequest:SkipCertificateCheck')
+                if ($PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')) {
+                  throw 'Invoke-WebRequest SkipCertificateCheck default was not removed'
+                }
+              }
+            }
           } finally {
+            $cleanupErrors = @()
             if ($null -ne $serverJob) {
-              Stop-Job -Job $serverJob -ErrorAction SilentlyContinue
-              Remove-Job -Job $serverJob -Force -ErrorAction SilentlyContinue
+              try {
+                if ($serverJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+                  Stop-Job -Job $serverJob -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "server job stop failed: $($_.Exception.Message)"
+              }
+              try {
+                Remove-Job -Job $serverJob -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "server job removal failed: $($_.Exception.Message)"
+              }
             }
             if ($null -ne $certificate) {
-              Remove-Item -LiteralPath ("Cert:\CurrentUser\Root\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
-              Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
+              $certificatePath = "Cert:\CurrentUser\My\$($certificate.Thumbprint)"
+              try {
+                if (Test-Path -LiteralPath $certificatePath) {
+                  Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "fixture certificate cleanup failed: $($_.Exception.Message)"
+              }
+              if (Test-Path -LiteralPath $certificatePath) {
+                $cleanupErrors += "fixture certificate remains in CurrentUser\My: $certificatePath"
+              }
             }
             if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
-              Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction SilentlyContinue
+              try {
+                Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "install directory cleanup failed: $($_.Exception.Message)"
+              }
             }
-            if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              $cleanupErrors += "install directory remains: $installDirectory"
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              try {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "fixture directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              $cleanupErrors += "fixture directory remains: $fixtureRoot"
+            }
+            if ($null -ne $runWorkBefore) {
+              try {
+                $runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+                $runWorkLeftover = @($runWorkAfterFinal | Where-Object { $runWorkBefore -notcontains $_ })
+                if ($runWorkLeftover.Count -ne 0) {
+                  $cleanupErrors += "private staging remains: $($runWorkLeftover -join ', ')"
+                }
+              } catch {
+                $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
+              }
+            }
+            if ($cleanupErrors.Count -ne 0) {
+              throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
+            }
           }
 
   e2e-2025:
@@ -1104,15 +1227,18 @@ jobs:
           $certificate = $null
           $installDirectory = $null
           $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
+          $runWorkBefore = $null
+          $skipCertificateCheckWasPresent = $false
+          $skipCertificateCheckOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
               [Parameter(Mandatory)][string]$Root,
               [Parameter(Mandatory)][string]$Filter
             )
-            $item = Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse | Select-Object -First 1
-            if ($null -eq $item) { throw "artifact file $Filter is missing below $Root" }
-            return $item
+            $items = @(Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse)
+            if ($items.Count -ne 1) { throw "artifact file $Filter is missing or ambiguous below $Root" }
+            return $items[0]
           }
 
           function Get-ArtifactChecksum {
@@ -1144,8 +1270,10 @@ jobs:
           }
 
           try {
-            $admin = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
-            if ($admin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'bootstrap E2E must run as an ordinary user' }
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+            $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output ("bootstrap identity name={0}; administrator={1}" -f $identity.Name, $isAdministrator)
 
             $commitFile = Get-ArtifactFile -Root $artifactRoot -Filter 'CURRENT_COMMIT'
             if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA) {
@@ -1194,7 +1322,6 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
-            Import-Certificate -FilePath $certificateFile -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
 
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
@@ -1256,44 +1383,163 @@ jobs:
             $env:ECS_TOOL_BIN = $sentinelToolBin
             $env:ECS_RELEASE_BASE = $mainBase
             $env:ECS_BUNDLE_RELEASE_BASE = $bundleBase
+            $releaseBaseUri = [Uri]::new([string]$env:ECS_RELEASE_BASE)
+            $bundleReleaseBaseUri = [Uri]::new([string]$env:ECS_BUNDLE_RELEASE_BASE)
+            if (-not $releaseBaseUri.IsAbsoluteUri -or $releaseBaseUri.Scheme -cne 'https' -or $releaseBaseUri.Host -cne 'localhost' -or $releaseBaseUri.Port -ne $port) {
+              throw 'ECS_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
+              throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
+            }
             $env:ECS_REPOSITORY = 'CST-Cat/ecs'
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
-            & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
-            if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
-            if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
-            $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
-            $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
-            $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
-            if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
-            $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
-            if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
+            $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+            $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $skipCertificateCheckWasPresent = $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')
+            $skipCertificateCheckOriginalValue = $null
+            if ($skipCertificateCheckWasPresent) {
+              $skipCertificateCheckOriginalValue = $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck']
+            }
+            try {
+              $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+              & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
+              if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
+              $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterRun -or $userPathBaseline -cne $userPathAfterRun) { throw 'run.ps1 changed the Machine or User PATH' }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
+              $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
+              $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
+              $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
+              if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+              $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+              if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
 
-            $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
-            $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
-            $installFull = [IO.Path]::GetFullPath($installDirectory)
-            if (-not $installFull.StartsWith($localAppDataFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA' }
-            & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
-            if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
-            $installedEcs = Join-Path $installDirectory 'ecs.exe'
-            if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
-            $installedVersion = @(& $installedEcs --version 2>&1)
-            if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
-            Remove-Item -LiteralPath $installDirectory -Recurse -Force
-            if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
-            $installDirectory = $null
-            Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              $protectedInstallTargets = @(
+                (Join-Path $env:ProgramFiles 'ecs-e2e-forbidden')
+                (Join-Path $env:ProgramData 'ecs-e2e-forbidden')
+                (Join-Path $env:SystemRoot 'ecs-e2e-forbidden')
+                (Join-Path $PWD.Path 'ecs-e2e-forbidden')
+                (Join-Path $env:RUNNER_TEMP 'ecs-e2e-forbidden')
+              )
+              $expectedProtectedInstallError = 'ecs install: install directory must remain under the current user local-data directory'
+              foreach ($protectedInstallTarget in $protectedInstallTargets) {
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target already exists: $protectedInstallTarget" }
+                $tempInstallBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                $protectedInstallOutput = @()
+                $protectedInstallException = $null
+                $protectedInstallSucceeded = $true
+                try {
+                  $protectedInstallOutput = @(& $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $protectedInstallTarget 2>&1)
+                } catch {
+                  $protectedInstallSucceeded = $false
+                  $protectedInstallException = $_
+                }
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target was created: $protectedInstallTarget" }
+                $tempInstallAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                if (@($tempInstallAfter | Where-Object { $tempInstallBefore -notcontains $_ }).Count -ne 0) { throw "protected install created a temporary work directory for $protectedInstallTarget" }
+                if ($protectedInstallSucceeded) { throw "install.ps1 unexpectedly accepted protected install target: $protectedInstallTarget" }
+                $protectedInstallFailureText = ((@($protectedInstallOutput) + @($protectedInstallException)) | Out-String)
+                if ($protectedInstallFailureText -notmatch [regex]::Escape($expectedProtectedInstallError)) { throw "protected install did not preserve the expected path rejection for $protectedInstallTarget" }
+              }
+
+              $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+              $localAppDataEcsFull = [IO.Path]::GetFullPath($localAppDataFull + '\ecs').TrimEnd('\')
+              $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
+              $installFull = [IO.Path]::GetFullPath($installDirectory)
+              if (-not $installFull.StartsWith($localAppDataEcsFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA\ecs' }
+              & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
+              if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
+              $machinePathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }
+              $installedEcs = Join-Path $installDirectory 'ecs.exe'
+              if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
+              $installedVersion = @(& $installedEcs --version 2>&1)
+              if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
+              $machinePathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterVersion -or $userPathBaseline -cne $userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }
+              Remove-Item -LiteralPath $installDirectory -Recurse -Force
+              if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
+              $installDirectory = $null
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+            } finally {
+              if ($skipCertificateCheckWasPresent) {
+                $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $skipCertificateCheckOriginalValue
+                if (-not $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck') -or
+                    $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] -cne $skipCertificateCheckOriginalValue) {
+                  throw 'Invoke-WebRequest SkipCertificateCheck default was not restored exactly'
+                }
+              } else {
+                [void]$PSDefaultParameterValues.Remove('Invoke-WebRequest:SkipCertificateCheck')
+                if ($PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')) {
+                  throw 'Invoke-WebRequest SkipCertificateCheck default was not removed'
+                }
+              }
+            }
           } finally {
+            $cleanupErrors = @()
             if ($null -ne $serverJob) {
-              Stop-Job -Job $serverJob -ErrorAction SilentlyContinue
-              Remove-Job -Job $serverJob -Force -ErrorAction SilentlyContinue
+              try {
+                if ($serverJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+                  Stop-Job -Job $serverJob -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "server job stop failed: $($_.Exception.Message)"
+              }
+              try {
+                Remove-Job -Job $serverJob -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "server job removal failed: $($_.Exception.Message)"
+              }
             }
             if ($null -ne $certificate) {
-              Remove-Item -LiteralPath ("Cert:\CurrentUser\Root\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
-              Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
+              $certificatePath = "Cert:\CurrentUser\My\$($certificate.Thumbprint)"
+              try {
+                if (Test-Path -LiteralPath $certificatePath) {
+                  Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "fixture certificate cleanup failed: $($_.Exception.Message)"
+              }
+              if (Test-Path -LiteralPath $certificatePath) {
+                $cleanupErrors += "fixture certificate remains in CurrentUser\My: $certificatePath"
+              }
             }
             if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
-              Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction SilentlyContinue
+              try {
+                Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "install directory cleanup failed: $($_.Exception.Message)"
+              }
             }
-            if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              $cleanupErrors += "install directory remains: $installDirectory"
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              try {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "fixture directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              $cleanupErrors += "fixture directory remains: $fixtureRoot"
+            }
+            if ($null -ne $runWorkBefore) {
+              try {
+                $runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+                $runWorkLeftover = @($runWorkAfterFinal | Where-Object { $runWorkBefore -notcontains $_ })
+                if ($runWorkLeftover.Count -ne 0) {
+                  $cleanupErrors += "private staging remains: $($runWorkLeftover -join ', ')"
+                }
+              } catch {
+                $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
+              }
+            }
+            if ($cleanupErrors.Count -ne 0) {
+              throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
+            }
           }
