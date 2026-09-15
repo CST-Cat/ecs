@@ -955,8 +955,7 @@ jobs:
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
-              Write-Output ("LISTENER_ENDPOINT family={0}; address={1}; port={2}" -f $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString, $endpoint.Port)
-              Write-Output ("READY:" + $endpoint.Port)
+              Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
               try {
                 while ($true) {
                   $client = $listener.AcceptTcpClient()
@@ -995,14 +994,14 @@ jobs:
             $readyLine = $null
             for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
               if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
-              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+$' } | Select-Object -Last 1)
+              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1)
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
-            $port = [int](([string]$readyLine) -replace '^READY:', '')
-            $listenerEndpointLines = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^LISTENER_ENDPOINT family=[^;]+; address=[^;]+; port=[0-9]+$' })
-            if ($listenerEndpointLines.Count -ne 1) { throw 'HTTPS fixture did not report one listener endpoint' }
-            Write-Output ("bootstrap fixture listener endpoint: " + [string]$listenerEndpointLines[0])
+            $readyMatch = [regex]::Match([string]$readyLine, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
+            $port = [int]$readyMatch.Groups['port'].Value
+            Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
             $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
             if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
             foreach ($localhostAddress in $localhostAddresses) {
@@ -1377,8 +1376,7 @@ jobs:
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
-              Write-Output ("LISTENER_ENDPOINT family={0}; address={1}; port={2}" -f $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString, $endpoint.Port)
-              Write-Output ("READY:" + $endpoint.Port)
+              Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
               try {
                 while ($true) {
                   $client = $listener.AcceptTcpClient()
@@ -1417,14 +1415,14 @@ jobs:
             $readyLine = $null
             for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
               if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
-              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+$' } | Select-Object -Last 1)
+              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1)
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
-            $port = [int](([string]$readyLine) -replace '^READY:', '')
-            $listenerEndpointLines = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^LISTENER_ENDPOINT family=[^;]+; address=[^;]+; port=[0-9]+$' })
-            if ($listenerEndpointLines.Count -ne 1) { throw 'HTTPS fixture did not report one listener endpoint' }
-            Write-Output ("bootstrap fixture listener endpoint: " + [string]$listenerEndpointLines[0])
+            $readyMatch = [regex]::Match([string]$readyLine, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
+            $port = [int]$readyMatch.Groups['port'].Value
+            Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
             $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
             if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
             foreach ($localhostAddress in $localhostAddresses) {
