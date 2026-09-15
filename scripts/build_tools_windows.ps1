@@ -18,14 +18,61 @@ function Stop-EcsWindowsBuild {
     throw "build-tools-windows: $Message"
 }
 
+function Get-EcsWindowsMsysGpgAgentProcessIds {
+    param([Parameter(Mandatory)][string]$MsysRoot)
+
+    $agentPath = [IO.Path]::GetFullPath((Join-Path $MsysRoot 'usr\bin\gpg-agent.exe'))
+    $processIds = @()
+    foreach ($process in [Diagnostics.Process]::GetProcessesByName('gpg-agent')) {
+        try {
+            if ($process.HasExited) { continue }
+            $processPath = [IO.Path]::GetFullPath($process.MainModule.FileName)
+            if ($processPath.Equals($agentPath, [StringComparison]::OrdinalIgnoreCase)) {
+                $processIds += $process.Id
+            }
+        } catch [InvalidOperationException] {
+            # The agent can exit between process enumeration and inspection.
+            continue
+        } catch [System.ComponentModel.Win32Exception] {
+            if ($process.HasExited) { continue }
+            throw "could not inspect locked MSYS2 gpg-agent process: $($_.Exception.Message)"
+        } catch {
+            throw "could not inspect locked MSYS2 gpg-agent process: $($_.Exception.Message)"
+        } finally {
+            $process.Dispose()
+        }
+    }
+    return @($processIds | Sort-Object -Unique)
+}
+
+function Wait-EcsWindowsMsysGpgAgentExit {
+    param([Parameter(Mandatory)][string]$MsysRoot)
+
+    $attempts = 40
+    $delayMilliseconds = 250
+    $lastProcessIds = @()
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $lastProcessIds = @(Get-EcsWindowsMsysGpgAgentProcessIds -MsysRoot $MsysRoot)
+        if ($lastProcessIds.Count -eq 0) { return }
+        if ($attempt -lt $attempts) {
+            Start-Sleep -Milliseconds $delayMilliseconds
+        }
+    }
+    throw "locked MSYS2 gpg-agent did not exit after $($attempts * $delayMilliseconds)ms (process ids: $($lastProcessIds -join ', '))"
+}
+
 function Invoke-EcsWindowsMsysGpgCleanup {
     param([Parameter(Mandatory)][string]$MsysRoot)
 
     $gpgconf = Join-Path $MsysRoot 'usr\bin\gpgconf.exe'
+    $gpgConnectAgent = Join-Path $MsysRoot 'usr\bin\gpg-connect-agent.exe'
     $gpgHome = Join-Path $MsysRoot 'etc\pacman.d\gnupg'
     if (-not (Test-Path -LiteralPath $gpgconf -PathType Leaf) -or
         -not (Test-Path -LiteralPath $gpgHome -PathType Container)) {
         return
+    }
+    if (-not (Test-Path -LiteralPath $gpgConnectAgent -PathType Leaf)) {
+        throw "locked MSYS2 base is missing gpg-connect-agent.exe: $gpgConnectAgent"
     }
     $previousGpgHome = $env:GNUPGHOME
     try {
@@ -34,6 +81,13 @@ function Invoke-EcsWindowsMsysGpgCleanup {
         if ($LASTEXITCODE -ne 0) {
             throw "locked MSYS2 gpgconf --kill all failed with exit code $LASTEXITCODE"
         }
+        # KILLAGENT is an Assuan shutdown request; --no-autostart keeps this
+        # cleanup from creating a new agent when gpgconf already stopped it.
+        & $gpgConnectAgent --no-autostart --homedir $gpgHome 'KILLAGENT' '/bye' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "locked MSYS2 gpg-connect-agent KILLAGENT failed with exit code $LASTEXITCODE"
+        }
+        Wait-EcsWindowsMsysGpgAgentExit -MsysRoot $MsysRoot
     } finally {
         if ($null -eq $previousGpgHome) {
             Remove-Item Env:GNUPGHOME -ErrorAction SilentlyContinue
