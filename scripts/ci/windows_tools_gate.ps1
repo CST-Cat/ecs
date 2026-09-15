@@ -302,7 +302,7 @@ function Assert-EcsGlobalPathUnchanged {
 function Invoke-EcsWindowsProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ArgumentList,
         [Parameter(Mandatory)][string]$WorkingDirectory,
         [hashtable]$Environment = @{},
         [int]$Timeout = 180
