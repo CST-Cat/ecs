@@ -118,23 +118,23 @@
         "depends": ["mingw-w64-ucrt-x86_64-gettext-runtime", "mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd"]
       },
       {
-        "name": "mingw-w64-ucrt-x86_64-crt-git",
-        "version": "13.0.0.r380.gb83511db8-1",
-        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-crt-git-13.0.0.r380.gb83511db8-1-any.pkg.tar.zst",
-        "source_sha256": "cd689558778ae8f2dfe46b982007008f526de8e77c85fa6305661994ae1ddef3",
+        "name": "mingw-w64-ucrt-x86_64-crt",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-crt-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "09bccbb31c7bdc9090358cac429a78b8bffe5142a98a1e1d54f5b869f3068055",
         "upstream": "https://github.com/mingw-w64/mingw-w64",
         "license": "ZPL-2.1",
-        "provides": ["mingw-w64-ucrt-x86_64-crt"],
-        "depends": ["mingw-w64-ucrt-x86_64-headers-git"]
+        "provides": ["mingw-w64-ucrt-x86_64-crt-git=14.0.0.r375.g9c1abbbf5"],
+        "depends": ["mingw-w64-ucrt-x86_64-headers"]
       },
       {
-        "name": "mingw-w64-ucrt-x86_64-headers-git",
-        "version": "13.0.0.r380.gb83511db8-1",
-        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-headers-git-13.0.0.r380.gb83511db8-1-any.pkg.tar.zst",
-        "source_sha256": "7ce4a1718fb6e1d7bde97623fa5bece492d88122f8608669cdfb58b8b05e29a0",
+        "name": "mingw-w64-ucrt-x86_64-headers",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-headers-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "046cc32a88739738e94976486ace1e8e457e6beb6ae866de2f07d2d3eebcabb6",
         "upstream": "https://github.com/mingw-w64/mingw-w64",
         "license": "ZPL-2.1 AND LGPL-2.1-or-later",
-        "provides": ["mingw-w64-ucrt-x86_64-headers"],
+        "provides": ["mingw-w64-ucrt-x86_64-headers-git=14.0.0.r375.g9c1abbbf5"],
         "depends": []
       },
       {
