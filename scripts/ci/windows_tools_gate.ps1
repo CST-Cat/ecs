@@ -666,7 +666,7 @@ try {
     Assert-EcsProcessSucceeded -Result $fioVersionRun -Description 'fio version'
     Assert-EcsText -Text ($fioVersionRun.Stdout + $fioVersionRun.Stderr) -Pattern "fio-$([regex]::Escape($fioVersion))([\s]|$)" -Description 'fio locked version'
     $fioJson = Join-Path $gateWork 'fio-windowsaio.json'
-    $fioRun = Invoke-EcsWindowsProcess -FilePath $fio -ArgumentList @('--name=ecs-windowsaio-smoke', "--filename=$fioData", '--rw=read', '--bs=4k', '--size=4k', '--ioengine=windowsaio', '--iodepth=1', '--numjobs=1', '--direct=1', '--output-format=json', "--output=$fioJson") -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
+    $fioRun = Invoke-EcsWindowsProcess -FilePath $fio -ArgumentList @('--name=ecs-windowsaio-smoke', '--thread', "--filename=$fioData", '--rw=read', '--bs=4k', '--size=4k', '--ioengine=windowsaio', '--iodepth=1', '--numjobs=1', '--direct=1', '--output-format=json', "--output=$fioJson") -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
     Assert-EcsProcessSucceeded -Result $fioRun -Description 'fio windowsaio real I/O smoke'
     if (-not (Test-Path -LiteralPath $fioJson -PathType Leaf)) { Stop-EcsWindowsGate 'fio did not produce JSON output' }
     $fioResult = Get-EcsGateJson $fioJson
