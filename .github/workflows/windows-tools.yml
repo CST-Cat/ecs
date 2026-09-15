@@ -852,6 +852,8 @@ jobs:
           $runWorkBefore = $null
           $certificateCheckDefaultWasPresent = $false
           $certificateCheckDefaultOriginalValue = $null
+          $noProxyDefaultWasPresent = $false
+          $noProxyDefaultOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
@@ -1018,6 +1020,14 @@ jobs:
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
             $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+            if (-not $invokeWebRequestCommand.Parameters.ContainsKey('NoProxy')) { throw 'current pwsh Invoke-WebRequest lacks NoProxy' }
+            $noProxyParameterName = 'Invoke-WebRequest:NoProxy'
+            $noProxyDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($noProxyParameterName)
+            $noProxyDefaultOriginalValue = $null
+            if ($noProxyDefaultWasPresent) {
+              $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
+            }
             $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
             $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
             $certificateCheckDefaultOriginalValue = $null
@@ -1026,6 +1036,7 @@ jobs:
             }
             try {
               $PSDefaultParameterValues[$certificateCheckParameterName] = $true
+              $PSDefaultParameterValues[$noProxyParameterName] = $true
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
@@ -1089,16 +1100,31 @@ jobs:
               $installDirectory = $null
               Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
-              if ($certificateCheckDefaultWasPresent) {
-                $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
-                if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
-                    $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
-                  throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+              try {
+                if ($noProxyDefaultWasPresent) {
+                  $PSDefaultParameterValues[$noProxyParameterName] = $noProxyDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($noProxyParameterName) -or
+                      $PSDefaultParameterValues[$noProxyParameterName] -cne $noProxyDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest no-proxy default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($noProxyParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($noProxyParameterName)) {
+                    throw 'Invoke-WebRequest no-proxy default was not removed'
+                  }
                 }
-              } else {
-                [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
-                if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
-                  throw 'Invoke-WebRequest certificate-check default was not removed'
+              } finally {
+                if ($certificateCheckDefaultWasPresent) {
+                  $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                      $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                    throw 'Invoke-WebRequest certificate-check default was not removed'
+                  }
                 }
               }
             }
@@ -1231,6 +1257,8 @@ jobs:
           $runWorkBefore = $null
           $certificateCheckDefaultWasPresent = $false
           $certificateCheckDefaultOriginalValue = $null
+          $noProxyDefaultWasPresent = $false
+          $noProxyDefaultOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
@@ -1397,6 +1425,14 @@ jobs:
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
             $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+            if (-not $invokeWebRequestCommand.Parameters.ContainsKey('NoProxy')) { throw 'current pwsh Invoke-WebRequest lacks NoProxy' }
+            $noProxyParameterName = 'Invoke-WebRequest:NoProxy'
+            $noProxyDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($noProxyParameterName)
+            $noProxyDefaultOriginalValue = $null
+            if ($noProxyDefaultWasPresent) {
+              $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
+            }
             $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
             $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
             $certificateCheckDefaultOriginalValue = $null
@@ -1405,6 +1441,7 @@ jobs:
             }
             try {
               $PSDefaultParameterValues[$certificateCheckParameterName] = $true
+              $PSDefaultParameterValues[$noProxyParameterName] = $true
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
@@ -1468,16 +1505,31 @@ jobs:
               $installDirectory = $null
               Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
-              if ($certificateCheckDefaultWasPresent) {
-                $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
-                if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
-                    $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
-                  throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+              try {
+                if ($noProxyDefaultWasPresent) {
+                  $PSDefaultParameterValues[$noProxyParameterName] = $noProxyDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($noProxyParameterName) -or
+                      $PSDefaultParameterValues[$noProxyParameterName] -cne $noProxyDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest no-proxy default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($noProxyParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($noProxyParameterName)) {
+                    throw 'Invoke-WebRequest no-proxy default was not removed'
+                  }
                 }
-              } else {
-                [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
-                if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
-                  throw 'Invoke-WebRequest certificate-check default was not removed'
+              } finally {
+                if ($certificateCheckDefaultWasPresent) {
+                  $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                      $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                    throw 'Invoke-WebRequest certificate-check default was not removed'
+                  }
                 }
               }
             }
