@@ -239,8 +239,10 @@
       }
     ],
     "build_flags": {
-      "c": ["-O3", "-ffunction-sections", "-fdata-sections", "-static", "-static-libgcc", "-static-libgomp", "-static-libwinpthread", "-Wl,--gc-sections", "-D_WIN32_WINNT=0x0601"],
-      "fortran": ["-O3", "-fopenmp", "-static", "-static-libgcc", "-static-libgfortran", "-static-libgomp", "-static-libwinpthread"],
+      "c": ["-O3", "-ffunction-sections", "-fdata-sections", "-D_WIN32_WINNT=0x0601"],
+      "fortran": ["-O3", "-fopenmp"],
+      "linker": ["-static", "-static-libgcc", "-Wl,--gc-sections"],
+      "fortran_linker": ["-fopenmp", "-static-libgfortran"],
       "openssl": ["mingw64", "-O3", "no-shared", "no-module", "no-tests", "no-docs", "no-ssl", "no-sock", "no-dgram", "no-http", "no-dso", "no-engine", "no-async", "no-autoload-config", "-static"],
       "fio": ["--build-static", "--target-win-ver=7", "--disable-numa", "--disable-rdma", "--disable-rados", "--disable-rbd", "--disable-gfapi", "--disable-http", "--disable-pmem", "--disable-libzbc", "--disable-xnvme", "--disable-libblkio", "--disable-libnfs", "--disable-dfs", "--disable-tcmalloc", "--disable-native"]
     }

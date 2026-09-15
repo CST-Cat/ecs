@@ -60,6 +60,11 @@ jq -e '
   (any(.windows_toolchain.packages[]; .name == "mingw-w64-ucrt-x86_64-gcc-libs" and (.runtime_components | index("libgomp")) != null)) and
   (any(.windows_toolchain.packages[]; .name == "mingw-w64-ucrt-x86_64-nasm" and .version == "3.02-1")) and
   (any(.windows_toolchain.packages[]; .name == "make" and .version == "4.4.1-3")) and
+  (.windows_toolchain.build_flags.c == ["-O3", "-ffunction-sections", "-fdata-sections", "-D_WIN32_WINNT=0x0601"]) and
+  (.windows_toolchain.build_flags.fortran == ["-O3", "-fopenmp"]) and
+  (.windows_toolchain.build_flags.linker == ["-static", "-static-libgcc", "-Wl,--gc-sections"]) and
+  (.windows_toolchain.build_flags.fortran_linker == ["-fopenmp", "-static-libgfortran"]) and
+  ([.windows_toolchain.build_flags.c[], .windows_toolchain.build_flags.fortran[], .windows_toolchain.build_flags.linker[], .windows_toolchain.build_flags.fortran_linker[]] | all(. != "-static-libgomp" and . != "-static-libwinpthread")) and
   ([.windows_dll_allowlist[]] | length > 0 and all(. | test("^[A-Za-z0-9*_.-]+$"))) and
   (all(.tools[] | select(.repository != null); (.tag | length > 0) and (.commit | test("^[0-9a-f]{40}$")))) and
   ((.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256) as $digests |

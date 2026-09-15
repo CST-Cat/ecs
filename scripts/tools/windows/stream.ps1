@@ -14,10 +14,11 @@ function Build-EcsWindowsStream {
     $streamRevision = "$($Matches['version'])-$($Matches['date'])"
     $flags = @($Context.Toolchain.build_flags.c) + @('-fopenmp', "-DSTREAM_ARRAY_SIZE=$($Context.Stream.array_size)", "-DNTIMES=$($Context.Stream.ntimes)")
     $flagString = $flags -join ' '
+    $linkerFlagString = @($Context.LinkerFlags) -join ' '
     $script = @"
 $($Context.Preamble)
 set -eu
-gcc $flagString $(ConvertTo-EcsBashLiteral $source) -o $(ConvertTo-EcsBashLiteral $output)
+gcc $flagString $linkerFlagString $(ConvertTo-EcsBashLiteral $source) -o $(ConvertTo-EcsBashLiteral $output)
 test -s $(ConvertTo-EcsBashLiteral $output)
 "@
     Invoke-EcsWindowsBash -Context $Context -Script $script

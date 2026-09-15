@@ -18,6 +18,31 @@ function Stop-EcsWindowsBuild {
     throw "build-tools-windows: $Message"
 }
 
+function Invoke-EcsWindowsMsysGpgCleanup {
+    param([Parameter(Mandatory)][string]$MsysRoot)
+
+    $gpgconf = Join-Path $MsysRoot 'usr\bin\gpgconf.exe'
+    $gpgHome = Join-Path $MsysRoot 'etc\pacman.d\gnupg'
+    if (-not (Test-Path -LiteralPath $gpgconf -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $gpgHome -PathType Container)) {
+        return
+    }
+    $previousGpgHome = $env:GNUPGHOME
+    try {
+        $env:GNUPGHOME = $gpgHome
+        & $gpgconf --homedir $gpgHome --kill all 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "locked MSYS2 gpgconf --kill all failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        if ($null -eq $previousGpgHome) {
+            Remove-Item Env:GNUPGHOME -ErrorAction SilentlyContinue
+        } else {
+            $env:GNUPGHOME = $previousGpgHome
+        }
+    }
+}
+
 function Get-EcsJsonFile {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -202,6 +227,23 @@ $toolchain = $lock.windows_toolchain
 if ($null -eq $toolchain -or @($toolchain.packages).Count -lt 1) {
     Stop-EcsWindowsBuild 'Windows toolchain lock is missing'
 }
+$buildFlagsProperty = $toolchain.PSObject.Properties['build_flags']
+if ($null -eq $buildFlagsProperty -or $null -eq $buildFlagsProperty.Value) {
+    Stop-EcsWindowsBuild 'Windows toolchain lock is missing build flag groups'
+}
+$buildFlags = $buildFlagsProperty.Value
+foreach ($flagGroup in @('c', 'fortran', 'linker', 'fortran_linker')) {
+    if ($flagGroup -notin @($buildFlags.PSObject.Properties.Name) -or @($buildFlags.PSObject.Properties[$flagGroup].Value).Count -eq 0) {
+        Stop-EcsWindowsBuild "Windows toolchain lock is missing build flag group: $flagGroup"
+    }
+}
+$allCompilerFlags = @()
+foreach ($flagGroup in @('c', 'fortran', 'linker', 'fortran_linker')) {
+    $allCompilerFlags += @($buildFlags.PSObject.Properties[$flagGroup].Value)
+}
+if (@($allCompilerFlags | Where-Object { $_ -in @('-static-libgomp', '-static-libwinpthread') }).Count -ne 0) {
+    Stop-EcsWindowsBuild 'Windows toolchain lock contains unsupported GCC static runtime flags'
+}
 $distribution = $toolchain.distribution
 $allowlist = @($lock.windows_dll_allowlist)
 if ($allowlist.Count -eq 0) {
@@ -242,6 +284,8 @@ if ($PrintParams) {
         'target_triplet=x86_64-w64-mingw32',
         "base_packages=$($basePackageFacts.Count)",
         "toolchain_packages=$(@($toolchain.packages).Count)",
+        "linker_flags=$(@($buildFlags.linker) -join ' ')",
+        "fortran_linker_flags=$(@($buildFlags.fortran_linker) -join ' ')",
         'smoke_runner=direct',
         'validation_scope=functional',
         'performance_valid=false',
@@ -274,6 +318,8 @@ if (Test-Path -LiteralPath $WorkRoot) {
 }
 New-Item -ItemType Directory -Force -Path $WorkRoot | Out-Null
 
+$msysRoot = $null
+$buildError = $null
 try {
     $sourceRoot = Join-Path $WorkRoot 'sources'
     $downloadRoot = Join-Path $WorkRoot 'downloads'
@@ -392,9 +438,16 @@ $($packageCheckLines -join "`n")
     elseif ([Environment]::ProcessorCount -gt 0) { $jobs = [Environment]::ProcessorCount }
     $epoch = 946684800
     if ($env:SOURCE_DATE_EPOCH -and $env:SOURCE_DATE_EPOCH -match '^[0-9]+$') { $epoch = [int64]$env:SOURCE_DATE_EPOCH }
-    $cFlags = @($toolchain.build_flags.c) -join ' '
-    $fortranFlags = @($toolchain.build_flags.fortran) -join ' '
-    $linkerFlags = '-static -static-libgcc -static-libgomp -static-libwinpthread -Wl,--gc-sections'
+    # Keep link-only options out of C/Fortran compile flags. GCC's -static
+    # selects static libgomp/libwinpthread archives; only libgfortran has a
+    # supported language-specific static-driver option here.
+    $cFlagList = @($buildFlags.c)
+    $fortranFlagList = @($buildFlags.fortran)
+    $linkerFlagList = @($buildFlags.linker)
+    $fortranLinkerFlagList = @($linkerFlagList + @($buildFlags.fortran_linker))
+    $cFlags = $cFlagList -join ' '
+    $fortranFlags = $fortranFlagList -join ' '
+    $linkerFlags = $linkerFlagList -join ' '
     $preamble = @"
 export PATH=$(ConvertTo-EcsBashLiteral $msysContext.UcrtBinPosix):$(ConvertTo-EcsBashLiteral $msysContext.MsysUsrBinPosix)
 export CC=gcc
@@ -472,6 +525,8 @@ nasm -v | sed -n '1p'
         Preamble = $preamble
         CFlags = $cFlags
         FortranFlags = $fortranFlags
+        LinkerFlags = @($linkerFlagList)
+        FortranLinkerFlags = @($fortranLinkerFlagList)
         CompileDate = $compileDate
         BuildFacts = @{}
     }
@@ -487,6 +542,14 @@ nasm -v | sed -n '1p'
     Build-EcsWindowsOpenSSL -Context $context
     Build-EcsWindowsStream -Context $context
     Build-EcsWindowsFio -Context $context
+
+    foreach ($name in $windowToolNames) {
+        if ($name -in @('npb-ep', 'npb-ft')) {
+            $context.BuildFacts[$name]['linker_flags'] = @($fortranLinkerFlagList)
+        } else {
+            $context.BuildFacts[$name]['linker_flags'] = @($linkerFlagList)
+        }
+    }
 
     foreach ($name in $windowToolNames) {
         foreach ($key in $toolchainFacts.Keys) {
@@ -574,8 +637,37 @@ nasm -v | sed -n '1p'
     if ($LASTEXITCODE -ne 0) { Stop-EcsWindowsBuild 'Windows tools gate failed' }
     Write-Output "build-tools-windows: completed real $Target stage at $stage"
 }
+catch {
+    $buildError = $_
+    throw
+}
 finally {
     if (Test-Path -LiteralPath $WorkRoot) {
-        Remove-Item -LiteralPath $WorkRoot -Recurse -Force
+        $gpgCleanupError = $null
+        $removeError = $null
+        if ($null -ne $msysRoot) {
+            try {
+                Invoke-EcsWindowsMsysGpgCleanup -MsysRoot $msysRoot
+            } catch {
+                $gpgCleanupError = $_
+            }
+        }
+        try {
+            Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction Stop
+        } catch {
+            $removeError = $_
+        }
+        if ($null -ne $buildError) {
+            if ($null -ne $gpgCleanupError) {
+                Write-Warning "MSYS2 gpg-agent cleanup failed after the build error: $($gpgCleanupError.Exception.Message)"
+            }
+            if ($null -ne $removeError) {
+                Write-Warning "MSYS2 work directory cleanup failed after the build error: $($removeError.Exception.Message)"
+            }
+        } elseif ($null -ne $gpgCleanupError) {
+            throw $gpgCleanupError
+        } elseif ($null -ne $removeError) {
+            throw $removeError
+        }
     }
 }
