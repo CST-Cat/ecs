@@ -31,6 +31,13 @@ RAND = randi8
 WTIME = wtime.c
 "@
     Set-Content -LiteralPath (Join-Path $sourceRoot 'config\make.def') -Value $makeDefinition -Encoding ascii
+    $prepareScript = @"
+$($Context.Preamble)
+set -eu
+cd $(ConvertTo-EcsBashLiteral $source)
+make -C sys all
+"@
+    Invoke-EcsWindowsBash -Context $Context -Script $prepareScript
     foreach ($benchmark in @('EP', 'FT')) {
         $lower = $benchmark.ToLowerInvariant()
         $params = Join-Path $sourceRoot "$benchmark\npbparams.h"
@@ -45,7 +52,6 @@ WTIME = wtime.c
 $($Context.Preamble)
 set -eu
 cd $(ConvertTo-EcsBashLiteral $source)
-make -C sys all
 make -j$($Context.Jobs) ep CLASS=A
 make -j$($Context.Jobs) ft CLASS=A
 copy_release() {
