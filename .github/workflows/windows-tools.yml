@@ -195,7 +195,7 @@ jobs:
           $corpus = $corpusItem.FullName
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 gate failed' }
+          if (-not $?) { throw 'VERIFY-2022 gate failed' }
           Write-Output 'VERIFY-2022 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
 
       - name: VERIFY-2022 ecs.exe native runtime
@@ -493,7 +493,7 @@ jobs:
           $corpus = $corpusItem.FullName
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 gate failed' }
+          if (-not $?) { throw 'VERIFY-2025 gate failed' }
           Write-Output 'VERIFY-2025 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
 
       - name: VERIFY-2025 ecs.exe native runtime
