@@ -17,14 +17,14 @@ the current `v0.8.3` release.
 
 - 新增 Windows Server 2022+ x64 的 `windows_amd64` 原生发布目标：主程序使用 `ecs_windows_amd64.zip`，匹配的工具 Bundle 使用 `ecs-tools_windows_amd64.zip`；`system` 使用 native Win32 system probes，`latency` 使用 native Win32 ICMP。
 - Windows frozen benchmark set 固定为 zstd、NPB EP、NPB FT、OpenSSL、STREAM 和 fio；fio 的 Windows gate 要求并验证 `windowsaio`。`sysbench`、`iperf3` 与 Ookla 在 Windows unsupported。
-- NextTrace 尚未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。Windows 2022/2025 GitHub Actions real gate 只作为待彩排的发布前验证，未在此声称已通过。
+- NextTrace 尚未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions real gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排；这仍是发布前彩排，不代表正式 Release 已发布或用户已下载验证。
 - 报告与比较标识继续保持 `ecs.report/v1` 与 `ecs.compare/v1`；同一 semantic field 的 Linux/FreeBSD/Windows 来源边界写入 schema 文档，主模块没有新增 Go dependency。工具包从 `bundle-v1.5` 递增为 `bundle-v1.6`，不改变软件版本。
 
 ### English
 
 - Added a native Windows Server 2022+ x64 release target, `windows_amd64`: the main program uses `ecs_windows_amd64.zip`, the matching tools Bundle uses `ecs-tools_windows_amd64.zip`, `system` uses native Win32 system probes, and `latency` uses native Win32 ICMP.
 - The Windows frozen benchmark set is exactly zstd, NPB EP, NPB FT, OpenSSL, STREAM and fio; the Windows fio gate requires and verifies `windowsaio`. `sysbench`, `iperf3` and Ookla are unsupported on Windows.
-- NextTrace has not yet passed an independent genuine Windows network gate, so it is not in the Windows Bundle; Windows `route` and `backtrace` are explicitly unsupported. The Windows 2022/2025 GitHub Actions real gates are release-preparation rehearsals still to run and are not claimed as passed here.
+- NextTrace has not yet passed an independent genuine Windows network gate, so it is not in the Windows Bundle; Windows `route` and `backtrace` are explicitly unsupported. The Windows Server 2022 x64 and Windows Server 2025 x64 GitHub Actions real gates—including native runtime, tool verification, packaged workloads and current ZIP/bootstrap E2E—have passed rehearsal; this remains only a release-preparation rehearsal, not a formal Release publication or user download validation.
 - The report and comparison identifiers remain `ecs.report/v1` and `ecs.compare/v1`; the schema documents the Linux/FreeBSD/Windows source boundary for the same semantic fields, and the main module has no new Go dependency. The tool package increments from `bundle-v1.5` to `bundle-v1.6` without changing the software version.
 
 ## 0.8.3 — 2026-09-14

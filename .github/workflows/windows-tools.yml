@@ -946,8 +946,6 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
-            # Import-Certificate is intentionally not called; the fixture server loads the PFX directly.
-
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
@@ -1040,7 +1038,7 @@ jobs:
             if ($noProxyDefaultWasPresent) {
               $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
             }
-            $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
+            $certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'
             $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
             $certificateCheckDefaultOriginalValue = $null
             if ($certificateCheckDefaultWasPresent) {
@@ -1369,8 +1367,6 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
-            # Import-Certificate is intentionally not called; the fixture server loads the PFX directly.
-
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
@@ -1463,7 +1459,7 @@ jobs:
             if ($noProxyDefaultWasPresent) {
               $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
             }
-            $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
+            $certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'
             $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
             $certificateCheckDefaultOriginalValue = $null
             if ($certificateCheckDefaultWasPresent) {

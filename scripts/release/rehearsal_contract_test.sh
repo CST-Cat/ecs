@@ -24,8 +24,302 @@ assert_contains() {
 assert_absent() {
   local file=$1 needle=$2
   if grep -Fq -- "$needle" "$file"; then
-    die "$file contains forbidden legacy contract: $needle"
+    die "$file contains forbidden contract: $needle"
   fi
+}
+
+assert_absent_regex() {
+  local file=$1 pattern=$2
+  if grep -Eiq -- "$pattern" "$file"; then
+    die "$file contains forbidden contract pattern: $pattern"
+  fi
+}
+
+assert_exact_count() {
+  local file=$1 needle=$2 expected=$3 count
+  count=$(awk -v needle="$needle" 'index($0, needle) { count++ } END { print count + 0 }' "$file")
+  [[ "$count" -eq "$expected" ]] ||
+    die "$file must contain $expected lines with contract $needle, got $count"
+}
+
+get_section_bounds() {
+  local file=$1 start_marker=$2 end_marker=$3
+  local start_line end_line
+
+  start_line=$(awk -v marker="$start_marker" '$0 == marker { print NR; exit }' "$file")
+  [[ -n "$start_line" ]] || die "$file missing contract section start: $start_marker"
+
+  if [[ -n "$end_marker" ]]; then
+    end_line=$(awk -v marker="$end_marker" -v start="$start_line" \
+      'NR > start && $0 == marker { print NR; exit }' "$file")
+    [[ -n "$end_line" ]] || die "$file missing contract section end: $end_marker"
+  else
+    end_line=$(( $(wc -l < "$file") + 1 ))
+  fi
+
+  printf '%s %s\n' "$start_line" "$end_line"
+}
+
+assert_section_contains() {
+  local file=$1 start_marker=$2 end_marker=$3 needle=$4
+  local bounds start_line end_line
+  bounds=$(get_section_bounds "$file" "$start_marker" "$end_marker")
+  read -r start_line end_line <<<"$bounds"
+  awk -v start="$start_line" -v end="$end_line" -v needle="$needle" \
+    'NR > start && NR < end && index($0, needle) { found=1; exit } END { exit !found }' \
+    "$file" || die "$file section $start_marker missing contract: $needle"
+}
+
+assert_section_count() {
+  local file=$1 start_marker=$2 end_marker=$3 needle=$4 expected=$5
+  local bounds start_line end_line count
+  bounds=$(get_section_bounds "$file" "$start_marker" "$end_marker")
+  read -r start_line end_line <<<"$bounds"
+  count=$(awk -v start="$start_line" -v end="$end_line" -v needle="$needle" \
+    'NR > start && NR < end && index($0, needle) { count++ } END { print count + 0 }' \
+    "$file")
+  [[ "$count" -eq "$expected" ]] ||
+    die "$file section $start_marker must contain $expected lines with contract $needle, got $count"
+}
+
+assert_ordered_in_section() {
+  local file=$1 start_marker=$2 end_marker=$3 marker
+  local bounds start_line end_line previous line
+  shift 3
+  bounds=$(get_section_bounds "$file" "$start_marker" "$end_marker")
+  read -r start_line end_line <<<"$bounds"
+  previous=$start_line
+  for marker in "$@"; do
+    line=$(awk -v start="$previous" -v end="$end_line" -v needle="$marker" \
+      'NR > start && NR < end && index($0, needle) { print NR; exit }' "$file")
+    [[ -n "$line" ]] || die "$file section $start_marker missing ordered contract: $marker"
+    previous=$line
+  done
+}
+
+assert_only_exact_line() {
+  local file=$1 needle=$2 expected=$3 violation
+  violation=$(awk -v needle="$needle" -v expected="$expected" '
+    {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      if (index($0, needle) && line != expected) {
+        print NR ":" $0
+        exit
+      }
+    }
+  ' "$file")
+  [[ -z "$violation" ]] || die "$file uses $needle outside its direct contract line: $violation"
+}
+
+assert_no_core_gate_bypass() {
+  local file=$1
+  assert_absent_regex "$file" '^[[:space:]]*(if|continue-on-error|skipped)[[:space:]]*:'
+  assert_absent_regex "$file" '^[[:space:]]*condition[[:space:]]*:'
+  assert_absent_regex "$file" 'skipped'
+  assert_absent_regex "$file" '^[[:space:]]*if[[:space:]]*[(][^[:cntrl:]]*(skip|skipped)'
+  assert_absent_regex "$file" '^[[:space:]]*(skip|skipped)[[:space:]]*[:=]'
+  assert_absent_regex "$file" '^[[:space:]]*\$(skip|skipped)[[:space:]]*='
+  assert_absent_regex "$file" '^[[:space:]]*(exit|return)[[:space:]]+0([[:space:]]|$)'
+  assert_absent "$file" '|| true'
+}
+
+assert_no_sensitive_token_evasion() {
+  local file=$1
+  assert_absent_regex "$file" '\[char\]'
+  assert_absent_regex "$file" '\[byte[[:space:]]*\[\]\]|GetString[[:space:]]*[(][^)]*byte'
+  assert_absent_regex "$file" '(FromBase64String|ToBase64String|Base64)'
+  assert_absent_regex "$file" '(SkipCertificateCheck|CertificateCheck)[^[:cntrl:]]*(Replace|Substring)|(Replace|Substring)[^[:cntrl:]]*(SkipCertificateCheck|CertificateCheck)'
+  assert_absent_regex "$file" '(Skip|CertificateCheck)[^[:cntrl:]]*[+][^[:cntrl:]]*(Skip|CertificateCheck)'
+  assert_absent_regex "$file" '(Skip|CertificateCheck)[^[:cntrl:]]*-[[:space:]]*f|-[[:space:]]*f[^[:cntrl:]]*(Skip|CertificateCheck)'
+  assert_absent_regex "$file" "'Skip'[[:space:]]*[+][[:space:]]*'CertificateCheck"
+  assert_absent_regex "$file" "'S'[[:space:]]*[+][[:space:]]*'kipCertificateCheck"
+  assert_absent_regex "$file" 'part[[:alnum:]_]*[[:space:]]*[+][[:space:]]*part[[:alnum:]_]*'
+  assert_absent_regex "$file" '(SkipCertificateCheck|CertificateCheck)[^[:cntrl:]]*(env:|GetEnvironmentVariable|SetEnvironmentVariable)|(env:|GetEnvironmentVariable|SetEnvironmentVariable)[^[:cntrl:]]*(SkipCertificateCheck|CertificateCheck)'
+  assert_absent_regex "$file" '(Skip|CertificateCheck)[^[:cntrl:]]*(env:|GetEnvironmentVariable|SetEnvironmentVariable)|(env:|GetEnvironmentVariable|SetEnvironmentVariable)[^[:cntrl:]]*(Skip|CertificateCheck)'
+  assert_absent_regex "$file" '^[[:space:]]*#.*(Import-Certificate|SkipCertificateCheck|CertificateCheck|X509Store|certutil)'
+}
+
+assert_e2e_bootstrap_contract() {
+  local start_marker=$1 end_marker=$2
+
+  assert_section_count "$windows" "$start_marker" "$end_marker" 'Assert-ArtifactChecksum -ChecksumFile' 3
+  assert_section_count "$windows" "$start_marker" "$end_marker" 'Invoke-WebRequest:SkipCertificateCheck' 1
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'bootstrap artifact does not identify the current workflow commit'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$mainMembers | Sort-Object'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'main Windows ZIP member set changed'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (-not \$releaseBaseUri.IsAbsoluteUri -or \$releaseBaseUri.Scheme -cne 'https' -or \$releaseBaseUri.Host -cne 'localhost' -or \$releaseBaseUri.Port -ne \$port)"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (-not \$bundleReleaseBaseUri.IsAbsoluteUri -or \$bundleReleaseBaseUri.Scheme -cne 'https' -or \$bundleReleaseBaseUri.Host -cne 'localhost' -or \$bundleReleaseBaseUri.Port -ne \$port)"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "[string]\$requiredTools[0] -cne 'zstd'"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'install.ps1 unexpectedly accepted protected install target'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'protected install did not preserve the expected path rejection'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (\$zstdResults.Count -ne 1 -or [string]\$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if ([string]\$env:ECS_TOOL_BIN -cne \$sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (\$machinePathBaseline -cne \$machinePathAfterRun -or \$userPathBaseline -cne \$userPathAfterRun) { throw 'run.ps1 changed the Machine or User PATH' }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (\$machinePathBaseline -cne \$machinePathAfterInstall -or \$userPathBaseline -cne \$userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (\$machinePathBaseline -cne \$machinePathAfterVersion -or \$userPathBaseline -cne \$userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }"
+
+  assert_ordered_in_section "$windows" "$start_marker" "$end_marker" \
+    '$commitFile = Get-ArtifactFile' \
+    'if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA)' \
+    'bootstrap artifact does not identify the current workflow commit' \
+    '$mainArchive = Get-ArtifactFile' \
+    '$bundleArchive = Get-ArtifactFile' \
+    '$corpusArchive = Get-ArtifactFile' \
+    '$runScript = Get-ArtifactFile' \
+    '$installScript = Get-ArtifactFile' \
+    'Assert-ArtifactChecksum -ChecksumFile $mainChecksums' \
+    'Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive' \
+    'Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive' \
+    '[IO.Compression.ZipFile]::OpenRead' \
+    "\$expectedMainMembers = @('ecs.exe', 'LICENSE', 'NOTICE', 'README.md', 'README_EN.md', 'SECURITY.md', 'THIRD_PARTY.md')" \
+    'if ((@($mainMembers | Sort-Object) -join "`n") -cne (@($expectedMainMembers | Sort-Object) -join "`n"))' \
+    'Expand-Archive -LiteralPath $mainArchive.FullName' \
+    '$planOutput = @(& $ecsPath plan' \
+    '$requiredTools = @($plan.required_tools)' \
+    'only-required-tools plan drifted' \
+    '$certificate = New-SelfSignedCertificate' \
+    '$serverJob = Start-Job -ScriptBlock $serverScript' \
+    '$mainBase = "https://localhost:$port/main"' \
+    '$bundleBase = "https://localhost:$port/bundle"' \
+    '$releaseBaseUri = [Uri]::new' \
+    '$bundleReleaseBaseUri = [Uri]::new' \
+    'ECS_RELEASE_BASE must be the current local HTTPS fixture' \
+    'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture' \
+    '$noProxyDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($noProxyParameterName)' \
+    '$noProxyDefaultOriginalValue = $null' \
+    '$noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]' \
+    "\$certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'" \
+    '$certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)' \
+    '$certificateCheckDefaultOriginalValue = $null' \
+    '$certificateCheckDefaultOriginalValue = $PSDefaultParameterValues[$certificateCheckParameterName]' \
+    'try {' \
+    '$PSDefaultParameterValues[$certificateCheckParameterName] = $true' \
+    'Invoke-WebRequest -UseBasicParsing -Uri "$($env:ECS_RELEASE_BASE)/checksums.txt" -OutFile $probeFile -NoProxy -ErrorAction Stop' \
+    '& $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot' \
+    '$machinePathBaseline -cne $machinePathAfterRun -or $userPathBaseline -cne $userPathAfterRun' \
+    'if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin)' \
+    '$runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json' \
+    '$zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq '\''zstd'\'' })' \
+    'if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq '\''error'\'')' \
+    '$runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter '\''ecs-run-*'\'' | ForEach-Object { $_.FullName })' \
+    'run.ps1 left private staging behind' \
+    '$protectedInstallTargets = @(' \
+    '$protectedInstallSucceeded = $true' \
+    "& \$installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase \$mainBase -InstallDirectory \$protectedInstallTarget" \
+    'protected install target was created' \
+    'protected install created a temporary work directory' \
+    'if ($protectedInstallSucceeded)' \
+    'protected install did not preserve the expected path rejection' \
+    '$localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA)' \
+    '$installDirectory = Join-Path $env:LOCALAPPDATA' \
+    'install E2E path escaped LOCALAPPDATA\ecs' \
+    "& \$installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase \$mainBase -InstallDirectory \$installDirectory" \
+    'install.ps1 failed against the current artifact fixture' \
+    '$machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall' \
+    '$installedEcs = Join-Path $installDirectory '\''ecs.exe'\''' \
+    '$installedVersion = @(& $installedEcs --version 2>&1)' \
+    '$machinePathBaseline -cne $machinePathAfterVersion -or $userPathBaseline -cne $userPathAfterVersion' \
+    'Remove-Item -LiteralPath $installDirectory -Recurse -Force' \
+    '            } finally {' \
+    '$PSDefaultParameterValues[$noProxyParameterName] = $noProxyDefaultOriginalValue' \
+    'Invoke-WebRequest no-proxy default was not restored exactly' \
+    '[void]$PSDefaultParameterValues.Remove($noProxyParameterName)' \
+    'Invoke-WebRequest no-proxy default was not removed' \
+    'if ($certificateCheckDefaultWasPresent)' \
+    '$PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue' \
+    'if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or' \
+    'Invoke-WebRequest certificate-check default was not restored exactly' \
+    '[void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)' \
+    'if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName))' \
+    'Invoke-WebRequest certificate-check default was not removed' \
+    '$cleanupErrors = @()' \
+    'Remove-Job -Job $serverJob' \
+    'fixture directory remains' \
+    '$runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter '\''ecs-run-*'\'' | ForEach-Object { $_.FullName })' \
+    'private staging remains:' \
+    'throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '\''; '\''))'
+}
+
+assert_no_trusted_root_mutation() {
+  local file=$1 pattern
+  local forbidden_patterns=(
+    'CurrentUser\\Root'
+    'LocalMachine\\Root'
+    'Import-Certificate[^[:cntrl:]]*Root'
+    'Root[^[:cntrl:]]*Import-Certificate'
+    'X509Store[[:space:]]*[(][[:space:]]*[^[:alnum:]_]*Root'
+    'X509Store[^[:cntrl:]]*Root'
+    '[.]Open[[:space:]]*[(][^)]*ReadWrite'
+    '[.]Add[[:space:]]*[(][[:space:]]*rootCertificate[[:space:]]*[)]'
+    'certutil[[:space:]]+(-f[[:space:]]+)?-addstore[[:space:]]+Root'
+    'certutil[^[:cntrl:]]+-addstore[^[:cntrl:]]+Root'
+  )
+
+  for pattern in "${forbidden_patterns[@]}"; do
+    assert_absent_regex "$file" "$pattern"
+  done
+}
+
+assert_no_temporary_standard_user_architecture() {
+  local file=$1 pattern
+  local forbidden_patterns=(
+    'New-LocalUser'
+    'Remove-LocalUser'
+    'PSCredential'
+    'Start-Process[^[:cntrl:]]+-Credential'
+    '-LoadUserProfile'
+    'ordinary-child'
+    'ordinary[[:space:]]+user[[:space:]]+fixture'
+    'ordinary[[:space:]-]+child'
+    'ordinary[[:space:]-]+user[[:space:]-]+fixture'
+    'temporary[[:space:]]+user[[:space:]]+(SID|ACL)'
+    'temporary[[:space:]-]+user[[:space:]-]+(SID|ACL)'
+    'temporary[[:space:]-]+(SID|ACL)[[:space:]-]+(permission|access|fixture)'
+    'temporary[[:space:]-]+(SID|ACL)[[:space:]-]+(SID|ACL)'
+    'CommonDocuments'
+    'FileSystemAccessRule'
+    'New-Object[^[:cntrl:]]*(FileSystemAccessRule|NTAccount)'
+    'Set-Acl'
+    'AddAccessRule'
+    'icacls'
+  )
+
+  for pattern in "${forbidden_patterns[@]}"; do
+    assert_absent_regex "$file" "$pattern"
+  done
+}
+
+assert_no_product_tls_bypass() {
+  local file=$1 pattern
+  local forbidden_patterns=(
+    'SkipCertificateCheck'
+    'ServicePointManager'
+    'ServerCertificateValidationCallback'
+    'TrustAll'
+    'AllowInsecure'
+    'NoVerify'
+    'certificate[[:space:]-]+bypass'
+  )
+
+  for pattern in "${forbidden_patterns[@]}"; do
+    assert_absent_regex "$file" "$pattern"
+  done
 }
 
 assert_no_redirected_no_color() {
@@ -63,6 +357,8 @@ windows=.github/workflows/windows-tools.yml
 sdk=.github/workflows/freebsd-sdk-release.yml
 freeze=scripts/release/freeze.sh
 publisher=scripts/release/publish.sh
+run_ps1=run.ps1
+install_ps1=install.ps1
 
 # ECS：正式发布必须同时是 push 与 v* tag；dispatch 不论选 branch 还是 tag 都是彩排。
 assert_contains "$release" "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
@@ -159,18 +455,50 @@ assert_contains "$windows" "CURRENT_COMMIT"
 assert_contains "$windows" "run.ps1"
 assert_contains "$windows" "install.ps1"
 assert_contains "$windows" "New-SelfSignedCertificate"
-assert_contains "$windows" "Import-Certificate"
 assert_contains "$windows" "SslStream"
 assert_contains "$windows" "ECS_RELEASE_BASE"
 assert_contains "$windows" "ECS_BUNDLE_RELEASE_BASE"
 assert_contains "$windows" "ECS_TOOL_BIN"
 assert_contains "$windows" "LOCALAPPDATA"
 assert_contains "$windows" "actions/download-artifact"
-assert_absent "$windows" "SkipCertificateCheck"
+assert_no_trusted_root_mutation "$windows"
+assert_no_temporary_standard_user_architecture "$windows"
+assert_no_core_gate_bypass "$windows"
+assert_no_sensitive_token_evasion "$windows"
+assert_exact_count "$windows" "Invoke-WebRequest:SkipCertificateCheck" 2
+assert_only_exact_line "$windows" "Invoke-WebRequest:SkipCertificateCheck" \
+  "\$certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'"
+[[ -f "$run_ps1" ]] || die "$run_ps1 is missing"
+[[ -f "$install_ps1" ]] || die "$install_ps1 is missing"
+assert_no_product_tls_bypass "$run_ps1"
+assert_no_product_tls_bypass "$install_ps1"
+
+assert_ordered_in_section "$windows" \
+  "      - name: E2E-2022 packaged bundle workloads" \
+  "      - name: E2E-2022 current ZIP and bootstrap scripts" \
+  'Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force' \
+  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe'))" \
+  'scripts/ci/windows_tools_gate.ps1 -StageRoot $stage' \
+  "if (-not \$?) { throw 'E2E-2022 packaged workload gate failed' }" \
+  'E2E-2022 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+assert_ordered_in_section "$windows" \
+  "      - name: E2E-2025 packaged bundle workloads" \
+  "      - name: E2E-2025 current ZIP and bootstrap scripts" \
+  'Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force' \
+  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe'))" \
+  'scripts/ci/windows_tools_gate.ps1 -StageRoot $stage' \
+  "if (-not \$?) { throw 'E2E-2025 packaged workload gate failed' }" \
+  'E2E-2025 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+assert_e2e_bootstrap_contract \
+  "      - name: E2E-2022 current ZIP and bootstrap scripts" \
+  '  e2e-2025:'
+assert_e2e_bootstrap_contract \
+  "      - name: E2E-2025 current ZIP and bootstrap scripts" \
+  ''
 assert_absent "$windows" "releases/download"
 assert_absent "$windows" "releases/latest/download"
 assert_absent "$windows" ")[0].FullName"
-for forbidden in 'WSL' 'Cygwin' 'winget' 'choco' 'ping\.exe' 'skip' 'continue-on-error' 'host PATH'; do
+for forbidden in 'WSL' 'Cygwin' 'winget' 'choco' 'ping\.exe' 'host PATH'; do
   if grep -Eiq -- "$forbidden" "$windows"; then
     die "$windows contains forbidden Windows CI contract: $forbidden"
   fi

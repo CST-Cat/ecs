@@ -270,7 +270,7 @@ ecs --config ecs.json
 
 Windows 的发布目标是 Windows Server 2022 或更高版本的 x64，内部目标名为 `windows_amd64`。主程序资产是 `ecs_windows_amd64.zip`，匹配的工具 Bundle 资产是 `ecs-tools_windows_amd64.zip`；`install.ps1` 与 `run.ps1` 按对应的 `checksums.txt` 校验 ZIP。Windows `system` 使用 native Win32 system probes，`latency` 使用 native Win32 ICMP，不依赖或打包 `ping.exe`。
 
-Windows frozen benchmark set 只有 `zstd`、NPB EP、NPB FT、OpenSSL、STREAM 和 `fio`；fio 的 Windows gate 要求并验证 `windowsaio`。`sysbench`、`iperf3` 和 Ookla 在 Windows unsupported。NextTrace 目前未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。GitHub Actions 的 Windows 2022/2025 real gate 是发布前准备验证，不在本地文档中视为已通过。
+Windows frozen benchmark set 只有 `zstd`、NPB EP、NPB FT、OpenSSL、STREAM 和 `fio`；fio 的 Windows gate 要求并验证 `windowsaio`。`sysbench`、`iperf3` 和 Ookla 在 Windows unsupported。NextTrace 目前未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions real gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排；这仍是发布前彩排，不代表正式 Release 已发布或用户已下载验证。
 
 项目正式支持 Linux、FreeBSD 与 Windows Server 2022+ x64。Linux 发布架构为 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`；FreeBSD 发布架构为 `amd64`、`arm64`；Windows 发布架构为 `amd64`（`windows_amd64`）。原生探针不需要 root。
 
