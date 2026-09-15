@@ -649,7 +649,7 @@ try {
     Assert-EcsProcessSucceeded -Result $opensslVersionRun -Description 'OpenSSL version'
     Assert-EcsText -Text ($opensslVersionRun.Stdout + $opensslVersionRun.Stderr) -Pattern "^OpenSSL $([regex]::Escape($opensslVersion))([\s]|$)" -Description 'OpenSSL locked version'
     foreach ($algorithm in @('aes-256-gcm', 'chacha20-poly1305', 'sha256')) {
-        $arguments = @('speed', '-elapsed', '-seconds', '1', '-bytes', '16384', '-mr', '-multi', '1', '-evp', $algorithm)
+        $arguments = @('speed', '-elapsed', '-seconds', '1', '-bytes', '16384', '-mr', '-evp', $algorithm)
         if ($algorithm -ne 'sha256') { $arguments += '-aead' }
         $speed = Invoke-EcsWindowsProcess -FilePath $openssl -ArgumentList $arguments -WorkingDirectory $gateWork -Environment $opensslEnvironment -Timeout $TimeoutSeconds
         Assert-EcsProcessSucceeded -Result $speed -Description "OpenSSL speed $algorithm"
