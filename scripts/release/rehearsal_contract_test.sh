@@ -37,7 +37,7 @@ assert_absent_regex() {
 
 assert_exact_count() {
   local file=$1 needle=$2 expected=$3 count
-  count=$(awk -v needle="$needle" 'index($0, needle) { count++ } END { print count + 0 }' "$file")
+  count=$(AWK_NEEDLE="$needle" awk 'index($0, ENVIRON["AWK_NEEDLE"]) { count++ } END { print count + 0 }' "$file")
   [[ "$count" -eq "$expected" ]] ||
     die "$file must contain $expected lines with contract $needle, got $count"
 }
@@ -46,12 +46,12 @@ get_section_bounds() {
   local file=$1 start_marker=$2 end_marker=$3
   local start_line end_line
 
-  start_line=$(awk -v marker="$start_marker" '$0 == marker { print NR; exit }' "$file")
+  start_line=$(AWK_MARKER="$start_marker" awk '$0 == ENVIRON["AWK_MARKER"] { print NR; exit }' "$file")
   [[ -n "$start_line" ]] || die "$file missing contract section start: $start_marker"
 
   if [[ -n "$end_marker" ]]; then
-    end_line=$(awk -v marker="$end_marker" -v start="$start_line" \
-      'NR > start && $0 == marker { print NR; exit }' "$file")
+    end_line=$(AWK_MARKER="$end_marker" awk -v start="$start_line" \
+      'NR > start && $0 == ENVIRON["AWK_MARKER"] { print NR; exit }' "$file")
     [[ -n "$end_line" ]] || die "$file missing contract section end: $end_marker"
   else
     end_line=$(( $(wc -l < "$file") + 1 ))
@@ -65,8 +65,8 @@ assert_section_contains() {
   local bounds start_line end_line
   bounds=$(get_section_bounds "$file" "$start_marker" "$end_marker")
   read -r start_line end_line <<<"$bounds"
-  awk -v start="$start_line" -v end="$end_line" -v needle="$needle" \
-    'NR > start && NR < end && index($0, needle) { found=1; exit } END { exit !found }' \
+  AWK_NEEDLE="$needle" awk -v start="$start_line" -v end="$end_line" \
+    'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { found=1; exit } END { exit !found }' \
     "$file" || die "$file section $start_marker missing contract: $needle"
 }
 
@@ -75,8 +75,8 @@ assert_section_count() {
   local bounds start_line end_line count
   bounds=$(get_section_bounds "$file" "$start_marker" "$end_marker")
   read -r start_line end_line <<<"$bounds"
-  count=$(awk -v start="$start_line" -v end="$end_line" -v needle="$needle" \
-    'NR > start && NR < end && index($0, needle) { count++ } END { print count + 0 }' \
+  count=$(AWK_NEEDLE="$needle" awk -v start="$start_line" -v end="$end_line" \
+    'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { count++ } END { print count + 0 }' \
     "$file")
   [[ "$count" -eq "$expected" ]] ||
     die "$file section $start_marker must contain $expected lines with contract $needle, got $count"
@@ -90,8 +90,8 @@ assert_ordered_in_section() {
   read -r start_line end_line <<<"$bounds"
   previous=$start_line
   for marker in "$@"; do
-    line=$(awk -v start="$previous" -v end="$end_line" -v needle="$marker" \
-      'NR > start && NR < end && index($0, needle) { print NR; exit }' "$file")
+    line=$(AWK_NEEDLE="$marker" awk -v start="$previous" -v end="$end_line" \
+      'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { print NR; exit }' "$file")
     [[ -n "$line" ]] || die "$file section $start_marker missing ordered contract: $marker"
     previous=$line
   done
@@ -99,11 +99,11 @@ assert_ordered_in_section() {
 
 assert_only_exact_line() {
   local file=$1 needle=$2 expected=$3 violation
-  violation=$(awk -v needle="$needle" -v expected="$expected" '
+  violation=$(AWK_NEEDLE="$needle" AWK_EXPECTED="$expected" awk '
     {
       line=$0
       sub(/^[[:space:]]*/, "", line)
-      if (index($0, needle) && line != expected) {
+      if (index($0, ENVIRON["AWK_NEEDLE"]) && line != ENVIRON["AWK_EXPECTED"]) {
         print NR ":" $0
         exit
       }
