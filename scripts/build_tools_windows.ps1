@@ -165,7 +165,7 @@ function New-EcsManifestTool {
         [Parameter(Mandatory)][System.Collections.IDictionary]$Fact,
         [Parameter(Mandatory)][string]$BinaryPath,
         [Parameter(Mandatory)][string[]]$EnabledFeatures,
-        [Parameter(Mandatory)][string[]]$DisabledFeatures,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$DisabledFeatures,
         [Parameter(Mandatory)][string]$License,
         [Parameter(Mandatory)][string[]]$DependencyAllowlist,
         [Parameter(Mandatory)][System.Collections.IDictionary]$PeFacts
