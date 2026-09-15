@@ -64,37 +64,39 @@ function Wait-EcsWindowsMsysGpgAgentExit {
 function Invoke-EcsWindowsMsysGpgCleanup {
     param([Parameter(Mandatory)][string]$MsysRoot)
 
+    $bash = Join-Path $MsysRoot 'usr\bin\bash.exe'
     $gpgconf = Join-Path $MsysRoot 'usr\bin\gpgconf.exe'
     $gpgConnectAgent = Join-Path $MsysRoot 'usr\bin\gpg-connect-agent.exe'
     $gpgHome = Join-Path $MsysRoot 'etc\pacman.d\gnupg'
-    if (-not (Test-Path -LiteralPath $gpgconf -PathType Leaf) -or
+    if (-not (Test-Path -LiteralPath $bash -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $gpgconf -PathType Leaf) -or
         -not (Test-Path -LiteralPath $gpgHome -PathType Container)) {
         return
     }
     if (-not (Test-Path -LiteralPath $gpgConnectAgent -PathType Leaf)) {
         throw "locked MSYS2 base is missing gpg-connect-agent.exe: $gpgConnectAgent"
     }
-    $previousGpgHome = $env:GNUPGHOME
-    try {
-        $env:GNUPGHOME = $gpgHome
-        & $gpgconf --homedir $gpgHome --kill all 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "locked MSYS2 gpgconf --kill all failed with exit code $LASTEXITCODE"
-        }
-        # KILLAGENT is an Assuan shutdown request; --no-autostart keeps this
-        # cleanup from creating a new agent when gpgconf already stopped it.
-        & $gpgConnectAgent --no-autostart --homedir $gpgHome 'KILLAGENT' '/bye' 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "locked MSYS2 gpg-connect-agent KILLAGENT failed with exit code $LASTEXITCODE"
-        }
-        Wait-EcsWindowsMsysGpgAgentExit -MsysRoot $MsysRoot
-    } finally {
-        if ($null -eq $previousGpgHome) {
-            Remove-Item Env:GNUPGHOME -ErrorAction SilentlyContinue
-        } else {
-            $env:GNUPGHOME = $previousGpgHome
-        }
-    }
+    $msysUsrBinPosix = ConvertTo-EcsMsysPath (Join-Path $MsysRoot 'usr\bin')
+    $cleanupContext = [pscustomobject]@{ Bash = $bash }
+    # pacman-key uses /etc/pacman.d/gnupg, while gpgconf otherwise defaults to
+    # ~/.gnupg. Keep shutdown in the same locked MSYS2 Bash context as the
+    # transaction so POSIX home and socket resolution address that agent.
+    $cleanupScript = @'
+export PATH=__MSYS_USR_BIN__
+set -eu
+gpgHome=/etc/pacman.d/gnupg
+agentSocket=$(gpgconf --homedir "$gpgHome" --list-dir agent-socket)
+if test -n "$agentSocket"; then
+    if ! gpg-connect-agent --no-autostart --raw-socket "$agentSocket" KILLAGENT /bye; then
+        printf '%s\n' 'MSYS2 gpg-connect-agent raw socket shutdown did not complete; using homedir shutdown' >&2
+    fi
+fi
+gpgconf --homedir "$gpgHome" --kill all
+gpg-connect-agent --no-autostart --homedir "$gpgHome" KILLAGENT /bye
+'@
+    $cleanupScript = $cleanupScript.Replace('__MSYS_USR_BIN__', (ConvertTo-EcsBashLiteral $msysUsrBinPosix))
+    Invoke-EcsWindowsBash -Context $cleanupContext -Script $cleanupScript
+    Wait-EcsWindowsMsysGpgAgentExit -MsysRoot $MsysRoot
 }
 
 function Remove-EcsWindowsWorkRoot {
@@ -498,7 +500,8 @@ set -eu
 # involved.
 pacman-key --init
 pacman-key --populate msys2
-gpgconf --kill all
+# pacman-key uses this keyring home; do not let gpgconf default to ~/.gnupg.
+gpgconf --homedir /etc/pacman.d/gnupg --kill all
 $(($basePackageCheckLines -join "`n"))
 pacman -U --noconfirm $($packageInstallArgs -join ' ')
 "@
