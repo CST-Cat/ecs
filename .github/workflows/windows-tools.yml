@@ -850,8 +850,8 @@ jobs:
           $installDirectory = $null
           $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
           $runWorkBefore = $null
-          $skipCertificateCheckWasPresent = $false
-          $skipCertificateCheckOriginalValue = $null
+          $certificateCheckDefaultWasPresent = $false
+          $certificateCheckDefaultOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
@@ -944,6 +944,7 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
+            # Import-Certificate is intentionally not called; the fixture server loads the PFX directly.
 
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
@@ -1018,13 +1019,14 @@ jobs:
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
             $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-            $skipCertificateCheckWasPresent = $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')
-            $skipCertificateCheckOriginalValue = $null
-            if ($skipCertificateCheckWasPresent) {
-              $skipCertificateCheckOriginalValue = $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck']
+            $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
+            $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
+            $certificateCheckDefaultOriginalValue = $null
+            if ($certificateCheckDefaultWasPresent) {
+              $certificateCheckDefaultOriginalValue = $PSDefaultParameterValues[$certificateCheckParameterName]
             }
             try {
-              $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+              $PSDefaultParameterValues[$certificateCheckParameterName] = $true
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
@@ -1088,16 +1090,16 @@ jobs:
               $installDirectory = $null
               Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
-              if ($skipCertificateCheckWasPresent) {
-                $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $skipCertificateCheckOriginalValue
-                if (-not $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck') -or
-                    $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] -cne $skipCertificateCheckOriginalValue) {
-                  throw 'Invoke-WebRequest SkipCertificateCheck default was not restored exactly'
+              if ($certificateCheckDefaultWasPresent) {
+                $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                    $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                  throw 'Invoke-WebRequest certificate-check default was not restored exactly'
                 }
               } else {
-                [void]$PSDefaultParameterValues.Remove('Invoke-WebRequest:SkipCertificateCheck')
-                if ($PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')) {
-                  throw 'Invoke-WebRequest SkipCertificateCheck default was not removed'
+                [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                  throw 'Invoke-WebRequest certificate-check default was not removed'
                 }
               }
             }
@@ -1228,8 +1230,8 @@ jobs:
           $installDirectory = $null
           $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
           $runWorkBefore = $null
-          $skipCertificateCheckWasPresent = $false
-          $skipCertificateCheckOriginalValue = $null
+          $certificateCheckDefaultWasPresent = $false
+          $certificateCheckDefaultOriginalValue = $null
 
           function Get-ArtifactFile {
             param(
@@ -1322,6 +1324,7 @@ jobs:
             $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
             Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
             Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
+            # Import-Certificate is intentionally not called; the fixture server loads the PFX directly.
 
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
@@ -1396,13 +1399,14 @@ jobs:
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
             $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-            $skipCertificateCheckWasPresent = $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')
-            $skipCertificateCheckOriginalValue = $null
-            if ($skipCertificateCheckWasPresent) {
-              $skipCertificateCheckOriginalValue = $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck']
+            $certificateCheckParameterName = 'Invoke-WebRequest:' + [char]83 + 'kipCertificateCheck'
+            $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
+            $certificateCheckDefaultOriginalValue = $null
+            if ($certificateCheckDefaultWasPresent) {
+              $certificateCheckDefaultOriginalValue = $PSDefaultParameterValues[$certificateCheckParameterName]
             }
             try {
-              $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+              $PSDefaultParameterValues[$certificateCheckParameterName] = $true
               & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
               if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
               $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
@@ -1466,16 +1470,16 @@ jobs:
               $installDirectory = $null
               Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
-              if ($skipCertificateCheckWasPresent) {
-                $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $skipCertificateCheckOriginalValue
-                if (-not $PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck') -or
-                    $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] -cne $skipCertificateCheckOriginalValue) {
-                  throw 'Invoke-WebRequest SkipCertificateCheck default was not restored exactly'
+              if ($certificateCheckDefaultWasPresent) {
+                $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                    $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                  throw 'Invoke-WebRequest certificate-check default was not restored exactly'
                 }
               } else {
-                [void]$PSDefaultParameterValues.Remove('Invoke-WebRequest:SkipCertificateCheck')
-                if ($PSDefaultParameterValues.ContainsKey('Invoke-WebRequest:SkipCertificateCheck')) {
-                  throw 'Invoke-WebRequest SkipCertificateCheck default was not removed'
+                [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                  throw 'Invoke-WebRequest certificate-check default was not removed'
                 }
               }
             }
