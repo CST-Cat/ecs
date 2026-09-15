@@ -951,7 +951,7 @@ jobs:
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
-              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
@@ -1374,7 +1374,7 @@ jobs:
             $serverScript = {
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
-              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
               $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
               $listener.Start()
               $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
