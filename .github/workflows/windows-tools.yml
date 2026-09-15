@@ -994,7 +994,7 @@ jobs:
             $readyLine = $null
             for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
               if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
-              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1)
+              $readyLine = Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
@@ -1417,7 +1417,7 @@ jobs:
             $readyLine = $null
             for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
               if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
-              $readyLine = @(Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1)
+              $readyLine = Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1
               if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
             }
             if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
