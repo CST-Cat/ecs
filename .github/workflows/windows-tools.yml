@@ -69,10 +69,10 @@ jobs:
           if (@($lock.windows_dll_allowlist).Count -eq 0) { throw 'Windows DLL allowlist is empty' }
 
           & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-          if ($LASTEXITCODE -ne 0) { throw 'ordinary-user execution evidence failed' }
+          if (-not $?) { throw 'ordinary-user execution evidence failed' }
 
-          $params = @(& ./scripts/build_tools_windows.ps1 -Target windows_amd64 -PrintParams)
-          if ($LASTEXITCODE -ne 0) { throw 'Windows builder lock/check failed' }
+          $params = & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -PrintParams
+          if (-not $?) { throw 'Windows builder lock/check failed' }
           $paramsText = $params -join "`n"
           foreach ($marker in @('target=windows_amd64', 'toolchain_mode=native', 'smoke_runner=direct', 'validation_scope=functional', 'performance_valid=false', 'nexttrace=unsupported')) {
             if ($paramsText -notmatch [regex]::Escape($marker)) { throw "builder parameters missing $marker" }
@@ -100,7 +100,7 @@ jobs:
           Set-StrictMode -Version Latest
           New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage' | Out-Null
           & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -StageRoot (Join-Path $PWD '.ci/windows-tools-stage')
-          if ($LASTEXITCODE -ne 0) { throw 'native Windows tools builder failed' }
+          if (-not $?) { throw 'native Windows tools builder failed' }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -826,7 +826,7 @@ jobs:
           $corpus = $corpusItem.FullName
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-          if ($LASTEXITCODE -ne 0) { throw 'E2E-2022 packaged workload gate failed' }
+          if (-not $?) { throw 'E2E-2022 packaged workload gate failed' }
           Write-Output 'E2E-2022 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
 
       - name: E2E-2022 current ZIP and bootstrap scripts
@@ -998,7 +998,7 @@ jobs:
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
-            if ($LASTEXITCODE -ne 0) { throw 'run.ps1 failed against the current artifact fixture' }
+            if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
             if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
             $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
             $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
@@ -1012,7 +1012,7 @@ jobs:
             $installFull = [IO.Path]::GetFullPath($installDirectory)
             if (-not $installFull.StartsWith($localAppDataFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA' }
             & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
-            if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed against the current artifact fixture' }
+            if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
             $installedEcs = Join-Path $installDirectory 'ecs.exe'
             if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
             $installedVersion = @(& $installedEcs --version 2>&1)
@@ -1081,7 +1081,7 @@ jobs:
           $corpus = $corpusItem.FullName
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-          if ($LASTEXITCODE -ne 0) { throw 'E2E-2025 packaged workload gate failed' }
+          if (-not $?) { throw 'E2E-2025 packaged workload gate failed' }
           Write-Output 'E2E-2025 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
 
       - name: E2E-2025 current ZIP and bootstrap scripts
@@ -1253,7 +1253,7 @@ jobs:
             $env:ECS_VERSION = 'phase8-current'
             $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
             & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
-            if ($LASTEXITCODE -ne 0) { throw 'run.ps1 failed against the current artifact fixture' }
+            if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
             if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
             $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
             $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
@@ -1267,7 +1267,7 @@ jobs:
             $installFull = [IO.Path]::GetFullPath($installDirectory)
             if (-not $installFull.StartsWith($localAppDataFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA' }
             & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
-            if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed against the current artifact fixture' }
+            if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
             $installedEcs = Join-Path $installDirectory 'ecs.exe'
             if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
             $installedVersion = @(& $installedEcs --version 2>&1)

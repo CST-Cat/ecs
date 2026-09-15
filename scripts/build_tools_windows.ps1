@@ -676,7 +676,7 @@ $($objdumpCommand) --version | sed -n '1p'
     $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 
     & (Join-Path $RepoRoot 'scripts\ci\windows_tools_gate.ps1') -StageRoot $stage -ManifestPath $manifestPath -LockPath (Join-Path $RepoRoot 'tools\lock.json') -CorpusPath $corpusPath -ObjdumpPath $objdumpPath
-    if ($LASTEXITCODE -ne 0) { Stop-EcsWindowsBuild 'Windows tools gate failed' }
+    if (-not $?) { Stop-EcsWindowsBuild 'Windows tools gate failed' }
     Write-Output "build-tools-windows: completed real $Target stage at $stage"
 }
 catch {
