@@ -43,6 +43,25 @@ function Invoke-EcsWindowsMsysGpgCleanup {
     }
 }
 
+function Remove-EcsWindowsWorkRoot {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $attempts = 20
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            $lastError = $_
+            if ($attempt -lt $attempts) {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+    }
+    throw "MSYS2 work directory cleanup failed after $attempts attempts: $($lastError.Exception.Message)"
+}
+
 function Get-EcsJsonFile {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -676,7 +695,7 @@ finally {
             }
         }
         try {
-            Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction Stop
+            Remove-EcsWindowsWorkRoot -Path $WorkRoot
         } catch {
             $removeError = $_
         }
