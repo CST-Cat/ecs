@@ -950,8 +950,7 @@ jobs:
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Any, 0)
-              $listener.Server.DualMode = $true
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
               Write-Output ("READY:" + $listener.LocalEndpoint.Port)
               try {
@@ -1330,8 +1329,7 @@ jobs:
               param([string]$Root, [string]$PfxPath, [string]$Password)
               $ErrorActionPreference = 'Stop'
               $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
-              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Any, 0)
-              $listener.Server.DualMode = $true
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
               $listener.Start()
               Write-Output ("READY:" + $listener.LocalEndpoint.Port)
               try {
