@@ -18,7 +18,7 @@ set -eu
 cd $(ConvertTo-EcsBashLiteral $source)
 perl ./Configure $flagString
 make -j$($Context.Jobs) build_generated
-make -j$($Context.Jobs) apps/openssl
+make -j$($Context.Jobs) apps/openssl.exe
 cp apps/openssl.exe $(ConvertTo-EcsBashLiteral $output)
 test -s $(ConvertTo-EcsBashLiteral $output)
 "@
