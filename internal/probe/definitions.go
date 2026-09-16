@@ -86,7 +86,7 @@ func BuiltinDefinitions() []Definition {
 			[]string{"nexttrace-tiny"}, 30*time.Second, "routing", "wizard.askRouting"), Probe: backtraceProbe{}},
 	}
 
-	return definitions
+	return applyPlatformDefinitions(definitions)
 }
 
 // CatalogFromDefinitions validates a definition set and derives its immutable

@@ -25,6 +25,7 @@ type Terminal struct {
 	palette          termcolor.Palette
 	tty              bool
 	progressTTY      bool
+	staticProgress   bool
 	progressInterval time.Duration
 	progressWidth    int
 }
@@ -52,11 +53,15 @@ func New(out io.Writer, noColor bool) *Terminal {
 // 到调色板，无色时都只剩文本。
 func NewWithColor(out io.Writer, level termcolor.Level) *Terminal {
 	tty := isTerminal(out)
+	liveCapability := terminalSupportsLiveProgress(out)
+	progressAllowed := progressTTYFromEnvironment(tty)
+	staticAllowed := progressStaticFromEnvironment(tty)
 	return &Terminal{
 		out:              out,
 		palette:          termcolor.Palette{Level: level},
 		tty:              tty,
-		progressTTY:      progressTTYFromEnvironment(tty),
+		progressTTY:      progressAllowed && liveCapability,
+		staticProgress:   tty && staticAllowed && !liveCapability,
 		progressInterval: time.Second,
 	}
 }
@@ -76,15 +81,17 @@ type ProgressView struct {
 	doneCount  int
 	closed     bool
 	live       bool
+	static     bool
 	liveLine   bool
 	liveWidth  int
 	stopTicker chan struct{}
 	tickerDone chan struct{}
 }
 
-// BeginProgress starts the run-level progress state. A real TTY gets one live
-// line refreshed by a timer; redirected and collected output stays silent
-// unless a module fails.
+// BeginProgress starts the run-level progress state. A VT-capable real TTY gets
+// one live line refreshed by a timer; a real TTY without live capability gets
+// newline-delimited static progress; redirected and collected output stays
+// silent unless a module fails.
 func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 	view := &ProgressView{
 		terminal: terminal,
@@ -93,7 +100,13 @@ func (terminal *Terminal) BeginProgress(total int) *ProgressView {
 		done:     make(map[int]struct{}),
 		running:  make(map[int]string),
 	}
-	if terminal != nil && terminal.tty && terminal.progressTTY && total > 0 {
+	if terminal != nil && terminal.tty && total > 0 {
+		if terminal.staticProgress {
+			view.static = true
+		}
+		if !terminal.progressTTY {
+			return view
+		}
 		view.live = true
 		view.stopTicker = make(chan struct{})
 		view.tickerDone = make(chan struct{})
@@ -154,7 +167,11 @@ func (view *ProgressView) Update(event runner.Progress) {
 			return
 		}
 		view.running[index] = event.Title
-		view.renderLiveLocked()
+		if view.live {
+			view.renderLiveLocked()
+		} else if view.static {
+			view.renderStaticLocked()
+		}
 	case runner.PhaseDone:
 		_, alreadyDone := view.done[index]
 		if alreadyDone {
@@ -170,8 +187,10 @@ func (view *ProgressView) Update(event runner.Progress) {
 		if event.Result.Status == model.StatusError {
 			view.renderErrorLocked(event.Title)
 		}
-		if len(view.running) > 0 {
+		if view.live && len(view.running) > 0 {
 			view.renderLiveLocked()
+		} else if view.static {
+			view.renderStaticLocked()
 		}
 	default:
 		return
@@ -212,6 +231,20 @@ func (view *ProgressView) renderErrorLocked(title string) {
 	elapsed := formatElapsed(time.Since(view.started))
 	line := view.formatLineLocked(elapsed, state)
 	fmt.Fprintln(view.terminal.out, line)
+}
+
+func (view *ProgressView) renderStaticLocked() {
+	if !view.static || view.closed || view.total <= 0 {
+		return
+	}
+	if len(view.running) == 0 && view.doneCount < view.total {
+		return
+	}
+	state := view.stateLocked()
+	line := view.formatLineLocked(formatElapsed(time.Since(view.started)), state)
+	if line != "" {
+		fmt.Fprintln(view.terminal.out, line)
+	}
 }
 
 func (view *ProgressView) renderLiveLocked() {
@@ -512,6 +545,34 @@ func progressTTYFromEnvironment(stdoutTTY bool) bool {
 		strings.TrimSpace(os.Getenv("CI")) != "",
 		os.Getenv("ECS_PROGRESS_MODE"),
 	)
+}
+
+// progressStaticFromEnvironment keeps a real console useful when it cannot
+// interpret VT cursor sequences. Unlike live progress, a native Windows
+// console does not need TERM to opt into newline-delimited status lines.
+func progressStaticFromEnvironment(stdoutTTY bool) bool {
+	return progressStaticAllowed(
+		stdoutTTY,
+		os.Getenv("TERM"),
+		strings.TrimSpace(os.Getenv("CI")) != "",
+		os.Getenv("ECS_PROGRESS_MODE"),
+	)
+}
+
+func progressStaticAllowed(stdoutTTY bool, term string, ci bool, mode string) bool {
+	if !stdoutTTY || ci {
+		return false
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "plain" || mode == "off" || mode == "disabled" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(term)) {
+	case "dumb", "unknown":
+		return false
+	default:
+		return true
+	}
 }
 
 func progressTTYAllowed(stdoutTTY bool, term string, ci bool, mode string) bool {

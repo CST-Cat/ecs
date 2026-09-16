@@ -193,13 +193,13 @@ fi
 assets=(checksums.txt)
 case "$kind" in
   ecs)
-    for target in "${ECS_TARGET_IDS[@]}"; do
-      assets+=("ecs_${target}.tar.gz")
+    for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+      assets+=("$(ecs_target_asset_name "$target" main)")
     done
     ;;
   bundle)
-    for target in "${ECS_TARGET_IDS[@]}"; do
-      assets+=("ecs-tools_${target}.tar.gz")
+    for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+      assets+=("$(ecs_target_asset_name "$target" tools)")
     done
     assets+=("$ECS_CORPUS_ARCHIVE")
     ;;
@@ -207,9 +207,24 @@ esac
 
 uploads=()
 for asset in "${assets[@]}"; do
-  [[ -s "$dist/$asset" ]] || die "缺少发布资产 $asset"
+  [[ -f "$dist/$asset" && ! -L "$dist/$asset" && -s "$dist/$asset" ]] || die "缺少或非法发布资产 $asset"
   uploads+=("$dist/$asset")
 done
+
+# Do not silently publish a stale or unknown target alongside the canonical
+# release set. verify.sh performs the same target gate while inspecting the ECS
+# binaries; publish keeps its own zero-remote-side-effect check complete.
+while IFS= read -r candidate; do
+  candidate=$(basename "$candidate")
+  expected=0
+  for asset in "${assets[@]}"; do
+    [[ "$candidate" == "$asset" ]] || continue
+    expected=1
+    break
+  done
+  [[ "$expected" -eq 1 ]] || die "多余发布资产 $candidate"
+done < <(find "$dist" -maxdepth 1 \( -type f -o -type l \) \
+  \( -name 'ecs_*.tar.gz' -o -name 'ecs_*.zip' -o -name 'ecs-tools_*' -o -name "$ECS_CORPUS_ARCHIVE" \) -print)
 
 # 远端零副作用边界：到这里已经完成正式发布前能够本地确定性验证的全部内容。
 # check-only 必须在 command -v gh 和任何 gh 子命令之前返回。

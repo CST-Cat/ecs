@@ -1,6 +1,6 @@
 # ecs
 
-An ad-free, local-first Linux and FreeBSD VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, Markdown and HTML reports locally.
+An ad-free, local-first Linux, FreeBSD and Windows Server 2022+ x64 VPS benchmark. One run covers local performance, network quality, routing, media reachability and IP reputation, and writes JSON, Markdown and HTML reports locally.
 
 Project boundaries:
 
@@ -266,7 +266,13 @@ ecs --config ecs.json
 
 Each standard `run.sh` invocation stages the frozen architecture-matched `ecs-tools` for its selected modules. Routing and return-path tracing use the pinned NextTrace Tiny asset on Linux; on FreeBSD they use the base-system `/sbin/ping` and `/usr/sbin/traceroute` instead, no privileged network program is downloaded, and the FreeBSD `ecs-tools` archive contains neither `ping` nor `nexttrace-tiny`. Ookla ships an official client for Linux only, so selecting `ookla` on FreeBSD fails closed. Tool preparation failure stops the run; it never reuses same-named host programs or produces a fallback report.
 
-The project supports Linux and FreeBSD. Linux publishes `amd64`, `arm64`, `armv7`, `386`, `s390x`, `riscv64` and `ppc64le`; FreeBSD publishes `amd64` and `arm64`. Native probes do not require root.
+### Windows Server 2022+ x64
+
+The Windows release target is Windows Server 2022 or later on x64, represented as `windows_amd64`. The main program asset is `ecs_windows_amd64.zip`, and the matching tools Bundle asset is `ecs-tools_windows_amd64.zip`; `install.ps1` and `run.ps1` verify each ZIP against its `checksums.txt`. Windows `system` uses native Win32 system probes, while `latency` uses native Win32 ICMP; `ping.exe` is neither required nor bundled.
+
+The Windows frozen benchmark set contains only `zstd`, NPB EP, NPB FT, OpenSSL, STREAM and `fio`; the fio Windows gate requires and verifies `windowsaio`. `sysbench`, `iperf3` and Ookla are unsupported on Windows. NextTrace has not yet passed an independent genuine Windows network gate, so it is not in the Windows Bundle; Windows `route` and `backtrace` are explicitly unsupported. The Windows Server 2022 x64 and Windows Server 2025 x64 GitHub Actions real gates—including native runtime, tool verification, packaged workloads and current ZIP/bootstrap E2E—have passed rehearsal; this remains only a release-preparation rehearsal, not a formal Release publication or user download validation.
+
+The project supports Linux, FreeBSD and Windows Server 2022+ x64. Linux publishes `amd64`, `arm64`, `armv7`, `386`, `s390x`, `riscv64` and `ppc64le`; FreeBSD publishes `amd64` and `arm64`; Windows publishes `amd64` (`windows_amd64`). Native probes do not require root.
 
 Source development and maintenance are described in [CONTRIBUTING.md](CONTRIBUTING.md). See [CHANGELOG.md](CHANGELOG.md) for changes and [NOTICE](NOTICE)/[LICENSE](LICENSE) for attribution and licensing.
 

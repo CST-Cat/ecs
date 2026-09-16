@@ -118,29 +118,34 @@ func (e fioEngine) EffectiveDepth(requested int) int {
 }
 
 // detectFIOEngine 探测 fio 实际可用的 ioengine。平台文件提供候选顺序，
-// 让 Linux 保持 io_uring -> libaio -> psync，而 FreeBSD 使用其真实的
-// posixaio -> psync 能力边界。
+// 让 Linux 保持 io_uring -> libaio -> psync，FreeBSD 使用其真实的
+// posixaio -> psync 能力边界，Windows 优先验证 windowsaio。
 func detectFIOEngine(ctx context.Context, fioPath string) fioEngine {
 	helpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	command := newProbeCommand(helpCtx, fioPath, "--enghelp")
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	run := command.RunCombined(probeCommandCombinedLimit)
-	output := run.Combined
-	if run.Err != nil && len(output) == 0 {
-		// 探测本身失败时退到最保守、必然存在的同步引擎。
-		return fioEngine{Name: "psync", AsyncQueue: false}
-	}
+	return fioEngineFromProbe(run.Err, run.Combined)
+}
+
+func fioEngineFromProbe(runErr error, output []byte) fioEngine {
 	available := make(map[string]bool)
 	for _, line := range strings.Split(sanitizeCommandOutput(output), "\n") {
 		available[strings.TrimSpace(line)] = true
+	}
+	if runErr != nil && fioEngineProbeFailureRequiresFallback(output) {
+		// Unix preserves the historical rule that non-zero --enghelp output can
+		// still carry a usable candidate. Windows rejects every failed probe, so
+		// its platform boundary makes even non-empty output unavailable.
+		return fioEngineFallback(runErr, available)
 	}
 	for _, candidate := range fioEngineCandidates() {
 		if available[candidate.name] {
 			return fioEngine{Name: candidate.name, AsyncQueue: candidate.async, Detected: true}
 		}
 	}
-	return fioEngine{Name: "psync", AsyncQueue: false}
+	return fioEngineFallback(nil, available)
 }
 
 func runFIODisk(ctx context.Context, env Environment, fioPath string) (result model.Result) {
@@ -178,6 +183,11 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 	}()
 
 	engine := detectFIOEngine(ctx, fioPath)
+	if engine.Name == "" {
+		result.Status = model.StatusError
+		addFailure(&result, "engine_detection", "fio", fmt.Errorf("fio 未报告可用的 native ioengine"))
+		return result
+	}
 	plan := fioJobPlan()
 	matrixMode := env.Config.DiskMatrixMode
 	if matrixMode == "" {
@@ -674,7 +684,7 @@ func prepareFIODiskPath(ctx context.Context, env Environment) (string, int64, sy
 	if err != nil || !info.IsDir() {
 		return "", 0, disk, fmt.Errorf("测试路径不可用: %s", diskPath)
 	}
-	collectDisk(ctx, diskPath, &disk)
+	collectPlatformDisk(ctx, diskPath, &disk)
 	actualBytes, err := fioDiskSize(uint64(env.Config.DiskMiB)*1024*1024, disk.DiskFree)
 	if err != nil {
 		return "", 0, disk, err

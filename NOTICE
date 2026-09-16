@@ -38,14 +38,33 @@ supports unknown/unavailable version and license fields until CI has built and
 audited a real artifact. This notice does not claim that a release asset or
 tool version exists merely because a manifest example exists.
 
-When run.sh needs pinned zstd, NPB EP/FT, pinned OpenSSL, official STREAM,
-fio, iperf3, NextTrace Tiny, or ping, it uses the platform-matched
+The main Go module remains standard-library-only. Native Windows support uses
+the Windows API through the Go standard library and does not add a third-party
+Go dependency.
+
+On Unix, when run.sh needs pinned zstd, NPB EP/FT, pinned OpenSSL, official
+STREAM, fio, iperf3, NextTrace Tiny, or ping, it uses the platform-matched
 ecs-tools tar.gz artifact for fixed-contract components and for any missing
-general tool. NextTrace Tiny and the pinned ping build are Linux-only: the
-FreeBSD tool packages omit both and use the base-system ping and traceroute
-instead. The artifact is accepted only after checks against the Bundle
-Release's checksums.txt, then only the requested regular executable members are unpacked
-into the temporary run directory and exposed through the temporary PATH.
+general tool. On Windows Server 2022+ x64, the release target is
+windows_amd64 and the main and tools assets are respectively
+ecs_windows_amd64.zip and ecs-tools_windows_amd64.zip. The Windows tools
+asset contains only zstd, NPB EP, NPB FT, OpenSSL, STREAM, and fio; its
+build-time MSYS2 UCRT64 inputs are pinned in tools/lock.json and are not a
+Go dependency or a runtime tool asset. License notices for the six tools are
+generated from their upstream sources into the package LICENSES/ directory.
+The Windows asset does not support sysbench or iperf3; Ookla is unsupported
+there as well.
+
+NextTrace Tiny and the pinned ping build are Linux-only: the FreeBSD tool
+packages omit both and use the base-system ping and traceroute instead. The
+Windows package omits both; native Win32 system probes and native Win32 ICMP
+are implemented by ecs itself, and fio's Windows native engine is windowsaio.
+The Windows route and backtrace modules remain unsupported because NextTrace
+has not passed an independent genuine Windows network gate. The artifact is
+accepted only after checks against the Bundle Release's checksums.txt, then
+only the requested regular executable members are unpacked into the temporary
+run directory and exposed through the temporary PATH (or its Windows
+PowerShell equivalent).
 When the zstd benchmark is selected, run.sh downloads and
 extracts the corpus asset from the Bundle Release and verifies its archive
 against the Bundle Release's checksums.txt; the zstd probe verifies its
@@ -55,14 +74,18 @@ adapter and is not a source for these general missing tools.
 The ecs-tools set intentionally excludes the Ookla speedtest client. Ookla is
 an explicit external adapter with its own terms and privacy policy: it is part
 of the full default profile, omitted from the standard default profile, and
-can be explicitly selected from any profile. It is never part of ecs-tools.
+can be explicitly selected from any profile on supported Unix targets. It is
+unsupported on Windows and is never part of ecs-tools.
 System-provided ping likewise has no single project-wide license: the
 applicable notice is the distribution package actually used. On FreeBSD the
 latency and routing probes run the base-system /sbin/ping and
 /usr/sbin/traceroute owned by the installed FreeBSD release, so their notice
-is the operating system's, not a bundled tool package's.
+is the operating system's, not a bundled tool package's. On Windows, the
+latency probe calls native Win32 ICMP APIs rather than a third-party ping
+binary.
 
-The default public iperf3 endpoint registry is derived from:
+The default public iperf3 endpoint registry for supported Unix targets is
+derived from:
 
   Yet-Another-Bench-Script (YABS)
   https://github.com/masonr/yet-another-bench-script
@@ -71,5 +94,6 @@ The default public iperf3 endpoint registry is derived from:
   Registry snapshot: YABS v2026-07-24 IPERF_LOCS
 
 No YABS executable code, banners, upload behavior, or bundled binaries are
-included. ecs invokes the user's installed iperf3 process, records the exact
-parameters and result provenance, and keeps all reports local.
+included. On supported Unix targets, ecs invokes the user's installed iperf3
+process, records the exact parameters and result provenance, and keeps all
+reports local; iperf3 is unsupported on Windows.

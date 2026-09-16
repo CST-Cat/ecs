@@ -1,0 +1,1631 @@
+name: windows-tools
+
+# Windows benchmark bundle chain.  The builder and gate live in scripts/; this
+# workflow only chooses the real runner, artifact hand-off, and dependency DAG.
+#
+# LOCK/CHECK -> BUILD windows_amd64 -> VERIFY-2022 || VERIFY-2025
+#             -> PACKAGE -> E2E-2022 || E2E-2025
+#
+# workflow_dispatch is a rehearsal only.  It produces seven-day artifacts and
+# never has repository write permission or a release/tag side effect.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-tools-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lock-check:
+    name: LOCK/CHECK
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Parse PowerShell scripts and lock facts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $paths = @(
+            (Resolve-Path 'scripts/build_tools_windows.ps1').Path,
+            (Resolve-Path 'scripts/ci/windows_tools_gate.ps1').Path,
+            (Resolve-Path 'scripts/tools/windows/common.ps1').Path
+          )
+          $paths += @(Get-ChildItem 'scripts/tools/windows' -Filter '*.ps1' -File | ForEach-Object { $_.FullName })
+          foreach ($path in $paths | Sort-Object -Unique) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) {
+              throw "PowerShell parse failed for ${path}: $($errors -join '; ')"
+            }
+          }
+
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          if ([string]$lock.schema_version -ne 'ecs.tools.lock/v1') { throw 'unexpected tools lock schema' }
+          $windowsTarget = @($lock.architectures | Where-Object { $_.target -eq 'windows_amd64' })
+          if ($windowsTarget.Count -ne 1 -or [string]$windowsTarget[0].goos -ne 'windows' -or [string]$windowsTarget[0].goarch -ne 'amd64') {
+            throw 'windows_amd64 lock target is missing or ambiguous'
+          }
+          $wantTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio')
+          if ((@($lock.windows_tools) -join '|') -ne ($wantTools -join '|')) { throw 'Windows tool set drifted' }
+          if (@($lock.windows_tools | Where-Object { $_ -eq 'nexttrace-tiny' -or $_ -eq 'ping' }).Count -ne 0) {
+            throw 'unsupported tool entered the Windows bundle'
+          }
+          if (@($lock.windows_dll_allowlist).Count -eq 0) { throw 'Windows DLL allowlist is empty' }
+
+          & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
+          if (-not $?) { throw 'ordinary-user execution evidence failed' }
+
+          $params = & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -PrintParams
+          if (-not $?) { throw 'Windows builder lock/check failed' }
+          $paramsText = $params -join "`n"
+          foreach ($marker in @('target=windows_amd64', 'toolchain_mode=native', 'smoke_runner=direct', 'validation_scope=functional', 'performance_valid=false', 'nexttrace=unsupported')) {
+            if ($paramsText -notmatch [regex]::Escape($marker)) { throw "builder parameters missing $marker" }
+          }
+          Write-Output 'LOCK/CHECK passed: pinned target, tool set, allowlist, PowerShell syntax, and ordinary-user contract'
+
+  build:
+    name: BUILD windows_amd64
+    needs: lock-check
+    runs-on: windows-2022
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Build and gate the native Windows tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage' | Out-Null
+          & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -StageRoot (Join-Path $PWD '.ci/windows-tools-stage')
+          if (-not $?) { throw 'native Windows tools builder failed' }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-tools-stage-windows_amd64
+          path: .ci/windows-tools-stage
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-2022:
+    name: VERIFY-2022
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-stage-windows_amd64
+          path: .ci/windows-tools-stage-artifact
+
+      - name: Prepare locked PE inspector and fixed corpus
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $inputRoot = Join-Path $PWD '.ci/windows-tools-gate-inputs'
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'ecs-windows-gate-downloads'
+          New-Item -ItemType Directory -Force -Path (Join-Path $inputRoot 'corpus'), (Join-Path $inputRoot 'inspector'), $downloadRoot | Out-Null
+
+          $corpusZip = Join-Path $downloadRoot 'silesia.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri $lock.corpus.source_url -OutFile $corpusZip
+          if ((Get-FileHash -Algorithm SHA256 $corpusZip).Hash.ToLowerInvariant() -ne [string]$lock.corpus.source_sha256) { throw 'Silesia source hash mismatch' }
+          $corpusExtract = Join-Path $downloadRoot 'silesia'
+          Expand-Archive -LiteralPath $corpusZip -DestinationPath $corpusExtract -Force
+          $corpus = Join-Path $inputRoot ('corpus\' + [string]$lock.corpus.name)
+          $output = [IO.File]::Open($corpus, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+          try {
+            foreach ($member in @($lock.corpus.order)) {
+              $memberPath = Join-Path $corpusExtract $member
+              if (-not (Test-Path -LiteralPath $memberPath -PathType Leaf)) { throw "Silesia member missing: $member" }
+              $input = [IO.File]::OpenRead($memberPath)
+              try { $input.CopyTo($output) } finally { $input.Dispose() }
+            }
+          } finally { $output.Dispose() }
+          if ((Get-Item $corpus).Length -ne [int64]$lock.corpus.bytes -or (Get-FileHash -Algorithm SHA256 $corpus).Hash.ToLowerInvariant() -ne [string]$lock.corpus.sha256) { throw 'fixed Silesia corpus mismatch' }
+
+          $inspectorPackages = @(
+            'mingw-w64-ucrt-x86_64-binutils',
+            'mingw-w64-ucrt-x86_64-gettext-runtime',
+            'mingw-w64-ucrt-x86_64-zlib',
+            'mingw-w64-ucrt-x86_64-zstd',
+            'mingw-w64-ucrt-x86_64-libiconv'
+          )
+          foreach ($packageName in $inspectorPackages) {
+            $package = @($lock.windows_toolchain.packages | Where-Object { $_.name -eq $packageName })
+            if ($package.Count -ne 1) { throw "locked inspector package is missing: $packageName" }
+            $packageArchive = Join-Path $downloadRoot ($packageName + '.pkg.tar.zst')
+            Invoke-WebRequest -UseBasicParsing -Uri $package[0].source_url -OutFile $packageArchive
+            if ((Get-FileHash -Algorithm SHA256 $packageArchive).Hash.ToLowerInvariant() -ne [string]$package[0].source_sha256) { throw "package hash mismatch: $packageName" }
+            & (Get-Command tar.exe -ErrorAction Stop).Source -xf $packageArchive -C (Join-Path $inputRoot 'inspector')
+            if ($LASTEXITCODE -ne 0) { throw "locked package extraction failed: $packageName" }
+          }
+          $objdump = Join-Path $inputRoot 'inspector\ucrt64\bin\objdump.exe'
+          if (-not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'locked objdump is missing' }
+
+      - name: VERIFY-2022 PE manifest DLL and benchmark gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
+          if ($null -eq $stageItem) { throw 'downloaded Windows stage is missing windows_amd64' }
+          $stage = $stageItem.FullName
+          $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
+          $objdumpItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter 'objdump.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $corpusItem -or $null -eq $objdumpItem) { throw 'locked gate inputs are incomplete' }
+          $corpus = $corpusItem.FullName
+          $objdump = $objdumpItem.FullName
+          & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
+          if (-not $?) { throw 'VERIFY-2022 gate failed' }
+          Write-Output 'VERIFY-2022 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
+
+      - name: VERIFY-2022 ecs.exe native runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          go build -trimpath -o ecs.exe ./cmd/ecs
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath ecs.exe -PathType Leaf)) { throw 'ecs.exe build failed' }
+          function Invoke-Ecs {
+            param([Parameter(Mandatory, Position = 0)][string[]]$Arguments)
+            $output = @(& .\ecs.exe @Arguments 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw "ecs.exe $($Arguments -join ' ') failed" }
+            return $output
+          }
+
+          function Get-JsonPropertyValue {
+            param(
+              [Parameter(Mandatory)][object]$Object,
+              [Parameter(Mandatory)][string]$Name,
+              [Parameter(Mandatory)][string]$Context
+            )
+            if ($null -eq $Object) { throw "$Context JSON object is null while reading '$Name'" }
+            $objects = @($Object)
+            if ($objects.Count -ne 1) { throw "$Context expected one JSON object while reading '$Name', got $($objects.Count)" }
+            $properties = @($objects[0].PSObject.Properties | Where-Object { $_.Name -ieq $Name })
+            if ($properties.Count -ne 1) {
+              $available = @($objects[0].PSObject.Properties | ForEach-Object { $_.Name }) -join ', '
+              throw "$Context missing JSON property '$Name'; available properties: $available"
+            }
+            if ($null -eq $properties[0].Value) { throw "$Context JSON property '$Name' is null" }
+            return $properties[0].Value
+          }
+
+          function Get-SystemFieldRaw {
+            param(
+              [Parameter(Mandatory)][object]$Result,
+              [Parameter(Mandatory)][string]$Key
+            )
+            $fields = @(Get-JsonPropertyValue -Object $Result -Name 'fields' -Context 'system result')
+            $fieldMatches = @($fields | Where-Object { [string]$_.key -eq $Key })
+            if ($fieldMatches.Count -ne 1) { throw "system JSON must contain one field named $Key" }
+            $value = Get-JsonPropertyValue -Object $fieldMatches[0] -Name 'value' -Context "system JSON field $Key"
+            $raw = [string](Get-JsonPropertyValue -Object $value -Name 'raw' -Context "system JSON field $Key value")
+            if ([string]::IsNullOrWhiteSpace($raw)) { throw "system JSON field $Key is empty" }
+            return $raw
+          }
+
+          function Convert-PositiveMachineBytes {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<number>[0-9]+(?:\.[0-9]+)?)\s*(?<unit>B|KiB|MiB|GiB|TiB|PiB)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable byte value: $Raw" }
+            $number = [double]::Parse($match.Groups['number'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $exponent = switch ($match.Groups['unit'].Value) {
+              'B' { 0 }
+              'KiB' { 1 }
+              'MiB' { 2 }
+              'GiB' { 3 }
+              'TiB' { 4 }
+              'PiB' { 5 }
+              default { throw "$Name has an unknown byte unit: $Raw" }
+            }
+            $bytes = $number * [math]::Pow(1024, $exponent)
+            if ([double]::IsNaN($bytes) -or [double]::IsInfinity($bytes) -or $bytes -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $bytes
+          }
+
+          function Convert-PositiveMachineSeconds {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<seconds>[0-9]+(?:\.[0-9]+)?)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable seconds value: $Raw" }
+            $seconds = [double]::Parse($match.Groups['seconds'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ([double]::IsNaN($seconds) -or [double]::IsInfinity($seconds) -or $seconds -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $seconds
+          }
+
+          function Assert-WindowsSystemFacts {
+            param([Parameter(Mandatory)][object]$Report)
+            $schemaVersion = [string](Get-JsonPropertyValue -Object $Report -Name 'schema_version' -Context 'system report')
+            if ($schemaVersion -ne 'ecs.report/v1') { throw "system report has unexpected schema_version: $schemaVersion" }
+            $results = @(Get-JsonPropertyValue -Object $Report -Name 'results' -Context 'system report')
+            $systemMatches = @($results | Where-Object { [string]$_.id -eq 'system' })
+            if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
+            $system = $systemMatches[0]
+            $fieldsProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'fields' })
+            if ($fieldsProperty.Count -ne 1) {
+              $status = [string](Get-JsonPropertyValue -Object $system -Name 'status' -Context 'system result')
+              $evidence = Get-JsonPropertyValue -Object $system -Name 'evidence' -Context 'system result'
+              $evidenceValid = Get-JsonPropertyValue -Object $evidence -Name 'valid' -Context 'system evidence'
+              $evidenceExpected = Get-JsonPropertyValue -Object $evidence -Name 'expected' -Context 'system evidence'
+              $evidenceUnit = [string](Get-JsonPropertyValue -Object $evidence -Name 'unit' -Context 'system evidence')
+              $failureProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'failures' })
+              $failureText = '<missing>'
+              if ($failureProperty.Count -eq 1) {
+                $failureItems = @($failureProperty[0].Value)
+                if ($failureItems.Count -eq 0) {
+                  $failureText = '<empty>'
+                } else {
+                  $failureText = @($failureItems | ForEach-Object {
+                    [string](Get-JsonPropertyValue -Object $_ -Name 'message' -Context 'system failure')
+                  }) -join ' | '
+                }
+              }
+              throw "system JSON has no structured facts; status=$status evidence.valid=$evidenceValid evidence.expected=$evidenceExpected evidence.unit=$evidenceUnit failures=$failureText"
+            }
+            $os = Get-SystemFieldRaw -Result $system -Key 'os'
+            if ($os -notmatch '(?i)^Windows(?:\s+Server)?\b') { throw "system OS is not Windows: $os" }
+            if ((Get-SystemFieldRaw -Result $system -Key 'arch') -ne 'amd64') { throw 'system arch is not amd64' }
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'memory_total') -Name 'memory_total')
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'disk_total') -Name 'disk_total')
+            [void](Convert-PositiveMachineSeconds -Raw (Get-SystemFieldRaw -Result $system -Key 'uptime_seconds') -Name 'uptime_seconds')
+            $measurements = @(Get-JsonPropertyValue -Object $system -Name 'measurements' -Context 'system result')
+            $logicalMatches = @($measurements | Where-Object { [string]$_.key -eq 'logical_cpus' })
+            if ($logicalMatches.Count -ne 1) { throw 'system JSON must contain one logical_cpus measurement' }
+            $logicalCPUs = [double](Get-JsonPropertyValue -Object $logicalMatches[0] -Name 'value' -Context 'logical_cpus measurement')
+            if ([double]::IsNaN($logicalCPUs) -or [double]::IsInfinity($logicalCPUs) -or $logicalCPUs -le 0) {
+              throw "logical_cpus is not positive: $logicalCPUs"
+            }
+          }
+
+          function Assert-EcsLoopbackLatencyReport {
+            param(
+              [Parameter(Mandatory)][string]$Root,
+              [Parameter(Mandatory)][string]$Language
+            )
+            $reportItem = Get-ChildItem -LiteralPath $Root -Filter '*.json' -File -Recurse | Select-Object -First 1
+            if ($null -eq $reportItem) { throw "loopback $Language JSON report was not written" }
+            $report = Get-Content -Raw -LiteralPath $reportItem.FullName | ConvertFrom-Json
+            if ([string]$report.schema_version -ne 'ecs.report/v1') {
+              throw "loopback $Language JSON has unexpected schema_version: $($report.schema_version)"
+            }
+            $latencyMatches = @($report.results | Where-Object { [string]$_.id -eq 'latency' })
+            if ($latencyMatches.Count -ne 1) { throw "loopback $Language JSON has no unique latency result" }
+            $icmpMeasurements = @($latencyMatches[0].measurements | Where-Object {
+              [string]$_.key -match '^icmp_.*_loopback_ipv4$' -and [string]$_.method -eq 'icmp-echo-v1'
+            })
+            if ($icmpMeasurements.Count -eq 0) {
+              throw "loopback $Language JSON has no native ICMP measurement"
+            }
+            $lossMatches = @($latencyMatches[0].measurements | Where-Object { [string]$_.key -eq 'icmp_loss_percent_loopback_ipv4' -and [string]$_.method -eq 'icmp-echo-v1' })
+            if ($lossMatches.Count -ne 1 -or [double]$lossMatches[0].value -ne 0) {
+              throw "loopback $Language JSON did not report zero native ICMP loss"
+            }
+            if (@($latencyMatches[0].measurements | Where-Object { [string]$_.key -match '^icmp_' -and [string]$_.method -ne 'icmp-echo-v1' }).Count -ne 0) {
+              throw "loopback $Language JSON contains an ICMP measurement with an unexpected method"
+            }
+          }
+
+          if (((Invoke-Ecs @('--version')) -join "`n") -notmatch '(?i)ecs\s') { throw '--version failed' }
+          $list = (Invoke-Ecs @('list')) -join "`n"
+          if ($list -notmatch 'system') { throw 'list failed' }
+          $plan = ((Invoke-Ecs @('plan', '--profile', 'standard')) -join "`n") | ConvertFrom-Json
+          if ([string]$plan.profile -ne 'standard' -or [string]$plan.schema_version -ne 'ecs.plan/v1') { throw 'standard plan failed' }
+          $systemRoot = Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-system'
+          [void](Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'json', '--output', $systemRoot, '--no-color'))
+          $systemFile = Get-ChildItem $systemRoot -File -Filter '*.json' -Recurse | Select-Object -First 1
+          if ($null -eq $systemFile) { throw 'system JSON runtime failed' }
+          $systemReport = Get-Content -Raw $systemFile.FullName | ConvertFrom-Json
+          Assert-WindowsSystemFacts -Report $systemReport
+          $textRoot = Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-text'
+          [void](Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', $textRoot, '--no-color'))
+          $textFile = Get-ChildItem $textRoot -File -Filter '*.md' -Recurse | Select-Object -First 1
+          if ($null -eq $textFile -or $textFile.Length -eq 0) { throw 'system text runtime failed' }
+          $redirected = Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-redirected.txt'
+          & .\ecs.exe run --lang en --only system --yes --format md --output (Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-text') *> $redirected
+          if ($LASTEXITCODE -ne 0) { throw 'redirected ecs.exe run failed' }
+          if ((Get-Content -Raw $redirected) -match "`e\[") { throw 'redirected output contains ANSI escape sequences' }
+          $env:NO_COLOR = ''
+          try {
+            $noColorOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-no-color')))
+            if (($noColorOutput -join "`n") -match "`e\[") { throw 'NO_COLOR did not suppress ANSI output' }
+          } finally { Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue }
+          $noColorFlagOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-verify-2022-no-color-flag'), '--no-color'))
+          if (($noColorFlagOutput -join "`n") -match "`e\[") { throw '--no-color did not suppress ANSI output' }
+          $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          try {
+            $port = $listener.LocalEndpoint.Port
+            foreach ($language in @('en-US', 'zh-CN')) {
+              $latencyRoot = Join-Path $env:RUNNER_TEMP ("ecs-verify-2022-loopback-$language")
+              [void](Invoke-Ecs @('run', '--lang', $language, '--only', 'latency', '--exposure', 'any', '--ip-version', '4', '--latency-attempts', '2', '--latency-targets', "loopback=127.0.0.1:$port", '--yes', '--format', 'json', '--output', $latencyRoot, '--no-color'))
+              Assert-EcsLoopbackLatencyReport -Root $latencyRoot -Language $language
+            }
+          } finally { $listener.Stop() }
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPLoopback$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 TestWindowsNativeICMPLoopback failed' }
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPDeadlineDoesNotHang$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 TestWindowsNativeICMPDeadlineDoesNotHang failed' }
+          go test ./internal/probe -run '^TestProbeCommandWindowsProcessTree$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 TestProbeCommandWindowsProcessTree failed' }
+          go test ./internal/ui -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 internal/ui tests failed' }
+          Write-Output 'VERIFY-2022 ecs.exe runtime passed: version/list/plan, system JSON, native loopback ICMP, process-tree cancellation, TTY/redirect, NO_COLOR, and --no-color'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-2022
+          path: .ci/windows-tools-gate-inputs
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-2025:
+    name: VERIFY-2025
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-stage-windows_amd64
+          path: .ci/windows-tools-stage-artifact
+
+      - name: Prepare locked PE inspector and fixed corpus
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $inputRoot = Join-Path $PWD '.ci/windows-tools-gate-inputs'
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'ecs-windows-gate-downloads'
+          New-Item -ItemType Directory -Force -Path (Join-Path $inputRoot 'corpus'), (Join-Path $inputRoot 'inspector'), $downloadRoot | Out-Null
+
+          $corpusZip = Join-Path $downloadRoot 'silesia.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri $lock.corpus.source_url -OutFile $corpusZip
+          if ((Get-FileHash -Algorithm SHA256 $corpusZip).Hash.ToLowerInvariant() -ne [string]$lock.corpus.source_sha256) { throw 'Silesia source hash mismatch' }
+          $corpusExtract = Join-Path $downloadRoot 'silesia'
+          Expand-Archive -LiteralPath $corpusZip -DestinationPath $corpusExtract -Force
+          $corpus = Join-Path $inputRoot ('corpus\' + [string]$lock.corpus.name)
+          $output = [IO.File]::Open($corpus, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+          try {
+            foreach ($member in @($lock.corpus.order)) {
+              $memberPath = Join-Path $corpusExtract $member
+              if (-not (Test-Path -LiteralPath $memberPath -PathType Leaf)) { throw "Silesia member missing: $member" }
+              $input = [IO.File]::OpenRead($memberPath)
+              try { $input.CopyTo($output) } finally { $input.Dispose() }
+            }
+          } finally { $output.Dispose() }
+          if ((Get-Item $corpus).Length -ne [int64]$lock.corpus.bytes -or (Get-FileHash -Algorithm SHA256 $corpus).Hash.ToLowerInvariant() -ne [string]$lock.corpus.sha256) { throw 'fixed Silesia corpus mismatch' }
+
+          $inspectorPackages = @(
+            'mingw-w64-ucrt-x86_64-binutils',
+            'mingw-w64-ucrt-x86_64-gettext-runtime',
+            'mingw-w64-ucrt-x86_64-zlib',
+            'mingw-w64-ucrt-x86_64-zstd',
+            'mingw-w64-ucrt-x86_64-libiconv'
+          )
+          foreach ($packageName in $inspectorPackages) {
+            $package = @($lock.windows_toolchain.packages | Where-Object { $_.name -eq $packageName })
+            if ($package.Count -ne 1) { throw "locked inspector package is missing: $packageName" }
+            $packageArchive = Join-Path $downloadRoot ($packageName + '.pkg.tar.zst')
+            Invoke-WebRequest -UseBasicParsing -Uri $package[0].source_url -OutFile $packageArchive
+            if ((Get-FileHash -Algorithm SHA256 $packageArchive).Hash.ToLowerInvariant() -ne [string]$package[0].source_sha256) { throw "package hash mismatch: $packageName" }
+            & (Get-Command tar.exe -ErrorAction Stop).Source -xf $packageArchive -C (Join-Path $inputRoot 'inspector')
+            if ($LASTEXITCODE -ne 0) { throw "locked package extraction failed: $packageName" }
+          }
+          $objdump = Join-Path $inputRoot 'inspector\ucrt64\bin\objdump.exe'
+          if (-not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'locked objdump is missing' }
+
+      - name: VERIFY-2025 PE manifest DLL and benchmark gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
+          if ($null -eq $stageItem) { throw 'downloaded Windows stage is missing windows_amd64' }
+          $stage = $stageItem.FullName
+          $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
+          $objdumpItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter 'objdump.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $corpusItem -or $null -eq $objdumpItem) { throw 'locked gate inputs are incomplete' }
+          $corpus = $corpusItem.FullName
+          $objdump = $objdumpItem.FullName
+          & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
+          if (-not $?) { throw 'VERIFY-2025 gate failed' }
+          Write-Output 'VERIFY-2025 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
+
+      - name: VERIFY-2025 ecs.exe native runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          go build -trimpath -o ecs.exe ./cmd/ecs
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath ecs.exe -PathType Leaf)) { throw 'ecs.exe build failed' }
+          function Invoke-Ecs {
+            param([Parameter(Mandatory, Position = 0)][string[]]$Arguments)
+            $output = @(& .\ecs.exe @Arguments 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw "ecs.exe $($Arguments -join ' ') failed" }
+            return $output
+          }
+
+          function Get-JsonPropertyValue {
+            param(
+              [Parameter(Mandatory)][object]$Object,
+              [Parameter(Mandatory)][string]$Name,
+              [Parameter(Mandatory)][string]$Context
+            )
+            if ($null -eq $Object) { throw "$Context JSON object is null while reading '$Name'" }
+            $objects = @($Object)
+            if ($objects.Count -ne 1) { throw "$Context expected one JSON object while reading '$Name', got $($objects.Count)" }
+            $properties = @($objects[0].PSObject.Properties | Where-Object { $_.Name -ieq $Name })
+            if ($properties.Count -ne 1) {
+              $available = @($objects[0].PSObject.Properties | ForEach-Object { $_.Name }) -join ', '
+              throw "$Context missing JSON property '$Name'; available properties: $available"
+            }
+            if ($null -eq $properties[0].Value) { throw "$Context JSON property '$Name' is null" }
+            return $properties[0].Value
+          }
+
+          function Get-SystemFieldRaw {
+            param(
+              [Parameter(Mandatory)][object]$Result,
+              [Parameter(Mandatory)][string]$Key
+            )
+            $fields = @(Get-JsonPropertyValue -Object $Result -Name 'fields' -Context 'system result')
+            $fieldMatches = @($fields | Where-Object { [string]$_.key -eq $Key })
+            if ($fieldMatches.Count -ne 1) { throw "system JSON must contain one field named $Key" }
+            $value = Get-JsonPropertyValue -Object $fieldMatches[0] -Name 'value' -Context "system JSON field $Key"
+            $raw = [string](Get-JsonPropertyValue -Object $value -Name 'raw' -Context "system JSON field $Key value")
+            if ([string]::IsNullOrWhiteSpace($raw)) { throw "system JSON field $Key is empty" }
+            return $raw
+          }
+
+          function Convert-PositiveMachineBytes {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<number>[0-9]+(?:\.[0-9]+)?)\s*(?<unit>B|KiB|MiB|GiB|TiB|PiB)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable byte value: $Raw" }
+            $number = [double]::Parse($match.Groups['number'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $exponent = switch ($match.Groups['unit'].Value) {
+              'B' { 0 }
+              'KiB' { 1 }
+              'MiB' { 2 }
+              'GiB' { 3 }
+              'TiB' { 4 }
+              'PiB' { 5 }
+              default { throw "$Name has an unknown byte unit: $Raw" }
+            }
+            $bytes = $number * [math]::Pow(1024, $exponent)
+            if ([double]::IsNaN($bytes) -or [double]::IsInfinity($bytes) -or $bytes -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $bytes
+          }
+
+          function Convert-PositiveMachineSeconds {
+            param(
+              [Parameter(Mandatory)][string]$Raw,
+              [Parameter(Mandatory)][string]$Name
+            )
+            $match = [regex]::Match($Raw, '^\s*(?<seconds>[0-9]+(?:\.[0-9]+)?)\s*$')
+            if (-not $match.Success) { throw "$Name is not a parseable seconds value: $Raw" }
+            $seconds = [double]::Parse($match.Groups['seconds'].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ([double]::IsNaN($seconds) -or [double]::IsInfinity($seconds) -or $seconds -le 0) {
+              throw "$Name is not positive: $Raw"
+            }
+            return $seconds
+          }
+
+          function Assert-WindowsSystemFacts {
+            param([Parameter(Mandatory)][object]$Report)
+            $schemaVersion = [string](Get-JsonPropertyValue -Object $Report -Name 'schema_version' -Context 'system report')
+            if ($schemaVersion -ne 'ecs.report/v1') { throw "system report has unexpected schema_version: $schemaVersion" }
+            $results = @(Get-JsonPropertyValue -Object $Report -Name 'results' -Context 'system report')
+            $systemMatches = @($results | Where-Object { [string]$_.id -eq 'system' })
+            if ($systemMatches.Count -ne 1) { throw 'system JSON has no unique system result' }
+            $system = $systemMatches[0]
+            $fieldsProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'fields' })
+            if ($fieldsProperty.Count -ne 1) {
+              $status = [string](Get-JsonPropertyValue -Object $system -Name 'status' -Context 'system result')
+              $evidence = Get-JsonPropertyValue -Object $system -Name 'evidence' -Context 'system result'
+              $evidenceValid = Get-JsonPropertyValue -Object $evidence -Name 'valid' -Context 'system evidence'
+              $evidenceExpected = Get-JsonPropertyValue -Object $evidence -Name 'expected' -Context 'system evidence'
+              $evidenceUnit = [string](Get-JsonPropertyValue -Object $evidence -Name 'unit' -Context 'system evidence')
+              $failureProperty = @($system.PSObject.Properties | Where-Object { $_.Name -ieq 'failures' })
+              $failureText = '<missing>'
+              if ($failureProperty.Count -eq 1) {
+                $failureItems = @($failureProperty[0].Value)
+                if ($failureItems.Count -eq 0) {
+                  $failureText = '<empty>'
+                } else {
+                  $failureText = @($failureItems | ForEach-Object {
+                    [string](Get-JsonPropertyValue -Object $_ -Name 'message' -Context 'system failure')
+                  }) -join ' | '
+                }
+              }
+              throw "system JSON has no structured facts; status=$status evidence.valid=$evidenceValid evidence.expected=$evidenceExpected evidence.unit=$evidenceUnit failures=$failureText"
+            }
+            $os = Get-SystemFieldRaw -Result $system -Key 'os'
+            if ($os -notmatch '(?i)^Windows(?:\s+Server)?\b') { throw "system OS is not Windows: $os" }
+            if ((Get-SystemFieldRaw -Result $system -Key 'arch') -ne 'amd64') { throw 'system arch is not amd64' }
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'memory_total') -Name 'memory_total')
+            [void](Convert-PositiveMachineBytes -Raw (Get-SystemFieldRaw -Result $system -Key 'disk_total') -Name 'disk_total')
+            [void](Convert-PositiveMachineSeconds -Raw (Get-SystemFieldRaw -Result $system -Key 'uptime_seconds') -Name 'uptime_seconds')
+            $measurements = @(Get-JsonPropertyValue -Object $system -Name 'measurements' -Context 'system result')
+            $logicalMatches = @($measurements | Where-Object { [string]$_.key -eq 'logical_cpus' })
+            if ($logicalMatches.Count -ne 1) { throw 'system JSON must contain one logical_cpus measurement' }
+            $logicalCPUs = [double](Get-JsonPropertyValue -Object $logicalMatches[0] -Name 'value' -Context 'logical_cpus measurement')
+            if ([double]::IsNaN($logicalCPUs) -or [double]::IsInfinity($logicalCPUs) -or $logicalCPUs -le 0) {
+              throw "logical_cpus is not positive: $logicalCPUs"
+            }
+          }
+
+          if (((Invoke-Ecs @('--version')) -join "`n") -notmatch '(?i)ecs\s') { throw '--version failed' }
+          $list = (Invoke-Ecs @('list')) -join "`n"
+          if ($list -notmatch 'system') { throw 'list failed' }
+          $plan = ((Invoke-Ecs @('plan', '--profile', 'standard')) -join "`n") | ConvertFrom-Json
+          if ([string]$plan.profile -ne 'standard' -or [string]$plan.schema_version -ne 'ecs.plan/v1') { throw 'standard plan failed' }
+          function Assert-EcsLoopbackLatencyReport {
+            param(
+              [Parameter(Mandatory)][string]$Root,
+              [Parameter(Mandatory)][string]$Language
+            )
+            $reportItem = Get-ChildItem -LiteralPath $Root -Filter '*.json' -File -Recurse | Select-Object -First 1
+            if ($null -eq $reportItem) { throw "loopback $Language JSON report was not written" }
+            $report = Get-Content -Raw -LiteralPath $reportItem.FullName | ConvertFrom-Json
+            if ([string]$report.schema_version -ne 'ecs.report/v1') {
+              throw "loopback $Language JSON has unexpected schema_version: $($report.schema_version)"
+            }
+            $latencyMatches = @($report.results | Where-Object { [string]$_.id -eq 'latency' })
+            if ($latencyMatches.Count -ne 1) { throw "loopback $Language JSON has no unique latency result" }
+            $icmpMeasurements = @($latencyMatches[0].measurements | Where-Object {
+              [string]$_.key -match '^icmp_.*_loopback_ipv4$' -and [string]$_.method -eq 'icmp-echo-v1'
+            })
+            if ($icmpMeasurements.Count -eq 0) {
+              throw "loopback $Language JSON has no native ICMP measurement"
+            }
+            $lossMatches = @($latencyMatches[0].measurements | Where-Object { [string]$_.key -eq 'icmp_loss_percent_loopback_ipv4' -and [string]$_.method -eq 'icmp-echo-v1' })
+            if ($lossMatches.Count -ne 1 -or [double]$lossMatches[0].value -ne 0) {
+              throw "loopback $Language JSON did not report zero native ICMP loss"
+            }
+            if (@($latencyMatches[0].measurements | Where-Object { [string]$_.key -match '^icmp_' -and [string]$_.method -ne 'icmp-echo-v1' }).Count -ne 0) {
+              throw "loopback $Language JSON contains an ICMP measurement with an unexpected method"
+            }
+          }
+
+          $systemRoot = Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-system'
+          [void](Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'json', '--output', $systemRoot, '--no-color'))
+          $systemFile = Get-ChildItem $systemRoot -File -Filter '*.json' -Recurse | Select-Object -First 1
+          if ($null -eq $systemFile) { throw 'system JSON runtime failed' }
+          $systemReport = Get-Content -Raw $systemFile.FullName | ConvertFrom-Json
+          Assert-WindowsSystemFacts -Report $systemReport
+          $textRoot = Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-text'
+          [void](Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', $textRoot, '--no-color'))
+          $textFile = Get-ChildItem $textRoot -File -Filter '*.md' -Recurse | Select-Object -First 1
+          if ($null -eq $textFile -or $textFile.Length -eq 0) { throw 'system text runtime failed' }
+          $redirected = Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-redirected.txt'
+          & .\ecs.exe run --lang en --only system --yes --format md --output (Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-text') *> $redirected
+          if ($LASTEXITCODE -ne 0) { throw 'redirected ecs.exe run failed' }
+          if ((Get-Content -Raw $redirected) -match "`e\[") { throw 'redirected output contains ANSI escape sequences' }
+          $env:NO_COLOR = ''
+          try {
+            $noColorOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-no-color')))
+            if (($noColorOutput -join "`n") -match "`e\[") { throw 'NO_COLOR did not suppress ANSI output' }
+          } finally { Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue }
+          $noColorFlagOutput = @(Invoke-Ecs @('run', '--lang', 'en', '--only', 'system', '--yes', '--format', 'md', '--output', (Join-Path $env:RUNNER_TEMP 'ecs-verify-2025-no-color-flag'), '--no-color'))
+          if (($noColorFlagOutput -join "`n") -match "`e\[") { throw '--no-color did not suppress ANSI output' }
+          $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          try {
+            $port = $listener.LocalEndpoint.Port
+            foreach ($language in @('en-US', 'zh-CN')) {
+              $latencyRoot = Join-Path $env:RUNNER_TEMP ("ecs-verify-2025-loopback-$language")
+              [void](Invoke-Ecs @('run', '--lang', $language, '--only', 'latency', '--exposure', 'any', '--ip-version', '4', '--latency-attempts', '2', '--latency-targets', "loopback=127.0.0.1:$port", '--yes', '--format', 'json', '--output', $latencyRoot, '--no-color'))
+              Assert-EcsLoopbackLatencyReport -Root $latencyRoot -Language $language
+            }
+          } finally { $listener.Stop() }
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPLoopback$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 TestWindowsNativeICMPLoopback failed' }
+          go test -tags=windows ./internal/probe -run '^TestWindowsNativeICMPDeadlineDoesNotHang$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 TestWindowsNativeICMPDeadlineDoesNotHang failed' }
+          go test ./internal/probe -run '^TestProbeCommandWindowsProcessTree$' -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 TestProbeCommandWindowsProcessTree failed' }
+          go test ./internal/ui -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 internal/ui tests failed' }
+          Write-Output 'VERIFY-2025 ecs.exe runtime passed: version/list/plan, system JSON, native loopback ICMP, process-tree cancellation, TTY/redirect, NO_COLOR, and --no-color'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-2025
+          path: .ci/windows-tools-gate-inputs
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: PACKAGE windows_amd64
+    needs: [verify-2022, verify-2025]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-stage-windows_amd64
+          path: tools-artifacts
+
+      - name: Normalize the verified Windows stage
+        run: |
+          set -euo pipefail
+          source scripts/lib/common.sh
+          source_dir=$(find tools-artifacts -type d -name windows_amd64 -print -quit)
+          test -n "$source_dir"
+          test -s "$source_dir/manifest.json"
+          mkdir -p tools-stage/windows_amd64
+          cp -a "$source_dir/." tools-stage/windows_amd64/
+          chmod +x tools-stage/windows_amd64/bin/*
+
+      - name: Package the Windows benchmark bundle
+        run: |
+          set -euo pipefail
+          rm -rf .ci/windows-tools-dist .ci/windows-main-binaries .ci/silesia-source .ci/windows-corpus
+          mkdir -p .ci/windows-tools-dist/bundle .ci/windows-tools-dist/main .ci/windows-tools-dist/bootstrap .ci/silesia-source
+          ./scripts/package.sh --tools-stage tools-stage --target windows_amd64
+          test -s dist/ecs-tools_windows_amd64.zip
+          grep -F 'ecs-tools_windows_amd64.zip' dist/checksums.txt
+          cp dist/ecs-tools_windows_amd64.zip dist/checksums.txt .ci/windows-tools-dist/bundle/
+
+          VERSION=phase8-e2e COMMIT="${GITHUB_SHA}" OUTPUT_DIR=.ci/windows-main-binaries \
+            ./scripts/cross.sh --target windows_amd64
+          ./scripts/package.sh --binaries-dir .ci/windows-main-binaries --target windows_amd64
+          test -s dist/ecs_windows_amd64.zip
+          grep -F 'ecs_windows_amd64.zip' dist/checksums.txt
+          cp dist/ecs_windows_amd64.zip dist/checksums.txt .ci/windows-tools-dist/main/
+
+          corpus_source=$(jq -er '.corpus.source_url' tools/lock.json)
+          corpus_source_sha=$(jq -er '.corpus.source_sha256' tools/lock.json)
+          corpus_name=$(jq -er '.corpus.name' tools/lock.json)
+          corpus_archive=$(jq -er '.corpus.archive' tools/lock.json)
+          corpus_bytes=$(jq -er '.corpus.bytes' tools/lock.json)
+          corpus_sha=$(jq -er '.corpus.sha256' tools/lock.json)
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output .ci/silesia-source/silesia.zip "$corpus_source"
+          printf '%s  %s\n' "$corpus_source_sha" .ci/silesia-source/silesia.zip | sha256sum --check --status
+          unzip -q .ci/silesia-source/silesia.zip -d .ci/silesia-source/extracted
+          mkdir -p .ci/windows-corpus
+          while IFS= read -r member; do
+            cat ".ci/silesia-source/extracted/$member" >> ".ci/windows-corpus/$corpus_name"
+          done < <(jq -er '.corpus.order[]' tools/lock.json)
+          test "$(wc -c < ".ci/windows-corpus/$corpus_name")" -eq "$corpus_bytes"
+          test "$(sha256sum ".ci/windows-corpus/$corpus_name" | cut -d' ' -f1)" = "$corpus_sha"
+          tar -C .ci/windows-corpus --sort=name --mtime="@$(git show -s --format=%ct HEAD)" \
+            --owner=0 --group=0 --numeric-owner -czf ".ci/windows-tools-dist/bundle/$corpus_archive" "$corpus_name"
+          (cd .ci/windows-tools-dist/bundle && sha256sum "$corpus_archive" >> checksums.txt)
+
+          cp run.ps1 install.ps1 .ci/windows-tools-dist/bootstrap/
+          printf '%s\n' "$GITHUB_SHA" > .ci/windows-tools-dist/CURRENT_COMMIT
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-tools-dist
+          path: .ci/windows-tools-dist
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e-2022:
+    name: E2E-2022
+    needs: [package, verify-2022]
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-dist
+          path: .ci/windows-tools-dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-2022
+          path: .ci/windows-tools-gate-inputs
+
+      - name: E2E-2022 packaged bundle workloads
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $archiveItem = Get-ChildItem '.ci/windows-tools-dist' -File -Filter 'ecs-tools_windows_amd64.zip' -Recurse | Select-Object -First 1
+          if ($null -eq $archiveItem) { throw 'packaged Windows benchmark bundle is missing' }
+          $archive = $archiveItem.FullName
+          $bundle = Join-Path $PWD '.ci/windows-bundle'
+          Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force
+          $stage = $bundle
+          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
+          }
+          $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
+          $objdumpItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter 'objdump.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $corpusItem -or $null -eq $objdumpItem) { throw 'packaged E2E gate inputs are incomplete' }
+          $corpus = $corpusItem.FullName
+          $objdump = $objdumpItem.FullName
+          & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
+          if (-not $?) { throw 'E2E-2022 packaged workload gate failed' }
+          Write-Output 'E2E-2022 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+
+      - name: E2E-2022 current ZIP and bootstrap scripts
+        shell: pwsh
+        env:
+          ECS_E2E_LABEL: '2022'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $label = [string]$env:ECS_E2E_LABEL
+          $artifactRoot = Join-Path $PWD '.ci/windows-tools-dist'
+          $serverJob = $null
+          $certificate = $null
+          $installDirectory = $null
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
+          $runWorkBefore = $null
+          $certificateCheckDefaultWasPresent = $false
+          $certificateCheckDefaultOriginalValue = $null
+          $noProxyDefaultWasPresent = $false
+          $noProxyDefaultOriginalValue = $null
+
+          function Get-ArtifactFile {
+            param(
+              [Parameter(Mandatory)][string]$Root,
+              [Parameter(Mandatory)][string]$Filter
+            )
+            $items = @(Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse)
+            if ($items.Count -ne 1) { throw "artifact file $Filter is missing or ambiguous below $Root" }
+            return $items[0]
+          }
+
+          function Get-ArtifactChecksum {
+            param(
+              [Parameter(Mandatory)][object]$ChecksumFile,
+              [Parameter(Mandatory)][string]$Asset
+            )
+            $checksumMatches = @(
+              foreach ($line in Get-Content -LiteralPath $ChecksumFile.FullName) {
+                $match = [regex]::Match($line, '^\s*([0-9A-Fa-f]{64})\s+\*?(.+?)\s*$')
+                if ($match.Success -and $match.Groups[2].Value -ceq $Asset) {
+                  $match.Groups[1].Value.ToLowerInvariant()
+                }
+              }
+            )
+            if ($checksumMatches.Count -ne 1) { throw "checksums.txt has no unique entry for $Asset" }
+            return $checksumMatches[0]
+          }
+
+          function Assert-ArtifactChecksum {
+            param(
+              [Parameter(Mandatory)][object]$ChecksumFile,
+              [Parameter(Mandatory)][object]$AssetFile,
+              [Parameter(Mandatory)][string]$Asset
+            )
+            $expected = Get-ArtifactChecksum -ChecksumFile $ChecksumFile -Asset $Asset
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetFile.FullName).Hash.ToLowerInvariant()
+            if ($actual -cne $expected) { throw "$Asset SHA-256 mismatch" }
+          }
+
+          try {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+            $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output ("bootstrap identity name={0}; administrator={1}" -f $identity.Name, $isAdministrator)
+
+            $commitFile = Get-ArtifactFile -Root $artifactRoot -Filter 'CURRENT_COMMIT'
+            if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA) {
+              throw 'bootstrap artifact does not identify the current workflow commit'
+            }
+            $mainRoot = Join-Path $artifactRoot 'main'
+            $bundleRoot = Join-Path $artifactRoot 'bundle'
+            $mainArchive = Get-ArtifactFile -Root $mainRoot -Filter 'ecs_windows_amd64.zip'
+            $mainChecksums = Get-ArtifactFile -Root $mainRoot -Filter 'checksums.txt'
+            $bundleArchive = Get-ArtifactFile -Root $bundleRoot -Filter 'ecs-tools_windows_amd64.zip'
+            $bundleChecksums = Get-ArtifactFile -Root $bundleRoot -Filter 'checksums.txt'
+            $corpusArchive = Get-ArtifactFile -Root $bundleRoot -Filter 'ecs-corpus_silesia-v1.tar.gz'
+            $runScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'run.ps1'
+            $installScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'install.ps1'
+            Assert-ArtifactChecksum -ChecksumFile $mainChecksums -AssetFile $mainArchive -Asset 'ecs_windows_amd64.zip'
+            Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive -Asset 'ecs-tools_windows_amd64.zip'
+            Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive -Asset 'ecs-corpus_silesia-v1.tar.gz'
+
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::OpenRead($mainArchive.FullName)
+            try { $mainMembers = @($zip.Entries | ForEach-Object { [string]$_.FullName }) } finally { $zip.Dispose() }
+            $expectedMainMembers = @('ecs.exe', 'LICENSE', 'NOTICE', 'README.md', 'README_EN.md', 'SECURITY.md', 'THIRD_PARTY.md')
+            if ((@($mainMembers | Sort-Object) -join "`n") -cne (@($expectedMainMembers | Sort-Object) -join "`n")) { throw 'main Windows ZIP member set changed' }
+            $mainExtract = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-main-$label")
+            Expand-Archive -LiteralPath $mainArchive.FullName -DestinationPath $mainExtract -Force
+            $ecsPath = Join-Path $mainExtract 'ecs.exe'
+            if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'main Windows ZIP did not extract ecs.exe' }
+
+            $planOutput = @(& $ecsPath plan --lang en --profile standard --only zstd --exposure any 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw 'current main ZIP plan failed' }
+            $plan = ($planOutput -join "`n") | ConvertFrom-Json
+            $requiredTools = @($plan.required_tools)
+            if ($requiredTools.Count -ne 1 -or [string]$requiredTools[0] -cne 'zstd') { throw "only-required-tools plan drifted: $($requiredTools -join ',')" }
+
+            New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot 'main'), (Join-Path $fixtureRoot 'bundle') | Out-Null
+            Copy-Item -LiteralPath $mainArchive.FullName -Destination (Join-Path $fixtureRoot 'main/ecs_windows_amd64.zip')
+            Copy-Item -LiteralPath $mainChecksums.FullName -Destination (Join-Path $fixtureRoot 'main/checksums.txt')
+            Copy-Item -LiteralPath $bundleArchive.FullName -Destination (Join-Path $fixtureRoot 'bundle/ecs-tools_windows_amd64.zip')
+            Copy-Item -LiteralPath $bundleChecksums.FullName -Destination (Join-Path $fixtureRoot 'bundle/checksums.txt')
+            Copy-Item -LiteralPath $corpusArchive.FullName -Destination (Join-Path $fixtureRoot 'bundle/ecs-corpus_silesia-v1.tar.gz')
+
+            $certificate = New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddHours(2) -KeyExportPolicy Exportable -Type SSLServerAuthentication
+            $certificateFile = Join-Path $fixtureRoot 'fixture.cer'
+            $pfxFile = Join-Path $fixtureRoot 'fixture.pfx'
+            $certificatePassword = 'ecs-phase8-fixture-password'
+            $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
+            Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
+            Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
+            $serverScript = {
+              param([string]$Root, [string]$PfxPath, [string]$Password)
+              $ErrorActionPreference = 'Stop'
+              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
+              $listener.Start()
+              $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
+              Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
+              try {
+                while ($true) {
+                  $client = $listener.AcceptTcpClient()
+                  try {
+                    $ssl = [Net.Security.SslStream]::new($client.GetStream(), $false)
+                    try {
+                      $ssl.AuthenticateAsServer($cert, $false, [Security.Authentication.SslProtocols]::Tls12, $false)
+                      $reader = [IO.StreamReader]::new($ssl, [Text.Encoding]::ASCII, $false, 4096, $true)
+                      $requestLine = $reader.ReadLine()
+                      $headerLine = $null
+                      while ($null -ne ($headerLine = $reader.ReadLine()) -and $headerLine -ne '') { }
+                      $status = '404 Not Found'
+                      $body = [Text.Encoding]::UTF8.GetBytes('not found')
+                      if ($requestLine -match '^GET\s+(?<path>/[^\s?]*)\s+HTTP/') {
+                        $relative = [Uri]::UnescapeDataString($Matches.path.TrimStart('/'))
+                        if ($relative -notmatch '(^|/)\.\.(/|$)' -and $relative -notmatch '\\') {
+                          $candidate = [IO.Path]::GetFullPath((Join-Path $Root $relative.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+                          $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+                          if ($candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                            $status = '200 OK'
+                            $body = [IO.File]::ReadAllBytes($candidate)
+                          }
+                        }
+                      }
+                      $response = "HTTP/1.1 $status`r`nContent-Length: $($body.Length)`r`nContent-Type: application/octet-stream`r`nConnection: close`r`n`r`n"
+                      $responseBytes = [Text.Encoding]::ASCII.GetBytes($response)
+                      $ssl.Write($responseBytes, 0, $responseBytes.Length)
+                      $ssl.Write($body, 0, $body.Length)
+                      $ssl.Flush()
+                    } finally { $ssl.Dispose() }
+                  } finally { $client.Dispose() }
+                }
+              } finally { $listener.Stop(); $cert.Dispose() }
+            }
+            $serverJob = Start-Job -ScriptBlock $serverScript -ArgumentList $fixtureRoot, $pfxFile, $certificatePassword
+            $readyLine = $null
+            for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
+              if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
+              $readyLine = Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1
+              if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
+            }
+            if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
+            $readyText = ([string]$readyLine).Trim()
+            Write-Output ("bootstrap fixture ready signal: <{0}>" -f $readyText)
+            $readyMatch = [regex]::Match($readyText, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
+            $port = [int]$readyMatch.Groups['port'].Value
+            Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
+            $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
+            if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
+            foreach ($localhostAddress in $localhostAddresses) {
+              Write-Output ("bootstrap localhost resolution family={0}; address={1}" -f $localhostAddress.AddressFamily, $localhostAddress.IPAddressToString)
+            }
+            $mainBase = "https://localhost:$port/main"
+            $bundleBase = "https://localhost:$port/bundle"
+
+            $runWorkBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+            $sentinelToolBin = Join-Path $env:RUNNER_TEMP ("ecs-tool-bin-sentinel-$label")
+            New-Item -ItemType Directory -Force -Path $sentinelToolBin | Out-Null
+            $env:ECS_TOOL_BIN = $sentinelToolBin
+            $env:ECS_RELEASE_BASE = $mainBase
+            $env:ECS_BUNDLE_RELEASE_BASE = $bundleBase
+            $releaseBaseUri = [Uri]::new([string]$env:ECS_RELEASE_BASE)
+            $bundleReleaseBaseUri = [Uri]::new([string]$env:ECS_BUNDLE_RELEASE_BASE)
+            if (-not $releaseBaseUri.IsAbsoluteUri -or $releaseBaseUri.Scheme -cne 'https' -or $releaseBaseUri.Host -cne 'localhost' -or $releaseBaseUri.Port -ne $port) {
+              throw 'ECS_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
+              throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            Write-Output ("bootstrap fixture URIs main={0}; bundle={1}" -f [string]$env:ECS_RELEASE_BASE, [string]$env:ECS_BUNDLE_RELEASE_BASE)
+            $env:ECS_REPOSITORY = 'CST-Cat/ecs'
+            $env:ECS_VERSION = 'phase8-current'
+            $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
+            $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+            $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+            if (-not $invokeWebRequestCommand.Parameters.ContainsKey('NoProxy')) { throw 'current pwsh Invoke-WebRequest lacks NoProxy' }
+            $noProxyParameterName = 'Invoke-WebRequest:NoProxy'
+            $noProxyDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($noProxyParameterName)
+            $noProxyDefaultOriginalValue = $null
+            if ($noProxyDefaultWasPresent) {
+              $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
+            }
+            $certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'
+            $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
+            $certificateCheckDefaultOriginalValue = $null
+            if ($certificateCheckDefaultWasPresent) {
+              $certificateCheckDefaultOriginalValue = $PSDefaultParameterValues[$certificateCheckParameterName]
+            }
+            try {
+              $PSDefaultParameterValues[$certificateCheckParameterName] = $true
+              $PSDefaultParameterValues[$noProxyParameterName] = $true
+              $probeFile = Join-Path $fixtureRoot 'probe-checksums.txt'
+              Invoke-WebRequest -UseBasicParsing -Uri "$($env:ECS_RELEASE_BASE)/checksums.txt" -OutFile $probeFile -NoProxy -ErrorAction Stop
+              if (-not (Test-Path -LiteralPath $probeFile -PathType Leaf) -or (Get-Item -LiteralPath $probeFile).Length -eq 0) {
+                throw 'localhost HTTPS fixture probe returned no file'
+              }
+              Write-Output ("bootstrap localhost HTTPS probe succeeded uri={0}/checksums.txt" -f [string]$env:ECS_RELEASE_BASE)
+              & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
+              if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
+              $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterRun -or $userPathBaseline -cne $userPathAfterRun) { throw 'run.ps1 changed the Machine or User PATH' }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
+              $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
+              $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
+              $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
+              if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+              $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+              if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
+
+              $protectedInstallTargets = @(
+                (Join-Path $env:ProgramFiles 'ecs-e2e-forbidden')
+                (Join-Path $env:ProgramData 'ecs-e2e-forbidden')
+                (Join-Path $env:SystemRoot 'ecs-e2e-forbidden')
+                (Join-Path $PWD.Path 'ecs-e2e-forbidden')
+                (Join-Path $env:RUNNER_TEMP 'ecs-e2e-forbidden')
+              )
+              $expectedProtectedInstallError = 'ecs install: install directory must remain under the current user local-data directory'
+              foreach ($protectedInstallTarget in $protectedInstallTargets) {
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target already exists: $protectedInstallTarget" }
+                $tempInstallBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                $protectedInstallOutput = @()
+                $protectedInstallException = $null
+                $protectedInstallSucceeded = $true
+                try {
+                  $protectedInstallOutput = @(& $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $protectedInstallTarget 2>&1)
+                } catch {
+                  $protectedInstallSucceeded = $false
+                  $protectedInstallException = $_
+                }
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target was created: $protectedInstallTarget" }
+                $tempInstallAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                if (@($tempInstallAfter | Where-Object { $tempInstallBefore -notcontains $_ }).Count -ne 0) { throw "protected install created a temporary work directory for $protectedInstallTarget" }
+                if ($protectedInstallSucceeded) { throw "install.ps1 unexpectedly accepted protected install target: $protectedInstallTarget" }
+                $protectedInstallFailureText = ((@($protectedInstallOutput) + @($protectedInstallException)) | Out-String)
+                if ($protectedInstallFailureText -notmatch [regex]::Escape($expectedProtectedInstallError)) { throw "protected install did not preserve the expected path rejection for $protectedInstallTarget" }
+              }
+
+              $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+              $localAppDataEcsFull = [IO.Path]::GetFullPath($localAppDataFull + '\ecs').TrimEnd('\')
+              $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
+              $installFull = [IO.Path]::GetFullPath($installDirectory)
+              if (-not $installFull.StartsWith($localAppDataEcsFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA\ecs' }
+              & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
+              if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
+              $machinePathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }
+              $installedEcs = Join-Path $installDirectory 'ecs.exe'
+              if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
+              $installedVersion = @(& $installedEcs --version 2>&1)
+              if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
+              $machinePathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterVersion -or $userPathBaseline -cne $userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }
+              Remove-Item -LiteralPath $installDirectory -Recurse -Force
+              if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
+              $installDirectory = $null
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+            } finally {
+              try {
+                if ($noProxyDefaultWasPresent) {
+                  $PSDefaultParameterValues[$noProxyParameterName] = $noProxyDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($noProxyParameterName) -or
+                      $PSDefaultParameterValues[$noProxyParameterName] -cne $noProxyDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest no-proxy default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($noProxyParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($noProxyParameterName)) {
+                    throw 'Invoke-WebRequest no-proxy default was not removed'
+                  }
+                }
+              } finally {
+                if ($certificateCheckDefaultWasPresent) {
+                  $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                      $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                    throw 'Invoke-WebRequest certificate-check default was not removed'
+                  }
+                }
+              }
+            }
+          } finally {
+            $cleanupErrors = @()
+            if ($null -ne $serverJob) {
+              try {
+                if ($serverJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+                  Stop-Job -Job $serverJob -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "server job stop failed: $($_.Exception.Message)"
+              }
+              try {
+                Remove-Job -Job $serverJob -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "server job removal failed: $($_.Exception.Message)"
+              }
+            }
+            if ($null -ne $certificate) {
+              $certificatePath = "Cert:\CurrentUser\My\$($certificate.Thumbprint)"
+              try {
+                if (Test-Path -LiteralPath $certificatePath) {
+                  Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "fixture certificate cleanup failed: $($_.Exception.Message)"
+              }
+              if (Test-Path -LiteralPath $certificatePath) {
+                $cleanupErrors += "fixture certificate remains in CurrentUser\My: $certificatePath"
+              }
+            }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              try {
+                Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "install directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              $cleanupErrors += "install directory remains: $installDirectory"
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              try {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "fixture directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              $cleanupErrors += "fixture directory remains: $fixtureRoot"
+            }
+            if ($null -ne $runWorkBefore) {
+              try {
+                $runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+                $runWorkLeftover = @($runWorkAfterFinal | Where-Object { $runWorkBefore -notcontains $_ })
+                if ($runWorkLeftover.Count -ne 0) {
+                  $cleanupErrors += "private staging remains: $($runWorkLeftover -join ', ')"
+                }
+              } catch {
+                $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
+              }
+            }
+            if ($cleanupErrors.Count -ne 0) {
+              throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
+            }
+          }
+
+  e2e-2025:
+    name: E2E-2025
+    needs: [package, verify-2025]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-dist
+          path: .ci/windows-tools-dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-2025
+          path: .ci/windows-tools-gate-inputs
+
+      - name: E2E-2025 packaged bundle workloads
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+          $archiveItem = Get-ChildItem '.ci/windows-tools-dist' -File -Filter 'ecs-tools_windows_amd64.zip' -Recurse | Select-Object -First 1
+          if ($null -eq $archiveItem) { throw 'packaged Windows benchmark bundle is missing' }
+          $archive = $archiveItem.FullName
+          $bundle = Join-Path $PWD '.ci/windows-bundle'
+          Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force
+          $stage = $bundle
+          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
+          }
+          $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
+          $objdumpItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter 'objdump.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $corpusItem -or $null -eq $objdumpItem) { throw 'packaged E2E gate inputs are incomplete' }
+          $corpus = $corpusItem.FullName
+          $objdump = $objdumpItem.FullName
+          & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
+          if (-not $?) { throw 'E2E-2025 packaged workload gate failed' }
+          Write-Output 'E2E-2025 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+
+      - name: E2E-2025 current ZIP and bootstrap scripts
+        shell: pwsh
+        env:
+          ECS_E2E_LABEL: '2025'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $label = [string]$env:ECS_E2E_LABEL
+          $artifactRoot = Join-Path $PWD '.ci/windows-tools-dist'
+          $serverJob = $null
+          $certificate = $null
+          $installDirectory = $null
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-fixture-$label")
+          $runWorkBefore = $null
+          $certificateCheckDefaultWasPresent = $false
+          $certificateCheckDefaultOriginalValue = $null
+          $noProxyDefaultWasPresent = $false
+          $noProxyDefaultOriginalValue = $null
+
+          function Get-ArtifactFile {
+            param(
+              [Parameter(Mandatory)][string]$Root,
+              [Parameter(Mandatory)][string]$Filter
+            )
+            $items = @(Get-ChildItem -LiteralPath $Root -File -Filter $Filter -Recurse)
+            if ($items.Count -ne 1) { throw "artifact file $Filter is missing or ambiguous below $Root" }
+            return $items[0]
+          }
+
+          function Get-ArtifactChecksum {
+            param(
+              [Parameter(Mandatory)][object]$ChecksumFile,
+              [Parameter(Mandatory)][string]$Asset
+            )
+            $checksumMatches = @(
+              foreach ($line in Get-Content -LiteralPath $ChecksumFile.FullName) {
+                $match = [regex]::Match($line, '^\s*([0-9A-Fa-f]{64})\s+\*?(.+?)\s*$')
+                if ($match.Success -and $match.Groups[2].Value -ceq $Asset) {
+                  $match.Groups[1].Value.ToLowerInvariant()
+                }
+              }
+            )
+            if ($checksumMatches.Count -ne 1) { throw "checksums.txt has no unique entry for $Asset" }
+            return $checksumMatches[0]
+          }
+
+          function Assert-ArtifactChecksum {
+            param(
+              [Parameter(Mandatory)][object]$ChecksumFile,
+              [Parameter(Mandatory)][object]$AssetFile,
+              [Parameter(Mandatory)][string]$Asset
+            )
+            $expected = Get-ArtifactChecksum -ChecksumFile $ChecksumFile -Asset $Asset
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetFile.FullName).Hash.ToLowerInvariant()
+            if ($actual -cne $expected) { throw "$Asset SHA-256 mismatch" }
+          }
+
+          try {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+            $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output ("bootstrap identity name={0}; administrator={1}" -f $identity.Name, $isAdministrator)
+
+            $commitFile = Get-ArtifactFile -Root $artifactRoot -Filter 'CURRENT_COMMIT'
+            if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA) {
+              throw 'bootstrap artifact does not identify the current workflow commit'
+            }
+            $mainRoot = Join-Path $artifactRoot 'main'
+            $bundleRoot = Join-Path $artifactRoot 'bundle'
+            $mainArchive = Get-ArtifactFile -Root $mainRoot -Filter 'ecs_windows_amd64.zip'
+            $mainChecksums = Get-ArtifactFile -Root $mainRoot -Filter 'checksums.txt'
+            $bundleArchive = Get-ArtifactFile -Root $bundleRoot -Filter 'ecs-tools_windows_amd64.zip'
+            $bundleChecksums = Get-ArtifactFile -Root $bundleRoot -Filter 'checksums.txt'
+            $corpusArchive = Get-ArtifactFile -Root $bundleRoot -Filter 'ecs-corpus_silesia-v1.tar.gz'
+            $runScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'run.ps1'
+            $installScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'install.ps1'
+            Assert-ArtifactChecksum -ChecksumFile $mainChecksums -AssetFile $mainArchive -Asset 'ecs_windows_amd64.zip'
+            Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive -Asset 'ecs-tools_windows_amd64.zip'
+            Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive -Asset 'ecs-corpus_silesia-v1.tar.gz'
+
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::OpenRead($mainArchive.FullName)
+            try { $mainMembers = @($zip.Entries | ForEach-Object { [string]$_.FullName }) } finally { $zip.Dispose() }
+            $expectedMainMembers = @('ecs.exe', 'LICENSE', 'NOTICE', 'README.md', 'README_EN.md', 'SECURITY.md', 'THIRD_PARTY.md')
+            if ((@($mainMembers | Sort-Object) -join "`n") -cne (@($expectedMainMembers | Sort-Object) -join "`n")) { throw 'main Windows ZIP member set changed' }
+            $mainExtract = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-main-$label")
+            Expand-Archive -LiteralPath $mainArchive.FullName -DestinationPath $mainExtract -Force
+            $ecsPath = Join-Path $mainExtract 'ecs.exe'
+            if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'main Windows ZIP did not extract ecs.exe' }
+
+            $planOutput = @(& $ecsPath plan --lang en --profile standard --only zstd --exposure any 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw 'current main ZIP plan failed' }
+            $plan = ($planOutput -join "`n") | ConvertFrom-Json
+            $requiredTools = @($plan.required_tools)
+            if ($requiredTools.Count -ne 1 -or [string]$requiredTools[0] -cne 'zstd') { throw "only-required-tools plan drifted: $($requiredTools -join ',')" }
+
+            New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot 'main'), (Join-Path $fixtureRoot 'bundle') | Out-Null
+            Copy-Item -LiteralPath $mainArchive.FullName -Destination (Join-Path $fixtureRoot 'main/ecs_windows_amd64.zip')
+            Copy-Item -LiteralPath $mainChecksums.FullName -Destination (Join-Path $fixtureRoot 'main/checksums.txt')
+            Copy-Item -LiteralPath $bundleArchive.FullName -Destination (Join-Path $fixtureRoot 'bundle/ecs-tools_windows_amd64.zip')
+            Copy-Item -LiteralPath $bundleChecksums.FullName -Destination (Join-Path $fixtureRoot 'bundle/checksums.txt')
+            Copy-Item -LiteralPath $corpusArchive.FullName -Destination (Join-Path $fixtureRoot 'bundle/ecs-corpus_silesia-v1.tar.gz')
+
+            $certificate = New-SelfSignedCertificate -DnsName 'localhost' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddHours(2) -KeyExportPolicy Exportable -Type SSLServerAuthentication
+            $certificateFile = Join-Path $fixtureRoot 'fixture.cer'
+            $pfxFile = Join-Path $fixtureRoot 'fixture.pfx'
+            $certificatePassword = 'ecs-phase8-fixture-password'
+            $securePassword = ConvertTo-SecureString $certificatePassword -AsPlainText -Force
+            Export-Certificate -Cert $certificate -FilePath $certificateFile | Out-Null
+            Export-PfxCertificate -Cert $certificate -FilePath $pfxFile -Password $securePassword | Out-Null
+            $serverScript = {
+              param([string]$Root, [string]$PfxPath, [string]$Password)
+              $ErrorActionPreference = 'Stop'
+              $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $Password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+              $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback, 0)
+              $listener.Start()
+              $endpoint = [Net.IPEndPoint]$listener.LocalEndpoint
+              Write-Output ("READY:{0};family={1};address={2}" -f $endpoint.Port, $endpoint.Address.AddressFamily, $endpoint.Address.IPAddressToString)
+              try {
+                while ($true) {
+                  $client = $listener.AcceptTcpClient()
+                  try {
+                    $ssl = [Net.Security.SslStream]::new($client.GetStream(), $false)
+                    try {
+                      $ssl.AuthenticateAsServer($cert, $false, [Security.Authentication.SslProtocols]::Tls12, $false)
+                      $reader = [IO.StreamReader]::new($ssl, [Text.Encoding]::ASCII, $false, 4096, $true)
+                      $requestLine = $reader.ReadLine()
+                      $headerLine = $null
+                      while ($null -ne ($headerLine = $reader.ReadLine()) -and $headerLine -ne '') { }
+                      $status = '404 Not Found'
+                      $body = [Text.Encoding]::UTF8.GetBytes('not found')
+                      if ($requestLine -match '^GET\s+(?<path>/[^\s?]*)\s+HTTP/') {
+                        $relative = [Uri]::UnescapeDataString($Matches.path.TrimStart('/'))
+                        if ($relative -notmatch '(^|/)\.\.(/|$)' -and $relative -notmatch '\\') {
+                          $candidate = [IO.Path]::GetFullPath((Join-Path $Root $relative.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+                          $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+                          if ($candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                            $status = '200 OK'
+                            $body = [IO.File]::ReadAllBytes($candidate)
+                          }
+                        }
+                      }
+                      $response = "HTTP/1.1 $status`r`nContent-Length: $($body.Length)`r`nContent-Type: application/octet-stream`r`nConnection: close`r`n`r`n"
+                      $responseBytes = [Text.Encoding]::ASCII.GetBytes($response)
+                      $ssl.Write($responseBytes, 0, $responseBytes.Length)
+                      $ssl.Write($body, 0, $body.Length)
+                      $ssl.Flush()
+                    } finally { $ssl.Dispose() }
+                  } finally { $client.Dispose() }
+                }
+              } finally { $listener.Stop(); $cert.Dispose() }
+            }
+            $serverJob = Start-Job -ScriptBlock $serverScript -ArgumentList $fixtureRoot, $pfxFile, $certificatePassword
+            $readyLine = $null
+            for ($attempt = 0; $attempt -lt 100 -and $null -eq $readyLine; $attempt++) {
+              if ($serverJob.State -eq 'Failed') { throw "HTTPS fixture failed: $($serverJob.ChildJobs[0].JobStateInfo.Reason)" }
+              $readyLine = Receive-Job -Job $serverJob -Keep | Where-Object { [string]$_ -match '^READY:[0-9]+;family=[^;]+;address=[^;]+$' } | Select-Object -Last 1
+              if ($null -eq $readyLine) { Start-Sleep -Milliseconds 100 }
+            }
+            if ($null -eq $readyLine) { throw 'HTTPS fixture did not become ready' }
+            $readyText = ([string]$readyLine).Trim()
+            Write-Output ("bootstrap fixture ready signal: <{0}>" -f $readyText)
+            $readyMatch = [regex]::Match($readyText, '^READY:(?<port>[0-9]+);family=(?<family>[^;]+);address=(?<address>[^;]+)$')
+            if (-not $readyMatch.Success) { throw 'HTTPS fixture readiness endpoint was malformed' }
+            $port = [int]$readyMatch.Groups['port'].Value
+            Write-Output ("bootstrap fixture listener endpoint: family={0}; address={1}; port={2}" -f $readyMatch.Groups['family'].Value, $readyMatch.Groups['address'].Value, $port)
+            $localhostAddresses = @([System.Net.Dns]::GetHostAddresses('localhost'))
+            if ($localhostAddresses.Count -eq 0) { throw 'localhost resolved to no addresses' }
+            foreach ($localhostAddress in $localhostAddresses) {
+              Write-Output ("bootstrap localhost resolution family={0}; address={1}" -f $localhostAddress.AddressFamily, $localhostAddress.IPAddressToString)
+            }
+            $mainBase = "https://localhost:$port/main"
+            $bundleBase = "https://localhost:$port/bundle"
+
+            $runWorkBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+            $sentinelToolBin = Join-Path $env:RUNNER_TEMP ("ecs-tool-bin-sentinel-$label")
+            New-Item -ItemType Directory -Force -Path $sentinelToolBin | Out-Null
+            $env:ECS_TOOL_BIN = $sentinelToolBin
+            $env:ECS_RELEASE_BASE = $mainBase
+            $env:ECS_BUNDLE_RELEASE_BASE = $bundleBase
+            $releaseBaseUri = [Uri]::new([string]$env:ECS_RELEASE_BASE)
+            $bundleReleaseBaseUri = [Uri]::new([string]$env:ECS_BUNDLE_RELEASE_BASE)
+            if (-not $releaseBaseUri.IsAbsoluteUri -or $releaseBaseUri.Scheme -cne 'https' -or $releaseBaseUri.Host -cne 'localhost' -or $releaseBaseUri.Port -ne $port) {
+              throw 'ECS_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            if (-not $bundleReleaseBaseUri.IsAbsoluteUri -or $bundleReleaseBaseUri.Scheme -cne 'https' -or $bundleReleaseBaseUri.Host -cne 'localhost' -or $bundleReleaseBaseUri.Port -ne $port) {
+              throw 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
+            }
+            Write-Output ("bootstrap fixture URIs main={0}; bundle={1}" -f [string]$env:ECS_RELEASE_BASE, [string]$env:ECS_BUNDLE_RELEASE_BASE)
+            $env:ECS_REPOSITORY = 'CST-Cat/ecs'
+            $env:ECS_VERSION = 'phase8-current'
+            $runReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-report-$label")
+            $machinePathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+            $userPathBaseline = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+            if (-not $invokeWebRequestCommand.Parameters.ContainsKey('NoProxy')) { throw 'current pwsh Invoke-WebRequest lacks NoProxy' }
+            $noProxyParameterName = 'Invoke-WebRequest:NoProxy'
+            $noProxyDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($noProxyParameterName)
+            $noProxyDefaultOriginalValue = $null
+            if ($noProxyDefaultWasPresent) {
+              $noProxyDefaultOriginalValue = $PSDefaultParameterValues[$noProxyParameterName]
+            }
+            $certificateCheckParameterName = 'Invoke-WebRequest:SkipCertificateCheck'
+            $certificateCheckDefaultWasPresent = $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)
+            $certificateCheckDefaultOriginalValue = $null
+            if ($certificateCheckDefaultWasPresent) {
+              $certificateCheckDefaultOriginalValue = $PSDefaultParameterValues[$certificateCheckParameterName]
+            }
+            try {
+              $PSDefaultParameterValues[$certificateCheckParameterName] = $true
+              $PSDefaultParameterValues[$noProxyParameterName] = $true
+              $probeFile = Join-Path $fixtureRoot 'probe-checksums.txt'
+              Invoke-WebRequest -UseBasicParsing -Uri "$($env:ECS_RELEASE_BASE)/checksums.txt" -OutFile $probeFile -NoProxy -ErrorAction Stop
+              if (-not (Test-Path -LiteralPath $probeFile -PathType Leaf) -or (Get-Item -LiteralPath $probeFile).Length -eq 0) {
+                throw 'localhost HTTPS fixture probe returned no file'
+              }
+              Write-Output ("bootstrap localhost HTTPS probe succeeded uri={0}/checksums.txt" -f [string]$env:ECS_RELEASE_BASE)
+              & $runScript.FullName --lang en --profile standard --only zstd --exposure any --yes --format json --output $runReportRoot
+              if (-not $?) { throw 'run.ps1 failed against the current artifact fixture' }
+              $machinePathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterRun = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterRun -or $userPathBaseline -cne $userPathAfterRun) { throw 'run.ps1 changed the Machine or User PATH' }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }
+              $runReportItem = Get-ArtifactFile -Root $runReportRoot -Filter '*.json'
+              $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
+              $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
+              if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+              $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+              if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
+
+              $protectedInstallTargets = @(
+                (Join-Path $env:ProgramFiles 'ecs-e2e-forbidden')
+                (Join-Path $env:ProgramData 'ecs-e2e-forbidden')
+                (Join-Path $env:SystemRoot 'ecs-e2e-forbidden')
+                (Join-Path $PWD.Path 'ecs-e2e-forbidden')
+                (Join-Path $env:RUNNER_TEMP 'ecs-e2e-forbidden')
+              )
+              $expectedProtectedInstallError = 'ecs install: install directory must remain under the current user local-data directory'
+              foreach ($protectedInstallTarget in $protectedInstallTargets) {
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target already exists: $protectedInstallTarget" }
+                $tempInstallBefore = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                $protectedInstallOutput = @()
+                $protectedInstallException = $null
+                $protectedInstallSucceeded = $true
+                try {
+                  $protectedInstallOutput = @(& $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $protectedInstallTarget 2>&1)
+                } catch {
+                  $protectedInstallSucceeded = $false
+                  $protectedInstallException = $_
+                }
+                if (Test-Path -LiteralPath $protectedInstallTarget) { throw "protected install target was created: $protectedInstallTarget" }
+                $tempInstallAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-install-*' | ForEach-Object { $_.FullName })
+                if (@($tempInstallAfter | Where-Object { $tempInstallBefore -notcontains $_ }).Count -ne 0) { throw "protected install created a temporary work directory for $protectedInstallTarget" }
+                if ($protectedInstallSucceeded) { throw "install.ps1 unexpectedly accepted protected install target: $protectedInstallTarget" }
+                $protectedInstallFailureText = ((@($protectedInstallOutput) + @($protectedInstallException)) | Out-String)
+                if ($protectedInstallFailureText -notmatch [regex]::Escape($expectedProtectedInstallError)) { throw "protected install did not preserve the expected path rejection for $protectedInstallTarget" }
+              }
+
+              $localAppDataFull = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+              $localAppDataEcsFull = [IO.Path]::GetFullPath($localAppDataFull + '\ecs').TrimEnd('\')
+              $installDirectory = Join-Path $env:LOCALAPPDATA ("ecs\phase8-e2e-$label-" + [guid]::NewGuid().ToString('N'))
+              $installFull = [IO.Path]::GetFullPath($installDirectory)
+              if (-not $installFull.StartsWith($localAppDataEcsFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA\ecs' }
+              & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
+              if (-not $?) { throw 'install.ps1 failed against the current artifact fixture' }
+              $machinePathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }
+              $installedEcs = Join-Path $installDirectory 'ecs.exe'
+              if (-not (Test-Path -LiteralPath $installedEcs -PathType Leaf)) { throw 'install.ps1 did not create the user-directory ecs.exe' }
+              $installedVersion = @(& $installedEcs --version 2>&1)
+              if ($LASTEXITCODE -ne 0 -or ($installedVersion -join "`n") -notmatch '(?i)ecs\s') { throw 'installed ecs.exe did not run' }
+              $machinePathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+              $userPathAfterVersion = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+              if ($machinePathBaseline -cne $machinePathAfterVersion -or $userPathBaseline -cne $userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }
+              Remove-Item -LiteralPath $installDirectory -Recurse -Force
+              if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
+              $installDirectory = $null
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+            } finally {
+              try {
+                if ($noProxyDefaultWasPresent) {
+                  $PSDefaultParameterValues[$noProxyParameterName] = $noProxyDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($noProxyParameterName) -or
+                      $PSDefaultParameterValues[$noProxyParameterName] -cne $noProxyDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest no-proxy default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($noProxyParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($noProxyParameterName)) {
+                    throw 'Invoke-WebRequest no-proxy default was not removed'
+                  }
+                }
+              } finally {
+                if ($certificateCheckDefaultWasPresent) {
+                  $PSDefaultParameterValues[$certificateCheckParameterName] = $certificateCheckDefaultOriginalValue
+                  if (-not $PSDefaultParameterValues.ContainsKey($certificateCheckParameterName) -or
+                      $PSDefaultParameterValues[$certificateCheckParameterName] -cne $certificateCheckDefaultOriginalValue) {
+                    throw 'Invoke-WebRequest certificate-check default was not restored exactly'
+                  }
+                } else {
+                  [void]$PSDefaultParameterValues.Remove($certificateCheckParameterName)
+                  if ($PSDefaultParameterValues.ContainsKey($certificateCheckParameterName)) {
+                    throw 'Invoke-WebRequest certificate-check default was not removed'
+                  }
+                }
+              }
+            }
+          } finally {
+            $cleanupErrors = @()
+            if ($null -ne $serverJob) {
+              try {
+                if ($serverJob.State -notin @('Completed', 'Failed', 'Stopped')) {
+                  Stop-Job -Job $serverJob -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "server job stop failed: $($_.Exception.Message)"
+              }
+              try {
+                Remove-Job -Job $serverJob -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "server job removal failed: $($_.Exception.Message)"
+              }
+            }
+            if ($null -ne $certificate) {
+              $certificatePath = "Cert:\CurrentUser\My\$($certificate.Thumbprint)"
+              try {
+                if (Test-Path -LiteralPath $certificatePath) {
+                  Remove-Item -LiteralPath $certificatePath -Force -ErrorAction Stop
+                }
+              } catch {
+                $cleanupErrors += "fixture certificate cleanup failed: $($_.Exception.Message)"
+              }
+              if (Test-Path -LiteralPath $certificatePath) {
+                $cleanupErrors += "fixture certificate remains in CurrentUser\My: $certificatePath"
+              }
+            }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              try {
+                Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "install directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if ($null -ne $installDirectory -and (Test-Path -LiteralPath $installDirectory)) {
+              $cleanupErrors += "install directory remains: $installDirectory"
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              try {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction Stop
+              } catch {
+                $cleanupErrors += "fixture directory cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            if (Test-Path -LiteralPath $fixtureRoot) {
+              $cleanupErrors += "fixture directory remains: $fixtureRoot"
+            }
+            if ($null -ne $runWorkBefore) {
+              try {
+                $runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
+                $runWorkLeftover = @($runWorkAfterFinal | Where-Object { $runWorkBefore -notcontains $_ })
+                if ($runWorkLeftover.Count -ne 0) {
+                  $cleanupErrors += "private staging remains: $($runWorkLeftover -join ', ')"
+                }
+              } catch {
+                $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
+              }
+            }
+            if ($cleanupErrors.Count -ne 0) {
+              throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
+            }
+          }

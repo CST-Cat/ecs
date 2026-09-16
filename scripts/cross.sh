@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 交叉编译全部发布目标的 ecs 主程序，确认七个 Linux 与两个 FreeBSD
-# target 都还能构建。
+# 交叉编译全部发布目标的 ecs 主程序，确认七个 Linux、两个 FreeBSD 与
+# 一个 Windows target 都还能构建。
 #
-# 只构建、不打包：打包是 scripts/package.sh 的职责，这里只回答九个目标
-# 现在是否都能编译。目标列表来自 scripts/lib/common.sh，与打包和发布共用同一张表。
+# 只构建、不打包：打包是 scripts/package.sh 的职责。目标列表来自
+# scripts/lib/common.sh，与打包和发布共用同一张表。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -42,17 +42,18 @@ ldflags+=" -X ecs/internal/buildinfo.ToolsBundle=$tools_bundle"
 
 mkdir -p "$output_dir"
 build_count=0
-for entry in "${ECS_TARGETS[@]}"; do
+for entry in "${ECS_RELEASE_TARGETS[@]}"; do
   read -r target_id goos goarch package_arch <<<"$entry"
   if [[ -n "$target" && "$target_id" != "$target" ]]; then
     continue
   fi
   goarm=""
   [[ "$goos" == linux && "$package_arch" == armv7 ]] && goarm=7
-  printf 'cross: %s/%s -> %s\n' "$goos" "$package_arch" "$output_dir/ecs_${target_id}" >&2
+  binary_name=$(ecs_target_asset_name "$target_id" binary)
+  printf 'cross: %s/%s -> %s\n' "$goos" "$package_arch" "$output_dir/$binary_name" >&2
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" \
     "$go_command" build -trimpath -ldflags "$ldflags" \
-    -o "$output_dir/ecs_${target_id}" "$ECS_REPO_ROOT/cmd/ecs"
+    -o "$output_dir/$binary_name" "$ECS_REPO_ROOT/cmd/ecs"
   build_count=$((build_count + 1))
 done
 

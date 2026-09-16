@@ -12,6 +12,8 @@
 > 快照中的 `full` 默认包含 Ookla，`standard` 默认不含；
 > `--only ookla` 可从任意配置档显式单独选择。
 
+> Phase 9 current implementation note（2026-09-14）：下文的历史 Linux-only 设计约束不再代表当前发布目标。当前 Windows 目标为 Windows Server 2022+ x64 的 `windows_amd64`，主程序与工具 Bundle 使用 Windows ZIP asset；当前实现与锁定事实以本文末尾的 Phase 9 节及 `tools/lock.json` 为准。
+
 ## 样本选择
 
 最先对照的是用户指定的两个融合测试项目：
@@ -50,10 +52,10 @@
 10. **流媒体结论带证据**：规则按版本管理，输出 HTTP 状态、重定向地区或命中的页面信号；反爬、登录墙和网络错误返回“未知”，不能误报为不解锁。
 11. **终端和文件输出分离**：TTY 可以有颜色与动态进度；管道、日志和 JSON 永远无 ANSI、无交互噪音。
 12. **中断也有报告**：收到 `Ctrl+C` 后立即停止当前压力测试、清理临时文件，并导出已经完成的部分。
-13. **只面向 Linux**：不保留 macOS、Windows 或 BSD 的代码路径与发布目标。VPS 几乎全是
-    Linux 发行版，多平台分支的代价是测试断言被迫放宽到"哪个平台都成立"，真实生产
-    路径反而失去覆盖（见下方第 4 条实测教训）。架构维度保留：Linux VPS 有 ARM 与
-    RISC-V，发布覆盖 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`。
+13. **（历史快照）只面向 Linux**：该日期的设计不保留 macOS、Windows 或 BSD 的代码路径
+    与发布目标。VPS 几乎全是 Linux 发行版，多平台分支的代价是测试断言被迫放宽到"哪个平台
+    都成立"，真实生产路径反而失去覆盖（见下方第 4 条实测教训）。当前目标已由 Phase 9
+    节更新为 Linux、FreeBSD 与 Windows Server 2022+ x64。
 
 ## 首版功能矩阵
 
@@ -407,3 +409,21 @@ ASN 命中可以进一步使用 APNIC aut-num 事实（例如 AS9929=CUII、AS48
   CMNET，仍保留该身份。
 - 未来若增加 heuristic indicator，必须先补充一手来源、边界测试、低置信 evidence
   文案和新的 signature-set 版本；在此之前生产 heuristic 层保持为空。
+
+## Phase 9：Windows 原生适配边界（2026-09-14）
+
+本节记录当前实现的 Windows 事实，优先于本文件开头标注的历史调研快照。发布目标是
+Windows Server 2022+ x64，目标名为 `windows_amd64`；主程序资产为
+`ecs_windows_amd64.zip`，工具 Bundle 资产为 `ecs-tools_windows_amd64.zip`。
+
+- `system` 使用 native Win32 system probes；`latency` 使用 native Win32 ICMP，不依赖
+  `ping.exe`。磁盘基准继续使用 fio，Windows 原生异步 engine 为 `windowsaio`。
+- Windows frozen benchmark set 只包含 zstd、NPB EP、NPB FT、OpenSSL、STREAM 和 fio。
+  `sysbench`、`iperf3` 与 Ookla unsupported，不进入 Windows 工具集合。
+- NextTrace 尚未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows
+  `route` / `backtrace` 保持 unsupported，不把现有 Linux NextTrace 资产写成 Windows 支持。
+- Windows gate 由真实 Windows runner 直接做功能校验；当前文档只记录待 GitHub Actions
+  彩排验证的 gate，不把未执行的 Windows Actions 当成通过。
+- 这次适配没有新增主模块 Go dependency。报告仍保持 `ecs.report/v1`，比较结果仍保持
+  `ecs.compare/v1`；跨平台差异记录为同一 semantic field 的平台来源和可用性，不新增
+  第二套报告或比较 schema。

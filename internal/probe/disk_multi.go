@@ -131,7 +131,7 @@ func isDiskMountDevice(mount mountPoint) bool {
 	if strings.HasPrefix(mount.Device, "/dev/") {
 		return true
 	}
-	return mount.FSType == "ufs" || mount.FSType == "zfs"
+	return mount.FSType == "ufs" || mount.FSType == "zfs" || mount.FSType == "windows-fixed"
 }
 
 // mountWritable 通过实际创建临时文件确认可写。

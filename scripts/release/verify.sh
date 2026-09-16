@@ -89,6 +89,8 @@ fi
 [[ "$dist" == /* ]] || dist="$ECS_REPO_ROOT/$dist"
 [[ -d "$dist" ]] || die "no such dist directory: $dist"
 [[ "$build_go_version" == go* ]] || die "--build-go-version must look like go1.x.y, got $build_go_version"
+[[ -f "$dist/checksums.txt" && ! -L "$dist/checksums.txt" && -s "$dist/checksums.txt" ]] ||
+  die "缺少或非法 checksums.txt"
 
 verify_root=$(mktemp -d)
 trap 'rm -rf -- "$verify_root"' EXIT
@@ -117,12 +119,12 @@ done <<<"$listing"
 
 # ---- 发布物清单 ----
 assets=()
-for target in "${ECS_TARGET_IDS[@]}"; do
-  assets+=("ecs_${target}.tar.gz")
+for target in "${ECS_RELEASE_TARGET_IDS[@]}"; do
+  assets+=("$(ecs_target_asset_name "$target" main)")
 done
 
 for asset in "${assets[@]}"; do
-  [[ -s "$dist/$asset" ]] || die "缺少发布物 $asset"
+  [[ -f "$dist/$asset" && ! -L "$dist/$asset" && -s "$dist/$asset" ]] || die "缺少或非法发布物 $asset"
 done
 
 echo "release-verify: 全部校验通过"

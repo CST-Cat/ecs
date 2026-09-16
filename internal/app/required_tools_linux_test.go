@@ -14,6 +14,14 @@ func wantSelectedModuleTools() []string {
 	return []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}
 }
 
+func wantPlanJSONRequiredTools() []string {
+	return []string{"sysbench", "zstd", "speedtest"}
+}
+
+func wantPlanJSONExternalServices() []string {
+	return []string{"third-party-provider", "ookla"}
+}
+
 // TestResolveRequiredToolsStagesEveryDeclaredToolOnLinux pins that the Linux
 // platform boundary is a pure pass-through: no declared tool may be silently
 // dropped, because the frozen bundle is the only source for all of them.

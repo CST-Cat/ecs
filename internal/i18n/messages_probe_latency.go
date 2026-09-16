@@ -32,7 +32,7 @@ var probeLatencyChinese = map[string]string{
 	"probe.latency.note.resolution":              "每个目标只解析一次 DNS，之后固定对该 IP 建连；TCP 延迟只包含三次握手，解析耗时单列。",
 	"probe.latency.note.region":                  "区域标签说明服务归属，不保证本次连接实际落在该地区。",
 	"probe.latency.note.icmp":                    "ICMP 反映纯网络往返；与 TCP 列并列可区分链路问题与服务端排队。",
-	"probe.latency.note.icmp_unavailable":        "系统没有可用的 ping，本次只有 TCP 建连延迟；不会用 TCP 数字冒充 ICMP 结果。",
+	"probe.latency.note.icmp_unavailable":        "没有可用的 ICMP 实现，本次只有 TCP 建连延迟；不会用 TCP 数字冒充 ICMP 结果。",
 	"probe.latency.note.intercepted":             "部分目标的 TCP 建连延迟明显低于同目标 ICMP 往返，疑似被透明代理或网关代答；TCP 列不能作为到目标的真实链路延迟。",
 }
 
@@ -68,6 +68,6 @@ var probeLatencyEnglish = map[string]string{
 	"probe.latency.note.resolution":              "Each target is resolved once and subsequent connections use that IP; TCP latency covers the handshake only and DNS time is separate.",
 	"probe.latency.note.region":                  "The region label describes service ownership and does not guarantee where this connection terminated.",
 	"probe.latency.note.icmp":                    "ICMP reflects network round trips; showing it beside TCP helps distinguish path issues from server accept-queue behavior.",
-	"probe.latency.note.icmp_unavailable":        "No usable ping command was available, so this run reports TCP connection latency only and never presents TCP numbers as ICMP results.",
+	"probe.latency.note.icmp_unavailable":        "No usable ICMP implementation was available, so this run reports TCP connection latency only and never presents TCP numbers as ICMP results.",
 	"probe.latency.note.intercepted":             "Some targets have TCP connection latency far below their ICMP round trip, suggesting transparent proxy or gateway interception; TCP is not the true path latency in that case.",
 }

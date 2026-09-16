@@ -255,7 +255,7 @@ func systemSwapLimitMachineValue(limits resourceLimits) string {
 
 func stableSystemMeasurements(snapshot systemSnapshot, resources EnvironmentSnapshot) []model.Measurement {
 	measurements := []model.Measurement{
-		systemMeasurement("logical_cpus", float64(snapshot.LogicalCPUs), "count", strconv.Itoa(snapshot.LogicalCPUs), "runtime-numcpu-v1", nil),
+		systemMeasurement("logical_cpus", float64(snapshot.LogicalCPUs), "count", strconv.Itoa(snapshot.LogicalCPUs), systemLogicalCPUCountMethod(snapshot), nil),
 		systemMeasurement("usable_cpus", float64(snapshot.Allowance.Threads), "count", strconv.Itoa(snapshot.Allowance.Threads), "cpu-allowance-v1", model.BoolPtr(true)),
 	}
 	if snapshot.MemoryTotalKnown {
@@ -273,10 +273,10 @@ func stableSystemMeasurements(snapshot systemSnapshot, resources EnvironmentSnap
 	}
 	if snapshot.DiskKnown {
 		measurements = append(measurements,
-			systemMeasurement("disk_total_bytes", float64(snapshot.DiskTotal), "bytes", model.FormatBytes(snapshot.DiskTotal), "statfs-v1", nil),
-			systemMeasurement("disk_used_bytes", float64(snapshot.DiskUsed), "bytes", model.FormatBytes(snapshot.DiskUsed), "statfs-v1", model.BoolPtr(false)),
-			systemMeasurement("disk_free_bytes", float64(snapshot.DiskFree), "bytes", model.FormatBytes(snapshot.DiskFree), "statfs-v1", model.BoolPtr(true)),
-			systemMeasurement("disk_usage_percent", snapshot.DiskUsage, "%", fmt.Sprintf("%.1f %%", snapshot.DiskUsage), "statfs-v1", model.BoolPtr(false)),
+			systemMeasurement("disk_total_bytes", float64(snapshot.DiskTotal), "bytes", model.FormatBytes(snapshot.DiskTotal), systemDiskMeasurementMethod(), nil),
+			systemMeasurement("disk_used_bytes", float64(snapshot.DiskUsed), "bytes", model.FormatBytes(snapshot.DiskUsed), systemDiskMeasurementMethod(), model.BoolPtr(false)),
+			systemMeasurement("disk_free_bytes", float64(snapshot.DiskFree), "bytes", model.FormatBytes(snapshot.DiskFree), systemDiskMeasurementMethod(), model.BoolPtr(true)),
+			systemMeasurement("disk_usage_percent", snapshot.DiskUsage, "%", fmt.Sprintf("%.1f %%", snapshot.DiskUsage), systemDiskMeasurementMethod(), model.BoolPtr(false)),
 		)
 	}
 	if snapshot.StealKnown && platformPressureFactsAvailable() {
@@ -287,6 +287,13 @@ func stableSystemMeasurements(snapshot systemSnapshot, resources EnvironmentSnap
 	}
 	measurements = append(measurements, systemResourceMeasurements(resources)...)
 	return measurements
+}
+
+func systemLogicalCPUCountMethod(snapshot systemSnapshot) string {
+	if snapshot.LogicalCPUMethod != "" {
+		return snapshot.LogicalCPUMethod
+	}
+	return platformLogicalCPUCountMethod()
 }
 
 func systemResourceMeasurements(resources EnvironmentSnapshot) []model.Measurement {

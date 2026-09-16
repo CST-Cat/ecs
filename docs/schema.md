@@ -237,6 +237,29 @@ cgroup_oom_kill_events_window
 measurement 可以缺失。接口缺失不会按宿主机数据推断，也不会用 0 填充；但接口存在且前后
 计数没有变化时，0 是合法的实际 measurement value。
 
+## 跨平台同义字段的来源
+
+`ecs.report/v1` 保持同一组 semantic field；Linux、FreeBSD 与 Windows 只替换事实来源，
+不能因为平台没有对应接口而填入猜测的零值。以下是当前实现的来源边界；字段 key、单位和
+可用性语义不因平台新增一套 schema：
+
+| semantic field | Linux | FreeBSD | Windows Server 2022+ x64 |
+| --- | --- | --- | --- |
+| `system.os` / `system.kernel` | `/etc/os-release` 与 `uname -sr` | 固定 FreeBSD 标识与 `/usr/bin/uname -sr` | `RtlGetVersion`、`GetVersionExW`、`GetProductInfo`（`ntdll.dll`/`kernel32.dll`） |
+| `system.cpu_model` / `cpu_frequency` | `/proc/cpuinfo` | `sysctl hw.model`、`sysctl hw.clockrate` | `HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0` 的 `ProcessorNameString` 与 `~MHz` |
+| `system.cpu_topology` / `logical_cpus` / `physical_cpus` / cache | `/proc/cpuinfo` 与 runtime CPU count | `sysctl hw.ncpu`、`kern.smp.cores`、threads-per-core 与 cache sysctl | `GetActiveProcessorCount`、`GetLogicalProcessorInformationEx` |
+| `system.memory_*` / `swap` | `/proc/meminfo`，配额另读 cgroup | `sysctl hw.physmem`、`vm.stats.vm.*`、`vm.swap_total` | `GlobalMemoryStatusEx`；swap 由 `TotalPageFile - TotalPhys` 推导 |
+| `system.uptime` / load | `/proc/uptime`、`/proc/loadavg` | `clock_gettime(CLOCK_MONOTONIC)`，load 来自 `sysctl vm.loadavg` | `GetTickCount64`；当前 load 标记 unavailable |
+| `system.disk_*` | `df -Pk` | `/bin/df -Pk` | `GetDiskFreeSpaceExW`；固定卷由 Win32 drive APIs 发现 |
+| hardware inventory fields | `/sys/class/dmi`、`/sys/class/drm`、`/sys/class/net`、`/sys/class/block` | `/bin/kenv`、`/sbin/ifconfig`、`/sbin/geom` | `GetSystemFirmwareTable`、`EnumDisplayDevicesW`、`GetAdaptersAddresses`、`GetLogicalDrives`/`GetDriveTypeW` |
+| `latency` ICMP measurements | 固定工具包中的 `ping` | base-system `/sbin/ping` | native Win32 ICMP APIs in `iphlpapi.dll`（`IcmpCreateFile`/`Icmp6CreateFile` 与 `IcmpSendEcho2`/`Icmp6SendEcho2`） |
+| `disk.ioengine` 与 fio measurements | fio 实际报告 `io_uring`/`libaio`/`psync` | fio 实际报告 `posixaio`/`psync` | fio 优先且 gate 验证 `windowsaio`；报告仍保存实际 `ioengine` |
+| route/backtrace observations | 固定 NextTrace Tiny | base-system traceroute | 当前 unsupported；NextTrace 未通过独立真实 Windows network gate，故不 bundled |
+
+这些来源差异不改变 `ecs.report/v1` 或 `ecs.compare/v1`，也不新增字段、迁移层或第二套
+报告/比较标识。Windows 缺少 Linux cgroup、PSI、steal-time、balloon 或 KSM 接口时，
+相应字段保持 unavailable，并在 evidence/notes 中保留来源边界。
+
 ## Field
 
 `fields` 适合离散信息：

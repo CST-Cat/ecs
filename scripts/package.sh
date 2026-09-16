@@ -74,14 +74,26 @@ die() {
   exit 1
 }
 
+zip_stage() {
+  local archive=$1 stage=$2
+  shift 2
+  if command -v zip >/dev/null 2>&1; then
+    (cd "$stage" && zip -X -q -r "$archive" "$@")
+  elif command -v 7z >/dev/null 2>&1; then
+    (cd "$stage" && 7z a -bd -mtc=off -tzip "$archive" "$@" >/dev/null)
+  else
+    die "Windows ZIP packaging requires zip or 7z"
+  fi
+}
+
 # The default stays the seven Linux targets so an unqualified local packaging
-# run keeps the historic set. Release and bundle wiring ask for all nine
+# run keeps the historic set. Release and bundle wiring ask for all ten
 # platform targets explicitly with --all-targets, and a single unambiguous
-# Linux or FreeBSD target can still be selected with --target.
+# target can still be selected with --target.
 if [[ "$all_targets" -eq 1 ]]; then
   [[ "${#target_selectors[@]}" -eq 0 ]] ||
     usage_error "--all-targets cannot be combined with --target"
-  targets=("${ECS_TARGETS[@]}")
+  targets=("${ECS_RELEASE_TARGETS[@]}")
 else
   targets=("${ECS_LINUX_TARGETS[@]}")
   if [[ "${#target_selectors[@]}" -gt 0 ]]; then
@@ -93,7 +105,7 @@ else
           usage_error "target may only be supplied once: $selected_target"
       done
       selected=0
-      for target_record in "${ECS_TARGETS[@]}"; do
+      for target_record in "${ECS_RELEASE_TARGETS[@]}"; do
         read -r target_id _goos _goarch _arch <<<"$target_record"
         if [[ "$target_id" == "$selected_target" ]]; then
           targets+=("$target_record")
@@ -166,14 +178,23 @@ package_tools() {
   cp "$stage_dir/manifest.json" "$package_stage/manifest.json"
   cp -a "$stage_dir/LICENSES/." "$package_stage/LICENSES/"
   for tool in "${target_tools[@]}"; do
-    cp "$source_dir/$tool" "$package_stage/bin/$tool"
-    chmod 0755 "$package_stage/bin/$tool"
+    tool_file=$(ecs_target_asset_name "$target" tool "$tool")
+    cp "$source_dir/$tool_file" "$package_stage/bin/$tool_file"
+    chmod 0755 "$package_stage/bin/$tool_file"
   done
-  archive="$dist_dir/ecs-tools_${target}.tar.gz"
+  archive="$dist_dir/$(ecs_target_asset_name "$target" tools)"
   echo "packaging ecs-tools_${target}"
-  tar -C "$package_stage" --sort=name --mtime="@$source_date_epoch" \
-    --owner=0 --group=0 --numeric-owner -czf "$archive" \
-    bin LICENSES LICENSE NOTICE manifest.json
+  case "$archive" in
+    *.tar.gz)
+      tar -C "$package_stage" --sort=name --mtime="@$source_date_epoch" \
+        --owner=0 --group=0 --numeric-owner -czf "$archive" \
+        bin LICENSES LICENSE NOTICE manifest.json
+      ;;
+    *.zip)
+      zip_stage "$archive" "$package_stage" bin LICENSES LICENSE NOTICE manifest.json
+      ;;
+    *) die "unsupported tools archive name: $archive" ;;
+  esac
 }
 
 package_corpus() {
@@ -188,7 +209,7 @@ package_corpus() {
 
 mkdir -p "$dist_dir"
 find "$dist_dir" -mindepth 1 -maxdepth 1 -type f \
-  \( -name 'ecs_*.tar.*' -o -name 'ecs-tools_*' -o -name 'ecs-corpus_*' \) -delete
+  \( -name 'ecs_*.tar.*' -o -name 'ecs_*.zip' -o -name 'ecs-tools_*' -o -name 'ecs-corpus_*' \) -delete
 find "$dist_dir" -mindepth 1 -maxdepth 1 -type f -name 'checksums.txt' -delete
 
 assets=()
@@ -198,22 +219,34 @@ if [[ -n "$binaries_dir" ]]; then
     suffix="$target_id"
     new_temp_stage
     stage=$new_temp_stage_path
-    binary="$stage/ecs"
+    binary_name=$(ecs_target_asset_name "$target_id" binary)
+    member_name=$(ecs_target_asset_name "$target_id" main-member)
+    archive_name=$(ecs_target_asset_name "$target_id" main)
+    binary="$stage/$member_name"
     echo "packaging $suffix"
-    cp "$binaries_dir/ecs_${suffix}" "$binary"
+    cp "$binaries_dir/$binary_name" "$binary"
     chmod 0755 "$binary"
     cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$repo_root/README.md" "$repo_root/README_EN.md" "$repo_root/SECURITY.md" "$repo_root/THIRD_PARTY.md" "$stage/"
-    tar -C "$stage" --sort=name --mtime="@$source_date_epoch" \
-      --owner=0 --group=0 --numeric-owner -czf "$dist_dir/ecs_${suffix}.tar.gz" \
-      ecs LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md
-    assets+=("ecs_${suffix}.tar.gz")
+    case "$archive_name" in
+      *.tar.gz)
+        tar -C "$stage" --sort=name --mtime="@$source_date_epoch" \
+          --owner=0 --group=0 --numeric-owner -czf "$dist_dir/$archive_name" \
+          "$member_name" LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md
+        ;;
+      *.zip)
+        zip_stage "$dist_dir/$archive_name" "$stage" \
+          "$member_name" LICENSE NOTICE README.md README_EN.md SECURITY.md THIRD_PARTY.md
+        ;;
+      *) die "unsupported ECS archive name: $archive_name" ;
+    esac
+    assets+=("$archive_name")
   done
 else
   corpus_target=""
   for target in "${targets[@]}"; do
     read -r target_id goos _goarch arch <<<"$target"
     package_tools "$target_id"
-    assets+=("ecs-tools_${target_id}.tar.gz")
+    assets+=("$(ecs_target_asset_name "$target_id" tools)")
     if [[ "$goos" == linux && -z "$corpus_target" ]]; then
       corpus_target=$target_id
     fi

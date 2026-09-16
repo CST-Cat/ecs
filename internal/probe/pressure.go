@@ -148,7 +148,7 @@ func BuildPressureMeasurements(before, after EnvironmentSnapshot) []model.Measur
 	add := func(key string, value float64, unit, display, method string) {
 		measurements = append(measurements, environmentMeasurement(key, pressureMeasurementLabel(key), value, unit, display, method))
 	}
-	if before.LoadKnown {
+	if before.LoadKnown && platformLoadAverageAvailable() {
 		add("pretest_load_1m", before.Load1, "load", fmt.Sprintf("%.2f", before.Load1), platformLoadAverageMethod())
 	}
 	if !platformPressureFactsAvailable() {

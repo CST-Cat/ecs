@@ -9,7 +9,251 @@
     {"target": "linux_riscv64", "goos": "linux", "goarch": "riscv64", "package": "riscv64", "openssl_target": "linux64-riscv64"},
     {"target": "linux_ppc64le", "goos": "linux", "goarch": "ppc64le", "package": "ppc64le", "openssl_target": "linux-ppc64le"},
     {"target": "freebsd_amd64", "goos": "freebsd", "goarch": "amd64", "package": "amd64", "openssl_target": "BSD-x86_64"},
-    {"target": "freebsd_arm64", "goos": "freebsd", "goarch": "arm64", "package": "arm64", "openssl_target": "BSD-aarch64"}
+    {"target": "freebsd_arm64", "goos": "freebsd", "goarch": "arm64", "package": "arm64", "openssl_target": "BSD-aarch64"},
+    {"target": "windows_amd64", "goos": "windows", "goarch": "amd64", "package": "amd64", "openssl_target": "mingw64"}
+  ],
+  "windows_tools": ["zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio"],
+  "windows_toolchain": {
+    "environment": "MSYS2 UCRT64",
+    "distribution": {
+      "name": "MSYS2",
+      "version": "2025-08-30",
+      "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst",
+      "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57",
+      "license": "MSYS2 distribution; package-specific licenses are recorded below"
+    },
+    "base_packages": [
+      {"name": "base", "version": "2022.06-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL"},
+      {"name": "bash", "version": "5.2.037-2", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL", "provides": ["sh"]},
+      {"name": "coreutils", "version": "8.32-5", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL3"},
+      {"name": "gawk", "version": "5.3.2-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL", "provides": ["awk"]},
+      {"name": "grep", "version": "1~3.0-7", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL3"},
+      {"name": "sed", "version": "4.9-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL3"},
+      {"name": "pacman", "version": "6.1.0-18", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL-2.0-or-later"},
+      {"name": "perl", "version": "5.40.3-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL"},
+      {"name": "libintl", "version": "0.22.5-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL"},
+      {"name": "libiconv", "version": "1.18-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "LGPL"},
+      {"name": "msys2-runtime", "version": "3.6.4-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "GPL"},
+      {"name": "filesystem", "version": "2025.05.08-2", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "BSD-3-Clause", "provides": ["msys2-base"]},
+      {"name": "zstd", "version": "1.5.7-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "BSD"},
+      {"name": "zlib", "version": "1.3.1-1", "source_url": "https://github.com/msys2/msys2-installer/releases/download/2025-08-30/msys2-base-x86_64-20250830.tar.zst", "source_sha256": "a6c00b86ca0cd7fffc8a0a35142f7b17ebaadc419f449410cf1aec44fa92ec57", "license": "custom"}
+    ],
+    "packages": [
+      {
+        "name": "mingw-w64-ucrt-x86_64-gcc",
+        "version": "16.2.0-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-16.2.0-3-any.pkg.tar.zst",
+        "source_sha256": "1cd86e5817f6e0d7310d7cb2bb91f4a55e1256cb4ce580a0c5f2a74e013d144d",
+        "upstream": "https://gcc.gnu.org/",
+        "license": "GPL-3.0-or-later",
+        "provides": ["mingw-w64-ucrt-x86_64-gcc-base", "mingw-w64-ucrt-x86_64-cc"],
+        "depends": ["mingw-w64-ucrt-x86_64-binutils", "mingw-w64-ucrt-x86_64-crt", "mingw-w64-ucrt-x86_64-headers", "mingw-w64-ucrt-x86_64-isl", "mingw-w64-ucrt-x86_64-gmp", "mingw-w64-ucrt-x86_64-mpfr", "mingw-w64-ucrt-x86_64-mpc", "mingw-w64-ucrt-x86_64-gcc-libs=16.2.0-3", "mingw-w64-ucrt-x86_64-windows-default-manifest", "mingw-w64-ucrt-x86_64-winpthreads", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-gcc-fortran",
+        "version": "16.2.0-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-fortran-16.2.0-3-any.pkg.tar.zst",
+        "source_sha256": "2e534e8d45158425d80da00840bd712795d9c64e9c721fadd52cc8504d6817f7",
+        "upstream": "https://gcc.gnu.org/",
+        "license": "GPL-3.0-or-later",
+        "provides": ["mingw-w64-ucrt-x86_64-fc"],
+        "depends": ["mingw-w64-ucrt-x86_64-gcc=16.2.0-3", "mingw-w64-ucrt-x86_64-gcc-libgfortran=16.2.0-3", "mingw-w64-ucrt-x86_64-gcc-libs=16.2.0-3", "mingw-w64-ucrt-x86_64-gmp", "mingw-w64-ucrt-x86_64-isl", "mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-mpc", "mingw-w64-ucrt-x86_64-mpfr", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-gcc-libs",
+        "version": "16.2.0-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-libs-16.2.0-3-any.pkg.tar.zst",
+        "source_sha256": "5763fabf86fa13a4449ee765006d3446384ed66af7bf827459710eb777e0b11c",
+        "upstream": "https://gcc.gnu.org/",
+        "license": "GPL-3.0-or-later WITH GCC-exception-3.1 AND LGPL-2.1-or-later",
+        "provides": ["mingw-w64-ucrt-x86_64-omp", "mingw-w64-ucrt-x86_64-cc-libs"],
+        "runtime_components": ["libgomp"],
+        "depends": ["mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-tzdata"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-gcc-libgfortran",
+        "version": "16.2.0-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-libgfortran-16.2.0-3-any.pkg.tar.zst",
+        "source_sha256": "d4780f5a3d836cc68b7f99ce632bfaec1a15b79abc71dabfabeb3beb73eb778f",
+        "upstream": "https://gcc.gnu.org/",
+        "license": "GPL-3.0-or-later",
+        "provides": ["mingw-w64-ucrt-x86_64-fc-libs"],
+        "depends": ["mingw-w64-ucrt-x86_64-gcc-libs=16.2.0-3", "mingw-w64-ucrt-x86_64-libwinpthread"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-libwinpthread",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "61d340fe8eebc77ee821badca246827fe90545e99685e503bdea16a8d25df512",
+        "upstream": "https://www.mingw-w64.org/",
+        "license": "MIT AND BSD-3-Clause-Clear",
+        "provides": ["mingw-w64-ucrt-x86_64-libwinpthread-git"],
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-nasm",
+        "version": "3.02-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-nasm-3.02-1-any.pkg.tar.zst",
+        "source_sha256": "e60cf678bedee3d6c9a9264f8dec5897520e5ff7e3ae80c2b90b2628c5f51d58",
+        "upstream": "https://www.nasm.us/",
+        "license": "BSD",
+        "depends": ["mingw-w64-ucrt-x86_64-zlib"]
+      },
+      {
+        "name": "make",
+        "version": "4.4.1-3",
+        "source_url": "https://repo.msys2.org/msys/x86_64/make-4.4.1-3-x86_64.pkg.tar.zst",
+        "source_sha256": "af0bdba17f06fe037f0194069adaa31a8fe45f1a11381501896aea1fae37bd5d",
+        "upstream": "https://www.gnu.org/software/make/",
+        "license": "GPL-3.0-or-later",
+        "depends": ["libintl", "sh"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-binutils",
+        "version": "2.47-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-binutils-2.47-3-any.pkg.tar.zst",
+        "source_sha256": "ba98af202fe71e0884bb51daf78ce10bd8a51c69528c700dcf5855e6ece06dd3",
+        "upstream": "https://sourceware.org/binutils/",
+        "license": "GPL-3.0-or-later AND GPL-2.0-or-later AND LGPL-3.0-or-later AND LGPL-2.0-or-later",
+        "depends": ["mingw-w64-ucrt-x86_64-gettext-runtime", "mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-crt",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-crt-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "09bccbb31c7bdc9090358cac429a78b8bffe5142a98a1e1d54f5b869f3068055",
+        "upstream": "https://github.com/mingw-w64/mingw-w64",
+        "license": "ZPL-2.1",
+        "provides": ["mingw-w64-ucrt-x86_64-crt-git=14.0.0.r375.g9c1abbbf5"],
+        "depends": ["mingw-w64-ucrt-x86_64-headers"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-headers",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-headers-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "046cc32a88739738e94976486ace1e8e457e6beb6ae866de2f07d2d3eebcabb6",
+        "upstream": "https://github.com/mingw-w64/mingw-w64",
+        "license": "ZPL-2.1 AND LGPL-2.1-or-later",
+        "provides": ["mingw-w64-ucrt-x86_64-headers-git=14.0.0.r375.g9c1abbbf5"],
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-isl",
+        "version": "0.28-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-isl-0.28-1-any.pkg.tar.zst",
+        "source_sha256": "8594e01a253d5a72646c586cf5a1626c1b1c2be7c30060fe67abd9bebe3fe223",
+        "upstream": "https://libisl.sourceforge.io/",
+        "license": "MIT",
+        "depends": ["mingw-w64-ucrt-x86_64-gmp"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-gmp",
+        "version": "6.3.0-2",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gmp-6.3.0-2-any.pkg.tar.zst",
+        "source_sha256": "e82a75968a556484a50084578238a84eb60fb93e34986fd6695c537975bd39ea",
+        "upstream": "https://gmplib.org/",
+        "license": "LGPL-3.0-or-later AND GPL-2.0-or-later",
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-mpfr",
+        "version": "4.2.2-3",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-mpfr-4.2.2-3-any.pkg.tar.zst",
+        "source_sha256": "6b70a275d2ec75c70aa50a236c218e6b7ee9a5ab4c6d52cb0b580267b7d200fe",
+        "upstream": "https://www.mpfr.org/",
+        "license": "LGPL-3.0-or-later",
+        "depends": ["mingw-w64-ucrt-x86_64-cc-libs", "mingw-w64-ucrt-x86_64-gmp"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-mpc",
+        "version": "1.4.1-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-mpc-1.4.1-1-any.pkg.tar.zst",
+        "source_sha256": "f06556e811c711ce91609484e31d358e4f495811ba29813bf2284a3b236d82ce",
+        "upstream": "https://www.multiprecision.org/mpc/",
+        "license": "LGPL-3.0-or-later",
+        "depends": ["mingw-w64-ucrt-x86_64-gmp", "mingw-w64-ucrt-x86_64-mpfr"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-windows-default-manifest",
+        "version": "20260815-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-windows-default-manifest-20260815-1-any.pkg.tar.zst",
+        "source_sha256": "b39039f754a600cc0dec49df7d675a59a3cb2b63691d91b4ae60735ee7075eca",
+        "upstream": "https://github.com/mingw-w64/mingw-w64",
+        "license": "Public Domain",
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-winpthreads",
+        "version": "14.0.0.r375.g9c1abbbf5-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-winpthreads-14.0.0.r375.g9c1abbbf5-1-any.pkg.tar.zst",
+        "source_sha256": "3cdd84d957e4bb8b5a30df548afd82b97a52fedc77974a43debd1d0685ed669c",
+        "upstream": "https://github.com/mingw-w64/mingw-w64",
+        "license": "MIT AND BSD-3-Clause-Clear",
+        "provides": ["mingw-w64-ucrt-x86_64-winpthreads-git"],
+        "depends": ["mingw-w64-ucrt-x86_64-crt", "mingw-w64-ucrt-x86_64-libwinpthread=14.0.0.r375.g9c1abbbf5"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-zlib",
+        "version": "1.3.2-2",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-zlib-1.3.2-2-any.pkg.tar.zst",
+        "source_sha256": "841401182976d2f9e17e5c0ebaac51f2a8014140ea53d67625e91c8fb3c85ea0",
+        "upstream": "https://zlib.net/",
+        "license": "Zlib",
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-zstd",
+        "version": "1.5.7-2",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-zstd-1.5.7-2-any.pkg.tar.zst",
+        "source_sha256": "dbdb8427280046a2b41697780aa4c52983b708082b0da4755951dc3bea96ca89",
+        "upstream": "https://facebook.github.io/zstd/",
+        "license": "BSD-3-Clause OR GPL-2.0-or-later",
+        "depends": ["mingw-w64-ucrt-x86_64-cc-libs"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-tzdata",
+        "version": "2026d-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-tzdata-2026d-1-any.pkg.tar.zst",
+        "source_sha256": "81de12269b33f428d2e9719f7c99d7530bd0cb25276c9300cfc9ff31a1194960",
+        "upstream": "https://www.iana.org/time-zones",
+        "license": "Public Domain",
+        "depends": []
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-gettext-runtime",
+        "version": "0.23.1-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gettext-runtime-0.23.1-1-any.pkg.tar.zst",
+        "source_sha256": "21cd3fed02f548075ec1710bc3f2604edbcd7e494f2bfe0ab838378d5931af57",
+        "upstream": "https://www.gnu.org/software/gettext/",
+        "license": "GPL-3.0-or-later AND LGPL-2.1-or-later",
+        "depends": ["mingw-w64-ucrt-x86_64-gcc-libs", "mingw-w64-ucrt-x86_64-libiconv"]
+      },
+      {
+        "name": "mingw-w64-ucrt-x86_64-libiconv",
+        "version": "1.18-1",
+        "source_url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libiconv-1.18-1-any.pkg.tar.zst",
+        "source_sha256": "6b875c9ea05969cd4d802c1fc68edd158c269447e8dbf1baee02dec28603e74c",
+        "upstream": "https://www.gnu.org/software/libiconv/",
+        "license": "LGPL-2.1-or-later AND GPL-3.0-or-later (documentation)",
+        "depends": []
+      }
+    ],
+    "build_flags": {
+      "c": ["-O3", "-ffunction-sections", "-fdata-sections", "-D_WIN32_WINNT=0x0601"],
+      "fortran": ["-O3", "-fopenmp"],
+      "linker": ["-static", "-static-libgcc", "-Wl,--gc-sections"],
+      "fortran_linker": ["-fopenmp", "-static-libgfortran"],
+      "openssl": ["mingw64", "-O3", "no-shared", "no-module", "no-tests", "no-docs", "no-ssl", "no-sock", "no-dgram", "no-http", "no-dso", "no-engine", "no-async", "no-autoload-config", "-static"],
+      "fio": ["--build-static", "--target-win-ver=7", "--disable-numa", "--disable-rdma", "--disable-rados", "--disable-rbd", "--disable-gfapi", "--disable-http", "--disable-pmem", "--disable-libzbc", "--disable-xnvme", "--disable-libblkio", "--disable-libnfs", "--disable-dfs", "--disable-tcmalloc", "--disable-native"]
+    }
+  },
+  "windows_dll_allowlist": [
+    "ADVAPI32.dll", "API-MS-WIN-*.dll", "BCRYPT.dll", "COMBASE.dll", "COMDLG32.dll",
+    "CRYPT32.dll", "GDI32.dll", "IPHLPAPI.dll", "KERNEL32.dll", "KERNELBASE.dll",
+    "MSVCRT.dll", "NCRYPT.dll", "NETAPI32.dll", "NTDLL.dll", "OLE32.dll",
+    "OLEAUT32.dll", "PSAPI.DLL", "RPCRT4.dll", "SECUR32.dll", "SETUPAPI.dll",
+    "SHELL32.dll", "SHLWAPI.dll", "USER32.dll", "UCRTBASE.dll", "USERENV.dll",
+    "VERSION.dll", "WLDAP32.dll", "WINMM.dll", "WINSPOOL.DRV", "WS2_32.dll"
   ],
   "tools": [
     {
