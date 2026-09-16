@@ -4,6 +4,7 @@ name: windows-tools
 # workflow only chooses the real runner, artifact hand-off, and dependency DAG.
 #
 # LOCK/CHECK -> BUILD windows_amd64 -> VERIFY-2022 || VERIFY-2025
+#             -> ECS-INTEGRATION-2022 || ECS-INTEGRATION-2025
 #             -> PACKAGE -> E2E-2022 || E2E-2025
 #
 # workflow_dispatch is a rehearsal only.  It produces seven-day artifacts and
@@ -787,6 +788,158 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
+
+  integration-windows:
+    name: ECS-INTEGRATION-${{ matrix.server }}
+    needs: [verify-2022, verify-2025]
+    runs-on: windows-${{ matrix.server }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        server: ['2022', '2025']
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.1'
+          check-latest: false
+          cache: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-stage-windows_amd64
+          path: .ci/windows-tools-stage-artifact
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecs-windows-tools-gate-inputs-${{ matrix.server }}
+          path: .ci/windows-tools-gate-inputs
+
+      - name: Windows ECS frozen-tool integration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $processPathBefore = [string]$env:Path
+          $machinePathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+          $userPathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          $worktreeRoot = (Get-Location).Path
+          $stageRoot = $null
+          $corpusRoot = $null
+          $sandboxRoot = $null
+          $testExitCode = 1
+          $testError = $null
+          $cleanupErrors = @()
+          try {
+            $stageItems = @(Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse)
+            if ($stageItems.Count -ne 1) { throw 'downloaded Windows stage is missing or ambiguous' }
+            $sourceStage = $stageItems[0].FullName
+            $stageRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen tools stage 数据 ' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+            foreach ($item in @(Get-ChildItem -LiteralPath $sourceStage -Force)) {
+              Copy-Item -LiteralPath $item.FullName -Destination $stageRoot -Recurse -Force
+            }
+            $toolBin = Join-Path $stageRoot 'bin'
+            if (-not (Test-Path -LiteralPath $toolBin -PathType Container)) { throw 'staged bundle bin directory is missing' }
+            $manifestPath = Join-Path $stageRoot 'manifest.json'
+            if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'staged bundle manifest.json is missing' }
+            $licensesRoot = Join-Path $stageRoot 'LICENSES'
+            if (-not (Test-Path -LiteralPath $licensesRoot -PathType Container)) { throw 'staged bundle LICENSES directory is missing' }
+            $stageFiles = @(Get-ChildItem -LiteralPath $stageRoot -File -Recurse -Force)
+            if ($stageFiles.Count -eq 0) { throw 'staged bundle contains no regular files' }
+            foreach ($stageFile in $stageFiles) {
+              $stageFile.IsReadOnly = $true
+            }
+            $stageFiles = @(Get-ChildItem -LiteralPath $stageRoot -File -Recurse -Force)
+            foreach ($stageFile in $stageFiles) {
+              if (-not $stageFile.IsReadOnly) { throw "staged bundle regular file is writable: $($stageFile.FullName)" }
+            }
+            $licenseFiles = @(Get-ChildItem -LiteralPath $licensesRoot -File -Recurse -Force)
+            if ($licenseFiles.Count -eq 0) { throw 'staged bundle LICENSES directory contains no regular files' }
+            if (-not (Get-Item -LiteralPath $manifestPath).IsReadOnly) { throw 'staged bundle manifest.json is writable' }
+            foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'openssl.exe', 'stream.exe', 'fio.exe')) {
+              $toolPath = Join-Path $toolBin $tool
+              if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) { throw "staged bundle is missing $tool" }
+              if (-not (Get-Item -LiteralPath $toolPath).IsReadOnly) { throw "staged bundle $tool is writable" }
+            }
+
+            $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+            $corpusItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse)
+            if ($corpusItems.Count -ne 1) { throw 'fixed zstd corpus is missing or ambiguous' }
+            $corpusRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen corpus 数据 ' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $corpusRoot | Out-Null
+            $corpusPath = Join-Path $corpusRoot ([string]$lock.corpus.name)
+            Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
+
+            & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
+            if (-not $?) { throw 'ordinary-user execution gate failed' }
+
+            $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox 数据 ' + [guid]::NewGuid().ToString('N'))
+            $tempRoot = Join-Path $sandboxRoot 'temp with spaces'
+            $homeRoot = Join-Path $sandboxRoot 'home with spaces'
+            $cacheRoot = Join-Path $sandboxRoot 'cache with spaces'
+            New-Item -ItemType Directory -Force -Path $tempRoot, $homeRoot, $cacheRoot, (Join-Path $cacheRoot 'mod') | Out-Null
+            $env:TEMP = $tempRoot
+            $env:TMP = $tempRoot
+            $env:TMPDIR = $tempRoot
+            $env:HOME = $homeRoot
+            $env:USERPROFILE = $homeRoot
+            $env:GOCACHE = $cacheRoot
+            $env:GOMODCACHE = Join-Path $cacheRoot 'mod'
+            $env:ECS_TOOL_BIN = $toolBin
+            $env:ECS_ZSTD_CORPUS = $corpusPath
+
+            & go test -tags=integration ./internal/probe -run '^TestIntegrationWindowsFrozenTools$' -count=1 -v
+            $testExitCode = $LASTEXITCODE
+          } catch {
+            $testError = $_
+          } finally {
+            foreach ($cleanupTarget in @(
+              [pscustomobject]@{ Label = 'sandbox'; Path = $sandboxRoot },
+              [pscustomobject]@{ Label = 'corpus'; Path = $corpusRoot },
+              [pscustomobject]@{ Label = 'stage'; Path = $stageRoot },
+              [pscustomobject]@{ Label = 'stage artifact'; Path = (Join-Path $worktreeRoot '.ci/windows-tools-stage-artifact') },
+              [pscustomobject]@{ Label = 'gate inputs'; Path = (Join-Path $worktreeRoot '.ci/windows-tools-gate-inputs') }
+            )) {
+              if ($null -ne $cleanupTarget.Path -and (Test-Path -LiteralPath $cleanupTarget.Path)) {
+                try {
+                  Remove-Item -LiteralPath $cleanupTarget.Path -Recurse -Force -ErrorAction Stop
+                } catch {
+                  $cleanupErrors += "$($cleanupTarget.Label) cleanup failed: $($_.Exception.Message)"
+                }
+              }
+              if ($null -ne $cleanupTarget.Path -and (Test-Path -LiteralPath $cleanupTarget.Path)) {
+                $cleanupErrors += "$($cleanupTarget.Label) remains: $($cleanupTarget.Path)"
+              }
+            }
+          }
+          $postErrors = @()
+          $processPathAfter = [string]$env:Path
+          $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          if ($processPathBefore -cne $processPathAfter) {
+            $postErrors += 'Windows ECS frozen-tool integration changed the process PATH'
+          }
+          if ($machinePathBefore -cne $machinePathAfter -or $userPathBefore -cne $userPathAfter) {
+            $postErrors += 'Windows ECS frozen-tool integration changed the Machine or User PATH'
+          }
+          $postErrors += $cleanupErrors
+          if ($null -ne $testError) {
+            $postErrors += "Windows ECS frozen-tool integration raised an exception: $($testError.Exception.Message)"
+          } elseif ($testExitCode -ne 0) {
+            $postErrors += "Windows ECS frozen-tool integration failed with exit code $testExitCode"
+          }
+          if ($postErrors.Count -ne 0) { throw ($postErrors -join '; ') }
+          Write-Output "Windows ECS frozen-tool integration passed on Server ${{ matrix.server }}: ECS_TOOL_BIN was the read-only staged bundle; hostile PATH, sandbox, production probes, parsers, and ECS JSON were verified"
 
   e2e-2022:
     name: E2E-2022
