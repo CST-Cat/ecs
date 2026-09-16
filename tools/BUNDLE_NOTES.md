@@ -15,13 +15,13 @@ the newest section.
 
 - 新增 Windows Server 2022+ x64 的 `windows_amd64` 工具 Bundle contract，资产格式为 `ecs-tools_windows_amd64.zip`；主程序对应的 Windows ZIP asset 为 `ecs_windows_amd64.zip`。
 - Windows frozen benchmark set 只包含 `zstd`、NPB EP、NPB FT、OpenSSL、STREAM 和 `fio`；Windows gate 要求 fio 的 `windowsaio` engine，并保留每个工具的 manifest、PE/DLL allowlist 和上游许可证文件。
-- Windows 的系统与 ICMP 事实由主程序的 native Win32 probes 提供，不在工具 Bundle 中增加 `ping.exe`；NextTrace 不进入 Bundle，Windows route/backtrace 仍 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions 真实 gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排；这仍是发布前彩排，不代表 `bundle-v1.6` 已正式发布、GitHub Release 已创建或用户已下载验证。
+- Windows 的系统与 ICMP 事实由主程序的 native Win32 probes 提供，不在工具 Bundle 中增加 `ping.exe`；NextTrace 不进入 Bundle，Windows route/backtrace 仍 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions 真实 gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排。
 
 ### English
 
 - Added the Windows Server 2022+ x64 `windows_amd64` tool Bundle contract, with `ecs-tools_windows_amd64.zip` as its asset; the corresponding Windows main-program ZIP asset is `ecs_windows_amd64.zip`.
 - The Windows frozen benchmark set contains only `zstd`, NPB EP, NPB FT, OpenSSL, STREAM and `fio`; the Windows gate requires fio's `windowsaio` engine and retains each tool's manifest, PE/DLL allowlist and upstream license files.
-- Windows system and ICMP facts come from the main program's native Win32 probes, so the tool Bundle adds no `ping.exe`; NextTrace is not in the Bundle, and Windows route/backtrace remain unsupported. The Windows Server 2022 x64 and Windows Server 2025 x64 GitHub Actions genuine gates—including native runtime, tool verification, packaged workloads and current ZIP/bootstrap E2E—have passed rehearsal; this remains only a release-preparation rehearsal and does not mean `bundle-v1.6` has been formally published, a GitHub Release has been created, or users have validated a download.
+- Windows system and ICMP facts come from the main program's native Win32 probes, so the tool Bundle adds no `ping.exe`; NextTrace is not in the Bundle, and Windows route/backtrace remain unsupported. The Windows Server 2022 x64 and Windows Server 2025 x64 GitHub Actions genuine gates—including native runtime, tool verification, packaged workloads and current ZIP/bootstrap E2E—have passed rehearsal.
 
 ## bundle-v1.5
 

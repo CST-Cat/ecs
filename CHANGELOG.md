@@ -1,31 +1,31 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.8.3` 的主要变化。
+`v0.1.0` 到当前版本 `v0.8.4` 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.8.3` release.
+the current `v0.8.4` release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
-## Unreleased
+## 0.8.4 — 2026-09-15
 
 ### 中文
 
 - 新增 Windows Server 2022+ x64 的 `windows_amd64` 原生发布目标：主程序使用 `ecs_windows_amd64.zip`，匹配的工具 Bundle 使用 `ecs-tools_windows_amd64.zip`；`system` 使用 native Win32 system probes，`latency` 使用 native Win32 ICMP。
 - Windows frozen benchmark set 固定为 zstd、NPB EP、NPB FT、OpenSSL、STREAM 和 fio；fio 的 Windows gate 要求并验证 `windowsaio`。`sysbench`、`iperf3` 与 Ookla 在 Windows unsupported。
 - NextTrace 尚未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions real gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排；这仍是发布前彩排，不代表正式 Release 已发布或用户已下载验证。
-- 报告与比较标识继续保持 `ecs.report/v1` 与 `ecs.compare/v1`；同一 semantic field 的 Linux/FreeBSD/Windows 来源边界写入 schema 文档，主模块没有新增 Go dependency。工具包从 `bundle-v1.5` 递增为 `bundle-v1.6`，不改变软件版本。
+- 报告与比较标识继续保持 `ecs.report/v1` 与 `ecs.compare/v1`；同一 semantic field 的 Linux/FreeBSD/Windows 来源边界写入 schema 文档，主模块没有新增 Go dependency。工具包从 `bundle-v1.5` 递增为 `bundle-v1.6`，软件版本从 `v0.8.3` 递增为 `v0.8.4`。
 
 ### English
 
 - Added a native Windows Server 2022+ x64 release target, `windows_amd64`: the main program uses `ecs_windows_amd64.zip`, the matching tools Bundle uses `ecs-tools_windows_amd64.zip`, `system` uses native Win32 system probes, and `latency` uses native Win32 ICMP.
 - The Windows frozen benchmark set is exactly zstd, NPB EP, NPB FT, OpenSSL, STREAM and fio; the Windows fio gate requires and verifies `windowsaio`. `sysbench`, `iperf3` and Ookla are unsupported on Windows.
 - NextTrace has not yet passed an independent genuine Windows network gate, so it is not in the Windows Bundle; Windows `route` and `backtrace` are explicitly unsupported. The Windows Server 2022 x64 and Windows Server 2025 x64 GitHub Actions real gates—including native runtime, tool verification, packaged workloads and current ZIP/bootstrap E2E—have passed rehearsal; this remains only a release-preparation rehearsal, not a formal Release publication or user download validation.
-- The report and comparison identifiers remain `ecs.report/v1` and `ecs.compare/v1`; the schema documents the Linux/FreeBSD/Windows source boundary for the same semantic fields, and the main module has no new Go dependency. The tool package increments from `bundle-v1.5` to `bundle-v1.6` without changing the software version.
+- The report and comparison identifiers remain `ecs.report/v1` and `ecs.compare/v1`; the schema documents the Linux/FreeBSD/Windows source boundary for the same semantic fields, and the main module has no new Go dependency. The tool package increments from `bundle-v1.5` to `bundle-v1.6`, while the software version increments from `v0.8.3` to `v0.8.4`.
 
 ## 0.8.3 — 2026-09-14
 
