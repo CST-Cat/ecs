@@ -847,19 +847,41 @@ jobs:
             }
           }
 
-          function Write-PathEvidence {
+          function Get-PathSnapshot {
+            $processPath = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Process)
+            return [ordered]@{
+              process = Get-PathEvidence $processPath
+              machine = Get-PathEvidence (Get-RawWindowsPath -Target Machine)
+              user = Get-PathEvidence (Get-RawWindowsPath -Target User)
+            }
+          }
+
+          function Write-PathSnapshotEvidence {
             param(
               [Parameter(Mandatory)][string]$Label,
-              [AllowNull()][string]$ProcessPath,
-              [AllowNull()][string]$MachinePath,
-              [AllowNull()][string]$UserPath
+              [Parameter(Mandatory)][object]$Snapshot
             )
-            $evidence = [ordered]@{
-              process = Get-PathEvidence $ProcessPath
-              machine = Get-PathEvidence $MachinePath
-              user = Get-PathEvidence $UserPath
+            Write-Host ("PATH evidence ${Label}: " + ($Snapshot | ConvertTo-Json -Compress))
+          }
+
+          function Get-PathSnapshotDifferences {
+            param(
+              [Parameter(Mandatory)][object]$Expected,
+              [Parameter(Mandatory)][object]$Actual
+            )
+            $differences = @()
+            foreach ($scope in @('process', 'machine', 'user')) {
+              $expectedValue = $Expected[$scope]
+              $actualValue = $Actual[$scope]
+              if ($expectedValue.present -ne $actualValue.present -or
+                  $expectedValue.length -ne $actualValue.length -or
+                  $expectedValue.sha256 -cne $actualValue.sha256 -or
+                  $expectedValue.value -cne $actualValue.value) {
+                $differences += ("{0}: before(length={1},sha256={2}) after(length={3},sha256={4})" -f
+                  $scope, $expectedValue.length, $expectedValue.sha256, $actualValue.length, $actualValue.sha256)
+              }
             }
-            Write-Host ("PATH evidence ${Label}: " + ($evidence | ConvertTo-Json -Compress))
+            return $differences
           }
 
           function Get-RawWindowsPath {
@@ -885,15 +907,14 @@ jobs:
             }
           }
 
-          $processPathBefore = [string]$env:Path
-          $machinePathBefore = Get-RawWindowsPath -Target Machine
-          $userPathBefore = Get-RawWindowsPath -Target User
-          Write-PathEvidence -Label 'before integration' -ProcessPath $processPathBefore -MachinePath $machinePathBefore -UserPath $userPathBefore
+          $pathBefore = Get-PathSnapshot
+          Write-PathSnapshotEvidence -Label 'before integration' -Snapshot $pathBefore
           $stageRoot = $null
           $corpusRoot = $null
           $sandboxRoot = $null
           $stageArtifactRoot = Join-Path $env:RUNNER_TEMP 'ecs-windows-tools-stage-artifact'
           $gateInputsRoot = Join-Path $env:RUNNER_TEMP ('ecs-windows-tools-gate-inputs-' + '${{ matrix.server }}')
+          $pathBeforeWorkload = $null
           $testExitCode = 1
           $testError = $null
           $cleanupErrors = @()
@@ -940,12 +961,11 @@ jobs:
 
             & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
             if (-not $?) { throw 'ordinary-user execution gate failed' }
-            $processPathAfterGate = [string]$env:Path
-            $machinePathAfterGate = Get-RawWindowsPath -Target Machine
-            $userPathAfterGate = Get-RawWindowsPath -Target User
-            Write-PathEvidence -Label 'after ordinary-user gate' -ProcessPath $processPathAfterGate -MachinePath $machinePathAfterGate -UserPath $userPathAfterGate
-            if ($processPathBefore -cne $processPathAfterGate -or $machinePathBefore -cne $machinePathAfterGate -or $userPathBefore -cne $userPathAfterGate) {
-              throw 'ordinary-user gate changed process, Machine, or User PATH'
+            $pathAfterGate = Get-PathSnapshot
+            Write-PathSnapshotEvidence -Label 'after ordinary-user gate' -Snapshot $pathAfterGate
+            $gatePathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathAfterGate)
+            if ($gatePathDifferences.Count -ne 0) {
+              throw ("ordinary-user gate changed PATH: " + ($gatePathDifferences -join '; '))
             }
 
             $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox ' + [guid]::NewGuid().ToString('N'))
@@ -962,6 +982,13 @@ jobs:
             $env:GOMODCACHE = Join-Path $cacheRoot 'mod'
             $env:ECS_TOOL_BIN = $toolBin
             $env:ECS_ZSTD_CORPUS = $corpusPath
+
+            $pathBeforeWorkload = Get-PathSnapshot
+            Write-PathSnapshotEvidence -Label 'before production workload' -Snapshot $pathBeforeWorkload
+            $preparationPathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathBeforeWorkload)
+            if ($preparationPathDifferences.Count -ne 0) {
+              throw ("integration preparation changed PATH: " + ($preparationPathDifferences -join '; '))
+            }
 
             & go test -tags=integration ./internal/probe -run '^TestIntegrationWindowsFrozenTools$' -count=1 -v
             $testExitCode = $LASTEXITCODE
@@ -988,17 +1015,17 @@ jobs:
             }
           }
           $postErrors = @()
-          $processPathAfter = [string]$env:Path
-          $machinePathAfter = Get-RawWindowsPath -Target Machine
-          $userPathAfter = Get-RawWindowsPath -Target User
-          Write-PathEvidence -Label 'after integration and cleanup' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
-          if ($processPathBefore -cne $processPathAfter) {
-            Write-PathEvidence -Label 'process PATH mismatch' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
-            $postErrors += 'Windows ECS frozen-tool integration changed the process PATH'
+          $pathAfter = Get-PathSnapshot
+          Write-PathSnapshotEvidence -Label 'after integration and cleanup' -Snapshot $pathAfter
+          $stepPathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathAfter)
+          if ($stepPathDifferences.Count -ne 0) {
+            $postErrors += ("Windows ECS frozen-tool integration changed process, Machine, or User PATH: " + ($stepPathDifferences -join '; '))
           }
-          if ($machinePathBefore -cne $machinePathAfter -or $userPathBefore -cne $userPathAfter) {
-            Write-PathEvidence -Label 'Machine/User PATH mismatch' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
-            $postErrors += 'Windows ECS frozen-tool integration changed the Machine or User PATH'
+          if ($null -ne $pathBeforeWorkload) {
+            $workloadPathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBeforeWorkload -Actual $pathAfter)
+            if ($workloadPathDifferences.Count -ne 0) {
+              $postErrors += ("Windows ECS production workload changed process, Machine, or User PATH: " + ($workloadPathDifferences -join '; '))
+            }
           }
           $postErrors += $cleanupErrors
           if ($null -ne $testError) {

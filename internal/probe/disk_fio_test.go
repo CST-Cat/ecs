@@ -1,6 +1,8 @@
 package probe
 
 import (
+	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -214,5 +216,16 @@ func TestFIOPlanAndDiskSafety(t *testing.T) {
 	offsets := fioModuleOffsets(map[string]fioJob{"a": {JobStart: 1000}, "b": {JobStart: 2500}})
 	if formatModuleOffset(offsets, "b") != "2 s" || formatModuleOffset(offsets, "missing") != "—" {
 		t.Fatalf("fio module offsets = %v", offsets)
+	}
+}
+
+func TestFIODiskWorkloadCommandUsesValidatedSandbox(t *testing.T) {
+	workingDirectory := t.TempDir()
+	command := newFIODiskWorkloadCommand(context.Background(), filepath.Join("relative-bin", "fio-fixture.exe"), workingDirectory, "--name=fixture")
+	if command.Dir != workingDirectory {
+		t.Fatalf("fio workload command directory = %q, want validated sandbox %q", command.Dir, workingDirectory)
+	}
+	if !filepath.IsAbs(command.Path) {
+		t.Fatalf("fio workload executable path = %q, want absolute path with an explicit Dir", command.Path)
 	}
 }

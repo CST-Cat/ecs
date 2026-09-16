@@ -148,6 +148,19 @@ func fioEngineFromProbe(runErr error, output []byte) fioEngine {
 	return fioEngineFallback(nil, available)
 }
 
+func newFIODiskWorkloadCommand(ctx context.Context, fioPath, workingDirectory string, args ...string) *probeCommand {
+	if absolutePath, err := filepath.Abs(fioPath); err == nil {
+		fioPath = absolutePath
+	}
+	command := newProbeCommand(ctx, fioPath, args...)
+	// The Windows fio path parser can leave a drive-letter residue in its
+	// current directory when an absolute --filename is supplied.  The caller
+	// has already validated this directory as the workload sandbox, so keep
+	// every such artifact inside that sandbox rather than the probe package.
+	command.Dir = workingDirectory
+	return command
+}
+
 func runFIODisk(ctx context.Context, env Environment, fioPath string) (result model.Result) {
 	result = newDiskResult()
 	expectedJobs := len(fioJobPlan())
@@ -194,7 +207,7 @@ func runFIODisk(ctx context.Context, env Environment, fioPath string) (result mo
 		matrixMode = config.DiskMatrixTime
 	}
 	args := fioArgumentsForMode(tempName, actualBytes, engine, plan, matrixMode)
-	command := newProbeCommand(ctx, fioPath, args...)
+	command := newFIODiskWorkloadCommand(ctx, fioPath, diskPath, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "NO_COLOR=1")
 	run := command.RunSeparate()
 	if run.Err != nil {
