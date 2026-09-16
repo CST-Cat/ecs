@@ -53,6 +53,9 @@ func TestNPBPlatformFlagContracts(t *testing.T) {
 		t.Fatalf("Linux NPB flags = %q/%q, want %q/%q", compileFlags, linkFlags, npbCompileFlags, npbCompileFlags)
 	}
 	windowsCompile, windowsLink := npbExpectedFlags("windows")
+	if npbWindowsFFlags != "-O3 -fopenmp" || npbWindowsLinkFlags != "-static -static-libgcc -Wl,--gc-sections -f..." {
+		t.Fatalf("Windows NPB output contract constants changed: %q/%q", npbWindowsFFlags, npbWindowsLinkFlags)
+	}
 	if windowsCompile != npbWindowsFFlags || windowsLink != npbWindowsLinkFlags {
 		t.Fatalf("Windows NPB flags = %q/%q, want %q/%q", windowsCompile, windowsLink, npbWindowsFFlags, npbWindowsLinkFlags)
 	}

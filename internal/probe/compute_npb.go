@@ -16,12 +16,15 @@ import (
 )
 
 const (
-	npbMethodVersion    = "npb-omp-3.4.4-class-a-v1"
-	npbExpectedVersion  = "3.4.4"
-	npbExpectedClass    = "A"
-	npbCompileFlags     = "-O3 -fopenmp -static"
-	npbWindowsFFlags    = "-O3 -fopenmp"
-	npbWindowsLinkFlags = "-static -static-libgcc -Wl,--gc-sections -fopenmp -static-libgfortran"
+	npbMethodVersion   = "npb-omp-3.4.4-class-a-v1"
+	npbExpectedVersion = "3.4.4"
+	npbExpectedClass   = "A"
+	npbCompileFlags    = "-O3 -fopenmp -static"
+	npbWindowsFFlags   = "-O3 -fopenmp"
+	// NPB 3.4.4's setparams.c embeds compiler metadata with MAXL=46. Its
+	// put_string contract therefore renders the locked Windows linker flags as
+	// the first 43 characters followed by an ellipsis in benchmark output.
+	npbWindowsLinkFlags = "-static -static-libgcc -Wl,--gc-sections -f..."
 	npbRandomGenerator  = "randi8"
 	npbRunTimeout       = 10 * time.Minute
 )

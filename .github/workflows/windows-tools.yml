@@ -862,9 +862,32 @@ jobs:
             Write-Host ("PATH evidence ${Label}: " + ($evidence | ConvertTo-Json -Compress))
           }
 
+          function Get-RawWindowsPath {
+            param([Parameter(Mandatory)][EnvironmentVariableTarget]$Target)
+            $registryRoot = if ($Target -eq [EnvironmentVariableTarget]::Machine) {
+              [Microsoft.Win32.Registry]::LocalMachine
+            } else {
+              [Microsoft.Win32.Registry]::CurrentUser
+            }
+            $subKeyName = if ($Target -eq [EnvironmentVariableTarget]::Machine) {
+              'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+            } else {
+              'Environment'
+            }
+            $registryKey = $registryRoot.OpenSubKey($subKeyName, $false)
+            if ($null -eq $registryKey) { return $null }
+            try {
+              $value = $registryKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+              if ($null -eq $value) { return $null }
+              return [string]$value
+            } finally {
+              $registryKey.Dispose()
+            }
+          }
+
           $processPathBefore = [string]$env:Path
-          $machinePathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
-          $userPathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          $machinePathBefore = Get-RawWindowsPath -Target Machine
+          $userPathBefore = Get-RawWindowsPath -Target User
           Write-PathEvidence -Label 'before integration' -ProcessPath $processPathBefore -MachinePath $machinePathBefore -UserPath $userPathBefore
           $worktreeRoot = (Get-Location).Path
           $stageRoot = $null
@@ -917,8 +940,8 @@ jobs:
             & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
             if (-not $?) { throw 'ordinary-user execution gate failed' }
             $processPathAfterGate = [string]$env:Path
-            $machinePathAfterGate = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
-            $userPathAfterGate = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            $machinePathAfterGate = Get-RawWindowsPath -Target Machine
+            $userPathAfterGate = Get-RawWindowsPath -Target User
             Write-PathEvidence -Label 'after ordinary-user gate' -ProcessPath $processPathAfterGate -MachinePath $machinePathAfterGate -UserPath $userPathAfterGate
             if ($processPathBefore -cne $processPathAfterGate -or $machinePathBefore -cne $machinePathAfterGate -or $userPathBefore -cne $userPathAfterGate) {
               throw 'ordinary-user gate changed process, Machine, or User PATH'
@@ -965,8 +988,8 @@ jobs:
           }
           $postErrors = @()
           $processPathAfter = [string]$env:Path
-          $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
-          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          $machinePathAfter = Get-RawWindowsPath -Target Machine
+          $userPathAfter = Get-RawWindowsPath -Target User
           Write-PathEvidence -Label 'after integration and cleanup' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
           if ($processPathBefore -cne $processPathAfter) {
             Write-PathEvidence -Label 'process PATH mismatch' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
