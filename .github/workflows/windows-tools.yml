@@ -816,12 +816,12 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ecs-windows-tools-stage-windows_amd64
-          path: .ci/windows-tools-stage-artifact
+          path: ${{ runner.temp }}/ecs-windows-tools-stage-artifact
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ecs-windows-tools-gate-inputs-${{ matrix.server }}
-          path: .ci/windows-tools-gate-inputs
+          path: ${{ runner.temp }}/ecs-windows-tools-gate-inputs-${{ matrix.server }}
 
       - name: Windows ECS frozen-tool integration
         shell: pwsh
@@ -889,15 +889,16 @@ jobs:
           $machinePathBefore = Get-RawWindowsPath -Target Machine
           $userPathBefore = Get-RawWindowsPath -Target User
           Write-PathEvidence -Label 'before integration' -ProcessPath $processPathBefore -MachinePath $machinePathBefore -UserPath $userPathBefore
-          $worktreeRoot = (Get-Location).Path
           $stageRoot = $null
           $corpusRoot = $null
           $sandboxRoot = $null
+          $stageArtifactRoot = Join-Path $env:RUNNER_TEMP 'ecs-windows-tools-stage-artifact'
+          $gateInputsRoot = Join-Path $env:RUNNER_TEMP ('ecs-windows-tools-gate-inputs-' + '${{ matrix.server }}')
           $testExitCode = 1
           $testError = $null
           $cleanupErrors = @()
           try {
-            $stageItems = @(Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse)
+            $stageItems = @(Get-ChildItem -LiteralPath $stageArtifactRoot -Directory -Filter 'windows_amd64' -Recurse)
             if ($stageItems.Count -ne 1) { throw 'downloaded Windows stage is missing or ambiguous' }
             $sourceStage = $stageItems[0].FullName
             $stageRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen tools stage 数据 ' + [guid]::NewGuid().ToString('N'))
@@ -930,7 +931,7 @@ jobs:
             }
 
             $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
-            $corpusItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse)
+            $corpusItems = @(Get-ChildItem -LiteralPath $gateInputsRoot -File -Filter ([string]$lock.corpus.name) -Recurse)
             if ($corpusItems.Count -ne 1) { throw 'fixed zstd corpus is missing or ambiguous' }
             $corpusRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen corpus ' + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $corpusRoot | Out-Null
@@ -971,8 +972,8 @@ jobs:
               [pscustomobject]@{ Label = 'sandbox'; Path = $sandboxRoot },
               [pscustomobject]@{ Label = 'corpus'; Path = $corpusRoot },
               [pscustomobject]@{ Label = 'stage'; Path = $stageRoot },
-              [pscustomobject]@{ Label = 'stage artifact'; Path = (Join-Path $worktreeRoot '.ci/windows-tools-stage-artifact') },
-              [pscustomobject]@{ Label = 'gate inputs'; Path = (Join-Path $worktreeRoot '.ci/windows-tools-gate-inputs') }
+              [pscustomobject]@{ Label = 'stage artifact'; Path = $stageArtifactRoot },
+              [pscustomobject]@{ Label = 'gate inputs'; Path = $gateInputsRoot }
             )) {
               if ($null -ne $cleanupTarget.Path -and (Test-Path -LiteralPath $cleanupTarget.Path)) {
                 try {
