@@ -395,6 +395,7 @@ bundle=.github/workflows/bundle-release.yml
 windows=.github/workflows/windows-tools.yml
 nexttrace_gate=scripts/ci/windows_nexttrace_gate.ps1
 nexttrace_report_assert=scripts/ci/windows_nexttrace_report_assert.ps1
+icmp_prerequisite=scripts/ci/windows_icmp_prerequisite.ps1
 sdk=.github/workflows/freebsd-sdk-release.yml
 freeze=scripts/release/freeze.sh
 publisher=scripts/release/publish.sh
@@ -438,10 +439,20 @@ assert_contains "$windows" "scripts/build_tools_windows.ps1"
 assert_contains "$windows" "scripts/ci/windows_tools_gate.ps1"
 assert_contains "$windows" "scripts/ci/windows_nexttrace_gate.ps1"
 assert_contains "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1"
+assert_contains "$windows" "scripts/ci/windows_icmp_prerequisite.ps1"
 assert_exact_count "$windows" "scripts/ci/windows_nexttrace_gate.ps1" 3
 assert_exact_count "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath" 4
+assert_exact_count "$windows" "scripts/ci/windows_icmp_prerequisite.ps1" 5
+assert_exact_count "$windows" '-Action Setup' 4
+assert_exact_count "$windows" '-Action Cleanup' 4
+assert_exact_count "$windows" '-OwnerToken $icmpOwnerToken' 8
+assert_exact_count "$windows" '-CapabilityAwareIPv6' 2
 assert_contains "$windows" "NextTrace canonical network gate"
 assert_contains "$windows" "canonical NextTrace gate failed"
+assert_contains "$windows" "runner ICMP prerequisite setup failed"
+assert_contains "$windows" "runner ICMP prerequisite cleanup failed"
+assert_exact_count "$windows" "This workflow-only finally removes the runner prerequisite" 2
+assert_exact_count "$windows" "This outer bootstrap finally owns the workflow-only runner prerequisite cleanup" 2
 assert_contains "$windows" "-CheckOrdinaryUser validates no-admin-operation only"
 assert_contains "$windows" "ordinary-user token execution not claimed"
 assert_absent "$windows" "ordinary-user contract"
@@ -518,6 +529,7 @@ assert_contains "$windows" "ECS_TOOL_BIN"
 assert_contains "$windows" "LOCALAPPDATA"
 assert_contains "$windows" "actions/download-artifact"
 [[ -f "$nexttrace_gate" ]] || die "$nexttrace_gate is missing"
+[[ -f "$icmp_prerequisite" ]] || die "$icmp_prerequisite is missing"
 for required_nexttrace_gate_fact in \
   "ECS_TOOL_BIN" \
   "plan --lang en --only route" \
@@ -560,6 +572,10 @@ for required_nexttrace_gate_fact in \
   "16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b"; do
   assert_contains "$nexttrace_gate" "$required_nexttrace_gate_fact"
 done
+assert_contains "$nexttrace_gate" "gate failed; emitting diagnostic evidence"
+assert_absent "$nexttrace_gate" "runner-capability"
+assert_absent "$nexttrace_gate" "Get-NetFirewallProfile"
+assert_absent "$nexttrace_gate" "Get-NetIPConfiguration"
 for forbidden_nexttrace_gate_fact in 'tracert' 'Test-NetConnection' '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake tool' 'fake binary' 'hops.Count -lt 1'; do
   assert_absent "$nexttrace_gate" "$forbidden_nexttrace_gate_fact"
 done
@@ -598,6 +614,31 @@ done
 for forbidden_report_assert_fact in 'tracert' 'Test-NetConnection' '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake tool' 'fake binary' 'hops.Count -lt 1'; do
   assert_absent "$nexttrace_report_assert" "$forbidden_report_assert_fact"
 done
+for required_icmp_prerequisite_fact in \
+  'ecs.phase6.icmp/v1' \
+  'GITHUB_RUN_ID' \
+  'GITHUB_RUN_ATTEMPT' \
+  'ECS-Phase6-NextTrace-' \
+  'OwnerToken' \
+  'owner_token' \
+  'Owned' \
+  'CapabilityAwareIPv6' \
+  'Get-NetFirewallRule' \
+  'New-NetFirewallRule' \
+  'PersistentStore' \
+  'Remove-NetFirewallRule' \
+  'Get-NetFirewallPortFilter' \
+  'ICMPv4' \
+  'ICMPv6' \
+  'refusing to overwrite existing firewall rule' \
+  'same-name firewall rule is present without ownership' \
+  'refusing to delete' \
+  'firewall state remains after cleanup'; do
+  assert_contains "$icmp_prerequisite" "$required_icmp_prerequisite_fact"
+done
+for forbidden_icmp_prerequisite_fact in 'tracert' 'Test-NetConnection' 'TCP' 'UDP' 'WinDivert' '|| true' 'continue-on-error' 't.Skip' 'ErrorAction SilentlyContinue' 'host PATH fallback'; do
+  assert_absent "$icmp_prerequisite" "$forbidden_icmp_prerequisite_fact"
+done
 assert_contains scripts/ci/windows_tools_gate.ps1 "-CheckOrdinaryUser validates no-admin-operation only"
 assert_contains scripts/ci/windows_tools_gate.ps1 "ordinary-user token execution is not claimed"
 assert_absent scripts/ci/windows_tools_gate.ps1 "ordinary-user execution evidence"
@@ -627,6 +668,54 @@ assert_ordered_in_section "$windows" \
   "      - name: VERIFY-2025 NextTrace canonical network gate" \
   "scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025'" \
   "canonical NextTrace gate failed"
+assert_ordered_in_section "$windows" \
+  "      - name: VERIFY-2022 NextTrace canonical network gate" \
+  '  verify-2025:' \
+  'try {' \
+  '$icmpPrerequisite -Action Setup -Label '\''VERIFY-2022'\''' \
+  "scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022'" \
+  'finally {' \
+  '$icmpPrerequisite -Action Cleanup -Label '\''VERIFY-2022'\'''
+assert_section_count "$windows" \
+  "      - name: VERIFY-2022 NextTrace canonical network gate" \
+  '  verify-2025:' \
+  'finally {' 1
+assert_ordered_in_section "$windows" \
+  "      - name: VERIFY-2025 NextTrace canonical network gate" \
+  '  package:' \
+  'try {' \
+  '$icmpPrerequisite -Action Setup -Label '\''VERIFY-2025'\''' \
+  "scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025'" \
+  'finally {' \
+  '$icmpPrerequisite -Action Cleanup -Label '\''VERIFY-2025'\'''
+assert_section_count "$windows" \
+  "      - name: VERIFY-2025 NextTrace canonical network gate" \
+  '  package:' \
+  'finally {' 1
+assert_ordered_in_section "$windows" \
+  "      - name: E2E-2022 current ZIP and bootstrap scripts" \
+  '  e2e-2025:' \
+  '$icmpPrerequisite -Action Setup -Label "E2E-$label"' \
+  '$routeTarget4 = '\''1.1.1.1'\''' \
+  '$backtraceTarget4 = '\''1.1.1.1'\''' \
+  'This outer bootstrap finally owns the workflow-only runner prerequisite cleanup' \
+  '$icmpPrerequisite -Action Cleanup -Label "E2E-$label"'
+assert_section_count "$windows" \
+  "      - name: E2E-2022 current ZIP and bootstrap scripts" \
+  '  e2e-2025:' \
+  '$icmpPrerequisite -Action Cleanup -Label "E2E-$label"' 1
+assert_ordered_in_section "$windows" \
+  "      - name: E2E-2025 current ZIP and bootstrap scripts" \
+  '' \
+  '$icmpPrerequisite -Action Setup -Label "E2E-$label"' \
+  '$routeTarget4 = '\''1.1.1.1'\''' \
+  '$backtraceTarget4 = '\''1.1.1.1'\''' \
+  'This outer bootstrap finally owns the workflow-only runner prerequisite cleanup' \
+  '$icmpPrerequisite -Action Cleanup -Label "E2E-$label"'
+assert_section_count "$windows" \
+  "      - name: E2E-2025 current ZIP and bootstrap scripts" \
+  '' \
+  '$icmpPrerequisite -Action Cleanup -Label "E2E-$label"' 1
 
 assert_ordered_in_section "$windows" \
   "      - name: E2E-2022 packaged bundle workloads" \

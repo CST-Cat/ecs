@@ -343,6 +343,19 @@ try {
         Assert-EcsCanonicalTraceReport -Report $backtraceReport6 -Module 'backtrace' -Family '6' -FamilyName 'ipv6' -MaxHops 20 -Target $backtraceTarget6
         Write-Output "NextTrace IPv6 canonical gate passed: label=$Label; staged_sha256=$nexttraceHash"
     }
+} catch {
+    $failure = $_
+    try {
+        Write-Host ("NextTrace $Label gate failed; emitting diagnostic evidence from $output")
+        $evidenceFiles = @(Get-ChildItem -LiteralPath $output -File -Recurse -ErrorAction Stop | Sort-Object FullName)
+        foreach ($evidenceFile in $evidenceFiles) {
+            Write-Host ("--- {0} ---" -f $evidenceFile.FullName)
+            Get-Content -Raw -LiteralPath $evidenceFile.FullName -ErrorAction Stop | Write-Host
+        }
+    } catch {
+        Write-Host ("NextTrace diagnostic evidence emission failed: {0}" -f $_.Exception.Message)
+    }
+    throw $failure
 } finally {
     $env:PATH = $oldPath
     if ($hadToolBin) { $env:ECS_TOOL_BIN = $oldToolBin } else { Remove-Item Env:ECS_TOOL_BIN -ErrorAction SilentlyContinue }

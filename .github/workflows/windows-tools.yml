@@ -46,6 +46,7 @@ jobs:
             (Resolve-Path 'scripts/ci/windows_tools_gate.ps1').Path,
             (Resolve-Path 'scripts/ci/windows_nexttrace_gate.ps1').Path,
             (Resolve-Path 'scripts/ci/windows_nexttrace_report_assert.ps1').Path,
+            (Resolve-Path 'scripts/ci/windows_icmp_prerequisite.ps1').Path,
             (Resolve-Path 'scripts/tools/windows/common.ps1').Path
           )
           $paths += @(Get-ChildItem 'scripts/tools/windows' -Filter '*.ps1' -File | ForEach-Object { $_.FullName })
@@ -422,8 +423,18 @@ jobs:
           $stageBin = Join-Path $stageItem.FullName 'bin'
           $ecsPath = Join-Path $PWD 'ecs.exe'
           if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2022 NextTrace gate cannot find ecs.exe' }
-          & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
-          if (-not $?) { throw 'VERIFY-2022 canonical NextTrace gate failed' }
+          $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
+          $icmpOwnerToken = [guid]::NewGuid().ToString('N')
+          try {
+            & $icmpPrerequisite -Action Setup -Label 'VERIFY-2022' -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
+            if (-not $?) { throw 'VERIFY-2022 runner ICMP prerequisite setup failed' }
+            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
+            if (-not $?) { throw 'VERIFY-2022 canonical NextTrace gate failed' }
+          } finally {
+            # This workflow-only finally removes the runner prerequisite; ECS itself never writes firewall state.
+            & $icmpPrerequisite -Action Cleanup -Label 'VERIFY-2022' -OwnerToken $icmpOwnerToken
+            if (-not $?) { throw 'VERIFY-2022 runner ICMP prerequisite cleanup failed' }
+          }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -733,8 +744,18 @@ jobs:
           $stageBin = Join-Path $stageItem.FullName 'bin'
           $ecsPath = Join-Path $PWD 'ecs.exe'
           if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2025 NextTrace gate cannot find ecs.exe' }
-          & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
-          if (-not $?) { throw 'VERIFY-2025 canonical NextTrace gate failed' }
+          $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
+          $icmpOwnerToken = [guid]::NewGuid().ToString('N')
+          try {
+            & $icmpPrerequisite -Action Setup -Label 'VERIFY-2025' -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
+            if (-not $?) { throw 'VERIFY-2025 runner ICMP prerequisite setup failed' }
+            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
+            if (-not $?) { throw 'VERIFY-2025 canonical NextTrace gate failed' }
+          } finally {
+            # This workflow-only finally removes the runner prerequisite; ECS itself never writes firewall state.
+            & $icmpPrerequisite -Action Cleanup -Label 'VERIFY-2025' -OwnerToken $icmpOwnerToken
+            if (-not $?) { throw 'VERIFY-2025 runner ICMP prerequisite cleanup failed' }
+          }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -1139,6 +1160,8 @@ jobs:
           $certificateCheckDefaultOriginalValue = $null
           $noProxyDefaultWasPresent = $false
           $noProxyDefaultOriginalValue = $null
+          $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
+          $icmpOwnerToken = [guid]::NewGuid().ToString('N')
 
           function Get-ArtifactFile {
             param(
@@ -1179,6 +1202,8 @@ jobs:
           }
 
           try {
+            & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
+            if (-not $?) { throw "E2E-$label runner ICMP prerequisite setup failed" }
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -1506,6 +1531,13 @@ jobs:
               } catch {
                 $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
               }
+            }
+            # This outer bootstrap finally owns the workflow-only runner prerequisite cleanup.
+            try {
+              & $icmpPrerequisite -Action Cleanup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
+              if (-not $?) { $cleanupErrors += "runner ICMP prerequisite cleanup failed" }
+            } catch {
+              $cleanupErrors += "runner ICMP prerequisite cleanup failed: $($_.Exception.Message)"
             }
             if ($cleanupErrors.Count -ne 0) {
               throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
@@ -1578,6 +1610,8 @@ jobs:
           $certificateCheckDefaultOriginalValue = $null
           $noProxyDefaultWasPresent = $false
           $noProxyDefaultOriginalValue = $null
+          $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
+          $icmpOwnerToken = [guid]::NewGuid().ToString('N')
 
           function Get-ArtifactFile {
             param(
@@ -1618,6 +1652,8 @@ jobs:
           }
 
           try {
+            & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
+            if (-not $?) { throw "E2E-$label runner ICMP prerequisite setup failed" }
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -1945,6 +1981,13 @@ jobs:
               } catch {
                 $cleanupErrors += "private staging cleanup check failed: $($_.Exception.Message)"
               }
+            }
+            # This outer bootstrap finally owns the workflow-only runner prerequisite cleanup.
+            try {
+              & $icmpPrerequisite -Action Cleanup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
+              if (-not $?) { $cleanupErrors += "runner ICMP prerequisite cleanup failed" }
+            } catch {
+              $cleanupErrors += "runner ICMP prerequisite cleanup failed: $($_.Exception.Message)"
             }
             if ($cleanupErrors.Count -ne 0) {
               throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
