@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,7 +15,12 @@ import (
 )
 
 func npbOutput(spec npbBenchmarkSpec, threads int, mops float64) string {
+	return npbOutputForGOOS(spec, threads, mops, runtime.GOOS)
+}
+
+func npbOutputForGOOS(spec npbBenchmarkSpec, threads int, mops float64, goos string) string {
 	perThread := mops / float64(threads)
+	compileFlags, linkFlags := npbExpectedFlags(goos)
 	return fmt.Sprintf(`
 
  NAS Parallel Benchmarks (NPB3.4-OMP) - %s Benchmark
@@ -36,10 +42,28 @@ func npbOutput(spec npbBenchmarkSpec, threads int, mops float64) string {
     FLINK        = gfortran
     F_LIB        = (none)
     F_INC        = (none)
-    FFLAGS       = -O3 -fopenmp -static
-    FLINKFLAGS   = -O3 -fopenmp -static
+    FFLAGS       = %s
+    FLINKFLAGS   = %s
     RAND         = randi8
-`, spec.Name, threads, spec.Name, spec.ExpectedSize, spec.ExpectedIters, threads, threads, mops, perThread, spec.ExpectedOp)
+`, spec.Name, threads, spec.Name, spec.ExpectedSize, spec.ExpectedIters, threads, threads, mops, perThread, spec.ExpectedOp, compileFlags, linkFlags)
+}
+
+func TestNPBPlatformFlagContracts(t *testing.T) {
+	if compileFlags, linkFlags := npbExpectedFlags("linux"); compileFlags != npbCompileFlags || linkFlags != npbCompileFlags {
+		t.Fatalf("Linux NPB flags = %q/%q, want %q/%q", compileFlags, linkFlags, npbCompileFlags, npbCompileFlags)
+	}
+	windowsCompile, windowsLink := npbExpectedFlags("windows")
+	if windowsCompile != npbWindowsFFlags || windowsLink != npbWindowsLinkFlags {
+		t.Fatalf("Windows NPB flags = %q/%q, want %q/%q", windowsCompile, windowsLink, npbWindowsFFlags, npbWindowsLinkFlags)
+	}
+	spec := npbBenchmarkSpecs[0]
+	output := npbOutputForGOOS(spec, 1, 100, "windows")
+	if _, err := parseNPBBenchmarkOutputForGOOS(output, spec, 1, "windows"); err != nil {
+		t.Fatalf("Windows NPB output with locked flags rejected: %v", err)
+	}
+	if _, err := parseNPBBenchmarkOutputForGOOS(npbOutputForGOOS(spec, 1, 100, "linux"), spec, 1, "windows"); err == nil {
+		t.Fatal("Windows NPB parser accepted the Linux flag contract")
+	}
 }
 
 func TestParseNPBOutputAndFailureCategories(t *testing.T) {

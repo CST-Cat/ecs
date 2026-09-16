@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"regexp"
@@ -70,9 +71,9 @@ var streamOfficialMarkers = []string{
 	"Function",
 }
 
-// maxStreamBinaryBytes 限制读入内存的候选文件大小。官方 STREAM 只有几十 KB；
-// PATH 上恰好同名的巨大文件不应该把整个进程读爆。
-const maxStreamBinaryBytes = 64 << 20
+// maxStreamBinaryBytes bounds candidate inspection while covering the locked
+// Windows STREAM PE, whose static allocation makes it roughly 230 MiB.
+const maxStreamBinaryBytes = 256 << 20
 
 // IsOfficialStreamBinary identifies the upstream STREAM executable without
 // invoking it.  ImageMagick also installs a command named "stream"; running
@@ -83,17 +84,48 @@ func IsOfficialStreamBinary(path string) bool {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxStreamBinaryBytes {
 		return false
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return false
 	}
-	text := string(data)
+	defer file.Close()
+	markerLength := 0
 	for _, marker := range streamOfficialMarkers {
-		if !strings.Contains(text, marker) {
+		if len(marker) > markerLength {
+			markerLength = len(marker)
+		}
+	}
+	carry := ""
+	found := make([]bool, len(streamOfficialMarkers))
+	foundCount := 0
+	buffer := make([]byte, 64<<10)
+	for {
+		read, readErr := file.Read(buffer)
+		if read > 0 {
+			text := carry + string(buffer[:read])
+			for index, marker := range streamOfficialMarkers {
+				if !found[index] && strings.Contains(text, marker) {
+					found[index] = true
+					foundCount++
+				}
+			}
+			if foundCount == len(streamOfficialMarkers) {
+				return true
+			}
+			keep := markerLength - 1
+			if len(text) > keep {
+				carry = text[len(text)-keep:]
+			} else {
+				carry = text
+			}
+		}
+		if readErr == io.EOF {
+			return false
+		}
+		if readErr != nil {
 			return false
 		}
 	}
-	return true
 }
 
 // parseStreamOutput parses the official STREAM summary table strictly.  A

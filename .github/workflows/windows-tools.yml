@@ -829,9 +829,43 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
+          function Get-PathEvidence {
+            param([AllowNull()][string]$Value)
+            $present = $null -ne $Value
+            $text = if ($present) { $Value } else { '' }
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+              $digest = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))).Replace('-', '').ToLowerInvariant()
+            } finally {
+              $sha.Dispose()
+            }
+            return [ordered]@{
+              present = $present
+              length = $text.Length
+              sha256 = $digest
+              value = $text
+            }
+          }
+
+          function Write-PathEvidence {
+            param(
+              [Parameter(Mandatory)][string]$Label,
+              [AllowNull()][string]$ProcessPath,
+              [AllowNull()][string]$MachinePath,
+              [AllowNull()][string]$UserPath
+            )
+            $evidence = [ordered]@{
+              process = Get-PathEvidence $ProcessPath
+              machine = Get-PathEvidence $MachinePath
+              user = Get-PathEvidence $UserPath
+            }
+            Write-Host ("PATH evidence ${Label}: " + ($evidence | ConvertTo-Json -Compress))
+          }
+
           $processPathBefore = [string]$env:Path
           $machinePathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
           $userPathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          Write-PathEvidence -Label 'before integration' -ProcessPath $processPathBefore -MachinePath $machinePathBefore -UserPath $userPathBefore
           $worktreeRoot = (Get-Location).Path
           $stageRoot = $null
           $corpusRoot = $null
@@ -875,15 +909,22 @@ jobs:
             $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
             $corpusItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse)
             if ($corpusItems.Count -ne 1) { throw 'fixed zstd corpus is missing or ambiguous' }
-            $corpusRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen corpus 数据 ' + [guid]::NewGuid().ToString('N'))
+            $corpusRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen corpus ' + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $corpusRoot | Out-Null
             $corpusPath = Join-Path $corpusRoot ([string]$lock.corpus.name)
             Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
 
             & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
             if (-not $?) { throw 'ordinary-user execution gate failed' }
+            $processPathAfterGate = [string]$env:Path
+            $machinePathAfterGate = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
+            $userPathAfterGate = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+            Write-PathEvidence -Label 'after ordinary-user gate' -ProcessPath $processPathAfterGate -MachinePath $machinePathAfterGate -UserPath $userPathAfterGate
+            if ($processPathBefore -cne $processPathAfterGate -or $machinePathBefore -cne $machinePathAfterGate -or $userPathBefore -cne $userPathAfterGate) {
+              throw 'ordinary-user gate changed process, Machine, or User PATH'
+            }
 
-            $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox 数据 ' + [guid]::NewGuid().ToString('N'))
+            $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox ' + [guid]::NewGuid().ToString('N'))
             $tempRoot = Join-Path $sandboxRoot 'temp with spaces'
             $homeRoot = Join-Path $sandboxRoot 'home with spaces'
             $cacheRoot = Join-Path $sandboxRoot 'cache with spaces'
@@ -926,10 +967,13 @@ jobs:
           $processPathAfter = [string]$env:Path
           $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
           $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+          Write-PathEvidence -Label 'after integration and cleanup' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
           if ($processPathBefore -cne $processPathAfter) {
+            Write-PathEvidence -Label 'process PATH mismatch' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
             $postErrors += 'Windows ECS frozen-tool integration changed the process PATH'
           }
           if ($machinePathBefore -cne $machinePathAfter -or $userPathBefore -cne $userPathAfter) {
+            Write-PathEvidence -Label 'Machine/User PATH mismatch' -ProcessPath $processPathAfter -MachinePath $machinePathAfter -UserPath $userPathAfter
             $postErrors += 'Windows ECS frozen-tool integration changed the Machine or User PATH'
           }
           $postErrors += $cleanupErrors

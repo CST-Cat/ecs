@@ -52,6 +52,38 @@ func TestParseOpenSSLOutputAndErrors(t *testing.T) {
 	}
 }
 
+func TestOpenSSLSpeedPlatformArguments(t *testing.T) {
+	spec := openSSLAlgorithmSpecs[0]
+	windowsArgs := openSSLSpeedArguments(spec, 4, openSSLDurationSeconds, openSSLBlockBytes, "windows")
+	if strings.Contains(strings.Join(windowsArgs, " "), "-multi") {
+		t.Fatalf("Windows OpenSSL speed arguments contain unsupported -multi: %q", windowsArgs)
+	}
+	for _, want := range []string{"speed", "-elapsed", "-seconds", "5", "-bytes", "16384", "-mr", "-evp", spec.EVPName} {
+		if !hasOpenSSLArgument(windowsArgs, want) {
+			t.Fatalf("Windows OpenSSL speed arguments %q omit %q", windowsArgs, want)
+		}
+	}
+	linuxArgs := openSSLSpeedArguments(spec, 4, openSSLDurationSeconds, openSSLBlockBytes, "linux")
+	if !hasOpenSSLArgument(linuxArgs, "-multi") || !hasOpenSSLArgument(linuxArgs, "4") {
+		t.Fatalf("Linux OpenSSL speed arguments lost multi-worker contract: %q", linuxArgs)
+	}
+	if got := openSSLWorkerCount("windows", 4); got != 1 {
+		t.Fatalf("Windows OpenSSL worker count = %d, want 1", got)
+	}
+	if got := openSSLWorkerCount("linux", 4); got != 4 {
+		t.Fatalf("Linux OpenSSL worker count = %d, want 4", got)
+	}
+}
+
+func hasOpenSSLArgument(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestOpenSSLMeasurementsAndTable(t *testing.T) {
 	spec := openSSLAlgorithmSpecs[0]
 	first := openSSLSpeedSample{Algorithm: spec.Key, Workers: 1, Duration: 5, BlockBytes: 16384, ThroughputBPS: 4_000_000_000, ThroughputMBPS: 4000}

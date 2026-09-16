@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -96,7 +97,7 @@ func missingOpenSSLResult(err error) model.Result {
 		message = err.Error()
 	}
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl", Count: 1, Message: message})
-	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(distinctBenchmarkThreadCounts(allowance.Threads)), "run")
+	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(openSSLThreadCounts(runtime.GOOS, allowance.Threads)), "run")
 	result.Notes = cryptoNotes(result, allowance)
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.none")}
 	result.Finish(start)
@@ -110,7 +111,8 @@ func runOpenSSLSpeed(ctx context.Context, env Environment, path string, specs []
 func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path string, specs []openSSLAlgorithmSpec, allowance cpuAllowance) model.Result {
 	start := time.Now()
 	result := newCryptoResult()
-	threadCounts := distinctBenchmarkThreadCounts(allowance.Threads)
+	workers := openSSLWorkerCount(runtime.GOOS, allowance.Threads)
+	threadCounts := distinctBenchmarkThreadCounts(workers)
 
 	versionOutput, version, versionErr := queryOpenSSLVersion(ctx, path)
 	if versionErr != nil || version != openSSLExpectedVersion {
@@ -136,7 +138,6 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 		return result
 	}
 
-	workers := allowance.Threads
 	singleCore := len(threadCounts) == 1
 	runs := make(map[string][]openSSLSpeedSample, len(specs))
 	validRuns := 0
@@ -239,19 +240,38 @@ func queryOpenSSLVersion(ctx context.Context, path string) (string, string, erro
 	return text, matches[0][1], nil
 }
 
+func openSSLWorkerCount(goos string, requested int) int {
+	if goos == "windows" && requested > 1 {
+		return 1
+	}
+	return requested
+}
+
+func openSSLThreadCounts(goos string, requested int) []int {
+	return distinctBenchmarkThreadCounts(openSSLWorkerCount(goos, requested))
+}
+
+func openSSLSpeedArguments(spec openSSLAlgorithmSpec, workers, seconds, blockBytes int, goos string) []string {
+	args := []string{
+		"speed", "-elapsed", "-seconds", strconv.Itoa(seconds),
+		"-bytes", strconv.Itoa(blockBytes), "-mr",
+	}
+	if goos != "windows" {
+		args = append(args, "-multi", strconv.Itoa(workers))
+	}
+	args = append(args, "-evp", spec.EVPName)
+	if spec.AEAD {
+		args = append(args, "-aead")
+	}
+	return args
+}
+
 func executeOpenSSLSpeed(ctx context.Context, path string, spec openSSLAlgorithmSpec, workers, seconds, blockBytes int) (openSSLSpeedSample, error) {
 	sample := openSSLSpeedSample{Algorithm: spec.Key, Workers: workers, Duration: seconds, BlockBytes: blockBytes}
 	if workers < 1 || seconds < 1 || blockBytes < 1 {
 		return sample, fmt.Errorf("OpenSSL speed workers/duration/block size 必须为正数")
 	}
-	args := []string{
-		"speed", "-elapsed", "-seconds", strconv.Itoa(seconds),
-		"-bytes", strconv.Itoa(blockBytes), "-mr", "-multi", strconv.Itoa(workers),
-		"-evp", spec.EVPName,
-	}
-	if spec.AEAD {
-		args = append(args, "-aead")
-	}
+	args := openSSLSpeedArguments(spec, workers, seconds, blockBytes, runtime.GOOS)
 	sample.Args = append([]string(nil), args...)
 	workDirectory, err := os.MkdirTemp("", "ecs-openssl-")
 	if err != nil {

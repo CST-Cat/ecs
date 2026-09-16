@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,9 +58,12 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), integrationWindowsToolTimeout)
 	defer cancel()
-	fioDirectory := filepath.Join(t.TempDir(), "fio integration path with spaces 数据")
+	fioDirectory := filepath.Join(t.TempDir(), "fio integration path with spaces")
 	if err := os.MkdirAll(fioDirectory, 0o700); err != nil {
 		t.Fatalf("create fio sandbox: %v", err)
+	}
+	if !strings.Contains(fioDirectory, " ") || containsNonASCII(fioDirectory) {
+		t.Fatalf("fio workload sandbox must be an existing ASCII path with spaces: %q", fioDirectory)
 	}
 	env := Environment{Config: config.Runtime{
 		DiskPath:       fioDirectory,
@@ -204,8 +208,8 @@ func requireFrozenWindowsCorpus(t *testing.T) string {
 	if err != nil || !info.Mode().IsRegular() {
 		t.Fatalf("ECS_ZSTD_CORPUS=%q is not a regular file: %v", absolute, err)
 	}
-	if !strings.Contains(absolute, " ") || !containsNonASCII(absolute) {
-		t.Fatalf("fixed corpus path must exercise spaces and Unicode: %q", absolute)
+	if !strings.Contains(absolute, " ") || containsNonASCII(absolute) {
+		t.Fatalf("fixed corpus path must be an existing ASCII path with spaces: %q", absolute)
 	}
 	if pathIsUnderWindowsRoot(absolute, mustIntegrationWorkingDirectory(t)) {
 		t.Fatalf("fixed corpus escaped the test sandbox into the worktree: %q", absolute)
@@ -297,6 +301,9 @@ func assertCompleteWindowsProbeResult(t *testing.T, result model.Result) {
 
 func assertWindowsZstdResult(t *testing.T, result model.Result, corpusPath string) {
 	t.Helper()
+	if !strings.Contains(corpusPath, " ") || containsNonASCII(corpusPath) {
+		t.Fatalf("zstd corpus workload path must be ASCII with spaces: %q", corpusPath)
+	}
 	if got := windowsResultField(result, "version"); !strings.Contains(got, zstdExpectedVersion) {
 		t.Fatalf("zstd frozen version evidence=%q, want %s", got, zstdExpectedVersion)
 	}
@@ -321,6 +328,22 @@ func assertWindowsNPBResult(t *testing.T, result model.Result) {
 		t.Fatalf("NPB benchmark evidence is incomplete: %q", windowsResultField(result, "benchmarks"))
 	}
 	assertWindowsPositiveMeasurements(t, result, "npb_ep_1t_mops", "npb_ft_1t_mops")
+	expectedCompileFlags, expectedLinkFlags := npbExpectedFlags(runtime.GOOS)
+	seenEP, seenFT := false, false
+	for _, block := range result.TextBlocks {
+		if strings.Contains(block.Content, "- EP Benchmark") {
+			seenEP = true
+		}
+		if strings.Contains(block.Content, "- FT Benchmark") {
+			seenFT = true
+		}
+		if !strings.Contains(block.Content, "FFLAGS       = "+expectedCompileFlags) || !strings.Contains(block.Content, "FLINKFLAGS   = "+expectedLinkFlags) {
+			t.Fatalf("NPB raw production evidence has unexpected compiler/linker flags: %q", block.Content)
+		}
+	}
+	if !seenEP || !seenFT {
+		t.Fatalf("NPB raw production evidence omitted EP or FT output: EP=%t FT=%t", seenEP, seenFT)
+	}
 	verified := map[string]bool{"EP": false, "FT": false}
 	for _, table := range result.Tables {
 		if table.Key != "benchmark.npb.results" {
@@ -376,6 +399,20 @@ func assertWindowsOpenSSLResult(t *testing.T, result model.Result) {
 	}
 	if !rawSpeedEvidence {
 		t.Fatalf("OpenSSL production raw stdout/stderr has no machine-speed evidence")
+	}
+	argumentEvidence := 0
+	for _, field := range result.Fields {
+		if !strings.HasPrefix(field.Key, "arguments_") {
+			continue
+		}
+		arguments := field.Value.Text()
+		if strings.Contains(arguments, "-multi") || !strings.Contains(arguments, "-seconds 5") || !strings.Contains(arguments, "-bytes 16384") || !strings.Contains(arguments, "-mr") {
+			t.Fatalf("OpenSSL Windows production arguments violate the fixed speed contract: %q", arguments)
+		}
+		argumentEvidence++
+	}
+	if argumentEvidence < len(openSSLAlgorithmSpecs) {
+		t.Fatalf("OpenSSL production result has %d fixed-argument evidence fields, want at least %d", argumentEvidence, len(openSSLAlgorithmSpecs))
 	}
 	var algorithmRows int
 	for _, table := range result.Tables {

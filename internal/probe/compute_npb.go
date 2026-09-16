@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,12 +16,14 @@ import (
 )
 
 const (
-	npbMethodVersion   = "npb-omp-3.4.4-class-a-v1"
-	npbExpectedVersion = "3.4.4"
-	npbExpectedClass   = "A"
-	npbCompileFlags    = "-O3 -fopenmp -static"
-	npbRandomGenerator = "randi8"
-	npbRunTimeout      = 10 * time.Minute
+	npbMethodVersion    = "npb-omp-3.4.4-class-a-v1"
+	npbExpectedVersion  = "3.4.4"
+	npbExpectedClass    = "A"
+	npbCompileFlags     = "-O3 -fopenmp -static"
+	npbWindowsFFlags    = "-O3 -fopenmp"
+	npbWindowsLinkFlags = "-static -static-libgcc -Wl,--gc-sections -fopenmp -static-libgfortran"
+	npbRandomGenerator  = "randi8"
+	npbRunTimeout       = 10 * time.Minute
 )
 
 var npbBannerPattern = regexp.MustCompile(`(?m)^\s*NAS Parallel Benchmarks \(NPB3\.4-OMP\) - (EP|FT) Benchmark\s*$`)
@@ -102,6 +105,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	paths := make(map[string]string, len(specs))
 	validRuns := 0
 	expectedRuns := len(specs) * len(threadCounts)
+	compileFlags, _ := npbExpectedFlags(runtime.GOOS)
 	for _, spec := range specs {
 		path, err := LookupTool(spec.Binary)
 		if err != nil {
@@ -143,7 +147,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 		{Key: "threads", Label: "probe.npb.field.threads", Value: model.RawValue(benchmarkThreadField(workers))},
 		{Key: "cpu_allowance", Label: "probe.npb.field.cpu_allowance", Value: model.RawValue(cpuAllowanceMachineValue(allowance))},
 		{Key: "implementation", Label: "probe.npb.field.implementation", Value: model.RawValue("NPB3.4-OMP")},
-		{Key: "compiler_flags", Label: "probe.npb.field.compiler_flags", Value: model.RawValue(npbCompileFlags)},
+		{Key: "compiler_flags", Label: "probe.npb.field.compiler_flags", Value: model.RawValue(compileFlags)},
 		{Key: "random_generator", Label: "probe.npb.field.random_generator", Value: model.RawValue(npbRandomGenerator)},
 		{Key: "arguments", Label: "probe.npb.field.arguments", Value: model.RawValue("(none)")},
 		{Key: "environment_1t", Label: "probe.npb.field.environment_1t", Value: model.RawValue(environment1T)},
@@ -158,7 +162,7 @@ func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs [
 	addComparisonParameter(result.Methodology.Parameters, "problem_class", npbExpectedClass)
 	addComparisonParameter(result.Methodology.Parameters, "threads", benchmarkThreadField(workers))
 	addComparisonParameter(result.Methodology.Parameters, "implementation", "NPB3.4-OMP")
-	addComparisonParameter(result.Methodology.Parameters, "compiler_flags", npbCompileFlags)
+	addComparisonParameter(result.Methodology.Parameters, "compiler_flags", compileFlags)
 	addComparisonParameter(result.Methodology.Parameters, "random_generator", npbRandomGenerator)
 	addComparisonParameter(result.Methodology.Parameters, "environment_1t", environment1T)
 	addComparisonParameter(result.Methodology.Parameters, "environment_nt", environmentNT)
@@ -240,7 +244,18 @@ func npbEnvironmentParameters(threads int) []string {
 	}
 }
 
-func parseNPBBenchmarkOutput(output string, spec npbBenchmarkSpec, requestedThreads int) (sample npbBenchmarkSample, err error) {
+func npbExpectedFlags(goos string) (compileFlags, linkFlags string) {
+	if goos == "windows" {
+		return npbWindowsFFlags, npbWindowsLinkFlags
+	}
+	return npbCompileFlags, npbCompileFlags
+}
+
+func parseNPBBenchmarkOutput(output string, spec npbBenchmarkSpec, requestedThreads int) (npbBenchmarkSample, error) {
+	return parseNPBBenchmarkOutputForGOOS(output, spec, requestedThreads, runtime.GOOS)
+}
+
+func parseNPBBenchmarkOutputForGOOS(output string, spec npbBenchmarkSpec, requestedThreads int, goos string) (sample npbBenchmarkSample, err error) {
 	sample = npbBenchmarkSample{Benchmark: spec.Name, Threads: requestedThreads}
 	defer func() {
 		if err != nil {
@@ -304,13 +319,14 @@ func parseNPBBenchmarkOutput(output string, spec npbBenchmarkSpec, requestedThre
 	if err != nil || linker != compiler {
 		return sample, fmt.Errorf("NPB %s FLINK 与 FC 不一致", spec.Name)
 	}
+	expectedCompileFlags, expectedLinkFlags := npbExpectedFlags(goos)
 	compileFlags, err := field("FFLAGS")
-	if err != nil || compileFlags != npbCompileFlags {
-		return sample, fmt.Errorf("NPB %s FFLAGS 为 %s，期望 %s", spec.Name, fallback(compileFlags, "unknown"), npbCompileFlags)
+	if err != nil || compileFlags != expectedCompileFlags {
+		return sample, fmt.Errorf("NPB %s FFLAGS 为 %s，期望 %s", spec.Name, fallback(compileFlags, "unknown"), expectedCompileFlags)
 	}
 	linkFlags, err := field("FLINKFLAGS")
-	if err != nil || linkFlags != npbCompileFlags {
-		return sample, fmt.Errorf("NPB %s FLINKFLAGS 为 %s，期望 %s", spec.Name, fallback(linkFlags, "unknown"), npbCompileFlags)
+	if err != nil || linkFlags != expectedLinkFlags {
+		return sample, fmt.Errorf("NPB %s FLINKFLAGS 为 %s，期望 %s", spec.Name, fallback(linkFlags, "unknown"), expectedLinkFlags)
 	}
 	random, err := field("RAND")
 	if err != nil || random != npbRandomGenerator {
