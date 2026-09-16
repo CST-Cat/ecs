@@ -48,23 +48,28 @@ ecs-tools tar.gz artifact for fixed-contract components and for any missing
 general tool. On Windows Server 2022+ x64, the release target is
 windows_amd64 and the main and tools assets are respectively
 ecs_windows_amd64.zip and ecs-tools_windows_amd64.zip. The Windows tools
-asset contains only zstd, NPB EP, NPB FT, OpenSSL, STREAM, and fio; its
-build-time MSYS2 UCRT64 inputs are pinned in tools/lock.json and are not a
-Go dependency or a runtime tool asset. License notices for the six tools are
-generated from their upstream sources into the package LICENSES/ directory.
-The Windows asset does not support sysbench or iperf3; Ookla is unsupported
-there as well.
+asset contains zstd, NPB EP, NPB FT, OpenSSL, STREAM, fio, and the official
+NextTrace Tiny v1.7.1 prebuilt; its locked Windows AMD64 asset is
+nexttrace-tiny_windows_amd64.exe with SHA-256
+16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b, and the
+packaged copy is byte-identical to the verified input. The build-time MSYS2
+UCRT64 inputs are pinned in tools/lock.json and are not a Go dependency or a
+runtime tool asset. License notices for the seven tools are generated from
+their upstream sources into the package LICENSES/ directory. The Windows
+asset does not support sysbench or iperf3; Ookla is unsupported there as well.
 
-NextTrace Tiny and the pinned ping build are Linux-only: the FreeBSD tool
-packages omit both and use the base-system ping and traceroute instead. The
-Windows package omits both; native Win32 system probes and native Win32 ICMP
+The pinned ping build is Linux-only. FreeBSD tool packages omit both ping and
+NextTrace Tiny and use the base-system ping and traceroute instead. The
+Windows package omits ping; native Win32 system probes and native Win32 ICMP
 are implemented by ecs itself, and fio's Windows native engine is windowsaio.
-The Windows route and backtrace modules remain unsupported because NextTrace
-has not passed an independent genuine Windows network gate. The artifact is
-accepted only after checks against the Bundle Release's checksums.txt, then
-only the requested regular executable members are unpacked into the temporary
-run directory and exposed through the temporary PATH (or its Windows
-PowerShell equivalent).
+Windows route and backtrace use the canonical NextTrace arguments, JSON
+adapter and production parser; the final Windows runner gate verifies the
+official v1.7.1 provenance, IPv4 route/backtrace results and IPv6 when the
+runner has global IPv6/default-route capability. The artifact is accepted
+only after checks against the Bundle Release's checksums.txt, then only the
+requested regular executable members are unpacked into the temporary run
+directory and exposed through the temporary PATH (or its Windows PowerShell
+equivalent).
 When the zstd benchmark is selected, run.sh downloads and
 extracts the corpus asset from the Bundle Release and verifies its archive
 against the Bundle Release's checksums.txt; the zstd probe verifies its

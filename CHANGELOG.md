@@ -11,6 +11,18 @@ the current `v0.8.4` release.
 - `Unreleased` 用于后续维护；从本约定开始，每次维护 `Unreleased` 或新增版本章节时都必须同步填写 `### 中文` 与 `### English`，发布新版本时再移动为带日期的版本节。
 - `Unreleased` tracks future work. From this convention onward, every maintained `Unreleased` or new version section must keep matching `### 中文` and `### English` entries before it is moved to a dated release section.
 
+## Unreleased
+
+### 中文
+
+- Windows `windows_amd64` Bundle 从六工具扩展为七工具，加入官方 NextTrace Tiny v1.7.1 预编译资产；锁定 SHA-256 为 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`，Bundle 版本由 `bundle-v1.6` 递增为 `bundle-v1.7`，不提升 `ecs` 软件版本。
+- Windows route/backtrace 通过生产 `ecs.exe` 路径接入 canonical NextTrace 参数、`nexttrace-json-v1` adapter 与 production parser；最终 Server 2022/2025 runner 对 IPv4 必须真实执行，具备 global IPv6/default route 时执行 IPv6，否则明确报告 capability missing，并保留 engine/version、target、family、hops 与工具来源验证。
+
+### English
+
+- The Windows `windows_amd64` Bundle grows from six to seven tools by adding the official NextTrace Tiny v1.7.1 prebuilt; its locked SHA-256 is `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`. The Bundle version increments from `bundle-v1.6` to `bundle-v1.7`; the `ecs` software version does not change.
+- Windows route/backtrace are wired through the production `ecs.exe` path with the canonical NextTrace arguments, `nexttrace-json-v1` adapter and production parser. The final Server 2022/2025 runners must execute a genuine IPv4 gate, run IPv6 when global IPv6/default-route capability exists, otherwise report capability missing explicitly, and verify engine/version, target, family, hops and tool provenance.
+
 ## 0.8.4 — 2026-09-15
 
 ### 中文

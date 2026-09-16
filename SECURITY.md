@@ -2,7 +2,7 @@
 
 ## 运行与网络边界
 
-`ecs` 支持 Linux 与 FreeBSD；原生探针无需 root。默认运行不会安装软件、修改内核参数或系统目录，也不会上传报告。`install.sh` 只安装 `ecs`，标准 `run.sh` 只在临时目录 staging 已校验的固定工具，不调用系统包管理器安装基准工具。
+`ecs` 支持 Linux、FreeBSD 与 Windows Server 2022+ x64；原生探针无需 root。默认运行不会安装软件、修改内核参数或系统目录，也不会上传报告。`install.sh` 只安装 `ecs`，标准 `run.sh` 只在临时目录 staging 已校验的固定工具，不调用系统包管理器安装基准工具。
 
 `--exposure` 是外联上限：`local` 禁止联网，`public` 只允许公共基础设施，`thirdparty`（默认）允许已登记的第三方情报服务，`any` 允许所有已登记的外部服务。越过上限的默认模块会被过滤，显式点名则报错。任何联网目标，包括 STUN、测速节点、路由目标、情报接口和 Ookla，都能看到请求的公网出口 IP；该信息不会因本地报告遮盖而对远端隐藏。
 
@@ -12,7 +12,7 @@ NAT 探测以标准库实现 STUN（RFC 5389/5780）。请求只包含协议头�
 
 三网测速节点清单固定到每个 `ecs` 版本审计过的上游 commit。节点 URL 必须是绝对 HTTP(S) URL，拒绝 userinfo、fragment、非法端口和特殊用途地址；专用客户端忽略环境代理，在实际拨号处解析并筛选公网地址，每次重定向也重新校验。因此内网/回环目标、DNS rebinding 和重定向不能把它变成 SSRF 通道。部分节点只有 HTTP，测速流量可能被链路观察或篡改，结果不构成机密性或完整性证明。
 
-路由与回程模块在 Linux 上只使用官方 NextTrace Tiny，以参数数组调用无启动横幅的 JSON 模式，不经过 shell，并记录实际版本和完整参数；FreeBSD 改用 base-system 的 `/usr/sbin/traceroute`（同样以参数数组调用、不经 shell），不下载特权网络程序，并把 `adapter` 与 `arguments` 记为比较参数，避免与 Linux 的 NextTrace 结果被当成同一口径。`run.sh` 先校验当前架构 `ecs-tools` 归档在 Bundle Release `checksums.txt` 中的摘要，再只把本次需要的成员 staging 到私有 `$WORK/bin`；工具准备失败或 `ECS_AUTO_DEPS=0` 时终止运行，退出时清理 `$WORK`，不安装到系统。
+路由与回程模块在 Linux 和 Windows 上只使用官方 NextTrace Tiny，以参数数组调用无启动横幅的 JSON 模式，不经过 shell，并记录实际版本和完整参数；Windows Server 2022+ x64 使用锁定的官方 v1.7.1 预编译资产，IPv4 必须通过最终 runner gate，有 global IPv6/default route 时也必须验证 IPv6。FreeBSD 改用 base-system 的 `/usr/sbin/traceroute`（同样以参数数组调用、不经 shell），不下载特权网络程序，并把 `adapter` 与 `arguments` 记为比较参数，避免不同 backend 的结果被当成同一口径。`run.sh` 先校验当前架构 `ecs-tools` 归档在 Bundle Release `checksums.txt` 中的摘要，再只把本次需要的成员 staging 到私有 `$WORK/bin`；工具准备失败或 `ECS_AUTO_DEPS=0` 时终止运行，退出时清理 `$WORK`，不安装到系统。
 
 Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显式选择才会调用官方客户端。若 `run.sh` 需要临时准备客户端，Debian/Ubuntu 路径会在 `$WORK` 内校验固定 GPG 指纹、验证官方 Packagecloud 签名并解包，不写 `/etc`，也不执行供应商安装脚本；无法安全临时解包的平台会终止运行。FreeBSD 没有官方 Ookla 客户端，`run.sh` 在进入包管理器路径前就直接失败，不会回退到 Linux 的 Packagecloud 路径。Ookla 可独立接收出口 IP、客户端、服务器和测量元数据，因此该模式不属于本地零上传边界。
 
@@ -33,18 +33,18 @@ Ookla 是独立的外部适配器，`standard` 不默认运行，`full` 或显�
 仓库有三条彼此独立、版本线不同的发布链：ECS application Release、Bundle Release 和仅供 CI 消费的 FreeBSD GNU SDK immutable snapshot。
 
 ```text
-ECS Release:    freeze → source-checks / ecs-build × 9 → assemble → verify → rehearsal | publish
-Bundle Release: tools × 9 → assemble → rehearsal | publish
+ECS Release:    freeze → source-checks / ecs-build × 10 → assemble → verify → rehearsal | publish
+Bundle Release: tools × 10 (Linux ×7 + FreeBSD ×2 + Windows ×1) → assemble → rehearsal | publish
 GNU SDK:        intent → SDK build × 2 → prepare → rehearsal | publish
 ```
 
-ECS Release 只发布九目标主程序归档及其 `checksums.txt`（七个 Linux 架构加 FreeBSD `amd64`、`arm64`）。Bundle Release 独立发布固定的 benchmark runtime、工具归档、corpus 及其自己的 `checksums.txt`；ECS 主程序携带所依赖的 Bundle 标识，客户端据此选择 Bundle，而不是从移动中的 `main` 读取或接受用户覆盖。GNU SDK snapshot 不属于用户工具包或 ECS 软件发布，只作为 FreeBSD GNU 构建链按 lock 中 URL+SHA256 消费的 immutable CI 依赖。
+ECS Release 只发布十目标主程序归档及其 `checksums.txt`（七个 Linux 架构、FreeBSD `amd64`/`arm64` 和 Windows `amd64`）。Bundle Release 独立发布固定的 benchmark runtime、工具归档、corpus 及其自己的 `checksums.txt`；ECS 主程序携带所依赖的 Bundle 标识，客户端据此选择 Bundle，而不是从移动中的 `main` 读取或接受用户覆盖。GNU SDK snapshot 不属于用户工具包或 ECS 软件发布，只作为 FreeBSD GNU 构建链按 lock 中 URL+SHA256 消费的 immutable CI 依赖。
 
 三条链的“彩排”都具有**零永久远端副作用**。ECS 与 Bundle 的 `workflow_dispatch` 无条件代表 rehearsal：即使维护者在 Actions UI 中选择了一个形如 `v*` / `bundle-v*` 的 tag ref，正式 `publish` 仍额外要求 `github.event_name == push`，因此 dispatch 不可能获得发布写路径。ECS/Bundle 彩排会消费与正式发布相同的最终 Actions artifact，并让 `publish.sh --check-only` 校验发布边界；该模式在任何 `gh release` 操作之前返回。FreeBSD GNU SDK 的手动入口默认 `release_mode=rehearsal`，会完成双架构源码构建、裁剪、验证、consumer gate、打包、SHA256SUMS 和 release notes，只留下 7 天 Actions artifact；只有显式选择 `release_mode=publish` 并提供合法的新 `sdk_version` 才进入唯一的 `contents:write` job。
 
 ECS Release 发布入口确认候选提交等于当时远端 `main`，随后该流程只使用冻结 SHA。正式 Bundle push 还要求触发 tag 精确等于该提交中的 `tools/BUNDLE`，防止“推 A tag 却按文件内容创建 B Release/tag”。GNU SDK 的正式 publish 在昂贵构建前确认候选 SHA 是当时远端 `main` 并检查目标 Release/tag 尚不存在，构建完成后在真正写入前再次检查一次；rehearsal 不要求 `sdk_version`，也不会消耗 append-only tag 名。Bundle rehearsal 与正式发布都只使用 workflow 触发时的固定 SHA。三条链的构建、校验、prepare/rehearsal job 都只有 `contents:read`；每条链只有唯一正式 `publish` job 持有 `contents:write`。
 
-Bundle 的工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；NextTrace 资产还必须匹配上游发布的 SHA-256 digest，缺失 digest 即失败，而 FreeBSD 工具归档不含 NextTrace 与 `ping`，因此该断言只作用于 Linux 工具包。工具 manifest 记录来源与构建参数。每条用户可下载 Release 各自产生 `checksums.txt`；GNU SDK snapshot 产生独立 `SHA256SUMS`。完整性校验只设在下载边界，发布链内部不重复校验自己刚产出的字节。
+Bundle 的工具构建使用固定上游 release tag 与完整 commit、或固定 HTTPS 来源与 SHA-256；Windows NextTrace v1.7.1 预编译资产也必须匹配锁定的上游 SHA-256 digest，缺失 digest 即失败，并以逐字节相同的文件进入 Bundle。FreeBSD 工具归档不含 NextTrace 与 `ping`，继续使用 base-system ping/traceroute 合同。工具 manifest 记录来源与构建参数。每条用户可下载 Release 各自产生 `checksums.txt`；GNU SDK snapshot 产生独立 `SHA256SUMS`。完整性校验只设在下载边界，发布链内部不重复校验自己刚产出的字节。
 
 ### Immutable Releases
 

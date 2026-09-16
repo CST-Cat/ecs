@@ -4,8 +4,8 @@ name: windows-tools
 # workflow only chooses the real runner, artifact hand-off, and dependency DAG.
 #
 # LOCK/CHECK -> BUILD windows_amd64 -> VERIFY-2022 || VERIFY-2025
-#             -> ECS-INTEGRATION-2022 || ECS-INTEGRATION-2025
-#             -> PACKAGE -> E2E-2022 || E2E-2025
+#             -> canonical NextTrace IPv4/IPv6 gates + ECS-INTEGRATION
+#             -> PACKAGE -> E2E-2022 || E2E-2025 (including route/backtrace)
 #
 # workflow_dispatch is a rehearsal only.  It produces seven-day artifacts and
 # never has repository write permission or a release/tag side effect.
@@ -44,6 +44,8 @@ jobs:
           $paths = @(
             (Resolve-Path 'scripts/build_tools_windows.ps1').Path,
             (Resolve-Path 'scripts/ci/windows_tools_gate.ps1').Path,
+            (Resolve-Path 'scripts/ci/windows_nexttrace_gate.ps1').Path,
+            (Resolve-Path 'scripts/ci/windows_nexttrace_report_assert.ps1').Path,
             (Resolve-Path 'scripts/tools/windows/common.ps1').Path
           )
           $paths += @(Get-ChildItem 'scripts/tools/windows' -Filter '*.ps1' -File | ForEach-Object { $_.FullName })
@@ -62,23 +64,32 @@ jobs:
           if ($windowsTarget.Count -ne 1 -or [string]$windowsTarget[0].goos -ne 'windows' -or [string]$windowsTarget[0].goarch -ne 'amd64') {
             throw 'windows_amd64 lock target is missing or ambiguous'
           }
-          $wantTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio')
+          $wantTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio', 'nexttrace-tiny')
           if ((@($lock.windows_tools) -join '|') -ne ($wantTools -join '|')) { throw 'Windows tool set drifted' }
-          if (@($lock.windows_tools | Where-Object { $_ -eq 'nexttrace-tiny' -or $_ -eq 'ping' }).Count -ne 0) {
+          if (@($lock.windows_tools | Where-Object { $_ -eq 'ping' -or $_ -eq 'sysbench' -or $_ -eq 'iperf3' }).Count -ne 0) {
             throw 'unsupported tool entered the Windows bundle'
           }
+          $nexttrace = @($lock.tools | Where-Object { $_.name -eq 'nexttrace-tiny' })
+          if ($nexttrace.Count -ne 1) { throw 'NextTrace lock entry is missing or duplicated' }
+          if ([string]$nexttrace[0].windows_asset_pattern -ne 'nexttrace-tiny_windows_<architecture>.exe') { throw 'NextTrace Windows asset pattern drifted' }
+          $nexttraceAsset = ([string]$nexttrace[0].windows_asset_pattern).Replace('<architecture>', 'amd64')
+          $nexttraceReleasePath = 'releases' + '/download'
+          $nexttraceURL = "https://github.com/$($nexttrace[0].repository)/$nexttraceReleasePath/$($nexttrace[0].tag)/$nexttraceAsset"
+          $expectedNexttraceURL = 'https://github.com/nxtrace/NTrace-core/' + $nexttraceReleasePath + '/v1.7.1/nexttrace-tiny_windows_amd64.exe'
+          if ($nexttraceURL -ne $expectedNexttraceURL) { throw 'NextTrace source URL drifted' }
+          if ([string]$nexttrace[0].windows_asset_sha256.amd64 -ne '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b') { throw 'NextTrace Windows AMD64 SHA-256 drifted' }
           if (@($lock.windows_dll_allowlist).Count -eq 0) { throw 'Windows DLL allowlist is empty' }
 
           & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-          if (-not $?) { throw 'ordinary-user execution evidence failed' }
+          if (-not $?) { throw 'no-admin-operation check failed' }
 
           $params = & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -PrintParams
           if (-not $?) { throw 'Windows builder lock/check failed' }
           $paramsText = $params -join "`n"
-          foreach ($marker in @('target=windows_amd64', 'toolchain_mode=native', 'smoke_runner=direct', 'validation_scope=functional', 'performance_valid=false', 'nexttrace=unsupported')) {
+          foreach ($marker in @('target=windows_amd64', 'toolchain_mode=native', 'smoke_runner=direct', 'validation_scope=functional', 'performance_valid=false', 'nexttrace=verified-upstream-prebuilt', 'nexttrace_asset=nexttrace-tiny_windows_amd64.exe', 'nexttrace_source_sha256=16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b')) {
             if ($paramsText -notmatch [regex]::Escape($marker)) { throw "builder parameters missing $marker" }
           }
-          Write-Output 'LOCK/CHECK passed: pinned target, tool set, allowlist, PowerShell syntax, and ordinary-user contract'
+          Write-Output 'LOCK/CHECK passed: pinned target, seven-tool set, verified NextTrace asset metadata, allowlist, PowerShell syntax, and no-admin-operation contract (-CheckOrdinaryUser validates no-admin-operation only; ordinary-user token execution not claimed)'
 
   build:
     name: BUILD windows_amd64
@@ -197,7 +208,7 @@ jobs:
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
           if (-not $?) { throw 'VERIFY-2022 gate failed' }
-          Write-Output 'VERIFY-2022 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
+          Write-Output 'VERIFY-2022 passed: PE/manifest/DLL allowlist, locked versions, six real benchmark smoke workloads, and verified NextTrace prebuilt metadata; performance_valid=false; canonical route/backtrace gate follows'
 
       - name: VERIFY-2022 ecs.exe native runtime
         shell: pwsh
@@ -401,6 +412,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2022 internal/ui tests failed' }
           Write-Output 'VERIFY-2022 ecs.exe runtime passed: version/list/plan, system JSON, native loopback ICMP, process-tree cancellation, TTY/redirect, NO_COLOR, and --no-color'
 
+      - name: VERIFY-2022 NextTrace canonical network gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
+          if ($null -eq $stageItem) { throw 'VERIFY-2022 NextTrace gate cannot find windows_amd64 stage' }
+          $stageBin = Join-Path $stageItem.FullName 'bin'
+          $ecsPath = Join-Path $PWD 'ecs.exe'
+          if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2022 NextTrace gate cannot find ecs.exe' }
+          & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
+          if (-not $?) { throw 'VERIFY-2022 canonical NextTrace gate failed' }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ecs-windows-tools-gate-inputs-2022
@@ -495,7 +519,7 @@ jobs:
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
           if (-not $?) { throw 'VERIFY-2025 gate failed' }
-          Write-Output 'VERIFY-2025 passed: PE/manifest/DLL allowlist, locked versions, and real smoke workloads; performance_valid=false; route/backtrace unsupported; NextTrace not bundled'
+          Write-Output 'VERIFY-2025 passed: PE/manifest/DLL allowlist, locked versions, six real benchmark smoke workloads, and verified NextTrace prebuilt metadata; performance_valid=false; canonical route/backtrace gate follows'
 
       - name: VERIFY-2025 ecs.exe native runtime
         shell: pwsh
@@ -698,6 +722,19 @@ jobs:
           go test ./internal/ui -count=1 -v
           if ($LASTEXITCODE -ne 0) { throw 'VERIFY-2025 internal/ui tests failed' }
           Write-Output 'VERIFY-2025 ecs.exe runtime passed: version/list/plan, system JSON, native loopback ICMP, process-tree cancellation, TTY/redirect, NO_COLOR, and --no-color'
+
+      - name: VERIFY-2025 NextTrace canonical network gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
+          if ($null -eq $stageItem) { throw 'VERIFY-2025 NextTrace gate cannot find windows_amd64 stage' }
+          $stageBin = Join-Path $stageItem.FullName 'bin'
+          $ecsPath = Join-Path $PWD 'ecs.exe'
+          if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2025 NextTrace gate cannot find ecs.exe' }
+          & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
+          if (-not $?) { throw 'VERIFY-2025 canonical NextTrace gate failed' }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -945,7 +982,7 @@ jobs:
             $licenseFiles = @(Get-ChildItem -LiteralPath $licensesRoot -File -Recurse -Force)
             if ($licenseFiles.Count -eq 0) { throw 'staged bundle LICENSES directory contains no regular files' }
             if (-not (Get-Item -LiteralPath $manifestPath).IsReadOnly) { throw 'staged bundle manifest.json is writable' }
-            foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'openssl.exe', 'stream.exe', 'fio.exe')) {
+            foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'openssl.exe', 'stream.exe', 'fio.exe', 'nexttrace-tiny.exe')) {
               $toolPath = Join-Path $toolBin $tool
               if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) { throw "staged bundle is missing $tool" }
               if (-not (Get-Item -LiteralPath $toolPath).IsReadOnly) { throw "staged bundle $tool is writable" }
@@ -960,12 +997,12 @@ jobs:
             Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
 
             & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-            if (-not $?) { throw 'ordinary-user execution gate failed' }
+            if (-not $?) { throw 'no-admin-operation gate failed' }
             $pathAfterGate = Get-PathSnapshot
-            Write-PathSnapshotEvidence -Label 'after ordinary-user gate' -Snapshot $pathAfterGate
+            Write-PathSnapshotEvidence -Label 'after no-admin-operation gate' -Snapshot $pathAfterGate
             $gatePathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathAfterGate)
             if ($gatePathDifferences.Count -ne 0) {
-              throw ("ordinary-user gate changed PATH: " + ($gatePathDifferences -join '; '))
+              throw ("no-admin-operation gate changed PATH: " + ($gatePathDifferences -join '; '))
             }
 
             $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox ' + [guid]::NewGuid().ToString('N'))
@@ -1072,7 +1109,7 @@ jobs:
           $bundle = Join-Path $PWD '.ci/windows-bundle'
           Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force
           $stage = $bundle
-          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe')) {
+          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe', 'nexttrace-tiny.exe')) {
             if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
           }
           $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
@@ -1082,7 +1119,7 @@ jobs:
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
           if (-not $?) { throw 'E2E-2022 packaged workload gate failed' }
-          Write-Output 'E2E-2022 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+          Write-Output 'E2E-2022 validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false'
 
       - name: E2E-2022 current ZIP and bootstrap scripts
         shell: pwsh
@@ -1173,7 +1210,6 @@ jobs:
             Expand-Archive -LiteralPath $mainArchive.FullName -DestinationPath $mainExtract -Force
             $ecsPath = Join-Path $mainExtract 'ecs.exe'
             if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'main Windows ZIP did not extract ecs.exe' }
-
             $planOutput = @(& $ecsPath plan --lang en --profile standard --only zstd --exposure any 2>&1)
             if ($LASTEXITCODE -ne 0) { throw 'current main ZIP plan failed' }
             $plan = ($planOutput -join "`n") | ConvertFrom-Json
@@ -1311,6 +1347,25 @@ jobs:
               $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
               $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
               if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+
+              $routeTarget4 = '1.1.1.1'
+              $routeReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-route-report-$label")
+              & $runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color
+              if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
+              $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4
+              if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
+
+              $backtraceTarget4 = '1.1.1.1'
+              $backtraceReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-backtrace-report-$label")
+              & $runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color
+              if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
+              $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4
+              if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
+
               $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
               if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
 
@@ -1362,7 +1417,7 @@ jobs:
               Remove-Item -LiteralPath $installDirectory -Recurse -Force
               if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
               $installDirectory = $null
-              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
               try {
                 if ($noProxyDefaultWasPresent) {
@@ -1493,7 +1548,7 @@ jobs:
           $bundle = Join-Path $PWD '.ci/windows-bundle'
           Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force
           $stage = $bundle
-          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe')) {
+          foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe', 'nexttrace-tiny.exe')) {
             if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
           }
           $corpusItem = Get-ChildItem '.ci/windows-tools-gate-inputs' -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
@@ -1503,7 +1558,7 @@ jobs:
           $objdump = $objdumpItem.FullName
           & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
           if (-not $?) { throw 'E2E-2025 packaged workload gate failed' }
-          Write-Output 'E2E-2025 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+          Write-Output 'E2E-2025 validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false'
 
       - name: E2E-2025 current ZIP and bootstrap scripts
         shell: pwsh
@@ -1594,7 +1649,6 @@ jobs:
             Expand-Archive -LiteralPath $mainArchive.FullName -DestinationPath $mainExtract -Force
             $ecsPath = Join-Path $mainExtract 'ecs.exe'
             if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'main Windows ZIP did not extract ecs.exe' }
-
             $planOutput = @(& $ecsPath plan --lang en --profile standard --only zstd --exposure any 2>&1)
             if ($LASTEXITCODE -ne 0) { throw 'current main ZIP plan failed' }
             $plan = ($planOutput -join "`n") | ConvertFrom-Json
@@ -1732,6 +1786,25 @@ jobs:
               $runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json
               $zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq 'zstd' })
               if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }
+
+              $routeTarget4 = '1.1.1.1'
+              $routeReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-route-report-$label")
+              & $runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color
+              if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
+              $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4
+              if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
+
+              $backtraceTarget4 = '1.1.1.1'
+              $backtraceReportRoot = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-backtrace-report-$label")
+              & $runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color
+              if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
+              $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4
+              if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }
+              if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
+
               $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
               if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
 
@@ -1783,7 +1856,7 @@ jobs:
               Remove-Item -LiteralPath $installDirectory -Recurse -Force
               if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
               $installDirectory = $null
-              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
               try {
                 if ($noProxyDefaultWasPresent) {

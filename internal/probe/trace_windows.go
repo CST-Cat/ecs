@@ -4,32 +4,66 @@ package probe
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"os"
 )
 
-// Windows route and backtrace remain behind the native NextTrace gate. The
-// platform definition boundary short-circuits those modules before their
-// concrete probes run; these compile-time adapters deliberately expose no
-// executable, command arguments, or Unix fallback.
-const traceWindowsUnsupportedAdapter = "windows-unsupported-v1"
-
-func detectTraceBackend(context.Context) traceBackend {
+func detectTraceBackend(ctx context.Context) traceBackend {
+	path, err := LookupTool(traceNextTraceEngineName)
+	if err != nil {
+		return traceBackend{Name: traceNextTraceEngineName, Adapter: traceNextTraceAdapter}
+	}
 	return traceBackend{
-		Name:    windowsUnsupportedMethodology,
-		Adapter: traceWindowsUnsupportedAdapter,
+		Name:    traceNextTraceEngineName,
+		Path:    path,
+		Version: commandVersion(ctx, path),
+		Adapter: traceNextTraceAdapter,
 	}
 }
 
 func traceMaxHopsForFamily(string) int { return routeSnapshotHops }
 
-func traceBackendAvailable(traceBackend) bool { return false }
-
-func traceBackendAvailableForFamily(traceBackend, string) bool { return false }
-
-func traceCommandSpecForFamily(traceBackend, string, int, string) traceCommandSpec {
-	return traceCommandSpec{}
+func traceBackendAvailable(backend traceBackend) bool {
+	return backend.Adapter == traceNextTraceAdapter && backend.Path != ""
 }
 
-func runTraceCommandForFamily(context.Context, traceBackend, string, int, string) traceCommandResult {
-	return traceCommandResult{Err: errors.New(windowsUnsupportedMethodology)}
+func traceBackendAvailableForFamily(backend traceBackend, family string) bool {
+	spec := traceCommandSpecForFamily(backend, "<target>", routeSnapshotHops, family)
+	return traceBackendAvailable(backend) && spec.Path != "" && len(spec.Args) > 0
+}
+
+func traceCommandSpecForFamily(backend traceBackend, target string, maxHops int, family string) traceCommandSpec {
+	if backend.Adapter != traceNextTraceAdapter || backend.Name != traceNextTraceEngineName {
+		return traceCommandSpec{}
+	}
+	args := nextTraceCommandArgsForFamily(target, maxHops, family)
+	if len(args) == 0 {
+		return traceCommandSpec{}
+	}
+	return traceCommandSpec{Path: backend.Path, Args: args}
+}
+
+func runTraceCommandForFamily(ctx context.Context, backend traceBackend, target string, maxHops int, family string) traceCommandResult {
+	if !traceBackendAvailableForFamily(backend, family) {
+		return traceCommandResult{Err: fmt.Errorf("trace backend is unavailable: %s", backend.Name)}
+	}
+	spec := traceCommandSpecForFamily(backend, target, maxHops, family)
+	if spec.Path == "" || len(spec.Args) == 0 {
+		return traceCommandResult{Err: fmt.Errorf("unsupported trace backend: %s", backend.Name)}
+	}
+	command := newProbeCommand(ctx, spec.Path, spec.Args...)
+	command.Env = append(os.Environ(), "NO_COLOR=1", "LC_ALL=C", "LANG=C")
+	run := command.RunSeparate()
+	result := traceCommandResult{Stdout: run.Stdout, Stderr: run.Stderr, Err: run.Err}
+	if contextCauseError(ctx) != nil {
+		return result
+	}
+	trace, err := parseNextTraceCanonical(sanitizeCommandOutput(run.Stdout), family, target)
+	if err != nil {
+		result.ParseErr = err
+		return result
+	}
+	result.Trace = trace
+	result.Parsed = true
+	return result
 }

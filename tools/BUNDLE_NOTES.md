@@ -9,6 +9,20 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.7
+
+### 中文
+
+- Windows Server 2022+ x64 的 `windows_amd64` Bundle 从六工具扩展为七工具：`zstd`、NPB EP、NPB FT、OpenSSL、STREAM、`fio` 和官方 NextTrace Tiny v1.7.1 预编译资产 `nexttrace-tiny_windows_amd64.exe`。
+- NextTrace 资产固定 SHA-256 为 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`；构建阶段验证来源和摘要，打包资产与已验证输入逐字节一致，manifest、许可证文件与现有六项 benchmark contract 一并保留。
+- Windows Server 2022 与 2025 的最终 gate 通过生产 `ecs.exe` 路径运行 route/backtrace：IPv4 两个 runner 都必须真实执行，存在 global IPv6/default route 时执行 IPv6，否则明确报告 capability missing；结果必须证明 canonical args、`nexttrace-json-v1` adapter、target/family/hops 和 NextTrace provenance。该网络 gate 不在 package-only gate 中联网，也不改变 FreeBSD 的 base-system traceroute 合同。
+
+### English
+
+- The Windows Server 2022+ x64 `windows_amd64` Bundle grows from six to seven tools: `zstd`, NPB EP, NPB FT, OpenSSL, STREAM, `fio`, and the official NextTrace Tiny v1.7.1 prebuilt asset `nexttrace-tiny_windows_amd64.exe`.
+- The NextTrace asset is pinned to SHA-256 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`; the build verifies its source and digest, the packaged asset is byte-identical to the verified input, and the manifest, license files, and existing six benchmark contracts remain intact.
+- The final Windows Server 2022 and 2025 gates run route/backtrace through the production `ecs.exe` path: both runners must execute a genuine IPv4 gate, and IPv6 runs when a global IPv6 address/default route exists; otherwise the missing capability is reported explicitly. Results must prove canonical args, the `nexttrace-json-v1` adapter, target/family/hops, and NextTrace provenance. The network gate is not run by the package-only gate and does not change the FreeBSD base-system traceroute contract.
+
 ## bundle-v1.6
 
 ### 中文

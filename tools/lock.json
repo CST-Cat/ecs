@@ -12,7 +12,7 @@
     {"target": "freebsd_arm64", "goos": "freebsd", "goarch": "arm64", "package": "arm64", "openssl_target": "BSD-aarch64"},
     {"target": "windows_amd64", "goos": "windows", "goarch": "amd64", "package": "amd64", "openssl_target": "mingw64"}
   ],
-  "windows_tools": ["zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio"],
+  "windows_tools": ["zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "nexttrace-tiny"],
   "windows_toolchain": {
     "environment": "MSYS2 UCRT64",
     "distribution": {
@@ -332,6 +332,10 @@
         "s390x": "64c80d850b06d09bfc1b154fabef90a7fdcf6856f5d0236877ab47ed12d359fb",
         "riscv64": "0bd74a31f399c799446670716d0a2c372dbc0909bc591af72961e6afde415912",
         "ppc64le": "a09d7a689ac53a6aac50378e9bbd0cac8dc16bfcdfa98941a14780417a2513d2"
+      },
+      "windows_asset_pattern": "nexttrace-tiny_windows_<architecture>.exe",
+      "windows_asset_sha256": {
+        "amd64": "16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b"
       }
     },
     {

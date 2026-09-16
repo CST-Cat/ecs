@@ -19,7 +19,7 @@ const windowsUnsupportedMethodology = "unsupported on native Windows"
 func applyPlatformDefinitions(definitions []Definition) []Definition {
 	for index := range definitions {
 		switch definitions[index].Descriptor.ID {
-		case "cpu", "speed", "ookla", "route", "backtrace":
+		case "cpu", "speed", "ookla":
 			definitions[index].Probe = newWindowsUnsupportedProbe(definitions[index].Descriptor)
 		}
 	}

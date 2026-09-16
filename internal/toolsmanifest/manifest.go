@@ -57,6 +57,7 @@ var windowsToolNames = [...]string{
 	"openssl",
 	"stream",
 	"fio",
+	"nexttrace-tiny",
 }
 
 type targetSpec struct {

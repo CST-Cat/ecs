@@ -75,6 +75,27 @@ func TestOpenSSLSpeedPlatformArguments(t *testing.T) {
 	}
 }
 
+func TestOpenSSLNotesRespectEffectiveWorkerContract(t *testing.T) {
+	allowance := cpuAllowance{Visible: 4, Quota: 2, Threads: 2, Source: "fixture"}
+	notes := cryptoNotes(model.Result{}, allowance, 1)
+	for _, note := range notes {
+		if note == "probe.crypto.note.separate_runs" || note == "probe.crypto.note.single_core" || note == "probe.crypto.note.quota_limited" {
+			t.Fatalf("single-worker OpenSSL contract emitted misleading note %q: %v", note, notes)
+		}
+	}
+	separate := cryptoNotes(model.Result{}, allowance, 4)
+	foundSeparate := false
+	for _, note := range separate {
+		if note == "probe.crypto.note.separate_runs" {
+			foundSeparate = true
+			break
+		}
+	}
+	if !foundSeparate {
+		t.Fatalf("multi-worker OpenSSL contract omitted separate-run note: %v", separate)
+	}
+}
+
 func hasOpenSSLArgument(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {

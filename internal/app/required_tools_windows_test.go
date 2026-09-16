@@ -12,9 +12,9 @@ import (
 
 // wantSelectedModuleTools is the Windows tool set for the mixed selection used
 // by TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices. The
-// unsupported benchmark/network adapters remain selectable modules but stage
-// no Unix executable; zstd is the only surviving tool in this selection.
-func wantSelectedModuleTools() []string { return []string{"zstd"} }
+// unsupported benchmark/network adapters remain selectable modules, while
+// route and backtrace share one staged NextTrace executable.
+func wantSelectedModuleTools() []string { return []string{"nexttrace-tiny", "zstd"} }
 
 func wantPlanJSONRequiredTools() []string { return []string{"zstd"} }
 
@@ -27,8 +27,8 @@ func TestResolveRequiredToolsKeepsWindowsBundleContract(t *testing.T) {
 		want   []string
 	}{
 		{module: "latency", want: nil},
-		{module: "route", want: nil},
-		{module: "backtrace", want: nil},
+		{module: "route", want: []string{"nexttrace-tiny"}},
+		{module: "backtrace", want: []string{"nexttrace-tiny"}},
 		{module: "cpu", want: nil},
 		{module: "zstd", want: []string{"zstd"}},
 		{module: "npb", want: []string{"npb-ep", "npb-ft"}},
@@ -51,6 +51,14 @@ func TestResolveRequiredToolsKeepsWindowsBundleContract(t *testing.T) {
 	}
 }
 
+func TestResolveRequiredToolsFiltersOnlyUnsupportedWindowsTools(t *testing.T) {
+	declared := []string{"ping", "sysbench", "iperf3", "speedtest", "nexttrace-tiny", "zstd"}
+	want := []string{"nexttrace-tiny", "zstd"}
+	if got := resolveRequiredTools(declared); !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveRequiredTools(%v) = %v, want %v", declared, got, want)
+	}
+}
+
 func TestResolveRequiredToolsDoesNotAliasCallerStorage(t *testing.T) {
 	declared := []string{"zstd", "sysbench", "fio"}
 	resolved := resolveRequiredTools(declared)
@@ -63,7 +71,7 @@ func TestResolveRequiredToolsDoesNotAliasCallerStorage(t *testing.T) {
 	}
 }
 
-func TestWindowsRoutingPlansDoNotRequestNextTrace(t *testing.T) {
+func TestWindowsRoutingPlansRequestNextTrace(t *testing.T) {
 	for _, moduleID := range []string{"route", "backtrace"} {
 		t.Run(moduleID, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -83,8 +91,8 @@ func TestWindowsRoutingPlansDoNotRequestNextTrace(t *testing.T) {
 			if len(plan.Modules) != 1 || plan.Modules[0].ID != moduleID {
 				t.Fatalf("Windows %s plan modules = %+v", moduleID, plan.Modules)
 			}
-			if len(plan.RequiredTools) != 0 {
-				t.Fatalf("Windows %s plan required_tools = %v, want none", moduleID, plan.RequiredTools)
+			if !reflect.DeepEqual(plan.RequiredTools, []string{"nexttrace-tiny"}) {
+				t.Fatalf("Windows %s plan required_tools = %v, want [nexttrace-tiny]", moduleID, plan.RequiredTools)
 			}
 		})
 	}

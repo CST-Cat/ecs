@@ -6,9 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
-
-	"ecs/internal/config"
 )
 
 func detectTraceBackend(ctx context.Context) traceBackend {
@@ -44,22 +41,6 @@ func traceCommandSpecForFamily(backend traceBackend, target string, maxHops int,
 		return traceCommandSpec{}
 	}
 	return traceCommandSpec{Path: backend.Path, Args: args}
-}
-
-// nextTraceCommandArgsForFamily is the single canonical argv constructor for
-// the frozen Linux NextTrace backend. It deliberately has no route/backtrace
-// descriptor dependency.
-func nextTraceCommandArgsForFamily(target string, maxHops int, family string) []string {
-	hops := strconv.Itoa(maxHops)
-	familyArg := ""
-	if family == config.IPVersion4 || family == config.IPVersion6 {
-		familyArg = "-" + family
-	}
-	args := []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000"}
-	if familyArg != "" {
-		args = append([]string{familyArg}, args...)
-	}
-	return append(args, target)
 }
 
 func runTraceCommandForFamily(ctx context.Context, backend traceBackend, target string, maxHops int, family string) traceCommandResult {

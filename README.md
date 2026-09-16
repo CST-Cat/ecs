@@ -270,7 +270,7 @@ ecs --config ecs.json
 
 Windows 的发布目标是 Windows Server 2022 或更高版本的 x64，内部目标名为 `windows_amd64`。主程序资产是 `ecs_windows_amd64.zip`，匹配的工具 Bundle 资产是 `ecs-tools_windows_amd64.zip`；`install.ps1` 与 `run.ps1` 按对应的 `checksums.txt` 校验 ZIP。Windows `system` 使用 native Win32 system probes，`latency` 使用 native Win32 ICMP，不依赖或打包 `ping.exe`。
 
-Windows frozen benchmark set 只有 `zstd`、NPB EP、NPB FT、OpenSSL、STREAM 和 `fio`；fio 的 Windows gate 要求并验证 `windowsaio`。`sysbench`、`iperf3` 和 Ookla 在 Windows unsupported。NextTrace 目前未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows `route` / `backtrace` 明确 unsupported。Windows Server 2022 x64 与 Windows Server 2025 x64 的 GitHub Actions real gates（包括 native runtime、工具验证、打包 workloads 与当前 ZIP/bootstrap E2E）已通过彩排；这仍是发布前彩排，不代表正式 Release 已发布或用户已下载验证。
+Windows frozen benchmark set 是七工具：`zstd`、NPB EP、NPB FT、OpenSSL、STREAM、`fio` 和官方 NextTrace Tiny v1.7.1。前六项 benchmark 的 Windows gate 要求并验证 `windowsaio`；NextTrace Windows AMD64 官方预编译资产 `nexttrace-tiny_windows_amd64.exe` 必须以锁定 SHA-256 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b` 校验后原样放入 Bundle。`sysbench`、`iperf3` 和 Ookla 在 Windows unsupported。Windows `route` / `backtrace` 与 Linux 共用 canonical NextTrace 参数、JSON adapter 和 production parser，并记录 engine、version、adapter、target、family、hops 与工具来源；Windows Server 2022/2025 的最终 workflow 对 IPv4 必跑真实 gate，有 global IPv6/default route 时也必须跑 IPv6，否则明确报告 capability missing。最终 Windows rehearsal 完成前不发布 Release；不使用 `tracert.exe` 或 host PATH fallback。
 
 项目正式支持 Linux、FreeBSD 与 Windows Server 2022+ x64。Linux 发布架构为 `amd64`、`arm64`、`armv7`、`386`、`s390x`、`riscv64`、`ppc64le`；FreeBSD 发布架构为 `amd64`、`arm64`；Windows 发布架构为 `amd64`（`windows_amd64`）。原生探针不需要 root。
 

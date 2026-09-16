@@ -122,6 +122,13 @@ assert_no_core_gate_bypass() {
   assert_absent_regex "$file" '^[[:space:]]*\$(skip|skipped)[[:space:]]*='
   assert_absent_regex "$file" '^[[:space:]]*(exit|return)[[:space:]]+0([[:space:]]|$)'
   assert_absent "$file" '|| true'
+  assert_absent "$file" 'continue-on-error'
+  assert_absent "$file" 't.Skip'
+  assert_absent "$file" 'tracert'
+  assert_absent "$file" 'Test-NetConnection'
+  assert_absent "$file" 'host PATH fallback'
+  assert_absent "$file" 'fake tool'
+  assert_absent "$file" 'fake binary'
 }
 
 assert_no_sensitive_token_evasion() {
@@ -165,6 +172,24 @@ assert_e2e_bootstrap_contract() {
     'protected install did not preserve the expected path rejection'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "if (\$zstdResults.Count -ne 1 -or [string]\$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }"
+  assert_section_count "$windows" "$start_marker" "$end_marker" \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath' 2
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$routeTarget4 = '\''1.1.1.1'\'''
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '\''*.json'\'''
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'run.ps1 route bootstrap failed'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'bootstrap route report assertion failed'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$backtraceTarget4 = '\''1.1.1.1'\'''
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '\''*.json'\'''
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'run.ps1 backtrace bootstrap failed'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'bootstrap backtrace report assertion failed'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "if ([string]\$env:ECS_TOOL_BIN -cne \$sentinelToolBin) { throw 'run.ps1 did not restore ECS_TOOL_BIN' }"
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
@@ -197,6 +222,8 @@ assert_e2e_bootstrap_contract() {
     '$serverJob = Start-Job -ScriptBlock $serverScript' \
     '$mainBase = "https://localhost:$port/main"' \
     '$bundleBase = "https://localhost:$port/bundle"' \
+    '$env:ECS_RELEASE_BASE = $mainBase' \
+    '$env:ECS_BUNDLE_RELEASE_BASE = $bundleBase' \
     '$releaseBaseUri = [Uri]::new' \
     '$bundleReleaseBaseUri = [Uri]::new' \
     'ECS_RELEASE_BASE must be the current local HTTPS fixture' \
@@ -217,6 +244,18 @@ assert_e2e_bootstrap_contract() {
     '$runReport = Get-Content -Raw -LiteralPath $runReportItem.FullName | ConvertFrom-Json' \
     '$zstdResults = @($runReport.results | Where-Object { [string]$_.id -eq '\''zstd'\'' })' \
     'if ($zstdResults.Count -ne 1 -or [string]$zstdResults[0].status -eq '\''error'\'')' \
+    '$routeTarget4 = '\''1.1.1.1'\''' \
+    '$runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color' \
+    'if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }' \
+    '$routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '\''*.json'\''' \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4' \
+    'if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }' \
+    '$backtraceTarget4 = '\''1.1.1.1'\''' \
+    '$runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color' \
+    'if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }' \
+    '$backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '\''*.json'\''' \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4' \
+    'if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }' \
     '$runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter '\''ecs-run-*'\'' | ForEach-Object { $_.FullName })' \
     'run.ps1 left private staging behind' \
     '$protectedInstallTargets = @(' \
@@ -354,6 +393,8 @@ assert_no_non_publish_write_job() {
 release=.github/workflows/release.yml
 bundle=.github/workflows/bundle-release.yml
 windows=.github/workflows/windows-tools.yml
+nexttrace_gate=scripts/ci/windows_nexttrace_gate.ps1
+nexttrace_report_assert=scripts/ci/windows_nexttrace_report_assert.ps1
 sdk=.github/workflows/freebsd-sdk-release.yml
 freeze=scripts/release/freeze.sh
 publisher=scripts/release/publish.sh
@@ -395,6 +436,17 @@ assert_contains "$windows" "runs-on: windows-2022"
 assert_contains "$windows" "runs-on: windows-2025"
 assert_contains "$windows" "scripts/build_tools_windows.ps1"
 assert_contains "$windows" "scripts/ci/windows_tools_gate.ps1"
+assert_contains "$windows" "scripts/ci/windows_nexttrace_gate.ps1"
+assert_contains "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1"
+assert_exact_count "$windows" "scripts/ci/windows_nexttrace_gate.ps1" 3
+assert_exact_count "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath" 4
+assert_contains "$windows" "NextTrace canonical network gate"
+assert_contains "$windows" "canonical NextTrace gate failed"
+assert_contains "$windows" "-CheckOrdinaryUser validates no-admin-operation only"
+assert_contains "$windows" "ordinary-user token execution not claimed"
+assert_absent "$windows" "ordinary-user contract"
+assert_absent "$windows" "ordinary-user execution evidence"
+assert_absent "$windows" "ordinary-user gate"
 assert_contains "$windows" "scripts/package.sh --tools-stage tools-stage --target windows_amd64"
 assert_contains "$windows" "needs: [package, verify-2025]"
 assert_contains "$windows" "ecs-windows-tools-gate-inputs-2025"
@@ -445,9 +497,13 @@ assert_contains "$windows" "npb-ft.exe"
 assert_contains "$windows" "stream.exe"
 assert_contains "$windows" "openssl.exe"
 assert_contains "$windows" "fio.exe"
+assert_contains "$windows" "nexttrace-tiny.exe"
 assert_contains "$windows" "windowsaio"
 assert_contains "$windows" "performance_valid=false"
-assert_contains "$windows" "NextTrace not bundled"
+assert_contains "$windows" "NextTrace prebuilt metadata"
+assert_contains "$windows" "nexttrace-tiny_windows_<architecture>.exe"
+assert_contains "$windows" "verified-upstream-prebuilt"
+assert_contains "$windows" "nexttrace_source_sha256=16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b"
 assert_contains "$windows" "ecs_windows_amd64.zip"
 assert_contains "$windows" "ecs-corpus_silesia-v1.tar.gz"
 assert_contains "$windows" "scripts/cross.sh --target windows_amd64"
@@ -461,6 +517,90 @@ assert_contains "$windows" "ECS_BUNDLE_RELEASE_BASE"
 assert_contains "$windows" "ECS_TOOL_BIN"
 assert_contains "$windows" "LOCALAPPDATA"
 assert_contains "$windows" "actions/download-artifact"
+[[ -f "$nexttrace_gate" ]] || die "$nexttrace_gate is missing"
+for required_nexttrace_gate_fact in \
+  "ECS_TOOL_BIN" \
+  "plan --lang en --only route" \
+  "plan --lang en --only backtrace" \
+  "run --lang en --only route --format json" \
+  "run --lang en --only backtrace --format json" \
+  "result.status -notin @('ok', 'warning')" \
+  "nexttrace-json-v1" \
+  "--queries" \
+  "--parallel-requests" \
+  "--timeout" \
+  "-M" \
+  "responded" \
+  "'ip'" \
+  "respondingHops" \
+  "no actual responding hop" \
+  "ecs.report/v1" \
+  "evidence" \
+  "unsupported" \
+  "tool_missing" \
+  "parse_error" \
+  "engine" \
+  "version" \
+  "arguments" \
+  "ip_version" \
+  "targets" \
+  "probe.route.source.nexttrace.name" \
+  "normalized_trace_json" \
+  "hops" \
+  "MaxHops" \
+  "--max-hops" \
+  'familyFlag = "-$Family"' \
+  "--ip-version 4" \
+  "--ip-version 6" \
+  "--no-color" \
+  "--json" \
+  "Get-NetRoute" \
+  "NextTrace IPv4 canonical gate passed" \
+  "not-tested capability=missing" \
+  "16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b"; do
+  assert_contains "$nexttrace_gate" "$required_nexttrace_gate_fact"
+done
+for forbidden_nexttrace_gate_fact in 'tracert' 'Test-NetConnection' '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake tool' 'fake binary' 'hops.Count -lt 1'; do
+  assert_absent "$nexttrace_gate" "$forbidden_nexttrace_gate_fact"
+done
+[[ -f "$nexttrace_report_assert" ]] || die "$nexttrace_report_assert is missing"
+for required_report_assert_fact in \
+  "ecs.report/v1" \
+  "result IDs are missing or not unique" \
+  "status" \
+  "evidence" \
+  "valid" \
+  "expected" \
+  "unsupported" \
+  "tool_missing" \
+  "parse_error" \
+  "nexttrace-json-v1" \
+  "1.7.1" \
+  "arguments" \
+  "--no-color" \
+  "--json" \
+  "--queries" \
+  "--parallel-requests" \
+  "--timeout" \
+  "-M" \
+  "--max-hops" \
+  "probe.route.source.nexttrace.name" \
+  "probe.route.normalized_trace_json" \
+  "probe.backtrace.normalized_trace_json" \
+  "target" \
+  "hops" \
+  "responded" \
+  "'ip'" \
+  "respondingHops" \
+  "no actual responding hop"; do
+  assert_contains "$nexttrace_report_assert" "$required_report_assert_fact"
+done
+for forbidden_report_assert_fact in 'tracert' 'Test-NetConnection' '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake tool' 'fake binary' 'hops.Count -lt 1'; do
+  assert_absent "$nexttrace_report_assert" "$forbidden_report_assert_fact"
+done
+assert_contains scripts/ci/windows_tools_gate.ps1 "-CheckOrdinaryUser validates no-admin-operation only"
+assert_contains scripts/ci/windows_tools_gate.ps1 "ordinary-user token execution is not claimed"
+assert_absent scripts/ci/windows_tools_gate.ps1 "ordinary-user execution evidence"
 assert_no_trusted_root_mutation "$windows"
 assert_no_temporary_standard_user_architecture "$windows"
 assert_no_core_gate_bypass "$windows"
@@ -474,21 +614,36 @@ assert_no_product_tls_bypass "$run_ps1"
 assert_no_product_tls_bypass "$install_ps1"
 
 assert_ordered_in_section "$windows" \
+  "      - name: VERIFY-2022 ecs.exe native runtime" \
+  '  verify-2025:' \
+  'VERIFY-2022 ecs.exe runtime passed' \
+  "      - name: VERIFY-2022 NextTrace canonical network gate" \
+  "scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022'" \
+  "canonical NextTrace gate failed"
+assert_ordered_in_section "$windows" \
+  "      - name: VERIFY-2025 ecs.exe native runtime" \
+  '  package:' \
+  'VERIFY-2025 ecs.exe runtime passed' \
+  "      - name: VERIFY-2025 NextTrace canonical network gate" \
+  "scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025'" \
+  "canonical NextTrace gate failed"
+
+assert_ordered_in_section "$windows" \
   "      - name: E2E-2022 packaged bundle workloads" \
   "      - name: E2E-2022 current ZIP and bootstrap scripts" \
   'Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force' \
-  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe'))" \
+  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe', 'nexttrace-tiny.exe'))" \
   'scripts/ci/windows_tools_gate.ps1 -StageRoot $stage' \
   "if (-not \$?) { throw 'E2E-2022 packaged workload gate failed' }" \
-  'E2E-2022 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+  'E2E-2022 validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false'
 assert_ordered_in_section "$windows" \
   "      - name: E2E-2025 packaged bundle workloads" \
   "      - name: E2E-2025 current ZIP and bootstrap scripts" \
   'Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force' \
-  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe'))" \
+  "foreach (\$tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe', 'nexttrace-tiny.exe'))" \
   'scripts/ci/windows_tools_gate.ps1 -StageRoot $stage' \
   "if (-not \$?) { throw 'E2E-2025 packaged workload gate failed' }" \
-  'E2E-2025 executed zstd, NPB EP, NPB FT, STREAM, OpenSSL, and fio/windowsaio from the packaged bundle; performance_valid=false'
+  'E2E-2025 validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false'
 assert_e2e_bootstrap_contract \
   "      - name: E2E-2022 current ZIP and bootstrap scripts" \
   '  e2e-2025:'

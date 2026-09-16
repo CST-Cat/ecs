@@ -150,7 +150,7 @@ func TestCanonicalManifestLists(t *testing.T) {
 	wantWindowsArchitectures := []string{"amd64"}
 	wantToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3", "nexttrace-tiny", "ping"}
 	wantFreeBSDToolNames := []string{"sysbench", "zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "iperf3"}
-	wantWindowsToolNames := []string{"zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio"}
+	wantWindowsToolNames := []string{"zstd", "npb-ep", "npb-ft", "openssl", "stream", "fio", "nexttrace-tiny"}
 	wantTargets := []targetSpec{
 		{Target: "linux_amd64", GOOS: "linux", GOARCH: "amd64", Package: "amd64"},
 		{Target: "linux_arm64", GOOS: "linux", GOARCH: "arm64", Package: "arm64"},

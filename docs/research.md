@@ -418,12 +418,18 @@ Windows Server 2022+ x64，目标名为 `windows_amd64`；主程序资产为
 
 - `system` 使用 native Win32 system probes；`latency` 使用 native Win32 ICMP，不依赖
   `ping.exe`。磁盘基准继续使用 fio，Windows 原生异步 engine 为 `windowsaio`。
-- Windows frozen benchmark set 只包含 zstd、NPB EP、NPB FT、OpenSSL、STREAM 和 fio。
-  `sysbench`、`iperf3` 与 Ookla unsupported，不进入 Windows 工具集合。
-- NextTrace 尚未通过独立真实 Windows network gate，因此不进入 Windows Bundle；Windows
-  `route` / `backtrace` 保持 unsupported，不把现有 Linux NextTrace 资产写成 Windows 支持。
-- Windows gate 由真实 Windows runner 直接做功能校验；当前文档只记录待 GitHub Actions
-  彩排验证的 gate，不把未执行的 Windows Actions 当成通过。
+- Windows frozen benchmark set 是七工具：zstd、NPB EP、NPB FT、OpenSSL、STREAM、fio
+  和官方 NextTrace Tiny v1.7.1 Windows AMD64 预编译资产。锁定资产
+  `nexttrace-tiny_windows_amd64.exe` 的 SHA-256 为
+  `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`，并以逐字节相同的
+  文件进入 Windows Bundle；`sysbench`、`iperf3` 与 Ookla unsupported，不进入 Windows
+  工具集合。
+- Windows `route` / `backtrace` 已与 Linux 共用 canonical NextTrace 参数、
+  `nexttrace-json-v1` adapter 和 production parser。最终 Windows Server 2022/2025 runner
+  gate 必须通过生产 `ecs.exe` 路径验证 IPv4 的非 unsupported 结果、engine/version、
+  adapter、target、family、hops 与工具来源；存在 global IPv6/default route 时也必须验证
+  IPv6，否则只能明确报告 capability missing。该要求不改变 FreeBSD 的 base-system
+  `/usr/sbin/traceroute` 合同，也不把未执行的 Windows Actions 当成通过。
 - 这次适配没有新增主模块 Go dependency。报告仍保持 `ecs.report/v1`，比较结果仍保持
   `ecs.compare/v1`；跨平台差异记录为同一 semantic field 的平台来源和可用性，不新增
   第二套报告或比较 schema。

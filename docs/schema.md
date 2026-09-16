@@ -254,7 +254,7 @@ measurement 可以缺失。接口缺失不会按宿主机数据推断，也不�
 | hardware inventory fields | `/sys/class/dmi`、`/sys/class/drm`、`/sys/class/net`、`/sys/class/block` | `/bin/kenv`、`/sbin/ifconfig`、`/sbin/geom` | `GetSystemFirmwareTable`、`EnumDisplayDevicesW`、`GetAdaptersAddresses`、`GetLogicalDrives`/`GetDriveTypeW` |
 | `latency` ICMP measurements | 固定工具包中的 `ping` | base-system `/sbin/ping` | native Win32 ICMP APIs in `iphlpapi.dll`（`IcmpCreateFile`/`Icmp6CreateFile` 与 `IcmpSendEcho2`/`Icmp6SendEcho2`） |
 | `disk.ioengine` 与 fio measurements | fio 实际报告 `io_uring`/`libaio`/`psync` | fio 实际报告 `posixaio`/`psync` | fio 优先且 gate 验证 `windowsaio`；报告仍保存实际 `ioengine` |
-| route/backtrace observations | 固定 NextTrace Tiny | base-system traceroute | 当前 unsupported；NextTrace 未通过独立真实 Windows network gate，故不 bundled |
+| route/backtrace observations | 固定 NextTrace Tiny | base-system traceroute | 官方 NextTrace Tiny v1.7.1 Windows AMD64 预编译资产 `nexttrace-tiny_windows_amd64.exe`，SHA-256 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`，校验后原样 bundled；与 Linux 共用 canonical 参数、`nexttrace-json-v1` adapter 和 production parser；IPv4 由 Server 2022/2025 真实 gate 验证，具备 global IPv6/default route 时验证 IPv6 |
 
 这些来源差异不改变 `ecs.report/v1` 或 `ecs.compare/v1`，也不新增字段、迁移层或第二套
 报告/比较标识。Windows 缺少 Linux cgroup、PSI、steal-time、balloon 或 KSM 接口时，

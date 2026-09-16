@@ -337,7 +337,7 @@ func assertWindowsNPBResult(t *testing.T, result model.Result) {
 		if strings.Contains(block.Content, "- FT Benchmark") {
 			seenFT = true
 		}
-		if !strings.Contains(block.Content, "FFLAGS       = "+expectedCompileFlags) || !strings.Contains(block.Content, "FLINKFLAGS   = "+expectedLinkFlags) {
+		if !hasExactWindowsNPBField(block.Content, "FFLAGS", expectedCompileFlags) || !hasExactWindowsNPBField(block.Content, "FLINKFLAGS", expectedLinkFlags) {
 			t.Fatalf("NPB raw production evidence has unexpected compiler/linker flags: %q", block.Content)
 		}
 	}
@@ -368,6 +368,25 @@ func assertWindowsNPBResult(t *testing.T, result model.Result) {
 			t.Fatalf("NPB %s table has no successful production verification evidence", benchmark)
 		}
 	}
+}
+
+func hasExactWindowsNPBField(output, label, expected string) bool {
+	count := 0
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, label) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, label))
+		if !strings.HasPrefix(rest, "=") {
+			return false
+		}
+		count++
+		if strings.TrimSpace(strings.TrimPrefix(rest, "=")) != expected {
+			return false
+		}
+	}
+	return count == 1
 }
 
 func assertWindowsOpenSSLResult(t *testing.T, result model.Result) {

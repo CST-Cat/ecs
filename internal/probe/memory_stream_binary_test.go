@@ -36,11 +36,21 @@ func TestStreamBinaryDetectorHandlesLockedWindowsPESize(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(streamOfficialMarkers, "\x00")), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const largeCandidateSize = 64 << 20
+	const largeCandidateSize = 230 << 20
 	if err := os.Truncate(path, largeCandidateSize+1); err != nil {
 		t.Fatal(err)
 	}
 	if !IsOfficialStreamBinary(path) {
 		t.Fatalf("large official STREAM marker candidate was rejected; size=%d", largeCandidateSize+1)
+	}
+	overSized := filepath.Join(t.TempDir(), "stream-oversized.exe")
+	if err := os.WriteFile(overSized, []byte(strings.Join(streamOfficialMarkers, "\x00")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(overSized, int64(maxStreamBinaryBytes)+1); err != nil {
+		t.Fatal(err)
+	}
+	if IsOfficialStreamBinary(overSized) {
+		t.Fatalf("oversized STREAM marker candidate was accepted; limit=%d", maxStreamBinaryBytes)
 	}
 }

@@ -89,6 +89,9 @@ func IsOfficialStreamBinary(path string) bool {
 		return false
 	}
 	defer file.Close()
+	// The initial Stat rejects known oversized candidates. LimitReader keeps the
+	// scan bounded as well if the file is replaced or grows after that check.
+	limited := io.LimitReader(file, int64(maxStreamBinaryBytes))
 	markerLength := 0
 	for _, marker := range streamOfficialMarkers {
 		if len(marker) > markerLength {
@@ -100,7 +103,7 @@ func IsOfficialStreamBinary(path string) bool {
 	foundCount := 0
 	buffer := make([]byte, 64<<10)
 	for {
-		read, readErr := file.Read(buffer)
+		read, readErr := limited.Read(buffer)
 		if read > 0 {
 			text := carry + string(buffer[:read])
 			for index, marker := range streamOfficialMarkers {

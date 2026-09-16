@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$CorpusPath,
     [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$ObjdumpPath,
     [Parameter(ParameterSetName = 'FullGate')][int]$TimeoutSeconds = 180,
-    [Parameter(Mandatory, ParameterSetName = 'OrdinaryUser')][switch]$CheckOrdinaryUser
+    [Parameter(Mandatory, ParameterSetName = 'NoAdminOperation')][switch]$CheckOrdinaryUser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -243,35 +243,35 @@ function Get-EcsProtectedInstallRoots {
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique
 }
 
-function Invoke-EcsOrdinaryUserCheck {
+function Invoke-EcsNoAdminOperationCheck {
     param([Parameter(Mandatory)][string]$StageRoot)
 
     $token = Get-EcsWindowsTokenEvidence
-    Write-Host ("ordinary-user token evidence: user={0}; administrator_group_membership={1}; token_elevated={2}; token_elevation_type={3}" -f $token.User, $token.AdministratorGroupMembership, $token.TokenElevated, $token.ElevationTypeName)
+    Write-Host ("no-admin-operation context (observational; does not prove an ordinary-user token): user={0}; administrator_group_membership={1}; token_elevated={2}; token_elevation_type={3}" -f $token.User, $token.AdministratorGroupMembership, $token.TokenElevated, $token.ElevationTypeName)
     if ($token.TokenElevated -or $token.ElevationType -eq 2) {
-        Write-Host 'ordinary-user token evidence: actual token is elevated; continuing only with the no-admin-operation checks below'
+        Write-Host 'no-admin-operation context: actual runner token is elevated; this check does not claim ordinary-user execution'
     }
 
     $stagePath = [IO.Path]::GetFullPath($StageRoot)
     foreach ($root in Get-EcsProtectedInstallRoots) {
         if (Test-EcsPathUnderRoot -Path $stagePath -Root $root) {
-            Stop-EcsWindowsGate "ordinary-user evidence path is under protected Program Files root: $stagePath"
+            Stop-EcsWindowsGate "no-admin-operation check path is under protected Program Files root: $stagePath"
         }
     }
 
     $machinePathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
     $userPathBefore = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-    $probe = Join-Path ([IO.Path]::GetTempPath()) ("ecs-ordinary-user." + [guid]::NewGuid().ToString('N') + '.tmp')
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ("ecs-no-admin-operation." + [guid]::NewGuid().ToString('N') + '.tmp')
     foreach ($root in Get-EcsProtectedInstallRoots) {
         if (Test-EcsPathUnderRoot -Path $probe -Root $root) {
-            Stop-EcsWindowsGate "ordinary-user probe is under protected Program Files root: $probe"
+            Stop-EcsWindowsGate "no-admin-operation probe is under protected Program Files root: $probe"
         }
     }
-    $probeText = 'ecs ordinary-user execution evidence'
+    $probeText = 'ecs no-admin-operation check'
     try {
         [IO.File]::WriteAllText($probe, $probeText)
         if ([IO.File]::ReadAllText($probe) -cne $probeText) {
-            Stop-EcsWindowsGate 'ordinary-user temporary write/read evidence did not round-trip'
+            Stop-EcsWindowsGate 'no-admin-operation temporary write/read check did not round-trip'
         }
     } finally {
         if (Test-Path -LiteralPath $probe -PathType Leaf) { Remove-Item -LiteralPath $probe -Force }
@@ -279,10 +279,10 @@ function Invoke-EcsOrdinaryUserCheck {
     $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
     $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
     if ($machinePathBefore -cne $machinePathAfter -or $userPathBefore -cne $userPathAfter) {
-        Stop-EcsWindowsGate 'ordinary-user evidence detected a Machine or User PATH mutation'
+        Stop-EcsWindowsGate 'no-admin-operation check detected a Machine or User PATH mutation'
     }
 
-    Write-Host 'ordinary-user execution evidence: temp_write=passed; protected_install_path=not_used; machine_path=unchanged; user_path=unchanged'
+    Write-Host 'no-admin-operation check passed: temp_write=passed; protected_install_path=not_used; machine_path=unchanged; user_path=unchanged; ordinary-user-token-proof=not-claimed'
     return [pscustomobject]@{
         MachinePath = $machinePathBefore
         UserPath = $userPathBefore
@@ -296,7 +296,7 @@ function Assert-EcsGlobalPathUnchanged {
     if ($Evidence.MachinePath -cne $machinePathAfter -or $Evidence.UserPath -cne $userPathAfter) {
         Stop-EcsWindowsGate 'real workload changed the Machine or User PATH'
     }
-    Write-Host 'ordinary-user execution evidence: real workload Machine/User PATH remained unchanged'
+    Write-Host 'no-admin-operation check: real workload Machine/User PATH remained unchanged'
 }
 
 function Invoke-EcsWindowsProcess {
@@ -475,22 +475,52 @@ function New-EcsFixedSample {
 }
 
 if ($CheckOrdinaryUser) {
-    $null = Invoke-EcsOrdinaryUserCheck -StageRoot (Get-Location).Path
-    Write-Output 'windows-tools-gate: ordinary-user/no-admin-operation check passed; real workload gate remains required'
+    $null = Invoke-EcsNoAdminOperationCheck -StageRoot (Get-Location).Path
+    Write-Output 'windows-tools-gate: -CheckOrdinaryUser validates no-admin-operation only; ordinary-user token execution is not claimed; real workload gate remains required'
     exit 0
 }
 
 $lock = Get-EcsGateJson $LockPath
 $manifest = Get-EcsGateJson $ManifestPath
 $expectedTools = @($lock.windows_tools)
-$frozenTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio')
+$frozenTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio', 'nexttrace-tiny')
 if ([string]$lock.schema_version -ne 'ecs.tools.lock/v1') { Stop-EcsWindowsGate 'unexpected tools lock schema' }
-if (($expectedTools -join '|') -ne ($frozenTools -join '|')) { Stop-EcsWindowsGate 'Windows tool set is not the frozen six-tool contract' }
+if (($expectedTools -join '|') -ne ($frozenTools -join '|')) { Stop-EcsWindowsGate 'Windows tool set is not the frozen seven-tool contract' }
 $targetFacts = @($lock.architectures | Where-Object { $_.target -eq 'windows_amd64' })
 if ($targetFacts.Count -ne 1 -or [string]$targetFacts[0].goos -ne 'windows' -or [string]$targetFacts[0].goarch -ne 'amd64' -or [string]$targetFacts[0].package -ne 'amd64') {
     Stop-EcsWindowsGate 'tools lock has no unique windows_amd64 target facts'
 }
 if (@($lock.windows_dll_allowlist).Count -eq 0) { Stop-EcsWindowsGate 'Windows DLL import allowlist is empty' }
+$nexttraceLocked = @($lock.tools | Where-Object { $_.name -eq 'nexttrace-tiny' })
+if ($nexttraceLocked.Count -ne 1) { Stop-EcsWindowsGate 'NextTrace lock identity is missing or duplicated' }
+$nexttraceLockFields = @($nexttraceLocked[0].PSObject.Properties.Name)
+foreach ($requiredField in @('repository', 'version', 'tag', 'commit', 'windows_asset_pattern', 'windows_asset_sha256')) {
+    if ($requiredField -notin $nexttraceLockFields) { Stop-EcsWindowsGate "NextTrace lock is missing $requiredField" }
+}
+if ([string]$nexttraceLocked[0].upstream -ne 'https://github.com/nxtrace/NTrace-core' -or
+    [string]$nexttraceLocked[0].repository -ne 'nxtrace/NTrace-core' -or
+    [string]$nexttraceLocked[0].version -ne '1.7.1' -or
+    [string]$nexttraceLocked[0].tag -ne 'v1.7.1' -or
+    [string]$nexttraceLocked[0].commit -ne 'c9919828fcd8c3103827d08bb26d69e9bf538299') {
+    Stop-EcsWindowsGate 'NextTrace lock identity is not the pinned v1.7.1 upstream commit'
+}
+$nexttraceAssetPattern = [string]$nexttraceLocked[0].windows_asset_pattern
+if ($nexttraceAssetPattern -ne 'nexttrace-tiny_windows_<architecture>.exe') {
+    Stop-EcsWindowsGate 'NextTrace Windows asset pattern is not the pinned release pattern'
+}
+$nexttraceDigestProperties = @($nexttraceLocked[0].windows_asset_sha256.PSObject.Properties.Name)
+if ($nexttraceDigestProperties -notcontains 'amd64') { Stop-EcsWindowsGate 'NextTrace Windows AMD64 asset digest is missing' }
+$nexttraceExpectedSha256 = [string]$nexttraceLocked[0].windows_asset_sha256.amd64
+if ($nexttraceExpectedSha256 -ne '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b' -or
+    $nexttraceExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
+    Stop-EcsWindowsGate 'NextTrace Windows AMD64 asset digest is not the pinned SHA-256'
+}
+$nexttraceAssetName = ([string]$nexttraceAssetPattern).Replace('<architecture>', [string]$targetFacts[0].package)
+$nexttraceAssetUrl = "https://github.com/$($nexttraceLocked[0].repository)/releases/download/$($nexttraceLocked[0].tag)/$nexttraceAssetName"
+if ($nexttraceAssetName -ne 'nexttrace-tiny_windows_amd64.exe' -or
+    $nexttraceAssetUrl -ne 'https://github.com/nxtrace/NTrace-core/releases/download/v1.7.1/nexttrace-tiny_windows_amd64.exe') {
+    Stop-EcsWindowsGate 'NextTrace Windows asset URL is not derived from the pinned release tag and asset'
+}
 if ([string]$manifest.schema_version -ne 'ecs-tools.manifest/v1') { Stop-EcsWindowsGate 'manifest schema changed' }
 if ([string]$manifest.target -ne 'windows_amd64' -or [string]$manifest.goos -ne 'windows' -or [string]$manifest.goarch -ne 'amd64' -or [string]$manifest.architecture -ne 'amd64') {
     Stop-EcsWindowsGate 'manifest target facts are not windows_amd64'
@@ -508,7 +538,6 @@ if ([string]$manifest.build.toolchain_mode -ne 'native' -or
 if ([bool]$manifest.build.validation.performance_valid) { Stop-EcsWindowsGate 'performance_valid must remain false' }
 $manifestTools = @($manifest.tools)
 if (($manifestTools.name -join '|') -ne ($expectedTools -join '|')) { Stop-EcsWindowsGate 'manifest tool set/order differs from tools lock' }
-if (@($manifestTools | Where-Object { [string]$_.name -match '\.exe$' -or [string]$_.name -eq 'nexttrace-tiny' }).Count -ne 0) { Stop-EcsWindowsGate 'manifest contains a physical .exe id or NextTrace' }
 if (-not (Test-Path -LiteralPath $CorpusPath -PathType Leaf)) { Stop-EcsWindowsGate "missing fixed corpus: $CorpusPath" }
 if (-not (Test-Path -LiteralPath $ObjdumpPath -PathType Leaf)) { Stop-EcsWindowsGate "missing pinned PE inspector: $ObjdumpPath" }
 $corpusFile = Get-Item -LiteralPath $CorpusPath
@@ -523,15 +552,18 @@ $manifestFile = Join-Path $StageRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $binDir -PathType Container)) { Stop-EcsWindowsGate 'bundle has no bin directory' }
 if (-not (Test-Path -LiteralPath $licenseDir -PathType Container)) { Stop-EcsWindowsGate 'bundle has no LICENSES directory' }
 if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) { Stop-EcsWindowsGate 'bundle has no manifest.json' }
-$requiredLicenses = @('ZSTD-LICENSE', 'ZSTD-COPYING', 'NPB-README.txt', 'NPB-LICENSE.txt', 'OPENSSL-LICENSE.txt', 'FIO-COPYING', 'STREAM-LICENSE.txt')
+$requiredLicenses = @('ZSTD-LICENSE', 'ZSTD-COPYING', 'NPB-README.txt', 'NPB-LICENSE.txt', 'OPENSSL-LICENSE.txt', 'FIO-COPYING', 'NEXTTRACE-LICENSE', 'STREAM-LICENSE.txt')
 foreach ($license in $requiredLicenses) {
     $licensePath = Join-Path $licenseDir $license
     if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf) -or (Get-Item -LiteralPath $licensePath).Length -eq 0) {
         Stop-EcsWindowsGate "missing or empty license file: $license"
     }
 }
-$binaries = @(Get-ChildItem -LiteralPath $binDir -File | Sort-Object Name)
-if ($binaries.Count -ne $expectedTools.Count) { Stop-EcsWindowsGate "bundle has $($binaries.Count) binaries, want $($expectedTools.Count)" }
+$binEntries = @(Get-ChildItem -LiteralPath $binDir -Force)
+if ($binEntries.Count -ne $expectedTools.Count -or @($binEntries | Where-Object { $_.PSIsContainer }).Count -ne 0) {
+    Stop-EcsWindowsGate "bundle bin layout has $($binEntries.Count) direct entries or a nested directory; want exactly $($expectedTools.Count) files"
+}
+$binaries = @($binEntries | Where-Object { -not $_.PSIsContainer } | Sort-Object Name)
 foreach ($name in $expectedTools) {
     $binary = Join-Path $binDir "$name.exe"
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { Stop-EcsWindowsGate "missing binary $name.exe" }
@@ -541,6 +573,39 @@ foreach ($manifestTool in $manifestTools) {
     $manifestBinary = Join-Path $binDir "$($manifestTool.name).exe"
     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestBinary).Hash.ToLowerInvariant()
     if ([string]$manifestTool.parameters.binary_sha256 -ne $actualHash) { Stop-EcsWindowsGate "manifest hash mismatch for $($manifestTool.name)" }
+    if ($manifestTool.name -eq 'nexttrace-tiny') {
+        $nexttraceParameters = $manifestTool.parameters
+        if ([string]$manifestTool.upstream -ne [string]$nexttraceLocked[0].upstream -or
+            [string]$manifestTool.version -ne [string]$nexttraceLocked[0].version -or
+            [string]$manifestTool.tag_or_commit -ne [string]$nexttraceLocked[0].tag -or
+            [string]$manifestTool.source -ne $nexttraceAssetUrl -or
+            [string]$manifestTool.architecture -ne 'amd64' -or
+            [string]$manifestTool.license -ne 'GPL-3.0-only' -or
+            [string]$nexttraceParameters.repository -ne [string]$nexttraceLocked[0].repository -or
+            [string]$nexttraceParameters.tag -ne [string]$nexttraceLocked[0].tag -or
+            [string]$nexttraceParameters.source_url -ne $nexttraceAssetUrl -or
+            [string]$nexttraceParameters.source_asset -ne $nexttraceAssetName -or
+            [string]$nexttraceParameters.asset_pattern -ne $nexttraceAssetPattern -or
+            [string]$nexttraceParameters.release_commit -ne [string]$nexttraceLocked[0].commit -or
+            [string]$nexttraceParameters.provenance -ne 'upstream official release binary' -or
+            [string]$nexttraceParameters.source_mode -ne 'verified-upstream-prebuilt' -or
+            [string]$nexttraceParameters.source_sha256 -ne $nexttraceExpectedSha256 -or
+            [string]$nexttraceParameters.original_sha256 -ne $nexttraceExpectedSha256 -or
+            [string]$nexttraceParameters.upstream_sha256 -ne $nexttraceExpectedSha256 -or
+            [string]$nexttraceParameters.binary_sha256 -ne $actualHash -or
+            [string]$nexttraceParameters.packaged_sha256 -ne $actualHash -or
+            $actualHash -ne $nexttraceExpectedSha256) {
+            Stop-EcsWindowsGate 'NextTrace verified-upstream-prebuilt metadata or byte hash mismatch'
+        }
+        if ([string]$nexttraceParameters.binary_sha256 -ne [string]$nexttraceParameters.packaged_sha256) {
+            Stop-EcsWindowsGate 'NextTrace binary_sha256 and packaged_sha256 differ'
+        }
+        if (@($nexttraceParameters.dependency_allowlist).Count -eq 0 -or
+            (@($nexttraceParameters.dependency_allowlist) -join '|') -ne (@($lock.windows_dll_allowlist) -join '|')) {
+            Stop-EcsWindowsGate 'NextTrace dependency allowlist is missing or changed'
+        }
+        continue
+    }
     if ([string]$manifestTool.parameters.pe_machine -ne 'pei-x86-64' -or
         -not [bool]$manifestTool.parameters.imports_checked -or
         -not [bool]$manifestTool.parameters.fully_static -or
@@ -576,7 +641,7 @@ if (@(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter '*.dll').Coun
     Stop-EcsWindowsGate 'bundle contains a non-system DLL'
 }
 
-$ordinaryEvidence = Invoke-EcsOrdinaryUserCheck -StageRoot $StageRoot
+$noAdminEvidence = Invoke-EcsNoAdminOperationCheck -StageRoot $StageRoot
 
 foreach ($binaryFile in $binaries) {
     $peFacts = Get-EcsPeFacts -Objdump $ObjdumpPath -Binary $binaryFile.FullName -Allowlist @($lock.windows_dll_allowlist)
@@ -590,7 +655,8 @@ foreach ($binaryFile in $binaries) {
         (@($manifestParameters.pe_imports) -join '|') -ne (@($peFacts.Imports) -join '|') -or
         [bool]$manifestParameters.imports_checked -ne [bool]$peFacts.ImportsChecked -or
         [bool]$manifestParameters.fully_static -ne [bool]$peFacts.FullyStatic -or
-        [bool]$manifestParameters.stripped -ne [bool]$peFacts.Stripped) {
+        (@($manifestParameters.dependency_allowlist) -join '|') -ne (@($lock.windows_dll_allowlist) -join '|') -or
+        ($logicalName -ne 'nexttrace-tiny' -and [bool]$manifestParameters.stripped -ne [bool]$peFacts.Stripped)) {
         Stop-EcsWindowsGate "manifest PE facts do not match the inspected $($binaryFile.Name)"
     }
 }
@@ -676,8 +742,8 @@ try {
     Assert-EcsProcessSucceeded -Result $enghelp -Description 'fio engine list'
     Assert-EcsText -Text ($enghelp.Stdout + $enghelp.Stderr) -Pattern '(?im)^\s*windowsaio\b' -Description 'fio windowsaio engine'
 
-    Assert-EcsGlobalPathUnchanged -Evidence $ordinaryEvidence
-    Write-Output "windows-tools-gate: $($expectedTools.Count)/$($expectedTools.Count) real functional checks passed; performance_valid=false; route/backtrace=unsupported; NextTrace=not bundled"
+    Assert-EcsGlobalPathUnchanged -Evidence $noAdminEvidence
+    Write-Output "windows-tools-gate: exact seven-tool package, six real functional benchmark checks, and verified NextTrace prebuilt passed; performance_valid=false; canonical route/backtrace network gate is separate; NextTrace network gate=not run by package gate"
 } finally {
     $env:PATH = $originalPath
     if (Test-Path -LiteralPath $gateWork) { Remove-Item -LiteralPath $gateWork -Recurse -Force }

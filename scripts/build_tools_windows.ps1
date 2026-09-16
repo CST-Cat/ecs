@@ -292,12 +292,50 @@ if ($targetFacts.Count -ne 1 -or [string]$targetFacts[0].goos -ne 'windows' -or 
 }
 $targetFacts = $targetFacts[0]
 $windowToolNames = @($lock.windows_tools)
-$expectedToolNames = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio')
+$sourceBuiltToolNames = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio')
+$prebuiltToolNames = @('nexttrace-tiny')
+$expectedToolNames = @($sourceBuiltToolNames + $prebuiltToolNames)
 if (($windowToolNames -join '|') -ne ($expectedToolNames -join '|')) {
-    Stop-EcsWindowsBuild "Windows tool set is not the frozen six-tool contract"
+    Stop-EcsWindowsBuild "Windows tool set is not the frozen seven-tool contract"
 }
-if ($windowToolNames -contains 'nexttrace-tiny' -or $windowToolNames -contains 'ping') {
-    Stop-EcsWindowsBuild 'NextTrace and ping are not allowed in the Windows bundle'
+if ($windowToolNames -contains 'ping' -or @($windowToolNames | Where-Object { $_ -in @('sysbench', 'iperf3') }).Count -ne 0) {
+    Stop-EcsWindowsBuild 'unsupported tool entered the Windows bundle'
+}
+
+$nexttraceTool = Get-EcsLockedTool -Lock $lock -Name 'nexttrace-tiny'
+if ([string]$nexttraceTool.upstream -ne 'https://github.com/nxtrace/NTrace-core' -or
+    [string]$nexttraceTool.repository -ne 'nxtrace/NTrace-core' -or
+    [string]$nexttraceTool.version -ne '1.7.1' -or
+    [string]$nexttraceTool.tag -ne 'v1.7.1' -or
+    [string]$nexttraceTool.commit -ne 'c9919828fcd8c3103827d08bb26d69e9bf538299') {
+    Stop-EcsWindowsBuild 'NextTrace lock identity is not the pinned v1.7.1 upstream commit'
+}
+$nexttracePatternProperty = $nexttraceTool.PSObject.Properties['windows_asset_pattern']
+$nexttraceDigestProperty = $nexttraceTool.PSObject.Properties['windows_asset_sha256']
+if ($null -eq $nexttracePatternProperty -or $null -eq $nexttraceDigestProperty) {
+    Stop-EcsWindowsBuild 'NextTrace Windows release asset metadata is missing'
+}
+$nexttraceAssetPattern = [string]$nexttracePatternProperty.Value
+if ($nexttraceAssetPattern -ne 'nexttrace-tiny_windows_<architecture>.exe') {
+    Stop-EcsWindowsBuild 'NextTrace Windows asset pattern is not the pinned release pattern'
+}
+$nexttraceDigests = $nexttraceDigestProperty.Value
+$nexttraceDigestEntry = $nexttraceDigests.PSObject.Properties['amd64']
+if ($null -eq $nexttraceDigestEntry) {
+    Stop-EcsWindowsBuild 'NextTrace Windows AMD64 asset digest is missing'
+}
+$nexttraceExpectedSha256 = [string]$nexttraceDigestEntry.Value
+if ($nexttraceExpectedSha256 -ne '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b' -or
+    $nexttraceExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
+    Stop-EcsWindowsBuild 'NextTrace Windows AMD64 asset digest is not the pinned SHA-256'
+}
+$nexttraceAssetName = ([string]$nexttraceAssetPattern).Replace('<architecture>', [string]$targetFacts.package)
+if ($nexttraceAssetName -ne 'nexttrace-tiny_windows_amd64.exe') {
+    Stop-EcsWindowsBuild "NextTrace Windows asset name is not pinned for $Target"
+}
+$nexttraceAssetUrl = "https://github.com/$($nexttraceTool.repository)/releases/download/$($nexttraceTool.tag)/$nexttraceAssetName"
+if ($nexttraceAssetUrl -ne 'https://github.com/nxtrace/NTrace-core/releases/download/v1.7.1/nexttrace-tiny_windows_amd64.exe') {
+    Stop-EcsWindowsBuild 'NextTrace Windows asset URL is not derived from the pinned release tag and asset'
 }
 
 $toolMap = @{}
@@ -375,7 +413,9 @@ if ($PrintParams) {
         'validation_scope=functional',
         'performance_valid=false',
         "tools=$($windowToolNames -join ',')",
-        'nexttrace=unsupported'
+        'nexttrace=verified-upstream-prebuilt',
+        "nexttrace_asset=$nexttraceAssetName",
+        "nexttrace_source_sha256=$nexttraceExpectedSha256"
     ) | Write-Output
     exit 0
 }
@@ -411,6 +451,18 @@ try {
     $packageRoot = Join-Path $WorkRoot 'msys-packages'
     $corpusRoot = Join-Path $WorkRoot 'corpus'
     New-Item -ItemType Directory -Force -Path $sourceRoot, $downloadRoot, $packageRoot, $corpusRoot | Out-Null
+
+    $nexttraceDownload = Join-Path $downloadRoot $nexttraceAssetName
+    Save-EcsVerifiedDownload -Uri $nexttraceAssetUrl -Sha256 $nexttraceExpectedSha256 -Destination $nexttraceDownload -Description 'official NextTrace Tiny Windows AMD64 release asset'
+    $nexttraceDownloadedSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nexttraceDownload).Hash.ToLowerInvariant()
+    if ($nexttraceDownloadedSha256 -ne $nexttraceExpectedSha256) {
+        Stop-EcsWindowsBuild "verified NextTrace release asset hash mismatch: expected $nexttraceExpectedSha256, got $nexttraceDownloadedSha256"
+    }
+
+    # The pinned checkout is used only for the upstream license text. The
+    # packaged executable always comes from the verified official release asset.
+    $nexttraceSourceRoot = Join-Path $sourceRoot 'nexttrace'
+    Invoke-EcsGitCloneAtCommit -Tool $nexttraceTool -Destination $nexttraceSourceRoot
 
     foreach ($name in @('zstd', 'openssl', 'fio')) {
         Invoke-EcsGitCloneAtCommit -Tool $toolMap[$name] -Destination (Join-Path $sourceRoot $name)
@@ -613,6 +665,7 @@ $($objdumpCommand) --version | sed -n '1p'
             openssl = Join-Path $sourceRoot 'openssl'
             stream = $streamSource
             fio = Join-Path $sourceRoot 'fio'
+            nexttrace = $nexttraceSourceRoot
         }
         Binaries = @{
             zstd = Join-Path $stage 'bin\zstd.exe'
@@ -621,6 +674,7 @@ $($objdumpCommand) --version | sed -n '1p'
             openssl = Join-Path $stage 'bin\openssl.exe'
             stream = Join-Path $stage 'bin\stream.exe'
             fio = Join-Path $stage 'bin\fio.exe'
+            'nexttrace-tiny' = Join-Path $stage 'bin\nexttrace-tiny.exe'
         }
         Tools = $toolMap
         Toolchain = $toolchain
@@ -646,7 +700,7 @@ $($objdumpCommand) --version | sed -n '1p'
     Build-EcsWindowsStream -Context $context
     Build-EcsWindowsFio -Context $context
 
-    foreach ($name in $windowToolNames) {
+    foreach ($name in $sourceBuiltToolNames) {
         if ($name -in @('npb-ep', 'npb-ft')) {
             $context.BuildFacts[$name]['linker_flags'] = @($fortranLinkerFlagList)
         } else {
@@ -654,13 +708,13 @@ $($objdumpCommand) --version | sed -n '1p'
         }
     }
 
-    foreach ($name in $windowToolNames) {
+    foreach ($name in $sourceBuiltToolNames) {
         foreach ($key in $toolchainFacts.Keys) {
             $context.BuildFacts[$name][$key] = $toolchainFacts[$key]
         }
     }
 
-    foreach ($name in $windowToolNames) {
+    foreach ($name in $sourceBuiltToolNames) {
         $binary = $context.Binaries[$name]
         if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -LiteralPath $binary).Length -eq 0) {
             Stop-EcsWindowsBuild "tool output is missing or empty: $name"
@@ -668,10 +722,21 @@ $($objdumpCommand) --version | sed -n '1p'
         $stripScript = "$($context.Preamble)`nset -eu`n$stripCommand --strip-all $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))`ntest -s $(ConvertTo-EcsBashLiteral (ConvertTo-EcsMsysPath $binary))"
         Invoke-EcsWindowsBash -Context $context -Script $stripScript
     }
+
+    $nexttraceBinary = $context.Binaries['nexttrace-tiny']
+    Copy-Item -LiteralPath $nexttraceDownload -Destination $nexttraceBinary -Force
+    $nexttracePackagedSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nexttraceBinary).Hash.ToLowerInvariant()
+    $nexttracePackagedBytes = (Get-Item -LiteralPath $nexttraceBinary).Length
+    $nexttraceSourceBytes = (Get-Item -LiteralPath $nexttraceDownload).Length
+    if ($nexttracePackagedBytes -ne $nexttraceSourceBytes -or $nexttracePackagedSha256 -ne $nexttraceDownloadedSha256 -or
+        $nexttracePackagedSha256 -ne $nexttraceExpectedSha256) {
+        Stop-EcsWindowsBuild "NextTrace packaged bytes differ from the verified upstream asset: source_sha256=$nexttraceDownloadedSha256 packaged_sha256=$nexttracePackagedSha256"
+    }
+
     $peFactsByTool = @{}
     foreach ($name in $windowToolNames) {
         $peFacts = Get-EcsWindowsPeFacts -ObjdumpPath $objdumpPath -BinaryPath $context.Binaries[$name] -Allowlist $allowlist
-        if (-not [bool]$peFacts['stripped']) {
+        if ($name -in $sourceBuiltToolNames -and -not [bool]$peFacts['stripped']) {
             Stop-EcsWindowsBuild "$name binary still contains debug or symbol sections after locked strip"
         }
         $peFactsByTool[$name] = $peFacts
@@ -685,6 +750,7 @@ $($objdumpCommand) --version | sed -n '1p'
     Get-Content -LiteralPath (Join-Path $context.Sources['npb'] 'NPB3.4-OMP\EP\ep.f90') -TotalCount 31 | Set-Content -LiteralPath $npbLicense -Encoding ascii
     Copy-EcsLicense (Join-Path $licenseRoot 'OPENSSL-LICENSE.txt') @((Join-Path $context.Sources['openssl'] 'LICENSE.txt'))
     Copy-EcsLicense (Join-Path $licenseRoot 'FIO-COPYING') @((Join-Path $context.Sources['fio'] 'COPYING'))
+    Copy-EcsLicense (Join-Path $licenseRoot 'NEXTTRACE-LICENSE') @((Join-Path $context.Sources['nexttrace'] 'LICENSE'))
     $streamLicense = Join-Path $licenseRoot 'STREAM-LICENSE.txt'
     $streamHeader = Get-Content -LiteralPath $streamSource
     $headerEnd = [Array]::IndexOf([string[]]$streamHeader, ' */')
@@ -699,6 +765,7 @@ $($objdumpCommand) --version | sed -n '1p'
         openssl = @('speed', 'EVP', 'AES-256-GCM', 'ChaCha20-Poly1305', 'SHA-256')
         stream = @('Copy', 'Scale', 'Add', 'Triad', 'OpenMP')
         fio = @('windowsaio', 'json', 'direct-io')
+        'nexttrace-tiny' = @('tiny', 'json')
     }
     $disabledMap = @{
         zstd = @('zlib', 'lzma', 'lz4', 'legacy-formats', 'dictionary-builder', 'trace')
@@ -707,8 +774,47 @@ $($objdumpCommand) --version | sed -n '1p'
         openssl = @('TLS/DTLS/QUIC', 'network/HTTP', 'shared libraries/modules/engines')
         stream = @()
         fio = @('rbd', 'rados', 'gfapi', 'rdma', 'libaio', 'io_uring', 'psync')
+        'nexttrace-tiny' = @('full', 'mtr', 'globalping', 'webui')
     }
     foreach ($name in $windowToolNames) {
+        if ($name -eq 'nexttrace-tiny') {
+            $nexttracePeFacts = $peFactsByTool[$name]
+            $nexttraceManifestParameters = [ordered]@{
+                repository = [string]$nexttraceTool.repository
+                tag = [string]$nexttraceTool.tag
+                release_commit = [string]$nexttraceTool.commit
+                source_url = $nexttraceAssetUrl
+                source_asset = $nexttraceAssetName
+                asset_pattern = $nexttraceAssetPattern
+                source_sha256 = $nexttraceExpectedSha256
+                original_sha256 = $nexttraceDownloadedSha256
+                upstream_sha256 = $nexttraceDownloadedSha256
+                binary_sha256 = $nexttracePackagedSha256
+                packaged_sha256 = $nexttracePackagedSha256
+                provenance = 'upstream official release binary'
+                source_mode = 'verified-upstream-prebuilt'
+                pe_machine = [string]$nexttracePeFacts['pe_machine']
+                pe_imports = @($nexttracePeFacts['imports'])
+                dependency_allowlist = @($allowlist)
+                imports_checked = [bool]$nexttracePeFacts['imports_checked']
+                fully_static = [bool]$nexttracePeFacts['fully_static']
+                stripped = [bool]$nexttracePeFacts['stripped']
+            }
+            $manifestTools += [ordered]@{
+                name = 'nexttrace-tiny'
+                upstream = [string]$nexttraceTool.upstream
+                version = [string]$nexttraceTool.version
+                tag_or_commit = [string]$nexttraceTool.tag
+                source = $nexttraceAssetUrl
+                build_flags = @('official-release-asset', 'tiny')
+                enabled_features = @($featureMap[$name])
+                disabled_features = @($disabledMap[$name])
+                architecture = 'amd64'
+                license = 'GPL-3.0-only'
+                parameters = $nexttraceManifestParameters
+            }
+            continue
+        }
         $manifestTool = New-EcsManifestTool -Name $name -Tool $context.Tools[$name] -Fact $context.BuildFacts[$name] -BinaryPath $context.Binaries[$name] -EnabledFeatures $featureMap[$name] -DisabledFeatures $disabledMap[$name] -License ([string]$context.BuildFacts[$name]['license']) -DependencyAllowlist $allowlist -PeFacts $peFactsByTool[$name]
         $manifestTools += $manifestTool
     }

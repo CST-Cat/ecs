@@ -2,16 +2,16 @@
 
 package app
 
-// Windows currently has no frozen runtime for these declared Unix adapters.
-// The module definitions remain canonical so ecs list and selection retain
-// every module ID, while this boundary keeps the wrapper contract limited to
-// tools that a Windows bundle can actually provide in this phase.
+// Windows currently has no frozen runtime for these declared Unix adapters;
+// route and backtrace use the staged NextTrace backend separately. The module
+// definitions remain canonical so ecs list and selection retain every module
+// ID, while this boundary keeps the wrapper contract limited to tools that a
+// Windows bundle can actually provide in this phase.
 var windowsUnsupportedTools = map[string]struct{}{
-	"ping":           {},
-	"sysbench":       {},
-	"iperf3":         {},
-	"speedtest":      {},
-	"nexttrace-tiny": {},
+	"ping":      {},
+	"sysbench":  {},
+	"iperf3":    {},
+	"speedtest": {},
 }
 
 func resolveRequiredTools(declared []string) []string {

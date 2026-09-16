@@ -4,23 +4,14 @@ package probe
 
 import "testing"
 
-func routeToolMissingTestApplies(t *testing.T) bool {
-	t.Helper()
-	// Native Windows route remains platform-unsupported until the NextTrace
-	// Windows gate passes; a missing staged executable is not its semantics.
-	return false
-}
+func routeToolMissingTestApplies(*testing.T) bool { return true }
 
-func backtraceToolMissingTestApplies(t *testing.T) bool {
-	t.Helper()
-	// Native Windows backtrace remains platform-unsupported until the NextTrace
-	// Windows gate passes; a missing staged executable is not its semantics.
-	return false
-}
+func backtraceToolMissingTestApplies(*testing.T) bool { return true }
 
 func backtraceFixtureTestApplies(t *testing.T) bool {
 	t.Helper()
-	// The Linux fixture supplies a fake NextTrace executable and is not a
-	// Windows runtime substitute while the native backend is unsupported.
+	// The shared producer fixture is a Unix shell script. The Windows-specific
+	// trace tests use a real PE test binary instead, so this fixture stays off
+	// the Windows path.
 	return false
 }

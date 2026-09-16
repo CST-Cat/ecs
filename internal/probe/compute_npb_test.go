@@ -67,6 +67,15 @@ func TestNPBPlatformFlagContracts(t *testing.T) {
 	if _, err := parseNPBBenchmarkOutputForGOOS(npbOutputForGOOS(spec, 1, 100, "linux"), spec, 1, "windows"); err == nil {
 		t.Fatal("Windows NPB parser accepted the Linux flag contract")
 	}
+	for _, invalid := range []string{
+		npbWindowsLinkFlags + "suffix",
+		strings.TrimSuffix(npbWindowsLinkFlags, "..."),
+	} {
+		invalidOutput := strings.Replace(output, "FLINKFLAGS   = "+npbWindowsLinkFlags, "FLINKFLAGS   = "+invalid, 1)
+		if _, err := parseNPBBenchmarkOutputForGOOS(invalidOutput, spec, 1, "windows"); err == nil {
+			t.Fatalf("Windows NPB parser accepted non-exact linker flags %q", invalid)
+		}
+	}
 }
 
 func TestParseNPBOutputAndFailureCategories(t *testing.T) {

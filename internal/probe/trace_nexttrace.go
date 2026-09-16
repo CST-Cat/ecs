@@ -8,9 +8,28 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ecs/internal/config"
 )
 
 var latencyPattern = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*ms`)
+
+// nextTraceCommandArgsForFamily is the single canonical argv constructor for
+// the frozen NextTrace Tiny backend. Linux and Windows call this same
+// function so their executable arguments cannot drift apart. The target is
+// always the final argument and is passed directly to exec.Command.
+func nextTraceCommandArgsForFamily(target string, maxHops int, family string) []string {
+	hops := strconv.Itoa(maxHops)
+	familyArg := ""
+	if family == config.IPVersion4 || family == config.IPVersion6 {
+		familyArg = "-" + family
+	}
+	args := []string{"--no-color", "--json", "-M", "--max-hops", hops, "--queries", "1", "--parallel-requests", "1", "--timeout", "1000"}
+	if familyArg != "" {
+		args = append([]string{familyArg}, args...)
+	}
+	return append(args, target)
+}
 
 // parseNextTraceCanonical is the sole adapter for the frozen NextTrace Tiny
 // native JSON format. Both route and backtrace consume the resulting ECS

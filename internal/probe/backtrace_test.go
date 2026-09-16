@@ -576,6 +576,11 @@ func TestBacktraceSkipReasonsAreDistinctAndMachineOnly(t *testing.T) {
 	if missing.SummaryMessages[0].Key != "probe.backtrace.summary.tool_missing" || missing.Failures[0].Message != "" || missing.Notes[0] != "probe.backtrace.note.tool_missing" {
 		t.Fatalf("tool missing = %+v", missing)
 	}
+	if !backtraceFixtureTestApplies(t) {
+		// Windows uses the staged PE fixture in trace_windows_test.go; the
+		// shared fixture below is a Unix shell script and must not be executed.
+		return
+	}
 
 	fixturePath := writeBacktraceFixture(t)
 	if err := os.Setenv("PATH", fixturePath); err != nil {

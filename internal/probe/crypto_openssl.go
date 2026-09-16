@@ -90,6 +90,7 @@ func cryptoMethodology() model.Methodology {
 func missingOpenSSLResult(err error) model.Result {
 	start := time.Now()
 	allowance := detectCPUAllowance()
+	workers := openSSLWorkerCount(runtime.GOOS, allowance.Threads)
 	result := newCryptoResult()
 	result.Status = model.StatusWarning
 	message := ""
@@ -98,7 +99,7 @@ func missingOpenSSLResult(err error) model.Result {
 	}
 	result.AddFailure(model.Failure{Category: model.FailureToolMissing, Stage: "tool_lookup", Target: "openssl", Count: 1, Message: message})
 	result.Evidence = model.NewEvidence(0, len(openSSLAlgorithmSpecs)*len(openSSLThreadCounts(runtime.GOOS, allowance.Threads)), "run")
-	result.Notes = cryptoNotes(result, allowance)
+	result.Notes = cryptoNotes(result, allowance, workers)
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.none")}
 	result.Finish(start)
 	return result
@@ -132,7 +133,7 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 		}
 		addComparisonParameter(result.Methodology.Parameters, "tool_version", fallback(versionOutput, "unknown"))
 		result.Evidence = model.NewEvidence(0, len(specs)*len(threadCounts), "run")
-		result.Notes = cryptoNotes(result, allowance)
+		result.Notes = cryptoNotes(result, allowance, workers)
 		result.SummaryMessages = []model.Message{model.NewMessage("probe.crypto.summary.version_mismatch", fallback(versionOutput, "unknown"), openSSLExpectedVersion)}
 		result.Finish(start)
 		return result
@@ -209,7 +210,7 @@ func runOpenSSLSpeedWithAllowance(ctx context.Context, env Environment, path str
 		{Name: "OpenSSL speed", URL: "https://docs.openssl.org/3.5/man1/openssl-speed/", Purpose: "probe.crypto.source.openssl"},
 		{Name: "OpenSSL 3.5.7", URL: "https://github.com/openssl/openssl/tree/openssl-3.5.7", Purpose: "probe.crypto.source.version"},
 	}
-	result.Notes = cryptoNotes(result, allowance)
+	result.Notes = cryptoNotes(result, allowance, workers)
 	expectedRuns := len(specs) * len(threadCounts)
 	result.Evidence = model.NewEvidence(validRuns, expectedRuns, "run")
 	if validRuns < expectedRuns {
@@ -460,7 +461,7 @@ func openSSLMeasurementLabel(key string) string {
 	return "probe.crypto.metric.unknown"
 }
 
-func cryptoNotes(result model.Result, allowance cpuAllowance) []string {
+func cryptoNotes(result model.Result, allowance cpuAllowance, effectiveWorkers int) []string {
 	notes := []string{
 		"probe.crypto.note.contract",
 		"probe.crypto.note.algorithms",
@@ -468,12 +469,12 @@ func cryptoNotes(result model.Result, allowance cpuAllowance) []string {
 		"probe.crypto.note.hardware_acceleration",
 		"probe.crypto.note.no_composite_score",
 	}
-	if allowance.Threads <= 1 {
-		notes = append(notes, "probe.crypto.note.single_core")
-	} else {
+	if effectiveWorkers > 1 {
 		notes = append(notes, "probe.crypto.note.separate_runs")
+	} else if allowance.Threads <= 1 {
+		notes = append(notes, "probe.crypto.note.single_core")
 	}
-	if allowance.Limited() && allowance.Threads > 1 {
+	if allowance.Limited() && effectiveWorkers > 1 {
 		notes = append(notes, "probe.crypto.note.quota_limited")
 	}
 	for _, failure := range result.Failures {
