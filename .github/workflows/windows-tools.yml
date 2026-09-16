@@ -918,6 +918,8 @@ jobs:
           $testExitCode = 1
           $testError = $null
           $cleanupErrors = @()
+          $restrictedProcessExitCode = 1
+          $standardUserLog = $null
           try {
             $stageItems = @(Get-ChildItem -LiteralPath $stageArtifactRoot -Directory -Filter 'windows_amd64' -Recurse)
             if ($stageItems.Count -ne 1) { throw 'downloaded Windows stage is missing or ambiguous' }
@@ -959,20 +961,15 @@ jobs:
             $corpusPath = Join-Path $corpusRoot ([string]$lock.corpus.name)
             Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
 
-            & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-            if (-not $?) { throw 'ordinary-user execution gate failed' }
-            $pathAfterGate = Get-PathSnapshot
-            Write-PathSnapshotEvidence -Label 'after ordinary-user gate' -Snapshot $pathAfterGate
-            $gatePathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathAfterGate)
-            if ($gatePathDifferences.Count -ne 0) {
-              throw ("ordinary-user gate changed PATH: " + ($gatePathDifferences -join '; '))
-            }
-
             $sandboxRoot = Join-Path $env:RUNNER_TEMP ('ecs integration sandbox ' + [guid]::NewGuid().ToString('N'))
             $tempRoot = Join-Path $sandboxRoot 'temp with spaces'
             $homeRoot = Join-Path $sandboxRoot 'home with spaces'
             $cacheRoot = Join-Path $sandboxRoot 'cache with spaces'
-            New-Item -ItemType Directory -Force -Path $tempRoot, $homeRoot, $cacheRoot, (Join-Path $cacheRoot 'mod') | Out-Null
+            $cliRoot = Join-Path $sandboxRoot 'ecs cli executable'
+            $cliOutputRoot = Join-Path $sandboxRoot 'ecs cli JSON output'
+            $cliDiskPath = Join-Path $sandboxRoot 'fio cli workload with spaces'
+            $hostileCliRoot = Join-Path $sandboxRoot 'hostile cli PATH'
+            New-Item -ItemType Directory -Force -Path $tempRoot, $homeRoot, $cacheRoot, (Join-Path $cacheRoot 'mod'), $cliRoot, $cliOutputRoot, $cliDiskPath, $hostileCliRoot | Out-Null
             $env:TEMP = $tempRoot
             $env:TMP = $tempRoot
             $env:TMPDIR = $tempRoot
@@ -982,6 +979,276 @@ jobs:
             $env:GOMODCACHE = Join-Path $cacheRoot 'mod'
             $env:ECS_TOOL_BIN = $toolBin
             $env:ECS_ZSTD_CORPUS = $corpusPath
+            $goPath = (Get-Command go.exe -ErrorAction Stop).Source
+            $cliPath = Join-Path $cliRoot 'ecs.exe'
+            & $goPath build -trimpath -o $cliPath ./cmd/ecs
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cliPath -PathType Leaf)) { throw 'building the current cmd/ecs Windows executable failed' }
+            $hostileSource = Join-Path $hostileCliRoot 'hostile.go'
+            $hostileBinary = Join-Path $hostileCliRoot 'hostile.exe'
+            Set-Content -LiteralPath $hostileSource -Encoding utf8NoBOM -Value @(
+              'package main'
+              ''
+              'import "os"'
+              ''
+              'func main() { os.Exit(97) }'
+            )
+            $savedGoModuleMode = $env:GO111MODULE
+            $savedGoToolchain = $env:GOTOOLCHAIN
+            try {
+              $env:GO111MODULE = 'off'
+              $env:GOTOOLCHAIN = 'local'
+              & $goPath build -trimpath -o $hostileBinary $hostileSource
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostileBinary -PathType Leaf)) { throw 'building the CLI hostile PATH sentinel failed' }
+            } finally {
+              if ($null -eq $savedGoModuleMode) { Remove-Item Env:GO111MODULE -ErrorAction SilentlyContinue } else { $env:GO111MODULE = $savedGoModuleMode }
+              if ($null -eq $savedGoToolchain) { Remove-Item Env:GOTOOLCHAIN -ErrorAction SilentlyContinue } else { $env:GOTOOLCHAIN = $savedGoToolchain }
+            }
+            foreach ($name in @('zstd.exe', 'openssl.exe', 'fio.exe')) {
+              Copy-Item -LiteralPath $hostileBinary -Destination (Join-Path $hostileCliRoot $name) -Force
+            }
+            $cliReportPath = Join-Path $cliOutputRoot 'standard-user-cli.json'
+
+            $ordinaryScript = Join-Path $sandboxRoot 'standard user integration.ps1'
+            Set-Content -LiteralPath $ordinaryScript -Encoding utf8NoBOM -Value @'
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          Start-Transcript -LiteralPath $env:ECS_PHASE1_LOG -Force | Out-Null
+
+          function Get-Phase1Hash {
+            param([Parameter(Mandatory)][string]$Text)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+              return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))).Replace('-', '').ToLowerInvariant())
+            } finally {
+              $sha.Dispose()
+            }
+          }
+
+          function Get-RawPhase1Path {
+            param([Parameter(Mandatory)][EnvironmentVariableTarget]$Target)
+            $root = if ($Target -eq [EnvironmentVariableTarget]::Machine) { [Microsoft.Win32.Registry]::LocalMachine } else { [Microsoft.Win32.Registry]::CurrentUser }
+            $subKey = if ($Target -eq [EnvironmentVariableTarget]::Machine) { 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment' } else { 'Environment' }
+            $key = $root.OpenSubKey($subKey, $false)
+            if ($null -eq $key) { return $null }
+            try {
+              $value = $key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+              if ($null -eq $value) { return $null }
+              return [string]$value
+            } finally {
+              $key.Dispose()
+            }
+          }
+
+          function Get-Phase1RegistryEvidence {
+            param([Parameter(Mandatory)][string]$SubKey)
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($SubKey, $false)
+            if ($null -eq $key) {
+              return [ordered]@{ present = $false; length = 0; sha256 = (Get-Phase1Hash '') }
+            }
+            try {
+              $values = foreach ($name in @($key.GetValueNames() | Sort-Object)) {
+                $kind = $key.GetValueKind($name).ToString()
+                $value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                '{0}|{1}|{2}' -f $name, $kind, ([string]$value)
+              }
+              $serialized = @($values) -join [Environment]::NewLine
+              return [ordered]@{ present = $true; length = $serialized.Length; sha256 = (Get-Phase1Hash $serialized) }
+            } finally {
+              $key.Dispose()
+            }
+          }
+
+          function Get-Phase1PathEvidence {
+            param([AllowNull()][string]$Value)
+            $present = $null -ne $Value
+            $text = if ($present) { $Value } else { '' }
+            return [ordered]@{ present = $present; length = $text.Length; sha256 = (Get-Phase1Hash $text); value = $text }
+          }
+
+          function Get-Phase1PathSnapshot {
+            return [ordered]@{
+              process = Get-Phase1PathEvidence ([Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Process))
+              machine = Get-Phase1PathEvidence (Get-RawPhase1Path -Target Machine)
+              user = Get-Phase1PathEvidence (Get-RawPhase1Path -Target User)
+            }
+          }
+
+          function Compare-Phase1PathSnapshot {
+            param([Parameter(Mandatory)][object]$Expected, [Parameter(Mandatory)][object]$Actual)
+            $differences = @()
+            foreach ($scope in @('process', 'machine', 'user')) {
+              $before = $Expected[$scope]
+              $after = $Actual[$scope]
+              if ($before.present -ne $after.present -or $before.length -ne $after.length -or $before.sha256 -cne $after.sha256 -or $before.value -cne $after.value) {
+                $differences += ('{0}: before(length={1},sha256={2}) after(length={3},sha256={4})' -f $scope, $before.length, $before.sha256, $after.length, $after.sha256)
+              }
+            }
+            return $differences
+          }
+
+          if (-not ('EcsPhase1TokenEvidence' -as [type])) {
+            Add-Type -TypeDefinition (@(
+              'using System;'
+              'using System.ComponentModel;'
+              'using System.Runtime.InteropServices;'
+              ''
+              'public static class EcsPhase1TokenEvidence'
+              '{'
+              '    private const int TokenElevationTypeInformation = 18;'
+              '    private const int TokenElevationInformation = 20;'
+              ''
+              '    [DllImport("advapi32.dll", SetLastError = true)]'
+              '    private static extern bool GetTokenInformation(IntPtr token, int informationClass, IntPtr information, int informationLength, out int returnLength);'
+              ''
+              '    private static int ReadInformation(IntPtr token, int informationClass)'
+              '    {'
+              '        IntPtr buffer = Marshal.AllocHGlobal(sizeof(int));'
+              '        try'
+              '        {'
+              '            int returnLength;'
+              '            if (!GetTokenInformation(token, informationClass, buffer, sizeof(int), out returnLength))'
+              '                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation");'
+              '            return Marshal.ReadInt32(buffer);'
+              '        }'
+              '        finally { Marshal.FreeHGlobal(buffer); }'
+              '    }'
+              ''
+              '    public static bool IsElevated(IntPtr token) { return ReadInformation(token, TokenElevationInformation) != 0; }'
+              '    public static int ElevationType(IntPtr token) { return ReadInformation(token, TokenElevationTypeInformation); }'
+              '}'
+            ) -join [Environment]::NewLine)
+          }
+
+          function Get-Phase1TokenEvidence {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            try {
+          $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $identity
+              $elevationType = [EcsPhase1TokenEvidence]::ElevationType($identity.Token)
+              $typeName = switch ($elevationType) { 1 { 'Default'; break } 2 { 'Full'; break } 3 { 'Limited'; break } default { "Unknown($elevationType)" } }
+              return [pscustomobject]@{
+                User = [string]$identity.Name
+                AdministratorGroupMembership = [bool]$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+                TokenElevated = [bool][EcsPhase1TokenEvidence]::IsElevated($identity.Token)
+                ElevationType = [int]$elevationType
+                ElevationTypeName = $typeName
+              }
+            } finally { $identity.Dispose() }
+          }
+
+          function Invoke-Phase1CLI {
+            param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string[]]$Arguments, [Parameter(Mandatory)][string]$WorkingDirectory)
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $FilePath
+            $start.WorkingDirectory = $WorkingDirectory
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $start
+            try {
+              if (-not $process.Start()) { throw "could not start $FilePath" }
+              $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+              $stderrTask = $process.StandardError.ReadToEndAsync()
+              if (-not $process.WaitForExit(45 * 60 * 1000)) {
+                & taskkill.exe /PID $process.Id /T /F | Out-Host
+                throw 'ecs.exe timed out after 2700 seconds'
+              }
+              $process.WaitForExit()
+              return [pscustomobject]@{
+                ExitCode = $process.ExitCode
+                Stdout = $stdoutTask.GetAwaiter().GetResult()
+                Stderr = $stderrTask.GetAwaiter().GetResult()
+              }
+            } finally { $process.Dispose() }
+          }
+
+          $token = Get-Phase1TokenEvidence
+          Write-Output ('standard-user token evidence: user={0}; administrator_group_membership={1}; token_elevated={2}; token_elevation_type={3}; restricted_token=true; administrator_sid_disabled=true' -f $token.User, $token.AdministratorGroupMembership, $token.TokenElevated, $token.ElevationTypeName)
+          if ($token.AdministratorGroupMembership -or $token.TokenElevated -or $token.ElevationType -eq 2) {
+            throw 'integration workload did not start under a non-administrator standard-user token'
+          }
+
+          $env:TEMP = $env:ECS_PHASE1_TEMP
+          $env:TMP = $env:ECS_PHASE1_TEMP
+          $env:TMPDIR = $env:ECS_PHASE1_TEMP
+          $env:HOME = $env:ECS_PHASE1_HOME
+          $env:USERPROFILE = $env:ECS_PHASE1_HOME
+          $env:GOCACHE = $env:ECS_PHASE1_CACHE
+          $env:GOMODCACHE = $env:ECS_PHASE1_MODCACHE
+          $env:ECS_TOOL_BIN = $env:ECS_PHASE1_TOOL_BIN
+          $env:ECS_ZSTD_CORPUS = $env:ECS_PHASE1_CORPUS
+          $env:ECS_WINDOWS_CLI_REPORT = $env:ECS_PHASE1_CLI_REPORT
+          $env:ECS_WINDOWS_SANDBOX_ROOT = $env:ECS_PHASE1_SANDBOX
+          $env:ECS_WINDOWS_CLI_DISK_PATH = $env:ECS_PHASE1_CLI_DISK
+          $env:GOTOOLCHAIN = 'local'
+          $env:PATH = $env:ECS_PHASE1_HOSTILE + [IO.Path]::PathSeparator + $env:ECS_PHASE1_PARENT_PATH
+
+          $pathBefore = Get-Phase1PathSnapshot
+          $registryBefore = [ordered]@{
+            environment = Get-Phase1RegistryEvidence -SubKey 'Environment'
+            userShellFolders = Get-Phase1RegistryEvidence -SubKey 'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+          }
+          Write-Output ('standard-user PATH evidence before workload: ' + ($pathBefore | ConvertTo-Json -Compress))
+          Write-Output ('standard-user registry evidence before workload: ' + ($registryBefore | ConvertTo-Json -Compress))
+          $workError = $null
+          try {
+            & $env:ECS_PHASE1_PWSH -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $env:ECS_PHASE1_REPO 'scripts/ci/windows_tools_gate.ps1') -CheckOrdinaryUser
+            if ($LASTEXITCODE -ne 0) { throw 'standard-user ordinary-user gate failed' }
+
+            $hostileEntries = @(Get-ChildItem -LiteralPath $env:ECS_PHASE1_HOSTILE -File -Filter '*.exe')
+            if ($hostileEntries.Count -ne 3) { throw 'standard-user CLI hostile PATH sentinel set is incomplete' }
+            foreach ($name in @('zstd.exe', 'openssl.exe', 'fio.exe')) {
+              $command = @(Get-Command -Name $name -CommandType Application -ErrorAction Stop)
+              $expected = [IO.Path]::GetFullPath((Join-Path $env:ECS_PHASE1_HOSTILE $name))
+              if ($command.Count -ne 1 -or -not [IO.Path]::GetFullPath($command[0].Source).Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "standard-user hostile PATH did not resolve $name from the sentinel directory"
+              }
+              & $command[0].Source
+              if ($LASTEXITCODE -ne 97) { throw "standard-user hostile $name exit code was $LASTEXITCODE, want 97" }
+            }
+            $cliArguments = @(
+              'run', '--lang', 'en', '--profile', 'standard', '--exposure', 'local',
+              '--only', 'zstd,npb,memory,crypto,disk', '--format', 'json', '--output', $env:ECS_PHASE1_CLI_OUTPUT,
+              '--name', 'standard-user-cli', '--yes', '--no-color', '--disk-path', $env:ECS_PHASE1_CLI_DISK,
+              '--disk-mib', '16', '--disk-matrix-mode', 'time'
+            )
+            $cli = Invoke-Phase1CLI -FilePath $env:ECS_PHASE1_CLI -Arguments $cliArguments -WorkingDirectory $env:ECS_PHASE1_REPO
+            Write-Output ('standard-user ecs.exe stdout:' + [Environment]::NewLine + $cli.Stdout)
+            Write-Output ('standard-user ecs.exe stderr:' + [Environment]::NewLine + $cli.Stderr)
+            if ($cli.ExitCode -ne 0) { throw "standard-user ecs.exe run failed with exit code $($cli.ExitCode)" }
+            if (-not (Test-Path -LiteralPath $env:ECS_PHASE1_CLI_REPORT -PathType Leaf)) { throw 'standard-user ecs.exe did not write the expected JSON report' }
+
+            & $env:ECS_PHASE1_GO test -tags=integration ./internal/probe -run '^TestIntegrationWindowsFrozenTools$' -count=1 -v
+            if ($LASTEXITCODE -ne 0) { throw "standard-user production integration test failed with exit code $LASTEXITCODE" }
+          } catch {
+            $workError = $_
+          }
+          $pathAfter = Get-Phase1PathSnapshot
+          $registryAfter = [ordered]@{
+            environment = Get-Phase1RegistryEvidence -SubKey 'Environment'
+            userShellFolders = Get-Phase1RegistryEvidence -SubKey 'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+          }
+          Write-Output ('standard-user PATH evidence after workload:' + [Environment]::NewLine + ($pathAfter | ConvertTo-Json -Compress))
+          Write-Output ('standard-user registry evidence after workload:' + [Environment]::NewLine + ($registryAfter | ConvertTo-Json -Compress))
+          $integrityErrors = @()
+          $pathDifferences = @(Compare-Phase1PathSnapshot -Expected $pathBefore -Actual $pathAfter)
+          if ($pathDifferences.Count -ne 0) { $integrityErrors += ('standard-user process/Machine/User PATH changed: ' + ($pathDifferences -join '; ')) }
+          foreach ($scope in @('environment', 'userShellFolders')) {
+            if ($registryBefore[$scope].present -ne $registryAfter[$scope].present -or $registryBefore[$scope].length -ne $registryAfter[$scope].length -or $registryBefore[$scope].sha256 -cne $registryAfter[$scope].sha256) {
+              $integrityErrors += "standard-user HKCU registry changed: $scope"
+            }
+          }
+          if ($null -eq $workError -and $integrityErrors.Count -ne 0) { $workError = [Exception]::new($integrityErrors -join '; ') }
+          if ($null -ne $workError) {
+            Write-Output ('standard-user workload evidence failed: ' + $workError.Exception.Message)
+            Stop-Transcript | Out-Null
+            throw $workError
+          }
+          Write-Output 'standard-user workload evidence: ordinary-user gate, real ecs.exe JSON run, six-tool production integration, PATH, and HKCU environment checks passed'
+          Stop-Transcript | Out-Null
+          '@
 
             $pathBeforeWorkload = Get-PathSnapshot
             Write-PathSnapshotEvidence -Label 'before production workload' -Snapshot $pathBeforeWorkload
@@ -990,11 +1257,131 @@ jobs:
               throw ("integration preparation changed PATH: " + ($preparationPathDifferences -join '; '))
             }
 
-            & go test -tags=integration ./internal/probe -run '^TestIntegrationWindowsFrozenTools$' -count=1 -v
-            $testExitCode = $LASTEXITCODE
+            $standardUserLog = Join-Path $sandboxRoot 'standard-user integration.log'
+            $phase1PowerShell = (Get-Command pwsh.exe -ErrorAction Stop).Source
+            $env:ECS_PHASE1_REPO = (Get-Location).Path
+            $env:ECS_PHASE1_GO = $goPath
+            $env:ECS_PHASE1_CLI = $cliPath
+            $env:ECS_PHASE1_PWSH = $phase1PowerShell
+            $env:ECS_PHASE1_TOOL_BIN = $toolBin
+            $env:ECS_PHASE1_CORPUS = $corpusPath
+            $env:ECS_PHASE1_TEMP = $tempRoot
+            $env:ECS_PHASE1_HOME = $homeRoot
+            $env:ECS_PHASE1_CACHE = $cacheRoot
+            $env:ECS_PHASE1_MODCACHE = Join-Path $cacheRoot 'mod'
+            $env:ECS_PHASE1_SANDBOX = $sandboxRoot
+            $env:ECS_PHASE1_HOSTILE = $hostileCliRoot
+            $env:ECS_PHASE1_CLI_OUTPUT = $cliOutputRoot
+            $env:ECS_PHASE1_CLI_REPORT = $cliReportPath
+            $env:ECS_PHASE1_CLI_DISK = $cliDiskPath
+            $env:ECS_PHASE1_LOG = $standardUserLog
+            $env:ECS_PHASE1_PARENT_PATH = $pathBefore.process.value
+            if (-not ('EcsPhase1RestrictedProcess' -as [type])) {
+              Add-Type -TypeDefinition (@(
+                'using System;'
+                'using System.ComponentModel;'
+                'using System.Runtime.InteropServices;'
+                'using System.Text;'
+                ''
+                'public static class EcsPhase1RestrictedProcess'
+                '{'
+                '    private const uint DisableMaxPrivilege = 1;'
+                '    private const uint TokenQuery = 8;'
+                '    private const uint TokenDuplicate = 2;'
+                '    private const uint TokenAssignPrimary = 1;'
+                '    private const uint TokenAdjustDefault = 128;'
+                '    private const uint TokenAdjustSessionId = 256;'
+                '    private const uint CreateUnicodeEnvironment = 1024;'
+                '    private const uint CreateNoWindow = 134217728;'
+                '    private const uint WaitObject0 = 0;'
+                '    private const uint WaitTimeout = 258;'
+                ''
+                '    [StructLayout(LayoutKind.Sequential)]'
+                '    private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }'
+                '    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]'
+                '    private struct StartupInfo'
+                '    {'
+                '        public int Cb; public IntPtr Reserved; public IntPtr Desktop; public IntPtr Title;'
+                '        public int X; public int Y; public int XSize; public int YSize; public int XCountChars; public int YCountChars;'
+                '        public int FillAttribute; public int Flags; public short ShowWindow; public short Reserved2;'
+                '        public IntPtr Reserved2Ptr; public IntPtr StdInput; public IntPtr StdOutput; public IntPtr StdError;'
+                '    }'
+                '    [StructLayout(LayoutKind.Sequential)]'
+                '    private struct ProcessInformation { public IntPtr Process; public IntPtr Thread; public int ProcessId; public int ThreadId; }'
+                ''
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GetCurrentProcess();'
+                '    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);'
+                '    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool CreateRestrictedToken(IntPtr existing, uint flags, uint disableCount, IntPtr disabledSids, uint deletePrivilegeCount, IntPtr deletedPrivileges, uint restrictedCount, IntPtr restrictedSids, out IntPtr token);'
+                '    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool ConvertStringSidToSid(string stringSid, out IntPtr sid);'
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);'
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr LocalFree(IntPtr handle);'
+                '    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool CreateProcessWithTokenW(IntPtr token, uint logonFlags, string applicationName, StringBuilder commandLine, uint creationFlags, IntPtr environment, string currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);'
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);'
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool TerminateProcess(IntPtr process, uint exitCode);'
+                '    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);'
+                ''
+                '    private static void ThrowLast(string operation) { throw new Win32Exception(Marshal.GetLastWin32Error(), operation); }'
+                '    private static string Quote(string value)'
+                '    {'
+                '        if (value.Length > 0 && value.IndexOf((char)32) < 0 && value.IndexOf((char)9) < 0 && value.IndexOf((char)34) < 0) return value;'
+                '        var builder = new StringBuilder(); builder.Append((char)34); int slashes = 0;'
+                '        foreach (char character in value)'
+                '        {'
+                '            if (character == (char)92) { slashes++; continue; }'
+                '            if (character == (char)34) { for (int i = 0; i < 2 * slashes + 1; i++) builder.Append((char)92); builder.Append((char)34); }'
+                '            else { for (int i = 0; i < slashes; i++) builder.Append((char)92); builder.Append(character); }'
+                '            slashes = 0;'
+                '        }'
+                '        for (int i = 0; i < 2 * slashes; i++) builder.Append((char)92); builder.Append((char)34); return builder.ToString();'
+                '    }'
+                ''
+                '    public static int Run(string filePath, string[] arguments, string workingDirectory, int timeoutSeconds)'
+                '    {'
+                '        IntPtr sourceToken = IntPtr.Zero, restrictedToken = IntPtr.Zero, adminSid = IntPtr.Zero, sidArray = IntPtr.Zero;'
+                '        ProcessInformation process = new ProcessInformation();'
+                '        try'
+                '        {'
+                '            uint access = TokenQuery | TokenDuplicate | TokenAssignPrimary | TokenAdjustDefault | TokenAdjustSessionId;'
+                '            if (!OpenProcessToken(GetCurrentProcess(), access, out sourceToken)) ThrowLast("OpenProcessToken");'
+                '            if (!ConvertStringSidToSid("S-1-5-32-544", out adminSid)) ThrowLast("ConvertStringSidToSid");'
+                '            sidArray = Marshal.AllocHGlobal(Marshal.SizeOf<SidAndAttributes>());'
+                '            Marshal.StructureToPtr(new SidAndAttributes { Sid = adminSid, Attributes = 0 }, sidArray, false);'
+                '            if (!CreateRestrictedToken(sourceToken, DisableMaxPrivilege, 1, sidArray, 0, IntPtr.Zero, 0, IntPtr.Zero, out restrictedToken)) ThrowLast("CreateRestrictedToken");'
+                '            var command = new StringBuilder(Quote(filePath));'
+                '            foreach (var argument in arguments) command.Append(" ").Append(Quote(argument));'
+                '            var startup = new StartupInfo { Cb = Marshal.SizeOf<StartupInfo>() };'
+                '            if (!CreateProcessWithTokenW(restrictedToken, 0, filePath, command, CreateUnicodeEnvironment | CreateNoWindow, IntPtr.Zero, workingDirectory, ref startup, out process)) ThrowLast("CreateProcessWithTokenW");'
+                '            uint wait = WaitForSingleObject(process.Process, checked((uint)Math.Min((long)timeoutSeconds * 1000L, uint.MaxValue)));'
+                '            if (wait == WaitTimeout) { TerminateProcess(process.Process, 124); WaitForSingleObject(process.Process, 30000); return 124; }'
+                '            if (wait != WaitObject0) ThrowLast("WaitForSingleObject");'
+                '            if (!GetExitCodeProcess(process.Process, out uint exitCode)) ThrowLast("GetExitCodeProcess");'
+                '            return unchecked((int)exitCode);'
+                '        }'
+                '        finally'
+                '        {'
+                '            if (process.Thread != IntPtr.Zero) CloseHandle(process.Thread);'
+                '            if (process.Process != IntPtr.Zero) CloseHandle(process.Process);'
+                '            if (sidArray != IntPtr.Zero) Marshal.FreeHGlobal(sidArray);'
+                '            if (adminSid != IntPtr.Zero) LocalFree(adminSid);'
+                '            if (restrictedToken != IntPtr.Zero) CloseHandle(restrictedToken);'
+                '            if (sourceToken != IntPtr.Zero) CloseHandle(sourceToken);'
+                '        }'
+                '    }'
+                '}'
+              ) -join [Environment]::NewLine)
+            }
+            $restrictedArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ordinaryScript)
+            $restrictedProcessExitCode = [EcsPhase1RestrictedProcess]::Run($phase1PowerShell, [string[]]$restrictedArgs, (Get-Location).Path, 3300)
+            if (Test-Path -LiteralPath $standardUserLog -PathType Leaf) {
+              Write-Output ('standard-user restricted-token process log:' + [Environment]::NewLine + (Get-Content -LiteralPath $standardUserLog -Raw))
+            }
+            $testExitCode = $restrictedProcessExitCode
           } catch {
             $testError = $_
           } finally {
+            if ($null -ne $standardUserLog -and -not (Test-Path -LiteralPath $standardUserLog -PathType Leaf)) {
+              $cleanupErrors += 'standard-user restricted-token process did not leave its required audit log'
+            }
             foreach ($cleanupTarget in @(
               [pscustomobject]@{ Label = 'sandbox'; Path = $sandboxRoot },
               [pscustomobject]@{ Label = 'corpus'; Path = $corpusRoot },
@@ -1034,7 +1421,7 @@ jobs:
             $postErrors += "Windows ECS frozen-tool integration failed with exit code $testExitCode"
           }
           if ($postErrors.Count -ne 0) { throw ($postErrors -join '; ') }
-          Write-Output "Windows ECS frozen-tool integration passed on Server ${{ matrix.server }}: ECS_TOOL_BIN was the read-only staged bundle; hostile PATH, sandbox, production probes, parsers, and ECS JSON were verified"
+          Write-Output "Windows ECS frozen-tool integration passed on Server ${{ matrix.server }}: a non-administrator standard-user token ran the ordinary-user gate, ecs.exe JSON workload, and six-tool production probes from the read-only staged ECS_TOOL_BIN; hostile PATH, sandbox, parser, cleanup, PATH, and HKCU evidence were verified"
 
   e2e-2022:
     name: E2E-2022

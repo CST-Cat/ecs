@@ -5,7 +5,6 @@ package probe
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -107,7 +106,7 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	assertWindowsReportJSON(t, results)
+	assertWindowsCLIReport(t, results)
 	if ctx.Err() != nil {
 		t.Fatalf("Windows frozen-tool integration context expired: %v", ctx.Err())
 	}
@@ -547,31 +546,103 @@ func windowsResultField(result model.Result, key string) string {
 	return ""
 }
 
-func assertWindowsReportJSON(t *testing.T, results []model.Result) {
+func assertWindowsCLIReport(t *testing.T, directResults []model.Result) {
 	t.Helper()
-	started := time.Unix(0, 0).UTC()
-	reportData := model.Report{
-		SchemaVersion: buildinfo.SchemaVersion,
-		Tool:          model.ToolInfo{Name: buildinfo.Name, Version: "windows-integration"},
-		Run: model.RunInfo{
-			ID: "windows-frozen-tools-integration", Profile: "standard", StartedAt: started,
-			CompletedAt: started.Add(time.Second), DurationMS: 1000, Exposure: "local",
-			Requested: []string{"zstd", "npb", "crypto", "memory", "disk"}, OutputFormats: []string{"json"},
-		},
-		Summary: model.Summary{Status: model.StatusOK, OK: len(results)},
-		Results: results,
+	reportPath := strings.TrimSpace(os.Getenv("ECS_WINDOWS_CLI_REPORT"))
+	if reportPath == "" {
+		t.Fatal("ECS_WINDOWS_CLI_REPORT must point to the JSON written by the real ecs.exe CLI")
 	}
-	content, err := report.JSON(reportData)
-	if err != nil || !json.Valid(content) {
-		t.Fatalf("production report.JSON() failed: err=%v valid=%t", err, json.Valid(content))
+	sandboxRoot := strings.TrimSpace(os.Getenv("ECS_WINDOWS_SANDBOX_ROOT"))
+	if sandboxRoot == "" {
+		t.Fatal("ECS_WINDOWS_SANDBOX_ROOT must identify the integration sandbox")
 	}
-	parsed, err := report.ParseJSON(content)
+	if !pathIsUnderWindowsRoot(reportPath, sandboxRoot) || pathIsUnderWindowsRoot(reportPath, mustIntegrationWorkingDirectory(t)) {
+		t.Fatalf("CLI report escaped its sandbox: report=%q sandbox=%q worktree=%q", reportPath, sandboxRoot, mustIntegrationWorkingDirectory(t))
+	}
+	info, err := os.Stat(reportPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		t.Fatalf("real ecs.exe did not write a regular JSON report: %q (%v)", reportPath, err)
+	}
+	outputEntries, err := os.ReadDir(filepath.Dir(reportPath))
 	if err != nil {
-		t.Fatalf("production report.ParseJSON() failed: %v", err)
+		t.Fatalf("read CLI report directory: %v", err)
 	}
-	if parsed.SchemaVersion != buildinfo.SchemaVersion || len(parsed.Results) != len(results) {
-		t.Fatalf("production ECS JSON round trip = schema:%q results:%d, want schema:%q results:%d", parsed.SchemaVersion, len(parsed.Results), buildinfo.SchemaVersion, len(results))
+	if len(outputEntries) != 1 || outputEntries[0].Name() != filepath.Base(reportPath) {
+		t.Fatalf("CLI output directory contains unexpected files: %v", outputEntries)
 	}
+	parsed, err := report.LoadJSON(reportPath)
+	if err != nil {
+		t.Fatalf("production report.LoadJSON() failed for real CLI output: %v", err)
+	}
+	if parsed.SchemaVersion != buildinfo.SchemaVersion {
+		t.Fatalf("real CLI report schema=%q, want %q", parsed.SchemaVersion, buildinfo.SchemaVersion)
+	}
+	if parsed.Summary.Status != model.StatusOK || parsed.Summary.OK != 5 || parsed.Summary.Warnings != 0 || parsed.Summary.Errors != 0 || parsed.Summary.Skipped != 0 {
+		t.Fatalf("real CLI report summary=%+v, want five OK results", parsed.Summary)
+	}
+	wantIDs := []string{"zstd", "npb", "memory", "crypto", "disk"}
+	if len(parsed.Results) != len(wantIDs) {
+		t.Fatalf("real CLI report result count=%d, want %d", len(parsed.Results), len(wantIDs))
+	}
+	got := make(map[string]model.Result, len(parsed.Results))
+	for _, result := range parsed.Results {
+		got[result.ID] = result
+	}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("real CLI report result count=%d, want %d: %+v", len(got), len(wantIDs), parsed.Results)
+	}
+	directIDs := make(map[string]bool, len(directResults))
+	for _, result := range directResults {
+		directIDs[result.ID] = true
+	}
+	for _, id := range wantIDs {
+		result, ok := got[id]
+		if !ok {
+			t.Fatalf("real CLI report omitted result %q", id)
+		}
+		if !directIDs[id] {
+			t.Fatalf("real CLI report result %q is not covered by the direct production integration set", id)
+		}
+		if result.Status != model.StatusOK || result.Evidence == nil || result.Evidence.DerivedGrade() != model.EvidenceComplete {
+			t.Fatalf("real CLI result %q status/evidence=%s/%+v, want OK/complete", id, result.Status, result.Evidence)
+		}
+		if result.Methodology.Kind == "" || len(result.Measurements) == 0 {
+			t.Fatalf("real CLI result %q lacks methodology or measurements: %+v", id, result)
+		}
+	}
+	if !containsString(parsed.Run.OutputFormats, "json") {
+		t.Fatalf("real CLI report output formats=%v, want json", parsed.Run.OutputFormats)
+	}
+	if parsed.Run.Profile != config.ProfileStandard {
+		t.Fatalf("real CLI report profile=%q, want %q", parsed.Run.Profile, config.ProfileStandard)
+	}
+	cliDiskPath := strings.TrimSpace(os.Getenv("ECS_WINDOWS_CLI_DISK_PATH"))
+	if cliDiskPath == "" || !pathIsUnderWindowsRoot(cliDiskPath, sandboxRoot) || !strings.Contains(cliDiskPath, " ") {
+		t.Fatalf("real CLI disk path=%q is not an existing sandbox path with spaces", cliDiskPath)
+	}
+	assertWindowsZstdResult(t, got["zstd"], mustWindowsCLIReportCorpus(t))
+	assertWindowsNPBResult(t, got["npb"])
+	assertWindowsOpenSSLResult(t, got["crypto"])
+	assertWindowsSTREAMResult(t, got["memory"])
+	assertWindowsFIOResult(t, got["disk"], cliDiskPath)
+}
+
+func mustWindowsCLIReportCorpus(t *testing.T) string {
+	t.Helper()
+	corpus := strings.TrimSpace(os.Getenv("ECS_ZSTD_CORPUS"))
+	if corpus == "" {
+		t.Fatal("ECS_ZSTD_CORPUS must remain set while validating the real CLI report")
+	}
+	return corpus
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 type integrationFileFact struct {
