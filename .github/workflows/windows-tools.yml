@@ -825,6 +825,8 @@ jobs:
 
       - name: Windows ECS frozen-tool integration
         shell: pwsh
+        env:
+          ECS_MATRIX_SERVER: ${{ matrix.server }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
@@ -913,7 +915,7 @@ jobs:
           $corpusRoot = $null
           $sandboxRoot = $null
           $stageArtifactRoot = Join-Path $env:RUNNER_TEMP 'ecs-windows-tools-stage-artifact'
-          $gateInputsRoot = Join-Path $env:RUNNER_TEMP ('ecs-windows-tools-gate-inputs-' + '${{ matrix.server }}')
+          $gateInputsRoot = Join-Path $env:RUNNER_TEMP ('ecs-windows-tools-gate-inputs-' + $env:ECS_MATRIX_SERVER)
           $pathBeforeWorkload = $null
           $testExitCode = 1
           $testError = $null
@@ -1421,7 +1423,7 @@ jobs:
             $postErrors += "Windows ECS frozen-tool integration failed with exit code $testExitCode"
           }
           if ($postErrors.Count -ne 0) { throw ($postErrors -join '; ') }
-          Write-Output "Windows ECS frozen-tool integration passed on Server ${{ matrix.server }}: a non-administrator standard-user token ran the ordinary-user gate, ecs.exe JSON workload, and six-tool production probes from the read-only staged ECS_TOOL_BIN; hostile PATH, sandbox, parser, cleanup, PATH, and HKCU evidence were verified"
+          Write-Output "Windows ECS frozen-tool integration passed on Server $env:ECS_MATRIX_SERVER: a non-administrator standard-user token ran the ordinary-user gate, ecs.exe JSON workload, and six-tool production probes from the read-only staged ECS_TOOL_BIN; hostile PATH, sandbox, parser, cleanup, PATH, and HKCU evidence were verified"
 
   e2e-2022:
     name: E2E-2022
