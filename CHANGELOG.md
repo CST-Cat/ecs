@@ -1,10 +1,10 @@
 # 更新日志 / Changelog
 
 本文件依据 Git tag 及其之间的实际提交历史整理，记录 `ecs` 从首个公开版本
-`v0.1.0` 到当前版本 `v0.8.4` 的主要变化。
+`v0.1.0` 到当前版本 `v0.8.5` 的主要变化。
 
 This file follows the actual Git tag and commit history from `v0.1.0` through
-the current `v0.8.4` release.
+the current `v0.8.5` release.
 
 - 每个版本以对应 Git tag 的日期为准；版本区间内的功能提交、修复提交和必要的合并提交一并归纳。
 - 重复的“按最新提交重建评分基线”CI 提交不逐条重复罗列，但其对基线、排行榜参考和发布校验的影响会记录在对应版本中。
@@ -15,13 +15,24 @@ the current `v0.8.4` release.
 
 ### 中文
 
-- Windows `windows_amd64` Bundle 从六工具扩展为七工具，加入官方 NextTrace Tiny v1.7.1 预编译资产；锁定 SHA-256 为 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`，Bundle 版本由 `bundle-v1.6` 递增为 `bundle-v1.7`，不提升 `ecs` 软件版本。
-- Windows route/backtrace 通过生产 `ecs.exe` 路径接入 canonical NextTrace 参数、`nexttrace-json-v1` adapter 与 production parser；最终 Server 2022/2025 runner 对 IPv4 必须真实执行，具备 global IPv6/default route 时执行 IPv6，否则明确报告 capability missing，并保留 engine/version、target、family、hops 与工具来源验证。
 
 ### English
 
-- The Windows `windows_amd64` Bundle grows from six to seven tools by adding the official NextTrace Tiny v1.7.1 prebuilt; its locked SHA-256 is `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`. The Bundle version increments from `bundle-v1.6` to `bundle-v1.7`; the `ecs` software version does not change.
-- Windows route/backtrace are wired through the production `ecs.exe` path with the canonical NextTrace arguments, `nexttrace-json-v1` adapter and production parser. The final Server 2022/2025 runners must execute a genuine IPv4 gate, run IPv6 when global IPv6/default-route capability exists, otherwise report capability missing explicitly, and verify engine/version, target, family, hops and tool provenance.
+## 0.8.5 — 2026-09-17
+
+### 中文
+
+- Windows `windows_amd64` Bundle 最终固定为七工具：`zstd`、NPB EP、NPB FT、OpenSSL、STREAM、`fio` 和官方 NextTrace Tiny v1.7.1 预编译资产 `nexttrace-tiny_windows_amd64.exe`。资产 SHA-256 锁定为 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`，构建、校验与打包保持官方字节不变；Bundle 从 `bundle-v1.7` 递增为 `bundle-v1.8`，软件版本从 `v0.8.4` 递增为 `v0.8.5`。
+- Windows `route` / `backtrace` 通过生产 `ecs.exe` 路径接入与 Linux 共用的 canonical NextTrace 参数、`nexttrace-json-v1` adapter 和 production parser；Windows Server 2022/2025 的 IPv4 gate 均真实执行，有 global IPv6 地址和 default route 时执行 IPv6，否则明确记录 capability missing。生产 route/backtrace 不使用 `tracert.exe` 或 host `PATH` fallback，并保留 engine、version、adapter、target、family、hops 与工具来源等 provenance。
+- capability-aware CI 严格区分可用和不可测试：`not-testable` 只有在 native `tracert` 与 staged NextTrace 都成功执行并解析、但都没有合法公网 responding hop 时成立，并强制 `live_network_not_proven=true`；IPv6 能力不存在时记录 `ipv6-unavailable`，不伪造 probe facts。两 runner 的 JSON capability evidence、原始 stdout/stderr 以及 route/backtrace 报告均作为 diagnostics 保留。
+- 完整 Windows Server 2022/2025 Actions 彩排已通过，覆盖 lock/check、native build/verify、NextTrace capability-aware network gate、package、两个 runner 的 artifact E2E 与 route/backtrace bootstrap assertions；这仍是发布准备彩排，不代表已创建正式 Release 或完成用户下载验证。
+
+### English
+
+- The Windows `windows_amd64` Bundle is finalized at seven tools: `zstd`, NPB EP, NPB FT, OpenSSL, STREAM, `fio`, and the official NextTrace Tiny v1.7.1 prebuilt asset `nexttrace-tiny_windows_amd64.exe`. Its SHA-256 is pinned to `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`, and BUILD, VERIFY, and packaging preserve the official bytes; the Bundle increments from `bundle-v1.7` to `bundle-v1.8`, while the software version increments from `v0.8.4` to `v0.8.5`.
+- Windows `route` / `backtrace` are wired through the production `ecs.exe` path with the Linux-shared canonical NextTrace arguments, `nexttrace-json-v1` adapter, and production parser. The Windows Server 2022/2025 IPv4 gates both execute genuinely; IPv6 runs when a global IPv6 address and default route exist, otherwise capability missing is recorded explicitly. Production route/backtrace use neither `tracert.exe` nor a host `PATH` fallback, and retain engine, version, adapter, target, family, hop, and tool-provenance evidence.
+- Capability-aware CI strictly distinguishes available from not-testable: `not-testable` is allowed only when both native `tracert` and staged NextTrace execute and parse successfully but neither observes a legal public responding hop, with `live_network_not_proven=true`; unavailable IPv6 is recorded as `ipv6-unavailable` without fabricated probe facts. JSON capability evidence, raw stdout/stderr, and route/backtrace reports from both runners are retained as diagnostics.
+- The complete Windows Server 2022/2025 Actions rehearsal passed, covering lock/check, native build/verify, the NextTrace capability-aware network gate, package, artifact E2E on both runners, and route/backtrace bootstrap assertions; this remains release-preparation rehearsal evidence, not a formal Release or user-download validation.
 
 ## 0.8.4 — 2026-09-15
 

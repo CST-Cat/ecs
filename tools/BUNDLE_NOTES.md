@@ -9,6 +9,22 @@ This file is the source of bundle release notes (bundle's own place): bump
 bilingual subsections, and `scripts/release/publish.sh --kind bundle` reads
 the newest section.
 
+## bundle-v1.8
+
+### 中文
+
+- Windows Server 2022+ x64 的 `windows_amd64` Bundle 最终固定为七工具：`zstd`、NPB EP、NPB FT、OpenSSL、STREAM、`fio` 和官方 NextTrace Tiny v1.7.1 预编译资产 `nexttrace-tiny_windows_amd64.exe`。
+- NextTrace 官方资产固定 SHA-256 为 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`；构建、VERIFY、打包和 artifact E2E 均校验来源与摘要并保持官方字节不变，manifest、许可证文件与原有六项 benchmark contract 继续保留。
+- Windows `route` / `backtrace` 通过生产 `ecs.exe` 路径使用与 Linux 共用的 canonical NextTrace 参数、`nexttrace-json-v1` adapter 和 production parser。Server 2022 与 2025 的 IPv4 gate 都真实执行；存在 global IPv6 地址和 default route 时执行 IPv6，否则明确记录 capability missing。生产 route/backtrace 不使用 `tracert.exe` 或 host `PATH` fallback，并保留 engine、version、adapter、target、family、hops 与工具来源证据。
+- capability-aware CI 严格校验 `not-testable` 证据：只有 native `tracert` 与 staged NextTrace 都成功执行并解析、但都没有合法公网 responding hop 时才允许该结论，并强制 `live_network_not_proven=true`；IPv6 能力缺失使用 `ipv6-unavailable` 且不写入虚假的 probe facts。完整 Windows Server 2022/2025 Actions 彩排（lock/check、build/verify、网络 gate、package、artifact E2E 与 route/backtrace bootstrap）已通过；两 runner 的 JSON capability evidence、原始 stdout/stderr 和 route/backtrace 报告均保留为 diagnostics。
+
+### English
+
+- The Windows Server 2022+ x64 `windows_amd64` Bundle is finalized at seven tools: `zstd`, NPB EP, NPB FT, OpenSSL, STREAM, `fio`, and the official NextTrace Tiny v1.7.1 prebuilt asset `nexttrace-tiny_windows_amd64.exe`.
+- The official NextTrace asset is pinned to SHA-256 `16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b`; BUILD, VERIFY, packaging, and artifact E2E all verify its source and digest while preserving the official bytes, and the manifest, license files, and existing six benchmark contracts remain intact.
+- Windows `route` / `backtrace` use the production `ecs.exe` path with the Linux-shared canonical NextTrace arguments, `nexttrace-json-v1` adapter, and production parser. The Server 2022 and 2025 IPv4 gates both execute genuinely; IPv6 runs when a global IPv6 address and default route exist, otherwise capability missing is recorded explicitly. Production route/backtrace use neither `tracert.exe` nor a host `PATH` fallback, and retain engine, version, adapter, target, family, hop, and tool-provenance evidence.
+- Capability-aware CI strictly validates `not-testable` evidence: the result is allowed only when both native `tracert` and staged NextTrace execute and parse successfully but neither observes a legal public responding hop, with `live_network_not_proven=true`; unavailable IPv6 is recorded as `ipv6-unavailable` without fabricated probe facts. The complete Windows Server 2022/2025 Actions rehearsal—lock/check, build/verify, network gates, package, artifact E2E, and route/backtrace bootstrap—passed; JSON capability evidence, raw stdout/stderr, and route/backtrace reports from both runners are retained as diagnostics.
+
 ## bundle-v1.7
 
 ### 中文
