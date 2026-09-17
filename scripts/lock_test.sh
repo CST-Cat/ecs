@@ -201,6 +201,135 @@ for forbidden_report_assert_fact in tracert Test-NetConnection '|| true' 'contin
 	fi
 done
 
+# The capability helper is the only Windows path allowed to invoke native
+# tracert. Keep its probe, provenance, evidence, and fail-closed decisions
+# pinned here so a workflow or caller cannot silently weaken the helper.
+nexttrace_capability="$repo_root/scripts/ci/windows_nexttrace_capability.ps1"
+[[ -f "$nexttrace_capability" ]] || die "Windows NextTrace capability helper is missing"
+
+for required_nexttrace_capability_fact in \
+	'ecs.windows.nexttrace.capability/v1' \
+	'Get-EcsCanonicalNativeExecutablePath' \
+	'Resolve-EcsAbsolutePath' \
+	'[IO.Path]::IsPathRooted' \
+	'System32' \
+	'tracert.exe' \
+	'$tracertFull = Get-EcsCanonicalNativeExecutablePath' \
+	'-ExecutablePath $tracertFull' \
+	'IPv4' \
+	'IPv6' \
+	'CanonicalMaxHops = 12' \
+	'$familyName = if' \
+	'$familyFlag = if' \
+	'1.1.1.1' \
+	'2606:4700:4700::1111' \
+	'-4' \
+	'-6' \
+	'-d' \
+	'-h' \
+	'MaxHops' \
+	'--no-color' \
+	'--json' \
+	'-M' \
+	'--max-hops' \
+	'--queries' \
+	'--parallel-requests' \
+	'--timeout' \
+	"'--queries', '1'" \
+	"'--parallel-requests', '1'" \
+	"'--timeout', '1000'" \
+	'[Parameter(Mandatory)][string]$Target' \
+	'$nativeArguments = @' \
+	'$directArguments = @' \
+	'$Target)' \
+	'NextTracePath' \
+	'nexttrace-tiny.exe' \
+	'Get-FileHash' \
+	'ExpectedSha256' \
+	'nexttrace_sha256' \
+	'ConvertFrom-Json' \
+	'Hops' \
+	'Success' \
+	'raw_stdout_path' \
+	'raw_stderr_path' \
+	'evidence_path' \
+	'ConvertTo-Json' \
+	'Write-EcsUtf8Text' \
+	'temporaryEvidencePath' \
+	'Move-Item' \
+	"\$ErrorActionPreference = 'Stop'" \
+	'Set-StrictMode -Version Latest' \
+	'available' \
+	'not-testable' \
+	'live_network_not_proven' \
+	'Get-EcsCapabilityDecision' \
+	'$nativePublic = $native.PublicRespondingHops -gt 0' \
+	'$directPublic = $direct.PublicRespondingHops -gt 0' \
+	'if ($directPublic)' \
+	'if ($nativeResponded -and -not $directResponded)' \
+	'if ($nativePublic -and -not $directPublic)' \
+	"Decision = 'available'" \
+	"Decision = 'not-testable'" \
+	'LiveNetworkNotProven = $false' \
+	'LiveNetworkNotProven = $true' \
+	'Stop-EcsWindowsNextTraceCapability' \
+	'native tracert observed responding hops but direct staged NextTrace observed none' \
+	'native tracert observed a public responding hop but direct staged NextTrace observed no legal public responding hop' \
+	'both probes executed and parsed successfully but neither observed a legal public responding hop' \
+	'Parse-EcsNativeTracertOutput' \
+	'Parse-EcsNextTraceOutput' \
+	'native tracert wrote unexpected stderr despite a successful exit' \
+	'direct staged NextTrace wrote unexpected stderr despite a successful exit' \
+	'completed' \
+	'parsed' \
+	'nativeRun.ExitCode -ne 0' \
+	'directRun.ExitCode -ne 0' \
+	'exit 1'; do
+	grep -Fq -- "$required_nexttrace_capability_fact" "$nexttrace_capability" ||
+		die "Windows NextTrace capability helper is missing fact: $required_nexttrace_capability_fact"
+done
+
+# The helper receives the expected digest from the pinned production callers;
+# keep that caller-to-helper supply-chain fact tied to the official artifact.
+nexttrace_capability_sha256='16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+for capability_sha256_source in "$ECS_LOCK_FILE" "$nexttrace_gate" "$nexttrace_report_assert"; do
+	grep -Fq -- "$nexttrace_capability_sha256" "$capability_sha256_source" ||
+		die "Windows NextTrace capability caller is missing the pinned SHA-256: $capability_sha256_source"
+done
+grep -Fq -- 'ExpectedSha256 $NextTraceSHA256' "$nexttrace_gate" ||
+	die "Windows NextTrace gate must pass its pinned SHA-256 to the capability helper"
+grep -Fq -- 'ExpectedSha256 $ExpectedHash' "$nexttrace_report_assert" ||
+	die "Windows NextTrace report assertion must pass its pinned SHA-256 to the capability helper"
+
+for forbidden_nexttrace_capability_fact in \
+	'continue-on-error' \
+	'|| true' \
+	'fake tool' \
+	'fake binary' \
+	'host PATH fallback' \
+	'Get-Command tracert' \
+	'where.exe tracert' \
+	'Invoke-WebRequest' \
+	'Invoke-RestMethod' \
+	'Start-BitsTransfer' \
+	'DownloadString' \
+	'DownloadFile' \
+	'releases/latest' \
+	'latest/download' \
+	'ErrorAction SilentlyContinue' \
+	'localhost' \
+	'127.0.0.1'; do
+	if grep -Fqi -- "$forbidden_nexttrace_capability_fact" "$nexttrace_capability"; then
+		die "Windows NextTrace capability helper contains forbidden fallback/bypass: $forbidden_nexttrace_capability_fact"
+	fi
+done
+if grep -Eiq -- '\$env:[Pp][Aa][Tt][Hh]|[Pp][Aa][Tt][Hh][[:space:]]+fallback|fallback[[:space:]]+[Pp][Aa][Tt][Hh]' "$nexttrace_capability"; then
+	die "Windows NextTrace capability helper contains a host PATH fallback"
+fi
+if grep -Eiq -- '(^|[^[:alnum:]_])loopback([^[:alnum:]_]|$)|(^|[^[:alnum:]_])localhost([^[:alnum:]_]|$)|(^|[^0-9])127[.]0[.]0[.]1([^0-9]|$)|(^|[^0-9A-Fa-f]):[ ]*:1([^0-9A-Fa-f]|$)' "$nexttrace_capability"; then
+	die "Windows NextTrace capability helper uses a loopback/localhost target"
+fi
+
 grep -Fq -- '-CheckOrdinaryUser validates no-admin-operation only' "$windows_gate" ||
 	die "Windows package gate must report the no-admin-operation contract"
 grep -Fq -- 'ordinary-user token execution is not claimed' "$windows_gate" ||

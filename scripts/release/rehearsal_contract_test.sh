@@ -42,6 +42,21 @@ assert_exact_count() {
     die "$file must contain $expected lines with contract $needle, got $count"
 }
 
+assert_exact_file_line_count() {
+  local file=$1 expected_line=$2 expected=$3 count
+  count=$(AWK_EXPECTED="$expected_line" awk '
+    {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line == ENVIRON["AWK_EXPECTED"]) { count++ }
+    }
+    END { print count + 0 }
+  ' "$file")
+  [[ "$count" -eq "$expected" ]] ||
+    die "$file must contain $expected exact lines $expected_line, got $count"
+}
+
 get_section_bounds() {
   local file=$1 start_marker=$2 end_marker=$3
   local start_line end_line
@@ -112,9 +127,235 @@ assert_only_exact_line() {
   [[ -z "$violation" ]] || die "$file uses $needle outside its direct contract line: $violation"
 }
 
+assert_workflow_if_contract() {
+  local file=$1 violation
+  violation=$(awk '
+    /^[[:space:]]*if[[:space:]]*:/ {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      count++
+      if (line != "if: ${{ always() }}") {
+        print NR ":" $0
+        invalid=1
+      }
+    }
+    END {
+      if ((count + 0) != 4) {
+        print "if: line count=" (count + 0) "; expected exactly 4 diagnostics if lines"
+        invalid=1
+      }
+      if (invalid) {
+        exit 1
+      }
+    }
+  ' "$file" || true)
+  [[ -z "$violation" ]] || die "$file has a non-diagnostics workflow if contract: $violation"
+}
+
+get_workflow_step_bounds() {
+  local file=$1 step_marker=$2
+  local start_line end_line
+
+  start_line=$(AWK_MARKER="$step_marker" awk '
+    $0 == ENVIRON["AWK_MARKER"] {
+      count++
+      line=NR
+    }
+    END {
+      if ((count + 0) == 1) {
+        print line
+      }
+    }
+  ' "$file")
+  [[ -n "$start_line" ]] || die "$file must contain exactly one workflow step: $step_marker"
+
+  end_line=$(awk -v start="$start_line" '
+    NR > start && ($0 ~ /^      - / || $0 ~ /^  [A-Za-z0-9_-]+:[[:space:]]*$/) {
+      print NR
+      exit
+    }
+  ' "$file")
+  if [[ -z "$end_line" ]]; then
+    end_line=$(( $(wc -l < "$file") + 1 ))
+  fi
+
+  printf '%s %s\n' "$start_line" "$end_line"
+}
+
+assert_workflow_step_contains() {
+  local file=$1 step_marker=$2 needle=$3
+  local bounds start_line end_line
+  bounds=$(get_workflow_step_bounds "$file" "$step_marker")
+  read -r start_line end_line <<<"$bounds"
+  AWK_NEEDLE="$needle" awk -v start="$start_line" -v end="$end_line" \
+    'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { found=1; exit } END { exit !found }' \
+    "$file" || die "$file workflow step $step_marker missing contract: $needle"
+}
+
+assert_workflow_step_count() {
+  local file=$1 step_marker=$2 needle=$3 expected=$4
+  local bounds start_line end_line count
+  bounds=$(get_workflow_step_bounds "$file" "$step_marker")
+  read -r start_line end_line <<<"$bounds"
+  count=$(AWK_NEEDLE="$needle" awk -v start="$start_line" -v end="$end_line" \
+    'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { count++ } END { print count + 0 }' \
+    "$file")
+  [[ "$count" -eq "$expected" ]] ||
+    die "$file workflow step $step_marker must contain $expected lines with contract $needle, got $count"
+}
+
+assert_workflow_step_exact_line_count() {
+  local file=$1 step_marker=$2 expected_line=$3 expected=$4
+  local bounds start_line end_line count
+  bounds=$(get_workflow_step_bounds "$file" "$step_marker")
+  read -r start_line end_line <<<"$bounds"
+  count=$(AWK_EXPECTED="$expected_line" awk -v start="$start_line" -v end="$end_line" '
+    NR > start && NR < end {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line == ENVIRON["AWK_EXPECTED"]) { count++ }
+    }
+    END { print count + 0 }
+  ' "$file")
+  [[ "$count" -eq "$expected" ]] ||
+    die "$file workflow step $step_marker must contain $expected exact lines $expected_line, got $count"
+}
+
+assert_workflow_step_ordered() {
+  local file=$1 step_marker=$2 marker
+  local bounds start_line end_line previous line
+  shift 2
+  bounds=$(get_workflow_step_bounds "$file" "$step_marker")
+  read -r start_line end_line <<<"$bounds"
+  previous=$start_line
+  for marker in "$@"; do
+    line=$(AWK_NEEDLE="$marker" awk -v start="$previous" -v end="$end_line" \
+      'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { print NR; exit }' "$file")
+    [[ -n "$line" ]] || die "$file workflow step $step_marker missing ordered contract: $marker"
+    previous=$line
+  done
+}
+
+assert_workflow_step_suffix_only_closure() {
+  local file=$1 step_marker=$2 final_marker=$3
+  local bounds start_line end_line final_line violation
+  bounds=$(get_workflow_step_bounds "$file" "$step_marker")
+  read -r start_line end_line <<<"$bounds"
+  final_line=$(AWK_NEEDLE="$final_marker" awk -v start="$start_line" -v end="$end_line" \
+    'NR > start && NR < end && index($0, ENVIRON["AWK_NEEDLE"]) { print NR; exit }' "$file")
+  [[ -n "$final_line" ]] || die "$file workflow step $step_marker missing final action: $final_marker"
+  violation=$(awk -v start="$final_line" -v end="$end_line" '
+    NR > start && NR < end {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line != "" && line != "}") {
+        print NR ":" $0
+        exit
+      }
+    }
+  ' "$file")
+  [[ -z "$violation" ]] ||
+    die "$file workflow step $step_marker has workflow actions after its required final action: $violation"
+}
+
+assert_diagnostics_upload_step_contract() {
+  local file=$1 job_start=$2 job_end=$3 core_end_marker=$4 step_marker=$5 artifact_name=$6
+  local path
+  shift 6
+
+  assert_ordered_in_section "$file" "$job_start" "$job_end" \
+    "$core_end_marker" "$step_marker"
+  assert_workflow_step_exact_line_count "$file" "$step_marker" 'if: ${{ always() }}' 1
+  assert_workflow_step_exact_line_count "$file" "$step_marker" \
+    'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4' 1
+  assert_workflow_step_exact_line_count "$file" "$step_marker" 'if-no-files-found: warn' 1
+  assert_workflow_step_exact_line_count "$file" "$step_marker" 'retention-days: 7' 1
+  assert_exact_count "$file" "name: $artifact_name" 1
+  assert_workflow_step_exact_line_count "$file" "$step_marker" "name: $artifact_name" 1
+  assert_workflow_step_ordered "$file" "$step_marker" \
+    'if: ${{ always() }}' \
+    'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4' \
+    'with:' \
+    "name: $artifact_name" \
+    'path: |' \
+    'if-no-files-found: warn' \
+    'retention-days: 7'
+
+  for path in "$@"; do
+    assert_workflow_step_exact_line_count "$file" "$step_marker" "$path" 1
+  done
+}
+
+assert_diagnostics_upload_contract() {
+  local file=$1
+  local uploader='actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4'
+
+  assert_workflow_if_contract "$file"
+  assert_exact_count "$file" 'name: ecs-windows-tools-gate-inputs-2022' 2
+  assert_exact_count "$file" 'name: ecs-windows-tools-gate-inputs-2025' 2
+  assert_ordered_in_section "$file" \
+    '  verify-2022:' '  verify-2025:' \
+    "      - name: VERIFY-2022 NextTrace canonical network gate" \
+    "      - uses: $uploader" \
+    '          name: ecs-windows-tools-gate-inputs-2022' \
+    '          path: .ci/windows-tools-gate-inputs' \
+    '          if-no-files-found: error' \
+    '          retention-days: 7' \
+    '      - name: Upload VERIFY-2022 NextTrace diagnostics'
+  assert_ordered_in_section "$file" \
+    '  verify-2025:' '  package:' \
+    "      - name: VERIFY-2025 NextTrace canonical network gate" \
+    "      - uses: $uploader" \
+    '          name: ecs-windows-tools-gate-inputs-2025' \
+    '          path: .ci/windows-tools-gate-inputs' \
+    '          if-no-files-found: error' \
+    '          retention-days: 7' \
+    '      - name: Upload VERIFY-2025 NextTrace diagnostics'
+
+  assert_diagnostics_upload_step_contract "$file" \
+    '  verify-2022:' '  verify-2025:' \
+    '          name: ecs-windows-tools-gate-inputs-2022' \
+    '      - name: Upload VERIFY-2022 NextTrace diagnostics' \
+    'ecs-windows-nexttrace-diagnostics-verify-2022' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json.raw-*' \
+    '${{ runner.temp }}/ecs-nexttrace-verify-2022'
+  assert_diagnostics_upload_step_contract "$file" \
+    '  verify-2025:' '  package:' \
+    '          name: ecs-windows-tools-gate-inputs-2025' \
+    '      - name: Upload VERIFY-2025 NextTrace diagnostics' \
+    'ecs-windows-nexttrace-diagnostics-verify-2025' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json.raw-*' \
+    '${{ runner.temp }}/ecs-nexttrace-verify-2025'
+  assert_diagnostics_upload_step_contract "$file" \
+    '  e2e-2022:' '  e2e-2025:' \
+    'throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '\''; '\''))' \
+    '      - name: Upload E2E-2022 NextTrace diagnostics' \
+    'ecs-windows-nexttrace-diagnostics-e2e-2022' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json.raw-*' \
+    '${{ runner.temp }}/ecs-bootstrap-report-2022' \
+    '${{ runner.temp }}/ecs-bootstrap-route-report-2022' \
+    '${{ runner.temp }}/ecs-bootstrap-backtrace-report-2022'
+  assert_diagnostics_upload_step_contract "$file" \
+    '  e2e-2025:' '' \
+    'throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '\''; '\''))' \
+    '      - name: Upload E2E-2025 NextTrace diagnostics' \
+    'ecs-windows-nexttrace-diagnostics-e2e-2025' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json' \
+    '${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json.raw-*' \
+    '${{ runner.temp }}/ecs-bootstrap-report-2025' \
+    '${{ runner.temp }}/ecs-bootstrap-route-report-2025' \
+    '${{ runner.temp }}/ecs-bootstrap-backtrace-report-2025'
+}
+
 assert_no_core_gate_bypass() {
   local file=$1
-  assert_absent_regex "$file" '^[[:space:]]*(if|continue-on-error|skipped)[[:space:]]*:'
+  assert_workflow_if_contract "$file"
+  assert_absent_regex "$file" '^[[:space:]]*(continue-on-error|skipped)[[:space:]]*:'
   assert_absent_regex "$file" '^[[:space:]]*condition[[:space:]]*:'
   assert_absent_regex "$file" 'skipped'
   assert_absent_regex "$file" '^[[:space:]]*if[[:space:]]*[(][^[:cntrl:]]*(skip|skipped)'
@@ -174,6 +415,37 @@ assert_e2e_bootstrap_contract() {
     "if (\$zstdResults.Count -ne 1 -or [string]\$zstdResults[0].status -eq 'error') { throw 'run.ps1 did not execute the only required zstd tool' }"
   assert_section_count "$windows" "$start_marker" "$end_marker" \
     'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath' 2
+  assert_section_count "$windows" "$start_marker" "$end_marker" "$nexttrace_capability" 1
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if ([IO.Path]::GetDirectoryName($capabilityPath) -ine $runnerTemp)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if (Test-Path -LiteralPath $capabilityPath)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $nextTraceStage -Force'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$nextTracePath = [IO.Path]::GetFullPath((Join-Path $nextTraceStage'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "\$nextTracePath = [IO.Path]::GetFullPath((Join-Path \$nextTraceStage 'bin\\nexttrace-tiny.exe'))"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if ([IO.Path]::GetFileName(\$nextTracePath) -cne 'nexttrace-tiny.exe')"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if ($nextTraceSha256 -cne $expectedNextTraceSha256)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilityExitCode = $LASTEXITCODE'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if ($capabilityExitCode -ne 0)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf))'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     '$routeTarget4 = '\''1.1.1.1'\'''
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
@@ -198,8 +470,15 @@ assert_e2e_bootstrap_contract() {
     "if (\$machinePathBaseline -cne \$machinePathAfterInstall -or \$userPathBaseline -cne \$userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }"
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "if (\$machinePathBaseline -cne \$machinePathAfterVersion -or \$userPathBaseline -cne \$userPathAfterVersion) { throw 'installed ecs.exe --version changed the Machine or User PATH' }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4'
 
   assert_ordered_in_section "$windows" "$start_marker" "$end_marker" \
+    '$icmpPrerequisite -Action Setup -Label "E2E-$label"' \
+    '$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)' \
+    '$capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp' \
     '$commitFile = Get-ArtifactFile' \
     'if ((Get-Content -Raw -LiteralPath $commitFile.FullName).Trim() -cne [string]$env:GITHUB_SHA)' \
     'bootstrap artifact does not identify the current workflow commit' \
@@ -211,6 +490,17 @@ assert_e2e_bootstrap_contract() {
     'Assert-ArtifactChecksum -ChecksumFile $mainChecksums' \
     'Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive' \
     'Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive' \
+    '$nextTraceStage = [IO.Path]::GetFullPath((Join-Path $runnerTemp' \
+    'Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $nextTraceStage -Force' \
+    '$nextTracePath = [IO.Path]::GetFullPath((Join-Path $nextTraceStage' \
+    "if ([IO.Path]::GetFileName(\$nextTracePath) -cne 'nexttrace-tiny.exe')" \
+    "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'" \
+    '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()' \
+    'if ($nextTraceSha256 -cne $expectedNextTraceSha256)' \
+    "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath" \
+    '$capabilityExitCode = $LASTEXITCODE' \
+    'if ($capabilityExitCode -ne 0)' \
+    'if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf))' \
     '[IO.Compression.ZipFile]::OpenRead' \
     "\$expectedMainMembers = @('ecs.exe', 'LICENSE', 'NOTICE', 'README.md', 'README_EN.md', 'SECURITY.md', 'THIRD_PARTY.md')" \
     'if ((@($mainMembers | Sort-Object) -join "`n") -cne (@($expectedMainMembers | Sort-Object) -join "`n"))' \
@@ -248,13 +538,13 @@ assert_e2e_bootstrap_contract() {
     '$runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color' \
     'if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }' \
     '$routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '\''*.json'\''' \
-    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4' \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath' \
     'if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }' \
     '$backtraceTarget4 = '\''1.1.1.1'\''' \
     '$runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color' \
     'if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }' \
     '$backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '\''*.json'\''' \
-    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4' \
+    'scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath' \
     'if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }' \
     '$runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter '\''ecs-run-*'\'' | ForEach-Object { $_.FullName })' \
     'run.ps1 left private staging behind' \
@@ -293,6 +583,73 @@ assert_e2e_bootstrap_contract() {
     '$runWorkAfterFinal = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter '\''ecs-run-*'\'' | ForEach-Object { $_.FullName })' \
     'private staging remains:' \
     'throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '\''; '\''))'
+
+  assert_section_count "$windows" "$start_marker" "$end_marker" \
+    '-CapabilityPath $capabilityPath -NextTracePath $nextTracePath' 2
+  assert_workflow_step_suffix_only_closure "$windows" "$start_marker" \
+    'throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '\''; '\''))'
+}
+
+assert_verify_nexttrace_contract() {
+  local start_marker=$1 end_marker=$2 label=$3 output_root=$4
+
+  assert_section_count "$windows" "$start_marker" "$end_marker" "$nexttrace_capability" 1
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '[guid]::NewGuid().ToString('
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "\$stageItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse)"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$nextTracePath = [IO.Path]::GetFullPath((Join-Path $stageBin'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "\$nextTracePath = [IO.Path]::GetFullPath((Join-Path \$stageBin 'nexttrace-tiny.exe'))"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf))'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if ($nextTraceSha256 -cne $expectedNextTraceSha256)'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilityExitCode = $LASTEXITCODE'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (\$capabilityExitCode -ne 0) { throw \"$label NextTrace capability probe failed with exit code \$capabilityExitCode\" }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "if (-not (Test-Path -LiteralPath \$capabilityPath -PathType Leaf)) { throw \"$label NextTrace capability evidence is missing: \$capabilityPath\" }"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "scripts/ci/windows_nexttrace_gate.ps1 -Label '$label'"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    "-OutputRoot (Join-Path \$env:RUNNER_TEMP '$output_root')"
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '-CapabilityPath $capabilityPath'
+
+  assert_ordered_in_section "$windows" "$start_marker" "$end_marker" \
+    'try {' \
+    "\$icmpPrerequisite -Action Setup -Label '$label'" \
+    '$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)' \
+    '$capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp' \
+    '$stageItems = @(Get-ChildItem -LiteralPath' \
+    '$nextTracePath = [IO.Path]::GetFullPath((Join-Path $stageBin' \
+    "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'" \
+    '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()' \
+    'if ($nextTraceSha256 -cne $expectedNextTraceSha256)' \
+    "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath" \
+    '$capabilityExitCode = $LASTEXITCODE' \
+    'if ($capabilityExitCode -ne 0)' \
+    'if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf))' \
+    "scripts/ci/windows_nexttrace_gate.ps1 -Label '$label' -EcsPath \$ecsPath -ToolBin \$stageBin -OutputRoot (Join-Path \$env:RUNNER_TEMP '$output_root') -CapabilityPath \$capabilityPath" \
+    'finally {' \
+    "\$icmpPrerequisite -Action Cleanup -Label '$label'" \
+    "if (-not \$?) { throw '$label runner ICMP prerequisite cleanup failed' }"
+  assert_section_count "$windows" "$start_marker" "$end_marker" 'finally {' 1
+  assert_workflow_step_suffix_only_closure "$windows" "$start_marker" \
+    "if (-not \$?) { throw '$label runner ICMP prerequisite cleanup failed' }"
 }
 
 assert_no_trusted_root_mutation() {
@@ -395,6 +752,7 @@ bundle=.github/workflows/bundle-release.yml
 windows=.github/workflows/windows-tools.yml
 nexttrace_gate=scripts/ci/windows_nexttrace_gate.ps1
 nexttrace_report_assert=scripts/ci/windows_nexttrace_report_assert.ps1
+nexttrace_capability=scripts/ci/windows_nexttrace_capability.ps1
 icmp_prerequisite=scripts/ci/windows_icmp_prerequisite.ps1
 sdk=.github/workflows/freebsd-sdk-release.yml
 freeze=scripts/release/freeze.sh
@@ -433,15 +791,23 @@ assert_contains "$windows" "needs: lock-check"
 assert_contains "$windows" "needs: build"
 assert_contains "$windows" "needs: [verify-2022, verify-2025]"
 assert_contains "$windows" "needs: [package, verify-2022]"
+assert_contains "$windows" "needs: [package, verify-2025]"
+assert_exact_file_line_count "$windows" "needs: lock-check" 1
+assert_exact_file_line_count "$windows" "needs: build" 2
+assert_exact_file_line_count "$windows" "needs: [verify-2022, verify-2025]" 2
+assert_exact_file_line_count "$windows" "needs: [package, verify-2022]" 1
+assert_exact_file_line_count "$windows" "needs: [package, verify-2025]" 1
 assert_contains "$windows" "runs-on: windows-2022"
 assert_contains "$windows" "runs-on: windows-2025"
 assert_contains "$windows" "scripts/build_tools_windows.ps1"
 assert_contains "$windows" "scripts/ci/windows_tools_gate.ps1"
 assert_contains "$windows" "scripts/ci/windows_nexttrace_gate.ps1"
 assert_contains "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1"
+assert_contains "$windows" "$nexttrace_capability"
 assert_contains "$windows" "scripts/ci/windows_icmp_prerequisite.ps1"
 assert_exact_count "$windows" "scripts/ci/windows_nexttrace_gate.ps1" 3
 assert_exact_count "$windows" "scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath" 4
+assert_exact_count "$windows" "$nexttrace_capability" 4
 assert_exact_count "$windows" "scripts/ci/windows_icmp_prerequisite.ps1" 5
 assert_exact_count "$windows" '-Action Setup' 4
 assert_exact_count "$windows" '-Action Cleanup' 4
@@ -529,7 +895,11 @@ assert_contains "$windows" "ECS_TOOL_BIN"
 assert_contains "$windows" "LOCALAPPDATA"
 assert_contains "$windows" "actions/download-artifact"
 [[ -f "$nexttrace_gate" ]] || die "$nexttrace_gate is missing"
+[[ -f "$nexttrace_capability" ]] || die "$nexttrace_capability is missing"
 [[ -f "$icmp_prerequisite" ]] || die "$icmp_prerequisite is missing"
+assert_contains "$nexttrace_capability" '[int]$MaxHops = 12'
+assert_contains "$nexttrace_capability" '$CanonicalMaxHops = 12'
+assert_contains "$nexttrace_capability" '$MaxHops -ne $CanonicalMaxHops'
 for required_nexttrace_gate_fact in \
   "ECS_TOOL_BIN" \
   "plan --lang en --only route" \
@@ -692,6 +1062,16 @@ assert_section_count "$windows" \
   "      - name: VERIFY-2025 NextTrace canonical network gate" \
   '  package:' \
   'finally {' 1
+assert_verify_nexttrace_contract \
+  "      - name: VERIFY-2022 NextTrace canonical network gate" \
+  '  verify-2025:' \
+  'VERIFY-2022' \
+  'ecs-nexttrace-verify-2022'
+assert_verify_nexttrace_contract \
+  "      - name: VERIFY-2025 NextTrace canonical network gate" \
+  '  package:' \
+  'VERIFY-2025' \
+  'ecs-nexttrace-verify-2025'
 assert_ordered_in_section "$windows" \
   "      - name: E2E-2022 current ZIP and bootstrap scripts" \
   '  e2e-2025:' \
@@ -739,6 +1119,7 @@ assert_e2e_bootstrap_contract \
 assert_e2e_bootstrap_contract \
   "      - name: E2E-2025 current ZIP and bootstrap scripts" \
   ''
+assert_diagnostics_upload_contract "$windows"
 assert_absent "$windows" "releases/download"
 assert_absent "$windows" "releases/latest/download"
 assert_absent "$windows" ")[0].FullName"

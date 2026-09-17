@@ -418,17 +418,33 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
-          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
-          if ($null -eq $stageItem) { throw 'VERIFY-2022 NextTrace gate cannot find windows_amd64 stage' }
-          $stageBin = Join-Path $stageItem.FullName 'bin'
           $ecsPath = Join-Path $PWD 'ecs.exe'
-          if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2022 NextTrace gate cannot find ecs.exe' }
           $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
           $icmpOwnerToken = [guid]::NewGuid().ToString('N')
+          $capabilityPath = $null
           try {
             & $icmpPrerequisite -Action Setup -Label 'VERIFY-2022' -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
             if (-not $?) { throw 'VERIFY-2022 runner ICMP prerequisite setup failed' }
-            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
+
+            $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+            $capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp ('ecs-nexttrace-capability-VERIFY-2022-' + [guid]::NewGuid().ToString('N') + '.json')))
+            $stageItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse)
+            if ($stageItems.Count -ne 1) { throw 'VERIFY-2022 NextTrace gate requires exactly one downloaded windows_amd64 stage' }
+            $stage = [IO.Path]::GetFullPath($stageItems[0].FullName)
+            $stageBin = [IO.Path]::GetFullPath((Join-Path $stage 'bin'))
+            $nextTracePath = [IO.Path]::GetFullPath((Join-Path $stageBin 'nexttrace-tiny.exe'))
+            if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2022 NextTrace gate cannot find ecs.exe' }
+            if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf)) { throw "VERIFY-2022 staged NextTrace is missing: $nextTracePath" }
+            $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+            $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
+            if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "VERIFY-2022 staged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+
+            & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilityExitCode = $LASTEXITCODE
+            if ($capabilityExitCode -ne 0) { throw "VERIFY-2022 NextTrace capability probe failed with exit code $capabilityExitCode" }
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "VERIFY-2022 NextTrace capability evidence is missing: $capabilityPath" }
+
+            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2022' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022') -CapabilityPath $capabilityPath
             if (-not $?) { throw 'VERIFY-2022 canonical NextTrace gate failed' }
           } finally {
             # This workflow-only finally removes the runner prerequisite; ECS itself never writes firewall state.
@@ -441,6 +457,18 @@ jobs:
           name: ecs-windows-tools-gate-inputs-2022
           path: .ci/windows-tools-gate-inputs
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload VERIFY-2022 NextTrace diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-nexttrace-diagnostics-verify-2022
+          path: |
+            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json
+            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json.raw-*
+            ${{ runner.temp }}/ecs-nexttrace-verify-2022
+          if-no-files-found: warn
           retention-days: 7
 
   verify-2025:
@@ -739,17 +767,33 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
-          $stageItem = Get-ChildItem '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse | Select-Object -First 1
-          if ($null -eq $stageItem) { throw 'VERIFY-2025 NextTrace gate cannot find windows_amd64 stage' }
-          $stageBin = Join-Path $stageItem.FullName 'bin'
           $ecsPath = Join-Path $PWD 'ecs.exe'
-          if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2025 NextTrace gate cannot find ecs.exe' }
           $icmpPrerequisite = Join-Path $PWD 'scripts/ci/windows_icmp_prerequisite.ps1'
           $icmpOwnerToken = [guid]::NewGuid().ToString('N')
+          $capabilityPath = $null
           try {
             & $icmpPrerequisite -Action Setup -Label 'VERIFY-2025' -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
             if (-not $?) { throw 'VERIFY-2025 runner ICMP prerequisite setup failed' }
-            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
+
+            $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+            $capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp ('ecs-nexttrace-capability-VERIFY-2025-' + [guid]::NewGuid().ToString('N') + '.json')))
+            $stageItems = @(Get-ChildItem -LiteralPath '.ci/windows-tools-stage-artifact' -Directory -Filter 'windows_amd64' -Recurse)
+            if ($stageItems.Count -ne 1) { throw 'VERIFY-2025 NextTrace gate requires exactly one downloaded windows_amd64 stage' }
+            $stage = [IO.Path]::GetFullPath($stageItems[0].FullName)
+            $stageBin = [IO.Path]::GetFullPath((Join-Path $stage 'bin'))
+            $nextTracePath = [IO.Path]::GetFullPath((Join-Path $stageBin 'nexttrace-tiny.exe'))
+            if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'VERIFY-2025 NextTrace gate cannot find ecs.exe' }
+            if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf)) { throw "VERIFY-2025 staged NextTrace is missing: $nextTracePath" }
+            $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+            $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
+            if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "VERIFY-2025 staged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+
+            & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilityExitCode = $LASTEXITCODE
+            if ($capabilityExitCode -ne 0) { throw "VERIFY-2025 NextTrace capability probe failed with exit code $capabilityExitCode" }
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "VERIFY-2025 NextTrace capability evidence is missing: $capabilityPath" }
+
+            & ./scripts/ci/windows_nexttrace_gate.ps1 -Label 'VERIFY-2025' -EcsPath $ecsPath -ToolBin $stageBin -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025') -CapabilityPath $capabilityPath
             if (-not $?) { throw 'VERIFY-2025 canonical NextTrace gate failed' }
           } finally {
             # This workflow-only finally removes the runner prerequisite; ECS itself never writes firewall state.
@@ -762,6 +806,18 @@ jobs:
           name: ecs-windows-tools-gate-inputs-2025
           path: .ci/windows-tools-gate-inputs
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload VERIFY-2025 NextTrace diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-nexttrace-diagnostics-verify-2025
+          path: |
+            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json
+            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json.raw-*
+            ${{ runner.temp }}/ecs-nexttrace-verify-2025
+          if-no-files-found: warn
           retention-days: 7
 
   package:
@@ -1204,6 +1260,12 @@ jobs:
           try {
             & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
             if (-not $?) { throw "E2E-$label runner ICMP prerequisite setup failed" }
+            $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+            if (-not (Test-Path -LiteralPath $runnerTemp -PathType Container)) { throw "E2E-$label RUNNER_TEMP is missing: $runnerTemp" }
+            $capabilityID = [guid]::NewGuid().ToString('N')
+            $capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp ("ecs-nexttrace-capability-E2E-$label-$capabilityID.json")))
+            if ([IO.Path]::GetDirectoryName($capabilityPath) -ine $runnerTemp) { throw "E2E-$label capability evidence escaped RUNNER_TEMP: $capabilityPath" }
+            if (Test-Path -LiteralPath $capabilityPath) { throw "E2E-$label capability evidence path was not fresh: $capabilityPath" }
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -1225,6 +1287,19 @@ jobs:
             Assert-ArtifactChecksum -ChecksumFile $mainChecksums -AssetFile $mainArchive -Asset 'ecs_windows_amd64.zip'
             Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive -Asset 'ecs-tools_windows_amd64.zip'
             Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive -Asset 'ecs-corpus_silesia-v1.tar.gz'
+
+            $nextTraceStage = [IO.Path]::GetFullPath((Join-Path $runnerTemp ("ecs-nexttrace-packaged-E2E-$label-$capabilityID")))
+            Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $nextTraceStage -Force
+            $nextTracePath = [IO.Path]::GetFullPath((Join-Path $nextTraceStage 'bin\nexttrace-tiny.exe'))
+            if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf)) { throw "E2E-$label packaged NextTrace is missing: $nextTracePath" }
+            if ([IO.Path]::GetFileName($nextTracePath) -cne 'nexttrace-tiny.exe') { throw "E2E-$label packaged NextTrace has an unexpected file name: $nextTracePath" }
+            $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+            $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
+            if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+            & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilityExitCode = $LASTEXITCODE
+            if ($capabilityExitCode -ne 0) { throw "E2E-$label NextTrace capability probe failed with exit code $capabilityExitCode" }
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
 
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $zip = [IO.Compression.ZipFile]::OpenRead($mainArchive.FullName)
@@ -1378,7 +1453,7 @@ jobs:
               & $runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color
               if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
               $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
-              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
               if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }
               if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
 
@@ -1387,7 +1462,7 @@ jobs:
               & $runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color
               if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
               $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
-              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
               if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }
               if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
 
@@ -1442,7 +1517,7 @@ jobs:
               Remove-Item -LiteralPath $installDirectory -Recurse -Force
               if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
               $installDirectory = $null
-              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions using E2E-runner-generated capability evidence, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
               try {
                 if ($noProxyDefaultWasPresent) {
@@ -1543,6 +1618,20 @@ jobs:
               throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
             }
           }
+
+      - name: Upload E2E-2022 NextTrace diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-nexttrace-diagnostics-e2e-2022
+          path: |
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json.raw-*
+            ${{ runner.temp }}/ecs-bootstrap-report-2022
+            ${{ runner.temp }}/ecs-bootstrap-route-report-2022
+            ${{ runner.temp }}/ecs-bootstrap-backtrace-report-2022
+          if-no-files-found: warn
+          retention-days: 7
 
   e2e-2025:
     name: E2E-2025
@@ -1654,6 +1743,12 @@ jobs:
           try {
             & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
             if (-not $?) { throw "E2E-$label runner ICMP prerequisite setup failed" }
+            $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+            if (-not (Test-Path -LiteralPath $runnerTemp -PathType Container)) { throw "E2E-$label RUNNER_TEMP is missing: $runnerTemp" }
+            $capabilityID = [guid]::NewGuid().ToString('N')
+            $capabilityPath = [IO.Path]::GetFullPath((Join-Path $runnerTemp ("ecs-nexttrace-capability-E2E-$label-$capabilityID.json")))
+            if ([IO.Path]::GetDirectoryName($capabilityPath) -ine $runnerTemp) { throw "E2E-$label capability evidence escaped RUNNER_TEMP: $capabilityPath" }
+            if (Test-Path -LiteralPath $capabilityPath) { throw "E2E-$label capability evidence path was not fresh: $capabilityPath" }
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -1675,6 +1770,19 @@ jobs:
             Assert-ArtifactChecksum -ChecksumFile $mainChecksums -AssetFile $mainArchive -Asset 'ecs_windows_amd64.zip'
             Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive -Asset 'ecs-tools_windows_amd64.zip'
             Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive -Asset 'ecs-corpus_silesia-v1.tar.gz'
+
+            $nextTraceStage = [IO.Path]::GetFullPath((Join-Path $runnerTemp ("ecs-nexttrace-packaged-E2E-$label-$capabilityID")))
+            Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $nextTraceStage -Force
+            $nextTracePath = [IO.Path]::GetFullPath((Join-Path $nextTraceStage 'bin\nexttrace-tiny.exe'))
+            if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf)) { throw "E2E-$label packaged NextTrace is missing: $nextTracePath" }
+            if ([IO.Path]::GetFileName($nextTracePath) -cne 'nexttrace-tiny.exe') { throw "E2E-$label packaged NextTrace has an unexpected file name: $nextTracePath" }
+            $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+            $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
+            if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+            & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilityExitCode = $LASTEXITCODE
+            if ($capabilityExitCode -ne 0) { throw "E2E-$label NextTrace capability probe failed with exit code $capabilityExitCode" }
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
 
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $zip = [IO.Compression.ZipFile]::OpenRead($mainArchive.FullName)
@@ -1828,7 +1936,7 @@ jobs:
               & $runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color
               if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
               $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
-              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
               if (-not $?) { throw "E2E-$label bootstrap route report assertion failed" }
               if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
 
@@ -1837,7 +1945,7 @@ jobs:
               & $runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color
               if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
               $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
-              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4
+              & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
               if (-not $?) { throw "E2E-$label bootstrap backtrace report assertion failed" }
               if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
 
@@ -1892,7 +2000,7 @@ jobs:
               Remove-Item -LiteralPath $installDirectory -Recurse -Force
               if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
               $installDirectory = $null
-              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+              Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions using E2E-runner-generated capability evidence, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
             } finally {
               try {
                 if ($noProxyDefaultWasPresent) {
@@ -1993,3 +2101,17 @@ jobs:
               throw ("E2E-$label cleanup failed: " + ($cleanupErrors -join '; '))
             }
           }
+
+      - name: Upload E2E-2025 NextTrace diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecs-windows-nexttrace-diagnostics-e2e-2025
+          path: |
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json.raw-*
+            ${{ runner.temp }}/ecs-bootstrap-report-2025
+            ${{ runner.temp }}/ecs-bootstrap-route-report-2025
+            ${{ runner.temp }}/ecs-bootstrap-backtrace-report-2025
+          if-no-files-found: warn
+          retention-days: 7

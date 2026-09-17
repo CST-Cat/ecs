@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ReportPath,
+    [Parameter(Mandatory)][string]$CapabilityPath,
+    [Parameter(Mandatory)][string]$NextTracePath,
     [Parameter(Mandatory)][ValidateSet('route', 'backtrace')][string]$Module,
     [Parameter(Mandatory)][ValidateSet('4', '6')][string]$Family,
     [Parameter(Mandatory)][ValidateSet('ipv4', 'ipv6')][string]$FamilyName,
@@ -15,10 +17,39 @@ $NextTraceAdapter = 'nexttrace-json-v1'
 $NextTraceEngine = 'nexttrace-tiny'
 $NextTraceSourceName = 'probe.route.source.nexttrace.name'
 $NextTraceSourceURL = 'https://github.com/nxtrace/NTrace-core'
+$NextTraceSHA256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
+$CapabilitySchemaVersion = 'ecs.windows.nexttrace.capability/v1'
+$CapabilityFamilyName = 'ipv4'
+$CapabilityTarget = '1.1.1.1'
+$CapabilityMaxHops = 12
 
 function Stop-EcsNextTraceReportAssertion {
     param([Parameter(Mandatory)][string]$Message)
     throw "windows-nexttrace-report-assert: $Message"
+}
+
+function Get-EcsRequiredAbsoluteFilePath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Description
+    )
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
+        Stop-EcsNextTraceReportAssertion "$Description must be an absolute path"
+    }
+    try {
+        $full = [IO.Path]::GetFullPath($Path)
+    } catch {
+        Stop-EcsNextTraceReportAssertion "$Description is not a valid path: $($_.Exception.Message)"
+    }
+    try {
+        $item = Get-Item -LiteralPath $full -ErrorAction Stop
+    } catch {
+        Stop-EcsNextTraceReportAssertion "$Description does not name an existing file: $full"
+    }
+    if ($item.PSIsContainer) {
+        Stop-EcsNextTraceReportAssertion "$Description is a directory: $full"
+    }
+    return $full
 }
 
 function Get-EcsReportProperty {
@@ -77,16 +108,103 @@ function Test-EcsActualRespondingHop {
     return $true
 }
 
-if (-not [IO.Path]::IsPathRooted($ReportPath)) {
-    Stop-EcsNextTraceReportAssertion 'report path must be absolute'
+function Assert-EcsReportCapabilityEvidence {
+    param(
+        [Parameter(Mandatory)][object]$Evidence,
+        [Parameter(Mandatory)][string]$HelperPath,
+        [Parameter(Mandatory)][string]$ExpectedEvidencePath,
+        [Parameter(Mandatory)][string]$ExpectedRawDirectory,
+        [Parameter(Mandatory)][string]$ExpectedNextTracePath,
+        [Parameter(Mandatory)][string]$ExpectedTarget,
+        [Parameter(Mandatory)][string]$ExpectedHash,
+        [Parameter(Mandatory)][int]$ExpectedMaxHops
+    )
+    . $HelperPath -Family IPv4 -Target $ExpectedTarget -NextTracePath $ExpectedNextTracePath -ExpectedSha256 $ExpectedHash -EvidencePath $ExpectedEvidencePath -MaxHops $ExpectedMaxHops
+    Assert-EcsCapabilityEvidence -Evidence $Evidence `
+        -ExpectedEvidencePath $ExpectedEvidencePath `
+        -ExpectedRawDirectory $ExpectedRawDirectory `
+        -ExpectedNextTracePath $ExpectedNextTracePath
 }
-$reportFile = Get-Item -LiteralPath ([IO.Path]::GetFullPath($ReportPath)) -ErrorAction Stop
-if ($reportFile.PSIsContainer) {
-    Stop-EcsNextTraceReportAssertion "report path is a directory: $($reportFile.FullName)"
+
+$reportFullPath = Get-EcsRequiredAbsoluteFilePath -Path $ReportPath -Description 'report path'
+$capabilityFullPath = Get-EcsRequiredAbsoluteFilePath -Path $CapabilityPath -Description 'capability evidence path'
+$nextTraceFullPath = Get-EcsRequiredAbsoluteFilePath -Path $NextTracePath -Description 'staged NextTrace executable'
+if ([IO.Path]::GetFileName($nextTraceFullPath) -ine 'nexttrace-tiny.exe') {
+    Stop-EcsNextTraceReportAssertion "staged NextTrace executable must be named nexttrace-tiny.exe: $nextTraceFullPath"
 }
 
 try {
-    $report = Get-Content -Raw -LiteralPath $reportFile.FullName | ConvertFrom-Json
+    $nextTraceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTraceFullPath -ErrorAction Stop).Hash.ToLowerInvariant()
+} catch {
+    Stop-EcsNextTraceReportAssertion "cannot hash staged NextTrace executable: $($_.Exception.Message)"
+}
+if ($nextTraceHash -cne $NextTraceSHA256) {
+    Stop-EcsNextTraceReportAssertion "staged NextTrace SHA-256 mismatch: expected $NextTraceSHA256, got $nextTraceHash"
+}
+
+try {
+    $capabilityEvidence = Get-Content -Raw -LiteralPath $capabilityFullPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    Stop-EcsNextTraceReportAssertion "capability evidence is invalid JSON: $($_.Exception.Message)"
+}
+
+$capabilityHelperPath = Get-EcsRequiredAbsoluteFilePath -Path (Join-Path $PSScriptRoot 'windows_nexttrace_capability.ps1') -Description 'capability validator helper'
+try {
+    $capabilityRawDirectory = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'raw_output_directory' -Context 'capability evidence')
+    if (-not [IO.Path]::IsPathRooted($capabilityRawDirectory) -or
+        -not (Test-Path -LiteralPath $capabilityRawDirectory -PathType Container)) {
+        Stop-EcsNextTraceReportAssertion "capability evidence raw output directory does not exist: $capabilityRawDirectory"
+    }
+    Assert-EcsReportCapabilityEvidence -Evidence $capabilityEvidence `
+        -HelperPath $capabilityHelperPath `
+        -ExpectedEvidencePath $capabilityFullPath `
+        -ExpectedRawDirectory $capabilityRawDirectory `
+        -ExpectedNextTracePath $nextTraceFullPath `
+        -ExpectedTarget $CapabilityTarget `
+        -ExpectedHash $NextTraceSHA256 `
+        -ExpectedMaxHops $CapabilityMaxHops
+} catch {
+    Stop-EcsNextTraceReportAssertion "capability evidence validation failed: $($_.Exception.Message)"
+}
+
+$capabilitySchema = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'schema_version' -Context 'capability evidence')
+$capabilityFamily = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'family' -Context 'capability evidence')
+$capabilityTarget = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'target' -Context 'capability evidence')
+$capabilityMaxHops = [int](Get-EcsReportProperty -Object $capabilityEvidence -Name 'max_hops' -Context 'capability evidence')
+$capabilityNextTracePath = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'nexttrace_path' -Context 'capability evidence')
+$capabilityExpectedHash = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'nexttrace_expected_sha256' -Context 'capability evidence')
+$capabilityActualHash = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'nexttrace_sha256' -Context 'capability evidence')
+if ($capabilitySchema -cne $CapabilitySchemaVersion -or
+    $capabilityFamily -cne $CapabilityFamilyName -or
+    $capabilityTarget -cne $CapabilityTarget -or
+    $capabilityMaxHops -ne $CapabilityMaxHops) {
+    Stop-EcsNextTraceReportAssertion 'capability evidence schema/family/target/max-hops is not the canonical IPv4 contract'
+}
+if ($capabilityNextTracePath -cne $nextTraceFullPath) {
+    Stop-EcsNextTraceReportAssertion 'capability evidence nexttrace_path does not match the staged executable path'
+}
+if ($capabilityExpectedHash -cne $NextTraceSHA256 -or $capabilityActualHash -cne $NextTraceSHA256) {
+    Stop-EcsNextTraceReportAssertion "capability evidence SHA-256 values must equal the pinned NextTrace hash $NextTraceSHA256"
+}
+
+$capabilityDecision = [string](Get-EcsReportProperty -Object $capabilityEvidence -Name 'decision' -Context 'capability evidence')
+$capabilityLiveNetworkNotProven = Get-EcsReportProperty -Object $capabilityEvidence -Name 'live_network_not_proven' -Context 'capability evidence'
+if ($capabilityLiveNetworkNotProven -isnot [bool]) {
+    Stop-EcsNextTraceReportAssertion 'capability evidence live_network_not_proven must be boolean'
+}
+if ($capabilityDecision -notin @('available', 'not-testable')) {
+    Stop-EcsNextTraceReportAssertion "capability evidence has an invalid IPv4 decision: $capabilityDecision"
+}
+$expectedLiveNetworkNotProven = $capabilityDecision -eq 'not-testable'
+if ([bool]$capabilityLiveNetworkNotProven -ne $expectedLiveNetworkNotProven) {
+    Stop-EcsNextTraceReportAssertion 'capability evidence decision and live_network_not_proven are inconsistent'
+}
+if ($Family -cne '4' -or $FamilyName -cne $CapabilityFamilyName -or $Target -cne $CapabilityTarget) {
+    Stop-EcsNextTraceReportAssertion 'IPv4 capability evidence cannot validate a non-canonical IPv4 report'
+}
+
+try {
+    $report = Get-Content -Raw -LiteralPath $reportFullPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 } catch {
     Stop-EcsNextTraceReportAssertion "report is invalid JSON: $($_.Exception.Message)"
 }
@@ -191,9 +309,14 @@ if ([string]$trace.engine -cne $NextTraceEngine -or
     [string]$trace.target -cne $Target) {
     Stop-EcsNextTraceReportAssertion "$Module canonical trace facts are incomplete: engine=$($trace.engine) adapter=$($trace.adapter) family=$($trace.family) target=$($trace.target) hops=$($hops.Count)"
 }
-if ($respondingHops.Count -lt 1) {
+$allowZeroRespondingHops = $capabilityDecision -eq 'not-testable' -and [bool]$capabilityLiveNetworkNotProven
+if ($respondingHops.Count -lt 1 -and -not $allowZeroRespondingHops) {
     Stop-EcsNextTraceReportAssertion "$Module canonical trace has no actual responding hop (requires responded=true and non-empty ip)"
 }
+if ($allowZeroRespondingHops -and $respondingHops.Count -eq 0) {
+    Write-Output ("NextTrace $Module report assertion accepted zero hops only from validated capability evidence: capability_decision=not-testable; live_network_not_proven=true; live network observation not proven; all other canonical assertions remained required")
+}
 
-Write-Output ("bootstrap $Module report assertion passed: schema=ecs.report/v1; status={0}; engine={1}; version={2}; adapter={3}; family={4}; target={5}; hops={6}; responding_hops={7}" -f
-    $status, $engine, $version, $adapter, $FamilyName, $Target, $hops.Count, $respondingHops.Count)
+$capabilityObservation = if ([bool]$capabilityLiveNetworkNotProven) { 'live network observation not proven' } else { 'live network observation proven' }
+Write-Output ("bootstrap $Module report assertion passed: schema=ecs.report/v1; status={0}; engine={1}; version={2}; adapter={3}; family={4}; target={5}; hops={6}; responding_hops={7}; capability_decision={8}; live_network_not_proven={9}; {10}" -f
+    $status, $engine, $version, $adapter, $FamilyName, $Target, $hops.Count, $respondingHops.Count, $capabilityDecision, $capabilityLiveNetworkNotProven, $capabilityObservation)

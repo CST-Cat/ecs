@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string]$EcsPath,
     [Parameter(Mandatory)][string]$ToolBin,
     [Parameter(Mandatory)][string]$OutputRoot,
+    [Parameter(Mandatory)][string]$CapabilityPath,
     [string]$Label = 'windows'
 )
 
@@ -12,6 +13,10 @@ Set-StrictMode -Version Latest
 $NextTraceSHA256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
 $NextTraceAdapter = 'nexttrace-json-v1'
 $NextTraceEngine = 'nexttrace-tiny'
+$CapabilitySchemaVersion = 'ecs.windows.nexttrace.capability/v1'
+$CapabilityFamilyName = 'ipv4'
+$CapabilityTarget = '1.1.1.1'
+$CapabilityMaxHops = 12
 
 function Stop-EcsWindowsNextTraceGate {
     param([Parameter(Mandatory)][string]$Message)
@@ -31,6 +36,33 @@ function Get-EcsRequiredPath {
         Stop-EcsWindowsNextTraceGate "$Description does not exist: $full"
     }
     return $full
+}
+
+function Get-EcsRequiredJsonFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Description
+    )
+    if (-not [IO.Path]::IsPathRooted($Path)) {
+        Stop-EcsWindowsNextTraceGate "$Description must be an absolute path"
+    }
+    try {
+        $full = [IO.Path]::GetFullPath($Path)
+    } catch {
+        Stop-EcsWindowsNextTraceGate "$Description is not a valid path: $($_.Exception.Message)"
+    }
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+        Stop-EcsWindowsNextTraceGate "$Description does not name an existing JSON file: $full"
+    }
+    try {
+        $json = Get-Content -Raw -LiteralPath $full -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Stop-EcsWindowsNextTraceGate "$Description is not valid JSON: $($_.Exception.Message)"
+    }
+    return [pscustomobject]@{
+        Path = $full
+        Json = $json
+    }
 }
 
 function Get-EcsPropertyValue {
@@ -177,8 +209,19 @@ function Assert-EcsCanonicalTraceReport {
         [Parameter(Mandatory)][string]$Family,
         [Parameter(Mandatory)][string]$FamilyName,
         [Parameter(Mandatory)][int]$MaxHops,
-        [Parameter(Mandatory)][string]$Target
+        [Parameter(Mandatory)][string]$Target,
+        [ValidateSet('none', 'available', 'not-testable')][string]$CapabilityDecision = 'none',
+        [bool]$CapabilityLiveNetworkNotProven = $false
     )
+    if ($CapabilityDecision -eq 'none' -and $CapabilityLiveNetworkNotProven) {
+        Stop-EcsWindowsNextTraceGate "$Module cannot mark live network observation unproven without a capability decision"
+    }
+    if ($CapabilityDecision -eq 'not-testable' -and -not $CapabilityLiveNetworkNotProven) {
+        Stop-EcsWindowsNextTraceGate "$Module cannot use not-testable capability evidence unless live network observation is explicitly unproven"
+    }
+    if ($CapabilityDecision -eq 'available' -and $CapabilityLiveNetworkNotProven) {
+        Stop-EcsWindowsNextTraceGate "$Module available capability evidence cannot claim live network observation is unproven"
+    }
     $result = Get-EcsSingleResult -Report $Report -ID $Module
     if ([string]$result.status -notin @('ok', 'warning') -or [string]$result.status -in @('unsupported', 'skipped', 'error')) {
         Stop-EcsWindowsNextTraceGate "$Module result has invalid gate status $($result.status)"
@@ -244,11 +287,63 @@ function Assert-EcsCanonicalTraceReport {
         [string]$trace.target -cne $Target) {
         Stop-EcsWindowsNextTraceGate "$Module canonical trace facts are incomplete: engine=$($trace.engine) adapter=$($trace.adapter) family=$($trace.family) target=$($trace.target) hops=$($hops.Count)"
     }
-    if ($respondingHops.Count -lt 1) {
+    $allowZeroRespondingHops = $CapabilityDecision -eq 'not-testable' -and $CapabilityLiveNetworkNotProven
+    if ($respondingHops.Count -lt 1 -and -not $allowZeroRespondingHops) {
         Stop-EcsWindowsNextTraceGate "$Module canonical trace has no actual responding hop (requires responded=true and non-empty ip)"
     }
-    Write-Output ("NextTrace $Module gate passed: engine={0}; version={1}; adapter={2}; family={3}; target={4}; hops={5}; responding_hops={6}; status={7}" -f
-        $engine, $version, $adapter, $FamilyName, $Target, $hops.Count, $respondingHops.Count, $result.status)
+    if ($allowZeroRespondingHops -and $respondingHops.Count -eq 0) {
+        Write-Output ("NextTrace $Module responding-hop assertion accepted zero hops only from validated capability evidence: decision=not-testable; live_network_not_proven=true; live network observation not proven; all other canonical assertions remained required")
+    }
+    $reportedDecision = if ($CapabilityDecision -eq 'none') { 'not-applied' } else { $CapabilityDecision }
+    Write-Output ("NextTrace $Module gate passed: engine={0}; version={1}; adapter={2}; family={3}; target={4}; hops={5}; responding_hops={6}; status={7}; capability_decision={8}; live_network_not_proven={9}" -f
+        $engine, $version, $adapter, $FamilyName, $Target, $hops.Count, $respondingHops.Count, $result.status, $reportedDecision, $CapabilityLiveNetworkNotProven)
+}
+
+function Get-EcsValidatedCapabilityEvidence {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedNextTracePath,
+        [Parameter(Mandatory)][string]$ExpectedHash
+    )
+    $file = Get-EcsRequiredJsonFile -Path $Path -Description 'capability evidence JSON'
+    $evidence = $file.Json
+
+    Assert-EcsCapabilityEvidence -Evidence $evidence `
+        -ExpectedEvidencePath $file.Path `
+        -ExpectedRawDirectory ([string](Get-EcsPropertyValue -Object $evidence -Name 'raw_output_directory' -Context 'capability evidence')) `
+        -ExpectedNextTracePath $ExpectedNextTracePath
+
+    if ([string](Get-EcsPropertyValue -Object $evidence -Name 'schema_version' -Context 'capability evidence') -cne $CapabilitySchemaVersion) {
+        Stop-EcsWindowsNextTraceGate "capability evidence schema must be $CapabilitySchemaVersion"
+    }
+    if ([string](Get-EcsPropertyValue -Object $evidence -Name 'family' -Context 'capability evidence') -cne $CapabilityFamilyName) {
+        Stop-EcsWindowsNextTraceGate "capability evidence family must be $CapabilityFamilyName"
+    }
+    if ([string](Get-EcsPropertyValue -Object $evidence -Name 'target' -Context 'capability evidence') -cne $CapabilityTarget) {
+        Stop-EcsWindowsNextTraceGate "capability evidence target must be $CapabilityTarget"
+    }
+    if ([int](Get-EcsPropertyValue -Object $evidence -Name 'max_hops' -Context 'capability evidence') -ne $CapabilityMaxHops) {
+        Stop-EcsWindowsNextTraceGate "capability evidence max_hops must remain $CapabilityMaxHops"
+    }
+    if ([string](Get-EcsPropertyValue -Object $evidence -Name 'nexttrace_path' -Context 'capability evidence') -cne $ExpectedNextTracePath) {
+        Stop-EcsWindowsNextTraceGate 'capability evidence nexttrace_path does not match this gate staged executable'
+    }
+    $evidenceExpectedHash = [string](Get-EcsPropertyValue -Object $evidence -Name 'nexttrace_expected_sha256' -Context 'capability evidence')
+    $evidenceActualHash = [string](Get-EcsPropertyValue -Object $evidence -Name 'nexttrace_sha256' -Context 'capability evidence')
+    if ($evidenceExpectedHash -cne $ExpectedHash -or $evidenceActualHash -cne $ExpectedHash) {
+        Stop-EcsWindowsNextTraceGate "capability evidence SHA-256 values must equal the hard-coded staged hash $ExpectedHash"
+    }
+    $rawDirectory = [string](Get-EcsPropertyValue -Object $evidence -Name 'raw_output_directory' -Context 'capability evidence')
+    if (-not [IO.Path]::IsPathRooted($rawDirectory) -or -not (Test-Path -LiteralPath $rawDirectory -PathType Container)) {
+        Stop-EcsWindowsNextTraceGate "capability evidence raw output directory does not exist: $rawDirectory"
+    }
+    $decision = [string](Get-EcsPropertyValue -Object $evidence -Name 'decision' -Context 'capability evidence')
+    $liveNetworkNotProven = Get-EcsPropertyValue -Object $evidence -Name 'live_network_not_proven' -Context 'capability evidence'
+    return [pscustomobject]@{
+        Decision = $decision
+        LiveNetworkNotProven = [bool]$liveNetworkNotProven
+        Reason = [string](Get-EcsPropertyValue -Object $evidence -Name 'reason' -Context 'capability evidence')
+    }
 }
 
 function Test-EcsGlobalIPv6Capability {
@@ -265,14 +360,14 @@ function Test-EcsGlobalIPv6Capability {
                 Where-Object { [string]$_.State -notin @('Dead', 'Invalid', 'Unreachable') }
         )
     } catch {
-        Write-Host "NextTrace IPv6 gate: not-tested capability=missing reason=$($_.Exception.Message)"
+        Write-Host "NextTrace IPv6 gate: not-tested capability=missing; IPv4 capability evidence is not applied to IPv6; reason=$($_.Exception.Message)"
         return $false
     }
     if ($addresses.Count -eq 0 -or $routes.Count -eq 0) {
-        Write-Host ("NextTrace IPv6 gate: not-tested capability=missing global_addresses={0} default_routes={1}" -f $addresses.Count, $routes.Count)
+        Write-Host ("NextTrace IPv6 gate: not-tested capability=missing; IPv4 capability evidence is not applied to IPv6; global_addresses={0} default_routes={1}" -f $addresses.Count, $routes.Count)
         return $false
     }
-    Write-Host ("NextTrace IPv6 capability detected: global_addresses={0}; default_routes={1}; running canonical IPv6 gates" -f $addresses.Count, $routes.Count)
+    Write-Host ("NextTrace IPv6 capability detected: global_addresses={0}; default_routes={1}; running canonical IPv6 gates with strict actual responding-hop requirement; IPv4 capability evidence is not applied to IPv6" -f $addresses.Count, $routes.Count)
     return $true
 }
 
@@ -280,7 +375,8 @@ $ecs = Get-EcsRequiredPath -Path $EcsPath -Description 'ecs.exe'
 $bin = Get-EcsRequiredPath -Path $ToolBin -Description 'staged tool directory'
 $outputItem = New-Item -ItemType Directory -Force -Path $OutputRoot
 $output = Get-EcsRequiredPath -Path $outputItem.FullName -Description 'gate output directory'
-$nexttrace = Join-Path $bin 'nexttrace-tiny.exe'
+$capabilityFile = Get-EcsRequiredJsonFile -Path $CapabilityPath -Description 'capability evidence JSON'
+$nexttrace = [IO.Path]::GetFullPath((Join-Path $bin 'nexttrace-tiny.exe'))
 if (-not (Test-Path -LiteralPath $nexttrace -PathType Leaf)) {
     Stop-EcsWindowsNextTraceGate "staged resolver is missing $nexttrace"
 }
@@ -288,6 +384,8 @@ $nexttraceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $nexttrace).Hash.T
 if ($nexttraceHash -cne $NextTraceSHA256) {
     Stop-EcsWindowsNextTraceGate "staged NextTrace SHA-256 mismatch: got $nexttraceHash"
 }
+$capabilityHelper = Get-EcsRequiredPath -Path (Join-Path $PSScriptRoot 'windows_nexttrace_capability.ps1') -Description 'capability validator helper'
+. $capabilityHelper -Family IPv4 -Target $CapabilityTarget -NextTracePath $nexttrace -ExpectedSha256 $NextTraceSHA256 -EvidencePath $capabilityFile.Path -MaxHops $CapabilityMaxHops
 
 $hadToolBin = Test-Path Env:ECS_TOOL_BIN
 $oldToolBin = $env:ECS_TOOL_BIN
@@ -304,6 +402,9 @@ try {
 
     $routeTarget4 = '1.1.1.1'
     $backtraceTarget4 = '1.1.1.1'
+    $ipv4Capability = Get-EcsValidatedCapabilityEvidence -Path $capabilityFile.Path -ExpectedNextTracePath $nexttrace -ExpectedHash $NextTraceSHA256
+    Write-Output ("NextTrace IPv4 capability evidence validated: schema={0}; family={1}; target={2}; max_hops={3}; decision={4}; live_network_not_proven={5}; applies_to=route,backtrace; reason={6}" -f
+        $CapabilitySchemaVersion, $CapabilityFamilyName, $CapabilityTarget, $CapabilityMaxHops, $ipv4Capability.Decision, $ipv4Capability.LiveNetworkNotProven, $ipv4Capability.Reason)
     $routePlanLines = @(& $ecs plan --lang en --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" 2>&1)
     if ($LASTEXITCODE -ne 0) { Stop-EcsWindowsNextTraceGate 'ecs.exe plan --only route failed' }
     $routePlan = Convert-EcsJsonOutput -Lines $routePlanLines -Description 'ecs.exe plan --only route'
@@ -318,13 +419,15 @@ try {
     $routeRunLines = @(& $ecs run --lang en --only route --format json --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --output $routeOutput4 --no-color 2>&1)
     if ($LASTEXITCODE -ne 0) { Stop-EcsWindowsNextTraceGate 'ecs.exe run --only route --format json failed' }
     $routeReport = Get-EcsSingleReport -Root $routeOutput4
-    Assert-EcsCanonicalTraceReport -Report $routeReport -Module 'route' -Family '4' -FamilyName 'ipv4' -MaxHops 12 -Target $routeTarget4
+    Assert-EcsCanonicalTraceReport -Report $routeReport -Module 'route' -Family '4' -FamilyName 'ipv4' -MaxHops 12 -Target $routeTarget4 `
+        -CapabilityDecision $ipv4Capability.Decision -CapabilityLiveNetworkNotProven $ipv4Capability.LiveNetworkNotProven
 
     $backtraceOutput4 = New-EcsReportRoot -Prefix 'backtrace-ipv4' -Root $output
     $backtraceRunLines = @(& $ecs run --lang en --only backtrace --format json --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --output $backtraceOutput4 --no-color 2>&1)
     if ($LASTEXITCODE -ne 0) { Stop-EcsWindowsNextTraceGate 'ecs.exe run --only backtrace --format json failed' }
     $backtraceReport = Get-EcsSingleReport -Root $backtraceOutput4
-    Assert-EcsCanonicalTraceReport -Report $backtraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target $backtraceTarget4
+    Assert-EcsCanonicalTraceReport -Report $backtraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target $backtraceTarget4 `
+        -CapabilityDecision $ipv4Capability.Decision -CapabilityLiveNetworkNotProven $ipv4Capability.LiveNetworkNotProven
     Write-Output "NextTrace IPv4 canonical gate passed: label=$Label; staged_sha256=$nexttraceHash"
 
     if (Test-EcsGlobalIPv6Capability) {
@@ -358,6 +461,14 @@ try {
     throw $failure
 } finally {
     $env:PATH = $oldPath
-    if ($hadToolBin) { $env:ECS_TOOL_BIN = $oldToolBin } else { Remove-Item Env:ECS_TOOL_BIN -ErrorAction SilentlyContinue }
-    if ($hadNoColor) { $env:NO_COLOR = $oldNoColor } else { Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue }
+    if ($hadToolBin) {
+        $env:ECS_TOOL_BIN = $oldToolBin
+    } elseif (Test-Path Env:ECS_TOOL_BIN) {
+        Remove-Item Env:ECS_TOOL_BIN -ErrorAction Stop
+    }
+    if ($hadNoColor) {
+        $env:NO_COLOR = $oldNoColor
+    } elseif (Test-Path Env:NO_COLOR) {
+        Remove-Item Env:NO_COLOR -ErrorAction Stop
+    }
 }
