@@ -439,8 +439,11 @@ jobs:
             $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
             if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "VERIFY-2022 staged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
 
+            $LASTEXITCODE = 0
             & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilitySucceeded = $?
             $capabilityExitCode = $LASTEXITCODE
+            if (-not $capabilitySucceeded) { throw 'VERIFY-2022 NextTrace capability probe invocation failed' }
             if ($capabilityExitCode -ne 0) { throw "VERIFY-2022 NextTrace capability probe failed with exit code $capabilityExitCode" }
             if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "VERIFY-2022 NextTrace capability evidence is missing: $capabilityPath" }
 
@@ -788,8 +791,11 @@ jobs:
             $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
             if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "VERIFY-2025 staged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
 
+            $LASTEXITCODE = 0
             & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilitySucceeded = $?
             $capabilityExitCode = $LASTEXITCODE
+            if (-not $capabilitySucceeded) { throw 'VERIFY-2025 NextTrace capability probe invocation failed' }
             if ($capabilityExitCode -ne 0) { throw "VERIFY-2025 NextTrace capability probe failed with exit code $capabilityExitCode" }
             if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "VERIFY-2025 NextTrace capability evidence is missing: $capabilityPath" }
 
@@ -1296,8 +1302,11 @@ jobs:
             $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
             $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
             if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+            $LASTEXITCODE = 0
             & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilitySucceeded = $?
             $capabilityExitCode = $LASTEXITCODE
+            if (-not $capabilitySucceeded) { throw "E2E-$label NextTrace capability probe invocation failed" }
             if ($capabilityExitCode -ne 0) { throw "E2E-$label NextTrace capability probe failed with exit code $capabilityExitCode" }
             if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
 
@@ -1779,8 +1788,11 @@ jobs:
             $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
             $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
             if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
+            $LASTEXITCODE = 0
             & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+            $capabilitySucceeded = $?
             $capabilityExitCode = $LASTEXITCODE
+            if (-not $capabilitySucceeded) { throw "E2E-$label NextTrace capability probe invocation failed" }
             if ($capabilityExitCode -ne 0) { throw "E2E-$label NextTrace capability probe failed with exit code $capabilityExitCode" }
             if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
 

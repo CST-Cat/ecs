@@ -439,9 +439,15 @@ assert_e2e_bootstrap_contract() {
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     'if ($nextTraceSha256 -cne $expectedNextTraceSha256)'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$LASTEXITCODE = 0'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath"
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilitySucceeded = $?'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
     '$capabilityExitCode = $LASTEXITCODE'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if (-not $capabilitySucceeded)'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     'if ($capabilityExitCode -ne 0)'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
@@ -497,8 +503,11 @@ assert_e2e_bootstrap_contract() {
     "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'" \
     '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()' \
     'if ($nextTraceSha256 -cne $expectedNextTraceSha256)' \
+    '$LASTEXITCODE = 0' \
     "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath" \
+    '$capabilitySucceeded = $?' \
     '$capabilityExitCode = $LASTEXITCODE' \
+    'if (-not $capabilitySucceeded)' \
     'if ($capabilityExitCode -ne 0)' \
     'if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf))' \
     '[IO.Compression.ZipFile]::OpenRead' \
@@ -615,9 +624,15 @@ assert_verify_nexttrace_contract() {
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     'if ($nextTraceSha256 -cne $expectedNextTraceSha256)'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$LASTEXITCODE = 0'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath"
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    '$capabilitySucceeded = $?'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
     '$capabilityExitCode = $LASTEXITCODE'
+  assert_section_contains "$windows" "$start_marker" "$end_marker" \
+    'if (-not $capabilitySucceeded)'
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
     "if (\$capabilityExitCode -ne 0) { throw \"$label NextTrace capability probe failed with exit code \$capabilityExitCode\" }"
   assert_section_contains "$windows" "$start_marker" "$end_marker" \
@@ -639,8 +654,11 @@ assert_verify_nexttrace_contract() {
     "\$expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'" \
     '$nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()' \
     'if ($nextTraceSha256 -cne $expectedNextTraceSha256)' \
+    '$LASTEXITCODE = 0' \
     "& ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target 1.1.1.1 -NextTracePath \$nextTracePath -ExpectedSha256 \$expectedNextTraceSha256 -EvidencePath \$capabilityPath" \
+    '$capabilitySucceeded = $?' \
     '$capabilityExitCode = $LASTEXITCODE' \
+    'if (-not $capabilitySucceeded)' \
     'if ($capabilityExitCode -ne 0)' \
     'if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf))' \
     "scripts/ci/windows_nexttrace_gate.ps1 -Label '$label' -EcsPath \$ecsPath -ToolBin \$stageBin -OutputRoot (Join-Path \$env:RUNNER_TEMP '$output_root') -CapabilityPath \$capabilityPath" \
