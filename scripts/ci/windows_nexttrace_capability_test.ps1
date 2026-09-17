@@ -202,4 +202,154 @@ Assert-TestThrows -Name 'invalid evidence field set' -MessagePattern 'invalid fi
     Assert-EcsExactPropertyNames -Object ([pscustomobject]@{ schema_version = 'ecs.windows.nexttrace.capability/v1' }) -Expected @('schema_version', 'family') -Context 'test evidence'
 }
 
+function Get-TestProductionFunctionSource {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $Path), [ref]$tokens, [ref]$errors)
+    if ($errors.Count -ne 0) {
+        throw "production script has PowerShell parse errors: $Path"
+    }
+    $functions = @($ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $Name
+        }, $true))
+    if ($functions.Count -ne 1) {
+        throw "production script does not contain exactly one $Name function: $Path"
+    }
+    return $functions[0]
+}
+
+function Import-TestProductionFunction {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$ImportedName = $Name
+    )
+    $functionAst = Get-TestProductionFunctionSource -Path $Path -Name $Name
+    $body = $functionAst.Body.Extent.Text
+    $body = $body.Substring(1, $body.Length - 2)
+    Set-Item -Path ("Function:\global:$ImportedName") -Value ([scriptblock]::Create($body))
+}
+
+$nextTraceGatePath = Join-Path $PSScriptRoot 'windows_nexttrace_gate.ps1'
+$nextTraceReportAssertPath = Join-Path $PSScriptRoot 'windows_nexttrace_report_assert.ps1'
+$NextTraceAdapter = 'nexttrace-json-v1'
+$NextTraceEngine = 'nexttrace-tiny'
+foreach ($functionName in @(
+        'Stop-EcsWindowsNextTraceGate',
+        'Get-EcsPropertyValue',
+        'Get-EcsRawField',
+        'Get-EcsSingleResult',
+        'Test-EcsActualRespondingHop',
+        'Test-EcsValidatedBacktraceNoResponseFailure',
+        'Assert-EcsCanonicalTraceReport'
+    )) {
+    Import-TestProductionFunction -Path $nextTraceGatePath -Name $functionName
+}
+Import-TestProductionFunction -Path $nextTraceReportAssertPath -Name 'Test-EcsValidatedBacktraceNoResponseFailure' -ImportedName 'Test-EcsReportValidatedBacktraceNoResponseFailure'
+
+function New-TestBacktraceResult {
+    param(
+        [string]$Status = 'error',
+        [int]$Valid = 0,
+        [string]$FailureTarget = '1.1.1.1',
+        [string]$FailureCategory = 'unknown',
+        [bool]$FailureRetryable = $false,
+        [int]$FailureCount = 1,
+        [switch]$FailureMessage,
+        [switch]$MissingTrace
+    )
+    $failureValues = [ordered]@{
+        category = $FailureCategory
+        stage = 'trace'
+        target = $FailureTarget
+        retryable = $FailureRetryable
+        count = $FailureCount
+    }
+    if ($FailureMessage) {
+        $failureValues.message = 'unexpected diagnostic'
+    }
+    $failure = [pscustomobject]$failureValues
+    $arguments = '--no-color --json -4 -M --max-hops 20 --queries 1 --parallel-requests 1 --timeout 1000'
+    $trace = [pscustomobject]@{
+        engine = 'nexttrace-tiny'
+        adapter = 'nexttrace-json-v1'
+        family = 'ipv4'
+        target = '1.1.1.1'
+        hops = @(
+            for ($hop = 1; $hop -le 12; $hop++) {
+                [pscustomobject]@{ hop = $hop; responded = $false; ip = $null }
+            }
+        )
+    }
+    $result = [pscustomobject]@{
+        id = 'backtrace'
+        status = $Status
+        evidence = [pscustomobject]@{ valid = $Valid; expected = 1 }
+        failures = @($failure)
+        fields = @(
+            [pscustomobject]@{ key = 'engine'; value = [pscustomobject]@{ raw = 'nexttrace-tiny' } }
+            [pscustomobject]@{ key = 'version'; value = [pscustomobject]@{ raw = 'nexttrace-tiny v1.7.1' } }
+            [pscustomobject]@{ key = 'arguments'; value = [pscustomobject]@{ raw = $arguments } }
+        )
+        methodology = [pscustomobject]@{
+            parameters = [pscustomobject]@{
+                adapter = 'nexttrace-json-v1'
+                ip_version = '4'
+                arguments = $arguments
+                targets = '1.1.1.1'
+                max_hops = '20'
+            }
+        }
+        sources = @([pscustomobject]@{ name = 'probe.route.source.nexttrace.name'; url = 'https://github.com/nxtrace/NTrace-core' })
+        text_blocks = @(
+            [pscustomobject]@{
+                title = 'probe.backtrace.normalized_trace_json'
+                language = 'json'
+                content = ($trace | ConvertTo-Json -Depth 8 -Compress)
+            }
+        )
+    }
+    if ($MissingTrace) {
+        $result.text_blocks = @()
+    }
+    return $result
+}
+
+$noResponsePredicateCases = @(
+    [pscustomobject]@{ Name = 'exact validated not-testable'; Result = (New-TestBacktraceResult); Decision = 'not-testable'; Live = $true; Expected = $true }
+    [pscustomobject]@{ Name = 'available capability'; Result = (New-TestBacktraceResult); Decision = 'available'; Live = $false; Expected = $false }
+    [pscustomobject]@{ Name = 'failure has message'; Result = (New-TestBacktraceResult -FailureMessage); Decision = 'not-testable'; Live = $true; Expected = $false }
+    [pscustomobject]@{ Name = 'failure has error category'; Result = (New-TestBacktraceResult -FailureCategory 'permission_denied'); Decision = 'not-testable'; Live = $true; Expected = $false }
+    [pscustomobject]@{ Name = 'failure has parser category'; Result = (New-TestBacktraceResult -FailureCategory 'parse_error'); Decision = 'not-testable'; Live = $true; Expected = $false }
+    [pscustomobject]@{ Name = 'failure has wrong target'; Result = (New-TestBacktraceResult -FailureTarget '8.8.8.8'); Decision = 'not-testable'; Live = $true; Expected = $false }
+    [pscustomobject]@{ Name = 'evidence is valid'; Result = (New-TestBacktraceResult -Valid 1); Decision = 'not-testable'; Live = $true; Expected = $false }
+)
+foreach ($case in $noResponsePredicateCases) {
+    $gateDecision = Test-EcsValidatedBacktraceNoResponseFailure -Result $case.Result -Target '1.1.1.1' -CapabilityDecision $case.Decision -CapabilityLiveNetworkNotProven $case.Live
+    $reportDecision = Test-EcsReportValidatedBacktraceNoResponseFailure -Result $case.Result -Target '1.1.1.1' -CapabilityDecision $case.Decision -CapabilityLiveNetworkNotProven $case.Live
+    Assert-TestEqual -Actual $gateDecision -Expected $case.Expected -Name "gate no-response predicate: $($case.Name)"
+    Assert-TestEqual -Actual $reportDecision -Expected $case.Expected -Name "report no-response predicate: $($case.Name)"
+}
+
+$exactBacktraceReport = [pscustomobject]@{
+    schema_version = 'ecs.report/v1'
+    results = @((New-TestBacktraceResult))
+}
+$null = Assert-EcsCanonicalTraceReport -Report $exactBacktraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target '1.1.1.1' -CapabilityDecision 'not-testable' -CapabilityLiveNetworkNotProven $true
+Assert-TestThrows -Name 'available capability cannot accept backtrace no-response error' -MessagePattern 'invalid gate status' -Script {
+    Assert-EcsCanonicalTraceReport -Report $exactBacktraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target '1.1.1.1' -CapabilityDecision 'available' -CapabilityLiveNetworkNotProven $false | Out-Null
+}
+$missingTraceReport = [pscustomobject]@{
+    schema_version = 'ecs.report/v1'
+    results = @((New-TestBacktraceResult -MissingTrace))
+}
+Assert-TestThrows -Name 'backtrace no-response requires canonical trace' -MessagePattern 'no unique canonical normalized trace JSON' -Script {
+    Assert-EcsCanonicalTraceReport -Report $missingTraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target '1.1.1.1' -CapabilityDecision 'not-testable' -CapabilityLiveNetworkNotProven $true | Out-Null
+}
+
 Write-Output 'windows_nexttrace_capability deterministic classifier/validation tests passed'

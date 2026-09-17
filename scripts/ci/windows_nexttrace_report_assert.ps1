@@ -108,6 +108,76 @@ function Test-EcsActualRespondingHop {
     return $true
 }
 
+function Test-EcsValidatedBacktraceNoResponseFailure {
+    param(
+        [Parameter(Mandatory)][object]$Result,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][ValidateSet('available', 'not-testable')][string]$CapabilityDecision,
+        [Parameter(Mandatory)][bool]$CapabilityLiveNetworkNotProven
+    )
+    if ([string]$Result.id -cne 'backtrace' -or
+        $CapabilityDecision -cne 'not-testable' -or
+        -not $CapabilityLiveNetworkNotProven -or
+        [string]$Result.status -cne 'error') {
+        return $false
+    }
+
+    $evidenceProperties = @($Result.PSObject.Properties | Where-Object { $_.Name -ceq 'evidence' })
+    if ($evidenceProperties.Count -ne 1 -or $null -eq $evidenceProperties[0].Value) {
+        return $false
+    }
+    $evidence = $evidenceProperties[0].Value
+    $validProperties = @($evidence.PSObject.Properties | Where-Object { $_.Name -ceq 'valid' })
+    $expectedProperties = @($evidence.PSObject.Properties | Where-Object { $_.Name -ceq 'expected' })
+    if ($validProperties.Count -ne 1 -or $expectedProperties.Count -ne 1) {
+        return $false
+    }
+    try {
+        if ([int64]$validProperties[0].Value -ne 0 -or [int64]$expectedProperties[0].Value -ne 1) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
+
+    $failureProperties = @($Result.PSObject.Properties | Where-Object { $_.Name -ceq 'failures' })
+    if ($failureProperties.Count -ne 1) {
+        return $false
+    }
+    $failures = @($failureProperties[0].Value)
+    if ($failures.Count -ne 1 -or $null -eq $failures[0]) {
+        return $false
+    }
+    $failure = $failures[0]
+    $actualFailureProperties = @($failure.PSObject.Properties | ForEach-Object { [string]$_.Name })
+    $expectedFailureProperties = @('category', 'stage', 'target', 'retryable', 'count')
+    if ($actualFailureProperties.Count -ne $expectedFailureProperties.Count -or
+        (($actualFailureProperties | Sort-Object) -join "`n") -cne (($expectedFailureProperties | Sort-Object) -join "`n")) {
+        return $false
+    }
+    if ([string]$failure.category -cne 'unknown' -or
+        [string]$failure.stage -cne 'trace' -or
+        [string]$failure.target -cne $Target) {
+        return $false
+    }
+    if ($failure.retryable -isnot [bool] -or [bool]$failure.retryable) {
+        return $false
+    }
+    try {
+        if ([int64]$failure.count -ne 1) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
+    $parserFailures = @($failures | Where-Object {
+        [string]$_.category -in @('unsupported', 'tool_missing', 'parse_error') -or
+        [string]$_.category -match '(?i)parse' -or
+        [string]$_.stage -match '(?i)parse'
+    })
+    return $parserFailures.Count -eq 0
+}
+
 function Assert-EcsReportCapabilityEvidence {
     param(
         [Parameter(Mandatory)][object]$Evidence,
@@ -224,19 +294,22 @@ if ($matchingResults.Count -ne 1) {
 $result = $matchingResults[0]
 
 $status = [string](Get-EcsReportProperty -Object $result -Name 'status' -Context "$Module result")
-if ([string]::IsNullOrWhiteSpace($status) -or $status -notin @('ok', 'warning') -or $status -in @('unsupported', 'skipped', 'error')) {
-    Stop-EcsNextTraceReportAssertion "$Module result has invalid status '$status'"
-}
-
 $evidence = Get-EcsReportProperty -Object $result -Name 'evidence' -Context "$Module result"
 $valid = [int](Get-EcsReportProperty -Object $evidence -Name 'valid' -Context "$Module evidence")
 $expected = [int](Get-EcsReportProperty -Object $evidence -Name 'expected' -Context "$Module evidence")
-if ($valid -lt 1 -or $expected -ne 1 -or $valid -ne $expected) {
+$failureProperty = @($result.PSObject.Properties | Where-Object { $_.Name -ceq 'failures' })
+$failures = if ($failureProperty.Count -eq 1) { @($failureProperty[0].Value) } else { @() }
+$allowValidatedBacktraceNoResponse = Test-EcsValidatedBacktraceNoResponseFailure -Result $result -Target $Target `
+    -CapabilityDecision $capabilityDecision -CapabilityLiveNetworkNotProven ([bool]$capabilityLiveNetworkNotProven)
+if (([string]::IsNullOrWhiteSpace($status) -or $status -notin @('ok', 'warning') -or $status -in @('unsupported', 'skipped', 'error')) -and
+    -not $allowValidatedBacktraceNoResponse) {
+    Stop-EcsNextTraceReportAssertion "$Module result has invalid status '$status'"
+}
+if (-not $allowValidatedBacktraceNoResponse -and
+    ($valid -lt 1 -or $expected -ne 1 -or $valid -ne $expected)) {
     Stop-EcsNextTraceReportAssertion "$Module evidence is not one valid expected target: valid=$valid expected=$expected"
 }
 
-$failureProperty = @($result.PSObject.Properties | Where-Object { $_.Name -ceq 'failures' })
-$failures = if ($failureProperty.Count -eq 1) { @($failureProperty[0].Value) } else { @() }
 $parserFailures = @($failures | Where-Object {
     [string]$_.category -in @('unsupported', 'tool_missing', 'parse_error') -or
     [string]$_.category -match '(?i)parse' -or
@@ -309,12 +382,23 @@ if ([string]$trace.engine -cne $NextTraceEngine -or
     [string]$trace.target -cne $Target) {
     Stop-EcsNextTraceReportAssertion "$Module canonical trace facts are incomplete: engine=$($trace.engine) adapter=$($trace.adapter) family=$($trace.family) target=$($trace.target) hops=$($hops.Count)"
 }
-$allowZeroRespondingHops = $capabilityDecision -eq 'not-testable' -and [bool]$capabilityLiveNetworkNotProven
+if ($allowValidatedBacktraceNoResponse -and $respondingHops.Count -ne 0) {
+    Stop-EcsNextTraceReportAssertion 'backtrace validated not-testable no-response evidence requires zero responding hops'
+}
+$allowZeroRespondingHops = if ($Module -ceq 'backtrace') {
+    $allowValidatedBacktraceNoResponse
+} else {
+    $capabilityDecision -eq 'not-testable' -and [bool]$capabilityLiveNetworkNotProven
+}
 if ($respondingHops.Count -lt 1 -and -not $allowZeroRespondingHops) {
     Stop-EcsNextTraceReportAssertion "$Module canonical trace has no actual responding hop (requires responded=true and non-empty ip)"
 }
 if ($allowZeroRespondingHops -and $respondingHops.Count -eq 0) {
-    Write-Output ("NextTrace $Module report assertion accepted zero hops only from validated capability evidence: capability_decision=not-testable; live_network_not_proven=true; live network observation not proven; all other canonical assertions remained required")
+    if ($allowValidatedBacktraceNoResponse) {
+        Write-Output 'NextTrace backtrace zero-response accepted as validated not-testable: status=error; evidence=0/1; failure=unknown/trace; canonical trace/provenance/arguments remained required'
+    } else {
+        Write-Output ("NextTrace $Module report assertion accepted zero hops only from validated capability evidence: capability_decision=not-testable; live_network_not_proven=true; live network observation not proven; all other canonical assertions remained required")
+    }
 }
 
 $capabilityObservation = if ([bool]$capabilityLiveNetworkNotProven) { 'live network observation not proven' } else { 'live network observation proven' }

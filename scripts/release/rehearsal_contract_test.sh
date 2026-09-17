@@ -960,6 +960,23 @@ for required_nexttrace_gate_fact in \
   "16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b"; do
   assert_contains "$nexttrace_gate" "$required_nexttrace_gate_fact"
 done
+for required_backtrace_no_response_gate_fact in \
+  'Test-EcsValidatedBacktraceNoResponseFailure' \
+  "\$CapabilityDecision -cne 'not-testable'" \
+  '-not $CapabilityLiveNetworkNotProven' \
+  "[string]\$Result.status -cne 'error'" \
+  'if ([int64]$validProperties[0].Value -ne 0 -or [int64]$expectedProperties[0].Value -ne 1)' \
+  "\$expectedFailureProperties = @('category', 'stage', 'target', 'retryable', 'count')" \
+  "[string]\$failure.category -cne 'unknown'" \
+  "[string]\$failure.stage -cne 'trace'" \
+  '[string]$failure.target -cne $Target' \
+  '$failure.retryable -isnot [bool]' \
+  '[int64]$failure.count -ne 1' \
+  '$parserFailures.Count -eq 0' \
+  'backtrace zero-response accepted as validated not-testable' \
+  'requires zero responding hops'; do
+  assert_contains "$nexttrace_gate" "$required_backtrace_no_response_gate_fact"
+done
 assert_contains "$nexttrace_gate" "gate failed; emitting diagnostic evidence"
 assert_absent "$nexttrace_gate" "runner-capability"
 assert_absent "$nexttrace_gate" "Get-NetFirewallProfile"
@@ -998,6 +1015,23 @@ for required_report_assert_fact in \
   "respondingHops" \
   "no actual responding hop"; do
   assert_contains "$nexttrace_report_assert" "$required_report_assert_fact"
+done
+for required_backtrace_no_response_report_fact in \
+  'Test-EcsValidatedBacktraceNoResponseFailure' \
+  "\$CapabilityDecision -cne 'not-testable'" \
+  '-not $CapabilityLiveNetworkNotProven' \
+  "[string]\$Result.status -cne 'error'" \
+  'if ([int64]$validProperties[0].Value -ne 0 -or [int64]$expectedProperties[0].Value -ne 1)' \
+  "\$expectedFailureProperties = @('category', 'stage', 'target', 'retryable', 'count')" \
+  "[string]\$failure.category -cne 'unknown'" \
+  "[string]\$failure.stage -cne 'trace'" \
+  '[string]$failure.target -cne $Target' \
+  '$failure.retryable -isnot [bool]' \
+  '[int64]$failure.count -ne 1' \
+  '$parserFailures.Count -eq 0' \
+  'backtrace zero-response accepted as validated not-testable' \
+  'requires zero responding hops'; do
+  assert_contains "$nexttrace_report_assert" "$required_backtrace_no_response_report_fact"
 done
 for forbidden_report_assert_fact in 'tracert' 'Test-NetConnection' '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake tool' 'fake binary' 'hops.Count -lt 1'; do
   assert_absent "$nexttrace_report_assert" "$forbidden_report_assert_fact"
