@@ -15,7 +15,7 @@ import (
 // document chooses paired, matrix or ranked-list CSS at generation time and
 // still collapses cleanly on narrow mobile terminals/browsers.
 func ComparisonHTML(data comparison.Report) ([]byte, error) {
-	data = sanitizedCopy(data)
+	data = sanitizedComparisonCopy(data)
 	var out strings.Builder
 	layout := comparisonLayoutFor(len(data.Inputs))
 	layoutClass := map[comparisonLayout]string{
@@ -86,10 +86,7 @@ func ComparisonHTML(data comparison.Report) ([]byte, error) {
 			for _, observation := range module.Changes {
 				out.WriteString(`<article class="observation-card"><div class="observation-title">` + html.EscapeString(observation.Label) + `</div><div class="observation-values">`)
 				for _, value := range observation.Values {
-					display := "—"
-					if value.Available {
-						display = value.Value
-					}
+					display := displayComparisonObservation(value)
 					fmt.Fprintf(&out, `<div><span>%s</span><strong>%s</strong></div>`, html.EscapeString(comparisonInputLabel(data, value.Report)), html.EscapeString(display))
 				}
 				out.WriteString("</div></article>")
@@ -160,10 +157,12 @@ func writeComparisonHTMLStatus(out *strings.Builder, data comparison.Report, mod
 	out.WriteString(`<h3>` + html.EscapeString(i18n.T("compare.statusEvidence")) + `</h3><div class="status-grid">`)
 	for index := range data.Inputs {
 		statusText, statusClass := "—", "muted"
-		if index < len(module.Statuses) && module.Statuses[index].Available {
-			status := module.Statuses[index].Status
-			statusText = statusIcon(status) + " " + statusLabel(status)
-			statusClass = string(status)
+		if index < len(module.Statuses) {
+			status := module.Statuses[index]
+			statusText = displayComparisonStatus(status)
+			if status.Available {
+				statusClass = string(status.Status)
+			}
 		}
 		evidenceText := "—"
 		evidenceRatio := 0.0
@@ -171,7 +170,7 @@ func writeComparisonHTMLStatus(out *strings.Builder, data comparison.Report, mod
 		if index < len(module.Evidence) && module.Evidence[index].Available {
 			evidence := module.Evidence[index]
 			grade := derivedComparisonEvidenceGrade(evidence)
-			evidenceText = fmt.Sprintf("%d/%d · %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade))
+			evidenceText = displayComparisonEvidence(evidence, " · ")
 			evidenceRatio = evidence.Ratio
 			evidenceClass = comparisonEvidenceClass(grade)
 		}
@@ -208,30 +207,6 @@ func writeComparisonHTMLMetric(out *strings.Builder, data comparison.Report, met
 			html.EscapeString(comparisonMetricDisplay(metric, value)), html.EscapeString(comparisonChange(value, value.Report == data.Reference)), comparisonHTMLBar(value.QualityRatio))
 	}
 	out.WriteString("</div></article>")
-}
-
-func sortComparisonValues(values []comparison.MetricValue) {
-	// Stable insertion sort keeps missing values in input order at the bottom
-	// and avoids importing a second ordering abstraction into the renderer.
-	for index := 1; index < len(values); index++ {
-		current := values[index]
-		position := index
-		for position > 0 && comparisonValueBefore(current, values[position-1]) {
-			values[position] = values[position-1]
-			position--
-		}
-		values[position] = current
-	}
-}
-
-func comparisonValueBefore(left, right comparison.MetricValue) bool {
-	if left.Available != right.Available {
-		return left.Available
-	}
-	if !left.Available {
-		return false
-	}
-	return left.Rank < right.Rank
 }
 
 func comparisonHTMLParameterScope(scope string) string {

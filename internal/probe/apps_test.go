@@ -57,11 +57,8 @@ func TestAppsProducerBuildsStableSuccessDirectly(t *testing.T) {
 	}
 
 	result := (appsProbe{}).Run(context.Background(), Environment{Config: config.Runtime{}})
-	if result.Title != "module.apps.title" || result.Description != "probe.apps.description" || result.Status != model.StatusOK {
-		t.Fatalf("apps result metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.apps.profile" {
-		t.Fatalf("apps methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("apps result status = %s", result.Status)
 	}
 	if len(result.Tables) != 4 || result.Tables[0].Title != "probe.apps.table.telegram" {
 		t.Fatalf("apps tables = %+v", result.Tables)

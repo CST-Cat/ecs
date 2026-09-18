@@ -8,10 +8,10 @@
 #       └ 未识别的参数原样透传给 ecs compare
 #
 # 为什么不用 run.sh：
-#   run.sh 一千七百行里绝大部分是工具包下载、manifest 校验、apt 临时安装、
-#   Ookla 官方源、语料准备和临时 PATH 拼装。对比是纯本地计算——不跑基准、
+#   run.sh 还负责工具包下载、manifest 校验、临时依赖和 Ookla 官方包的
+#   校验与解包、语料准备和临时 PATH 拼装。对比是纯本地计算——不跑基准、
 #   不联网测速、不需要任何基准工具，只需要 ecs 二进制本身。为对比两个 JSON
-#   而拉一个一千七百行的脚本不合比例。
+#   而引入完整运行脚本不合比例。
 #
 # 这个脚本做什么、不做什么：
 #   - 只下载 ecs 主程序，校验 SHA-256 之后才执行它；
@@ -76,6 +76,21 @@ case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
 
+owner=${REPO%%/*}
+repo=${REPO#*/}
+[ "$owner" != "$REPO" ] || die "ECS_REPOSITORY 必须使用 owner/repo 格式" "ECS_REPOSITORY must use owner/repo form"
+case "$owner" in
+  ""|*[!A-Za-z0-9._-]*) die "ECS_REPOSITORY owner 无效" "invalid ECS_REPOSITORY owner" ;;
+esac
+case "$repo" in
+  ""|*/*|*[!A-Za-z0-9._-]*) die "ECS_REPOSITORY 必须使用安全的 owner/repo 格式" "ECS_REPOSITORY must use safe owner/repo form" ;;
+esac
+if [ "$VERSION" != "latest" ]; then
+  case "$VERSION" in
+    *[!A-Za-z0-9._+-]*) die "发行版本无效" "invalid release version" ;;
+  esac
+fi
+
 # 平台识别：与 run.sh 一致，解析出的 OS token 直接参与资产名拼装。
 OS_NAME=$(uname -s)
 case "$OS_NAME" in
@@ -139,24 +154,51 @@ DEFAULT_OUT="$WORK/output"
 OUT=""
 
 fetch() {
+  fetch_max_time=${3:-300}
+  case "$1" in
+    https://*) ;;
+    *) die "远程下载地址必须使用 HTTPS：$1" "remote download URL must use HTTPS: $1" ;;
+  esac
   if command -v curl >/dev/null 2>&1; then
     # max-time applies per transfer; retry-max-time bounds the retry window.
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time 300 \
-      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time 300 \
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time "$fetch_max_time" \
+      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time "$fetch_max_time" \
       "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
     command -v timeout >/dev/null 2>&1 ||
       die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
-    timeout 300 wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
-  elif [ "$OS" = freebsd ] && [ -x /usr/bin/fetch ]; then
-    # FreeBSD base 系统的 /usr/bin/fetch，排在 curl 与 wget 之后的最后手段。
-    # 这里用绝对路径：它指的是操作系统自己拥有的 base 工具，与 FreeBSD 探针
-    # 直接写 /sbin/ping、/usr/sbin/traceroute 是同一个理由。
+    timeout "$fetch_max_time" wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+  elif [ "${OS:-}" = freebsd ] && [ -x /usr/bin/fetch ]; then
+    # FreeBSD base-system /usr/bin/fetch, the last resort after curl and wget.
+    #
+    # The path is absolute on purpose. This wrapper function is itself named
+    # fetch, and `command -v fetch` inside its own body resolves to the shell
+    # function rather than to the executable, so PATH lookup cannot be used to
+    # tell them apart. `timeout` is an external program as well, so it could
+    # not run a `command fetch ...` word anyway. FreeBSD owns /usr/bin/fetch
+    # exactly like it owns /sbin/ping and /usr/sbin/traceroute, so naming the
+    # base-system path is both unambiguous and consistent with the probes.
     command -v timeout >/dev/null 2>&1 ||
       die "fetch 路径需要 timeout 来限制总下载时间" "the fetch path requires timeout to bound total download time"
-    timeout 300 /usr/bin/fetch -q -o "$2" "$1"
+    timeout "$fetch_max_time" /usr/bin/fetch -q -o "$2" "$1"
   else
     die "需要 curl、wget 或 FreeBSD fetch" "curl, wget, or FreeBSD fetch is required"
+  fi
+}
+
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+  elif command -v sha256 >/dev/null 2>&1; then
+    # FreeBSD base-system /sbin/sha256. -q prints the digest alone, so the
+    # output already matches the "one lowercase hex line" contract above.
+    sha256 -q "$1" | tr '[:upper:]' '[:lower:]'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]'
+  else
+    return 1
   fi
 }
 
@@ -170,15 +212,9 @@ fetch "${BASE}/checksums.txt" "${WORK}/checksums.txt" ||
 # 确认下载归档与同一 Release 清单记录的字节一致。
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$EXPECTED" ] || die "校验文件里没有 ${ASSET} 的条目" "no checksum entry for ${ASSET}"
-if command -v sha256sum >/dev/null 2>&1; then
-  ACTUAL=$(sha256sum "${WORK}/${ASSET}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-elif command -v shasum >/dev/null 2>&1; then
-  ACTUAL=$(shasum -a 256 "${WORK}/${ASSET}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-elif command -v openssl >/dev/null 2>&1; then
-  ACTUAL=$(openssl dgst -sha256 "${WORK}/${ASSET}" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]')
-else
-  die "需要 sha256sum、shasum 或 openssl 才能校验下载内容" \
-    "sha256sum, shasum or openssl is required to verify the download"
+if ! ACTUAL=$(file_sha256 "${WORK}/${ASSET}"); then
+  die "需要 sha256sum、shasum、sha256 或 openssl 才能校验下载内容" \
+    "sha256sum, shasum, sha256, or openssl is required to verify the download"
 fi
 [ "$ACTUAL" = "$EXPECTED" ] || die "校验失败，拒绝执行下载内容" "checksum mismatch; refusing to run the download"
 say "校验通过" "checksum verified"

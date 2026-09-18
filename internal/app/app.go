@@ -20,7 +20,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	application := newApplication()
 	command, commandArgs := dispatchCommand(commandLine)
-	definition, ok := application.commands.lookup(command)
+	definition, ok := lookupCommand(application.commands, command)
 	if !ok {
 		fmt.Fprintf(stderr, "%s %q\n\n", i18n.T("cli.unknownCommand"), command)
 		printHelp(application.commands, stderr)

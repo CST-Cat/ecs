@@ -51,7 +51,7 @@ func TestResolveRequiredToolsKeepsWindowsBundleContract(t *testing.T) {
 	}
 }
 
-func TestResolveRequiredToolsFiltersOnlyUnsupportedWindowsTools(t *testing.T) {
+func TestResolveRequiredToolsStagesOnlyWindowsBundleTools(t *testing.T) {
 	declared := []string{"ping", "sysbench", "iperf3", "speedtest", "nexttrace-tiny", "zstd"}
 	want := []string{"nexttrace-tiny", "zstd"}
 	if got := resolveRequiredTools(declared); !reflect.DeepEqual(got, want) {

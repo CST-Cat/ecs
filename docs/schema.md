@@ -23,6 +23,17 @@
 - `summary`：`status`、`ok`、`warnings`、`skipped`、`errors` 计数，以及可选的结构化 `messages` 摘要；顶层没有旧的 `headline` 字符串。
 - `notices`：适用于整份报告的方法或隐私说明。
 
+报告 JSON 的读入边界是当前 `ecs.report/v1` 的 exact loader。`schema_version`、`tool`、`run`、`results` 和
+`summary` 必须存在且使用当前 JSON 类型；`tool.name`/`version`、`run.id`/`profile`/时间/时长/`exposure`/
+`redacted`/`requested_modules`/`output_formats`、`summary.status`/四个计数，以及每个 Result 的
+`id`/`title`/`status`/`started_at`/`duration_ms`/`methodology.kind` 都是必需字段。字段存在时，`false`、`0`
+和合法的空数组仍是有效值，缺失字段不会补默认值。Result ID 与其所属 Result 内的 measurement key 必须
+分别唯一；时间戳、状态、exposure、methodology kind、Evidence unit 和 summary 计数必须符合本节定义。
+summary 的四个计数必须分别等于各 Result 状态的数量且总和等于 `results` 长度；`summary.status` 按现有汇总规则为：有
+`error` 时为 `error`，否则有 `warning` 时为 `warning`，否则为 `ok`（只有 `skipped` 时仍为 `ok`）。
+外部 Evidence 的 `valid`/`expected` 负值或计数关系错误会被拒绝，不会在读入时调用 producer 使用的
+`Normalize()` 修复。
+
 每个 `Result` 使用 `summary_messages: Message[]` 保存模块摘要；Result 不再有旧的字符串
 `summary` 字段。顶层 `summary` 对象与 Result 的 `summary_messages` 是两个不同层级：两层的人类可读
 摘要都只用结构化 Message 表示；顶层对象另外保留 `status`、`ok`、`warnings`、`skipped`、`errors`。

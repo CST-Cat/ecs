@@ -34,7 +34,13 @@ func machineLocaleReportFixture() model.Report {
 		},
 		Results: []model.Result{{
 			ID: "latency", Title: "module.latency.title", Description: "probe.latency.description", Status: model.StatusOK,
+			StartedAt:       start,
 			SummaryMessages: []model.Message{model.NewMessage("message.summary.allOK", 1)},
+			Methodology: model.Methodology{
+				Kind: "protocol-measurement", Label: "methodology.protocol-measurement", Engine: "TCP connect",
+				Profile: "probe.latency.profile", ComparisonScope: "probe.latency.comparison_scope",
+				Parameters: map[string]string{"scope_revision": "1", "workload": "tcp-connect"},
+			},
 			Fields: []model.Field{
 				{Key: "endpoint_kind", Label: "probe.latency.column.region", Value: model.KeyValue("probe.latency.endpoint_kind.mainland_china")},
 				{Key: "carrier", Label: "probe.cnspeed.column.carrier", Value: model.KeyValue("probe.cnspeed.carrier.telecom")},

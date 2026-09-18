@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"ecs/internal/model"
+	"ecs/internal/tool"
 )
 
 func TestWindowsUnsupportedDefinitionsPreserveIDsAndToolFacts(t *testing.T) {
@@ -31,17 +32,37 @@ func TestWindowsUnsupportedDefinitionsPreserveIDsAndToolFacts(t *testing.T) {
 			}
 		}
 	}
-	wantUnsupported := map[string]struct{}{
-		"cpu":   {},
-		"speed": {},
-		"ookla": {},
+	wantUnsupported := make(map[string]struct{})
+	for _, definition := range definitions {
+		if windowsModuleHasUnsupportedTool(definition.Descriptor.RequiredTools) {
+			wantUnsupported[definition.Descriptor.ID] = struct{}{}
+		}
 	}
 	if !reflect.DeepEqual(unsupported, wantUnsupported) {
-		t.Fatalf("Windows unsupported IDs = %v, want exactly %v", unsupported, wantUnsupported)
+		t.Fatalf("Windows unsupported IDs = %v, want source-derived %v", unsupported, wantUnsupported)
+	}
+	wantUnsupportedIDs := []string{"cpu", "speed", "ookla"}
+	for _, id := range wantUnsupportedIDs {
+		if _, ok := unsupported[id]; !ok {
+			t.Fatalf("Windows unsupported IDs = %v, missing %q", unsupported, id)
+		}
+	}
+	if len(unsupported) != len(wantUnsupportedIDs) {
+		t.Fatalf("Windows unsupported IDs = %v, want exactly %v", unsupported, wantUnsupportedIDs)
 	}
 	for _, id := range []string{"cpu", "speed", "ookla", "latency", "route", "backtrace"} {
 		if !seen[id] {
 			t.Fatalf("Windows canonical module ID %q disappeared", id)
+		}
+	}
+	for _, definition := range definitions {
+		if definition.Descriptor.ID != "route" && definition.Descriptor.ID != "backtrace" {
+			continue
+		}
+		for _, requiredTool := range definition.Descriptor.RequiredTools {
+			if source := tool.PlatformToolSource(tool.PlatformWindows, requiredTool); source != tool.ToolSourceBundle {
+				t.Fatalf("Windows %s requirement %q source = %q, want bundle", definition.Descriptor.ID, requiredTool, source)
+			}
 		}
 	}
 }

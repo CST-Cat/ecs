@@ -1,6 +1,9 @@
 package report
 
 import (
+	"fmt"
+
+	comparison "ecs/internal/compare"
 	"ecs/internal/i18n"
 	"ecs/internal/model"
 )
@@ -14,6 +17,13 @@ func displayKey(key string) string {
 		return ""
 	}
 	return i18n.T(key)
+}
+
+// statusText owns the shared status glyph and localized label. Renderers keep
+// their own surrounding markup and tone, but do not re-decide this semantic
+// pair independently.
+func statusText(status model.Status) string {
+	return statusIcon(status) + " " + statusLabel(status)
 }
 
 // displayValue resolves only the explicit Value variant. Raw values are
@@ -96,4 +106,80 @@ func displayMethodology(methodology model.Methodology) model.Methodology {
 	methodology.Profile = displayKey(methodology.Profile)
 	methodology.ComparisonScope = displayKey(methodology.ComparisonScope)
 	return methodology
+}
+
+// displayFailureCount preserves the report contract that a recorded failure
+// always has at least one occurrence in human-readable output.
+func displayFailureCount(count int) int {
+	if count < 1 {
+		return 1
+	}
+	return count
+}
+
+// displayComparisonStatus resolves availability and the shared status text;
+// colors and markup remain renderer-owned.
+func displayComparisonStatus(value comparison.StatusValue) string {
+	if !value.Available {
+		return "—"
+	}
+	return statusText(value.Status)
+}
+
+// displayComparisonEvidence resolves the shared count/grade text. The
+// separator is supplied by each renderer because punctuation belongs to its
+// layout, while availability, counters and grade localization do not.
+func displayComparisonEvidence(value comparison.EvidenceValue, separator string) string {
+	if !value.Available {
+		return "—"
+	}
+	return fmt.Sprintf("%d/%d%s%s", value.Valid, value.Expected, separator, comparisonEvidenceGrade(derivedComparisonEvidenceGrade(value)))
+}
+
+func displayComparisonObservation(value comparison.ObservationValue) string {
+	if !value.Available {
+		return "—"
+	}
+	return value.Value
+}
+
+// sortComparisonValues keeps available values ordered by rank and missing
+// values in their input order. Every comparison renderer uses the same order
+// when it switches to the ranked many-report layout.
+func sortComparisonValues(values []comparison.MetricValue) {
+	for index := 1; index < len(values); index++ {
+		current := values[index]
+		position := index
+		for position > 0 && comparisonValueBefore(current, values[position-1]) {
+			values[position] = values[position-1]
+			position--
+		}
+		values[position] = current
+	}
+}
+
+func comparisonValueBefore(left, right comparison.MetricValue) bool {
+	if left.Available != right.Available {
+		return left.Available
+	}
+	if !left.Available {
+		return false
+	}
+	return left.Rank < right.Rank
+}
+
+func derivedComparisonEvidenceGrade(evidence comparison.EvidenceValue) model.EvidenceGrade {
+	return evidence.DerivedGrade()
+}
+
+func comparisonEvidenceGrade(grade model.EvidenceGrade) string {
+	key := "evidence." + string(grade)
+	if grade == model.EvidenceNotPlanned {
+		key = "evidence.notPlanned"
+	}
+	translated := i18n.T(key)
+	if translated == key {
+		return string(grade)
+	}
+	return translated
 }

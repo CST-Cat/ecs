@@ -4,30 +4,42 @@ import (
 	"reflect"
 	"strings"
 
+	comparison "ecs/internal/compare"
 	"ecs/internal/model"
+	"ecs/internal/score"
 )
 
-// sanitizedCopy returns a deep copy whose strings cannot carry terminal
+// These typed entry points are the complete supported surface for terminal
+// sanitization. The shared reflection walker below is deliberately kept
+// internal: renderers accept these report DTOs, not arbitrary object graphs.
+func sanitizedReportCopy(value model.Report) model.Report {
+	return cloneSupportedReportValue(reflect.ValueOf(value)).Interface().(model.Report)
+}
+
+func sanitizedComparisonCopy(value comparison.Report) comparison.Report {
+	return cloneSupportedReportValue(reflect.ValueOf(value)).Interface().(comparison.Report)
+}
+
+func sanitizedScoreCopy(value *score.Report) *score.Report {
+	if value == nil {
+		return nil
+	}
+	return cloneSupportedReportValue(reflect.ValueOf(value)).Interface().(*score.Report)
+}
+
+// cloneSupportedReportValue returns a deep copy whose strings cannot carry terminal
 // control sequences. Report fields can contain command output, remote labels,
 // URLs and file names, so none of them are trusted at any rendering boundary.
-// Map keys are sanitized as well because some renderers display parameter
-// names.
+// Map keys are copied verbatim: they are canonical identity, not presentation
+// text. A renderer that emits a map key must sanitize it at that output
+// boundary, after the copy has preserved the original identity.
 //
 // Every renderer runs this, not just the terminal one: a Markdown or HTML
 // report is routinely read with cat or grep, where a surviving escape sequence
 // executes just as it would in the text report. html/template escapes HTML
 // metacharacters and markdownEscape escapes Markdown ones, but neither removes
 // ESC or the remaining C0/C1 controls.
-func sanitizedCopy[T any](value T) T {
-	cloned := cloneTerminalValue(reflect.ValueOf(value))
-	if !cloned.IsValid() {
-		var zero T
-		return zero
-	}
-	return cloned.Interface().(T)
-}
-
-func cloneTerminalValue(value reflect.Value) reflect.Value {
+func cloneSupportedReportValue(value reflect.Value) reflect.Value {
 	if !value.IsValid() {
 		return reflect.Value{}
 	}
@@ -52,14 +64,14 @@ func cloneTerminalValue(value reflect.Value) reflect.Value {
 			return reflect.Zero(value.Type())
 		}
 		out := reflect.New(value.Type().Elem())
-		out.Elem().Set(cloneTerminalValue(value.Elem()))
+		out.Elem().Set(cloneSupportedReportValue(value.Elem()))
 		return out
 	case reflect.Interface:
 		if value.IsNil() {
 			return reflect.Zero(value.Type())
 		}
 		out := reflect.New(value.Type()).Elem()
-		out.Set(cloneTerminalValue(value.Elem()))
+		out.Set(cloneSupportedReportValue(value.Elem()))
 		return out
 	case reflect.Struct:
 		// Copy the complete value first so opaque standard-library structs such
@@ -71,7 +83,7 @@ func cloneTerminalValue(value reflect.Value) reflect.Value {
 			if value.Type().Field(index).PkgPath != "" {
 				continue
 			}
-			out.Field(index).Set(cloneTerminalValue(value.Field(index)))
+			out.Field(index).Set(cloneSupportedReportValue(value.Field(index)))
 		}
 		return out
 	case reflect.Slice:
@@ -80,13 +92,13 @@ func cloneTerminalValue(value reflect.Value) reflect.Value {
 		}
 		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
 		for index := 0; index < value.Len(); index++ {
-			out.Index(index).Set(cloneTerminalValue(value.Index(index)))
+			out.Index(index).Set(cloneSupportedReportValue(value.Index(index)))
 		}
 		return out
 	case reflect.Array:
 		out := reflect.New(value.Type()).Elem()
 		for index := 0; index < value.Len(); index++ {
-			out.Index(index).Set(cloneTerminalValue(value.Index(index)))
+			out.Index(index).Set(cloneSupportedReportValue(value.Index(index)))
 		}
 		return out
 	case reflect.Map:
@@ -96,7 +108,9 @@ func cloneTerminalValue(value reflect.Value) reflect.Value {
 		out := reflect.MakeMapWithSize(value.Type(), value.Len())
 		iterator := value.MapRange()
 		for iterator.Next() {
-			out.SetMapIndex(cloneTerminalValue(iterator.Key()), cloneTerminalValue(iterator.Value()))
+			// Never sanitize or deep-clone a map key. Changing a key while
+			// copying can merge two canonical members and silently drop one.
+			out.SetMapIndex(iterator.Key(), cloneSupportedReportValue(iterator.Value()))
 		}
 		return out
 	default:

@@ -13,6 +13,22 @@ type Definition struct {
 	ExternalService string
 }
 
-func validExternalService(service string) bool {
-	return service == "" || service == "ookla"
-}
+// Platform identifies one of the supported runtime operating systems.
+type Platform string
+
+const (
+	PlatformLinux   Platform = "linux"
+	PlatformFreeBSD Platform = "freebsd"
+	PlatformWindows Platform = "windows"
+)
+
+// ToolSource describes where a logical tool comes from at runtime. Build and
+// package facts remain owned by tools/lock.json; this is only the runtime
+// source used by the plan and platform definitions.
+type ToolSource string
+
+const (
+	ToolSourceBundle      ToolSource = "bundle"
+	ToolSourceBaseSystem  ToolSource = "base-system"
+	ToolSourceUnsupported ToolSource = "unsupported"
+)

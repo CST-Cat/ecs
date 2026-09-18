@@ -17,11 +17,8 @@ func TestCryptoProducerBuildsStableResult(t *testing.T) {
 	spec := openSSLAlgorithmSpecs[0]
 	result := runOpenSSLSpeedWithAllowance(context.Background(), Environment{}, path, []openSSLAlgorithmSpec{spec}, cpuAllowance{Visible: 2, Threads: 2})
 
-	if result.Title != "module.crypto.title" || result.Description != "probe.crypto.description" || result.Status != model.StatusOK {
-		t.Fatalf("crypto direct result metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.crypto.profile" || result.Methodology.ComparisonScope != "probe.crypto.comparison_scope" {
-		t.Fatalf("crypto methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("crypto direct result status = %s", result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 {
 		t.Fatalf("crypto evidence = %+v", result.Evidence)
@@ -110,7 +107,7 @@ func TestCryptoProducerSingleCoreAndFailureContracts(t *testing.T) {
 	}
 
 	missing := missingOpenSSLResult(errors.New("openssl missing"))
-	if missing.Title != "module.crypto.title" || missing.Status != model.StatusWarning || len(missing.Failures) != 1 || missing.Failures[0].Category != model.FailureToolMissing || len(missing.SummaryMessages) != 1 || missing.SummaryMessages[0].Key != "probe.crypto.summary.none" {
+	if missing.Status != model.StatusWarning || len(missing.Failures) != 1 || missing.Failures[0].Category != model.FailureToolMissing || len(missing.SummaryMessages) != 1 || missing.SummaryMessages[0].Key != "probe.crypto.summary.none" {
 		t.Fatalf("missing crypto result = %+v", missing)
 	}
 	if !slices.Contains(missing.Notes, "probe.crypto.note.tool_missing") {
@@ -122,15 +119,12 @@ func TestCryptoProducerVersionMismatchKeepsStableContract(t *testing.T) {
 	path := fakeOpenSSLVersionMismatchBinary(t)
 	result := runOpenSSLSpeedWithAllowance(context.Background(), Environment{}, path, openSSLAlgorithmSpecs[:1], cpuAllowance{Visible: 2, Threads: 2})
 
-	if result.Title != "module.crypto.title" || result.Description != "probe.crypto.description" || result.Status != model.StatusWarning {
-		t.Fatalf("crypto version mismatch metadata/status = %+v", result)
+	if result.Status != model.StatusWarning {
+		t.Fatalf("crypto version mismatch status = %s", result.Status)
 	}
 	assertProducerParameterScope(t, result, "tool_version")
 	if result.Methodology.Parameters["tool_version"] != "OpenSSL 3.4.0" {
 		t.Fatalf("crypto version mismatch comparison parameters = %v", result.Methodology.Parameters)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.crypto.profile" || result.Methodology.ComparisonScope != "probe.crypto.comparison_scope" {
-		t.Fatalf("crypto version mismatch methodology = %+v", result.Methodology)
 	}
 	if len(result.Failures) != 1 || result.Failures[0].Stage != "version_check" || result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 2 {
 		t.Fatalf("crypto version mismatch failure/evidence = %+v/%+v", result.Failures, result.Evidence)

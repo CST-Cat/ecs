@@ -2,7 +2,6 @@ package report
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	comparison "ecs/internal/compare"
@@ -15,7 +14,7 @@ import (
 // values are bold even in renderers that ignore emoji or HTML styling, and
 // density bars preserve the visual ranking in plain Markdown source.
 func ComparisonMarkdown(data comparison.Report) string {
-	data = sanitizedCopy(data)
+	data = sanitizedComparisonCopy(data)
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("compare.title") + "\n\n")
 	out.WriteString("> " + markdownEscape(i18n.T("compare.subtitle")) + "\n\n")
@@ -157,15 +156,7 @@ func writeComparisonMarkdownMetrics(out *strings.Builder, data comparison.Report
 			out.WriteString("| " + i18n.T("compare.rank") + " | " + i18n.T("compare.report") + " | " + i18n.T("compare.value") + " | " + i18n.T("compare.change") + " | |\n")
 			out.WriteString("| ---: | --- | ---: | --- | --- |\n")
 			values := append([]comparison.MetricValue(nil), metric.Values...)
-			sort.SliceStable(values, func(left, right int) bool {
-				if !values[left].Available {
-					return false
-				}
-				if !values[right].Available {
-					return true
-				}
-				return values[left].Rank < values[right].Rank
-			})
+			sortComparisonValues(values)
 			for _, value := range values {
 				rank := "—"
 				if value.Available {
@@ -240,11 +231,11 @@ func writeComparisonMarkdownObservations(out *strings.Builder, data comparison.R
 		for _, observation := range observations {
 			out.WriteString("| " + markdownEscape(observation.Label))
 			for index := range data.Inputs {
-				value := "—"
-				if index < len(observation.Values) && observation.Values[index].Available {
-					value = observation.Values[index].Value
+				value := comparison.ObservationValue{}
+				if index < len(observation.Values) {
+					value = observation.Values[index]
 				}
-				out.WriteString(" | " + markdownEscape(value))
+				out.WriteString(" | " + markdownEscape(displayComparisonObservation(value)))
 			}
 			out.WriteString(" |\n")
 		}
@@ -255,10 +246,7 @@ func writeComparisonMarkdownObservations(out *strings.Builder, data comparison.R
 		out.WriteString("#### " + markdownEscape(observation.Label) + "\n\n")
 		out.WriteString("| " + i18n.T("compare.report") + " | " + i18n.T("compare.value") + " |\n| --- | --- |\n")
 		for _, value := range observation.Values {
-			display := "—"
-			if value.Available {
-				display = value.Value
-			}
+			display := displayComparisonObservation(value)
 			fmt.Fprintf(out, "| %s | %s |\n", markdownEscape(comparisonInputLabel(data, value.Report)), markdownEscape(display))
 		}
 		out.WriteString("\n")
@@ -302,20 +290,22 @@ func comparisonMarkdownChange(value comparison.MetricValue, reference bool) stri
 }
 
 func comparisonMarkdownStatusValue(module comparison.Module, index int) string {
-	if index < 0 || index >= len(module.Statuses) || !module.Statuses[index].Available {
+	if index < 0 || index >= len(module.Statuses) {
 		return "—"
 	}
-	status := module.Statuses[index].Status
-	return statusIcon(status) + " " + markdownEscape(statusLabel(status))
+	return markdownEscape(displayComparisonStatus(module.Statuses[index]))
 }
 
 func comparisonMarkdownEvidenceValue(module comparison.Module, index int, withBar bool) string {
-	if index < 0 || index >= len(module.Evidence) || !module.Evidence[index].Available {
+	if index < 0 || index >= len(module.Evidence) {
 		return "—"
 	}
 	evidence := module.Evidence[index]
+	if !evidence.Available {
+		return displayComparisonEvidence(evidence, " ")
+	}
 	grade := derivedComparisonEvidenceGrade(evidence)
-	display := markdownEscape(fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade)))
+	display := markdownEscape(displayComparisonEvidence(evidence, " "))
 	if withBar {
 		display += "<br>`" + termcolor.Palette{Level: termcolor.LevelNone}.Bar(evidence.Ratio, 12) + "`"
 	}

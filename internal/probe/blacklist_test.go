@@ -57,11 +57,8 @@ func TestDNSBLClassificationReverseAndPresentation(t *testing.T) {
 
 func TestBlacklistProducerSkipBuildsStableResult(t *testing.T) {
 	result := (blacklistProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion6}})
-	if result.Title != "module.blacklist.title" || result.Description != "probe.blacklist.description" || result.Status != model.StatusSkipped {
-		t.Fatalf("blacklist direct metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.blacklist.profile" || result.Methodology.ComparisonScope != "probe.blacklist.comparison_scope" {
-		t.Fatalf("blacklist methodology = %+v", result.Methodology)
+	if result.Status != model.StatusSkipped {
+		t.Fatalf("blacklist direct status = %s", result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != len(dnsblZones()) || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.blacklist.summary.skipped" {
 		t.Fatalf("blacklist skip evidence/summary = %+v/%+v", result.Evidence, result.SummaryMessages)
@@ -204,11 +201,8 @@ func TestBlacklistProducerBuildsStableResultFromFindings(t *testing.T) {
 			config.IPVersion4: {Version: config.IPVersion4, IP: "203.0.113.9"},
 		}},
 	})
-	if result.Title != "module.blacklist.title" || result.Description != "probe.blacklist.description" || result.Status != model.StatusWarning {
-		t.Fatalf("blacklist direct metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.blacklist.profile" || result.Methodology.ComparisonScope != "probe.blacklist.comparison_scope" {
-		t.Fatalf("blacklist methodology = %+v", result.Methodology)
+	if result.Status != model.StatusWarning {
+		t.Fatalf("blacklist direct status = %s", result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != len(dnsblZones())-2 || result.Evidence.Expected != len(dnsblZones()) || len(result.Failures) != 2 {
 		t.Fatalf("blacklist evidence/failures = %+v/%+v", result.Evidence, result.Failures)

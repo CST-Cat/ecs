@@ -173,8 +173,12 @@ func TestNetworkSourceDisclosureUsesCanonicalQualityOrder(t *testing.T) {
 }
 
 func TestNetworkFiniteSemanticKeysHaveChineseAndEnglishCatalogEntries(t *testing.T) {
+	descriptor, ok := testCatalog().Lookup("network")
+	if !ok {
+		t.Fatal("network descriptor missing")
+	}
 	keys := []string{
-		networkTitleKey, networkDescriptionKey, networkMethodologyLabel, networkMethodologyProfile, networkComparisonScope,
+		descriptor.TitleKey, descriptor.DescriptionKey, descriptor.Methodology.Label, descriptor.Methodology.Profile, descriptor.Methodology.ComparisonScope,
 		networkMissingValue, networkRiskUnknown, networkChannelDirect, networkChannelAPIKey, networkChannelPublicDemo,
 		networkChannelTryout, networkChannelCommunity, networkChannelOfficialFree, networkChannelPublicPage,
 		networkChannelJina, networkChannelJinaProxy, networkChannelMixedFallback, networkChannelFreeFallback,

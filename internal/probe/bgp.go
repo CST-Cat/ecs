@@ -26,16 +26,7 @@ type bgpProbe struct{}
 func (bgpProbe) ID() string { return "bgp" }
 
 func newBGPResult() model.Result {
-	result := model.NewResult("bgp", "module.bgp.title")
-	result.Description = "probe.bgp.description"
-	result.Methodology = model.Methodology{
-		Kind:            "provider-assessment",
-		Label:           "methodology.provider-assessment",
-		Engine:          "RouteViews current RIB API",
-		Profile:         "probe.bgp.profile",
-		ComparisonScope: "probe.bgp.comparison_scope",
-	}
-	return result
+	return model.NewResult("bgp", "")
 }
 
 const routeViewsAPI = "https://api.routeviews.org"

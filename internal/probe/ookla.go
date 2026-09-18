@@ -25,15 +25,7 @@ type ooklaProbe struct{}
 func (ooklaProbe) ID() string { return "ookla" }
 
 func newOoklaProbeResult() model.Result {
-	result := model.NewResult("ookla", "module.ookla.title")
-	result.Description = "probe.ookla.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "ookla-speedtest-cli",
-		Profile:         "probe.ookla.profile",
-		ComparisonScope: "probe.ookla.comparison_scope",
-	}
+	result := model.NewResult("ookla", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	result.Notes = ooklaStableNotes()
 	return result

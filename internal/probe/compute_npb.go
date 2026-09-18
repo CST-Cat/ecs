@@ -80,25 +80,13 @@ func (npbProbe) Run(ctx context.Context, env Environment) model.Result {
 	return runNPBBenchmarks(ctx, env, npbBenchmarkSpecs)
 }
 
-func npbMethodology() model.Methodology {
-	return model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "NAS Parallel Benchmarks OpenMP",
-		Profile:         "probe.npb.profile",
-		ComparisonScope: "probe.npb.comparison_scope",
-	}
-}
-
 func runNPBBenchmarks(ctx context.Context, env Environment, specs []npbBenchmarkSpec) model.Result {
 	return runNPBBenchmarksWithAllowance(ctx, env, specs, detectCPUAllowance())
 }
 
 func runNPBBenchmarksWithAllowance(ctx context.Context, env Environment, specs []npbBenchmarkSpec, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("npb", "module.npb.title")
-	result.Description = "probe.npb.description"
-	result.Methodology = npbMethodology()
+	result := model.NewResult("npb", "")
 	result.Methodology.Parameters = newComparisonParameters()
 
 	workers := allowance.Threads

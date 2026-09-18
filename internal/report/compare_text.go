@@ -2,7 +2,6 @@ package report
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	comparison "ecs/internal/compare"
@@ -18,7 +17,7 @@ const comparisonBarWidth = 12
 // report.  The layout grows from a paired table to a matrix, then to ranked
 // vertical blocks when column count would stop being readable.
 func ComparisonText(data comparison.Report, color termcolor.Level) string {
-	data = sanitizedCopy(data)
+	data = sanitizedComparisonCopy(data)
 	r := &comparisonTextRenderer{
 		textRenderer: textRenderer{palette: termcolor.Palette{Level: color}, width: textWidth},
 		data:         data,
@@ -229,15 +228,7 @@ func (r *comparisonTextRenderer) manyMetrics(metrics []comparison.Metric) {
 	for _, metric := range metrics {
 		r.indentedStyled(metric.Label+" · "+metric.Method, r.palette.LabelBold)
 		values := append([]comparison.MetricValue(nil), metric.Values...)
-		sort.SliceStable(values, func(left, right int) bool {
-			if !values[left].Available {
-				return false
-			}
-			if !values[right].Available {
-				return true
-			}
-			return values[left].Rank < values[right].Rank
-		})
+		sortComparisonValues(values)
 		rows := make([][]string, 0, len(values))
 		for _, value := range values {
 			rank := "—"
@@ -279,10 +270,7 @@ func (r *comparisonTextRenderer) observations(observations []comparison.Observat
 		r.indented(observation.Label, true)
 		rows := make([][]string, 0, len(observation.Values))
 		for _, value := range observation.Values {
-			display := "—"
-			if value.Available {
-				display = value.Value
-			}
+			display := displayComparisonObservation(value)
 			rows = append(rows, []string{comparisonInputLabel(r.data, value.Report), display})
 		}
 		r.table([]string{i18n.T("compare.report"), i18n.T("compare.value")}, rows, nil)
@@ -327,7 +315,7 @@ func (r *comparisonTextRenderer) issues(issues []comparison.MetricIssue) {
 func (r *comparisonTextRenderer) noticeBlock() {
 	r.prefaceTitle(i18n.T("report.notices"))
 	for _, notice := range r.data.Notices {
-		// Dynamic canonical notice arguments are decoded after sanitizedCopy;
+		// Dynamic canonical notice arguments are decoded after the typed copy;
 		// sanitize the localized result once more so untrusted version text cannot
 		// reintroduce terminal controls.
 		r.note(sanitizeTerminalText(localizeComparisonNotice(notice)))
@@ -388,11 +376,15 @@ func (r *comparisonTextRenderer) styleChange(value comparison.MetricValue, refer
 }
 
 func (r *comparisonTextRenderer) statusValue(module comparison.Module, index int) string {
-	if index < 0 || index >= len(module.Statuses) || !module.Statuses[index].Available {
+	if index < 0 || index >= len(module.Statuses) {
 		return r.palette.Dim("—")
 	}
-	status := module.Statuses[index].Status
-	display := statusIcon(status) + " " + statusLabel(status)
+	statusValue := module.Statuses[index]
+	if !statusValue.Available {
+		return r.palette.Dim(displayComparisonStatus(statusValue))
+	}
+	status := statusValue.Status
+	display := displayComparisonStatus(statusValue)
 	switch status {
 	case model.StatusOK:
 		return r.palette.Success(display)
@@ -406,12 +398,15 @@ func (r *comparisonTextRenderer) statusValue(module comparison.Module, index int
 }
 
 func (r *comparisonTextRenderer) evidenceValue(module comparison.Module, index int, withBar bool) string {
-	if index < 0 || index >= len(module.Evidence) || !module.Evidence[index].Available {
+	if index < 0 || index >= len(module.Evidence) {
 		return r.palette.Dim("—")
 	}
 	evidence := module.Evidence[index]
+	if !evidence.Available {
+		return r.palette.Dim(displayComparisonEvidence(evidence, " "))
+	}
 	grade := derivedComparisonEvidenceGrade(evidence)
-	display := fmt.Sprintf("%d/%d %s", evidence.Valid, evidence.Expected, comparisonEvidenceGrade(grade))
+	display := displayComparisonEvidence(evidence, " ")
 	if withBar {
 		display += " " + r.palette.Bar(evidence.Ratio, 12)
 	}
@@ -428,10 +423,14 @@ func (r *comparisonTextRenderer) evidenceValue(module comparison.Module, index i
 }
 
 func (r *comparisonTextRenderer) observationValue(observation comparison.Observation, index int) string {
-	if index < 0 || index >= len(observation.Values) || !observation.Values[index].Available {
-		return r.palette.Dim("—")
+	if index < 0 || index >= len(observation.Values) {
+		return r.palette.Dim(displayComparisonObservation(comparison.ObservationValue{}))
 	}
-	return observation.Values[index].Value
+	display := displayComparisonObservation(observation.Values[index])
+	if !observation.Values[index].Available {
+		return r.palette.Dim(display)
+	}
+	return display
 }
 
 func (r *comparisonTextRenderer) styleComparability(value comparison.Comparability) string {
@@ -444,20 +443,4 @@ func (r *comparisonTextRenderer) styleComparability(value comparison.Comparabili
 	default:
 		return r.palette.ErrorBold(display)
 	}
-}
-
-func derivedComparisonEvidenceGrade(evidence comparison.EvidenceValue) model.EvidenceGrade {
-	return evidence.DerivedGrade()
-}
-
-func comparisonEvidenceGrade(grade model.EvidenceGrade) string {
-	key := "evidence." + string(grade)
-	if grade == model.EvidenceNotPlanned {
-		key = "evidence.notPlanned"
-	}
-	translated := i18n.T(key)
-	if translated == key {
-		return string(grade)
-	}
-	return translated
 }

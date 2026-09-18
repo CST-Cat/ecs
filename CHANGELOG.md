@@ -15,8 +15,11 @@ the current `v0.8.5` release.
 
 ### 中文
 
+- 收紧 `ecs.report/v1` JSON 读入为 exact current-schema loader：必需字段、字段类型、时间/时长、状态、exposure、methodology、结果身份和 summary 一致性均在读入边界校验；外部 Evidence 坏计数直接拒绝，不再被 `Normalize()` 静默修复。
 
 ### English
+
+- Tightened `ecs.report/v1` JSON ingress into an exact current-schema loader: required fields, types, timestamps/durations, statuses, exposure, methodology, result identity, and summary consistency are checked at the boundary; malformed external Evidence counters are rejected instead of being silently repaired by `Normalize()`.
 
 ## 0.8.5 — 2026-09-17
 

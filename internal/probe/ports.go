@@ -32,15 +32,7 @@ type portResult struct {
 
 func (portsProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("ports", "module.ports.title")
-	result.Description = "probe.ports.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "native TCP connect",
-		Profile:         "probe.ports.profile",
-		ComparisonScope: "probe.ports.comparison_scope",
-	}
+	result := model.NewResult("ports", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameter(result.Methodology.Parameters, "target_set", "ports-v1")

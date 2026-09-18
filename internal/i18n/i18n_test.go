@@ -63,6 +63,27 @@ func TestTranslationTablesStaySynchronizedAndFormatSafe(t *testing.T) {
 			}
 		}
 	}
+
+	for key := range zhLookup {
+		if _, ok := enLookup[key]; !ok {
+			t.Errorf("merged lookup has a Chinese-only key %q", key)
+		}
+	}
+	for key := range enLookup {
+		if _, ok := zhLookup[key]; !ok {
+			t.Errorf("merged lookup has an English-only key %q", key)
+		}
+	}
+}
+
+func TestCatalogMergeRejectsDuplicateKeys(t *testing.T) {
+	_, err := mergeCatalogs(
+		map[string]string{"duplicate.key": "first"},
+		map[string]string{"duplicate.key": "second"},
+	)
+	if err == nil {
+		t.Fatal("merging duplicate keys must fail")
+	}
 }
 
 func TestPrivacyCopyDistinguishesReportUploadFromMeasurementTraffic(t *testing.T) {
@@ -198,8 +219,8 @@ func TestTranslationHelpersExposeMissingKeysWithoutCrossLanguageFallback(t *test
 		t.Fatalf("Chinese JoinList = %q", JoinList([]string{"a", "b"}))
 	}
 	const key = "test.only.chinese"
-	chinese[key] = "只有中文"
-	t.Cleanup(func() { delete(chinese, key) })
+	zhLookup[key] = "只有中文"
+	t.Cleanup(func() { delete(zhLookup, key) })
 	if got := translate(LangEN, key); got != key {
 		t.Fatalf("missing English translation must expose key, got %q", got)
 	}

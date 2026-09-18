@@ -97,8 +97,8 @@ func TestSystemBuiltinUsesDirectProbeAndLiveResultHasNoDuplicateFacts(t *testing
 		t.Fatalf("systemProbe builtin count = %d", systemCount)
 	}
 	result := (systemProbe{}).Run(context.Background(), Environment{})
-	if result.Title != "module.system.title" || len(result.SummaryMessages) != 1 {
-		t.Fatalf("live direct system result = %+v", result)
+	if len(result.SummaryMessages) != 1 {
+		t.Fatalf("live direct system summary = %+v", result.SummaryMessages)
 	}
 	fields := make(map[string]bool, len(result.Fields))
 	for _, field := range result.Fields {

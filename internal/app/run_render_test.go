@@ -18,13 +18,22 @@ import (
 func writeAppRenderReport(t *testing.T, directory string) string {
 	t.Helper()
 	path := filepath.Join(directory, "sample.json")
+	start := time.Unix(1700000000, 0).UTC()
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{ID: "sample", Profile: "standard", StartedAt: time.Unix(0, 0).UTC()},
-		Summary:       model.Summary{Status: model.StatusOK, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
+		Run: model.RunInfo{
+			ID: "sample", Profile: "standard", StartedAt: start, CompletedAt: start.Add(time.Second), DurationMS: 1000,
+			Exposure: "local", Redacted: true, Requested: []string{"system"}, OutputFormats: []string{"json"},
+		},
+		Summary: model.Summary{Status: model.StatusOK, OK: 1, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
 		Results: []model.Result{{
-			ID: "system", Title: "系统", Status: model.StatusOK,
+			ID: "system", Title: "系统", Status: model.StatusOK, StartedAt: start,
+			Methodology: model.Methodology{
+				Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory",
+				Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope",
+				Parameters: map[string]string{"scope_revision": "1", "workload": "inventory"},
+			},
 			Fields: []model.Field{{Key: "state", Label: "状态", Value: model.RawValue("系统")}},
 			Tables: []model.Table{{
 				Key: "state", Title: "当前值", Columns: []model.TableColumn{{Key: "status", Label: "状态"}},

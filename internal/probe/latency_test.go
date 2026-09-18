@@ -125,8 +125,8 @@ func TestLatencyEndpointKindUsesStableMachineKey(t *testing.T) {
 func TestLatencyProducerDirectResult(t *testing.T) {
 	t.Run("skip without targets", func(t *testing.T) {
 		result := (latencyProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
-		if result.Status != model.StatusSkipped || result.Title != "module.latency.title" || result.Description != "probe.latency.description" {
-			t.Fatalf("latency skip result = %+v", result)
+		if result.Status != model.StatusSkipped {
+			t.Fatalf("latency skip status = %s", result.Status)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 0 || result.Evidence.Unit != "sample" {
 			t.Fatalf("latency skip evidence = %+v", result.Evidence)
@@ -172,11 +172,8 @@ func TestLatencyProducerDirectResult(t *testing.T) {
 		if got := <-accepted; got != 2 {
 			t.Fatalf("latency successful TCP connections = %d, want 2", got)
 		}
-		if result.Status != model.StatusOK || result.Title != "module.latency.title" || result.Description != "probe.latency.description" {
-			t.Fatalf("latency success status/metadata = %s/%+v", result.Status, result)
-		}
-		if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.latency.profile" || result.Methodology.ComparisonScope != "probe.latency.comparison_scope" {
-			t.Fatalf("latency success methodology = %+v", result.Methodology)
+		if result.Status != model.StatusOK {
+			t.Fatalf("latency success status = %s", result.Status)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "sample" {
 			t.Fatalf("latency success evidence = %+v", result.Evidence)

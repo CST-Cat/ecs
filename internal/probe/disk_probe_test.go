@@ -16,11 +16,8 @@ func TestDiskProbeMissingFIOEmitsStableResult(t *testing.T) {
 	t.Setenv(ToolBinEnv, "")
 	result := (diskProbe{}).Run(context.Background(), Environment{})
 
-	if result.ID != "disk" || result.Title != "module.disk.title" || result.Description != "probe.disk.description" || result.Status != model.StatusWarning {
-		t.Fatalf("disk missing result identity/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.disk.profile" || result.Methodology.ComparisonScope != "probe.disk.comparison_scope" {
-		t.Fatalf("disk missing methodology = %+v", result.Methodology)
+	if result.ID != "disk" || result.Status != model.StatusWarning {
+		t.Fatalf("disk missing result identity/status = %s/%s", result.ID, result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != len(fioJobPlan()) {
 		t.Fatalf("disk missing evidence = %+v", result.Evidence)
@@ -51,9 +48,6 @@ func TestDiskProducerAssemblesStableMetadataAndStructuredStatus(t *testing.T) {
 
 	finalizeDiskResult(&result)
 
-	if result.Title != "module.disk.title" || result.Description != "probe.disk.description" || result.Methodology.Engine != "fio" {
-		t.Fatalf("disk stable identity = %+v", result)
-	}
 	if result.Fields[0].Label != "probe.disk.field.engine" || result.Measurements[0].Label != "probe.disk.metric.fio_sequential_write_mib_s" {
 		t.Fatalf("disk stable metadata = fields:%+v measurements:%+v", result.Fields, result.Measurements)
 	}

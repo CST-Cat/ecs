@@ -24,15 +24,7 @@ const (
 
 func (routeProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("route", "module.route.title")
-	result.Description = "probe.route.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "probe.route.methodology.engine",
-		Profile:         "probe.route.profile",
-		ComparisonScope: "probe.route.comparison_scope",
-	}
+	result := model.NewResult("route", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.RouteTargets)

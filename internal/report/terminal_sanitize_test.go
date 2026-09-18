@@ -27,7 +27,7 @@ func TestTextSanitizesRepresentativeControlWithoutMutatingInput(t *testing.T) {
 	}) {
 		t.Fatalf("terminal output retained a control character:\n%s", output)
 	}
-	safe := sanitizedCopy(data)
+	safe := sanitizedReportCopy(data)
 	if raw, ok := safe.Results[0].Fields[0].Value.Raw(); !ok || raw != sanitized {
 		t.Fatalf("sanitized raw value variant = %q, %v; want %q, raw variant", raw, ok, sanitized)
 	}
@@ -39,5 +39,47 @@ func TestTextSanitizesRepresentativeControlWithoutMutatingInput(t *testing.T) {
 	}
 	if data.Results[0].Fields[keyFieldIndex].Value.Text() != payload {
 		t.Fatal("terminal sanitization mutated the key input report")
+	}
+}
+
+func TestSanitizedReportCopyPreservesMapKeyIdentityAndMemberCount(t *testing.T) {
+	const (
+		controlKey = "same\x1b"
+		plainKey   = "same "
+	)
+	if sanitized := sanitizeTerminalText(controlKey); sanitized != plainKey {
+		t.Fatalf("fixture does not collide after sanitization: %q != %q", sanitized, plainKey)
+	}
+
+	data := model.Report{Results: []model.Result{{Methodology: model.Methodology{
+		Parameters: map[string]string{
+			controlKey: "value from control-key member",
+			plainKey:   "value from plain-key member",
+		},
+	}}}}
+	originalParameters := data.Results[0].Methodology.Parameters
+	safe := sanitizedReportCopy(data)
+	parameters := safe.Results[0].Methodology.Parameters
+
+	if got, want := len(parameters), len(originalParameters); got != want {
+		t.Fatalf("sanitized map member count = %d, want %d", got, want)
+	}
+	for key, want := range originalParameters {
+		if got, ok := parameters[key]; !ok || got != want {
+			t.Fatalf("sanitized map member %q = %q, %v; want %q, true", key, got, ok, want)
+		}
+	}
+	if _, ok := parameters[controlKey]; !ok {
+		t.Fatalf("control-bearing canonical map key was rewritten or lost: %#v", parameters)
+	}
+	if _, ok := parameters[plainKey]; !ok {
+		t.Fatalf("plain canonical map key was rewritten or lost: %#v", parameters)
+	}
+
+	if got, want := len(originalParameters), 2; got != want {
+		t.Fatalf("sanitization mutated original map member count = %d, want %d", got, want)
+	}
+	if originalParameters[controlKey] != "value from control-key member" || originalParameters[plainKey] != "value from plain-key member" {
+		t.Fatalf("sanitization mutated original map identity or values: %#v", originalParameters)
 	}
 }

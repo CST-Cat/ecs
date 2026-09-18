@@ -120,6 +120,8 @@ file_sha256() {
     # FreeBSD base-system /sbin/sha256. -q prints the digest alone, so the
     # output already matches the "one lowercase hex line" contract above.
     sha256 -q "$1" | tr '[:upper:]' '[:lower:]'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]'
   else
     return 1
   fi
@@ -154,6 +156,21 @@ if [ "$HELP_REQUESTED" -eq 1 ]; then
         'standard 默认包含 cnspeed，不包含多源 IP 质量与 Ookla；full 增加后两项。显式使用 --only 可在任意档位选择任意模块。选中 Ookla 时，脚本会走独立的临时、已验证官方包源路径。'
     fi
     exit 0
+fi
+
+owner=${REPO%%/*}
+repo=${REPO#*/}
+[ "$owner" != "$REPO" ] || die "ECS_REPOSITORY 必须使用 owner/repo 格式" "ECS_REPOSITORY must use owner/repo form"
+case "$owner" in
+  ""|*[!A-Za-z0-9._-]*) die "ECS_REPOSITORY owner 无效" "invalid ECS_REPOSITORY owner" ;;
+esac
+case "$repo" in
+  ""|*/*|*[!A-Za-z0-9._-]*) die "ECS_REPOSITORY 必须使用安全的 owner/repo 格式" "ECS_REPOSITORY must use safe owner/repo form" ;;
+esac
+if [ "$VERSION" != "latest" ]; then
+  case "$VERSION" in
+    *[!A-Za-z0-9._+-]*) die "发行版本无效" "invalid release version" ;;
+  esac
 fi
 
 # An exact -- activates the wrapper grammar.  Only the tokens before it may be
@@ -1124,7 +1141,7 @@ fetch "${ECS_BASE}/checksums.txt" "${WORK}/checksums.txt" || die "下载校验�
 EXPECTED=$(awk -v f="$ASSET" '$2 == f {print $1; exit}' "${WORK}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$EXPECTED" ] || die "校验文件里没有 ${ASSET} 的条目" "no checksum entry for ${ASSET}"
 if ! ACTUAL=$(file_sha256 "${WORK}/${ASSET}"); then
-  die "需要 sha256sum、shasum 或 FreeBSD sha256 才能校验" "sha256sum, shasum, or FreeBSD sha256 is required to verify"
+  die "需要 sha256sum、shasum、sha256 或 openssl 才能校验" "sha256sum, shasum, sha256, or openssl is required to verify"
 fi
 [ "$ACTUAL" = "$EXPECTED" ] || die "SHA-256 校验失败：内容与发布版本不一致" "SHA-256 mismatch: content differs from the published release"
 say "SHA-256 已校验" "SHA-256 verified"

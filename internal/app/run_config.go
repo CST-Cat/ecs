@@ -1,9 +1,6 @@
 package app
 
 import (
-	"bytes"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -29,311 +26,243 @@ type runFlagParseError struct{ err error }
 func (e runFlagParseError) Error() string { return e.err.Error() }
 func (e runFlagParseError) Unwrap() error { return e.err }
 
-type runLanguageFlag struct {
-	value string
-	seen  bool
-}
-
-func (f *runLanguageFlag) String() string { return f.value }
-
-func (f *runLanguageFlag) Set(value string) error {
-	f.value = value
-	f.seen = true
-	if strings.HasPrefix(value, "-") {
-		return errors.New("--lang requires a value")
-	}
-	if strings.TrimSpace(value) != "" {
-		if language, ok := i18n.Parse(value); ok {
-			i18n.Set(language)
-		}
-	}
-	return nil
-}
-
 // resolveRunConfig is the single CLI/file/defaults resolver for run-like
 // commands. It deliberately stops before interactive mutation and execution;
 // callers may run the wizard and then validate the resulting Runtime.
 func resolveRunConfig(catalog module.Catalog, args []string, stderr io.Writer) (resolvedRunConfig, error) {
-	flags := flag.NewFlagSet("ecs run", flag.ContinueOnError)
-	parseOutput := &bytes.Buffer{}
-	flags.SetOutput(parseOutput)
-	languageFlag := &runLanguageFlag{}
-	flags.Var(languageFlag, "lang", "flag.lang")
-	helpFlag := flags.Bool("help", false, "")
-	hFlag := flags.Bool("h", false, "")
-	profileFlag := flags.String("profile", "", "flag.profile")
-	configFlag := flags.String("config", "", "flag.config")
-	onlyFlag := flags.String("only", "", "flag.only")
-	skipFlag := flags.String("skip", "", "flag.skip")
-	exposureFlag := flags.String("exposure", "", "flag.exposure")
-	revealFlag := flags.Bool("reveal", false, "flag.reveal")
-	ipVersionFlag := flags.String("ip-version", "", "flag.ipVersion")
-	ipv4Flag := flags.Bool("4", false, "flag.ipv4")
-	ipv6Flag := flags.Bool("6", false, "flag.ipv6")
-	ipSourcesFlag := flags.String("ip-quality-sources", "", "flag.ipQualitySources")
-	formatsFlag := flags.String("format", "", "flag.format")
-	outputFlag := flags.String("output", "", "flag.output")
-	nameFlag := flags.String("name", "", "flag.name")
-	noColorFlag := flags.Bool("no-color", false, "flag.noColor")
-	colorFlag := flags.String("color", "auto", "flag.color")
-	baselineFlag := flags.String("score-baseline", "", "flag.scoreBaseline")
-	cpuTimeFlag := flags.Duration("cpu-time", 0, "flag.cpuTime")
-	diskFlag := flags.Int("disk-mib", 0, "flag.diskMiB")
-	diskPathFlag := flags.String("disk-path", "", "flag.diskPath")
-	diskMultiFlag := flags.Bool("disk-multi", false, "flag.diskMulti")
-	diskMatrixModeFlag := flags.String("disk-matrix-mode", "", "flag.diskMatrixMode")
-	iperfDurationFlag := flags.Duration("iperf-duration", 0, "flag.iperfDuration")
-	threadsFlag := flags.Int("speed-threads", 0, "flag.speedThreads")
-	timeoutFlag := flags.Duration("timeout", 0, "flag.timeout")
-	dnsAttemptsFlag := flags.Int("dns-attempts", 0, "flag.dnsAttempts")
-	latencyAttemptsFlag := flags.Int("latency-attempts", 0, "flag.latencyAttempts")
-	dnsResolversFlag := flags.String("dns-resolvers", "", "flag.dnsResolvers")
-	latencyTargetsFlag := flags.String("latency-targets", "", "flag.latencyTargets")
-	routeTargetsFlag := flags.String("route-targets", "", "flag.routeTargets")
-	stunServersFlag := flags.String("stun-servers", "", "flag.stunServers")
-	iperfTargetsFlag := flags.String("iperf-targets", "", "flag.iperfTargets")
-	mediaRegionFlag := flags.String("media-region", "", "flag.mediaRegion")
-	backtraceCityFlag := flags.String("backtrace-city", "", "flag.backtraceCity")
-	backtraceTargetsFlag := flags.String("backtrace-targets", "", "flag.backtraceTargets")
-	ooklaServersFlag := flags.String("ookla-servers", "", "flag.ooklaServers")
-	interactiveFlag := flags.Bool("interactive", false, "flag.interactive")
-	yesFlag := flags.Bool("yes", false, "flag.yes")
-	strictFlag := flags.Bool("strict", false, "flag.strict")
-	versionFlag := flags.Bool("version", false, "flag.version")
-	flags.Usage = func() { printRunHelp(catalog, parseOutput, flags) }
-	if err := flags.Parse(args); err != nil {
-		if *helpFlag || *hFlag || errors.Is(err, flag.ErrHelp) {
-			flags.SetOutput(stderr)
-			printRunHelp(catalog, stderr, flags)
-			return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
-		}
-		_, _ = io.Copy(stderr, parseOutput)
-		return resolvedRunConfig{}, runFlagParseError{err: err}
-	}
-	if languageFlag.seen {
-		occurrence := languageFlagOccurrence{Value: languageFlag.value}
-		if err := validateExplicitLanguage([]languageFlagOccurrence{occurrence}); err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-		}
-	}
-	if *helpFlag || *hFlag {
-		flags.SetOutput(stderr)
-		printRunHelp(catalog, stderr, flags)
-		return resolvedRunConfig{}, runFlagParseError{err: flag.ErrHelp}
-	}
-	explicit := make(map[string]bool)
-	flags.Visit(func(flag *flag.Flag) { explicit[flag.Name] = true })
-
-	configPath := ""
-	if explicit["config"] {
-		configPath = *configFlag
-	}
-	var fileConfig config.File
-	var err error
-	if configPath != "" {
-		fileConfig, err = config.LoadFile(configPath)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-		}
-	}
-	profile := fileConfig.Profile
-	if explicit["profile"] {
-		profile = *profileFlag
-	}
-	// Keep one precedence pipeline: built-in defaults selected by profile, then
-	// config-file values, then only explicitly supplied CLI values. Callers
-	// apply the final Runtime validation after this resolver returns.
-	cfg, err := config.Defaults(catalog, profile)
+	// Stage 1: parse the complete run/plan flag grammar and remember which
+	// values were explicitly supplied.
+	flags, err := parseRunFlags(catalog, args, stderr)
 	if err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+		return resolvedRunConfig{}, err
 	}
-	if err := config.ApplyFile(catalog, &cfg, fileConfig); err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+
+	// Stage 2: built-in defaults selected by profile, overlaid by the config
+	// file. CLI values are intentionally not applied until the next stage.
+	cfg, err := loadRunConfig(catalog, flags)
+	if err != nil {
+		return resolvedRunConfig{}, err
 	}
-	if cfg.Output == "" {
-		cfg.Output = "./reports"
-	}
+
 	// Preserve the historical CLI contract: --version short-circuits before
 	// positional-argument and run-specific override validation.
-	if *versionFlag {
-		if explicit["no-color"] {
-			cfg.NoColor = *noColorFlag
+	if flags.version {
+		if flags.explicit["no-color"] {
+			cfg.NoColor = flags.noColor
 		}
-		return resolvedRunConfig{Runtime: cfg, Color: *colorFlag, Version: true}, nil
+		return resolvedRunConfig{Runtime: cfg, Color: flags.color, Version: true}, nil
 	}
-	if flags.NArg() != 0 {
-		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.Args(), " "))
+	if len(flags.positional) != 0 {
+		return resolvedRunConfig{}, fmt.Errorf("%s %s", i18n.T("help.extraArgs"), strings.Join(flags.positional, " "))
 	}
 
-	if explicit["exposure"] {
-		exposure, err := config.ParseExposure(*exposureFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --exposure: %v", i18n.T("cli.error"), err)
-		}
-		cfg.Exposure = exposure
+	// Stage 3: only explicitly supplied CLI values override the loaded
+	// runtime. Empty values remain meaningful when their flag was supplied.
+	if err := applyRunCLIOverrides(&cfg, flags); err != nil {
+		return resolvedRunConfig{}, err
 	}
-	if explicit["reveal"] {
-		cfg.Reveal = *revealFlag
+
+	// Stage 4: resolve explicit module selection and exposure, then return the
+	// runtime shared by run and plan.
+	cfg, err = resolveRunModules(catalog, cfg, flags)
+	if err != nil {
+		return resolvedRunConfig{}, err
 	}
-	if explicit["ip-version"] {
-		cfg.IPVersion = strings.ToLower(strings.TrimSpace(*ipVersionFlag))
-	}
-	if *ipv4Flag && *ipv6Flag {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), i18n.Errorf("err.ipv4AndIPv6"))
-	}
-	if *ipv4Flag {
-		cfg.IPVersion = config.IPVersion4
-	}
-	if *ipv6Flag {
-		cfg.IPVersion = config.IPVersion6
-	}
-	if explicit["ip-quality-sources"] {
-		cfg.IPQualitySources = config.ParseList(*ipSourcesFlag)
-	}
-	cfg.Formats = config.ParseList(strings.Join(cfg.Formats, ","))
-	if explicit["format"] {
-		cfg.Formats = config.ParseList(*formatsFlag)
-	}
-	if explicit["output"] {
-		cfg.Output = *outputFlag
-	}
-	if explicit["no-color"] {
-		cfg.NoColor = *noColorFlag
-	}
-	if explicit["cpu-time"] {
-		cfg.CPUTime = *cpuTimeFlag
-	}
-	if explicit["disk-mib"] {
-		cfg.DiskMiB = *diskFlag
-	}
-	if explicit["disk-path"] {
-		cfg.DiskPath = *diskPathFlag
-	}
-	if explicit["disk-multi"] {
-		cfg.DiskMulti = *diskMultiFlag
-	}
-	if explicit["disk-matrix-mode"] {
-		diskMatrixMode, err := config.ParseDiskMatrixMode(*diskMatrixModeFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --disk-matrix-mode: %v", i18n.T("cli.error"), err)
-		}
-		cfg.DiskMatrixMode = diskMatrixMode
-	}
-	if explicit["iperf-duration"] {
-		cfg.IPerfDuration = *iperfDurationFlag
-	}
-	if explicit["speed-threads"] {
-		cfg.SpeedThreads = *threadsFlag
-	}
-	if explicit["timeout"] {
-		cfg.HTTPTimeout = *timeoutFlag
-	}
-	if explicit["dns-attempts"] {
-		cfg.DNSAttempts = *dnsAttemptsFlag
-	}
-	if explicit["latency-attempts"] {
-		cfg.LatencyAttempts = *latencyAttemptsFlag
-	}
-	for _, override := range []struct {
-		flagName    string
-		raw         string
-		requirePort bool
-		apply       func([]config.Endpoint)
-		label       string
-	}{
-		{"dns-resolvers", *dnsResolversFlag, true, func(e []config.Endpoint) { cfg.DNSResolvers = e }, "dns-resolvers"},
-		{"latency-targets", *latencyTargetsFlag, true, func(e []config.Endpoint) { cfg.LatencyTargets = e }, "latency-targets"},
-		{"route-targets", *routeTargetsFlag, false, func(e []config.Endpoint) { cfg.RouteTargets = e }, "route-targets"},
-		{"stun-servers", *stunServersFlag, true, func(e []config.Endpoint) { cfg.STUNServers = e }, "stun-servers"},
-	} {
-		if !explicit[override.flagName] {
-			continue
-		}
-		endpoints, err := config.ParseEndpointList(override.raw, override.requirePort)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --%s: %v", i18n.T("cli.error"), override.label, err)
-		}
-		override.apply(endpoints)
-	}
-	if explicit["iperf-targets"] {
-		targets, err := config.ParseIPerfTargetList(*iperfTargetsFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --iperf-targets: %v", i18n.T("cli.error"), err)
-		}
-		cfg.IPerfTargets = targets
-	}
-	if explicit["media-region"] {
-		// 合法性由 config.Validate 无条件校验，这里只负责解析。
-		cfg.MediaRegions = config.ParseList(*mediaRegionFlag)
-	}
-	if explicit["backtrace-city"] {
-		if len(config.ParseList(*backtraceCityFlag)) == 0 {
-			cfg.BacktraceTargets = []config.Endpoint{}
-		} else {
-			cities, err := config.ParseBacktraceCities(*backtraceCityFlag)
-			if err != nil {
-				return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-			}
-			cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
-		}
-	}
-	if explicit["backtrace-targets"] {
-		targets, err := config.ParseBacktraceTargetList(*backtraceTargetsFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --backtrace-targets: %v", i18n.T("cli.error"), err)
-		}
-		cfg.BacktraceTargets = targets
-	}
-	if explicit["ookla-servers"] {
-		servers, err := config.ParseOoklaServerList(*ooklaServersFlag)
-		if err != nil {
-			return resolvedRunConfig{}, fmt.Errorf("%s: --ookla-servers: %v", i18n.T("cli.error"), err)
-		}
-		cfg.OoklaServers = servers
-	}
-	named := config.ParseList(*onlyFlag)
-	skipped := config.ParseList(*skipFlag)
-	if err := config.ValidateModuleSelection(catalog, named, skipped); err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-	}
-	cfg.Modules = config.SelectModules(catalog, cfg.Modules, named, skipped)
-	if err := config.CheckModuleExposure(catalog, named, cfg.Exposure); err != nil {
-		return resolvedRunConfig{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
-	}
-	cfg.Modules = config.FilterModulesByExposure(catalog, cfg.Modules, cfg.Exposure)
 
 	return resolvedRunConfig{
 		Runtime:       cfg,
-		Name:          *nameFlag,
-		Color:         *colorFlag,
-		ScoreBaseline: *baselineFlag,
-		Interactive:   *interactiveFlag,
-		Yes:           *yesFlag,
-		Strict:        *strictFlag,
+		Name:          flags.name,
+		Color:         flags.color,
+		ScoreBaseline: flags.scoreBaseline,
+		Interactive:   flags.interactive,
+		Yes:           flags.yes,
+		Strict:        flags.strict,
 		Version:       false,
 	}, nil
 }
 
-func printRunHelp(catalog module.Catalog, writer io.Writer, flags *flag.FlagSet) {
-	type savedUsage struct {
-		parsedFlag *flag.Flag
-		usage      string
+func loadRunConfig(catalog module.Catalog, flags parsedRunFlags) (config.Runtime, error) {
+	var fileConfig config.File
+	if flags.explicit["config"] && flags.configPath != "" {
+		loaded, err := config.LoadFile(flags.configPath)
+		if err != nil {
+			return config.Runtime{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+		}
+		fileConfig = loaded
 	}
-	var originalUsages []savedUsage
-	flags.VisitAll(func(parsedFlag *flag.Flag) {
-		if !strings.HasPrefix(parsedFlag.Usage, "flag.") {
-			return
+
+	profile := fileConfig.Profile
+	if flags.explicit["profile"] {
+		profile = flags.profile
+	}
+	cfg, err := config.Defaults(catalog, profile)
+	if err != nil {
+		return config.Runtime{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	if err := config.ApplyFile(catalog, &cfg, fileConfig); err != nil {
+		return config.Runtime{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	if cfg.Output == "" {
+		cfg.Output = "./reports"
+	}
+	return cfg, nil
+}
+
+func applyRunCLIOverrides(cfg *config.Runtime, flags parsedRunFlags) error {
+	if flags.explicit["exposure"] {
+		exposure, err := config.ParseExposure(flags.exposure)
+		if err != nil {
+			return fmt.Errorf("%s: --exposure: %v", i18n.T("cli.error"), err)
 		}
-		originalUsages = append(originalUsages, savedUsage{parsedFlag: parsedFlag, usage: parsedFlag.Usage})
-		parsedFlag.Usage = i18n.T(parsedFlag.Usage)
-	})
-	defer func() {
-		for _, saved := range originalUsages {
-			saved.parsedFlag.Usage = saved.usage
+		cfg.Exposure = exposure
+	}
+	if flags.explicit["reveal"] {
+		cfg.Reveal = flags.reveal
+	}
+	if flags.explicit["ip-version"] {
+		cfg.IPVersion = strings.ToLower(strings.TrimSpace(flags.ipVersion))
+	}
+	if flags.ipv4 && flags.ipv6 {
+		return fmt.Errorf("%s: %v", i18n.T("cli.error"), i18n.Errorf("err.ipv4AndIPv6"))
+	}
+	if flags.ipv4 {
+		cfg.IPVersion = config.IPVersion4
+	}
+	if flags.ipv6 {
+		cfg.IPVersion = config.IPVersion6
+	}
+	if flags.explicit["ip-quality-sources"] {
+		cfg.IPQualitySources = config.ParseList(flags.ipQualitySources)
+	}
+	cfg.Formats = config.ParseList(strings.Join(cfg.Formats, ","))
+	if flags.explicit["format"] {
+		cfg.Formats = config.ParseList(flags.formats)
+	}
+	if flags.explicit["output"] {
+		cfg.Output = flags.output
+	}
+	if flags.explicit["no-color"] {
+		cfg.NoColor = flags.noColor
+	}
+	if flags.explicit["cpu-time"] {
+		cfg.CPUTime = flags.cpuTime
+	}
+	if flags.explicit["disk-mib"] {
+		cfg.DiskMiB = flags.diskMiB
+	}
+	if flags.explicit["disk-path"] {
+		cfg.DiskPath = flags.diskPath
+	}
+	if flags.explicit["disk-multi"] {
+		cfg.DiskMulti = flags.diskMulti
+	}
+	if flags.explicit["disk-matrix-mode"] {
+		diskMatrixMode, err := config.ParseDiskMatrixMode(flags.diskMatrixMode)
+		if err != nil {
+			return fmt.Errorf("%s: --disk-matrix-mode: %v", i18n.T("cli.error"), err)
 		}
-	}()
-	fmt.Fprintln(writer, i18n.T("help.runUsage"))
-	flags.PrintDefaults()
-	fmt.Fprintln(writer, "\n"+i18n.T("cli.modules")+": "+strings.Join(catalog.IDs(), ","))
-	fmt.Fprintln(writer, i18n.T("cli.sources")+": "+strings.Join(config.IPQualitySourceIDs(), ","))
+		cfg.DiskMatrixMode = diskMatrixMode
+	}
+	if flags.explicit["iperf-duration"] {
+		cfg.IPerfDuration = flags.iperfDuration
+	}
+	if flags.explicit["speed-threads"] {
+		cfg.SpeedThreads = flags.speedThreads
+	}
+	if flags.explicit["timeout"] {
+		cfg.HTTPTimeout = flags.timeout
+	}
+	if flags.explicit["dns-attempts"] {
+		cfg.DNSAttempts = flags.dnsAttempts
+	}
+	if flags.explicit["latency-attempts"] {
+		cfg.LatencyAttempts = flags.latencyAttempts
+	}
+	if flags.explicit["dns-resolvers"] {
+		endpoints, err := parseRunEndpointOverride(flags.dnsResolvers, true, "dns-resolvers")
+		if err != nil {
+			return err
+		}
+		cfg.DNSResolvers = endpoints
+	}
+	if flags.explicit["latency-targets"] {
+		endpoints, err := parseRunEndpointOverride(flags.latencyTargets, true, "latency-targets")
+		if err != nil {
+			return err
+		}
+		cfg.LatencyTargets = endpoints
+	}
+	if flags.explicit["route-targets"] {
+		endpoints, err := parseRunEndpointOverride(flags.routeTargets, false, "route-targets")
+		if err != nil {
+			return err
+		}
+		cfg.RouteTargets = endpoints
+	}
+	if flags.explicit["stun-servers"] {
+		endpoints, err := parseRunEndpointOverride(flags.stunServers, true, "stun-servers")
+		if err != nil {
+			return err
+		}
+		cfg.STUNServers = endpoints
+	}
+	if flags.explicit["iperf-targets"] {
+		targets, err := config.ParseIPerfTargetList(flags.iperfTargets)
+		if err != nil {
+			return fmt.Errorf("%s: --iperf-targets: %v", i18n.T("cli.error"), err)
+		}
+		cfg.IPerfTargets = targets
+	}
+	if flags.explicit["media-region"] {
+		// 合法性由 config.Validate 无条件校验，这里只负责解析。
+		cfg.MediaRegions = config.ParseList(flags.mediaRegion)
+	}
+	if flags.explicit["backtrace-city"] {
+		if len(config.ParseList(flags.backtraceCity)) == 0 {
+			cfg.BacktraceTargets = []config.Endpoint{}
+		} else {
+			cities, err := config.ParseBacktraceCities(flags.backtraceCity)
+			if err != nil {
+				return fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+			}
+			cfg.BacktraceTargets = config.BacktraceTargetsFor(cities)
+		}
+	}
+	if flags.explicit["backtrace-targets"] {
+		targets, err := config.ParseBacktraceTargetList(flags.backtraceTargets)
+		if err != nil {
+			return fmt.Errorf("%s: --backtrace-targets: %v", i18n.T("cli.error"), err)
+		}
+		cfg.BacktraceTargets = targets
+	}
+	if flags.explicit["ookla-servers"] {
+		servers, err := config.ParseOoklaServerList(flags.ooklaServers)
+		if err != nil {
+			return fmt.Errorf("%s: --ookla-servers: %v", i18n.T("cli.error"), err)
+		}
+		cfg.OoklaServers = servers
+	}
+	return nil
+}
+
+func parseRunEndpointOverride(raw string, requirePort bool, label string) ([]config.Endpoint, error) {
+	endpoints, err := config.ParseEndpointList(raw, requirePort)
+	if err != nil {
+		return nil, fmt.Errorf("%s: --%s: %v", i18n.T("cli.error"), label, err)
+	}
+	return endpoints, nil
+}
+
+func resolveRunModules(catalog module.Catalog, cfg config.Runtime, flags parsedRunFlags) (config.Runtime, error) {
+	named := config.ParseList(flags.only)
+	skipped := config.ParseList(flags.skip)
+	if err := config.ValidateModuleSelection(catalog, named, skipped); err != nil {
+		return config.Runtime{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	cfg.Modules = config.SelectModules(catalog, cfg.Modules, named, skipped)
+	if err := config.CheckModuleExposure(catalog, named, cfg.Exposure); err != nil {
+		return config.Runtime{}, fmt.Errorf("%s: %v", i18n.T("cli.error"), err)
+	}
+	cfg.Modules = config.FilterModulesByExposure(catalog, cfg.Modules, cfg.Exposure)
+	return cfg, nil
 }

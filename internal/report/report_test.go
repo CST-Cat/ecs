@@ -71,6 +71,258 @@ func writeReportFile(t *testing.T, path string, content []byte) {
 	}
 }
 
+func canonicalReportWithMutation(t *testing.T, mutate func(map[string]json.RawMessage)) []byte {
+	t.Helper()
+	content, err := JSON(sampleReport())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(content, &document); err != nil {
+		t.Fatal(err)
+	}
+	mutate(document)
+	content, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
+}
+
+func rawObjectForTest(t *testing.T, raw json.RawMessage) map[string]json.RawMessage {
+	t.Helper()
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	return object
+}
+
+func rawJSONForTest(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func mutateCanonicalResult(t *testing.T, document map[string]json.RawMessage, mutate func(map[string]json.RawMessage)) {
+	t.Helper()
+	var results []json.RawMessage
+	if err := json.Unmarshal(document["results"], &results); err != nil || len(results) == 0 {
+		t.Fatalf("decode canonical results: %v", err)
+	}
+	result := rawObjectForTest(t, results[0])
+	mutate(result)
+	results[0] = rawJSONForTest(t, result)
+	document["results"] = rawJSONForTest(t, results)
+}
+
+func mutateCanonicalRun(t *testing.T, document map[string]json.RawMessage, mutate func(map[string]json.RawMessage)) {
+	t.Helper()
+	run := rawObjectForTest(t, document["run"])
+	mutate(run)
+	document["run"] = rawJSONForTest(t, run)
+}
+
+func mutateCanonicalSummary(t *testing.T, document map[string]json.RawMessage, mutate func(map[string]json.RawMessage)) {
+	t.Helper()
+	summary := rawObjectForTest(t, document["summary"])
+	mutate(summary)
+	document["summary"] = rawJSONForTest(t, summary)
+}
+
+func TestParseJSONExactCurrentSchema(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]json.RawMessage)
+		want   string
+	}{
+		{
+			name: "only schema_version",
+			mutate: func(document map[string]json.RawMessage) {
+				for field := range document {
+					if field != "schema_version" {
+						delete(document, field)
+					}
+				}
+			},
+			want: "missing required field report.tool",
+		},
+		{
+			name: "missing tool",
+			mutate: func(document map[string]json.RawMessage) {
+				delete(document, "tool")
+			},
+			want: "missing required field report.tool",
+		},
+		{
+			name: "missing run",
+			mutate: func(document map[string]json.RawMessage) {
+				delete(document, "run")
+			},
+			want: "missing required field report.run",
+		},
+		{
+			name: "missing redacted",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalRun(t, document, func(run map[string]json.RawMessage) { delete(run, "redacted") })
+			},
+			want: "missing required field run.redacted",
+		},
+		{
+			name: "missing summary status",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalSummary(t, document, func(summary map[string]json.RawMessage) { delete(summary, "status") })
+			},
+			want: "missing required field summary.status",
+		},
+		{
+			name: "missing result status",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) { delete(result, "status") })
+			},
+			want: "missing required field results[0].status",
+		},
+		{
+			name: "missing methodology",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) { delete(result, "methodology") })
+			},
+			want: "missing required field results[0].methodology",
+		},
+		{
+			name: "missing methodology kind",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) {
+					methodology := rawObjectForTest(t, result["methodology"])
+					delete(methodology, "kind")
+					result["methodology"] = rawJSONForTest(t, methodology)
+				})
+			},
+			want: "missing required field results[0].methodology.kind",
+		},
+		{
+			name: "negative duration",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) {
+					result["duration_ms"] = json.RawMessage(`-1`)
+				})
+			},
+			want: "results[0].duration_ms must not be negative",
+		},
+		{
+			name: "invalid evidence counters",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) {
+					evidence := rawObjectForTest(t, result["evidence"])
+					evidence["valid"] = json.RawMessage(`-1`)
+					result["evidence"] = rawJSONForTest(t, evidence)
+				})
+			},
+			want: "results[0].evidence.valid must not be negative",
+		},
+		{
+			name: "summary count mismatch",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalSummary(t, document, func(summary map[string]json.RawMessage) {
+					summary["ok"] = json.RawMessage(`0`)
+				})
+			},
+			want: "summary counts",
+		},
+		{
+			name: "duplicate result ID",
+			mutate: func(document map[string]json.RawMessage) {
+				var results []json.RawMessage
+				if err := json.Unmarshal(document["results"], &results); err != nil {
+					t.Fatal(err)
+				}
+				results = append(results, results[0])
+				document["results"] = rawJSONForTest(t, results)
+				mutateCanonicalSummary(t, document, func(summary map[string]json.RawMessage) {
+					summary["ok"] = json.RawMessage(`2`)
+				})
+			},
+			want: `duplicate result ID "system"`,
+		},
+		{
+			name: "duplicate measurement key",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) {
+					var measurements []json.RawMessage
+					if err := json.Unmarshal(result["measurements"], &measurements); err != nil {
+						t.Fatal(err)
+					}
+					measurements = append(measurements, measurements[0])
+					result["measurements"] = rawJSONForTest(t, measurements)
+				})
+			},
+			want: `duplicate measurement key "events"`,
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			content := canonicalReportWithMutation(t, test.mutate)
+			if _, err := ParseJSON(content); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ParseJSON error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	canonical, err := JSON(sampleReport())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseJSON(canonical)
+	if err != nil {
+		t.Fatalf("canonical ParseJSON error = %v", err)
+	}
+	roundTrip, err := JSON(parsed)
+	if err != nil || !bytes.Equal(roundTrip, canonical) {
+		t.Fatalf("canonical roundtrip changed report: err=%v before=%s after=%s", err, canonical, roundTrip)
+	}
+}
+
+func TestParseJSONRejectsEvidenceWithoutNormalization(t *testing.T) {
+	content := canonicalReportWithMutation(t, func(document map[string]json.RawMessage) {
+		mutateCanonicalResult(t, document, func(result map[string]json.RawMessage) {
+			evidence := rawObjectForTest(t, result["evidence"])
+			evidence["valid"] = json.RawMessage(`-3`)
+			result["evidence"] = rawJSONForTest(t, evidence)
+		})
+	})
+	parsed, err := ParseJSON(content)
+	if err == nil || !strings.Contains(err.Error(), "results[0].evidence.valid") {
+		t.Fatalf("negative evidence error = %v", err)
+	}
+	if parsed.Results[0].Evidence == nil || parsed.Results[0].Evidence.Valid != -3 {
+		t.Fatalf("negative evidence was normalized on rejected input: %+v", parsed.Results[0].Evidence)
+	}
+}
+
+func TestParseJSONAcceptsPresentZeroAndFalse(t *testing.T) {
+	data := sampleReport()
+	data.Run.Redacted = false
+	data.Run.DurationMS = 0
+	data.Results[0].Status = model.StatusWarning
+	data.Results[0].DurationMS = 0
+	data.Summary = model.Summary{Status: model.StatusWarning, Warnings: 1}
+	content, err := JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseJSON(content)
+	if err != nil {
+		t.Fatalf("present zero/false values rejected: %v", err)
+	}
+	if parsed.Run.Redacted || parsed.Run.DurationMS != 0 || parsed.Results[0].DurationMS != 0 || parsed.Summary.OK != 0 {
+		t.Fatalf("present zero/false values changed: %+v", parsed)
+	}
+}
+
 func TestWriteFilesCanonicalAndLanguageSpecificOutputs(t *testing.T) {
 	originalLanguage := i18n.Current()
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
@@ -285,12 +537,13 @@ func TestLoadJSONRejectsInvalidReportIdentity(t *testing.T) {
 		{
 			name:    "empty result ID",
 			mutate:  func(data *model.Report) { data.Results[0].ID = "" },
-			wantErr: "empty result ID",
+			wantErr: "results[0].id must not be empty",
 		},
 		{
 			name: "duplicate measurement key",
 			mutate: func(data *model.Report) {
-				data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{Key: "events"})
+				duplicate := data.Results[0].Measurements[0]
+				data.Results[0].Measurements = append(data.Results[0].Measurements, duplicate)
 			},
 			wantErr: `duplicate measurement key "events"`,
 		},
@@ -514,45 +767,55 @@ func TestLoadJSONValidationAndComparison(t *testing.T) {
 
 func TestLoadJSONRejectsUnsupportedSchemaEnums(t *testing.T) {
 	cases := []struct {
-		name    string
-		content string
-		marker  string
+		name   string
+		mutate func(*model.Report)
+		marker string
 	}{
 		{
-			name:    "summary status",
-			content: `{"schema_version":"ecs.report/v1","summary":{"status":"bogus"}}`,
-			marker:  `unsupported summary.status "bogus"`,
+			name:   "summary status",
+			mutate: func(data *model.Report) { data.Summary.Status = "bogus" },
+			marker: `unsupported summary.status "bogus"`,
 		},
 		{
-			name:    "result status",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","status":"bogus"}]}`,
-			marker:  `unsupported results[0].status "bogus"`,
+			name:   "result status",
+			mutate: func(data *model.Report) { data.Results[0].Status = "bogus" },
+			marker: `unsupported results[0].status "bogus"`,
 		},
 		{
-			name:    "run exposure",
-			content: `{"schema_version":"ecs.report/v1","run":{"exposure":"bogus"}}`,
-			marker:  `unsupported run.exposure "bogus"`,
+			name:   "run exposure",
+			mutate: func(data *model.Report) { data.Run.Exposure = "bogus" },
+			marker: `unsupported run.exposure "bogus"`,
 		},
 		{
-			name:    "methodology kind",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","methodology":{"kind":"bogus"}}]}`,
-			marker:  `unsupported results[0].methodology.kind "bogus"`,
+			name:   "methodology kind",
+			mutate: func(data *model.Report) { data.Results[0].Methodology.Kind = "bogus" },
+			marker: `unsupported results[0].methodology.kind "bogus"`,
 		},
 		{
-			name:    "evidence unit",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","evidence":{"valid":1,"expected":1,"unit":"bogus"}}]}`,
-			marker:  `unsupported results[0].evidence.unit "bogus"`,
+			name: "evidence unit",
+			mutate: func(data *model.Report) {
+				data.Results[0].Evidence.Unit = "bogus"
+			},
+			marker: `unsupported results[0].evidence.unit "bogus"`,
 		},
 		{
-			name:    "failure category",
-			content: `{"schema_version":"ecs.report/v1","results":[{"id":"module","failures":[{"category":"bogus"}]}]}`,
-			marker:  `unsupported results[0].failures[0].category "bogus"`,
+			name: "failure category",
+			mutate: func(data *model.Report) {
+				data.Results[0].Failures[0].Category = "bogus"
+			},
+			marker: `unsupported results[0].failures[0].category "bogus"`,
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
+			data := sampleReport()
+			test.mutate(&data)
+			content, err := JSON(data)
+			if err != nil {
+				t.Fatal(err)
+			}
 			path := filepath.Join(t.TempDir(), "report.json")
-			writeReportFile(t, path, []byte(test.content))
+			writeReportFile(t, path, content)
 			if _, err := LoadJSON(path); err == nil || !strings.Contains(err.Error(), test.marker) {
 				t.Fatalf("LoadJSON error = %v, want %q", err, test.marker)
 			}
@@ -586,10 +849,11 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 
 	t.Run("same key across result owners is allowed", func(t *testing.T) {
 		data := sampleReport()
-		data.Results = append(data.Results, model.Result{
-			ID: "cpu", Status: model.StatusOK,
-			Measurements: []model.Measurement{{Key: "events", Value: 999}},
-		})
+		second := data.Results[0]
+		second.ID = "cpu"
+		second.Measurements[0].Value = 999
+		data.Results = append(data.Results, second)
+		data.Summary.OK = 2
 		if err := load(t, data); err != nil {
 			t.Fatalf("cross-module duplicate key was rejected: %v", err)
 		}
@@ -597,7 +861,9 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 
 	t.Run("duplicate measurement in one result is rejected", func(t *testing.T) {
 		data := sampleReport()
-		data.Results[0].Measurements = append(data.Results[0].Measurements, model.Measurement{Key: "events", Value: 999})
+		duplicate := data.Results[0].Measurements[0]
+		duplicate.Value = 999
+		data.Results[0].Measurements = append(data.Results[0].Measurements, duplicate)
 		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), `duplicate measurement key "events"`) {
 			t.Fatalf("duplicate measurement error = %v", err)
 		}
@@ -605,7 +871,9 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 
 	t.Run("duplicate result ID is rejected", func(t *testing.T) {
 		data := sampleReport()
-		data.Results = append(data.Results, model.Result{ID: "system", Status: model.StatusSkipped})
+		duplicate := data.Results[0]
+		data.Results = append(data.Results, duplicate)
+		data.Summary.OK = 2
 		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), `duplicate result ID "system"`) {
 			t.Fatalf("duplicate result error = %v", err)
 		}
@@ -614,7 +882,7 @@ func TestLoadJSONMeasurementIdentity(t *testing.T) {
 	t.Run("empty result ID is rejected", func(t *testing.T) {
 		data := sampleReport()
 		data.Results[0].ID = ""
-		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), "empty result ID") {
+		if err := loadRaw(t, data); err == nil || !strings.Contains(err.Error(), "results[0].id must not be empty") {
 			t.Fatalf("empty result ID error = %v", err)
 		}
 	})

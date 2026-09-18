@@ -19,12 +19,12 @@ import (
 // TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices pins the
 // platform-resolved tool contract for one mixed selection. The expected tool
 // set comes from the platform test file: Linux stages every declared tool,
-// FreeBSD substitutes base-system ping and traceroute, and Windows omits
-// unsupported Unix adapters. External services are asserted by the same
+// FreeBSD substitutes base-system ping and traceroute, and Windows stages
+// only bundle-sourced tools. External services are asserted by the same
 // platform helper.
 func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T) {
 	application := newApplication()
-	plan := buildExecutionPlan(application.modules, application.tools, config.Runtime{
+	plan := buildExecutionPlan(application.modules, config.Runtime{
 		Modules: []string{"route", "backtrace", "ookla", "zstd", "cpu", "latency"},
 	})
 	if !reflect.DeepEqual(plan.RequiredTools, wantSelectedModuleTools()) {
@@ -49,11 +49,11 @@ func TestBuildExecutionPlanUsesToolServiceMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	renamedPlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"renamed-client"}})
+	renamedPlan := buildExecutionPlan(catalog, config.Runtime{Modules: []string{"renamed-client"}})
 	if !reflect.DeepEqual(renamedPlan.ExternalServices, wantPlanJSONExternalServices()) {
 		t.Fatalf("renamed tool service facts = %v", renamedPlan.ExternalServices)
 	}
-	barePlan := buildExecutionPlan(catalog, application.tools, config.Runtime{Modules: []string{"ookla"}})
+	barePlan := buildExecutionPlan(catalog, config.Runtime{Modules: []string{"ookla"}})
 	if !reflect.DeepEqual(barePlan.ExternalServices, []string{"third-party-provider"}) {
 		t.Fatalf("bare module service facts = %v", barePlan.ExternalServices)
 	}

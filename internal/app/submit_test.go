@@ -15,12 +15,22 @@ import (
 )
 
 func modelReportWithoutScoreableMeasurements() model.Report {
+	start := time.Unix(1700000000, 0).UTC()
 	return model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{ID: "empty", StartedAt: time.Unix(0, 0).UTC()},
+		Run: model.RunInfo{
+			ID: "empty", Profile: "standard", StartedAt: start, CompletedAt: start.Add(time.Second), DurationMS: 1000,
+			Exposure: "local", Redacted: true, Requested: []string{"system"}, OutputFormats: []string{"json"},
+		},
+		Summary: model.Summary{Status: model.StatusOK, OK: 1, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
 		Results: []model.Result{{
-			ID: "system", Status: model.StatusOK,
+			ID: "system", Title: "module.system.title", Status: model.StatusOK, StartedAt: start,
+			Methodology: model.Methodology{
+				Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory",
+				Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope",
+				Parameters: map[string]string{"scope_revision": "1", "workload": "inventory"},
+			},
 		}},
 	}
 }

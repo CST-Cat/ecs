@@ -192,16 +192,7 @@ func (dnsProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 func newDNSResult() model.Result {
-	result := model.NewResult("dns", "module.dns.title")
-	result.Description = "probe.dns.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "native DNS/UDP",
-		Profile:         "probe.dns.profile",
-		ComparisonScope: "probe.dns.comparison_scope",
-	}
-	return result
+	return model.NewResult("dns", "")
 }
 
 func dnsStatusValue(status string) model.Value {

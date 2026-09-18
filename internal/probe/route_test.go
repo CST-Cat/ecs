@@ -149,14 +149,6 @@ func TestRouteProducerUsesMachineSemanticsAndCounters(t *testing.T) {
 	}
 	result := (routeProbe{}).Run(context.Background(), routeTestEnvironment(targets, config.IPVersionAuto))
 
-	if result.Title != "module.route.title" || result.Description != "probe.route.description" {
-		t.Fatalf("route presentation fields = %#v", result)
-	}
-	if result.Methodology.Kind != "protocol-measurement" || result.Methodology.Label != "methodology.protocol-measurement" ||
-		result.Methodology.Engine != "probe.route.methodology.engine" || result.Methodology.Profile != "probe.route.profile" ||
-		result.Methodology.ComparisonScope != "probe.route.comparison_scope" {
-		t.Fatalf("route methodology = %#v", result.Methodology)
-	}
 	assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "tool_version", "adapter", "arguments")
 	parameters := result.Methodology.Parameters
 	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets"] != comparisonParameterJSON(targets) || parameters["max_hops"] != strconv.Itoa(routeSnapshotHops) || parameters["tool_version"] != "fixture-nexttrace" || parameters["adapter"] != traceNextTraceAdapter {

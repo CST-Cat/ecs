@@ -44,15 +44,7 @@ func (memoryProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 func newMemoryResult() model.Result {
-	result := model.NewResult("memory", "module.memory.title")
-	result.Description = "probe.memory.description"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "STREAM",
-		Profile:         "probe.memory.stream.profile",
-		ComparisonScope: "probe.memory.comparison_scope",
-	}
+	result := model.NewResult("memory", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	return result
 }

@@ -30,10 +30,43 @@ func ValidateFormats(formats []string) error {
 }
 
 func Validate(catalog module.Catalog, runtime Runtime) error {
-	knownModules := make(map[string]bool)
-	for _, id := range catalog.IDs() {
-		knownModules[id] = true
+	if err := validateRuntimeBasics(runtime); err != nil {
+		return err
 	}
+	if err := validateRuntimeModules(catalog, runtime); err != nil {
+		return err
+	}
+	if err := validateRuntimeBudgets(runtime); err != nil {
+		return err
+	}
+	if err := validateRuntimeSources(runtime); err != nil {
+		return err
+	}
+	if err := validateDNSAndLatencyEndpoints(runtime); err != nil {
+		return err
+	}
+	if err := validateRouteEndpoints(runtime.RouteTargets, runtime.IPVersion); err != nil {
+		return err
+	}
+	if err := validateSTUNEndpoints(runtime.STUNServers); err != nil {
+		return err
+	}
+	if err := validateBacktraceEndpoints(runtime.BacktraceTargets, runtime.IPVersion); err != nil {
+		return err
+	}
+	if err := validateOoklaServers(runtime.OoklaServers); err != nil {
+		return err
+	}
+	if err := validateOutputPath(runtime); err != nil {
+		return err
+	}
+	if err := validateIPerf(runtime); err != nil {
+		return err
+	}
+	return validateAbsoluteDiskPath(runtime.DiskPath)
+}
+
+func validateRuntimeBasics(runtime Runtime) error {
 	if len(runtime.Modules) == 0 {
 		return i18n.Errorf("err.noModules")
 	}
@@ -46,6 +79,14 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 		// the same meaning as auto.
 	default:
 		return i18n.Errorf("err.unknownIPVersion", runtime.IPVersion)
+	}
+	return nil
+}
+
+func validateRuntimeModules(catalog module.Catalog, runtime Runtime) error {
+	knownModules := make(map[string]bool)
+	for _, id := range catalog.IDs() {
+		knownModules[id] = true
 	}
 	for _, id := range runtime.Modules {
 		if !knownModules[id] {
@@ -60,6 +101,10 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 			return i18n.Errorf("err.moduleAboveLimitFix", id, info.Level.String(), runtime.Exposure.String())
 		}
 	}
+	return nil
+}
+
+func validateRuntimeBudgets(runtime Runtime) error {
 	if runtime.CPUTime < 100*time.Millisecond || runtime.CPUTime > 30*time.Second {
 		return i18n.Errorf("err.cpuTimeRange")
 	}
@@ -75,6 +120,10 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 	if runtime.SpeedThreads < 1 || runtime.SpeedThreads > 32 {
 		return i18n.Errorf("err.threadsRange")
 	}
+	return nil
+}
+
+func validateRuntimeSources(runtime Runtime) error {
 	if err := ValidateFormats(runtime.Formats); err != nil {
 		return err
 	}
@@ -89,9 +138,10 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 	if len(runtime.IPQualitySources) > 1 && (slices.Contains(runtime.IPQualitySources, "all") || slices.Contains(runtime.IPQualitySources, "none")) {
 		return i18n.Errorf("err.ipSourceCombo")
 	}
-	if err := ValidateMediaRegions(runtime.MediaRegions); err != nil {
-		return err
-	}
+	return ValidateMediaRegions(runtime.MediaRegions)
+}
+
+func validateDNSAndLatencyEndpoints(runtime Runtime) error {
 	for _, group := range [][]Endpoint{runtime.DNSResolvers, runtime.LatencyTargets} {
 		for _, endpoint := range group {
 			if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
@@ -115,10 +165,11 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 	if err := validateEndpointDuplicates(runtime.DNSResolvers, runtime.IPVersion, requirePort); err != nil {
 		return err
 	}
-	if err := validateEndpointDuplicates(runtime.LatencyTargets, runtime.IPVersion, requirePort); err != nil {
-		return err
-	}
-	for _, endpoint := range runtime.RouteTargets {
+	return validateEndpointDuplicates(runtime.LatencyTargets, runtime.IPVersion, requirePort)
+}
+
+func validateRouteEndpoints(endpoints []Endpoint, runtimeIPVersion string) error {
+	for _, endpoint := range endpoints {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.routeNameAddress")
 		}
@@ -132,10 +183,11 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 	}
-	if err := validateEndpointDuplicates(runtime.RouteTargets, runtime.IPVersion, noPort); err != nil {
-		return err
-	}
-	for _, endpoint := range runtime.STUNServers {
+	return validateEndpointDuplicates(endpoints, runtimeIPVersion, noPort)
+}
+
+func validateSTUNEndpoints(servers []Endpoint) error {
+	for _, endpoint := range servers {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.stunNameAddress")
 		}
@@ -150,10 +202,11 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Family, literalFamily)
 		}
 	}
-	if err := validateSTUNDuplicates(runtime.STUNServers); err != nil {
-		return err
-	}
-	for _, endpoint := range runtime.BacktraceTargets {
+	return validateSTUNDuplicates(servers)
+}
+
+func validateBacktraceEndpoints(endpoints []Endpoint, runtimeIPVersion string) error {
+	for _, endpoint := range endpoints {
 		if strings.TrimSpace(endpoint.Name) == "" || strings.TrimSpace(endpoint.Address) == "" {
 			return i18n.Errorf("err.backtraceNameAddress")
 		}
@@ -170,32 +223,41 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 			return i18n.Errorf("err.backtraceKind", endpoint.Kind)
 		}
 	}
-	if err := validateEndpointDuplicates(runtime.BacktraceTargets, runtime.IPVersion, noPort); err != nil {
-		return err
-	}
-	seenOoklaCarriers := make(map[string]bool)
-	for _, server := range runtime.OoklaServers {
+	return validateEndpointDuplicates(endpoints, runtimeIPVersion, noPort)
+}
+
+func validateOoklaServers(servers []OoklaServer) error {
+	seenCarriers := make(map[string]bool)
+	for _, server := range servers {
 		if server.Carrier != OoklaCarrierTelecom && server.Carrier != OoklaCarrierUnicom && server.Carrier != OoklaCarrierMobile {
 			return i18n.Errorf("err.ooklaCarrierField", server.Carrier)
 		}
 		if server.ID < 1 || server.ID > 99999999 {
 			return i18n.Errorf("err.ooklaIDField", server.Carrier)
 		}
-		if seenOoklaCarriers[server.Carrier] {
+		if seenCarriers[server.Carrier] {
 			return i18n.Errorf("err.ooklaDupField", server.Carrier)
 		}
-		seenOoklaCarriers[server.Carrier] = true
+		seenCarriers[server.Carrier] = true
 	}
+	return nil
+}
+
+func validateOutputPath(runtime Runtime) error {
 	if runtime.DiskPath == "" {
 		return i18n.Errorf("err.diskPathEmpty")
 	}
 	if _, err := ParseDiskMatrixMode(runtime.DiskMatrixMode); err != nil {
 		return err
 	}
+	return nil
+}
+
+func validateIPerf(runtime Runtime) error {
 	if runtime.IPerfDuration < time.Second || runtime.IPerfDuration > 30*time.Second {
 		return i18n.Errorf("err.iperfDuration")
 	}
-	seenIPerfTargets := make(map[string]bool, len(runtime.IPerfTargets))
+	seenTargets := make(map[string]bool, len(runtime.IPerfTargets))
 	for _, endpoint := range runtime.IPerfTargets {
 		if strings.TrimSpace(endpoint.Name) == "" || !validRouteTarget(endpoint.Host) {
 			return i18n.Errorf("err.iperfNodeName", endpoint.Host)
@@ -213,13 +275,16 @@ func Validate(catalog module.Catalog, runtime Runtime) error {
 			return i18n.Errorf("err.endpointFamilyMismatch", endpoint.Name, endpoint.Networks, literalFamily)
 		}
 		key := iperfTargetKey(endpoint.Host, endpoint.PortStart, endpoint.PortEnd)
-		if seenIPerfTargets[key] {
+		if seenTargets[key] {
 			return i18n.Errorf("err.endpointDuplicate", endpoint.Host)
 		}
-		seenIPerfTargets[key] = true
+		seenTargets[key] = true
 	}
-	_, err := filepath.Abs(runtime.DiskPath)
-	if err != nil {
+	return nil
+}
+
+func validateAbsoluteDiskPath(path string) error {
+	if _, err := filepath.Abs(path); err != nil {
 		return i18n.Errorf("err.diskPathWrap", err)
 	}
 	return nil

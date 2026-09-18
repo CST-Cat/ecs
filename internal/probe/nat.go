@@ -25,16 +25,7 @@ type natProbe struct{}
 func (natProbe) ID() string { return "nat" }
 
 func newNATResult() model.Result {
-	result := model.NewResult("nat", "module.nat.title")
-	result.Description = "probe.nat.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "STUN (RFC 5389/5780)",
-		Profile:         "probe.nat.profile",
-		ComparisonScope: "probe.nat.comparison_scope",
-	}
-	return result
+	return model.NewResult("nat", "")
 }
 
 // NAT 映射行为（RFC 5780 §4.3）。这些值是机器枚举，不是展示文案。

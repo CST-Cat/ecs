@@ -62,9 +62,7 @@ type cryptoProbe struct{}
 func (cryptoProbe) ID() string { return "crypto" }
 
 func newCryptoResult() model.Result {
-	result := model.NewResult("crypto", "module.crypto.title")
-	result.Description = "probe.crypto.description"
-	result.Methodology = cryptoMethodology()
+	result := model.NewResult("crypto", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	return result
 }
@@ -75,16 +73,6 @@ func (cryptoProbe) Run(ctx context.Context, env Environment) model.Result {
 		return missingOpenSSLResult(err)
 	}
 	return runOpenSSLSpeed(ctx, env, path, openSSLAlgorithmSpecs)
-}
-
-func cryptoMethodology() model.Methodology {
-	return model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "OpenSSL speed",
-		Profile:         "probe.crypto.profile",
-		ComparisonScope: "probe.crypto.comparison_scope",
-	}
 }
 
 func missingOpenSSLResult(err error) model.Result {

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// wantSelectedModuleTools is the frozen tool set the wrapper must stage on
-// linux for the route/backtrace/ookla/zstd/cpu/latency selection used by
+// wantSelectedModuleTools is the tool set the wrapper must request on Linux
+// for the route/backtrace/ookla/zstd/cpu/latency selection used by
 // TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices.
 func wantSelectedModuleTools() []string {
 	return []string{"nexttrace-tiny", "speedtest", "zstd", "sysbench", "ping"}
@@ -23,8 +23,8 @@ func wantPlanJSONExternalServices() []string {
 }
 
 // TestResolveRequiredToolsStagesEveryDeclaredToolOnLinux pins that the Linux
-// platform boundary is a pure pass-through: no declared tool may be silently
-// dropped, because the frozen bundle is the only source for all of them.
+// platform projection keeps every declared requirement, including speedtest's
+// separately verified wrapper path.
 func TestResolveRequiredToolsStagesEveryDeclaredToolOnLinux(t *testing.T) {
 	application := newApplication()
 	for _, test := range []struct {

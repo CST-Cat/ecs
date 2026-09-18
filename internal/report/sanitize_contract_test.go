@@ -12,7 +12,7 @@ import (
 // are routinely read with cat or grep, where a surviving ESC executes exactly
 // as it would in the text report.
 func TestAllRenderersStripControlSequences(t *testing.T) {
-	const payload = "clean\x1b[31mRED\x1b[0m\x07\x08done"
+	const payload = "clean\x1b[31mCSI\x1b[0mOSC\x1b]0;title\x07C0\x00\x01\x1fCR\rLF\nTAB\tC1\x80\x9b\x9fdone"
 	data := model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Results: []model.Result{{
@@ -35,9 +35,16 @@ func TestAllRenderersStripControlSequences(t *testing.T) {
 		"markdown": Markdown(data, nil),
 		"html":     string(htmlBytes),
 	} {
-		for _, forbidden := range []string{"\x1b", "\x07", "\x08"} {
+		sanitized := sanitizeTerminalText(payload)
+		if !strings.Contains(out, sanitized) {
+			t.Errorf("%s output lost sanitized control-bearing payload %q", name, sanitized)
+		}
+		for _, forbidden := range []string{
+			"CSI\x1b", "OSC\x1b", "C0\x00", "C0\x01", "C0\x1f",
+			"CR\r", "LF\nTAB", "TAB\t", "DEL\x7f", "C1\x80", "C1\x9b", "C1\x9f",
+		} {
 			if strings.Contains(out, forbidden) {
-				t.Errorf("%s output still contains control byte %q", name, forbidden)
+				t.Errorf("%s output retained raw control-bearing fragment %q", name, forbidden)
 			}
 		}
 		if !strings.Contains(out, "clean") {

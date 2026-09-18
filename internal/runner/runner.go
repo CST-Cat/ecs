@@ -256,9 +256,7 @@ func runDefinition(ctx context.Context, definition probe.Definition, cfg config.
 	} else {
 		result = safeRun(ctx, item, env)
 	}
-	if result.Methodology.Label == "" {
-		result.Methodology = descriptor.Methodology
-	}
+	applyDescriptorMetadata(&result, descriptor)
 	if result.Evidence == nil {
 		// Probes normally report their real sample denominator. This fallback
 		// supplies a module-level denominator when a result has no evidence,
@@ -274,6 +272,43 @@ func runDefinition(ctx context.Context, definition probe.Definition, cfg config.
 	}
 	result.Title = canonicalTitle
 	return result
+}
+
+// applyDescriptorMetadata makes the descriptor the sole owner of fixed result
+// metadata. Probes own only their comparison parameters and the explicitly
+// listed runtime variants below; arbitrary non-empty producer fields must not
+// replace canonical descriptor facts.
+func applyDescriptorMetadata(result *model.Result, descriptor module.Descriptor) {
+	if result == nil {
+		return
+	}
+	parameters := result.Methodology.Parameters
+	dynamicDescription := result.Description
+	dynamicProfile := result.Methodology.Profile
+	dynamicComparisonScope := result.Methodology.ComparisonScope
+
+	result.Description = descriptor.DescriptionKey
+	result.Methodology = descriptor.Methodology
+	result.Methodology.Parameters = parameters
+
+	switch descriptor.ID {
+	case "cpu":
+		// A missing sysbench executable changes the comparability scope because
+		// no benchmark sample was produced. The probe marks this exact variant;
+		// all other methodology fields remain descriptor-owned.
+		if dynamicComparisonScope == "probe.cpu.comparison_scope.tool_missing" {
+			result.Methodology.ComparisonScope = dynamicComparisonScope
+		}
+	case "memory":
+		// STREAM's one-core allowance reuses the physical run for both logical
+		// contexts, so its profile and description are distinct runtime facts.
+		if dynamicProfile == "probe.memory.stream.profile.single_core" {
+			result.Methodology.Profile = dynamicProfile
+		}
+		if dynamicDescription == "probe.memory.description.single_core" {
+			result.Description = dynamicDescription
+		}
+	}
 }
 
 // definitionTitle supplies the canonical descriptor title for built-ins and

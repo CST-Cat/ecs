@@ -3,12 +3,7 @@ package probe
 import "strings"
 
 const (
-	networkTitleKey           = "module.network.title"
-	networkDescriptionKey     = "probe.network.description"
-	networkMethodologyLabel   = "methodology.provider-assessment"
-	networkMethodologyProfile = "probe.network.profile"
-	networkComparisonScope    = "probe.network.comparison_scope"
-	networkMissingValue       = "probe.network.value.missing"
+	networkMissingValue = "probe.network.value.missing"
 
 	networkChannelDirect         = "probe.network.channel.direct"
 	networkChannelAPIKey         = "probe.network.channel.api_key"

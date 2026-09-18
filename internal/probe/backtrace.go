@@ -208,15 +208,7 @@ type backtraceRow struct {
 
 func (backtraceProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("backtrace", "module.backtrace.title")
-	result.Description = "probe.backtrace.description"
-	result.Methodology = model.Methodology{
-		Kind:            "heuristic",
-		Label:           "methodology.heuristic",
-		Engine:          "probe.backtrace.methodology.engine",
-		Profile:         "probe.backtrace.profile",
-		ComparisonScope: "probe.backtrace.comparison_scope",
-	}
+	result := model.NewResult("backtrace", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameterJSON(result.Methodology.Parameters, "targets", env.Config.BacktraceTargets)

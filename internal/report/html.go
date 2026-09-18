@@ -32,8 +32,8 @@ func HTML(data model.Report, scored *score.Report) ([]byte, error) {
 // htmlReport renders the machine report directly; stable keys are resolved by
 // the template functions at the individual presentation fields.
 func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
-	data = sanitizedCopy(data)
-	scored = sanitizedCopy(scored)
+	data = sanitizedReportCopy(data)
+	scored = sanitizedScoreCopy(scored)
 	functions := template.FuncMap{
 		"t":             i18n.T,
 		"displayKey":    displayKey,
@@ -43,6 +43,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 		"message":       renderMessage,
 		"htmlLang":      reportHTMLLanguage,
 		"methodology":   localizedMethodology,
+		"statusText":    statusText,
 		"statusLabel":   statusLabel,
 		"statusIcon":    statusIcon,
 		"duration":      formatDurationMS,
@@ -84,12 +85,7 @@ func htmlReport(data model.Report, scored *score.Report) ([]byte, error) {
 		"evidenceLabelColor": evidenceHTMLLabelColor,
 		"failureCategory":    failureCategoryLabel,
 		"failureRetryable":   failureRetryableLabel,
-		"failureCount": func(value int) int {
-			if value < 1 {
-				return 1
-			}
-			return value
-		},
+		"failureCount":       displayFailureCount,
 		// 条宽与 txt 柱状图同口径：超过基线不撑破容器，但颜色已到顶。
 		"barWidth": func(ratio float64) string {
 			if ratio > 1 {
@@ -306,7 +302,7 @@ const htmlTemplate = `<!doctype html>
 	<div><h2>{{resultTitle .}}</h2>{{if .Description}}<p class="description">{{displayKey .Description}}</p>{{end}}</div>
       <div class="badges">
         {{if .Methodology.Label}}<span class="badge method-badge">{{methodology .Methodology}}</span>{{end}}
-        <span class="badge {{.Status}}">{{statusIcon .Status}} {{statusLabel .Status}}</span>
+        <span class="badge {{.Status}}">{{statusText .Status}}</span>
       </div>
     </div>
     {{if .Methodology.Label}}

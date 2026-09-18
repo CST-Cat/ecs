@@ -1,9 +1,7 @@
 package tool
 
-import "fmt"
-
-// BuiltinDefinitions returns the application tool facts in canonical catalog
-// order. The returned slice and its values belong to the caller.
+// BuiltinDefinitions returns the application tool facts in canonical order.
+// The returned slice and its values belong to the caller.
 func BuiltinDefinitions() []Definition {
 	return []Definition{
 		{
@@ -42,13 +40,12 @@ func BuiltinDefinitions() []Definition {
 	}
 }
 
-// BuiltinCatalog validates a fresh copy of the built-in tool facts on every
-// call. It retains no mutable global registry and returns an explicit error if
-// a source edit violates the contract.
-func BuiltinCatalog() (Catalog, error) {
-	catalog, err := NewCatalog(BuiltinDefinitions())
-	if err != nil {
-		return Catalog{}, fmt.Errorf("builtin tool catalog: %w", err)
+// LookupBuiltin returns one built-in tool fact by exact ID.
+func LookupBuiltin(id string) (Definition, bool) {
+	for _, definition := range BuiltinDefinitions() {
+		if definition.ID == id {
+			return definition, true
+		}
 	}
-	return catalog, nil
+	return Definition{}, false
 }

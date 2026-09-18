@@ -13,24 +13,39 @@ import (
 )
 
 func submitTestReport() model.Report {
+	start := time.Unix(1700000000, 0).UTC()
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{ID: "app-submit-fixture", Profile: "full", StartedAt: time.Unix(1700000000, 0).UTC()},
-		Summary:       model.Summary{Status: model.StatusOK, OK: 2, Messages: []model.Message{model.NewMessage("message.summary.allOK", 2)}},
+		Run: model.RunInfo{
+			ID: "app-submit-fixture", Profile: "full", StartedAt: start, CompletedAt: start.Add(2 * time.Second),
+			DurationMS: 2000, Exposure: "local", Redacted: true,
+			Requested: []string{"system", "cpu"}, OutputFormats: []string{"json"},
+		},
+		Summary: model.Summary{Status: model.StatusOK, OK: 2, Messages: []model.Message{model.NewMessage("message.summary.allOK", 2)}},
 		Results: []model.Result{{
-			ID: "cpu", Status: model.StatusOK,
+			ID: "cpu", Title: "module.cpu.title", Status: model.StatusOK, StartedAt: start, DurationMS: 1000,
+			Methodology: model.Methodology{
+				Kind: "standard-benchmark", Label: "methodology.standard-benchmark", Engine: "sysbench",
+				Profile: "probe.cpu.profile", ComparisonScope: "probe.cpu.comparison_scope",
+				Parameters: map[string]string{"scope_revision": "1", "workload": "sysbench"},
+			},
 			Measurements: []model.Measurement{
-				{Key: "sysbench_cpu_single_events_s", Value: 900},
-				{Key: "sysbench_cpu_multi_events_s", Value: 3400},
+				{Key: "sysbench_cpu_single_events_s", Label: "probe.cpu.metric.single_events_s", Value: 900, Unit: "events/s", Display: model.RawValue("900 events/s"), Method: "sysbench-cpu-fixture-v1", HigherIsBetter: model.BoolPtr(true)},
+				{Key: "sysbench_cpu_multi_events_s", Label: "probe.cpu.metric.multi_events_s", Value: 3400, Unit: "events/s", Display: model.RawValue("3400 events/s"), Method: "sysbench-cpu-fixture-v1", HigherIsBetter: model.BoolPtr(true)},
 			},
 		}},
 	}
 	report.Results = append([]model.Result{{
-		ID: "system", Status: model.StatusOK,
+		ID: "system", Title: "module.system.title", Status: model.StatusOK, StartedAt: start, DurationMS: 1000,
+		Methodology: model.Methodology{
+			Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory",
+			Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope",
+			Parameters: map[string]string{"scope_revision": "1", "workload": "inventory"},
+		},
 		Measurements: []model.Measurement{
-			{Key: "logical_cpus", Value: 4},
-			{Key: "memory_total_bytes", Value: 8 * (1 << 30)},
+			{Key: "logical_cpus", Label: "probe.system.metric.logical_cpus", Value: 4, Unit: "count", Display: model.RawValue("4"), Method: "system-inventory-fixture-v1", HigherIsBetter: model.BoolPtr(true)},
+			{Key: "memory_total_bytes", Label: "probe.system.metric.memory_total_bytes", Value: 8 * (1 << 30), Unit: "bytes", Display: model.RawValue("8589934592"), Method: "system-inventory-fixture-v1", HigherIsBetter: model.BoolPtr(true)},
 		},
 	}}, report.Results...)
 	return report

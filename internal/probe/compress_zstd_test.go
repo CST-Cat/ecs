@@ -164,11 +164,8 @@ func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
 	tool := writeZstdFixtureTool(t, "zstd v1.5.7", "bench 1.5.7 : input 14 bytes, 1 seconds, 0 KB blocks\n-3 7 (2.000) 40.0 MB/s 20.0 MB/s fixture.corpus")
 	result := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, tool, corpus, contract, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
 
-	if result.ID != "zstd" || result.Title != "module.zstd.title" || result.Description != "probe.zstd.description" || result.Status != model.StatusOK {
-		t.Fatalf("zstd result identity/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.zstd.profile" || result.Methodology.ComparisonScope != "probe.zstd.comparison_scope" {
-		t.Fatalf("zstd methodology = %+v", result.Methodology)
+	if result.ID != "zstd" || result.Status != model.StatusOK {
+		t.Fatalf("zstd result identity/status = %s/%s", result.ID, result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 {
 		t.Fatalf("zstd evidence = %+v", result.Evidence)

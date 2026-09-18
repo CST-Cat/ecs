@@ -135,13 +135,79 @@ func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("runner result changed between identical machine runs:\nfirst=%+v\nsecond=%+v", first, second)
 	}
-	if first.Title != descriptor.TitleKey || first.Methodology.Label != "probe methodology" || first.Evidence == nil || first.Evidence.Valid != 1 || first.Evidence.Expected != 2 {
+	if first.Title != descriptor.TitleKey || first.Description != descriptor.DescriptionKey ||
+		first.Methodology.Kind != descriptor.Methodology.Kind || first.Methodology.Label != descriptor.Methodology.Label ||
+		first.Methodology.Engine != descriptor.Methodology.Engine || first.Methodology.Profile != descriptor.Methodology.Profile ||
+		first.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope || first.Evidence == nil ||
+		first.Evidence.Valid != 1 || first.Evidence.Expected != 2 {
 		t.Fatalf("canonical result metadata = %+v", first)
 	}
 	wantParameters := map[string]string{"scope_revision": "producer", "owned": "producer"}
 	if !reflect.DeepEqual(first.Methodology.Parameters, wantParameters) || runs != 2 {
 		t.Fatalf("runner parameters/runs = %v/%d, want producer-owned parameters", first.Methodology.Parameters, runs)
 	}
+}
+
+func TestRunDefinitionKeepsExplicitDynamicMetadataOverrides(t *testing.T) {
+	catalog := runnerCatalog()
+	cfg, err := config.Defaults(catalog, config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("cpu tool missing scope", func(t *testing.T) {
+		descriptor, ok := catalog.Lookup("cpu")
+		if !ok {
+			t.Fatal("cpu descriptor missing")
+		}
+		got := runDefinition(context.Background(), probe.Definition{
+			Descriptor: descriptor,
+			Probe: &runnerTestProbe{result: model.Result{
+				Status: model.StatusWarning,
+				Methodology: model.Methodology{
+					Kind:            "producer-kind-must-not-win",
+					Label:           "producer-label-must-not-win",
+					Engine:          "producer-engine-must-not-win",
+					Profile:         "producer-profile-must-not-win",
+					ComparisonScope: "probe.cpu.comparison_scope.tool_missing",
+					Parameters:      map[string]string{"scope_revision": "producer"},
+				},
+			}},
+		}, cfg, probe.Environment{}, true)
+		if got.Description != descriptor.DescriptionKey || got.Methodology.Kind != descriptor.Methodology.Kind ||
+			got.Methodology.Label != descriptor.Methodology.Label || got.Methodology.Engine != descriptor.Methodology.Engine ||
+			got.Methodology.Profile != descriptor.Methodology.Profile || got.Methodology.ComparisonScope != "probe.cpu.comparison_scope.tool_missing" ||
+			!reflect.DeepEqual(got.Methodology.Parameters, map[string]string{"scope_revision": "producer"}) {
+			t.Fatalf("cpu dynamic metadata = %+v", got)
+		}
+	})
+
+	t.Run("memory single core profile and description", func(t *testing.T) {
+		descriptor, ok := catalog.Lookup("memory")
+		if !ok {
+			t.Fatal("memory descriptor missing")
+		}
+		got := runDefinition(context.Background(), probe.Definition{
+			Descriptor: descriptor,
+			Probe: &runnerTestProbe{result: model.Result{
+				Status:      model.StatusOK,
+				Description: "probe.memory.description.single_core",
+				Methodology: model.Methodology{
+					Kind:       "producer-kind-must-not-win",
+					Label:      "producer-label-must-not-win",
+					Engine:     "producer-engine-must-not-win",
+					Profile:    "probe.memory.stream.profile.single_core",
+					Parameters: map[string]string{"scope_revision": "producer"},
+				},
+			}},
+		}, cfg, probe.Environment{}, true)
+		if got.Description != "probe.memory.description.single_core" || got.Methodology.Kind != descriptor.Methodology.Kind ||
+			got.Methodology.Label != descriptor.Methodology.Label || got.Methodology.Engine != descriptor.Methodology.Engine ||
+			got.Methodology.Profile != "probe.memory.stream.profile.single_core" || got.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope ||
+			!reflect.DeepEqual(got.Methodology.Parameters, map[string]string{"scope_revision": "producer"}) {
+			t.Fatalf("memory dynamic metadata = %+v", got)
+		}
+	})
 }
 
 func TestRunDefinitionNormalizesMalformedEvidence(t *testing.T) {

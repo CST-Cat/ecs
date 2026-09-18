@@ -82,9 +82,7 @@ func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
 func missingZstdResult(target string, err error) model.Result {
 	start := time.Now()
 	allowance := detectCPUAllowance()
-	result := model.NewResult("zstd", "module.zstd.title")
-	result.Description = "probe.zstd.description"
-	result.Methodology = zstdMethodology()
+	result := model.NewResult("zstd", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	result.Status = model.StatusWarning
 	message := ""
@@ -96,16 +94,6 @@ func missingZstdResult(target string, err error) model.Result {
 	finalizeZstdResult(&result, allowance)
 	result.Finish(start)
 	return result
-}
-
-func zstdMethodology() model.Methodology {
-	return model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "zstd",
-		Profile:         "probe.zstd.profile",
-		ComparisonScope: "probe.zstd.comparison_scope",
-	}
 }
 
 func findZstdCorpus(zstdPath string, contract zstdBenchmarkContract) (string, error) {
@@ -174,9 +162,7 @@ func runZstdBenchmark(ctx context.Context, env Environment, path, corpus string,
 
 func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, corpus string, contract zstdBenchmarkContract, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("zstd", "module.zstd.title")
-	result.Description = "probe.zstd.description"
-	result.Methodology = zstdMethodology()
+	result := model.NewResult("zstd", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	threadCounts := distinctBenchmarkThreadCounts(allowance.Threads)
 

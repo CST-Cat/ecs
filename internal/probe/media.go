@@ -34,15 +34,7 @@ type mediaResponseError struct {
 
 func (mediaProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("media", "module.media.title")
-	result.Description = "probe.media.description"
-	result.Methodology = model.Methodology{
-		Kind:            "heuristic",
-		Label:           "methodology.heuristic",
-		Engine:          "probe.media.methodology.engine",
-		Profile:         "probe.media.profile",
-		ComparisonScope: "probe.media.comparison_scope",
-	}
+	result := model.NewResult("media", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameterJSON(result.Methodology.Parameters, "regions", env.Config.MediaRegions)

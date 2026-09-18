@@ -37,15 +37,7 @@ type cnSpeedProbe struct{}
 func (cnSpeedProbe) ID() string { return "cnspeed" }
 
 func newCNSpeedResult() model.Result {
-	result := model.NewResult("cnspeed", "module.cnspeed.title")
-	result.Description = "probe.cnspeed.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "HTTP download against speedtest.cn nodes",
-		Profile:         "probe.cnspeed.profile",
-		ComparisonScope: "probe.cnspeed.comparison_scope",
-	}
+	result := model.NewResult("cnspeed", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	result.Notes = cnSpeedStableNotes()
 	return result

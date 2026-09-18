@@ -173,7 +173,7 @@ func TestComparisonRenderersSanitizeNestedControlsWithoutChangingJSON(t *testing
 	t.Cleanup(func() { i18n.Set(originalLanguage) })
 	i18n.Set(i18n.LangEN)
 	pair := comparisonReportFixture(t, 2, 0)
-	payload := "<nested>\x00\x1b[31m\x1f\x7f\u0080\u009b|[diagnostic]"
+	payload := "<nested>\x00\x1b[31mCSI\x1b]0;title\x07OSC\rLF\nTAB\t\x1f\x7f\u0080\u009b|[diagnostic]"
 	pair.Inputs[0].Label = payload
 	pair.Inputs[0].Profile = payload
 	pair.Modules[0].Metrics[0].Label = payload

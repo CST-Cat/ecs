@@ -133,15 +133,7 @@ type ipLookup struct {
 
 func (networkProbe) Run(ctx context.Context, env Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult("network", networkTitleKey)
-	result.Description = networkDescriptionKey
-	result.Methodology = model.Methodology{
-		Kind:            "provider-assessment",
-		Label:           networkMethodologyLabel,
-		Engine:          "probe.network.methodology.engine",
-		Profile:         networkMethodologyProfile,
-		ComparisonScope: networkComparisonScope,
-	}
+	result := model.NewResult("network", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "ip_version", env.Config.IPVersion)
 	addComparisonParameterJSON(result.Methodology.Parameters, "ip_quality_sources", env.Config.IPQualitySources)

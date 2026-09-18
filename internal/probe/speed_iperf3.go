@@ -189,15 +189,7 @@ type iperfDirectionRunner func(context.Context, string, string, int, string, boo
 func (speedProbe) ID() string { return "speed" }
 
 func newSpeedResult() model.Result {
-	result := model.NewResult("speed", "module.speed.title")
-	result.Description = "probe.speed.description"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "iperf3",
-		Profile:         "probe.speed.profile",
-		ComparisonScope: "probe.speed.comparison_scope",
-	}
+	result := model.NewResult("speed", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	return result
 }

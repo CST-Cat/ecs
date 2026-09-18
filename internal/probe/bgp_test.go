@@ -108,11 +108,8 @@ func TestBGPProducerBuildsStableResultFromCachedObservation(t *testing.T) {
 		}},
 	}
 	result := (bgpProbe{}).Run(context.Background(), env)
-	if result.Title != "module.bgp.title" || result.Description != "probe.bgp.description" || result.Status != model.StatusOK {
-		t.Fatalf("BGP direct metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.provider-assessment" || result.Methodology.Profile != "probe.bgp.profile" || result.Methodology.ComparisonScope != "probe.bgp.comparison_scope" {
-		t.Fatalf("BGP methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("BGP direct status = %s", result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 1 || result.Evidence.Expected != 1 || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.bgp.summary.values" || result.SummaryMessages[0].Args[0] != "1" {
 		t.Fatalf("BGP evidence/summary = %+v/%+v", result.Evidence, result.SummaryMessages)
@@ -143,9 +140,6 @@ func TestBGPProducerCachedFailureAndNoObservationContracts(t *testing.T) {
 	}
 	assertStableMetadata := func(t *testing.T, result model.Result) {
 		t.Helper()
-		if result.Title != "module.bgp.title" || result.Description != "probe.bgp.description" || result.Methodology.Label != "methodology.provider-assessment" || result.Methodology.Profile != "probe.bgp.profile" || result.Methodology.ComparisonScope != "probe.bgp.comparison_scope" {
-			t.Fatalf("BGP stable metadata = %+v/%+v", result, result.Methodology)
-		}
 		if len(result.Tables) != 1 || result.Tables[0].Title != "probe.bgp.table.observation" || len(result.Tables[0].Columns) != 6 {
 			t.Fatalf("BGP stable table metadata = %+v", result.Tables)
 		}

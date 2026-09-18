@@ -61,8 +61,8 @@ func Text(data model.Report, options TextOptions) string {
 }
 
 func textReport(data model.Report, options TextOptions) string {
-	data = sanitizedCopy(data)
-	options.Score = sanitizedCopy(options.Score)
+	data = sanitizedReportCopy(data)
+	options.Score = sanitizedScoreCopy(options.Score)
 	renderer := &textRenderer{
 		palette: termcolor.Palette{Level: options.Color},
 		score:   options.Score,
@@ -287,7 +287,7 @@ func (r *textRenderer) result(result model.Result) {
 	}
 	// 状态不能依赖 Summary 是否存在：跳过、空结果和仅有错误的结果也必须
 	// 明确显示状态，完整报告不能让读者靠章节标题猜测执行结果。
-	status := statusIcon(result.Status) + " " + statusLabel(result.Status)
+	status := statusText(result.Status)
 	if summary := resultSummary(result); summary != "" && strings.TrimSpace(summary) != strings.TrimSpace(r.summaryText) {
 		status += " · " + summary
 	}
@@ -316,7 +316,7 @@ func (r *textRenderer) resultFailures(failures []model.Failure) {
 			failureCategoryLabel(failure.Category),
 			fallbackReport(failure.Stage, "—"),
 			fallbackReport(failure.Target, "—"),
-			strconv.Itoa(max(failure.Count, 1)),
+			strconv.Itoa(displayFailureCount(failure.Count)),
 			failureRetryableLabel(failure.Retryable),
 			fallbackReport(failure.Message, "—"),
 		})

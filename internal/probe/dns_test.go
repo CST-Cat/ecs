@@ -64,8 +64,8 @@ func TestDNSQueryResponseAndFormattingContracts(t *testing.T) {
 func TestDNSProducerDirectResult(t *testing.T) {
 	t.Run("skip without resolver", func(t *testing.T) {
 		result := (dnsProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4}})
-		if result.Status != model.StatusSkipped || result.Title != "module.dns.title" || result.Description != "probe.dns.description" {
-			t.Fatalf("DNS skip result = %+v", result)
+		if result.Status != model.StatusSkipped {
+			t.Fatalf("DNS skip status = %s", result.Status)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 0 || result.Evidence.Expected != 0 || result.Evidence.Unit != "query" {
 			t.Fatalf("DNS skip evidence = %+v", result.Evidence)
@@ -85,11 +85,8 @@ func TestDNSProducerDirectResult(t *testing.T) {
 			DNSAttempts:  2,
 			DNSResolvers: []config.Endpoint{{Name: "fixture", Address: address}},
 		}})
-		if result.Status != model.StatusOK || result.Title != "module.dns.title" || result.Description != "probe.dns.description" {
-			t.Fatalf("DNS success status/metadata = %s/%+v", result.Status, result)
-		}
-		if result.Methodology.Label != "methodology.protocol-measurement" || result.Methodology.Profile != "probe.dns.profile" || result.Methodology.ComparisonScope != "probe.dns.comparison_scope" {
-			t.Fatalf("DNS success methodology = %+v", result.Methodology)
+		if result.Status != model.StatusOK {
+			t.Fatalf("DNS success status = %s", result.Status)
 		}
 		if result.Evidence == nil || result.Evidence.Valid != 2 || result.Evidence.Expected != 2 || result.Evidence.Unit != "query" {
 			t.Fatalf("DNS success evidence = %+v", result.Evidence)

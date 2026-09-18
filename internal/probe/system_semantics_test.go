@@ -85,22 +85,11 @@ func TestSystemDirectBuilderUsesSingleStableShape(t *testing.T) {
 	appendKernelNetworkFacts(&result, systemFixtureKernelFacts())
 	finalizeSystemResult(&result, snapshot)
 
-	if result.Title != "module.system.title" || result.Description != "probe.system.description" ||
-		result.Methodology.Kind != "inventory" || result.Methodology.Label != "methodology.inventory" ||
-		result.Methodology.Engine != "probe.system.methodology.engine" || result.Methodology.Profile != "probe.system.profile" ||
-		result.Methodology.ComparisonScope != "probe.system.comparison_scope" {
-		t.Fatalf("system identity = %+v", result)
-	}
 	if len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.system.summary" {
 		t.Fatalf("system summary = %+v", result.SummaryMessages)
 	}
-	for _, key := range []string{
-		result.Title, result.Description, result.Methodology.Label, result.Methodology.Engine,
-		result.Methodology.Profile, result.Methodology.ComparisonScope, result.SummaryMessages[0].Key,
-	} {
-		if !i18n.Has(i18n.LangZH, key) || !i18n.Has(i18n.LangEN, key) {
-			t.Fatalf("system stable key is not bilingual: %q", key)
-		}
+	if !i18n.Has(i18n.LangZH, result.SummaryMessages[0].Key) || !i18n.Has(i18n.LangEN, result.SummaryMessages[0].Key) {
+		t.Fatalf("system summary key is not bilingual: %q", result.SummaryMessages[0].Key)
 	}
 	if got := result.SummaryMessages[0].Args; len(got) != 4 || got[0] != "8" || got[1] != "8.00 GiB" || got[2] != "80.00 GiB" || got[3] != "kvm" {
 		t.Fatalf("system summary args = %v", result.SummaryMessages[0].Args)

@@ -70,11 +70,8 @@ func TestSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 		Network: NetworkCapabilities{IPv4Usable: true},
 	}
 	result := (speedProbe{}).Run(context.Background(), env)
-	if result.Title != "module.speed.title" || result.Description != "probe.speed.description" || result.Status != model.StatusOK {
-		t.Fatalf("speed result metadata/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.speed.profile" {
-		t.Fatalf("speed methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("speed result status = %s", result.Status)
 	}
 	if len(result.Tables) != 2 || result.Tables[0].Title != "probe.speed.table.results" || result.Tables[1].Title != "probe.speed.table.stability" {
 		t.Fatalf("speed tables = %+v", result.Tables)
@@ -184,8 +181,8 @@ func TestCNSpeedProducerBuildsStableSuccessDirectly(t *testing.T) {
 		})}
 	}
 	result := (cnSpeedProbe{}).Run(context.Background(), Environment{Config: config.Runtime{IPVersion: config.IPVersion4, HTTPTimeout: time.Second}})
-	if result.Title != "module.cnspeed.title" || result.Description != "probe.cnspeed.description" || result.Status != model.StatusOK {
-		t.Fatalf("cnspeed result metadata/status = %+v", result)
+	if result.Status != model.StatusOK {
+		t.Fatalf("cnspeed result status = %s", result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 3 || result.Evidence.Expected != 3 {
 		t.Fatalf("cnspeed evidence = %+v", result.Evidence)
@@ -380,11 +377,8 @@ func runOoklaFixtureWithConfigAndExitCode(t *testing.T, payload string, runtime 
 
 func TestOoklaProducerBuildsStableSuccessDirectly(t *testing.T) {
 	result := runOoklaFixture(t, `{"ping":{"jitter":1.5,"latency":8.5},"download":{"bandwidth":125000000},"upload":{"bandwidth":25000000},"packetLoss":0,"isp":"Fixture ISP","interface":{"externalIp":"8.8.8.8"},"server":{"id":42,"name":"Example","location":"London","country":"GB"}}`)
-	if result.Title != "module.ookla.title" || result.Description != "probe.ookla.description" || result.Status != model.StatusOK {
-		t.Fatalf("Ookla result metadata/status = %+v", result)
-	}
-	if result.Methodology.Engine != "ookla-speedtest-cli" || result.Methodology.Profile != "probe.ookla.profile" {
-		t.Fatalf("Ookla methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("Ookla result status = %s", result.Status)
 	}
 	if len(result.Fields) < 8 || result.Fields[0].Label != "probe.ookla.field.engine" {
 		t.Fatalf("Ookla fields = %#v", result.Fields)

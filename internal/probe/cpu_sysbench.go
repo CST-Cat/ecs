@@ -34,14 +34,8 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 		return runSysbenchCPU(ctx, env, path)
 	}
 	start := time.Now()
-	result := model.NewResult("cpu", "module.cpu.title")
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "sysbench",
-		Profile:         "cpu prime=20000",
-		ComparisonScope: "probe.cpu.comparison_scope.tool_missing",
-	}
+	result := model.NewResult("cpu", "")
+	result.Methodology.ComparisonScope = "probe.cpu.comparison_scope.tool_missing"
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "configured_duration", env.Config.CPUTime.String())
 	result.Status = model.StatusWarning
@@ -59,15 +53,7 @@ func runSysbenchCPU(ctx context.Context, env Environment, path string) model.Res
 
 func runSysbenchCPUWithAllowance(ctx context.Context, env Environment, path string, allowance cpuAllowance) model.Result {
 	start := time.Now()
-	result := model.NewResult("cpu", "module.cpu.title")
-	result.Description = "probe.cpu.description"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "sysbench",
-		Profile:         "cpu prime=20000",
-		ComparisonScope: "probe.cpu.comparison_scope",
-	}
+	result := model.NewResult("cpu", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "configured_duration", env.Config.CPUTime.String())
 

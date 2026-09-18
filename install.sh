@@ -29,6 +29,11 @@ usage() {
     "architecture-matched assets by run.sh when a test run selects them."
 }
 
+die() {
+  printf '%s\n' "$2" >&2
+  exit 1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --from)
@@ -111,12 +116,13 @@ if [ -n "$local_binary" ]; then
   exit 0
 fi
 
-os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
-machine=$(uname -m | tr '[:upper:]' '[:lower:]')
-case "$os_name" in
-  linux|freebsd) ;;
+OS_NAME=$(uname -s)
+machine=$(uname -m)
+case "$OS_NAME" in
+  Linux) os_name=linux; OS=linux ;;
+  FreeBSD) os_name=freebsd; OS=freebsd ;;
   *)
-    printf 'ecs only supports Linux and FreeBSD; detected: %s\n' "$os_name" >&2
+    printf 'ecs only supports Linux and FreeBSD; detected: %s\n' "$OS_NAME" >&2
     exit 1
     ;;
 esac
@@ -146,6 +152,12 @@ fi
 
 asset="${program}_${os_name}_${arch}.tar.gz"
 
+if [ "$version" != "latest" ]; then
+  case "$version" in
+    *[!A-Za-z0-9._+-]*) printf '%s\n' "invalid release version" >&2; exit 1 ;;
+  esac
+fi
+
 if [ -z "$release_base" ]; then
   owner=${repository%%/*}
   repo=${repository#*/}
@@ -159,68 +171,92 @@ if [ -z "$release_base" ]; then
   if [ "$version" = "latest" ]; then
     release_base="https://github.com/${repository}/releases/latest/download"
   else
-    case "$version" in
-      *[!A-Za-z0-9._+-]*) printf '%s\n' "invalid release version" >&2; exit 1 ;;
-    esac
     release_base="https://github.com/${repository}/releases/download/${version}"
   fi
 fi
 release_base=${release_base%/}
+case "$release_base" in
+  https://*) ;;
+  *) printf 'remote release URL must use https://: %s\n' "$release_base" >&2; exit 1 ;;
+esac
 
-work_dir=$(mktemp -d "${TMPDIR:-/tmp}/ecs-install.XXXXXX")
-trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
+WORK_ROOT=/tmp
+if [ -n "${TMPDIR:-}" ]; then
+  case "$TMPDIR" in
+    /*) WORK_ROOT=$TMPDIR ;;
+    *) printf '%s\n' "TMPDIR must be an absolute path" >&2; exit 1 ;;
+  esac
+fi
+[ -d "$WORK_ROOT" ] || { printf 'temporary directory does not exist: %s\n' "$WORK_ROOT" >&2; exit 1; }
+work_dir=$(mktemp -d "$WORK_ROOT/ecs-install.XXXXXX")
+cleanup() {
+  status=$?
+  trap - EXIT INT TERM HUP
+  if ! rm -rf "$work_dir"; then
+    printf 'failed to remove the temporary directory: %s\n' "$work_dir" >&2
+    [ "$status" -eq 0 ] && status=1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
-download() {
-  source_url=$1
-  destination_file=$2
-  case "$source_url" in
+fetch() {
+  fetch_max_time=${3:-300}
+  case "$1" in
     https://*) ;;
-    *)
-      printf 'remote download URL must use https://: %s\n' "$source_url" >&2
-      exit 1
-      ;;
+    *) die "远程下载地址必须使用 HTTPS：$1" "remote download URL must use HTTPS: $1" ;;
   esac
   if command -v curl >/dev/null 2>&1; then
     # max-time applies per transfer; retry-max-time bounds the retry window.
-    curl -fL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time 300 \
-      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time 300 \
-      "$source_url" -o "$destination_file"
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time "$fetch_max_time" \
+      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time "$fetch_max_time" \
+      "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
-    command -v timeout >/dev/null 2>&1 || {
-      printf '%s\n' "timeout is required to bound wget's total download time" >&2
-      exit 1
-    }
-    timeout 300 wget --https-only --tries=3 --timeout=20 -O "$destination_file" "$source_url"
-  elif [ "$os_name" = "freebsd" ] && [ -x /usr/bin/fetch ]; then
+    command -v timeout >/dev/null 2>&1 ||
+      die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
+    timeout "$fetch_max_time" wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
+  elif [ "${OS:-}" = freebsd ] && [ -x /usr/bin/fetch ]; then
     # FreeBSD base-system /usr/bin/fetch, the last resort after curl and wget.
-    # The absolute path is deliberate: it names the base-system utility the OS
-    # owns, the same way the FreeBSD probes name /sbin/ping and
-    # /usr/sbin/traceroute, so PATH lookup can never pick up something else.
-    command -v timeout >/dev/null 2>&1 || {
-      printf '%s\n' "timeout is required to bound fetch's total download time" >&2
-      exit 1
-    }
-    timeout 300 /usr/bin/fetch -q -o "$destination_file" "$source_url"
+    #
+    # The path is absolute on purpose. This wrapper function is itself named
+    # fetch, and `command -v fetch` inside its own body resolves to the shell
+    # function rather than to the executable, so PATH lookup cannot be used to
+    # tell them apart. `timeout` is an external program as well, so it could
+    # not run a `command fetch ...` word anyway. FreeBSD owns /usr/bin/fetch
+    # exactly like it owns /sbin/ping and /usr/sbin/traceroute, so naming the
+    # base-system path is both unambiguous and consistent with the probes.
+    command -v timeout >/dev/null 2>&1 ||
+      die "fetch 路径需要 timeout 来限制总下载时间" "the fetch path requires timeout to bound total download time"
+    timeout "$fetch_max_time" /usr/bin/fetch -q -o "$2" "$1"
   else
-    printf '%s\n' "curl, wget, or FreeBSD fetch is required to download a release" >&2
-    exit 1
+    die "需要 curl、wget 或 FreeBSD fetch" "curl, wget, or FreeBSD fetch is required"
   fi
 }
 
-download "${release_base}/${asset}" "${work_dir}/${asset}"
-download "${release_base}/checksums.txt" "${work_dir}/checksums.txt"
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+  elif command -v sha256 >/dev/null 2>&1; then
+    # FreeBSD base-system /sbin/sha256. -q prints the digest alone, so the
+    # output already matches the "one lowercase hex line" contract above.
+    sha256 -q "$1" | tr '[:upper:]' '[:lower:]'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]'
+  else
+    return 1
+  fi
+}
+
+fetch "${release_base}/${asset}" "${work_dir}/${asset}"
+fetch "${release_base}/checksums.txt" "${work_dir}/checksums.txt"
 
 expected_hash=$(awk -v file="$asset" '$2 == file {print $1; exit}' "${work_dir}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$expected_hash" ] || { printf 'checksum entry missing for %s\n' "$asset" >&2; exit 1; }
-if command -v sha256sum >/dev/null 2>&1; then
-  actual_hash=$(sha256sum "${work_dir}/${asset}" | awk '{print $1}')
-elif command -v shasum >/dev/null 2>&1; then
-  actual_hash=$(shasum -a 256 "${work_dir}/${asset}" | awk '{print $1}')
-elif command -v sha256 >/dev/null 2>&1; then
-  # FreeBSD base-system /sbin/sha256; -q prints the digest alone.
-  actual_hash=$(sha256 -q "${work_dir}/${asset}")
-else
-  printf '%s\n' "sha256sum, shasum, or FreeBSD sha256 is required to verify the release" >&2
+if ! actual_hash=$(file_sha256 "${work_dir}/${asset}"); then
+  printf '%s\n' "sha256sum, shasum, sha256, or openssl is required to verify the release" >&2
   exit 1
 fi
 [ "$actual_hash" = "$expected_hash" ] || { printf '%s\n' "SHA-256 verification failed" >&2; exit 1; }

@@ -24,16 +24,7 @@ type appsProbe struct{}
 func (appsProbe) ID() string { return "apps" }
 
 func newAppsResult() model.Result {
-	result := model.NewResult("apps", "module.apps.title")
-	result.Description = "probe.apps.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "native TCP connect",
-		Profile:         "probe.apps.profile",
-		ComparisonScope: "probe.apps.comparison_scope",
-	}
-	return result
+	return model.NewResult("apps", "")
 }
 
 func appsStableNotes() []string {

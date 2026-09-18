@@ -24,8 +24,8 @@ func Markdown(data model.Report, scored *score.Report) string {
 // keys are resolved at the individual output boundary; raw evidence is not
 // copied through a localized report tree.
 func markdownReport(data model.Report, scored *score.Report) string {
-	data = sanitizedCopy(data)
-	scored = sanitizedCopy(scored)
+	data = sanitizedReportCopy(data)
+	scored = sanitizedScoreCopy(scored)
 	var out strings.Builder
 	out.WriteString("# " + i18n.T("report.title") + "\n\n")
 	out.WriteString("> ")
@@ -67,7 +67,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 		out.WriteString(" | ")
 		out.WriteString(markdownEscape(localizedMethodology(result.Methodology)))
 		out.WriteString(" | ")
-		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
+		out.WriteString(statusText(result.Status))
 		out.WriteString(" | ")
 		out.WriteString(markdownMessages(result.SummaryMessages))
 		out.WriteString(" | ")
@@ -105,7 +105,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			}
 		}
 		out.WriteString("**")
-		out.WriteString(statusIcon(result.Status) + " " + statusLabel(result.Status))
+		out.WriteString(statusText(result.Status))
 		out.WriteString("**")
 		if summary := markdownMessages(result.SummaryMessages); summary != "" {
 			out.WriteString(" · ")
@@ -128,7 +128,7 @@ func markdownReport(data model.Report, scored *score.Report) string {
 			for _, failure := range result.Failures {
 				values := []string{
 					failureCategoryLabel(failure.Category), fallbackReport(failure.Stage, "—"),
-					fallbackReport(failure.Target, "—"), fmt.Sprintf("%d", max(failure.Count, 1)),
+					fallbackReport(failure.Target, "—"), fmt.Sprintf("%d", displayFailureCount(failure.Count)),
 					failureRetryableLabel(failure.Retryable), fallbackReport(failure.Message, "—"),
 				}
 				out.WriteString("| ")

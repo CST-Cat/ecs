@@ -353,16 +353,7 @@ func latencyEndpointKindValue(kind string) model.Value {
 }
 
 func newLatencyResult() model.Result {
-	result := model.NewResult("latency", "module.latency.title")
-	result.Description = "probe.latency.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "native TCP connect",
-		Profile:         "probe.latency.profile",
-		ComparisonScope: "probe.latency.comparison_scope",
-	}
-	return result
+	return model.NewResult("latency", "")
 }
 
 func latencyResolutionValue(item latencyResult) model.Value {

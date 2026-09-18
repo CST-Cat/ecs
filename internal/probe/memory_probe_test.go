@@ -16,11 +16,8 @@ func TestMemoryProbeMissingStreamReturnsStableResult(t *testing.T) {
 	t.Setenv(ToolBinEnv, "")
 
 	result := (memoryProbe{}).Run(context.Background(), Environment{})
-	if result.ID != "memory" || result.Title != "module.memory.title" || result.Description != "probe.memory.description" {
-		t.Fatalf("missing STREAM metadata = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.memory.stream.profile" || result.Methodology.ComparisonScope != "probe.memory.comparison_scope" {
-		t.Fatalf("missing STREAM methodology = %+v", result.Methodology)
+	if result.ID != "memory" {
+		t.Fatalf("missing STREAM identity = %q", result.ID)
 	}
 	if result.Status != model.StatusWarning || len(result.SummaryMessages) != 1 || result.SummaryMessages[0].Key != "probe.memory.stream_missing" {
 		t.Fatalf("missing STREAM status/summary = %s/%+v", result.Status, result.SummaryMessages)
@@ -43,11 +40,8 @@ func TestStreamProducerFailureEmitsStableResultDirectly(t *testing.T) {
 	allowance := cpuAllowance{Visible: 1, Threads: 1, Source: "fixture"}
 	result := runStreamMemoryWithAllowance(context.Background(), Environment{}, "/bin/false", allowance)
 
-	if result.Title != "module.memory.title" || result.Description != "probe.memory.description.single_core" {
-		t.Fatalf("STREAM failure metadata = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.memory.stream.profile.single_core" || result.Methodology.ComparisonScope != "probe.memory.comparison_scope" {
-		t.Fatalf("STREAM failure methodology = %+v", result.Methodology)
+	if result.Description != "probe.memory.description.single_core" || result.Methodology.Profile != "probe.memory.stream.profile.single_core" {
+		t.Fatalf("STREAM failure dynamic metadata = description:%q profile:%q", result.Description, result.Methodology.Profile)
 	}
 	if result.Status != model.StatusWarning || len(result.Failures) != 1 || result.Failures[0].Stage != "stream_1t" || result.Failures[0].Target != "1T" || strings.TrimSpace(result.Failures[0].Message) == "" {
 		t.Fatalf("STREAM failure status/evidence = %s/%+v", result.Status, result.Failures)
@@ -87,11 +81,8 @@ func TestStreamProducerSuccessfulMultiThreadResult(t *testing.T) {
 	t.Setenv("MEMORY_STREAM_LOG", logPath)
 
 	result := runStreamMemoryWithAllowance(context.Background(), Environment{}, path, cpuAllowance{Visible: 8, Threads: 4, Source: "fixture"})
-	if result.Status != model.StatusOK || result.Title != "module.memory.title" || result.Description != "probe.memory.description" {
-		t.Fatalf("STREAM successful metadata/status = %s/%+v", result.Status, result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.memory.stream.profile" || result.Methodology.ComparisonScope != "probe.memory.comparison_scope" {
-		t.Fatalf("STREAM successful methodology = %+v", result.Methodology)
+	if result.Status != model.StatusOK {
+		t.Fatalf("STREAM successful status = %s", result.Status)
 	}
 	if len(result.Failures) != 0 {
 		t.Fatalf("STREAM successful failures = %+v", result.Failures)

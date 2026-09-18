@@ -7,55 +7,46 @@ import (
 	"time"
 
 	"ecs/internal/model"
-	"ecs/internal/module"
+	"ecs/internal/tool"
 )
 
 const windowsUnsupportedMethodology = "unsupported on native Windows"
 
 // applyPlatformDefinitions preserves the canonical module catalog while
-// replacing only methodologies whose native Windows gate has not passed in the
-// current bundle. RequiredTools stays in the descriptor as canonical metadata;
-// app's Windows resolver removes those tools from the wrapper plan.
+// replacing modules whose declared requirements contain an unsupported runtime
+// tool. RequiredTools stays in the descriptor as canonical metadata; the app
+// plan and this probe projection both consume the same tool source facts.
 func applyPlatformDefinitions(definitions []Definition) []Definition {
 	for index := range definitions {
-		switch definitions[index].Descriptor.ID {
-		case "cpu", "speed", "ookla":
-			definitions[index].Probe = newWindowsUnsupportedProbe(definitions[index].Descriptor)
+		if windowsModuleHasUnsupportedTool(definitions[index].Descriptor.RequiredTools) {
+			definitions[index].Probe = newWindowsUnsupportedProbe(definitions[index].Descriptor.ID)
 		}
 	}
 	return definitions
 }
 
-type windowsUnsupportedProbe struct {
-	id          string
-	title       string
-	description string
-	methodology model.Methodology
-}
-
-func newWindowsUnsupportedProbe(descriptor module.Descriptor) windowsUnsupportedProbe {
-	methodology := descriptor.Methodology
-	if descriptor.Methodology.Parameters != nil {
-		methodology.Parameters = make(map[string]string, len(descriptor.Methodology.Parameters))
-		for key, value := range descriptor.Methodology.Parameters {
-			methodology.Parameters[key] = value
+func windowsModuleHasUnsupportedTool(requiredTools []string) bool {
+	for _, id := range requiredTools {
+		if tool.PlatformToolSource(tool.PlatformWindows, id) == tool.ToolSourceUnsupported {
+			return true
 		}
 	}
-	return windowsUnsupportedProbe{
-		id:          descriptor.ID,
-		title:       descriptor.TitleKey,
-		description: descriptor.DescriptionKey,
-		methodology: methodology,
-	}
+	return false
+}
+
+type windowsUnsupportedProbe struct {
+	id string
+}
+
+func newWindowsUnsupportedProbe(id string) windowsUnsupportedProbe {
+	return windowsUnsupportedProbe{id: id}
 }
 
 func (probe windowsUnsupportedProbe) ID() string { return probe.id }
 
 func (probe windowsUnsupportedProbe) Run(context.Context, Environment) model.Result {
 	start := time.Now()
-	result := model.NewResult(probe.id, probe.title)
-	result.Description = probe.description
-	result.Methodology = probe.methodology
+	result := model.NewResult(probe.id, "")
 	result.Status = model.StatusSkipped
 	result.SummaryMessages = []model.Message{model.NewMessage("probe.platform.summary.unsupported")}
 	result.Failures = []model.Failure{{

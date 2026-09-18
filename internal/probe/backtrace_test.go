@@ -414,8 +414,8 @@ func TestBacktraceProducerEmitsDirectMachineFactsAndPreservesErrors(t *testing.T
 	}
 	runtime.BacktraceTargets = backtraceFixtureTargets()
 	result := (backtraceProbe{}).Run(context.Background(), Environment{Config: runtime})
-	if result.Title != "module.backtrace.title" || result.Description != "probe.backtrace.description" || len(result.SummaryMessages) != 1 {
-		t.Fatalf("direct result shape = %+v", result)
+	if len(result.SummaryMessages) != 1 {
+		t.Fatalf("direct result summary shape = %+v", result.SummaryMessages)
 	}
 	if result.SummaryMessages[0].Key != "probe.backtrace.summary.values" || !reflect.DeepEqual(result.SummaryMessages[0].Args, []string{"2", "9"}) {
 		t.Fatalf("summary = %+v", result.SummaryMessages)
@@ -624,11 +624,6 @@ func TestBacktraceProducerDirectShapeContract(t *testing.T) {
 		t.Skip("NextTrace producer fixture is Linux-only; FreeBSD uses base-system traceroute")
 	}
 	result, _ := runBacktraceFixtureResultWithPath(t)
-	if result.Methodology.Kind != "heuristic" || result.Methodology.Label != "methodology.heuristic" ||
-		result.Methodology.Engine != "probe.backtrace.methodology.engine" || result.Methodology.Profile != "probe.backtrace.profile" ||
-		result.Methodology.ComparisonScope != "probe.backtrace.comparison_scope" {
-		t.Fatalf("methodology = %#v", result.Methodology)
-	}
 	assertProducerParameterScope(t, result, "ip_version", "targets", "max_hops", "signature_set", "tool_version", "adapter", "arguments")
 	parameters := result.Methodology.Parameters
 	if parameters["ip_version"] != config.IPVersionAuto || parameters["targets"] != comparisonParameterJSON(backtraceFixtureTargets()) || parameters["max_hops"] != strconv.Itoa(backtraceMaxHops) || parameters["signature_set"] != "china-backbone-v3" || parameters["tool_version"] != "backtrace-fixture 1" || parameters["adapter"] != traceNextTraceAdapter || parameters["arguments"] == "" {
@@ -709,6 +704,15 @@ func TestBacktraceProducerReportRendersBilingualWithoutMutation(t *testing.T) {
 		t.Skip("NextTrace producer fixture is Linux-only; FreeBSD uses base-system traceroute")
 	}
 	result := runBacktraceFixtureResult(t)
+	descriptor, ok := testCatalog().Lookup("backtrace")
+	if !ok {
+		t.Fatal("backtrace descriptor missing")
+	}
+	parameters := result.Methodology.Parameters
+	result.Title = descriptor.TitleKey
+	result.Description = descriptor.DescriptionKey
+	result.Methodology = descriptor.Methodology
+	result.Methodology.Parameters = parameters
 	data := model.Report{
 		SchemaVersion: "ecs.report/v1",
 		Tool:          model.ToolInfo{Name: "ecs", Version: "backtrace-fixture", Commit: "backtrace"},

@@ -496,6 +496,8 @@ func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
 			// The CPU measurement is enough for BuildBaseline, while omitting
 			// system host measurements makes BuildSubmission's host contract fail.
 			report.Results = []model.Result{report.Results[1]}
+			report.Summary.OK = 1
+			report.Summary.Messages = []model.Message{model.NewMessage("message.summary.allOK", 1)}
 			if err := validateBaselineReport(report); err != nil {
 				t.Fatalf("projection failure fixture is not baseline-valid: %v", err)
 			}

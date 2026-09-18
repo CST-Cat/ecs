@@ -10,16 +10,8 @@ import (
 )
 
 func buildSystemResult(start time.Time, snapshot systemSnapshot, resources EnvironmentSnapshot, cloud cloudIdentity) model.Result {
-	result := model.NewResult("system", "module.system.title")
+	result := model.NewResult("system", "")
 	result.StartedAt = start.UTC()
-	result.Description = "probe.system.description"
-	result.Methodology = model.Methodology{
-		Kind:            "inventory",
-		Label:           "methodology.inventory",
-		Engine:          "probe.system.methodology.engine",
-		Profile:         "probe.system.profile",
-		ComparisonScope: "probe.system.comparison_scope",
-	}
 
 	hardware := snapshot.Hardware
 	result.Fields = []model.Field{

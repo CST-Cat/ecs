@@ -36,16 +36,7 @@ type blacklistProbe struct{}
 func (blacklistProbe) ID() string { return "blacklist" }
 
 func newBlacklistResult() model.Result {
-	result := model.NewResult("blacklist", "module.blacklist.title")
-	result.Description = "probe.blacklist.description"
-	result.Methodology = model.Methodology{
-		Kind:            "protocol-measurement",
-		Label:           "methodology.protocol-measurement",
-		Engine:          "DNSBL over DNS A lookup",
-		Profile:         "probe.blacklist.profile",
-		ComparisonScope: "probe.blacklist.comparison_scope",
-	}
-	return result
+	return model.NewResult("blacklist", "")
 }
 
 // dnsblZone 是一个黑名单区域。

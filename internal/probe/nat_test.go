@@ -193,9 +193,8 @@ func TestNATWithoutServersSkipsWithoutNetwork(t *testing.T) {
 		result.SummaryMessages[0].Key != "probe.nat.summary.skipped" || result.Evidence == nil || result.Evidence.Valid != 0 {
 		t.Fatalf("NAT no-server result = %+v", result)
 	}
-	if result.Title != "module.nat.title" || result.Description != "probe.nat.description" ||
-		result.Methodology.Label != "methodology.protocol-measurement" || len(result.Notes) != 3 {
-		t.Fatalf("NAT skip stable shape = %+v", result)
+	if len(result.Notes) != 3 {
+		t.Fatalf("NAT skip notes = %+v", result.Notes)
 	}
 	if len(result.Tables) != 0 {
 		t.Fatalf("NAT no-server result unexpectedly has tables: %+v", result.Tables)

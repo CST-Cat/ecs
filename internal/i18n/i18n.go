@@ -31,6 +31,78 @@ var (
 	current = LangZH
 )
 
+// zhLookup and enLookup are built once from the domain-specific source maps.
+// Production code only reads these merged tables; source maps remain split by
+// domain so translations stay easy to maintain.
+var (
+	zhLookup = mustMergeCatalogs(
+		modelMessageChinese,
+		probePlatformChinese,
+		probeCPUChinese,
+		probeMemoryChinese,
+		probePressureChinese,
+		probeMemoryInventoryChinese,
+		probePortsChinese,
+		probeRDNSChinese,
+		probeKernelChinese,
+		probeSystemChinese,
+		probeNPBChinese,
+		probeZstdChinese,
+		probeCryptoChinese,
+		probeDiskChinese,
+		probeDNSChinese,
+		probeLatencyChinese,
+		probeNATChinese,
+		probeAppsChinese,
+		probeBlacklistChinese,
+		probeBGPChinese,
+		probeSpeedChinese,
+		probeCNSpeedChinese,
+		probeOoklaChinese,
+		probeNetworkChinese,
+		probeMediaChinese,
+		probeRouteChinese,
+		probeBacktraceChinese,
+		errorChinese,
+		scoreChinese,
+		cliChinese,
+		chinese,
+	)
+	enLookup = mustMergeCatalogs(
+		modelMessageEnglish,
+		probePlatformEnglish,
+		probeCPUEnglish,
+		probeMemoryEnglish,
+		probePressureEnglish,
+		probeMemoryInventoryEnglish,
+		probePortsEnglish,
+		probeRDNSEnglish,
+		probeKernelEnglish,
+		probeSystemEnglish,
+		probeNPBEnglish,
+		probeZstdEnglish,
+		probeCryptoEnglish,
+		probeDiskEnglish,
+		probeDNSEnglish,
+		probeLatencyEnglish,
+		probeNATEnglish,
+		probeAppsEnglish,
+		probeBlacklistEnglish,
+		probeBGPEnglish,
+		probeSpeedEnglish,
+		probeCNSpeedEnglish,
+		probeOoklaEnglish,
+		probeNetworkEnglish,
+		probeMediaEnglish,
+		probeRouteEnglish,
+		probeBacktraceEnglish,
+		errorEnglish,
+		scoreEnglish,
+		cliEnglish,
+		english,
+	)
+)
+
 // Supported 列出支持的语言。
 func Supported() []Lang { return []Lang{LangZH, LangEN} }
 
@@ -109,22 +181,37 @@ func JoinList(items []string) string {
 	return strings.Join(items, separator)
 }
 
-func catalogsFor(lang Lang) []map[string]string {
-	switch lang {
-	case LangEN:
-		return []map[string]string{modelMessageEnglish, probePlatformEnglish, probeCPUEnglish, probeMemoryEnglish, probePressureEnglish, probeMemoryInventoryEnglish, probePortsEnglish, probeRDNSEnglish, probeKernelEnglish, probeSystemEnglish, probeNPBEnglish, probeZstdEnglish, probeCryptoEnglish, probeDiskEnglish, probeDNSEnglish, probeLatencyEnglish, probeNATEnglish, probeAppsEnglish, probeBlacklistEnglish, probeBGPEnglish, probeSpeedEnglish, probeCNSpeedEnglish, probeOoklaEnglish, probeNetworkEnglish, probeMediaEnglish, probeRouteEnglish, probeBacktraceEnglish, errorEnglish, scoreEnglish, cliEnglish, english}
-	default:
-		return []map[string]string{modelMessageChinese, probePlatformChinese, probeCPUChinese, probeMemoryChinese, probePressureChinese, probeMemoryInventoryChinese, probePortsChinese, probeRDNSChinese, probeKernelChinese, probeSystemChinese, probeNPBChinese, probeZstdChinese, probeCryptoChinese, probeDiskChinese, probeDNSChinese, probeLatencyChinese, probeNATChinese, probeAppsChinese, probeBlacklistChinese, probeBGPChinese, probeSpeedChinese, probeCNSpeedChinese, probeOoklaChinese, probeNetworkChinese, probeMediaChinese, probeRouteChinese, probeBacktraceChinese, errorChinese, scoreChinese, cliChinese, chinese}
+func mergeCatalogs(catalogs ...map[string]string) (map[string]string, error) {
+	merged := make(map[string]string)
+	for _, catalog := range catalogs {
+		for key, value := range catalog {
+			if _, exists := merged[key]; exists {
+				return nil, fmt.Errorf("duplicate i18n key %q", key)
+			}
+			merged[key] = value
+		}
 	}
+	return merged, nil
+}
+
+func mustMergeCatalogs(catalogs ...map[string]string) map[string]string {
+	merged, err := mergeCatalogs(catalogs...)
+	if err != nil {
+		panic(err)
+	}
+	return merged
 }
 
 func lookup(lang Lang, key string) (string, bool) {
-	for _, catalog := range catalogsFor(lang) {
-		if value, ok := catalog[key]; ok && value != "" {
-			return value, true
-		}
+	catalog := zhLookup
+	if lang == LangEN {
+		catalog = enLookup
 	}
-	return "", false
+	value, ok := catalog[key]
+	if !ok || value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func translate(lang Lang, key string) string {

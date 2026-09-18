@@ -19,12 +19,22 @@ import (
 
 func writeLocalizedObservationInput(t *testing.T, directory, name, fieldValue, tableValue string) string {
 	t.Helper()
+	start := time.Unix(1700000000, 0).UTC()
 	report := model.Report{
 		SchemaVersion: buildinfo.SchemaVersion,
 		Tool:          model.ToolInfo{Name: "ecs", Version: "test"},
-		Run:           model.RunInfo{ID: name, Profile: "standard", StartedAt: time.Unix(0, 0).UTC(), Redacted: true},
+		Run: model.RunInfo{
+			ID: name, Profile: "standard", StartedAt: start, CompletedAt: start.Add(time.Second), DurationMS: 1000,
+			Exposure: "local", Redacted: true, Requested: []string{"system"}, OutputFormats: []string{"json"},
+		},
+		Summary: model.Summary{Status: model.StatusOK, OK: 1, Messages: []model.Message{model.NewMessage("message.summary.allOK", 1)}},
 		Results: []model.Result{{
-			ID: "system", Title: "系统", Status: model.StatusOK,
+			ID: "system", Title: "系统", Status: model.StatusOK, StartedAt: start,
+			Methodology: model.Methodology{
+				Kind: "inventory", Label: "methodology.inventory", Engine: "system-inventory",
+				Profile: "probe.system.profile", ComparisonScope: "probe.system.comparison_scope",
+				Parameters: map[string]string{"scope_revision": "1", "workload": "inventory"},
+			},
 			Fields: []model.Field{{Key: "state", Label: "状态", Value: model.RawValue(fieldValue)}},
 			Tables: []model.Table{{
 				Key: "system.state", Title: "当前值",

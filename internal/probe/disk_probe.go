@@ -39,15 +39,7 @@ func (diskProbe) Run(ctx context.Context, env Environment) model.Result {
 }
 
 func newDiskResult() model.Result {
-	result := model.NewResult("disk", "module.disk.title")
-	result.Description = "probe.disk.description"
-	result.Methodology = model.Methodology{
-		Kind:            "standard-benchmark",
-		Label:           "methodology.standard-benchmark",
-		Engine:          "fio",
-		Profile:         "probe.disk.profile",
-		ComparisonScope: "probe.disk.comparison_scope",
-	}
+	result := model.NewResult("disk", "")
 	result.Methodology.Parameters = newComparisonParameters()
 	return result
 }

@@ -76,7 +76,7 @@ func planCommand(app application, ctx context.Context, args []string, stdout, st
 		return 1
 	}
 
-	content, err := json.MarshalIndent(buildExecutionPlan(app.modules, app.tools, runtime), "", "  ")
+	content, err := json.MarshalIndent(buildExecutionPlan(app.modules, runtime), "", "  ")
 	if err != nil {
 		fmt.Fprintln(stderr, i18n.T("cli.error")+": "+err.Error())
 		return 1
@@ -86,7 +86,7 @@ func planCommand(app application, ctx context.Context, args []string, stdout, st
 	return 0
 }
 
-func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime config.Runtime) executionPlan {
+func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executionPlan {
 	plan := executionPlan{
 		SchemaVersion: buildinfo.PlanSchemaVersion,
 		Tool:          planTool{Name: buildinfo.Name, Version: buildinfo.Version},
@@ -120,7 +120,7 @@ func buildExecutionPlan(catalog module.Catalog, tools tool.Catalog, runtime conf
 				continue
 			}
 			plan.RequiredTools = append(plan.RequiredTools, toolID)
-			definition, ok := tools.Lookup(toolID)
+			definition, ok := tool.LookupBuiltin(toolID)
 			if ok && definition.ExternalService != "" && !containsPlanValue(toolServices, definition.ExternalService) {
 				toolServices = append(toolServices, definition.ExternalService)
 			}

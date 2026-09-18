@@ -344,7 +344,7 @@ func TestLeaderboardRejectsEmptyRunID(t *testing.T) {
 			}
 			args = append(args, input)
 			status, stdout, stderr := invokeAppMain(args...)
-			if status != 1 || stdout != "" || !strings.Contains(stderr, "Run.ID") {
+			if status != 1 || stdout != "" || !strings.Contains(strings.ToLower(stderr), "run.id") {
 				t.Fatalf("empty Run.ID status=%d stdout=%q stderr=%q", status, stdout, stderr)
 			}
 			if _, err := os.Lstat(output); !os.IsNotExist(err) {

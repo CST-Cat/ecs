@@ -207,11 +207,8 @@ func TestNPBProducerEmitsStableMachineResult(t *testing.T) {
 	t.Setenv(ToolBinEnv, directory)
 	result := runNPBBenchmarksWithAllowance(context.Background(), Environment{}, npbBenchmarkSpecs, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
 
-	if result.ID != "npb" || result.Title != "module.npb.title" || result.Description != "probe.npb.description" || result.Status != model.StatusOK {
-		t.Fatalf("NPB result identity/status = %+v", result)
-	}
-	if result.Methodology.Label != "methodology.standard-benchmark" || result.Methodology.Profile != "probe.npb.profile" || result.Methodology.ComparisonScope != "probe.npb.comparison_scope" {
-		t.Fatalf("NPB methodology = %+v", result.Methodology)
+	if result.ID != "npb" || result.Status != model.StatusOK {
+		t.Fatalf("NPB result identity/status = %s/%s", result.ID, result.Status)
 	}
 	if result.Evidence == nil || result.Evidence.Valid != 4 || result.Evidence.Expected != 4 {
 		t.Fatalf("NPB evidence = %+v", result.Evidence)

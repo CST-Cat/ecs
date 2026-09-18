@@ -5,9 +5,11 @@ package app
 import (
 	"reflect"
 	"testing"
+
+	"ecs/internal/tool"
 )
 
-// wantSelectedModuleTools is the frozen tool set the wrapper must stage on
+// wantSelectedModuleTools is the tool set the wrapper plan must retain on
 // FreeBSD for the route/backtrace/ookla/zstd/cpu/latency selection used by
 // TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices. route and
 // backtrace fall back to base-system traceroute and latency to base-system
@@ -26,7 +28,8 @@ func wantPlanJSONExternalServices() []string {
 
 // TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD pins the FreeBSD
 // platform boundary. Only ping and nexttrace-tiny have a base-system
-// substitute; every other declared tool is still downloaded and staged.
+// substitute; other requirements remain in the plan, including speedtest's
+// existing signed-package path.
 func TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD(t *testing.T) {
 	application := newApplication()
 	for _, test := range []struct {
@@ -56,6 +59,18 @@ func TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestFreeBSDSpeedtestRemainsInPrivatePlanProjection(t *testing.T) {
+	if got := tool.PlatformToolSource(tool.PlatformFreeBSD, "speedtest"); got != tool.ToolSourceBundle {
+		t.Fatalf("FreeBSD speedtest source = %q, want bundle projection", got)
+	}
+	if got, want := resolveRequiredTools([]string{"speedtest"}), []string{"speedtest"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FreeBSD speedtest required_tools projection = %v, want %v", got, want)
+	}
+	// This is a private plan/staging projection only. speedtest is absent from
+	// the frozen tools/lock.json archive; run.sh uses its separately verified
+	// signed package path and FreeBSD then fails closed without a client.
 }
 
 // TestResolveRequiredToolsDoesNotAliasCallerStorage guards the immutability
