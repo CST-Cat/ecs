@@ -23,6 +23,7 @@ $objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
 if ($corpusItems.Count -ne 1 -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw "$Label locked gate inputs are missing or ambiguous" }
 $objdump = [IO.Path]::GetFullPath($objdump)
 
+$LASTEXITCODE = 0
 & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath $lockPath -CorpusPath $corpusItems[0].FullName -ObjdumpPath $objdump
 $gateSucceeded = $?
 $gateExitCode = $LASTEXITCODE

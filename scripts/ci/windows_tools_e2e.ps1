@@ -31,6 +31,7 @@ $objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
 if ($null -eq $corpusItem -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'packaged E2E gate inputs are incomplete' }
 $corpus = $corpusItem.FullName
 $objdump = [IO.Path]::GetFullPath($objdump)
+$LASTEXITCODE = 0
 & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
 $packagedGateSucceeded = $?
 $packagedGateExitCode = $LASTEXITCODE
@@ -90,6 +91,7 @@ function Assert-ArtifactChecksum {
 }
 
 try {
+    $LASTEXITCODE = 0
     & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
     $setupSucceeded = $?
     $setupExitCode = $LASTEXITCODE
@@ -452,6 +454,7 @@ try {
   }
   # This outer bootstrap finally owns the workflow-only runner prerequisite cleanup.
   try {
+    $LASTEXITCODE = 0
     & $icmpPrerequisite -Action Cleanup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
     $cleanupSucceeded = $?
     $cleanupExitCode = $LASTEXITCODE

@@ -32,6 +32,7 @@ $setupAttempted = $false
 
 try {
     $setupAttempted = $true
+    $LASTEXITCODE = 0
     & $icmpPrerequisite -Action Setup -Label $Label -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
     $setupSucceeded = $?
     $setupExitCode = $LASTEXITCODE
@@ -53,12 +54,14 @@ try {
     if ($capabilityExitCode -ne 0) { throw "$Label NextTrace capability probe failed with exit code $capabilityExitCode" }
     if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "$Label NextTrace capability evidence is missing: $capabilityPath" }
 
+    $LASTEXITCODE = 0
     & ./scripts/ci/windows_nexttrace_gate.ps1 -Label $Label -EcsPath $EcsPath -ToolBin $stageBin -OutputRoot $OutputRoot -CapabilityPath $capabilityPath
     $gateSucceeded = $?
     $gateExitCode = $LASTEXITCODE
     if (-not $gateSucceeded -or $gateExitCode -ne 0) { throw "$Label canonical NextTrace gate failed with exit code $gateExitCode" }
 } finally {
     if ($setupAttempted) {
+        $LASTEXITCODE = 0
         & $icmpPrerequisite -Action Cleanup -Label $Label -OwnerToken $icmpOwnerToken
         $cleanupSucceeded = $?
         $cleanupExitCode = $LASTEXITCODE
