@@ -27,10 +27,10 @@ foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'opens
   if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
 }
 $corpusItem = Get-ChildItem $GateInputsRoot -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
-$objdumpItem = Get-ChildItem $GateInputsRoot -File -Filter 'objdump.exe' -Recurse | Select-Object -First 1
-if ($null -eq $corpusItem -or $null -eq $objdumpItem) { throw 'packaged E2E gate inputs are incomplete' }
+$objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
+if ($null -eq $corpusItem -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'packaged E2E gate inputs are incomplete' }
 $corpus = $corpusItem.FullName
-$objdump = $objdumpItem.FullName
+$objdump = [IO.Path]::GetFullPath($objdump)
 & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
 $packagedGateSucceeded = $?
 $packagedGateExitCode = $LASTEXITCODE

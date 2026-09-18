@@ -19,10 +19,11 @@ $stageItems = @(Get-ChildItem -LiteralPath $StageArtifactRoot -Directory -Filter
 if ($stageItems.Count -ne 1) { throw "$Label requires exactly one downloaded windows_amd64 stage" }
 $stage = [IO.Path]::GetFullPath($stageItems[0].FullName)
 $corpusItems = @(Get-ChildItem -LiteralPath $GateInputsRoot -File -Filter ([string]$lock.corpus.name) -Recurse)
-$objdumpItems = @(Get-ChildItem -LiteralPath $GateInputsRoot -File -Filter 'objdump.exe' -Recurse)
-if ($corpusItems.Count -ne 1 -or $objdumpItems.Count -ne 1) { throw "$Label locked gate inputs are missing or ambiguous" }
+$objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
+if ($corpusItems.Count -ne 1 -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw "$Label locked gate inputs are missing or ambiguous" }
+$objdump = [IO.Path]::GetFullPath($objdump)
 
-& ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath $lockPath -CorpusPath $corpusItems[0].FullName -ObjdumpPath $objdumpItems[0].FullName
+& ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath $lockPath -CorpusPath $corpusItems[0].FullName -ObjdumpPath $objdump
 $gateSucceeded = $?
 $gateExitCode = $LASTEXITCODE
 if (-not $gateSucceeded -or $gateExitCode -ne 0) { throw "$Label gate failed with exit code $gateExitCode" }
