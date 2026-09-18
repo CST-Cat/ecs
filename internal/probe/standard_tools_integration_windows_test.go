@@ -101,7 +101,7 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 			default:
 				t.Fatalf("unexpected Windows integration result ID %q", result.ID)
 			}
-			results = append(results, result)
+			results = append(results, canonicalWindowsIntegrationResult(t, result))
 		})
 	}
 	if t.Failed() {
@@ -564,6 +564,47 @@ func windowsResultField(result model.Result, key string) string {
 		}
 	}
 	return ""
+}
+
+// The frozen-tool gate runs the production probes directly so it can assert
+// their tool lookup, parser, workload, and raw-evidence contracts. Direct
+// probe results intentionally bypass runner.Run, so project the canonical
+// descriptor metadata here before constructing the ECS report. This mirrors
+// the runner's composition boundary without changing any probe-owned facts.
+func canonicalWindowsIntegrationResult(t *testing.T, result model.Result) model.Result {
+	t.Helper()
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Descriptor.ID != result.ID {
+			continue
+		}
+		descriptor := definition.Descriptor
+		parameters := result.Methodology.Parameters
+		dynamicDescription := result.Description
+		dynamicProfile := result.Methodology.Profile
+		dynamicComparisonScope := result.Methodology.ComparisonScope
+
+		result.Title = descriptor.TitleKey
+		result.Description = descriptor.DescriptionKey
+		result.Methodology = descriptor.Methodology
+		result.Methodology.Parameters = parameters
+
+		switch descriptor.ID {
+		case "cpu":
+			if dynamicComparisonScope == "probe.cpu.comparison_scope.tool_missing" {
+				result.Methodology.ComparisonScope = dynamicComparisonScope
+			}
+		case "memory":
+			if dynamicProfile == "probe.memory.stream.profile.single_core" {
+				result.Methodology.Profile = dynamicProfile
+			}
+			if dynamicDescription == "probe.memory.description.single_core" {
+				result.Description = dynamicDescription
+			}
+		}
+		return result
+	}
+	t.Fatalf("Windows integration result %q has no canonical descriptor", result.ID)
+	return model.Result{}
 }
 
 func assertWindowsReportJSON(t *testing.T, results []model.Result) {
