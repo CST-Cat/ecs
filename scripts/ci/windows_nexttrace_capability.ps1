@@ -882,7 +882,6 @@ function Get-EcsIPv6Capability {
 }
 
 function Invoke-EcsWindowsNextTraceCapability {
-try {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'windows-nexttrace-capability: Windows host required; refusing to emulate Windows probes'
     }
@@ -1114,10 +1113,6 @@ try {
     }
     Write-Output ("NextTrace capability evidence written: schema={0}; family={1}; target={2}; decision={3}; evidence={4}" -f
         $CapabilitySchema, $familyName, $Target, $evidence.decision, $evidenceFull)
-} catch {
-    Write-Error $_.Exception.Message
-    exit 1
-}
 }
 
 if (-not $DotSourced) {

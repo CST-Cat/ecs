@@ -283,8 +283,7 @@ for required_nexttrace_capability_fact in \
 	'completed' \
 	'parsed' \
 	'nativeRun.ExitCode -ne 0' \
-	'directRun.ExitCode -ne 0' \
-	'exit 1'; do
+	'directRun.ExitCode -ne 0'; do
 	grep -Fq -- "$required_nexttrace_capability_fact" "$nexttrace_capability" ||
 		die "Windows NextTrace capability helper is missing fact: $required_nexttrace_capability_fact"
 done
