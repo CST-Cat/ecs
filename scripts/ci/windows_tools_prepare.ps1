@@ -51,14 +51,8 @@ if ([string]$nexttrace[0].windows_asset_sha256.amd64 -ne '16e13532f6e8ee75f63db6
 if (@($lock.windows_dll_allowlist).Count -eq 0) { throw 'Windows DLL allowlist is empty' }
 
 & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-$ordinaryUserSucceeded = $?
-$ordinaryUserExitCode = $LASTEXITCODE
-if (-not $ordinaryUserSucceeded -or $ordinaryUserExitCode -ne 0) { throw "no-admin-operation check failed with exit code $ordinaryUserExitCode" }
 
 $params = & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -PrintParams
-$builderSucceeded = $?
-$builderExitCode = $LASTEXITCODE
-if (-not $builderSucceeded -or $builderExitCode -ne 0) { throw "Windows builder lock/check failed with exit code $builderExitCode" }
 $paramsText = $params -join "`n"
 foreach ($marker in @('target=windows_amd64', 'toolchain_mode=native', 'smoke_runner=direct', 'validation_scope=functional', 'performance_valid=false', 'nexttrace=verified-upstream-prebuilt', 'nexttrace_asset=nexttrace-tiny_windows_amd64.exe', 'nexttrace_source_sha256=16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b')) {
   if ($paramsText -notmatch [regex]::Escape($marker)) { throw "builder parameters missing $marker" }

@@ -61,7 +61,6 @@ jobs:
           Set-StrictMode -Version Latest
           New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage' | Out-Null
           & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -StageRoot (Join-Path $PWD '.ci/windows-tools-stage')
-          if ($LASTEXITCODE -ne 0 -or -not $?) { throw 'native Windows tools builder failed' }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

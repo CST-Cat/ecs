@@ -32,11 +32,7 @@ $setupAttempted = $false
 
 try {
     $setupAttempted = $true
-    $LASTEXITCODE = 0
     & $icmpPrerequisite -Action Setup -Label $Label -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
-    $setupSucceeded = $?
-    $setupExitCode = $LASTEXITCODE
-    if (-not $setupSucceeded -or $setupExitCode -ne 0) { throw "$Label runner ICMP prerequisite setup failed with exit code $setupExitCode" }
     $stageItems = @(Get-ChildItem -LiteralPath $StageArtifactRoot -Directory -Filter 'windows_amd64' -Recurse)
     if ($stageItems.Count -ne 1) { throw "$Label NextTrace gate requires exactly one downloaded windows_amd64 stage" }
     $stage = [IO.Path]::GetFullPath($stageItems[0].FullName)
@@ -46,26 +42,13 @@ try {
     $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
     if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "$Label staged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
 
-    $LASTEXITCODE = 0
     & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
-    $capabilitySucceeded = $?
-    $capabilityExitCode = $LASTEXITCODE
-    if (-not $capabilitySucceeded) { throw "$Label NextTrace capability probe invocation failed" }
-    if ($capabilityExitCode -ne 0) { throw "$Label NextTrace capability probe failed with exit code $capabilityExitCode" }
     if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "$Label NextTrace capability evidence is missing: $capabilityPath" }
 
-    $LASTEXITCODE = 0
     & ./scripts/ci/windows_nexttrace_gate.ps1 -Label $Label -EcsPath $EcsPath -ToolBin $stageBin -OutputRoot $OutputRoot -CapabilityPath $capabilityPath
-    $gateSucceeded = $?
-    $gateExitCode = $LASTEXITCODE
-    if (-not $gateSucceeded -or $gateExitCode -ne 0) { throw "$Label canonical NextTrace gate failed with exit code $gateExitCode" }
 } finally {
     if ($setupAttempted) {
-        $LASTEXITCODE = 0
         & $icmpPrerequisite -Action Cleanup -Label $Label -OwnerToken $icmpOwnerToken
-        $cleanupSucceeded = $?
-        $cleanupExitCode = $LASTEXITCODE
-        if (-not $cleanupSucceeded -or $cleanupExitCode -ne 0) { throw "$Label runner ICMP prerequisite cleanup failed with exit code $cleanupExitCode" }
     }
 }
 

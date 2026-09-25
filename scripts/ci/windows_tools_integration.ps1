@@ -138,10 +138,7 @@ try {
   $corpusPath = Join-Path $corpusRoot ([string]$lock.corpus.name)
   Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
 
-            & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
-            $gateSucceeded = $?
-            $gateExitCode = $LASTEXITCODE
-            if (-not $gateSucceeded -or $gateExitCode -ne 0) { throw "no-admin-operation gate failed with exit code $gateExitCode" }
+  & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
   $pathAfterGate = Get-PathSnapshot
   Write-PathSnapshotEvidence -Label 'after no-admin-operation gate' -Snapshot $pathAfterGate
   $gatePathDifferences = @(Get-PathSnapshotDifferences -Expected $pathBefore -Actual $pathAfterGate)

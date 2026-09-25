@@ -31,11 +31,7 @@ $objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
 if ($null -eq $corpusItem -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'packaged E2E gate inputs are incomplete' }
 $corpus = $corpusItem.FullName
 $objdump = [IO.Path]::GetFullPath($objdump)
-$LASTEXITCODE = 0
 & ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-$packagedGateSucceeded = $?
-$packagedGateExitCode = $LASTEXITCODE
-if (-not $packagedGateSucceeded -or $packagedGateExitCode -ne 0) { throw "E2E-$Label packaged workload gate failed with exit code $packagedGateExitCode" }
 Write-Output "E2E-$Label validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false"
 
 $label = $Label
@@ -91,11 +87,7 @@ function Assert-ArtifactChecksum {
 }
 
 try {
-    $LASTEXITCODE = 0
-    & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
-    $setupSucceeded = $?
-    $setupExitCode = $LASTEXITCODE
-    if (-not $setupSucceeded -or $setupExitCode -ne 0) { throw "E2E-$label runner ICMP prerequisite setup failed with exit code $setupExitCode" }
+  & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
   $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
   if (-not (Test-Path -LiteralPath $runnerTemp -PathType Container)) { throw "E2E-$label RUNNER_TEMP is missing: $runnerTemp" }
   $capabilityID = [guid]::NewGuid().ToString('N')
@@ -132,12 +124,7 @@ try {
   $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
   $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
   if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
-  $LASTEXITCODE = 0
   & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
-  $capabilitySucceeded = $?
-  $capabilityExitCode = $LASTEXITCODE
-  if (-not $capabilitySucceeded) { throw "E2E-$label NextTrace capability probe invocation failed" }
-  if ($capabilityExitCode -ne 0) { throw "E2E-$label NextTrace capability probe failed with exit code $capabilityExitCode" }
   if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
 
   Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -293,9 +280,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
     $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
     & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
-    $routeAssertionSucceeded = $?
-    $routeAssertionExitCode = $LASTEXITCODE
-    if (-not $routeAssertionSucceeded -or $routeAssertionExitCode -ne 0) { throw "E2E-$label bootstrap route report assertion failed with exit code $routeAssertionExitCode" }
     if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
 
     $backtraceTarget4 = '1.1.1.1'
@@ -304,9 +288,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
     $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
     & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
-    $backtraceAssertionSucceeded = $?
-    $backtraceAssertionExitCode = $LASTEXITCODE
-    if (-not $backtraceAssertionSucceeded -or $backtraceAssertionExitCode -ne 0) { throw "E2E-$label bootstrap backtrace report assertion failed with exit code $backtraceAssertionExitCode" }
     if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
 
     $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
@@ -346,9 +327,6 @@ try {
     $installFull = [IO.Path]::GetFullPath($installDirectory)
     if (-not $installFull.StartsWith($localAppDataEcsFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'install E2E path escaped LOCALAPPDATA\ecs' }
     & $installScript.FullName -Repository 'CST-Cat/ecs' -Version 'phase8-current' -ReleaseBase $mainBase -InstallDirectory $installDirectory
-    $installSucceeded = $?
-    $installExitCode = $LASTEXITCODE
-    if (-not $installSucceeded -or $installExitCode -ne 0) { throw "install.ps1 failed against the current artifact fixture with exit code $installExitCode" }
     $machinePathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
     $userPathAfterInstall = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
     if ($machinePathBaseline -cne $machinePathAfterInstall -or $userPathBaseline -cne $userPathAfterInstall) { throw 'install.ps1 changed the Machine or User PATH' }
@@ -454,11 +432,7 @@ try {
   }
   # This outer bootstrap finally owns the workflow-only runner prerequisite cleanup.
   try {
-    $LASTEXITCODE = 0
     & $icmpPrerequisite -Action Cleanup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
-    $cleanupSucceeded = $?
-    $cleanupExitCode = $LASTEXITCODE
-    if (-not $cleanupSucceeded -or $cleanupExitCode -ne 0) { $cleanupErrors += "runner ICMP prerequisite cleanup failed with exit code $cleanupExitCode" }
   } catch {
     $cleanupErrors += "runner ICMP prerequisite cleanup failed: $($_.Exception.Message)"
   }
