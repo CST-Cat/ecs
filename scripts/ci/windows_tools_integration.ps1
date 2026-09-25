@@ -215,4 +215,4 @@ if ($null -ne $testError) {
   $postErrors += "Windows ECS frozen-tool integration failed with exit code $testExitCode"
 }
 if ($postErrors.Count -ne 0) { throw ($postErrors -join '; ') }
-Write-Output "Windows ECS frozen-tool integration passed on Server ${Server}: ECS_TOOL_BIN was the read-only staged bundle; hostile PATH, sandbox, production probes, parsers, and ECS JSON were verified"
+Write-Output "Windows ECS frozen-tool integration passed on Server ${Server}: ECS_TOOL_BIN was the read-only staged bundle; hostile PATH, sandbox, production probes, parsers, workloads, raw evidence, and PATH isolation were verified"

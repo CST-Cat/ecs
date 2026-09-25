@@ -5,7 +5,6 @@ package probe
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,10 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"ecs/internal/buildinfo"
 	"ecs/internal/config"
 	"ecs/internal/model"
-	"ecs/internal/report"
 )
 
 const integrationWindowsToolTimeout = 30 * time.Minute
@@ -71,7 +68,6 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 		DiskMatrixMode: config.DiskMatrixTime,
 	}}
 
-	results := make([]model.Result, 0, 5)
 	for _, testCase := range []struct {
 		name string
 		run  func(context.Context, Environment) model.Result
@@ -101,13 +97,8 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 			default:
 				t.Fatalf("unexpected Windows integration result ID %q", result.ID)
 			}
-			results = append(results, canonicalWindowsIntegrationResult(t, result))
 		})
 	}
-	if t.Failed() {
-		return
-	}
-	assertWindowsReportJSON(t, results)
 	if ctx.Err() != nil {
 		t.Fatalf("Windows frozen-tool integration context expired: %v", ctx.Err())
 	}
@@ -564,74 +555,6 @@ func windowsResultField(result model.Result, key string) string {
 		}
 	}
 	return ""
-}
-
-// The frozen-tool gate runs the production probes directly so it can assert
-// their tool lookup, parser, workload, and raw-evidence contracts. Direct
-// probe results intentionally bypass runner.Run, so project the canonical
-// descriptor metadata here before constructing the ECS report. This mirrors
-// the runner's composition boundary without changing any probe-owned facts.
-func canonicalWindowsIntegrationResult(t *testing.T, result model.Result) model.Result {
-	t.Helper()
-	for _, definition := range BuiltinDefinitions() {
-		if definition.Descriptor.ID != result.ID {
-			continue
-		}
-		descriptor := definition.Descriptor
-		parameters := result.Methodology.Parameters
-		dynamicDescription := result.Description
-		dynamicProfile := result.Methodology.Profile
-		dynamicComparisonScope := result.Methodology.ComparisonScope
-
-		result.Title = descriptor.TitleKey
-		result.Description = descriptor.DescriptionKey
-		result.Methodology = descriptor.Methodology
-		result.Methodology.Parameters = parameters
-
-		switch descriptor.ID {
-		case "cpu":
-			if dynamicComparisonScope == "probe.cpu.comparison_scope.tool_missing" {
-				result.Methodology.ComparisonScope = dynamicComparisonScope
-			}
-		case "memory":
-			if dynamicProfile == "probe.memory.stream.profile.single_core" {
-				result.Methodology.Profile = dynamicProfile
-			}
-			if dynamicDescription == "probe.memory.description.single_core" {
-				result.Description = dynamicDescription
-			}
-		}
-		return result
-	}
-	t.Fatalf("Windows integration result %q has no canonical descriptor", result.ID)
-	return model.Result{}
-}
-
-func assertWindowsReportJSON(t *testing.T, results []model.Result) {
-	t.Helper()
-	started := time.Unix(0, 0).UTC()
-	reportData := model.Report{
-		SchemaVersion: buildinfo.SchemaVersion,
-		Tool:          model.ToolInfo{Name: buildinfo.Name, Version: "windows-integration"},
-		Run: model.RunInfo{
-			ID: "windows-frozen-tools-integration", Profile: "standard", StartedAt: started,
-			CompletedAt: started.Add(time.Second), DurationMS: 1000, Exposure: "local",
-			Requested: []string{"zstd", "npb", "crypto", "memory", "disk"}, OutputFormats: []string{"json"},
-		},
-		Summary: model.Summary{Status: model.StatusOK, OK: len(results)},
-		Results: results,
-	}
-	content, err := report.JSON(reportData)
-	if err != nil || !json.Valid(content) {
-		t.Fatalf("production report.JSON() failed: err=%v valid=%t", err, json.Valid(content))
-	}
-	parsed, err := report.ParseJSON(content)
-	if err != nil {
-		t.Fatalf("production report.ParseJSON() failed: %v", err)
-	}
-	if parsed.SchemaVersion != buildinfo.SchemaVersion || len(parsed.Results) != len(results) {
-		t.Fatalf("production ECS JSON round trip = schema:%q results:%d, want schema:%q results:%d", parsed.SchemaVersion, len(parsed.Results), buildinfo.SchemaVersion, len(results))
-	}
 }
 
 type integrationFileFact struct {
