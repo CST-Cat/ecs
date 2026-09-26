@@ -47,7 +47,7 @@ jobs:
       FREEBSD_C_DEPS_PREFIX: .ci/freebsd-c-preflight/deps
       FREEBSD_C_DEPS_WORK_DIR: .ci/freebsd-c-preflight/deps-work
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -119,7 +119,7 @@ jobs:
             --jobs "$(nproc)"
 
       - name: Upload C-tools stage fragment
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-c-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-c-tools-stage/${{ inputs.target }}
@@ -134,7 +134,7 @@ jobs:
       FREEBSD_GNU_SYSROOT_DIR: .ci/gnu-sdk-work/sysroot
       FREEBSD_GNU_SYSROOT_WORK_DIR: .ci/gnu-sdk-work/sysroot-work
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -178,7 +178,7 @@ jobs:
             --stage-root "$PWD/.ci/freebsd-gnu-tools-stage"
 
       - name: Upload GNU tools stage fragment
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-gnu-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-gnu-tools-stage/${{ inputs.target }}
@@ -191,7 +191,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -204,13 +204,13 @@ jobs:
           sudo apt-get install -y jq
 
       - name: Download Stage 3 C-tools fragment
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-c-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-c-tools-stage/${{ inputs.target }}
 
       - name: Download Stage 5 GNU tools fragment
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-gnu-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-gnu-tools-stage/${{ inputs.target }}
@@ -225,7 +225,7 @@ jobs:
             --stage-root "$PWD/.ci/freebsd-tools-stage"
 
       - name: Upload merged FreeBSD tools stage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-tools-stage/${{ inputs.target }}
@@ -238,13 +238,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.1'
           check-latest: false
@@ -257,7 +257,7 @@ jobs:
           sudo apt-get install -y file binutils jq
 
       - name: Download merged FreeBSD tools stage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-tools-stage/${{ inputs.target }}

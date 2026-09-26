@@ -79,7 +79,7 @@ jobs:
     outputs:
       tag: ${{ steps.intent.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -175,7 +175,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -216,7 +216,7 @@ jobs:
           sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
 
       - name: Upload GNU SDK tarball artifact (freebsd_amd64)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-gnu-sdk-tarball-freebsd_amd64
           path: .ci/dist/ecs-freebsd-gnu-sdk-freebsd_amd64.tar.zst
@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -267,7 +267,7 @@ jobs:
           sha256sum .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
 
       - name: Upload GNU SDK tarball artifact (freebsd_arm64)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-gnu-sdk-tarball-freebsd_arm64
           path: .ci/dist/ecs-freebsd-gnu-sdk-freebsd_arm64.tar.zst
@@ -284,19 +284,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
       - name: Download both SDK tarballs
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-gnu-sdk-tarball-freebsd_amd64
           path: .ci/dist
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-gnu-sdk-tarball-freebsd_arm64
           path: .ci/dist
@@ -353,7 +353,7 @@ jobs:
           EOF
 
       - name: Upload prepared SDK release candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-freebsd-gnu-sdk-release-candidate
           path: |
@@ -404,7 +404,7 @@ jobs:
       contents: write
     steps:
       - name: Download prepared SDK release candidate
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-gnu-sdk-release-candidate
           path: .ci/dist

@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -48,7 +48,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -62,7 +62,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage' | Out-Null
           & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -StageRoot (Join-Path $PWD '.ci/windows-tools-stage')
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: .ci/windows-tools-stage
@@ -77,19 +77,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.1'
           check-latest: false
           cache: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: .ci/windows-tools-stage-artifact
@@ -114,7 +114,7 @@ jobs:
         shell: pwsh
         run: |
           & ./scripts/ci/windows_tools_nexttrace.ps1 -Label 'VERIFY-2022' -EcsPath (Join-Path $PWD 'ecs.exe') -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-tools-gate-inputs-2022
           path: .ci/windows-tools-gate-inputs
@@ -123,7 +123,7 @@ jobs:
 
       - name: Upload VERIFY-2022 NextTrace diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-nexttrace-diagnostics-verify-2022
           path: |
@@ -141,19 +141,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.1'
           check-latest: false
           cache: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: .ci/windows-tools-stage-artifact
@@ -178,7 +178,7 @@ jobs:
         shell: pwsh
         run: |
           & ./scripts/ci/windows_tools_nexttrace.ps1 -Label 'VERIFY-2025' -EcsPath (Join-Path $PWD 'ecs.exe') -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-tools-gate-inputs-2025
           path: .ci/windows-tools-gate-inputs
@@ -187,7 +187,7 @@ jobs:
 
       - name: Upload VERIFY-2025 NextTrace diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-nexttrace-diagnostics-verify-2025
           path: |
@@ -205,19 +205,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.1'
           check-latest: false
           cache: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: tools-artifacts
@@ -255,7 +255,7 @@ jobs:
           cp run.ps1 install.ps1 .ci/windows-tools-dist/bootstrap/
           printf '%s\n' "$GITHUB_SHA" > .ci/windows-tools-dist/CURRENT_COMMIT
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-tools-dist
           path: .ci/windows-tools-dist
@@ -275,24 +275,24 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.1'
           check-latest: false
           cache: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: ${{ runner.temp }}/ecs-windows-tools-stage-artifact
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-gate-inputs-${{ matrix.server }}
           path: ${{ runner.temp }}/ecs-windows-tools-gate-inputs-${{ matrix.server }}
@@ -310,18 +310,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-dist
           path: .ci/windows-tools-dist
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-gate-inputs-2022
           path: .ci/windows-tools-gate-inputs
@@ -332,7 +332,7 @@ jobs:
           & ./scripts/ci/windows_tools_e2e.ps1 -Label '2022' -ArtifactRoot (Join-Path $PWD '.ci/windows-tools-dist') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
       - name: Upload E2E-2022 NextTrace diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-nexttrace-diagnostics-e2e-2022
           path: |
@@ -352,18 +352,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-dist
           path: .ci/windows-tools-dist
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@v8
         with:
           name: ecs-windows-tools-gate-inputs-2025
           path: .ci/windows-tools-gate-inputs
@@ -374,7 +374,7 @@ jobs:
           & ./scripts/ci/windows_tools_e2e.ps1 -Label '2025' -ArtifactRoot (Join-Path $PWD '.ci/windows-tools-dist') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
       - name: Upload E2E-2025 NextTrace diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecs-windows-nexttrace-diagnostics-e2e-2025
           path: |

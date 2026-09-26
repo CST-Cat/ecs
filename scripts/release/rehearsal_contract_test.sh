@@ -88,14 +88,12 @@ assert_no_non_publish_write_job() {
   fi
 }
 
-assert_pinned_actions() {
+assert_versioned_actions() {
   local file=$1 violation
   if violation=$(awk '
     /uses:/ {
       if ($0 ~ /uses:[[:space:]]*\.\//) next
-      at=index($0, "@")
-      digest=substr($0, at + 1, 40)
-      if (at == 0 || length(digest) != 40 || digest !~ /^[0-9a-f]+$/) {
+      if ($0 !~ /@v[0-9]+([.][0-9]+)*[[:space:]]*$/) {
         print NR ":" $0
         exit 1
       }
@@ -103,7 +101,7 @@ assert_pinned_actions() {
   ' "$file"); then
     :
   else
-    die "$file has an unpinned external action: $violation"
+    die "$file has an external action without a release version tag: $violation"
   fi
 }
 
@@ -136,7 +134,7 @@ assert_contains "$release" "--check-only"
 assert_absent "$release" "    if: startsWith(github.ref, 'refs/tags/v')"
 assert_single_write_job "$release"
 assert_no_non_publish_write_job "$release"
-assert_pinned_actions "$release"
+assert_versioned_actions "$release"
 
 assert_contains "$bundle" "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_contains "$bundle" "if: github.event_name == 'workflow_dispatch'"
@@ -145,7 +143,7 @@ assert_contains "$bundle" "--check-only"
 assert_absent "$bundle" "    if: startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_single_write_job "$bundle"
 assert_no_non_publish_write_job "$bundle"
-assert_pinned_actions "$bundle"
+assert_versioned_actions "$bundle"
 
 # Windows tools：只钉安全边界和真实执行链；实现脚本可独立演进。
 [[ -f "$windows" ]] || die "$windows is missing"
@@ -153,7 +151,7 @@ for needle in   "workflow_call:"   "workflow_dispatch:"   "contents: read"   "ru
   assert_contains "$windows" "$needle"
 done
 assert_absent "$windows" "contents: write"
-assert_pinned_actions "$windows"
+assert_versioned_actions "$windows"
 assert_no_core_gate_bypass "$windows"
 assert_no_sensitive_token_evasion "$windows"
 assert_absent "$windows" "releases/latest/download"
@@ -221,7 +219,7 @@ for needle in   "windows-runtime"   "windows-tools"   "windows-2022"   "windows-
   assert_contains "$ci" "$needle"
 done
 assert_absent "$ci" "contents: write"
-assert_pinned_actions "$ci"
+assert_versioned_actions "$ci"
 assert_no_core_gate_bypass "$ci"
 
 # SDK and release scripts keep their own explicit rehearsal/publish boundaries.
@@ -233,7 +231,7 @@ assert_contains "$sdk" "Prepare SDK release candidate"
 assert_contains "$sdk" "sort -V"
 assert_contains "$sdk" "gh release create"
 assert_single_write_job "$sdk"
-assert_pinned_actions "$sdk"
+assert_versioned_actions "$sdk"
 
 sdk_version_block=$(grep -A4 -F '      sdk_version:' "$sdk")
 if ! grep -Fq 'required: false' <<<"$sdk_version_block"; then

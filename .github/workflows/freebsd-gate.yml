@@ -24,21 +24,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           fetch-tags: false
 
       - name: Download merged FreeBSD tools stage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@v8
         with:
           name: ecs-freebsd-tools-stage-${{ inputs.target }}
           path: .ci/freebsd-tools-stage/${{ inputs.target }}
 
       - name: Start FreeBSD 15.1 VM (consumer/judge)
         id: freebsd_vm
-        uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
+        uses: vmactions/freebsd-vm@v1
         with:
           release: "15.1"
           arch: ${{ inputs.target == 'freebsd_amd64' && 'x86_64' || 'aarch64' }}
