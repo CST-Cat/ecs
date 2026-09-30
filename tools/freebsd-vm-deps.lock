@@ -10,7 +10,7 @@ amd64|oniguruma|6.9.10|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Ha
 amd64|bash|5.3.15|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/bash-5.3.15~e07de815d5.pkg|e07de815d531f7cfed98b07c84621fcf21a9e95eff2d9ab40a5f427e1633db24
 amd64|jq|1.8.2|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/jq-1.8.2~891030011e.pkg|891030011eb0c29c3abb4dd96f060adde7b0f58838f1d2259325be49ab456098
 amd64|file|5.46|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/file-5.46~d2234a4271.pkg|d2234a42716f0cb6c4540e88c223a2d30318148bb63d8016a5968667ae72514c
-amd64|ca_root_nss|3.129|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/ca_root_nss-3.129~26bf924ec8.pkg|26bf924ec85013bb7f76e810ba3c115ae3000ea26ef583da5b3d74382c7cb6ab
+amd64|ca_root_nss|3.130|https://pkg.freebsd.org/FreeBSD:15:amd64/quarterly/All/Hashed/ca_root_nss-3.130~b2e080ef8c.pkg|b2e080ef8c17db4fa01e29f70711309c27d16f39b71db27bb194d3283c28f03d
 aarch64|indexinfo|0.3.1_1|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/indexinfo-0.3.1_1~84e8649eaf.pkg|84e8649eaff3f97a77eb0029a3e24a9e2f6800f794ce2f85a6833b8a684a3ad0
 aarch64|gettext-runtime|1.0_1|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/gettext-runtime-1.0_1~e7c20b3873.pkg|e7c20b3873c2aebb4cfa1963f8707677b50aafe77c292a17a3949dbeda1ace2a
 aarch64|oniguruma|6.9.10|https://pkg.freebsd.org/FreeBSD:15:aarch64/quarterly/All/Hashed/oniguruma-6.9.10~153dd83d44.pkg|153dd83d44e461c14c5a67ac9d9fb4d11fd237a208584a4fb61d517e12ace099
