@@ -91,8 +91,8 @@ func TestProbeFormattingAndParsingHelpers(t *testing.T) {
 	if formatHardwareBytes(0) != "0 B" || formatHardwareBytes(1536) != "1.5 KiB" {
 		t.Fatalf("hardware bytes = %q/%q", formatHardwareBytes(0), formatHardwareBytes(1536))
 	}
-	if parseUintDefault("42", 7) != 42 || parseUintDefault("bad", 7) != 7 || fallback(" value ", "default") != "value" || fallback(" ", "default") != "default" {
-		t.Fatal("uint parser success/fallback failed")
+	if fallback(" value ", "default") != "value" || fallback(" ", "default") != "default" {
+		t.Fatal("string fallback failed")
 	}
 }
 

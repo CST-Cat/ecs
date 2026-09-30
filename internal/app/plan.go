@@ -110,11 +110,10 @@ func buildExecutionPlan(catalog module.Catalog, runtime config.Runtime) executio
 		if descriptor.Exposure == module.ExposureThirdParty {
 			needsThirdPartyProvider = true
 		}
-		// The descriptor records what a module needs; resolveRequiredTools
-		// records what this platform must actually stage for it. A base-system
-		// substitute on FreeBSD drops the download without changing the
-		// descriptor, so the machine contract stays platform-correct while the
-		// module metadata stays platform-independent.
+		// The descriptor records logical requirements; resolveRequiredTools
+		// projects those into this platform's wrapper dependencies. A
+		// platform-provided substitute on FreeBSD is omitted without changing
+		// the descriptor, while probe definitions own the actual backend.
 		for _, toolID := range resolveRequiredTools(descriptor.RequiredTools) {
 			if containsPlanValue(plan.RequiredTools, toolID) {
 				continue

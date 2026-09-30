@@ -272,16 +272,6 @@ func TestBuildModulesStatusesEvidenceAndUnion(t *testing.T) {
 	if data.Summary.Modules != 3 || data.Summary.ComparableMetrics != 1 || data.Summary.StatusChanges != 1 || data.Summary.EvidenceChanges != 1 || data.Summary.MissingModuleValues != 2 || data.Summary.Comparability != PartiallyComparable {
 		t.Fatalf("summary status/evidence = %+v", data.Summary)
 	}
-
-	duplicate := reportWithResults("duplicate", cpu0, cpu0)
-	duplicateData, err := Build([]model.Report{duplicate, candidate}, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	duplicateModule := findModule(duplicateData, "cpu")
-	if duplicateModule == nil || len(duplicateModule.MetricIssues) == 0 || duplicateModule.MetricIssues[0].Reason != "duplicate_module_id" || !reflect.DeepEqual(duplicateModule.MetricIssues[0].Reports, []int{0}) {
-		t.Fatalf("duplicate module issue = %+v", duplicateModule)
-	}
 }
 
 func TestBuildMetricsDirectionsRanksAndOutcomes(t *testing.T) {
@@ -360,16 +350,9 @@ func TestBuildMetricIssuesAndSignatureDifferences(t *testing.T) {
 		wantReports []int
 		setup       func([]model.Report)
 	}{
-		{name: "missing key", reason: "missing_metric_key", wantReports: []int{0, 1}, setup: func(reports []model.Report) {
-			reports[0].Results[0].Measurements[0].Key = ""
-			reports[1].Results[0].Measurements[0].Key = ""
-		}},
 		{name: "no matching", reason: "no_matching_metric", wantReports: []int{0}, setup: func(reports []model.Report) {
 			reports[0].Results[0].Measurements[0].Key = "only-first"
 			reports[1].Results[0].Measurements = nil
-		}},
-		{name: "duplicate key", reason: "duplicate_metric_key", wantReports: []int{0}, setup: func(reports []model.Report) {
-			reports[0].Results[0].Measurements = append(reports[0].Results[0].Measurements, reports[0].Results[0].Measurements[0])
 		}},
 		{name: "missing method or direction", reason: "missing_method_or_direction", wantReports: []int{0}, setup: func(reports []model.Report) {
 			reports[0].Results[0].Measurements[0].Method = ""

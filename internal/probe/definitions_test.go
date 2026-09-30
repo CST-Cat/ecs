@@ -175,13 +175,13 @@ func TestDefinitionValidationRejectsInvalidPairs(t *testing.T) {
 		{name: "empty descriptor", input: []Definition{{Probe: definitionTestProbe{id: "local"}}}, marker: "empty ID"},
 		{name: "duplicate descriptor", input: []Definition{testDefinition("local"), testDefinition("local")}, marker: "duplicate module descriptor"},
 		{name: "nil probe", input: []Definition{{Descriptor: testDefinition("local").Descriptor}}, marker: "nil probe"},
-		{name: "empty probe ID", input: []Definition{{Descriptor: testDefinition("local").Descriptor, Probe: definitionTestProbe{}}}, marker: "empty probe ID"},
+		{name: "empty probe ID", input: []Definition{{Descriptor: testDefinition("local").Descriptor, Probe: definitionTestProbe{}}}, marker: "does not match"},
 		{name: "whitespace probe ID", input: []Definition{{Descriptor: testDefinition("local").Descriptor, Probe: definitionTestProbe{id: " local "}}}, marker: "does not match"},
 		{name: "unknown probe", input: []Definition{{Descriptor: testDefinition("local").Descriptor, Probe: definitionTestProbe{id: "other"}}}, marker: "does not match"},
 		{name: "duplicate probe", input: []Definition{
 			{Descriptor: testDefinition("local").Descriptor, Probe: definitionTestProbe{id: "local"}},
 			{Descriptor: testDefinition("remote").Descriptor, Probe: definitionTestProbe{id: "local"}},
-		}, marker: "duplicate probe ID"},
+		}, marker: "does not match"},
 		{name: "missing descriptor", input: []Definition{{Probe: definitionTestProbe{id: "local"}}}, marker: "empty ID"},
 		{name: "missing probe", input: []Definition{{Descriptor: testDefinition("local").Descriptor}}, marker: "nil probe"},
 	}

@@ -157,7 +157,7 @@ func leaderboardCommand(app application, args []string, stdout, stderr io.Writer
 				}
 				continue
 			}
-			if err := validateBaselineReport(data); err != nil {
+			if err := score.ValidateReportScoreability(data); err != nil {
 				if inputIssue(path, err) {
 					return 1
 				}

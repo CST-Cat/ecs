@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"ecs/internal/i18n"
 )
@@ -39,12 +38,5 @@ Run ecs run --help for all test options or ecs compare --help for comparison opt
 }
 
 func commandHelpText(definition commandDefinition) string {
-	parts := make([]string, 0, 2)
-	if key := strings.TrimSpace(definition.UsageKey); key != "" {
-		parts = append(parts, i18n.T(key))
-	}
-	if key := strings.TrimSpace(definition.DescriptionKey); key != "" {
-		parts = append(parts, i18n.T(key))
-	}
-	return strings.Join(parts, " ")
+	return i18n.T(definition.UsageKey)
 }

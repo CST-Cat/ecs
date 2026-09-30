@@ -26,11 +26,11 @@ func wantPlanJSONExternalServices() []string {
 	return []string{"third-party-provider", "ookla"}
 }
 
-// TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD pins the FreeBSD
-// platform boundary. Only ping and nexttrace-tiny have a base-system
-// substitute; other requirements remain in the plan, including speedtest's
-// existing signed-package path.
-func TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD(t *testing.T) {
+// TestResolveRequiredToolsDropsPlatformProvidedNetworkToolsOnFreeBSD pins the
+// FreeBSD platform boundary. Only ping and nexttrace-tiny are platform-provided;
+// other requirements remain in the plan, including speedtest's existing
+// signed-package path.
+func TestResolveRequiredToolsDropsPlatformProvidedNetworkToolsOnFreeBSD(t *testing.T) {
 	application := newApplication()
 	for _, test := range []struct {
 		module string
@@ -61,14 +61,14 @@ func TestResolveRequiredToolsDropsBaseSystemNetworkToolsOnFreeBSD(t *testing.T) 
 	}
 }
 
-func TestFreeBSDSpeedtestRemainsInPrivatePlanProjection(t *testing.T) {
-	if got := tool.PlatformToolSource(tool.PlatformFreeBSD, "speedtest"); got != tool.ToolSourceBundle {
-		t.Fatalf("FreeBSD speedtest source = %q, want bundle projection", got)
+func TestFreeBSDSpeedtestRemainsInRequiredToolsProjection(t *testing.T) {
+	if got := tool.PlatformToolSource(tool.PlatformFreeBSD, "speedtest"); got != tool.ToolSourceWrapperManaged {
+		t.Fatalf("FreeBSD speedtest source = %q, want wrapper-managed projection", got)
 	}
 	if got, want := resolveRequiredTools([]string{"speedtest"}), []string{"speedtest"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("FreeBSD speedtest required_tools projection = %v, want %v", got, want)
 	}
-	// This is a private plan/staging projection only. speedtest is absent from
+	// This is a wrapper-managed plan projection only. speedtest is absent from
 	// the frozen tools/lock.json archive; run.sh uses its separately verified
 	// signed package path and FreeBSD then fails closed without a client.
 }

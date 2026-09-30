@@ -335,7 +335,6 @@ func (p Palette) ToneBold(text string, tone Tone) string {
 	return p.escapeBold(toneColor(tone)) + text + "\x1b[0m"
 }
 
-func (p Palette) Accent(text string) string  { return p.Tone(text, ToneAccent) }
 func (p Palette) Info(text string) string    { return p.Tone(text, ToneInfo) }
 func (p Palette) Success(text string) string { return p.Tone(text, ToneSuccess) }
 func (p Palette) Warning(text string) string { return p.Tone(text, ToneWarning) }

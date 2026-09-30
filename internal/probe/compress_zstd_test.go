@@ -63,7 +63,7 @@ func TestZstdParserAndCorpusContracts(t *testing.T) {
 		t.Fatalf("valid corpus rejected: %v", err)
 	}
 	t.Setenv("ECS_ZSTD_CORPUS", path)
-	if found, err := findZstdCorpus("unused", contract); err != nil || found != path {
+	if found, err := findZstdCorpus(contract); err != nil || found != path {
 		t.Fatalf("configured corpus = %q/%v", found, err)
 	}
 	if err := verifyZstdCorpus(directory, contract); err == nil || !strings.Contains(err.Error(), "不是普通文件") {
@@ -82,7 +82,7 @@ func TestZstdParserAndCorpusContracts(t *testing.T) {
 	t.Setenv("ECS_ZSTD_CORPUS", filepath.Join(directory, "missing.corpus"))
 	missing := contract
 	missing.CorpusName = "ecs-test-missing-corpus"
-	if _, err := findZstdCorpus("unused", missing); err == nil || !strings.Contains(err.Error(), "不在 ECS_ZSTD_CORPUS") {
+	if _, err := findZstdCorpus(missing); err == nil || !strings.Contains(err.Error(), "不在 ECS_ZSTD_CORPUS") {
 		t.Fatalf("missing corpus diagnostic = %v", err)
 	}
 }

@@ -14,8 +14,18 @@ import (
 
 func TestFreeBSDTraceBackendUsesOnlyBaseSystemPaths(t *testing.T) {
 	backend := detectTraceBackend(context.Background())
-	if backend.Name != "freebsd-traceroute" || backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Version == "" {
+	if backend.Name != traceFreeBSDTracerouteName || backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Version == "" {
 		t.Fatalf("FreeBSD trace backend = %#v", backend)
+	}
+	var routeEngine string
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Descriptor.ID == "route" {
+			routeEngine = definition.Descriptor.Methodology.Engine
+			break
+		}
+	}
+	if routeEngine != backend.Name {
+		t.Fatalf("FreeBSD route methodology engine = %q, want backend %q", routeEngine, backend.Name)
 	}
 	if !traceBackendAvailableForFamily(backend, "4") || !traceBackendAvailableForFamily(backend, "6") {
 		t.Fatal("FreeBSD base traceroute backend is not available for both IP families")

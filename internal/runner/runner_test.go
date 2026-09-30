@@ -121,11 +121,14 @@ func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
 	item := &runnerTestProbe{
 		id: "system", title: "probe title", runs: &runs,
 		result: model.Result{
-			ID: "system", Status: model.StatusOK,
+			ID: "system", Title: "producer title", Description: "producer description", Status: model.StatusOK,
 			Methodology: model.Methodology{
-				Kind:       "fixture",
-				Label:      "probe methodology",
-				Parameters: map[string]string{"scope_revision": "producer", "owned": "producer"},
+				Kind:            "fixture",
+				Label:           "probe methodology",
+				Engine:          "producer engine",
+				Profile:         "producer profile",
+				ComparisonScope: "producer scope",
+				Parameters:      map[string]string{"scope_revision": "producer", "owned": "producer"},
 			},
 			Evidence: model.NewEvidence(1, 2, "sample"),
 		},
@@ -148,14 +151,14 @@ func TestRunDefinitionKeepsCanonicalMachineMetadata(t *testing.T) {
 	}
 }
 
-func TestRunDefinitionKeepsExplicitDynamicMetadataOverrides(t *testing.T) {
+func TestRunDefinitionRejectsUnknownProbeMethodologyVariants(t *testing.T) {
 	catalog := runnerCatalog()
 	cfg, err := config.Defaults(catalog, config.ProfileStandard)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Run("cpu tool missing scope", func(t *testing.T) {
+	t.Run("CPU scope from unknown producer", func(t *testing.T) {
 		descriptor, ok := catalog.Lookup("cpu")
 		if !ok {
 			t.Fatal("cpu descriptor missing")
@@ -176,13 +179,13 @@ func TestRunDefinitionKeepsExplicitDynamicMetadataOverrides(t *testing.T) {
 		}, cfg, probe.Environment{}, true)
 		if got.Description != descriptor.DescriptionKey || got.Methodology.Kind != descriptor.Methodology.Kind ||
 			got.Methodology.Label != descriptor.Methodology.Label || got.Methodology.Engine != descriptor.Methodology.Engine ||
-			got.Methodology.Profile != descriptor.Methodology.Profile || got.Methodology.ComparisonScope != "probe.cpu.comparison_scope.tool_missing" ||
+			got.Methodology.Profile != descriptor.Methodology.Profile || got.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope ||
 			!reflect.DeepEqual(got.Methodology.Parameters, map[string]string{"scope_revision": "producer"}) {
-			t.Fatalf("cpu dynamic metadata = %+v", got)
+			t.Fatalf("unknown CPU metadata variant was accepted: %+v", got)
 		}
 	})
 
-	t.Run("memory single core profile and description", func(t *testing.T) {
+	t.Run("STREAM variant from unknown producer", func(t *testing.T) {
 		descriptor, ok := catalog.Lookup("memory")
 		if !ok {
 			t.Fatal("memory descriptor missing")
@@ -201,11 +204,11 @@ func TestRunDefinitionKeepsExplicitDynamicMetadataOverrides(t *testing.T) {
 				},
 			}},
 		}, cfg, probe.Environment{}, true)
-		if got.Description != "probe.memory.description.single_core" || got.Methodology.Kind != descriptor.Methodology.Kind ||
+		if got.Description != descriptor.DescriptionKey || got.Methodology.Kind != descriptor.Methodology.Kind ||
 			got.Methodology.Label != descriptor.Methodology.Label || got.Methodology.Engine != descriptor.Methodology.Engine ||
-			got.Methodology.Profile != "probe.memory.stream.profile.single_core" || got.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope ||
+			got.Methodology.Profile != descriptor.Methodology.Profile || got.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope ||
 			!reflect.DeepEqual(got.Methodology.Parameters, map[string]string{"scope_revision": "producer"}) {
-			t.Fatalf("memory dynamic metadata = %+v", got)
+			t.Fatalf("unknown STREAM metadata variant was accepted: %+v", got)
 		}
 	})
 }
@@ -248,13 +251,12 @@ func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
 		wantSummaryKey  string
 		wantValid       int
 		wantRuns        int
-		wantMethodology bool
 		wantFailure     bool
 	}{
 		{name: "offline network", descriptor: descriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.offline", wantValid: 0},
 		{name: "unavailable family", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: false, status: model.StatusOK, wantStatus: model.StatusSkipped, wantSummaryKey: "message.runner.skip.noRequestedIP", wantValid: 0},
 		{name: "network executes", descriptor: descriptor, configExposure: module.ExposureThirdParty, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
-		{name: "ok fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1, wantMethodology: true},
+		{name: "ok fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusOK, wantStatus: model.StatusOK, wantValid: 1, wantRuns: 1},
 		{name: "warning fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusWarning, wantStatus: model.StatusWarning, wantValid: 1, wantRuns: 1},
 		{name: "error fallback", descriptor: localDescriptor, configExposure: module.ExposureLocal, networkRunnable: true, status: model.StatusError, wantStatus: model.StatusError, wantValid: 0, wantRuns: 1, wantFailure: true},
 	}
@@ -271,13 +273,16 @@ func TestRunDefinitionSkipAndEvidenceFallback(t *testing.T) {
 			if got.Status != test.wantStatus || got.Evidence == nil || got.Evidence.Valid != test.wantValid || got.Evidence.Expected != 1 || runs != test.wantRuns {
 				t.Fatalf("result = %+v, want status=%s evidence=%d/1", got, test.wantStatus, test.wantValid)
 			}
+			if got.Title != test.descriptor.TitleKey || got.Description != test.descriptor.DescriptionKey ||
+				got.Methodology.Kind != test.descriptor.Methodology.Kind || got.Methodology.Label != test.descriptor.Methodology.Label ||
+				got.Methodology.Engine != test.descriptor.Methodology.Engine || got.Methodology.Profile != test.descriptor.Methodology.Profile ||
+				got.Methodology.ComparisonScope != test.descriptor.Methodology.ComparisonScope {
+				t.Fatalf("canonical metadata for %s result = title:%q description:%q methodology:%+v", got.Status, got.Title, got.Description, got.Methodology)
+			}
 			if test.wantSummaryKey != "" {
 				if len(got.SummaryMessages) != 1 || got.SummaryMessages[0].Key != test.wantSummaryKey {
 					t.Fatalf("structured skip summary = messages %+v, want %q", got.SummaryMessages, test.wantSummaryKey)
 				}
-			}
-			if test.wantMethodology && got.Methodology.Label != test.descriptor.Methodology.Label {
-				t.Fatalf("methodology = %+v, want descriptor metadata", got.Methodology)
 			}
 			if test.wantFailure && (len(got.Failures) == 0 || got.Failures[0].Stage != "fixture" || got.Failures[0].Target != test.descriptor.ID || got.Failures[0].Category == "" || !strings.Contains(got.Failures[0].Message, "fixture failure")) {
 				t.Fatalf("error diagnostics = %+v", got.Failures)
@@ -353,6 +358,30 @@ func TestSafeRunIsolatePanic(t *testing.T) {
 	}
 	if len(panicResult.Failures) != 1 || panicResult.Failures[0].Stage != "panic" || panicResult.Failures[0].Target != "panic-probe" || panicResult.Failures[0].Category != model.FailureUnknown || panicResult.Failures[0].Message != "fixture panic" {
 		t.Fatalf("panic failure = %+v", panicResult.Failures)
+	}
+}
+
+func TestRunDefinitionPanicGetsCanonicalMetadata(t *testing.T) {
+	descriptor, ok := runnerCatalog().Lookup("system")
+	if !ok {
+		t.Fatal("system descriptor missing")
+	}
+	cfg, err := config.Defaults(runnerCatalog(), config.ProfileStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runDefinition(context.Background(), probe.Definition{
+		Descriptor: descriptor,
+		Probe:      &runnerTestProbe{id: "system", panicValue: "fixture panic"},
+	}, cfg, probe.Environment{}, true)
+	if got.Status != model.StatusError || got.Title != descriptor.TitleKey || got.Description != descriptor.DescriptionKey ||
+		got.Methodology.Kind != descriptor.Methodology.Kind || got.Methodology.Label != descriptor.Methodology.Label ||
+		got.Methodology.Engine != descriptor.Methodology.Engine || got.Methodology.Profile != descriptor.Methodology.Profile ||
+		got.Methodology.ComparisonScope != descriptor.Methodology.ComparisonScope {
+		t.Fatalf("runner panic result metadata = %+v, descriptor = %+v", got, descriptor)
+	}
+	if len(got.Failures) != 1 || got.Failures[0].Stage != "panic" {
+		t.Fatalf("runner panic result failures = %+v", got.Failures)
 	}
 }
 

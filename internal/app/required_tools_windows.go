@@ -4,9 +4,9 @@ package app
 
 import "ecs/internal/tool"
 
-// resolveRequiredTools applies the private staged-dependency projection.
-// Windows native ICMP is represented by the base-system source, and
-// unsupported tools are not staged.
+// resolveRequiredTools projects logical requirements into wrapper-managed
+// dependencies for the Windows plan. Native ICMP is platform-provided, and
+// unsupported tools are omitted.
 func resolveRequiredTools(declared []string) []string {
-	return tool.BundleToolIDs(tool.PlatformWindows, declared)
+	return tool.RequiredToolIDs(tool.PlatformWindows, declared)
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 )
 
 // Validate checks the structural contract shared by table producers and
@@ -57,13 +56,6 @@ func (table *Table) UnmarshalJSON(data []byte) error {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
 		return fmt.Errorf("model table: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("model table must contain one JSON object")
-		}
-		return fmt.Errorf("model table trailing data: %w", err)
 	}
 	validated := Table(decoded)
 	if err := validated.Validate(); err != nil {

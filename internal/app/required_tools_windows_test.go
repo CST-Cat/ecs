@@ -13,14 +13,14 @@ import (
 // wantSelectedModuleTools is the Windows tool set for the mixed selection used
 // by TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices. The
 // unsupported benchmark/network adapters remain selectable modules, while
-// route and backtrace share one staged NextTrace executable.
+// route and backtrace share one wrapper-managed NextTrace tool.
 func wantSelectedModuleTools() []string { return []string{"nexttrace-tiny", "zstd"} }
 
 func wantPlanJSONRequiredTools() []string { return []string{"zstd"} }
 
 func wantPlanJSONExternalServices() []string { return []string{"third-party-provider"} }
 
-func TestResolveRequiredToolsKeepsWindowsBundleContract(t *testing.T) {
+func TestResolveRequiredToolsKeepsWindowsWrapperContract(t *testing.T) {
 	application := newApplication()
 	for _, test := range []struct {
 		module string
@@ -51,11 +51,11 @@ func TestResolveRequiredToolsKeepsWindowsBundleContract(t *testing.T) {
 	}
 }
 
-func TestResolveRequiredToolsStagesOnlyWindowsBundleTools(t *testing.T) {
+func TestResolveRequiredToolsIncludesOnlyWindowsWrapperManagedTools(t *testing.T) {
 	declared := []string{"ping", "sysbench", "iperf3", "speedtest", "nexttrace-tiny", "zstd"}
 	want := []string{"nexttrace-tiny", "zstd"}
 	if got := resolveRequiredTools(declared); !reflect.DeepEqual(got, want) {
-		t.Fatalf("resolveRequiredTools(%v) = %v, want %v", declared, got, want)
+		t.Fatalf("resolveRequiredTools(%v) = %v, want wrapper-managed IDs %v", declared, got, want)
 	}
 }
 

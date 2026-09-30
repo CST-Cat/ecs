@@ -142,7 +142,7 @@ func Run(ctx context.Context, definitions []probe.Definition, catalog module.Cat
 	titles := make([]string, len(selected))
 	titleKeys := make([]string, len(selected))
 	for index, definition := range selected {
-		titles[index] = definitionTitle(definition)
+		titles[index] = definition.CanonicalTitle()
 		titleKeys[index] = definition.Descriptor.TitleKey
 	}
 	results := make([]model.Result, len(selected))
@@ -233,18 +233,17 @@ func localInterfaceIPs() []string {
 func runDefinition(ctx context.Context, definition probe.Definition, cfg config.Runtime, env probe.Environment, networkRunnable bool) model.Result {
 	item := definition.Probe
 	descriptor := definition.Descriptor
-	canonicalTitle := definitionTitle(definition)
 	needsNetwork := descriptor.Exposure > module.ExposureLocal
 	var result model.Result
 	if cfg.OfflineOnly() && needsNetwork {
 		start := time.Now()
-		result = model.NewResult(item.ID(), canonicalTitle)
+		result = model.NewResult(item.ID(), "")
 		result.Status = model.StatusSkipped
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.offline")}
 		result.Finish(start)
 	} else if !networkRunnable && needsNetwork {
 		start := time.Now()
-		result = model.NewResult(item.ID(), canonicalTitle)
+		result = model.NewResult(item.ID(), "")
 		result.Status = model.StatusSkipped
 		result.SummaryMessages = []model.Message{model.NewMessage("message.runner.skip.noRequestedIP")}
 		result.Finish(start)
@@ -256,7 +255,7 @@ func runDefinition(ctx context.Context, definition probe.Definition, cfg config.
 	} else {
 		result = safeRun(ctx, item, env)
 	}
-	applyDescriptorMetadata(&result, descriptor)
+	result = probe.CompleteResultMetadata(definition, result)
 	if result.Evidence == nil {
 		// Probes normally report their real sample denominator. This fallback
 		// supplies a module-level denominator when a result has no evidence,
@@ -270,58 +269,7 @@ func runDefinition(ctx context.Context, definition probe.Definition, cfg config.
 	if result.Evidence != nil {
 		result.Evidence.Normalize()
 	}
-	result.Title = canonicalTitle
 	return result
-}
-
-// applyDescriptorMetadata makes the descriptor the sole owner of fixed result
-// metadata. Probes own only their comparison parameters and the explicitly
-// listed runtime variants below; arbitrary non-empty producer fields must not
-// replace canonical descriptor facts.
-func applyDescriptorMetadata(result *model.Result, descriptor module.Descriptor) {
-	if result == nil {
-		return
-	}
-	parameters := result.Methodology.Parameters
-	dynamicDescription := result.Description
-	dynamicProfile := result.Methodology.Profile
-	dynamicComparisonScope := result.Methodology.ComparisonScope
-
-	result.Description = descriptor.DescriptionKey
-	result.Methodology = descriptor.Methodology
-	result.Methodology.Parameters = parameters
-
-	switch descriptor.ID {
-	case "cpu":
-		// A missing sysbench executable changes the comparability scope because
-		// no benchmark sample was produced. The probe marks this exact variant;
-		// all other methodology fields remain descriptor-owned.
-		if dynamicComparisonScope == "probe.cpu.comparison_scope.tool_missing" {
-			result.Methodology.ComparisonScope = dynamicComparisonScope
-		}
-	case "memory":
-		// STREAM's one-core allowance reuses the physical run for both logical
-		// contexts, so its profile and description are distinct runtime facts.
-		if dynamicProfile == "probe.memory.stream.profile.single_core" {
-			result.Methodology.Profile = dynamicProfile
-		}
-		if dynamicDescription == "probe.memory.description.single_core" {
-			result.Description = dynamicDescription
-		}
-	}
-}
-
-// definitionTitle supplies the canonical descriptor title for built-ins and
-// falls back to the stable probe ID when no title key is available. runDefinition
-// canonicalizes result.Title to this value after the probe completes.
-func definitionTitle(definition probe.Definition) string {
-	if definition.Descriptor.TitleKey != "" {
-		return definition.Descriptor.TitleKey
-	}
-	if definition.Probe != nil {
-		return definition.Probe.ID()
-	}
-	return ""
 }
 
 func hasNetworkModules(selected []probe.Definition) bool {

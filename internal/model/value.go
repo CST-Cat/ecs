@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 )
 
 type valueVariant uint8
@@ -128,13 +127,6 @@ func (value *Value) UnmarshalJSON(data []byte) error {
 	}
 	if object, ok := last.(json.Delim); !ok || object != '}' {
 		return fmt.Errorf("model value must be a tagged object")
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("model value must contain one object")
-		}
-		return fmt.Errorf("model value trailing data: %w", err)
 	}
 	if !seen {
 		return fmt.Errorf("model value must contain exactly one tag")

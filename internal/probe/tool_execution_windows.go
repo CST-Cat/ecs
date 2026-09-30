@@ -10,19 +10,10 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
 const (
-	// Frozen benchmark output is normally small; this leaves room for verbose
-	// metadata while preventing an external tool from retaining unbounded data.
-	probeCommandCombinedLimit = 4 * 1024 * 1024
-	probeCommandStdoutLimit   = 4 * 1024 * 1024
-	probeCommandStderrLimit   = 64 * 1024
-	probeCommandWaitDelay     = 2 * time.Second
-	probeCommandOoklaLimit    = 512 * 1024
-
 	// CREATE_SUSPENDED closes the only process-tree window that cannot be
 	// covered by a Job Object alone: a child could create descendants before
 	// AssignProcessToJobObject runs. The primary process is resumed only after
@@ -39,8 +30,6 @@ const (
 	PROCESS_SUSPEND_RESUME  = 0x00000800
 	windowsInvalidParameter = syscall.Errno(87)
 )
-
-var errProbeCommandOutputLimit = errors.New("external command output exceeded its limit")
 
 var (
 	windowsKernel32           = syscall.NewLazyDLL("kernel32.dll")
@@ -195,39 +184,6 @@ func terminateWindowsProcess(pid int) error {
 	return errors.Join(terminateErr, closeErr)
 }
 
-type probeCommandWriter struct {
-	data     []byte
-	limit    int
-	cancel   context.CancelFunc
-	overflow bool
-}
-
-func newProbeCommandWriter(limit int, cancel context.CancelFunc) *probeCommandWriter {
-	return &probeCommandWriter{limit: limit, cancel: cancel}
-}
-
-func (writer *probeCommandWriter) Write(data []byte) (int, error) {
-	if writer.overflow {
-		return 0, errProbeCommandOutputLimit
-	}
-	remaining := writer.limit - len(writer.data)
-	if len(data) > remaining {
-		writer.data = append(writer.data, data[:remaining]...)
-		writer.overflow = true
-		writer.cancel()
-		return remaining, errProbeCommandOutputLimit
-	}
-	writer.data = append(writer.data, data...)
-	return len(data), nil
-}
-
-type probeCommandResult struct {
-	Stdout   []byte
-	Stderr   []byte
-	Combined []byte
-	Err      error
-}
-
 // probeCommand owns the command lifecycle used by benchmark adapters. The
 // Job Object remains open until Wait and pipe draining complete, so a normal
 // root exit still cleans descendants that retained inherited handles.
@@ -259,17 +215,6 @@ func newProbeCommand(ctx context.Context, path string, args ...string) *probeCom
 	return probe
 }
 
-func (command *probeCommand) RunCombined(limit int) probeCommandResult {
-	output := newProbeCommandWriter(limit, command.cancel)
-	return command.run(output, output, true)
-}
-
-func (command *probeCommand) RunSeparate() probeCommandResult {
-	stdout := newProbeCommandWriter(probeCommandStdoutLimit, command.cancel)
-	stderr := newProbeCommandWriter(probeCommandStderrLimit, command.cancel)
-	return command.run(stdout, stderr, false)
-}
-
 func (command *probeCommand) run(stdout, stderr *probeCommandWriter, combined bool) probeCommandResult {
 	defer command.cancel()
 	command.Cmd.Stdout = stdout
@@ -291,43 +236,7 @@ func (command *probeCommand) run(stdout, stderr *probeCommandWriter, combined bo
 		}
 	}
 
-	result := probeCommandResult{Err: runErr}
-	if combined {
-		result.Combined = stdout.data
-	} else {
-		result.Stdout = stdout.data
-		result.Stderr = stderr.data
-	}
-	stream, limit, diagnostic := "", 0, []byte(nil)
-	if stdout.overflow {
-		stream, limit = "stdout", stdout.limit
-		if combined {
-			stream = "combined"
-		} else {
-			diagnostic = stderr.data
-		}
-	} else if !combined && stderr.overflow {
-		stream, limit, diagnostic = "stderr", stderr.limit, stderr.data
-	}
-	if stream != "" {
-		result.Stdout = nil
-		result.Combined = nil
-		limitErr := probeCommandOutputLimitError(stream, limit, diagnostic, runErr)
-		if cause := contextCauseError(command.parentContext); cause != nil {
-			result.Err = errors.Join(cause, limitErr)
-		} else {
-			result.Err = limitErr
-		}
-		return result
-	}
-	if cause := contextCauseError(command.parentContext); cause != nil {
-		result.Err = cause
-		return result
-	}
-	if !combined && runErr != nil && len(stderr.data) > 0 {
-		result.Err = fmt.Errorf("%w: command stderr: %s", runErr, sanitizeCommandOutput(stderr.data))
-	}
-	return result
+	return processProbeCommandOutput(command.parentContext, stdout, stderr, combined, runErr)
 }
 
 // startWithJob creates the Job before spawning the process, starts the process
@@ -487,16 +396,4 @@ func (command *probeCommand) closeJob() error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func probeCommandOutputLimitError(stream string, limit int, stderr []byte, runErr error) error {
-	err := fmt.Errorf("external command %s exceeded %d-byte limit: %w", stream, limit, errProbeCommandOutputLimit)
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		err = errors.Join(err, exitErr)
-	}
-	if len(stderr) > 0 {
-		err = fmt.Errorf("%w: command stderr: %s", err, sanitizeCommandOutput(stderr))
-	}
-	return err
 }

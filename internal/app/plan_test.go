@@ -18,10 +18,10 @@ import (
 
 // TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices pins the
 // platform-resolved tool contract for one mixed selection. The expected tool
-// set comes from the platform test file: Linux stages every declared tool,
-// FreeBSD substitutes base-system ping and traceroute, and Windows stages
-// only bundle-sourced tools. External services are asserted by the same
-// platform helper.
+// set comes from the platform test file: Linux retains every wrapper-managed
+// requirement, FreeBSD omits platform-provided ping and traceroute, and Windows
+// includes only wrapper-managed requirements. External services are asserted
+// by the same platform helper.
 func TestBuildExecutionPlanDerivesRequiredToolsAndExternalServices(t *testing.T) {
 	application := newApplication()
 	plan := buildExecutionPlan(application.modules, config.Runtime{

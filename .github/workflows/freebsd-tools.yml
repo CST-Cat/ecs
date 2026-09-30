@@ -104,9 +104,33 @@ jobs:
           set -euo pipefail
           # build_tools.sh / build_tools_container.sh 只构建 Linux，继续显式拒绝
           # freebsd_* 目标；FreeBSD 工具链由本 workflow 的交叉构建链负责。
-          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools.sh
-          grep -q 'FreeBSD tools builder unavailable' scripts/build_tools_container.sh
-          echo 'Linux builders still refuse FreeBSD targets'
+          if direct_output=$(scripts/build_tools.sh --target freebsd_amd64 2>&1); then
+            echo 'build_tools.sh unexpectedly accepted a FreeBSD target' >&2
+            exit 1
+          else
+            direct_status=$?
+          fi
+          if [[ "$direct_status" -ne 1 ]]; then
+            printf '%s\n' "$direct_output" >&2
+            echo "build_tools.sh FreeBSD rejection exited $direct_status, expected 1" >&2
+            exit 1
+          fi
+
+          if container_params=$(scripts/build_tools_container.sh --target freebsd_amd64 --print-params); then
+            echo 'build_tools_container.sh unexpectedly printed FreeBSD parameters' >&2
+            exit 1
+          else
+            container_status=$?
+          fi
+          if [[ "$container_status" -ne 1 ]]; then
+            echo "build_tools_container.sh FreeBSD rejection exited $container_status, expected 1" >&2
+            exit 1
+          fi
+          if [[ -n "$container_params" ]]; then
+            printf '%s\n' "$container_params" >&2
+            echo 'build_tools_container.sh printed parameters for a rejected FreeBSD target' >&2
+            exit 1
+          fi
 
   linux-static:
     name: linux static checks

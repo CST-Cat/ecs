@@ -10,9 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"ecs/internal/model"
-	"ecs/internal/score"
 )
 
 const leaderboardEnvelopeLimit int64 = 32 * 1024 * 1024
@@ -53,14 +50,6 @@ func readLeaderboardArtifact(path string) ([]byte, string, error) {
 		return content, envelope.Schema, nil
 	}
 	return content, envelope.SchemaVersion, nil
-}
-
-// validateBaselineReport rejects a syntactically valid full report that has
-// no scoreable measurements. BuildBaseline is the single source of truth for
-// scoreability, so this check cannot drift from the eventual aggregation.
-func validateBaselineReport(report model.Report) error {
-	_, err := score.BuildBaseline([]model.Report{report}, "")
-	return err
 }
 
 type duplicateReportPath struct {

@@ -376,11 +376,6 @@ func Validate(manifest Manifest) error {
 			}
 			seen[architecture] = true
 		}
-		for _, architecture := range validArchitectures {
-			if !seen[architecture] {
-				return fmt.Errorf("supported_architectures omits %q", architecture)
-			}
-		}
 	}
 	validTargets := targetIDs(manifest.GOOS)
 	if manifest.SupportedTargets != nil {
@@ -393,11 +388,6 @@ func Validate(manifest Manifest) error {
 				return fmt.Errorf("invalid supported target %q", supportedTarget)
 			}
 			seen[supportedTarget] = true
-		}
-		for _, validTarget := range validTargets {
-			if !seen[validTarget] {
-				return fmt.Errorf("supported_targets omits %q", validTarget)
-			}
 		}
 	}
 	validToolNames := targetToolNames(manifest.GOOS)

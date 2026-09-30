@@ -29,14 +29,14 @@ func TestCommandDefinitionsHaveCanonicalOrderAndHandlers(t *testing.T) {
 		if definition.Handler == nil {
 			t.Fatalf("command %q has a nil handler", definition.Name)
 		}
-		if strings.TrimSpace(definition.UsageKey) == "" && strings.TrimSpace(definition.DescriptionKey) == "" {
-			t.Fatalf("command %q has no help metadata", definition.Name)
+		if strings.TrimSpace(definition.UsageKey) == "" {
+			t.Fatalf("command %q has no usage key", definition.Name)
 		}
 	}
 
 	second := commandDefinitions()
 	for index := range definitions {
-		if definitions[index].Name != second[index].Name || definitions[index].UsageKey != second[index].UsageKey || definitions[index].DescriptionKey != second[index].DescriptionKey {
+		if definitions[index].Name != second[index].Name || definitions[index].UsageKey != second[index].UsageKey {
 			t.Fatalf("command order/metadata changed between constructions: first=%+v second=%+v", definitions, second)
 		}
 	}
@@ -50,7 +50,7 @@ func TestLookupCommandMatchesExactNames(t *testing.T) {
 			t.Fatalf("lookup %q = %+v/%t", name, definition, ok)
 		}
 	}
-	if definition, ok := lookupCommand(definitions, "does-not-exist"); ok || definition.Name != "" || definition.Handler != nil || definition.UsageKey != "" || definition.DescriptionKey != "" {
+	if definition, ok := lookupCommand(definitions, "does-not-exist"); ok || definition.Name != "" || definition.Handler != nil || definition.UsageKey != "" {
 		t.Fatalf("unknown lookup = %+v/%t, want zero/false", definition, ok)
 	}
 }

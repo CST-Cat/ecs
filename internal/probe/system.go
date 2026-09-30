@@ -192,14 +192,6 @@ func readTrimmed(path, fallbackValue string) string {
 	return value
 }
 
-func parseUintDefault(value string, defaultValue uint64) uint64 {
-	number, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
-	if err != nil {
-		return defaultValue
-	}
-	return number
-}
-
 func parseUptimeSeconds(data []byte) (uint64, bool) {
 	fields := strings.Fields(string(data))
 	if len(fields) == 0 {

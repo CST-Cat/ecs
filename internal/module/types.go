@@ -95,9 +95,9 @@ type Descriptor struct {
 
 	Methodology model.Methodology
 
-	// RequiredTools lists tools relevant to the module. Route probes have a
-	// single execution contract: NextTrace Tiny. This metadata is also consumed
-	// by the wrapper dependency planner.
+	// RequiredTools lists the module's logical tool requirements. The platform
+	// resolver projects them into the plan's wrapper dependency list; probe
+	// definitions own the actual execution backend.
 	RequiredTools []string
 
 	TitleKey       string

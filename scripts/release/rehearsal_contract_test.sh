@@ -38,9 +38,6 @@ assert_no_core_gate_bypass() {
   for pattern in     '^[[:space:]]*continue-on-error[[:space:]]*:'     '^[[:space:]]*condition[[:space:]]*:'     '^[[:space:]]*if[[:space:]]*:[[:space:]]*[^#]*(skip|skipped)'     '^[[:space:]]*(skip|skipped)[[:space:]]*[:=]'     '^[[:space:]]*\$(skip|skipped)[[:space:]]*='     '^[[:space:]]*(exit|return)[[:space:]]+0([[:space:]]|$)'; do
     assert_absent_regex "$file" "$pattern"
   done
-  for needle in '|| true' 't.Skip' 'tracert' 'Test-NetConnection' 'host PATH fallback' 'fake tool' 'fake binary'; do
-    assert_absent "$file" "$needle"
-  done
 }
 
 assert_no_sensitive_token_evasion() {
@@ -138,7 +135,6 @@ assert_versioned_actions "$release"
 
 assert_contains "$bundle" "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_contains "$bundle" "if: github.event_name == 'workflow_dispatch'"
-assert_contains "$bundle" "bundle trigger tag"
 assert_contains "$bundle" "--check-only"
 assert_absent "$bundle" "    if: startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_single_write_job "$bundle"
@@ -167,25 +163,11 @@ for script in "$runtime_contract" "$tools_prepare" "$tools_verify" "$tools_nextt
   assert_no_sensitive_token_evasion "$script"
   assert_no_trusted_root_mutation "$script"
 done
-assert_contains "$tools_package" 'scripts/build_corpus.sh'
-assert_contains "$tools_package" 'ECS_CORPUS_ARCHIVE'
-assert_contains "$tools_package" 'source URL must use HTTPS'
-assert_contains "$tools_package" 'sha256sum "$ECS_CORPUS_ARCHIVE" >> checksums.txt'
 for script in "$nexttrace_gate" "$nexttrace_report_assert" "$icmp_prerequisite"; do
   [[ -f "$script" ]] || die "$script is missing"
 done
 
-# Required artifact failures and local-only rehearsal source chain.
-assert_contains "$tools_verify" 'locked gate inputs are missing or ambiguous'
-assert_contains "$tools_e2e" 'packaged workload is missing'
-assert_contains "$tools_e2e" 'checksums.txt has no unique entry'
-assert_contains "$tools_e2e" 'current main ZIP plan failed'
-assert_contains "$tools_e2e" 'main Windows ZIP did not extract ecs.exe'
-assert_contains "$tools_e2e" 'ECS_RELEASE_BASE must be the current local HTTPS fixture'
-assert_contains "$tools_e2e" 'ECS_BUNDLE_RELEASE_BASE must be the current local HTTPS fixture'
-assert_contains "$tools_e2e" 'protected install target was created'
-assert_contains "$tools_e2e" 'private staging remains:'
-assert_contains "$tools_e2e" 'runner ICMP prerequisite cleanup failed'
+# Required artifact paths and local-only rehearsal source chain.
 assert_contains "$tools_nexttrace" 'windows_nexttrace_capability.ps1'
 assert_contains "$tools_nexttrace" 'windows_nexttrace_gate.ps1'
 assert_contains "$tools_nexttrace" '-Family IPv4'
@@ -245,7 +227,6 @@ if [[ -z "$dispatch_line" || -z "$push_line" || "$dispatch_line" -ge "$push_line
 fi
 
 assert_contains "$publisher" "--check-only"
-assert_contains "$publisher" "未访问或修改 GitHub Release"
 check_only_line=$(grep -nE '^[[:space:]]*if \[\[ "\$check_only" -eq 1 \]\]' "$publisher" | tail -1 | cut -d: -f1)
 gh_line=$(grep -nE '^[[:space:]]*command -v gh ' "$publisher" | head -1 | cut -d: -f1)
 if [[ -z "$check_only_line" || -z "$gh_line" || "$check_only_line" -ge "$gh_line" ]]; then

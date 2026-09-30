@@ -72,7 +72,7 @@ func (zstdProbe) Run(ctx context.Context, env Environment) model.Result {
 	if err != nil {
 		return missingZstdResult("zstd", err)
 	}
-	corpus, err := findZstdCorpus(path, defaultZstdContract)
+	corpus, err := findZstdCorpus(defaultZstdContract)
 	if err != nil {
 		return missingZstdResult(zstdCorpusName, err)
 	}
@@ -96,7 +96,7 @@ func missingZstdResult(target string, err error) model.Result {
 	return result
 }
 
-func findZstdCorpus(zstdPath string, contract zstdBenchmarkContract) (string, error) {
+func findZstdCorpus(contract zstdBenchmarkContract) (string, error) {
 	candidates := make([]string, 0, 4)
 	if configured := strings.TrimSpace(os.Getenv("ECS_ZSTD_CORPUS")); configured != "" {
 		candidates = append(candidates, configured)

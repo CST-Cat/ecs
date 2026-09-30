@@ -17,7 +17,7 @@ const (
 
 func detectTraceBackend(ctx context.Context) traceBackend {
 	return traceBackend{
-		Name:    "freebsd-traceroute",
+		Name:    traceFreeBSDTracerouteName,
 		Version: freeBSDTracerouteRelease(ctx),
 		Adapter: traceFreeBSDTracerouteAdapter,
 	}
@@ -31,14 +31,14 @@ func traceMaxHopsForFamily(family string) int {
 }
 
 func traceBackendAvailableForFamily(backend traceBackend, family string) bool {
-	if backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Name != "freebsd-traceroute" {
+	if backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Name != traceFreeBSDTracerouteName {
 		return false
 	}
 	return freeBSDTracerouteExecutable(freeBSDTraceroutePathForFamily(freeBSDTraceFamily(family)))
 }
 
 func traceCommandSpecForFamily(backend traceBackend, target string, maxHops int, family string) traceCommandSpec {
-	if backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Name != "freebsd-traceroute" {
+	if backend.Adapter != traceFreeBSDTracerouteAdapter || backend.Name != traceFreeBSDTracerouteName {
 		return traceCommandSpec{}
 	}
 	path := freeBSDTraceroutePathForFamily(family)

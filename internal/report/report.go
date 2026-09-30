@@ -161,17 +161,17 @@ func validateReportJSONPresence(content []byte) error {
 	if root == nil {
 		return fmt.Errorf("report must be a JSON object")
 	}
-	if _, err := requiredJSONString(root, "report", "schema_version"); err != nil {
+	if _, err := requiredRawField(root, "report", "schema_version"); err != nil {
 		return err
 	}
 	tool, err := requiredJSONObject(root, "report", "tool")
 	if err != nil {
 		return err
 	}
-	if _, err := requiredJSONString(tool, "tool", "name"); err != nil {
+	if _, err := requiredRawField(tool, "tool", "name"); err != nil {
 		return err
 	}
-	if _, err := requiredJSONString(tool, "tool", "version"); err != nil {
+	if _, err := requiredRawField(tool, "tool", "version"); err != nil {
 		return err
 	}
 
@@ -180,14 +180,14 @@ func validateReportJSONPresence(content []byte) error {
 		return err
 	}
 	for _, field := range []string{"id", "profile", "started_at", "completed_at", "exposure"} {
-		if _, err := requiredJSONString(run, "run", field); err != nil {
+		if _, err := requiredRawField(run, "run", field); err != nil {
 			return err
 		}
 	}
-	if _, err := requiredJSONInt(run, "run", "duration_ms"); err != nil {
+	if _, err := requiredRawField(run, "run", "duration_ms"); err != nil {
 		return err
 	}
-	if _, err := requiredJSONBool(run, "run", "redacted"); err != nil {
+	if _, err := requiredRawField(run, "run", "redacted"); err != nil {
 		return err
 	}
 	if _, err := requiredJSONStringArray(run, "run", "requested_modules"); err != nil {
@@ -205,11 +205,11 @@ func validateReportJSONPresence(content []byte) error {
 	if err != nil {
 		return err
 	}
-	if _, err := requiredJSONString(summary, "summary", "status"); err != nil {
+	if _, err := requiredRawField(summary, "summary", "status"); err != nil {
 		return err
 	}
 	for _, field := range []string{"ok", "warnings", "skipped", "errors"} {
-		if _, err := requiredJSONInt(summary, "summary", field); err != nil {
+		if _, err := requiredRawField(summary, "summary", field); err != nil {
 			return err
 		}
 	}
@@ -221,21 +221,21 @@ func validateReportJSONPresence(content []byte) error {
 			return err
 		}
 		for _, field := range []string{"id", "title", "started_at"} {
-			if _, err := requiredJSONString(result, resultPath, field); err != nil {
+			if _, err := requiredRawField(result, resultPath, field); err != nil {
 				return err
 			}
 		}
-		if _, err := requiredJSONString(result, resultPath, "status"); err != nil {
+		if _, err := requiredRawField(result, resultPath, "status"); err != nil {
 			return err
 		}
-		if _, err := requiredJSONInt(result, resultPath, "duration_ms"); err != nil {
+		if _, err := requiredRawField(result, resultPath, "duration_ms"); err != nil {
 			return err
 		}
 		methodology, err := requiredJSONObject(result, resultPath, "methodology")
 		if err != nil {
 			return err
 		}
-		if _, err := requiredJSONString(methodology, resultPath+".methodology", "kind"); err != nil {
+		if _, err := requiredRawField(methodology, resultPath+".methodology", "kind"); err != nil {
 			return err
 		}
 		if rawEvidence, ok := result["evidence"]; ok {
@@ -243,10 +243,10 @@ func validateReportJSONPresence(content []byte) error {
 			if err != nil {
 				return err
 			}
-			if _, err := requiredJSONInt(evidence, resultPath+".evidence", "valid"); err != nil {
+			if _, err := requiredRawField(evidence, resultPath+".evidence", "valid"); err != nil {
 				return err
 			}
-			if _, err := requiredJSONInt(evidence, resultPath+".evidence", "expected"); err != nil {
+			if _, err := requiredRawField(evidence, resultPath+".evidence", "expected"); err != nil {
 				return err
 			}
 			if rawUnit, ok := evidence["unit"]; ok {
@@ -270,14 +270,6 @@ func requiredRawField(object map[string]json.RawMessage, path, field string) (js
 	return raw, nil
 }
 
-func requiredJSONString(object map[string]json.RawMessage, path, field string) (string, error) {
-	raw, err := requiredRawField(object, path, field)
-	if err != nil {
-		return "", err
-	}
-	return jsonStringAt(raw, path+"."+field)
-}
-
 func jsonStringAt(raw json.RawMessage, path string) (string, error) {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return "", fmt.Errorf("%s must be a string", path)
@@ -285,30 +277,6 @@ func jsonStringAt(raw json.RawMessage, path string) (string, error) {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return "", fmt.Errorf("%s must be a string: %w", path, err)
-	}
-	return value, nil
-}
-
-func requiredJSONBool(object map[string]json.RawMessage, path, field string) (bool, error) {
-	raw, err := requiredRawField(object, path, field)
-	if err != nil {
-		return false, err
-	}
-	var value bool
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return false, fmt.Errorf("%s.%s must be a boolean: %w", path, field, err)
-	}
-	return value, nil
-}
-
-func requiredJSONInt(object map[string]json.RawMessage, path, field string) (int64, error) {
-	raw, err := requiredRawField(object, path, field)
-	if err != nil {
-		return 0, err
-	}
-	var value int64
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return 0, fmt.Errorf("%s.%s must be an integer: %w", path, field, err)
 	}
 	return value, nil
 }

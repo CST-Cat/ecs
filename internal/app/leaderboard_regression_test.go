@@ -493,13 +493,13 @@ func TestLeaderboardRegressionReportsOutlierProjectionFailure(t *testing.T) {
 			root := t.TempDir()
 			report := submitTestReport()
 			report.Run.ID = "projection-failure-run"
-			// The CPU measurement is enough for BuildBaseline, while omitting
-			// system host measurements makes BuildSubmission's host contract fail.
+			// The CPU measurement is enough for baseline scoreability, while
+			// omitting system host measurements makes BuildSubmission's host contract fail.
 			report.Results = []model.Result{report.Results[1]}
 			report.Summary.OK = 1
 			report.Summary.Messages = []model.Message{model.NewMessage("message.summary.allOK", 1)}
-			if err := validateBaselineReport(report); err != nil {
-				t.Fatalf("projection failure fixture is not baseline-valid: %v", err)
+			if err := score.ValidateReportScoreability(report); err != nil {
+				t.Fatalf("projection failure fixture has no scoreable metrics: %v", err)
 			}
 			if _, err := score.OutlierSampleFromReport(newApplication().modules, report); err == nil {
 				t.Fatal("projection failure fixture unexpectedly produced an outlier sample")

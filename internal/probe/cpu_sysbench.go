@@ -35,7 +35,7 @@ func (cpuProbe) Run(ctx context.Context, env Environment) model.Result {
 	}
 	start := time.Now()
 	result := model.NewResult("cpu", "")
-	result.Methodology.ComparisonScope = "probe.cpu.comparison_scope.tool_missing"
+	result.Methodology.ComparisonScope = cpuToolMissingComparisonScope
 	result.Methodology.Parameters = newComparisonParameters()
 	addComparisonParameter(result.Methodology.Parameters, "configured_duration", env.Config.CPUTime.String())
 	result.Status = model.StatusWarning

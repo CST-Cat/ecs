@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -110,6 +111,29 @@ func TestReportJSONUsesOnlyStructuredSummaryMessages(t *testing.T) {
 	}
 	if _, ok := resultObject["error"]; ok {
 		t.Fatalf("legacy result error serialized: %s", content)
+	}
+}
+
+func TestSummaryTypesExcludeLegacyFields(t *testing.T) {
+	for _, test := range []struct {
+		name, fieldName, jsonName string
+		typeOf                    reflect.Type
+	}{
+		{name: "Summary", fieldName: "Headline", jsonName: "headline", typeOf: reflect.TypeOf(Summary{})},
+		{name: "Result", fieldName: "Summary", jsonName: "summary", typeOf: reflect.TypeOf(Result{})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if field, ok := test.typeOf.FieldByName(test.fieldName); ok {
+				t.Fatalf("legacy field %s.%s remains with json tag %q", test.name, test.fieldName, field.Tag.Get("json"))
+			}
+			for index := 0; index < test.typeOf.NumField(); index++ {
+				field := test.typeOf.Field(index)
+				jsonName, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+				if jsonName == test.jsonName {
+					t.Fatalf("legacy JSON field %s.%s remains as %s.%s", test.name, field.Name, test.name, jsonName)
+				}
+			}
+		})
 	}
 }
 

@@ -16,8 +16,10 @@ type metricRef struct {
 	result      model.Result
 }
 
-// Build creates a comparison from two or more reports. The first input is the
-// default reference; callers may select another valid index through Options.
+// Build creates a comparison from two or more reports whose result and
+// measurement identities have already been validated at the report boundary.
+// The first input is the default reference; callers may select another valid
+// index through Options.
 func Build(reports []model.Report, options Options) (Report, error) {
 	if len(reports) < 2 {
 		return Report{}, newValidationError("compare.help.inputs")
@@ -171,7 +173,7 @@ func unionModuleOrder(reports []model.Report) []string {
 	var order []string
 	for _, report := range reports {
 		for _, result := range report.Results {
-			if result.ID == "" || seen[result.ID] {
+			if seen[result.ID] {
 				continue
 			}
 			seen[result.ID] = true
@@ -185,22 +187,14 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 	module := Module{ID: id, Comparability: Comparable}
 	refs := make([]*model.Result, len(reports))
 	for inputIndex, report := range reports {
-		matches := 0
 		for resultIndex := range report.Results {
 			if report.Results[resultIndex].ID == id {
-				matches++
 				copy := report.Results[resultIndex]
 				refs[inputIndex] = &copy
 				if module.Title == "" {
 					module.Title = copy.Title
 				}
 			}
-		}
-		if matches > 1 {
-			refs[inputIndex] = nil
-			module.MetricIssues = append(module.MetricIssues, MetricIssue{
-				Key: id, Label: module.Title, Reason: "duplicate_module_id", Reports: []int{inputIndex},
-			})
 		}
 		status := StatusValue{Report: inputIndex}
 		evidence := EvidenceValue{Report: inputIndex}
@@ -239,49 +233,30 @@ func buildModule(reports []model.Report, id string, reference int) Module {
 
 func buildMetrics(results []*model.Result, reference int) ([]Metric, []MetricIssue) {
 	byKey := make(map[string][]metricRef)
-	duplicateKeys := make(map[string]map[int]bool)
 	keyOrder := make([]string, 0)
 	seenKey := make(map[string]bool)
 	for input, result := range results {
 		if result == nil {
 			continue
 		}
-		perInput := make(map[string]int)
 		for _, measurement := range result.Measurements {
-			perInput[measurement.Key]++
 			if !seenKey[measurement.Key] {
 				seenKey[measurement.Key] = true
 				keyOrder = append(keyOrder, measurement.Key)
 			}
 			byKey[measurement.Key] = append(byKey[measurement.Key], metricRef{input: input, measurement: measurement, result: *result})
 		}
-		for key, count := range perInput {
-			if count > 1 {
-				if duplicateKeys[key] == nil {
-					duplicateKeys[key] = make(map[int]bool)
-				}
-				duplicateKeys[key][input] = true
-			}
-		}
 	}
 	var metrics []Metric
 	var issues []MetricIssue
 	for _, key := range keyOrder {
 		refs := byKey[key]
-		if strings.TrimSpace(key) == "" {
-			issues = append(issues, MetricIssue{Label: refs[0].measurement.Label, Reason: "missing_metric_key", Reports: inputsForRefs(refs)})
-			continue
-		}
 		if len(refs) < 2 {
 			if len(refs) == 1 {
 				issues = append(issues, MetricIssue{
 					Key: key, Label: refs[0].measurement.Label, Reason: "no_matching_metric", Reports: inputsForRefs(refs),
 				})
 			}
-			continue
-		}
-		if duplicates := duplicateKeys[key]; len(duplicates) > 0 {
-			issues = append(issues, MetricIssue{Key: key, Label: refs[0].measurement.Label, Reason: "duplicate_metric_key", Reports: sortedInputSet(duplicates)})
 			continue
 		}
 		groups := make(map[string][]metricRef)

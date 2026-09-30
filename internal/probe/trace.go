@@ -19,6 +19,7 @@ const traceHopSummaryMethod = "trace-hop-summary-v1"
 
 const (
 	traceNextTraceEngineName      = "nexttrace-tiny"
+	traceFreeBSDTracerouteName    = "freebsd-traceroute"
 	traceNextTraceAdapter         = "nexttrace-json-v1"
 	traceFreeBSDTracerouteAdapter = "freebsd-traceroute-text-v1"
 	traceRawOutputTitle           = "probe.route.raw_output"

@@ -59,9 +59,12 @@ func TestWindowsUnsupportedDefinitionsPreserveIDsAndToolFacts(t *testing.T) {
 		if definition.Descriptor.ID != "route" && definition.Descriptor.ID != "backtrace" {
 			continue
 		}
+		if definition.Descriptor.ID == "route" && definition.Descriptor.Methodology.Engine != "NextTrace Tiny" {
+			t.Fatalf("Windows route methodology engine = %q, want unchanged NextTrace Tiny", definition.Descriptor.Methodology.Engine)
+		}
 		for _, requiredTool := range definition.Descriptor.RequiredTools {
-			if source := tool.PlatformToolSource(tool.PlatformWindows, requiredTool); source != tool.ToolSourceBundle {
-				t.Fatalf("Windows %s requirement %q source = %q, want bundle", definition.Descriptor.ID, requiredTool, source)
+			if source := tool.PlatformToolSource(tool.PlatformWindows, requiredTool); source != tool.ToolSourceWrapperManaged {
+				t.Fatalf("Windows %s requirement %q source = %q, want wrapper-managed", definition.Descriptor.ID, requiredTool, source)
 			}
 		}
 	}

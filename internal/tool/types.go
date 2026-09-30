@@ -22,13 +22,13 @@ const (
 	PlatformWindows Platform = "windows"
 )
 
-// ToolSource describes where a logical tool comes from at runtime. Build and
-// package facts remain owned by tools/lock.json; this is only the runtime
-// source used by the plan and platform definitions.
+// ToolSource classifies whether a logical tool is wrapper-managed,
+// platform-provided, or unsupported. Package and download facts remain with
+// the wrapper and tools/lock.json.
 type ToolSource string
 
 const (
-	ToolSourceBundle      ToolSource = "bundle"
-	ToolSourceBaseSystem  ToolSource = "base-system"
-	ToolSourceUnsupported ToolSource = "unsupported"
+	ToolSourceWrapperManaged   ToolSource = "wrapper-managed"
+	ToolSourcePlatformProvided ToolSource = "platform-provided"
+	ToolSourceUnsupported      ToolSource = "unsupported"
 )

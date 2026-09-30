@@ -22,10 +22,10 @@ func wantPlanJSONExternalServices() []string {
 	return []string{"third-party-provider", "ookla"}
 }
 
-// TestResolveRequiredToolsStagesEveryDeclaredToolOnLinux pins that the Linux
-// platform projection keeps every declared requirement, including speedtest's
-// separately verified wrapper path.
-func TestResolveRequiredToolsStagesEveryDeclaredToolOnLinux(t *testing.T) {
+// TestResolveRequiredToolsIncludesEveryDeclaredToolOnLinux pins that the
+// Linux plan projection keeps every known logical requirement, including
+// speedtest's separately verified wrapper path.
+func TestResolveRequiredToolsIncludesEveryDeclaredToolOnLinux(t *testing.T) {
 	application := newApplication()
 	for _, test := range []struct {
 		module string

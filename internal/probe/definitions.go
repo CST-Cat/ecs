@@ -2,7 +2,6 @@ package probe
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"ecs/internal/model"
@@ -101,22 +100,14 @@ func CatalogFromDefinitions(definitions []Definition) (module.Catalog, error) {
 	if err != nil {
 		return module.Catalog{}, err
 	}
-	seenProbes := make(map[string]struct{}, len(definitions))
 	for index, definition := range definitions {
 		if definition.Probe == nil {
 			return module.Catalog{}, fmt.Errorf("definition %d has nil probe", index)
 		}
 		probeID := definition.Probe.ID()
-		if strings.TrimSpace(probeID) == "" {
-			return module.Catalog{}, fmt.Errorf("definition %d has empty probe ID", index)
-		}
-		if _, exists := seenProbes[probeID]; exists {
-			return module.Catalog{}, fmt.Errorf("duplicate probe ID %q", probeID)
-		}
 		if definition.Descriptor.ID != probeID {
 			return module.Catalog{}, fmt.Errorf("definition %d descriptor ID %q does not match probe ID %q", index, definition.Descriptor.ID, probeID)
 		}
-		seenProbes[probeID] = struct{}{}
 	}
 	return catalog, nil
 }

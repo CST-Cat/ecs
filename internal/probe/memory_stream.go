@@ -308,8 +308,8 @@ func runStreamMemoryWithAllowance(ctx context.Context, env Environment, path str
 	threadCounts := distinctBenchmarkThreadCounts(workers)
 	singleCore := len(threadCounts) == 1
 	if singleCore {
-		result.Description = "probe.memory.description.single_core"
-		result.Methodology.Profile = "probe.memory.stream.profile.single_core"
+		result.Description = memorySingleCoreDescription
+		result.Methodology.Profile = memorySingleCoreProfile
 	}
 	runs := make([]streamMemoryRun, 0, 2)
 	validRuns := 0

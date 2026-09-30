@@ -96,6 +96,7 @@ jq -e '
     (("https://github.com/" + $nexttrace.repository + "/releases/download/" + $nexttrace.tag + "/" + ($nexttrace.windows_asset_pattern | gsub("<architecture>"; "amd64"))) == "https://github.com/nxtrace/NTrace-core/releases/download/v1.7.1/nexttrace-tiny_windows_amd64.exe")) and
   (.corpus.name == "ecs-silesia-v1.corpus") and
   (.corpus.bytes == 211938580) and
+  (.corpus.source_url | startswith("https://")) and
   (.corpus.sha256 | test("^[0-9a-f]{64}$")) and
   (.corpus.source_sha256 | test("^[0-9a-f]{64}$")) and
   (.corpus.order | length == 12)

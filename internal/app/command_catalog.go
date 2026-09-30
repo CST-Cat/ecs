@@ -15,14 +15,13 @@ import (
 // application composition root, lifecycle context, and output writers.
 type commandHandler func(application, context.Context, []string, io.Writer, io.Writer) int
 
-// commandDefinition owns one command's identity, handler, and human-facing
-// help metadata. UsageKey and DescriptionKey are stable i18n keys rather than
-// localized text, so the command table remains language independent.
+// commandDefinition owns one command's identity, handler, and usage text key.
+// UsageKey is a stable i18n key rather than localized text, so the command
+// table remains language independent.
 type commandDefinition struct {
-	Name           string
-	Handler        commandHandler
-	UsageKey       string
-	DescriptionKey string
+	Name     string
+	Handler  commandHandler
+	UsageKey string
 }
 
 // commandDefinitions returns the canonical command/help order.

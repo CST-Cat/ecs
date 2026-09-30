@@ -185,11 +185,6 @@ func validateBaseline(baseline Baseline, allowEmptyMetrics bool) error {
 				return fmt.Errorf("baseline tier %d metric %q has invalid sample count %d", tier.VCPUMin, key, count)
 			}
 		}
-		for key := range tier.MetricSampleCounts {
-			if _, ok := tier.Metrics[key]; !ok {
-				return fmt.Errorf("baseline tier %d has sample count for unknown metric %q", tier.VCPUMin, key)
-			}
-		}
 	}
 	if tierSampleTotal > baseline.SampleCount {
 		return fmt.Errorf("baseline tier sample counts cannot exceed the global sample_count")
@@ -221,6 +216,16 @@ func validateKnownBaselineMetrics(scope string, metrics map[string]float64, know
 		if _, ok := known[key]; !ok {
 			return fmt.Errorf("%s contains unknown metric %q not defined by Dimensions()", scope, key)
 		}
+	}
+	return nil
+}
+
+// ValidateReportScoreability reports whether a report contributes at least one
+// metric to a score baseline.
+func ValidateReportScoreability(report model.Report) error {
+	values := collectMeasurements(report)
+	if len(scoreableMetrics(report, values)) == 0 {
+		return i18n.Errorf("err.baselineNoMetrics")
 	}
 	return nil
 }

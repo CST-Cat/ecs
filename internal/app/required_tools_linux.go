@@ -4,9 +4,9 @@ package app
 
 import "ecs/internal/tool"
 
-// resolveRequiredTools projects declared requirements through the canonical
-// runtime source facts. Linux currently maps every known builtin to the
-// private staged-dependency projection.
+// resolveRequiredTools projects logical requirements into the wrapper-managed
+// dependencies for the Linux plan. Linux currently retains every known
+// builtin, including speedtest's separate signed-package path.
 func resolveRequiredTools(declared []string) []string {
-	return tool.BundleToolIDs(tool.PlatformLinux, declared)
+	return tool.RequiredToolIDs(tool.PlatformLinux, declared)
 }

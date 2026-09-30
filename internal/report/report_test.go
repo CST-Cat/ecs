@@ -307,6 +307,7 @@ func TestParseJSONAcceptsPresentZeroAndFalse(t *testing.T) {
 	data := sampleReport()
 	data.Run.Redacted = false
 	data.Run.DurationMS = 0
+	data.Run.Requested = []string{}
 	data.Results[0].Status = model.StatusWarning
 	data.Results[0].DurationMS = 0
 	data.Summary = model.Summary{Status: model.StatusWarning, Warnings: 1}
@@ -318,8 +319,61 @@ func TestParseJSONAcceptsPresentZeroAndFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("present zero/false values rejected: %v", err)
 	}
-	if parsed.Run.Redacted || parsed.Run.DurationMS != 0 || parsed.Results[0].DurationMS != 0 || parsed.Summary.OK != 0 {
+	if parsed.Run.Redacted || parsed.Run.DurationMS != 0 || parsed.Run.Requested == nil || len(parsed.Run.Requested) != 0 || parsed.Results[0].DurationMS != 0 || parsed.Summary.OK != 0 {
 		t.Fatalf("present zero/false values changed: %+v", parsed)
+	}
+}
+
+func TestParseJSONRejectsNullPresenceFields(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]json.RawMessage)
+		path   string
+	}{
+		{
+			name: "required string",
+			mutate: func(document map[string]json.RawMessage) {
+				tool := rawObjectForTest(t, document["tool"])
+				tool["name"] = json.RawMessage(`null`)
+				document["tool"] = rawJSONForTest(t, tool)
+			},
+			path: "tool.name",
+		},
+		{
+			name: "required bool",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalRun(t, document, func(run map[string]json.RawMessage) {
+					run["redacted"] = json.RawMessage(`null`)
+				})
+			},
+			path: "run.redacted",
+		},
+		{
+			name: "required int",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalRun(t, document, func(run map[string]json.RawMessage) {
+					run["duration_ms"] = json.RawMessage(`null`)
+				})
+			},
+			path: "run.duration_ms",
+		},
+		{
+			name: "required string-array element",
+			mutate: func(document map[string]json.RawMessage) {
+				mutateCanonicalRun(t, document, func(run map[string]json.RawMessage) {
+					run["requested_modules"] = json.RawMessage(`[null]`)
+				})
+			},
+			path: "run.requested_modules[0]",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			content := canonicalReportWithMutation(t, test.mutate)
+			if _, err := ParseJSON(content); err == nil || !strings.Contains(err.Error(), test.path) {
+				t.Fatalf("ParseJSON error = %v, want path %q", err, test.path)
+			}
+		})
 	}
 }
 
