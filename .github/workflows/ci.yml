@@ -1,11 +1,10 @@
 name: ci
 
-# 这个 commit 能不能进 main？
-#
-# main push 和 PR 跑完整回归；bsd 分支使用独立的 bsd.yml，只验收真实 FreeBSD
-# 功能。排行榜重建与写回在 leaderboard.yml，发布在 release.yml。
+# 标准 CI 在 push、PR 和手动 dispatch 上运行 Linux 检查、FreeBSD VM runtime、
+# Windows runtime，并复用 windows-tools.yml 运行 Windows 工具包门禁。
+# FreeBSD 工具链、排行榜和发布保持各自独立边界。
 # 红灯语义：ci 红表示代码或构建问题，应阻断合并；leaderboard 红表示排行榜
-# 处理失败；release 红表示发布门禁未通过。各 workflow 的职责边界保持独立。
+# 处理失败；release 红表示发布门禁未通过。
 #
 # compat 验证最低源码兼容版本；它必须使用 GOTOOLCHAIN=local，避免 go.mod
 # 要求更高版本时悄悄切换工具链而失去验证意义。unit 与其余普通 CI job 使用仓库
@@ -16,6 +15,7 @@ on:
   push:
     branches: ["main", "bsd", "win/candidate-c", "win-candidate-c"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -124,8 +124,8 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-  # main 推送仍在两个正式 FreeBSD 架构上做真实运行验收（与 bsd.yml 的分支 CI
-  # 同一形态：宿主机交叉构建，真实 FreeBSD VM 内执行消费）。
+  # 此处由 freebsd_runtime.sh 验收 ECS 在 VM 中的 system/ping/route/backtrace；
+  # freebsd_tools_gate.sh 是独立的工具包门禁。两者都是宿主构建、FreeBSD VM 消费。
   freebsd:
     name: freebsd runtime (${{ matrix.arch }})
     runs-on: ubuntu-24.04

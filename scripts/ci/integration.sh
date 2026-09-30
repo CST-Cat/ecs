@@ -276,6 +276,9 @@ export ECS_TOOL_BIN="$integration_tool_bin"
 
 ecs_step "go test -tags=integration ./... -timeout 30m -count=1"
 go test -tags=integration ./... -timeout 30m -count=1
+
+ecs_step "locked NextTrace route/backtrace loopback runtime"
+bash scripts/ci/linux_trace_runtime.sh
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
