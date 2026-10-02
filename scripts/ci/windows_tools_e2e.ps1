@@ -174,9 +174,12 @@ try {
       Assert-EcsBootstrapPlan -Plan $modulePlan -Module $planCase.Module -Family $planCase.Family
     }
   } finally {
-    [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', $(if ($hadPlanToolBin) { [string]$oldPlanToolBin } else { $null }), [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable('PATH', $(if ($hadPlanPath) { [string]$oldPlanPath } else { $null }), [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable('NO_COLOR', $(if ($hadPlanNoColor) { [string]$oldPlanNoColor } else { $null }), [EnvironmentVariableTarget]::Process)
+    if ($hadPlanToolBin) { [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', [string]$oldPlanToolBin, [EnvironmentVariableTarget]::Process) }
+    elseif (Test-Path Env:ECS_TOOL_BIN) { Remove-Item -LiteralPath Env:ECS_TOOL_BIN -ErrorAction Stop }
+    if ($hadPlanPath) { [Environment]::SetEnvironmentVariable('PATH', [string]$oldPlanPath, [EnvironmentVariableTarget]::Process) }
+    elseif (Test-Path Env:PATH) { Remove-Item -LiteralPath Env:PATH -ErrorAction Stop }
+    if ($hadPlanNoColor) { [Environment]::SetEnvironmentVariable('NO_COLOR', [string]$oldPlanNoColor, [EnvironmentVariableTarget]::Process) }
+    elseif (Test-Path Env:NO_COLOR) { Remove-Item -LiteralPath Env:NO_COLOR -ErrorAction Stop }
   }
 
   New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot 'main'), (Join-Path $fixtureRoot 'bundle') | Out-Null
@@ -371,9 +374,12 @@ try {
         $backtraceAssertion6 = Assert-EcsCanonicalTraceReport -Report $backtraceReport6 -Module backtrace -Family 6 -FamilyName ipv6 -MaxHops 20 -Target $target6
         Write-Output ("E2E-$label IPv6 backtrace report passed: schema=ecs.report/v1; status={0}; target={1}; responding_hops={2}" -f $backtraceAssertion6.Status, $backtraceAssertion6.Target, $backtraceAssertion6.RespondingHopCount)
       } finally {
-        [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', $(if ($hadTraceToolBin) { [string]$oldTraceToolBin } else { $null }), [EnvironmentVariableTarget]::Process)
-        [Environment]::SetEnvironmentVariable('PATH', $(if ($hadTracePath) { [string]$oldTracePath } else { $null }), [EnvironmentVariableTarget]::Process)
-        [Environment]::SetEnvironmentVariable('NO_COLOR', $(if ($hadTraceNoColor) { [string]$oldTraceNoColor } else { $null }), [EnvironmentVariableTarget]::Process)
+        if ($hadTraceToolBin) { [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', [string]$oldTraceToolBin, [EnvironmentVariableTarget]::Process) }
+        elseif (Test-Path Env:ECS_TOOL_BIN) { Remove-Item -LiteralPath Env:ECS_TOOL_BIN -ErrorAction Stop }
+        if ($hadTracePath) { [Environment]::SetEnvironmentVariable('PATH', [string]$oldTracePath, [EnvironmentVariableTarget]::Process) }
+        elseif (Test-Path Env:PATH) { Remove-Item -LiteralPath Env:PATH -ErrorAction Stop }
+        if ($hadTraceNoColor) { [Environment]::SetEnvironmentVariable('NO_COLOR', [string]$oldTraceNoColor, [EnvironmentVariableTarget]::Process) }
+        elseif (Test-Path Env:NO_COLOR) { Remove-Item -LiteralPath Env:NO_COLOR -ErrorAction Stop }
       }
     }
 

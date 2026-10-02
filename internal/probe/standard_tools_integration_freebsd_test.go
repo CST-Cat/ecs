@@ -178,7 +178,8 @@ func TestIntegrationFreeBSDTracerouteCanonicalRoute(t *testing.T) {
 	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	deadlineRun := runTraceCommandForFamily(deadlineCtx, backend, "192.0.2.1", 12, "4")
 	deadlineCancel()
-	if !errors.Is(deadlineRun.Err, context.DeadlineExceeded) || deadlineRun.Parsed || len(deadlineRun.Stdout) == 0 || len(deadlineRun.Stderr) == 0 {
+	// The deadline can expire before traceroute emits its first hop, so empty stdout is valid here.
+	if !errors.Is(deadlineRun.Err, context.DeadlineExceeded) || deadlineRun.Parsed || len(deadlineRun.Stderr) == 0 {
 		t.Fatalf("timed-out FreeBSD traceroute = parsed:%t err:%v stdout:%q stderr:%q", deadlineRun.Parsed, deadlineRun.Err, deadlineRun.Stdout, deadlineRun.Stderr)
 	}
 

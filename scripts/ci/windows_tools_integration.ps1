@@ -192,8 +192,11 @@ try {
   }
   foreach ($name in $environmentNames) {
     $saved = $environmentBefore[$name]
-    $restoredValue = if ($saved.Present) { [string]$saved.Value } else { $null }
-    [Environment]::SetEnvironmentVariable($name, $restoredValue, [EnvironmentVariableTarget]::Process)
+    if ($saved.Present) {
+      [Environment]::SetEnvironmentVariable($name, [string]$saved.Value, [EnvironmentVariableTarget]::Process)
+    } elseif (Test-Path "Env:$name") {
+      Remove-Item -LiteralPath "Env:$name" -ErrorAction Stop
+    }
     $actualPresent = Test-Path "Env:$name"
     $actualValue = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]::Process)
     if ($actualPresent -ne $saved.Present -or $actualValue -cne $saved.Value) {
