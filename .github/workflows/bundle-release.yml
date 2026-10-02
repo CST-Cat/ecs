@@ -159,8 +159,8 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: ecs-windows-tools-stage-*
-          path: tools-artifacts
+          name: ecs-windows-tools-stage-windows_amd64
+          path: tools-artifacts/ecs-windows-tools-stage-windows_amd64
 
       - name: Normalize the downloaded tools stages
         run: |
