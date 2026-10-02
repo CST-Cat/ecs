@@ -47,8 +47,8 @@ concurrency:
 jobs:
   # 发布候选冻结 + 入口变更日志校验。
   #
-  # main 只在这里读一次。Release transaction 一旦开始，后续所有 job 都 checkout
-  # 到这个冻结的 SHA——不再拿移动中的 main 和已经冻结的 tag 做比较。
+  # 正式 tag push 在这里比较 main 一次；workflow_dispatch 彩排直接冻结所选 SHA。
+  # Release transaction 一旦开始，后续所有 job 都 checkout 到冻结的 SHA。
   #
   # 确定性的源码检查在独立的 source-checks job 中执行。
   freeze:
@@ -68,6 +68,7 @@ jobs:
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           ./scripts/release/freeze.sh --event "$EVENT" --ref "$REF" --sha "$SHA" \
             | tee -a "$GITHUB_OUTPUT"
 

@@ -3,9 +3,9 @@ set -euo pipefail
 
 # 冻结发布候选：解析出这次要发的提交，并判断它有没有资格发。
 #
-# main 只在这里读一次。Release transaction 一旦开始，后续所有 job 都 checkout
-# 到这里输出的 SHA——不再拿移动中的 main 和已经冻结的 tag 做比较。那种比较
-# 会在发布过程中有人推 main 时莫名其妙地失败。
+# 正式 tag push 在这里读取 main 一次并确认候选已进入 main。Release transaction
+# 一旦开始，后续所有 job 都 checkout 到这里输出的 SHA，不再比较移动中的 main。
+# workflow_dispatch 是 dev 彩排，直接冻结所选 ref 的 SHA，不要求它已合入 main。
 #
 # workflow_dispatch 永远是演练事件：即使维护者在 Actions UI 里选中了一个 v*
 # tag 作为 dispatch ref，也只能得到 version=dev，绝不能因为 ref 看起来像发布 tag
@@ -90,11 +90,13 @@ esac
 [[ "$version" =~ ^[0-9A-Za-z._+-]+$ ]] ||
   die "版本号只能含字母、数字、点、下划线、加号和连字符：$version"
 
-# main 只在此处读取，之后不再参与任何判断。
-git fetch --no-tags origin main >&2
-main_commit=$(git rev-parse refs/remotes/origin/main)
-[[ "$candidate" == "$main_commit" ]] ||
-  die "发布候选 $candidate 不是远端 main $main_commit"
+# 正式 tag 发布候选必须已进入 main；dispatch 是 dev 彩排，使用其输入 SHA。
+if [[ "$event" == push ]]; then
+  git fetch --no-tags origin main >&2
+  main_commit=$(git rev-parse refs/remotes/origin/main)
+  [[ "$candidate" == "$main_commit" ]] ||
+    die "发布候选 $candidate 不是远端 main $main_commit"
+fi
 
 echo "release-freeze: 冻结 $candidate（版本 $version）" >&2
 printf 'sha=%s\n' "$candidate"
