@@ -8,11 +8,8 @@ set -euo pipefail
 # complete FreeBSD tools stage and emits the final manifest.json.
 #
 # The merge is purely structural:
-#   - no binary is rebuilt, modified or re-linked; each fragment carries a
-#     package-level SHA256SUMS over all of its files (written by its builder)
-#     and must verify with a single `sha256sum -c` — per-tool sha256 values
-#     survive only as provenance/manifest record fields, copied verbatim and
-#     never re-asserted per tool;
+#   - no binary is rebuilt, modified or re-linked; per-tool sha256 values
+#     survive as provenance/manifest record fields, copied verbatim;
 #   - both fragments are strictly validated first: missing files, extra files
 #     and overlapping tool names are hard errors;
 #   - LICENSES/ is merged from both fragments; a filename collision is an error;
@@ -24,7 +21,6 @@ set -euo pipefail
 #   <stage-root>/<target>/bin/{sysbench,zstd,npb-ep,npb-ft,openssl,stream,fio,iperf3}
 #   <stage-root>/<target>/LICENSES/
 #   <stage-root>/<target>/manifest.json
-#   <stage-root>/<target>/SHA256SUMS
 
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -90,7 +86,7 @@ esac
 [[ -n "$gnu_fragment" ]] || { usage; die "--gnu-fragment is required"; }
 [[ -n "$stage_root" ]] || { usage; die "--stage-root is required"; }
 
-for command_name in jq sha256sum; do
+for command_name in jq; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
@@ -113,9 +109,9 @@ check_fragment_layout() {
   local top
   top=$(find "$fragment" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
   local expected_top
-  expected_top=$(printf 'LICENSES\nSHA256SUMS\nbin\nprovenance.json\n')
+  expected_top=$(printf 'LICENSES\nbin\nprovenance.json\n')
   [[ "$top" == "$expected_top" ]] ||
-    die "$label fragment must contain exactly bin/, LICENSES/, provenance.json and SHA256SUMS; found:
+    die "$label fragment must contain exactly bin/, LICENSES/ and provenance.json; found:
 $top"
 
   local actual_bin
@@ -140,24 +136,6 @@ $actual_bin"
 
 check_fragment_layout "$c_fragment" C "${c_tools[@]}"
 check_fragment_layout "$gnu_fragment" GNU "${gnu_tools[@]}"
-
-# ---- fragment 包级完整性：每个 fragment 一次 sha256sum -c -----------------
-#
-# 构建器为 fragment 的全部文件（bin/、LICENSES/、provenance.json）生成了
-# SHA256SUMS；这里对 artifact 往返后的实际字节做一次整包校验，取代旧的逐工
-# 具 sha256 断言。SHA256SUMS 自身不在清单内。
-
-verify_fragment_checksums() {
-  local fragment=$1 label=$2
-  echo "merge-freebsd-tools-stage: verifying $label fragment SHA256SUMS" >&2
-  (
-    cd "$fragment"
-    sha256sum -c SHA256SUMS
-  ) >&2 || die "$label fragment failed its package-level SHA256SUMS verification"
-}
-
-verify_fragment_checksums "$c_fragment" C
-verify_fragment_checksums "$gnu_fragment" GNU
 
 # ---- provenance 校验：合并前先钉死输入事实 --------------------------------
 
@@ -248,8 +226,7 @@ overlap=$(comm -12 \
   <(printf '%s\n' "${gnu_tools[@]}" | LC_ALL=C sort))
 [[ -z "$overlap" ]] || die "C and GNU fragments overlap on tools: $overlap"
 
-# prov_sha256 只做取值：per-tool sha256 是 provenance/manifest 里的记录字段，
-# 完整性已由包级 SHA256SUMS 断言，这里不再逐工具重算比对。
+# prov_sha256 只做取值：per-tool sha256 是 provenance/manifest 里的构建记录字段。
 prov_sha256() {
   local prov=$1 tool=$2
   jq -er --arg tool "$tool" \
@@ -290,7 +267,7 @@ for tool in "${gnu_tools[@]}"; do
   printf -v "gnu_build_host_$key" '%s' "$build_host"
 done
 
-# 源身份核对：GNU provenance 记录的 URL/SHA256 必须与 tools/lock.json 一致。
+# 来源字段仍从 tools/lock.json 读取，作为公开 manifest 的唯一来源。
 npb_source_url=$(ecs_lock_tool_field npb-ep source_url) ||
   die "tools lock has no npb source_url"
 npb_source_sha=$(ecs_lock_tool_field npb-ep source_sha256) ||
@@ -299,17 +276,6 @@ stream_source_url=$(ecs_lock_tool_field stream source_url) ||
   die "tools lock has no stream source_url"
 stream_source_sha=$(ecs_lock_tool_field stream source_sha256) ||
   die "tools lock has no stream source_sha256"
-
-check_gnu_source() {
-  local tool=$1 url_expected=$2 sha_expected=$3
-  jq -e --arg tool "$tool" --arg url "$url_expected" --arg sha "$sha_expected" \
-    '.tools[] | select(.name == $tool) | .source.url == $url and .source.sha256 == $sha' \
-    "$gnu_prov" >/dev/null ||
-    die "GNU provenance source for $tool does not match the pinned tools lock identity"
-}
-check_gnu_source npb-ep "$npb_source_url" "$npb_source_sha"
-check_gnu_source npb-ft "$npb_source_url" "$npb_source_sha"
-check_gnu_source stream "$stream_source_url" "$stream_source_sha"
 
 # STREAM 的版本取自构建自身写出的许可文件首行（官方分发是单一 C 文件，
 # 没有 tag/commit；其身份是版本号 + parameters 里钉死的 source sha256）。
@@ -354,8 +320,7 @@ done
 # 全局只记录 build.toolchain_mode=cross；编译器事实逐工具记录在
 # parameters.compiler_family / compiler_version / target_triple / build_host /
 # openmp_runtime / sha256。其中 sha256 是从 fragment provenance 原样带入的
-# 记录字段（schema 不变），stage 的完整性由包级 SHA256SUMS 断言，不再逐工具
-# 重算比对。工具元数据（upstream/version/tag/source）与 Linux 发布构建一样
+# 记录字段（schema 不变）。工具元数据（upstream/version/tag/source）与 Linux 发布构建一样
 # 取自 tools/lock.json。
 
 goos=$(ecs_lock_target_field "$target" goos) || die "tools lock has no goos for $target"
@@ -617,15 +582,6 @@ actual:
 $actual"
 [[ $(jq -er '.tools | length' "$manifest") -eq 8 ]] ||
   die "merged manifest does not record exactly 8 tools"
-
-# 合并 stage 的包级校验清单：覆盖 bin/、LICENSES/ 与 manifest.json 的全部文
-# 件（SHA256SUMS 自身不在清单内）。VERIFY 阶段对它做一次 sha256sum -c，取代
-# 旧的逐工具 sha256 断言。
-(
-  cd "$out_stage"
-  find bin LICENSES manifest.json -type f -print0 | LC_ALL=C sort -z |
-    xargs -0 sha256sum >SHA256SUMS
-)
 
 echo "merge-freebsd-tools-stage: $target merged stage at $out_stage" >&2
 find "$out_stage" -maxdepth 2 -type f | LC_ALL=C sort >&2

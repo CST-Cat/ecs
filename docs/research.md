@@ -425,11 +425,17 @@ Windows Server 2022+ x64，目标名为 `windows_amd64`；主程序资产为
   文件进入 Windows Bundle；`sysbench`、`iperf3` 与 Ookla unsupported，不进入 Windows
   工具集合。
 - Windows `route` / `backtrace` 已与 Linux 共用 canonical NextTrace 参数、
-  `nexttrace-json-v1` adapter 和 production parser。最终 Windows Server 2022/2025 runner
-  gate 必须通过生产 `ecs.exe` 路径验证 IPv4 的非 unsupported 结果、engine/version、
-  adapter、target、family、hops 与工具来源；存在 global IPv6/default route 时也必须验证
-  IPv6，否则只能明确报告 capability missing。该要求不改变 FreeBSD 的 base-system
-  `/usr/sbin/traceroute` 合同，也不把未执行的 Windows Actions 当成通过。
+  `nexttrace-json-v1` adapter 和 production parser。当前 workflow 为 `LOCK/CHECK → BUILD →
+  PACKAGE → E2E (windows-2022, windows-2025)`；builder要求 `-CorpusOutputPath`，在
+  `WorkRoot`清理前单独导出已验证corpus供PACKAGE消费。旧GateInputs与独立VERIFY包装入口已删除；
+  BUILD producer记录manifest摘要事实，PACKAGE和consumer gate不重复重算这些内部字段，FreeBSD
+  merge也不再生成或复核内部 `SHA256SUMS`。两个E2E分别在Server 2022和2025上消费PACKAGE的
+  ZIP，验收native runtime、production integration、bootstrap/install与生产 `ecs.exe` IPv4
+  route/backtrace结果（含engine/version、adapter、target、family、hops与工具来源）。用户实际
+  下载的外部归档仍按checksums/lock校验；NextTrace capability E2E保留一次与lock pin绑定的
+  stage文件摘要。存在global IPv6地址和default route时，E2E运行IPv6并要求真实responding hop；
+  否则明确记录capability missing。Bundle assemble等待两个E2E成功。该要求不改变FreeBSD的
+  base-system `/usr/sbin/traceroute` 合同；没有运行的Windows Actions不得记为通过。
 - 这次适配没有新增主模块 Go dependency。报告仍保持 `ecs.report/v1`，比较结果仍保持
   `ecs.compare/v1`；跨平台差异记录为同一 semantic field 的平台来源和可用性，不新增
   第二套报告或比较 schema。

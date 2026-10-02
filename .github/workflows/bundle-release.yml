@@ -16,7 +16,7 @@ name: bundle-release
 #     （REAL GATE 与 PACKAGE/E2E 在同一 reusable workflow 内并行，均消费
 #      已通过 VERIFY 的 stage；VM 真实执行，不重新构建任何东西）
 #   WINDOWS BUILD（workflow_call 复用 windows-tools.yml：LOCK/CHECK→BUILD→
-#     VERIFY×2→PACKAGE→E2E×2）
+#     PACKAGE→E2E-2022 ∥ E2E-2025；assemble等待两个E2E全部成功）
 #   → ASSEMBLE（十个平台目标的 stage 由 scripts/package.sh --all-targets
 #     一次打包，统一 checksums）
 #   → REHEARSAL / PUBLISH。
@@ -56,8 +56,8 @@ jobs:
     with:
       run_bundle_e2e: true
 
-  # Windows 唯一 build path：整体复用 windows-tools.yml，包含两个真实 runner
-  # 的 gate、打包和 artifact E2E；本 workflow 不复制任何 Windows builder 逻辑。
+  # Windows 唯一 build path：整体复用 windows-tools.yml；等待LOCK/CHECK、BUILD、
+  # PACKAGE及Windows Server 2022/2025两个真实artifact E2E全部成功后assemble。
   windows-build:
     name: WINDOWS BUILD
     permissions:

@@ -15,10 +15,12 @@ the current `v0.8.5` release.
 
 ### 中文
 
+- 验证流程按信任边界收束：Windows链统一为 `LOCK/CHECK → BUILD → PACKAGE → E2E`，BUILD单独导出已验证corpus，两个Windows runner E2E验收打包ZIP、native runtime、production integration、bootstrap/install与IPv4 route/backtrace，IPv6按真实能力执行。外部成功下载的归档仍与lock或Release checksums比较；删除Windows内部artifact重复摘要复核、FreeBSD内部 `SHA256SUMS` 重读、SDK host ELF整文件SHA比较及zstd benchmark前重复corpus读取，保留P16/P17并以 `-` 表示不适用的host整文件摘要。
 - 收紧 `ecs.report/v1` JSON 读入为 exact current-schema loader：必需字段、字段类型、时间/时长、状态、exposure、methodology、结果身份和 summary 一致性均在读入边界校验；外部 Evidence 坏计数直接拒绝，不再被 `Normalize()` 静默修复。
 
 ### English
 
+- Consolidated validation at trust boundaries: the Windows chain is now `LOCK/CHECK → BUILD → PACKAGE → E2E`; BUILD exports the verified corpus separately, and both Windows runner E2Es validate the packaged ZIP, native runtime, production integration, bootstrap/install, and IPv4 route/backtrace, with IPv6 run according to real capability. Successful external archive downloads remain checked against lock or Release checksums. Removed repeated internal Windows artifact digest checks, FreeBSD internal `SHA256SUMS` rereads, the SDK host-ELF whole-file SHA comparison, and the duplicate pre-benchmark zstd corpus read; P16/P17 remain, with `-` marking the inapplicable host whole-file digest.
 - Tightened `ecs.report/v1` JSON ingress into an exact current-schema loader: required fields, types, timestamps/durations, statuses, exposure, methodology, result identity, and summary consistency are checked at the boundary; malformed external Evidence counters are rejected instead of being silently repaired by `Normalize()`.
 
 ## 0.8.5 — 2026-09-17

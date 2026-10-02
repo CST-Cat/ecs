@@ -1,11 +1,11 @@
 name: windows-tools
 
-# Windows benchmark bundle chain.  The builder and gate live in scripts/; this
-# workflow only chooses the real runner, artifact hand-off, and dependency DAG.
+# Windows benchmark bundle chain. The builders and E2E contracts live in scripts/;
+# this workflow chooses the real runners, artifact hand-off, and dependency DAG.
 #
-# LOCK/CHECK -> BUILD windows_amd64 -> VERIFY-2022 || VERIFY-2025
-#             -> canonical NextTrace IPv4/IPv6 gates + ECS-INTEGRATION
-#             -> PACKAGE -> E2E-2022 || E2E-2025 (including route/backtrace)
+# LOCK/CHECK -> BUILD windows_amd64 -> PACKAGE -> E2E (windows-2022 || windows-2025)
+# BUILD exports its already-verified corpus separately; E2E covers runtime,
+# production integration, bootstrap/install, and canonical route/backtrace.
 #
 # workflow_dispatch is a rehearsal only.  It produces seven-day artifacts and
 # never has repository write permission or a release/tag side effect.
@@ -38,7 +38,7 @@ jobs:
       - name: LOCK/CHECK pinned Windows tool contract
         shell: pwsh
         run: |
-          & ./scripts/ci/windows_tools_prepare.ps1 -Action Check
+          & ./scripts/ci/windows_tools_prepare.ps1
 
   build:
     name: BUILD windows_amd64
@@ -59,8 +59,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
-          New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage' | Out-Null
-          & ./scripts/build_tools_windows.ps1 -Target windows_amd64 -StageRoot (Join-Path $PWD '.ci/windows-tools-stage')
+          New-Item -ItemType Directory -Force -Path '.ci/windows-tools-stage', '.ci/windows-tools-corpus' | Out-Null
+          & ./scripts/build_tools_windows.ps1 -Target windows_amd64 `
+            -StageRoot (Join-Path $PWD '.ci/windows-tools-stage') `
+            -CorpusOutputPath (Join-Path $PWD '.ci/windows-tools-corpus/ecs-silesia-v1.corpus')
 
       - uses: actions/upload-artifact@v7
         with:
@@ -69,137 +71,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  verify-2022:
-    name: VERIFY-2022
-    needs: build
-    runs-on: windows-2022
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.27.1'
-          check-latest: false
-          cache: false
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-stage-windows_amd64
-          path: .ci/windows-tools-stage-artifact
-
-      - name: Prepare locked PE inspector and fixed corpus
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_prepare.ps1 -Action GateInputs -InputRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs') -DownloadRoot (Join-Path $env:RUNNER_TEMP 'ecs-windows-gate-downloads')
-      - name: VERIFY-2022 PE manifest DLL and benchmark gate
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_verify.ps1 -Label 'VERIFY-2022' -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
-      - name: VERIFY-2022 ecs.exe native runtime
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-StrictMode -Version Latest
-          go build -trimpath -o ecs.exe ./cmd/ecs
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath ecs.exe -PathType Leaf)) { throw 'ecs.exe build failed' }
-          & ./scripts/ci/windows_runtime_contract.ps1 -EcsPath (Join-Path $PWD 'ecs.exe') -Label 'VERIFY-2022' -RunNativeTests
-      - name: VERIFY-2022 NextTrace canonical network gate
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_nexttrace.ps1 -Label 'VERIFY-2022' -EcsPath (Join-Path $PWD 'ecs.exe') -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2022')
       - uses: actions/upload-artifact@v7
         with:
-          name: ecs-windows-tools-gate-inputs-2022
-          path: .ci/windows-tools-gate-inputs
+          name: ecs-windows-tools-corpus-windows_amd64
+          path: .ci/windows-tools-corpus
+          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload VERIFY-2022 NextTrace diagnostics
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ecs-windows-nexttrace-diagnostics-verify-2022
-          path: |
-            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json
-            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2022-*.json.raw-*
-            ${{ runner.temp }}/ecs-nexttrace-verify-2022
-          if-no-files-found: warn
-          retention-days: 7
-
-  verify-2025:
-    name: VERIFY-2025
-    needs: build
-    runs-on: windows-2025
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.27.1'
-          check-latest: false
-          cache: false
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-stage-windows_amd64
-          path: .ci/windows-tools-stage-artifact
-
-      - name: Prepare locked PE inspector and fixed corpus
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_prepare.ps1 -Action GateInputs -InputRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs') -DownloadRoot (Join-Path $env:RUNNER_TEMP 'ecs-windows-gate-downloads')
-      - name: VERIFY-2025 PE manifest DLL and benchmark gate
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_verify.ps1 -Label 'VERIFY-2025' -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
-      - name: VERIFY-2025 ecs.exe native runtime
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Set-StrictMode -Version Latest
-          go build -trimpath -o ecs.exe ./cmd/ecs
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath ecs.exe -PathType Leaf)) { throw 'ecs.exe build failed' }
-          & ./scripts/ci/windows_runtime_contract.ps1 -EcsPath (Join-Path $PWD 'ecs.exe') -Label 'VERIFY-2025' -RunNativeTests
-      - name: VERIFY-2025 NextTrace canonical network gate
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_nexttrace.ps1 -Label 'VERIFY-2025' -EcsPath (Join-Path $PWD 'ecs.exe') -StageArtifactRoot (Join-Path $PWD '.ci/windows-tools-stage-artifact') -OutputRoot (Join-Path $env:RUNNER_TEMP 'ecs-nexttrace-verify-2025')
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ecs-windows-tools-gate-inputs-2025
-          path: .ci/windows-tools-gate-inputs
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload VERIFY-2025 NextTrace diagnostics
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ecs-windows-nexttrace-diagnostics-verify-2025
-          path: |
-            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json
-            ${{ runner.temp }}/ecs-nexttrace-capability-VERIFY-2025-*.json.raw-*
-            ${{ runner.temp }}/ecs-nexttrace-verify-2025
-          if-no-files-found: warn
           retention-days: 7
 
   package:
     name: PACKAGE windows_amd64
-    needs: [verify-2022, verify-2025]
+    needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -221,6 +103,11 @@ jobs:
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: tools-artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ecs-windows-tools-corpus-windows_amd64
+          path: corpus-artifact
 
       - name: Normalize the verified Windows stage
         run: |
@@ -250,7 +137,7 @@ jobs:
           grep -F 'ecs_windows_amd64.zip' dist/checksums.txt
           cp dist/ecs_windows_amd64.zip dist/checksums.txt .ci/windows-tools-dist/main/
 
-          ./scripts/ci/windows_tools_package.sh --output-dir .ci/windows-tools-dist/bundle
+          ./scripts/ci/windows_tools_package.sh --output-dir .ci/windows-tools-dist/bundle --corpus-path corpus-artifact/ecs-silesia-v1.corpus
 
           cp run.ps1 install.ps1 .ci/windows-tools-dist/bootstrap/
           printf '%s\n' "$GITHUB_SHA" > .ci/windows-tools-dist/CURRENT_COMMIT
@@ -263,11 +150,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  integration-windows:
-    name: ECS-INTEGRATION-${{ matrix.server }}
-    needs: [verify-2022, verify-2025]
+  e2e:
+    name: E2E-${{ matrix.server }}
+    needs: package
     runs-on: windows-${{ matrix.server }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -289,99 +176,26 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: ecs-windows-tools-stage-windows_amd64
-          path: ${{ runner.temp }}/ecs-windows-tools-stage-artifact
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-gate-inputs-${{ matrix.server }}
-          path: ${{ runner.temp }}/ecs-windows-tools-gate-inputs-${{ matrix.server }}
-
-      - name: Windows ECS frozen-tool integration
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_integration.ps1 -Server '${{ matrix.server }}' -StageArtifactRoot (Join-Path $env:RUNNER_TEMP 'ecs-windows-tools-stage-artifact') -GateInputsRoot (Join-Path $env:RUNNER_TEMP ('ecs-windows-tools-gate-inputs-' + '${{ matrix.server }}'))
-
-  e2e-2022:
-    name: E2E-2022
-    needs: [package, verify-2022]
-    runs-on: windows-2022
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-
-      - uses: actions/download-artifact@v8
-        with:
           name: ecs-windows-tools-dist
           path: .ci/windows-tools-dist
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-gate-inputs-2022
-          path: .ci/windows-tools-gate-inputs
-
-      - name: E2E-2022 packaged bundle and bootstrap contract
+      - name: Packaged runtime, production integration, bootstrap, and trace contract
         shell: pwsh
         run: |
-          & ./scripts/ci/windows_tools_e2e.ps1 -Label '2022' -ArtifactRoot (Join-Path $PWD '.ci/windows-tools-dist') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
-      - name: Upload E2E-2022 NextTrace diagnostics
+          & ./scripts/ci/windows_tools_e2e.ps1 -Label '${{ matrix.server }}' -ArtifactRoot (Join-Path $PWD '.ci/windows-tools-dist')
+
+      - name: Upload E2E-${{ matrix.server }} diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: ecs-windows-nexttrace-diagnostics-e2e-2022
+          name: ecs-windows-nexttrace-diagnostics-e2e-${{ matrix.server }}
           path: |
-            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json
-            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2022-*.json.raw-*
-            ${{ runner.temp }}/ecs-bootstrap-report-2022
-            ${{ runner.temp }}/ecs-bootstrap-route-report-2022
-            ${{ runner.temp }}/ecs-bootstrap-backtrace-report-2022
-          if-no-files-found: warn
-          retention-days: 7
-
-  e2e-2025:
-    name: E2E-2025
-    needs: [package, verify-2025]
-    runs-on: windows-2025
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-dist
-          path: .ci/windows-tools-dist
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ecs-windows-tools-gate-inputs-2025
-          path: .ci/windows-tools-gate-inputs
-
-      - name: E2E-2025 packaged bundle and bootstrap contract
-        shell: pwsh
-        run: |
-          & ./scripts/ci/windows_tools_e2e.ps1 -Label '2025' -ArtifactRoot (Join-Path $PWD '.ci/windows-tools-dist') -GateInputsRoot (Join-Path $PWD '.ci/windows-tools-gate-inputs')
-      - name: Upload E2E-2025 NextTrace diagnostics
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ecs-windows-nexttrace-diagnostics-e2e-2025
-          path: |
-            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json
-            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-2025-*.json.raw-*
-            ${{ runner.temp }}/ecs-bootstrap-report-2025
-            ${{ runner.temp }}/ecs-bootstrap-route-report-2025
-            ${{ runner.temp }}/ecs-bootstrap-backtrace-report-2025
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-${{ matrix.server }}-*.json
+            ${{ runner.temp }}/ecs-nexttrace-capability-E2E-${{ matrix.server }}-*.json.raw-*
+            ${{ runner.temp }}/ecs-bootstrap-report-${{ matrix.server }}
+            ${{ runner.temp }}/ecs-bootstrap-route-report-${{ matrix.server }}
+            ${{ runner.temp }}/ecs-bootstrap-backtrace-report-${{ matrix.server }}
+            ${{ runner.temp }}/ecs-bootstrap-route-ipv6-report-${{ matrix.server }}
+            ${{ runner.temp }}/ecs-bootstrap-backtrace-ipv6-report-${{ matrix.server }}
           if-no-files-found: warn
           retention-days: 7

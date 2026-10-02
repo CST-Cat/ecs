@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('IPv4', 'IPv6')][string]$Family,
     [Parameter(Mandatory)][string]$Target,
     [Parameter(Mandatory)][string]$NextTracePath,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSha256,
+    [Parameter(Mandatory)][string]$ExpectedSha256,
     [Parameter(Mandatory)][Alias('OutputPath')][string]$EvidencePath,
     [int]$MaxHops = 12
 )
@@ -534,8 +534,6 @@ function Assert-EcsCapabilityEnvelope {
         [Parameter(Mandatory)][ValidateSet('ipv4', 'ipv6')][string]$FamilyName,
         [Parameter(Mandatory)][string]$TargetValue,
         [Parameter(Mandatory)][string]$NextTraceFullPath,
-        [Parameter(Mandatory)][string]$ExpectedHash,
-        [Parameter(Mandatory)][string]$ActualHash,
         [Parameter(Mandatory)][int]$MaxHopsValue
     )
     if ($SchemaVersion -cne $CapabilitySchema) {
@@ -548,15 +546,6 @@ function Assert-EcsCapabilityEnvelope {
     if ([string]::IsNullOrWhiteSpace($NextTraceFullPath) -or -not [IO.Path]::IsPathRooted($NextTraceFullPath) -or
         [IO.Path]::GetFileName($NextTraceFullPath) -ine 'nexttrace-tiny.exe') {
         Stop-EcsWindowsNextTraceCapability 'capability evidence has an invalid staged NextTrace path'
-    }
-    if ($ExpectedHash -notmatch '^[0-9A-Fa-f]{64}$') {
-        Stop-EcsWindowsNextTraceCapability 'capability evidence has an invalid expected SHA-256'
-    }
-    if ($ActualHash -notmatch '^[0-9a-f]{64}$') {
-        Stop-EcsWindowsNextTraceCapability 'capability evidence has an invalid actual SHA-256'
-    }
-    if ($ActualHash -cne $ExpectedHash.ToLowerInvariant()) {
-        Stop-EcsWindowsNextTraceCapability "capability evidence SHA-256 mismatch: expected $($ExpectedHash.ToLowerInvariant()), got $ActualHash"
     }
     if ($MaxHopsValue -ne $CanonicalMaxHops) {
         Stop-EcsWindowsNextTraceCapability "capability evidence max_hops must remain $CanonicalMaxHops"
@@ -660,8 +649,10 @@ function Assert-EcsCapabilityEvidence {
     param(
         [Parameter(Mandatory)][AllowNull()][object]$Evidence,
         [Parameter(Mandatory)][string]$ExpectedEvidencePath,
-        [Parameter(Mandatory)][string]$ExpectedRawDirectory,
-        [Parameter(Mandatory)][string]$ExpectedNextTracePath
+        [Parameter(Mandatory)][string]$ExpectedNextTracePath,
+        [Parameter(Mandatory)][ValidateSet('ipv4', 'ipv6')][string]$ExpectedFamilyName,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$ActualSha256
     )
     $topFields = @('schema_version', 'evidence_path', 'raw_output_directory', 'family', 'target', 'max_hops', 'decision', 'live_network_not_proven', 'reason', 'nexttrace_path', 'nexttrace_expected_sha256', 'nexttrace_sha256', 'native_tracert', 'direct_nexttrace', 'observed')
     Assert-EcsExactPropertyNames -Object $Evidence -Expected $topFields -Context 'capability evidence'
@@ -676,15 +667,39 @@ function Assert-EcsCapabilityEvidence {
     $nextTracePath = Assert-EcsStringValue -Value (Get-EcsObjectPropertyValue -Object $Evidence -Name 'nexttrace_path' -Context 'capability evidence') -Context 'capability evidence.nexttrace_path'
     $expectedHash = Assert-EcsStringValue -Value (Get-EcsObjectPropertyValue -Object $Evidence -Name 'nexttrace_expected_sha256' -Context 'capability evidence') -Context 'capability evidence.nexttrace_expected_sha256'
     $actualHash = Assert-EcsStringValue -Value (Get-EcsObjectPropertyValue -Object $Evidence -Name 'nexttrace_sha256' -Context 'capability evidence') -Context 'capability evidence.nexttrace_sha256'
-    Assert-EcsCapabilityEnvelope -SchemaVersion $schemaVersion -FamilyName $familyName -TargetValue $targetValue -NextTraceFullPath $nextTracePath -ExpectedHash $expectedHash -ActualHash $actualHash -MaxHopsValue ([int]$maxHopsValue)
+    Assert-EcsCapabilityEnvelope -SchemaVersion $schemaVersion -FamilyName $familyName -TargetValue $targetValue -NextTraceFullPath $nextTracePath -MaxHopsValue ([int]$maxHopsValue)
+    if ($familyName -cne $ExpectedFamilyName) {
+        Stop-EcsWindowsNextTraceCapability 'capability evidence family does not match this run'
+    }
+    $trustedExpectedHash = $ExpectedSha256.ToLowerInvariant()
+    $trustedActualHash = $ActualSha256.ToLowerInvariant()
+    if ($expectedHash -cne $trustedExpectedHash -or $actualHash -cne $trustedActualHash) {
+        Stop-EcsWindowsNextTraceCapability 'capability evidence SHA-256 values do not match the trusted pin and observed file digest'
+    }
     $canonicalNativePath = Get-EcsCanonicalNativeExecutablePath
     if ($nextTracePath -cne $ExpectedNextTracePath) {
         Stop-EcsWindowsNextTraceCapability 'capability evidence nexttrace_path does not match the staged executable path'
     }
     $evidencePath = Assert-EcsStringValue -Value (Get-EcsObjectPropertyValue -Object $Evidence -Name 'evidence_path' -Context 'capability evidence') -Context 'capability evidence.evidence_path'
     $rawDirectory = Assert-EcsStringValue -Value (Get-EcsObjectPropertyValue -Object $Evidence -Name 'raw_output_directory' -Context 'capability evidence') -Context 'capability evidence.raw_output_directory'
-    if ($evidencePath -cne $ExpectedEvidencePath -or $rawDirectory -cne $ExpectedRawDirectory) {
-        Stop-EcsWindowsNextTraceCapability 'capability evidence path fields do not match the captured evidence paths'
+    try {
+        $evidenceFullPath = [IO.Path]::GetFullPath($evidencePath)
+        $expectedEvidenceFullPath = [IO.Path]::GetFullPath($ExpectedEvidencePath)
+        $rawDirectoryFullPath = [IO.Path]::GetFullPath($rawDirectory)
+    } catch {
+        Stop-EcsWindowsNextTraceCapability "capability evidence paths are invalid: $($_.Exception.Message)"
+    }
+    $evidenceParent = [IO.Path]::GetDirectoryName($expectedEvidenceFullPath)
+    $rawParent = [IO.Path]::GetDirectoryName($rawDirectoryFullPath)
+    $rawLeaf = [IO.Path]::GetFileName($rawDirectoryFullPath)
+    $rawPrefix = [IO.Path]::GetFileName($expectedEvidenceFullPath) + '.raw-'
+    if ($evidencePath -cne $ExpectedEvidencePath -or
+        $evidenceFullPath -cne $expectedEvidenceFullPath -or
+        $rawParent -ine $evidenceParent -or
+        -not $rawLeaf.StartsWith($rawPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $rawLeaf.Length -le $rawPrefix.Length -or
+        -not (Test-Path -LiteralPath $rawDirectoryFullPath -PathType Container)) {
+        Stop-EcsWindowsNextTraceCapability 'capability evidence paths do not match this run scope'
     }
 
     $nativeEvidence = Get-EcsObjectPropertyValue -Object $Evidence -Name 'native_tracert' -Context 'capability evidence'
@@ -712,6 +727,9 @@ function Assert-EcsCapabilityEvidence {
             if ([string]::IsNullOrWhiteSpace($rawPath) -or -not [IO.Path]::IsPathRooted($rawPath) -or
                 -not (Test-Path -LiteralPath $rawPath -PathType Leaf)) {
                 Stop-EcsWindowsNextTraceCapability "capability evidence raw output path is missing: $rawPath"
+            }
+            if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($rawPath)) -ine $rawDirectoryFullPath) {
+                Stop-EcsWindowsNextTraceCapability "capability evidence raw output path escaped this run scope: $rawPath"
             }
         }
     }
@@ -779,17 +797,23 @@ function Assert-EcsCapabilityEvidence {
                 Stop-EcsWindowsNextTraceCapability 'IPv6-unavailable evidence must contain zero probe facts'
             }
         }
-        return
+    } else {
+        if ($decision -notin @('available', 'not-testable') -or $familyName -notin @('ipv4', 'ipv6')) {
+            Stop-EcsWindowsNextTraceCapability 'capability evidence has an invalid decision or family'
+        }
+        $classified = Get-EcsCapabilityDecision -NativeFacts $nativeFacts -DirectFacts $directFacts
+        if ($classified.Decision -cne $decision -or [bool]$classified.LiveNetworkNotProven -ne [bool]$liveNetworkNotProven) {
+            Stop-EcsWindowsNextTraceCapability 'capability evidence decision does not match the validated probe facts'
+        }
     }
-    if ($decision -notin @('available', 'not-testable') -or $familyName -notin @('ipv4', 'ipv6')) {
-        Stop-EcsWindowsNextTraceCapability 'capability evidence has an invalid decision or family'
-    }
-    if ($familyName -eq 'ipv6' -and $decision -eq 'ipv6-unavailable') {
-        Stop-EcsWindowsNextTraceCapability 'IPv6-unavailable is only valid with an explicit unavailable probe result'
-    }
-    $classified = Get-EcsCapabilityDecision -NativeFacts $nativeFacts -DirectFacts $directFacts
-    if ($classified.Decision -cne $decision -or [bool]$classified.LiveNetworkNotProven -ne [bool]$liveNetworkNotProven) {
-        Stop-EcsWindowsNextTraceCapability 'capability evidence decision does not match the validated probe facts'
+    return [pscustomobject]@{
+        Family = $familyName
+        Target = $targetValue
+        MaxHops = [int]$maxHopsValue
+        Sha256 = $actualHash
+        Decision = $decision
+        LiveNetworkNotProven = [bool]$liveNetworkNotProven
+        Reason = [string]$reasonValue
     }
 }
 
@@ -917,8 +941,6 @@ function Invoke-EcsWindowsNextTraceCapability {
     if ($actualHash -cne $expectedHash) {
         Stop-EcsWindowsNextTraceCapability "staged NextTrace SHA-256 mismatch: expected $expectedHash, got $actualHash"
     }
-    Assert-EcsCapabilityEnvelope -SchemaVersion $CapabilitySchema -FamilyName $familyName -TargetValue $Target -NextTraceFullPath $nextTraceFull -ExpectedHash $ExpectedSha256 -ActualHash $actualHash -MaxHopsValue $MaxHops
-
     $evidenceFull = Resolve-EcsAbsolutePath -Path $EvidencePath -Description 'evidence path'
     if ([string]::IsNullOrWhiteSpace([IO.Path]::GetFileName($evidenceFull))) {
         Stop-EcsWindowsNextTraceCapability 'evidence path must name a file'
@@ -1096,20 +1118,31 @@ function Invoke-EcsWindowsNextTraceCapability {
         }
     }
 
-    Assert-EcsCapabilityEvidence -Evidence $evidence -ExpectedEvidencePath $evidenceFull -ExpectedRawDirectory $rawDirectory -ExpectedNextTracePath $nextTraceFull
     $json = $evidence | ConvertTo-Json -Depth 10
-    try {
-        $serializedEvidence = ConvertFrom-Json -InputObject $json -ErrorAction Stop
-    } catch {
-        Stop-EcsWindowsNextTraceCapability "serialized capability evidence is invalid JSON: $($_.Exception.Message)"
-    }
-    Assert-EcsCapabilityEvidence -Evidence $serializedEvidence -ExpectedEvidencePath $evidenceFull -ExpectedRawDirectory $rawDirectory -ExpectedNextTracePath $nextTraceFull
     $temporaryEvidencePath = Join-Path $evidenceDirectory (".{0}.tmp-{1}" -f [IO.Path]::GetFileName($evidenceFull), [guid]::NewGuid().ToString('N'))
-    Write-EcsUtf8Text -Path $temporaryEvidencePath -Content $json
     try {
-        Move-Item -LiteralPath $temporaryEvidencePath -Destination $evidenceFull -ErrorAction Stop
-    } catch {
-        Stop-EcsWindowsNextTraceCapability "cannot publish complete evidence file '$evidenceFull': $($_.Exception.Message)"
+        Write-EcsUtf8Text -Path $temporaryEvidencePath -Content $json
+        try {
+            $serializedText = Get-Content -Raw -LiteralPath $temporaryEvidencePath -ErrorAction Stop
+            $serializedEvidence = ConvertFrom-Json -InputObject $serializedText -ErrorAction Stop
+        } catch {
+            Stop-EcsWindowsNextTraceCapability "serialized capability evidence is invalid JSON: $($_.Exception.Message)"
+        }
+        Assert-EcsCapabilityEvidence -Evidence $serializedEvidence `
+            -ExpectedEvidencePath $evidenceFull `
+            -ExpectedNextTracePath $nextTraceFull `
+            -ExpectedFamilyName $familyName `
+            -ExpectedSha256 $ExpectedSha256 `
+            -ActualSha256 $actualHash | Out-Null
+        try {
+            Move-Item -LiteralPath $temporaryEvidencePath -Destination $evidenceFull -ErrorAction Stop
+        } catch {
+            Stop-EcsWindowsNextTraceCapability "cannot publish complete evidence file '$evidenceFull': $($_.Exception.Message)"
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporaryEvidencePath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryEvidencePath -Force
+        }
     }
     Write-Output ("NextTrace capability evidence written: schema={0}; family={1}; target={2}; decision={3}; evidence={4}" -f
         $CapabilitySchema, $familyName, $Target, $evidence.decision, $evidenceFull)

@@ -158,25 +158,206 @@ Assert-TestThrows -Name 'extra capability fact' -MessagePattern 'native capabili
 }
 
 $hash = ('a' * 64) -join ''
-Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 12
+Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -MaxHopsValue 12
 
 Assert-TestThrows -Name 'max hops mismatch' -MessagePattern 'max_hops must remain 12' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 20
+    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -MaxHopsValue 20
 }
 Assert-TestThrows -Name 'staged NextTrace path mismatch' -MessagePattern 'invalid staged NextTrace path' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath (Join-Path ([IO.Path]::GetTempPath()) 'nexttrace.exe') -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 12
-}
-Assert-TestThrows -Name 'SHA mismatch' -MessagePattern 'SHA-256 mismatch' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash (('b' * 64) -join '') -MaxHopsValue 12
+    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath (Join-Path ([IO.Path]::GetTempPath()) 'nexttrace.exe') -MaxHopsValue 12
 }
 Assert-TestThrows -Name 'target mismatch' -MessagePattern 'target does not match' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '8.8.8.8' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 12
+    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv4 -TargetValue '8.8.8.8' -NextTraceFullPath $testNextTracePath -MaxHopsValue 12
 }
 Assert-TestThrows -Name 'family/target mismatch' -MessagePattern 'target does not match the canonical ipv6 capability target' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv6 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 12
+    Assert-EcsCapabilityEnvelope -SchemaVersion 'ecs.windows.nexttrace.capability/v1' -FamilyName ipv6 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -MaxHopsValue 12
 }
 Assert-TestThrows -Name 'schema mismatch' -MessagePattern 'schema must be' -Script {
-    Assert-EcsCapabilityEnvelope -SchemaVersion 'wrong.schema/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -ExpectedHash $hash -ActualHash $hash -MaxHopsValue 12
+    Assert-EcsCapabilityEnvelope -SchemaVersion 'wrong.schema/v1' -FamilyName ipv4 -TargetValue '1.1.1.1' -NextTraceFullPath $testNextTracePath -MaxHopsValue 12
+}
+
+$testEvidenceRoot = Join-Path ([IO.Path]::GetTempPath()) ("ecs-nexttrace-evidence-test-" + [guid]::NewGuid().ToString('N'))
+$script:TestTracertPath = Join-Path $testEvidenceRoot 'system32/tracert.exe'
+function Get-EcsCanonicalNativeExecutablePath { return $script:TestTracertPath }
+$testEvidencePath = Join-Path $testEvidenceRoot 'capability.json'
+$testRawDirectory = Join-Path $testEvidenceRoot 'capability.json.raw-test'
+New-Item -ItemType Directory -Force -Path $testRawDirectory | Out-Null
+foreach ($rawName in @('native.stdout', 'native.stderr', 'direct.stdout', 'direct.stderr')) {
+    Set-Content -LiteralPath (Join-Path $testRawDirectory $rawName) -Value ''
+}
+$testNextTracePath = Join-Path $testEvidenceRoot 'nexttrace-tiny.exe'
+$trustedNextTraceHash = ('a' * 64) -join ''
+
+function New-TestCapabilityEvidence {
+    param(
+        [string]$FamilyName = 'ipv4',
+        [string]$Decision = 'available',
+        [switch]$Unavailable,
+        [int]$RespondingHops = 1,
+        [int]$PublicRespondingHops = 1
+    )
+    $familyFlag = if ($FamilyName -ceq 'ipv4') { '-4' } else { '-6' }
+    $target = if ($FamilyName -ceq 'ipv4') { '1.1.1.1' } else { '2606:4700:4700::1111' }
+    $status = if ($Unavailable) { 'not-run-capability-unavailable' } else { 'completed' }
+    $parseStatus = if ($Unavailable) { 'not-run-capability-unavailable' } else { 'parsed' }
+    $exitCode = if ($Unavailable) { $null } else { 0 }
+    $hopSlots = if ($Unavailable) { 0 } else { 1 }
+    if ($Unavailable) {
+        $Decision = 'ipv6-unavailable'
+        $RespondingHops = 0
+        $PublicRespondingHops = 0
+    }
+    $native = [ordered]@{
+        executable_path = $script:TestTracertPath
+        arguments = @('-d', $familyFlag, '-h', '12', $target)
+        raw_stdout_path = Join-Path $script:TestRawDirectory 'native.stdout'
+        raw_stderr_path = Join-Path $script:TestRawDirectory 'native.stderr'
+        exit_code = $exitCode
+        execution_status = $status
+        parse_status = $parseStatus
+        hop_slots = $hopSlots
+        responding_hops = $RespondingHops
+        public_responding_hops = $PublicRespondingHops
+    }
+    $direct = [ordered]@{
+        executable_path = $script:TestNextTracePath
+        arguments = @($familyFlag, '--no-color', '--json', '-M', '--max-hops', '12', '--queries', '1', '--parallel-requests', '1', '--timeout', '1000', $target)
+        raw_stdout_path = Join-Path $script:TestRawDirectory 'direct.stdout'
+        raw_stderr_path = Join-Path $script:TestRawDirectory 'direct.stderr'
+        exit_code = $exitCode
+        execution_status = $status
+        parse_status = $parseStatus
+        hop_slots = $hopSlots
+        responding_hops = $RespondingHops
+        public_responding_hops = $PublicRespondingHops
+    }
+    $zero = if ($Unavailable) { 0 } else { $RespondingHops }
+    $public = if ($Unavailable) { 0 } else { $PublicRespondingHops }
+    return [pscustomobject]@{
+        schema_version = 'ecs.windows.nexttrace.capability/v1'
+        evidence_path = $script:TestEvidencePath
+        raw_output_directory = $script:TestRawDirectory
+        family = $FamilyName
+        target = $target
+        max_hops = 12
+        decision = $Decision
+        live_network_not_proven = ($Decision -ne 'available')
+        reason = 'deterministic synthetic capability evidence'
+        nexttrace_path = $script:TestNextTracePath
+        nexttrace_expected_sha256 = $script:TrustedNextTraceHash
+        nexttrace_sha256 = $script:TrustedNextTraceHash
+        native_tracert = [pscustomobject]$native
+        direct_nexttrace = [pscustomobject]$direct
+        observed = [pscustomobject]@{
+            native_hop_slots = $hopSlots
+            native_responding_hops = $zero
+            native_public_responding_hops = $public
+            direct_hop_slots = $hopSlots
+            direct_responding_hops = $zero
+            direct_public_responding_hops = $public
+        }
+    }
+}
+
+$script:TestEvidenceRoot = $testEvidenceRoot
+$script:TestEvidencePath = $testEvidencePath
+$script:TestRawDirectory = $testRawDirectory
+$script:TestNextTracePath = $testNextTracePath
+$script:TrustedNextTraceHash = $trustedNextTraceHash
+$validCapabilityEvidence = New-TestCapabilityEvidence
+$validatedCapabilityEvidence = Assert-EcsCapabilityEvidence -Evidence $validCapabilityEvidence `
+    -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+    -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash
+Assert-TestEqual -Actual $validatedCapabilityEvidence.Decision -Expected 'available' -Name 'validated capability decision'
+Assert-TestEqual -Actual $validatedCapabilityEvidence.Sha256 -Expected $trustedNextTraceHash -Name 'trusted capability digest'
+$uppercaseTrustedNextTraceHash = $trustedNextTraceHash.ToUpperInvariant()
+$producerValidatedCapabilityEvidence = Assert-EcsCapabilityEvidence -Evidence $validCapabilityEvidence `
+    -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+    -ExpectedFamilyName ipv4 -ExpectedSha256 $uppercaseTrustedNextTraceHash -ActualSha256 $trustedNextTraceHash
+Assert-TestEqual -Actual $producerValidatedCapabilityEvidence.Sha256 -Expected $trustedNextTraceHash -Name 'producer publish boundary accepts uppercase trusted pin'
+$consumerValidatedCapabilityEvidence = Assert-EcsCapabilityEvidence -Evidence $validCapabilityEvidence `
+    -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+    -ExpectedFamilyName ipv4 -ExpectedSha256 $uppercaseTrustedNextTraceHash -ActualSha256 $uppercaseTrustedNextTraceHash
+Assert-TestEqual -Actual $consumerValidatedCapabilityEvidence.Sha256 -Expected $trustedNextTraceHash -Name 'consumer accepts uppercase lock pin'
+
+$wrongPin = ('b' * 64) -join ''
+Assert-TestThrows -Name 'capability evidence rejects wrong external pin' -MessagePattern 'trusted pin and observed file digest' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $validCapabilityEvidence `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $wrongPin -ActualSha256 $wrongPin | Out-Null
+}
+$tamperedActual = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedActual.nexttrace_sha256 = $wrongPin
+Assert-TestThrows -Name 'capability evidence rejects tampered actual digest' -MessagePattern 'trusted pin and observed file digest' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedActual `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedExpected = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedExpected.nexttrace_expected_sha256 = $wrongPin
+Assert-TestThrows -Name 'capability evidence rejects tampered expected digest' -MessagePattern 'trusted pin and observed file digest' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedExpected `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedRunPath = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedRunPath.evidence_path = Join-Path $testEvidenceRoot 'other-run.json'
+Assert-TestThrows -Name 'capability evidence rejects another run path' -MessagePattern 'paths do not match this run scope' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedRunPath `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedRawScope = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedRawScope.raw_output_directory = Join-Path $testEvidenceRoot 'other-run.raw-x'
+Assert-TestThrows -Name 'capability evidence rejects another raw-output scope' -MessagePattern 'paths do not match this run scope' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedRawScope `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedFamily = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedFamily.family = 'ipv6'
+Assert-TestThrows -Name 'capability evidence rejects wrong family' -MessagePattern 'canonical ipv6 capability target' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedFamily `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedTarget = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedTarget.target = '8.8.8.8'
+Assert-TestThrows -Name 'capability evidence rejects wrong target' -MessagePattern 'canonical ipv4 capability target' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedTarget `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$tamperedWindowsFact = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$tamperedWindowsFact.native_tracert.executable_path = Join-Path $testEvidenceRoot 'other/tracert.exe'
+Assert-TestThrows -Name 'capability evidence rejects wrong Windows executable fact' -MessagePattern 'canonical System32 path' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $tamperedWindowsFact `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$unexpectedDllFact = $validCapabilityEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$unexpectedDllFact | Add-Member -NotePropertyName dll_facts -NotePropertyValue @()
+Assert-TestThrows -Name 'capability evidence rejects uncontracted DLL facts' -MessagePattern 'invalid field set' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $unexpectedDllFact `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv4 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
+}
+$ipv6AvailableEvidence = New-TestCapabilityEvidence -FamilyName ipv6
+$ipv6Available = Assert-EcsCapabilityEvidence -Evidence $ipv6AvailableEvidence `
+    -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+    -ExpectedFamilyName ipv6 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash
+Assert-TestEqual -Actual $ipv6Available.Decision -Expected 'available' -Name 'IPv6 available capability evidence'
+$ipv6UnavailableEvidence = New-TestCapabilityEvidence -FamilyName ipv6 -Unavailable
+$ipv6Unavailable = Assert-EcsCapabilityEvidence -Evidence $ipv6UnavailableEvidence `
+    -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+    -ExpectedFamilyName ipv6 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash
+Assert-TestEqual -Actual $ipv6Unavailable.Decision -Expected 'ipv6-unavailable' -Name 'IPv6 unavailable capability evidence'
+$ipv6WrongUnavailable = $ipv6UnavailableEvidence | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$ipv6WrongUnavailable.direct_nexttrace.execution_status = 'completed'
+Assert-TestThrows -Name 'IPv6 unavailable evidence rejects executed facts' -MessagePattern 'contains executed probe facts' -Script {
+    Assert-EcsCapabilityEvidence -Evidence $ipv6WrongUnavailable `
+        -ExpectedEvidencePath $testEvidencePath -ExpectedNextTracePath $testNextTracePath `
+        -ExpectedFamilyName ipv6 -ExpectedSha256 $trustedNextTraceHash -ActualSha256 $trustedNextTraceHash | Out-Null
 }
 Assert-TestThrows -Name 'invalid JSON' -MessagePattern 'invalid JSON' -Script {
     Parse-EcsNextTraceOutput -Output '{' -FamilyName ipv4 -HopLimit 12 | Out-Null
@@ -202,55 +383,8 @@ Assert-TestThrows -Name 'invalid evidence field set' -MessagePattern 'invalid fi
     Assert-EcsExactPropertyNames -Object ([pscustomobject]@{ schema_version = 'ecs.windows.nexttrace.capability/v1' }) -Expected @('schema_version', 'family') -Context 'test evidence'
 }
 
-function Get-TestProductionFunctionSource {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Name
-    )
-    $tokens = $null
-    $errors = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $Path), [ref]$tokens, [ref]$errors)
-    if ($errors.Count -ne 0) {
-        throw "production script has PowerShell parse errors: $Path"
-    }
-    $functions = @($ast.Find({
-            param($node)
-            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $Name
-        }, $true))
-    if ($functions.Count -ne 1) {
-        throw "production script does not contain exactly one $Name function: $Path"
-    }
-    return $functions[0]
-}
-
-function Import-TestProductionFunction {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Name,
-        [string]$ImportedName = $Name
-    )
-    $functionAst = Get-TestProductionFunctionSource -Path $Path -Name $Name
-    $body = $functionAst.Body.Extent.Text
-    $body = $body.Substring(1, $body.Length - 2)
-    Set-Item -Path ("Function:\global:$ImportedName") -Value ([scriptblock]::Create($body))
-}
-
-$nextTraceGatePath = Join-Path $PSScriptRoot 'windows_nexttrace_gate.ps1'
 $nextTraceReportAssertPath = Join-Path $PSScriptRoot 'windows_nexttrace_report_assert.ps1'
-$NextTraceAdapter = 'nexttrace-json-v1'
-$NextTraceEngine = 'nexttrace-tiny'
-foreach ($functionName in @(
-        'Stop-EcsWindowsNextTraceGate',
-        'Get-EcsPropertyValue',
-        'Get-EcsRawField',
-        'Get-EcsSingleResult',
-        'Test-EcsActualRespondingHop',
-        'Test-EcsValidatedBacktraceNoResponseFailure',
-        'Assert-EcsCanonicalTraceReport'
-    )) {
-    Import-TestProductionFunction -Path $nextTraceGatePath -Name $functionName
-}
-Import-TestProductionFunction -Path $nextTraceReportAssertPath -Name 'Test-EcsValidatedBacktraceNoResponseFailure' -ImportedName 'Test-EcsReportValidatedBacktraceNoResponseFailure'
+. $nextTraceReportAssertPath
 
 function New-TestBacktraceResult {
     param(
@@ -330,10 +464,8 @@ $noResponsePredicateCases = @(
     [pscustomobject]@{ Name = 'evidence is valid'; Result = (New-TestBacktraceResult -Valid 1); Decision = 'not-testable'; Live = $true; Expected = $false }
 )
 foreach ($case in $noResponsePredicateCases) {
-    $gateDecision = Test-EcsValidatedBacktraceNoResponseFailure -Result $case.Result -Target '1.1.1.1' -CapabilityDecision $case.Decision -CapabilityLiveNetworkNotProven $case.Live
-    $reportDecision = Test-EcsReportValidatedBacktraceNoResponseFailure -Result $case.Result -Target '1.1.1.1' -CapabilityDecision $case.Decision -CapabilityLiveNetworkNotProven $case.Live
-    Assert-TestEqual -Actual $gateDecision -Expected $case.Expected -Name "gate no-response predicate: $($case.Name)"
-    Assert-TestEqual -Actual $reportDecision -Expected $case.Expected -Name "report no-response predicate: $($case.Name)"
+    $decision = Test-EcsValidatedBacktraceNoResponseFailure -Result $case.Result -Target '1.1.1.1' -CapabilityDecision $case.Decision -CapabilityLiveNetworkNotProven $case.Live
+    Assert-TestEqual -Actual $decision -Expected $case.Expected -Name "backtrace no-response predicate: $($case.Name)"
 }
 
 $exactBacktraceReport = [pscustomobject]@{
@@ -351,5 +483,45 @@ $missingTraceReport = [pscustomobject]@{
 Assert-TestThrows -Name 'backtrace no-response requires canonical trace' -MessagePattern 'no unique canonical normalized trace JSON' -Script {
     Assert-EcsCanonicalTraceReport -Report $missingTraceReport -Module 'backtrace' -Family '4' -FamilyName 'ipv4' -MaxHops 20 -Target '1.1.1.1' -CapabilityDecision 'not-testable' -CapabilityLiveNetworkNotProven $true | Out-Null
 }
+
+$routeResult = New-TestBacktraceResult -Status 'ok' -Valid 1
+$routeResult.id = 'route'
+$routeResult.failures = @()
+$routeArguments = '--no-color --json -4 -M --max-hops 12 --queries 1 --parallel-requests 1 --timeout 1000'
+$routeResult.methodology.parameters.arguments = $routeArguments
+$routeResult.methodology.parameters.max_hops = '12'
+foreach ($field in $routeResult.fields) {
+    if ($field.key -ceq 'arguments') { $field.value.raw = $routeArguments }
+}
+$routeTrace = [string]$routeResult.text_blocks[0].content | ConvertFrom-Json
+$routeTrace.hops[0].responded = $true
+$routeTrace.hops[0].ip = '1.1.1.1'
+$routeResult.text_blocks[0].title = 'probe.route.normalized_trace_json'
+$routeResult.text_blocks[0].content = $routeTrace | ConvertTo-Json -Depth 8 -Compress
+$routeReport = [pscustomobject]@{
+    schema_version = 'ecs.report/v1'
+    results = @($routeResult)
+}
+$routeAssertion = Assert-EcsCanonicalTraceReport -Report $routeReport -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target '1.1.1.1'
+Assert-TestEqual -Actual $routeAssertion.RespondingHopCount -Expected 1 -Name 'canonical route responding hop'
+$wrongRouteReport = $routeReport | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$wrongRouteTrace = [string]$wrongRouteReport.results[0].text_blocks[0].content | ConvertFrom-Json
+$wrongRouteTrace.target = '8.8.8.8'
+$wrongRouteReport.results[0].text_blocks[0].content = $wrongRouteTrace | ConvertTo-Json -Depth 8 -Compress
+Assert-TestThrows -Name 'route report rejects wrong target' -MessagePattern 'canonical trace facts are incomplete' -Script {
+    Assert-EcsCanonicalTraceReport -Report $wrongRouteReport -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target '1.1.1.1' | Out-Null
+}
+$noResponseRouteReport = $routeReport | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$noResponseRouteTrace = [string]$noResponseRouteReport.results[0].text_blocks[0].content | ConvertFrom-Json
+$noResponseRouteTrace.hops[0].responded = $false
+$noResponseRouteTrace.hops[0].ip = $null
+$noResponseRouteReport.results[0].text_blocks[0].content = $noResponseRouteTrace | ConvertTo-Json -Depth 8 -Compress
+Assert-TestThrows -Name 'route report requires real response when capability is available' -MessagePattern 'no actual responding hop' -Script {
+    Assert-EcsCanonicalTraceReport -Report $noResponseRouteReport -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target '1.1.1.1' -CapabilityDecision available | Out-Null
+}
+$zeroRouteAssertion = Assert-EcsCanonicalTraceReport -Report $noResponseRouteReport -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target '1.1.1.1' -CapabilityDecision not-testable -CapabilityLiveNetworkNotProven $true
+Assert-TestEqual -Actual $zeroRouteAssertion.AllowZeroRespondingHops -Expected $true -Name 'route zero response is capability-gated'
+
+Remove-Item -LiteralPath $testEvidenceRoot -Recurse -Force
 
 Write-Output 'windows_nexttrace_capability deterministic classifier/validation tests passed'

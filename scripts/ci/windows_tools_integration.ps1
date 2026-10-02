@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('2022', '2025')][string]$Server,
-    [Parameter(Mandatory)][string]$StageArtifactRoot,
-    [Parameter(Mandatory)][string]$GateInputsRoot
+    [Parameter(Mandatory)][string]$StageRoot,
+    [Parameter(Mandatory)][string]$CorpusArchivePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,19 +10,9 @@ Set-StrictMode -Version Latest
 
 function Get-PathEvidence {
   param([AllowNull()][string]$Value)
-  $present = $null -ne $Value
-  $text = if ($present) { $Value } else { '' }
-  $sha = [Security.Cryptography.SHA256]::Create()
-  try {
-    $digest = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))).Replace('-', '').ToLowerInvariant()
-  } finally {
-    $sha.Dispose()
-  }
   return [ordered]@{
-    present = $present
-    length = $text.Length
-    sha256 = $digest
-    value = $text
+    present = $null -ne $Value
+    value = $Value
   }
 }
 
@@ -53,11 +43,9 @@ function Get-PathSnapshotDifferences {
     $expectedValue = $Expected[$scope]
     $actualValue = $Actual[$scope]
     if ($expectedValue.present -ne $actualValue.present -or
-        $expectedValue.length -ne $actualValue.length -or
-        $expectedValue.sha256 -cne $actualValue.sha256 -or
         $expectedValue.value -cne $actualValue.value) {
-      $differences += ("{0}: before(length={1},sha256={2}) after(length={3},sha256={4})" -f
-        $scope, $expectedValue.length, $expectedValue.sha256, $actualValue.length, $actualValue.sha256)
+      $differences += ("{0}: before(present={1}) after(present={2})" -f
+        $scope, $expectedValue.present, $actualValue.present)
     }
   }
   return $differences
@@ -88,36 +76,43 @@ function Get-RawWindowsPath {
 
 $pathBefore = Get-PathSnapshot
 Write-PathSnapshotEvidence -Label 'before integration' -Snapshot $pathBefore
-$stageRoot = $null
+$stageCopyRoot = $null
 $corpusRoot = $null
 $sandboxRoot = $null
-$stageArtifactRoot = [IO.Path]::GetFullPath($StageArtifactRoot)
-$gateInputsRoot = [IO.Path]::GetFullPath($GateInputsRoot)
+$sourceStage = [IO.Path]::GetFullPath($StageRoot)
+$corpusArchive = [IO.Path]::GetFullPath($CorpusArchivePath)
+$environmentNames = @('TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'GOCACHE', 'GOMODCACHE', 'ECS_TOOL_BIN', 'ECS_ZSTD_CORPUS')
+$environmentBefore = @{}
+foreach ($name in $environmentNames) {
+  $environmentBefore[$name] = [pscustomobject]@{
+    Present = Test-Path "Env:$name"
+    Value = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]::Process)
+  }
+}
 $pathBeforeWorkload = $null
 $testExitCode = 1
 $testError = $null
 $cleanupErrors = @()
 try {
-  $stageItems = @(Get-ChildItem -LiteralPath $stageArtifactRoot -Directory -Filter 'windows_amd64' -Recurse)
-  if ($stageItems.Count -ne 1) { throw 'downloaded Windows stage is missing or ambiguous' }
-  $sourceStage = $stageItems[0].FullName
-  $stageRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen tools stage 数据 ' + [guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+  if (-not (Test-Path -LiteralPath $sourceStage -PathType Container)) { throw "packaged Windows stage is missing: $sourceStage" }
+  if (-not (Test-Path -LiteralPath $corpusArchive -PathType Leaf)) { throw "packaged fixed corpus archive is missing: $corpusArchive" }
+  $stageCopyRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen tools stage 数据 ' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $stageCopyRoot | Out-Null
   foreach ($item in @(Get-ChildItem -LiteralPath $sourceStage -Force)) {
-    Copy-Item -LiteralPath $item.FullName -Destination $stageRoot -Recurse -Force
+    Copy-Item -LiteralPath $item.FullName -Destination $stageCopyRoot -Recurse -Force
   }
-  $toolBin = Join-Path $stageRoot 'bin'
+  $toolBin = Join-Path $stageCopyRoot 'bin'
   if (-not (Test-Path -LiteralPath $toolBin -PathType Container)) { throw 'staged bundle bin directory is missing' }
-  $manifestPath = Join-Path $stageRoot 'manifest.json'
+  $manifestPath = Join-Path $stageCopyRoot 'manifest.json'
   if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'staged bundle manifest.json is missing' }
-  $licensesRoot = Join-Path $stageRoot 'LICENSES'
+  $licensesRoot = Join-Path $stageCopyRoot 'LICENSES'
   if (-not (Test-Path -LiteralPath $licensesRoot -PathType Container)) { throw 'staged bundle LICENSES directory is missing' }
-  $stageFiles = @(Get-ChildItem -LiteralPath $stageRoot -File -Recurse -Force)
+  $stageFiles = @(Get-ChildItem -LiteralPath $stageCopyRoot -File -Recurse -Force)
   if ($stageFiles.Count -eq 0) { throw 'staged bundle contains no regular files' }
   foreach ($stageFile in $stageFiles) {
     $stageFile.IsReadOnly = $true
   }
-  $stageFiles = @(Get-ChildItem -LiteralPath $stageRoot -File -Recurse -Force)
+  $stageFiles = @(Get-ChildItem -LiteralPath $stageCopyRoot -File -Recurse -Force)
   foreach ($stageFile in $stageFiles) {
     if (-not $stageFile.IsReadOnly) { throw "staged bundle regular file is writable: $($stageFile.FullName)" }
   }
@@ -130,13 +125,19 @@ try {
     if (-not (Get-Item -LiteralPath $toolPath).IsReadOnly) { throw "staged bundle $tool is writable" }
   }
 
-  $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
-  $corpusItems = @(Get-ChildItem -LiteralPath $gateInputsRoot -File -Filter ([string]$lock.corpus.name) -Recurse)
-  if ($corpusItems.Count -ne 1) { throw 'fixed zstd corpus is missing or ambiguous' }
   $corpusRoot = Join-Path $env:RUNNER_TEMP ('ecs frozen corpus ' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $corpusRoot | Out-Null
-  $corpusPath = Join-Path $corpusRoot ([string]$lock.corpus.name)
-  Copy-Item -LiteralPath $corpusItems[0].FullName -Destination $corpusPath -Force
+  $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
+  $corpusName = [string]$lock.corpus.name
+  $tar = (Get-Command tar.exe -ErrorAction Stop).Source
+  $archiveMembers = @(& $tar -tzf $corpusArchive 2>&1)
+  if ($LASTEXITCODE -ne 0 -or $archiveMembers.Count -ne 1 -or [string]$archiveMembers[0] -cne $corpusName) {
+    throw 'packaged fixed zstd corpus archive has an unexpected entry set'
+  }
+  & $tar -xzf $corpusArchive -C $corpusRoot
+  if ($LASTEXITCODE -ne 0) { throw 'packaged fixed zstd corpus archive extraction failed' }
+  $corpusPath = Join-Path $corpusRoot $corpusName
+  if (-not (Test-Path -LiteralPath $corpusPath -PathType Leaf)) { throw 'extracted fixed zstd corpus is missing' }
 
   & ./scripts/ci/windows_tools_gate.ps1 -CheckOrdinaryUser
   $pathAfterGate = Get-PathSnapshot
@@ -176,9 +177,7 @@ try {
   foreach ($cleanupTarget in @(
     [pscustomobject]@{ Label = 'sandbox'; Path = $sandboxRoot },
     [pscustomobject]@{ Label = 'corpus'; Path = $corpusRoot },
-    [pscustomobject]@{ Label = 'stage'; Path = $stageRoot },
-    [pscustomobject]@{ Label = 'stage artifact'; Path = $stageArtifactRoot },
-    [pscustomobject]@{ Label = 'gate inputs'; Path = $gateInputsRoot }
+    [pscustomobject]@{ Label = 'stage copy'; Path = $stageCopyRoot }
   )) {
     if ($null -ne $cleanupTarget.Path -and (Test-Path -LiteralPath $cleanupTarget.Path)) {
       try {
@@ -189,6 +188,16 @@ try {
     }
     if ($null -ne $cleanupTarget.Path -and (Test-Path -LiteralPath $cleanupTarget.Path)) {
       $cleanupErrors += "$($cleanupTarget.Label) remains: $($cleanupTarget.Path)"
+    }
+  }
+  foreach ($name in $environmentNames) {
+    $saved = $environmentBefore[$name]
+    $restoredValue = if ($saved.Present) { [string]$saved.Value } else { $null }
+    [Environment]::SetEnvironmentVariable($name, $restoredValue, [EnvironmentVariableTarget]::Process)
+    $actualPresent = Test-Path "Env:$name"
+    $actualValue = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]::Process)
+    if ($actualPresent -ne $saved.Present -or $actualValue -cne $saved.Value) {
+      $cleanupErrors += "process environment $name was not restored exactly"
     }
   }
 }

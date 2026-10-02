@@ -106,14 +106,12 @@ release=.github/workflows/release.yml
 bundle=.github/workflows/bundle-release.yml
 windows=.github/workflows/windows-tools.yml
 ci=.github/workflows/ci.yml
-nexttrace_gate=scripts/ci/windows_nexttrace_gate.ps1
 nexttrace_report_assert=scripts/ci/windows_nexttrace_report_assert.ps1
 nexttrace_capability=scripts/ci/windows_nexttrace_capability.ps1
 icmp_prerequisite=scripts/ci/windows_icmp_prerequisite.ps1
 runtime_contract=scripts/ci/windows_runtime_contract.ps1
 tools_prepare=scripts/ci/windows_tools_prepare.ps1
-tools_verify=scripts/ci/windows_tools_verify.ps1
-tools_nexttrace=scripts/ci/windows_tools_nexttrace.ps1
+tools_gate=scripts/ci/windows_tools_gate.ps1
 tools_integration=scripts/ci/windows_tools_integration.ps1
 tools_e2e=scripts/ci/windows_tools_e2e.ps1
 tools_package=scripts/ci/windows_tools_package.sh
@@ -136,6 +134,10 @@ assert_versioned_actions "$release"
 assert_contains "$bundle" "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_contains "$bundle" "if: github.event_name == 'workflow_dispatch'"
 assert_contains "$bundle" "--check-only"
+assert_contains "$bundle" "windows-build:"
+assert_contains "$bundle" "uses: ./.github/workflows/windows-tools.yml"
+assert_contains "$bundle" "needs: [tools, freebsd-build, windows-build]"
+assert_contains "$bundle" "needs: assemble"
 assert_absent "$bundle" "    if: startsWith(github.ref, 'refs/tags/bundle-v')"
 assert_single_write_job "$bundle"
 assert_no_non_publish_write_job "$bundle"
@@ -143,9 +145,11 @@ assert_versioned_actions "$bundle"
 
 # Windows tools：只钉安全边界和真实执行链；实现脚本可独立演进。
 [[ -f "$windows" ]] || die "$windows is missing"
-for needle in   "workflow_call:"   "workflow_dispatch:"   "contents: read"   "runs-on: windows-2022"   "runs-on: windows-2025"   "needs: lock-check"   "needs: build"   "needs: [verify-2022, verify-2025]"   "needs: [package, verify-2022]"   "needs: [package, verify-2025]"   "scripts/package.sh --tools-stage tools-stage --target windows_amd64"   "scripts/cross.sh --target windows_amd64"   "scripts/ci/windows_tools_package.sh --output-dir .ci/windows-tools-dist/bundle"   "CURRENT_COMMIT"   "run.ps1"   "install.ps1"   "if-no-files-found: error"   "actions/download-artifact@"; do
+for needle in   "workflow_call:"   "workflow_dispatch:"   "contents: read"   "runs-on: windows-2022"   "server: ['2022', '2025']"   "needs: lock-check"   "needs: build"   "needs: package"   "name: BUILD windows_amd64"   "name: PACKAGE windows_amd64"   "ecs-windows-tools-stage-windows_amd64"   "ecs-windows-tools-corpus-windows_amd64"   "ecs-windows-tools-dist"   "scripts/package.sh --tools-stage tools-stage --target windows_amd64"   "scripts/cross.sh --target windows_amd64"   "scripts/ci/windows_tools_package.sh --output-dir .ci/windows-tools-dist/bundle --corpus-path corpus-artifact/ecs-silesia-v1.corpus"   "CorpusOutputPath"   "CURRENT_COMMIT"   "run.ps1"   "install.ps1"   "if-no-files-found: error"   "actions/download-artifact@"; do
   assert_contains "$windows" "$needle"
 done
+assert_contains "$windows" 'runs-on: windows-${{ matrix.server }}'
+assert_contains "$windows" 'name: E2E-${{ matrix.server }}'
 assert_absent "$windows" "contents: write"
 assert_versioned_actions "$windows"
 assert_no_core_gate_bypass "$windows"
@@ -153,40 +157,46 @@ assert_no_sensitive_token_evasion "$windows"
 assert_absent "$windows" "releases/latest/download"
 assert_absent "$windows" "ordinary-user execution evidence"
 assert_absent "$windows" "tools/lock.json"
+assert_absent "$windows" "GateInputs"
+assert_absent "$windows" "VERIFY-"
+assert_absent "$windows" "integration-windows"
 assert_absent "$windows" "jq -er"
 assert_absent "$windows" "silesia.zip"
 assert_absent "$windows" "sha256sum --check"
 
-for script in "$runtime_contract" "$tools_prepare" "$tools_verify" "$tools_nexttrace" "$tools_integration" "$tools_e2e" "$tools_package"; do
+for script in "$runtime_contract" "$tools_prepare" "$tools_gate" "$tools_integration" "$tools_e2e" "$tools_package"; do
   [[ -f "$script" ]] || die "$script is missing"
   assert_no_core_gate_bypass "$script"
   assert_no_sensitive_token_evasion "$script"
   assert_no_trusted_root_mutation "$script"
 done
-for script in "$nexttrace_gate" "$nexttrace_report_assert" "$icmp_prerequisite"; do
+for script in "$nexttrace_report_assert" "$icmp_prerequisite"; do
   [[ -f "$script" ]] || die "$script is missing"
 done
 
-# Required artifact paths and local-only rehearsal source chain.
-assert_contains "$tools_nexttrace" 'windows_nexttrace_capability.ps1'
-assert_contains "$tools_nexttrace" 'windows_nexttrace_gate.ps1'
-assert_contains "$tools_nexttrace" '-Family IPv4'
-assert_contains "$tools_nexttrace" '-MaxHops 12'
-assert_contains "$tools_nexttrace" '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
-assert_contains "$tools_e2e" 'windows_nexttrace_report_assert.ps1 -ReportPath'
+# The packaged E2E owns the Windows runtime and NextTrace report contracts.
+assert_contains "$tools_e2e" 'windows_nexttrace_capability.ps1'
+assert_contains "$tools_e2e" 'windows_asset_sha256.amd64'
+assert_contains "$tools_e2e" '-Family IPv4'
+assert_contains "$tools_e2e" '-MaxHops 12'
+assert_contains "$tools_e2e" 'windows_nexttrace_report_assert.ps1'
 assert_contains "$tools_e2e" '-Module route'
 assert_contains "$tools_e2e" '-Module backtrace'
+assert_contains "$tools_e2e" 'windows_runtime_contract.ps1'
+assert_contains "$tools_e2e" 'windows_tools_integration.ps1'
+assert_contains "$tools_e2e" 'Test-EcsGlobalIPv6Capability'
+assert_contains "$tools_e2e" '--ip-version 6'
+assert_contains "$tools_e2e" '-CapabilityAwareIPv6'
+assert_contains "$tools_e2e" 'Get-NetIPAddress'
+assert_contains "$tools_e2e" 'Get-NetRoute'
 assert_contains "$tools_e2e" 'ecs.report/v1'
 assert_contains "$nexttrace_capability" '$CanonicalMaxHops = 12'
-assert_contains "$nexttrace_gate" 'NextTrace IPv4 canonical gate passed'
-assert_contains "$nexttrace_gate" 'ecs.report/v1'
-assert_contains "$nexttrace_gate" '--ip-version 4'
-assert_contains "$nexttrace_gate" '--ip-version 6'
-assert_contains "$nexttrace_gate" '--json'
-assert_contains "$nexttrace_gate" '--no-color'
-assert_contains "$nexttrace_gate" 'not-tested capability=missing'
-assert_contains "$nexttrace_gate" '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
-for script in "$nexttrace_gate" "$nexttrace_report_assert" "$icmp_prerequisite"; do
+assert_contains "$nexttrace_capability" '--json'
+assert_contains "$nexttrace_capability" '--no-color'
+assert_contains "$nexttrace_capability" 'trusted pin and observed file digest'
+assert_contains "$tools_e2e" 'ExpectedSha256 $expectedNextTraceSha256'
+assert_contains "$tools_e2e" 'NextTrace IPv6 gate: not-tested capability=missing'
+for script in "$nexttrace_report_assert" "$icmp_prerequisite"; do
   assert_no_core_gate_bypass "$script"
 done
 
@@ -196,10 +206,11 @@ assert_no_trusted_root_mutation "$windows"
 assert_no_trusted_root_mutation "$run_ps1"
 assert_no_trusted_root_mutation "$install_ps1"
 
-# CI retains both Windows runtime labels while delegating their command contract.
-for needle in   "windows-runtime"   "windows-tools"   "windows-2022"   "windows-2025"   "windows_runtime_contract.ps1"; do
+# CI keeps one aggregate Windows reusable check; that workflow owns both runner versions.
+for needle in   "name: windows-tools"   "uses: ./.github/workflows/windows-tools.yml"   "needs: [unit, compat, quality, integration, race, cross, freebsd, windows-tools, submissions]"   "WINDOWS_TOOLS_RESULT"; do
   assert_contains "$ci" "$needle"
 done
+assert_absent "$ci" "windows-runtime"
 assert_absent "$ci" "contents: write"
 assert_versioned_actions "$ci"
 assert_no_core_gate_bypass "$ci"

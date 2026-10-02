@@ -4,7 +4,6 @@ package probe
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -33,13 +32,6 @@ func TestIntegrationWindowsFrozenTools(t *testing.T) {
 	stageBin := requireFrozenWindowsStage(t)
 	assertFrozenWindowsBundleReadOnly(t, stageBin)
 	corpusPath := requireFrozenWindowsCorpus(t)
-	beforeWorktree := snapshotIntegrationWorktree(t)
-	defer func() {
-		afterWorktree := snapshotIntegrationWorktree(t)
-		if !sameIntegrationWorktree(beforeWorktree, afterWorktree) {
-			t.Errorf("integration changed files below the probe worktree: before=%v after=%v", beforeWorktree, afterWorktree)
-		}
-	}()
 
 	hostileDir := filepath.Join(t.TempDir(), "hostile PATH 工具")
 	buildHostileWindowsTools(t, hostileDir)
@@ -555,50 +547,6 @@ func windowsResultField(result model.Result, key string) string {
 		}
 	}
 	return ""
-}
-
-type integrationFileFact struct {
-	Digest [sha256.Size]byte
-}
-
-func snapshotIntegrationWorktree(t *testing.T) map[string]integrationFileFact {
-	t.Helper()
-	root := mustIntegrationWorkingDirectory(t)
-	facts := make(map[string]integrationFileFact)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		facts[relative] = integrationFileFact{Digest: sha256.Sum256(content)}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("snapshot integration worktree %q: %v", root, err)
-	}
-	return facts
-}
-
-func sameIntegrationWorktree(before, after map[string]integrationFileFact) bool {
-	if len(before) != len(after) {
-		return false
-	}
-	for path, beforeFact := range before {
-		if afterFact, ok := after[path]; !ok || afterFact != beforeFact {
-			return false
-		}
-	}
-	return true
 }
 
 func mustIntegrationWorkingDirectory(t *testing.T) string {

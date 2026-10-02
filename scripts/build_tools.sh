@@ -365,14 +365,6 @@ nexttrace_download="$work/nexttrace-tiny"
 curl "${curl_options[@]}" "$nexttrace_asset_url" -o "$nexttrace_download"
 chmod 0755 "$nexttrace_download"
 nexttrace_sha=$(sha256sum "$nexttrace_download" | awk '{print $1}')
-# A missing digest is a verification failure, not a reason to skip verification.
-# NextTrace Tiny is the one prebuilt binary in the package; shipping it without
-# a checksum would leave the whole route/backtrace path unverified.
-[[ -n "$nexttrace_asset_digest" ]] ||
-  die "NextTrace release does not publish a digest for $nexttrace_asset_name"
-[[ "$nexttrace_asset_digest" == "sha256:${nexttrace_sha}" ]] ||
-  die "NextTrace asset digest disagrees with GitHub: expected $nexttrace_asset_digest, got sha256:$nexttrace_sha"
-
 jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=2
 

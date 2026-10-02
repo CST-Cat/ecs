@@ -161,6 +161,9 @@ func TestZstdProducerEmitsStableMachineResult(t *testing.T) {
 	if err := os.WriteFile(corpus, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := verifyZstdCorpus(corpus, contract); err != nil {
+		t.Fatalf("fixture corpus failed its production check: %v", err)
+	}
 	tool := writeZstdFixtureTool(t, "zstd v1.5.7", "bench 1.5.7 : input 14 bytes, 1 seconds, 0 KB blocks\n-3 7 (2.000) 40.0 MB/s 20.0 MB/s fixture.corpus")
 	result := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, tool, corpus, contract, cpuAllowance{Visible: 2, Threads: 2, Source: "fixture"})
 
@@ -259,6 +262,9 @@ func TestZstdProducerFailureAndMissingDiagnosticsStayStructured(t *testing.T) {
 	corpus := filepath.Join(directory, contract.CorpusName)
 	if err := os.WriteFile(corpus, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if err := verifyZstdCorpus(corpus, contract); err != nil {
+		t.Fatalf("fixture corpus failed its production check: %v", err)
 	}
 	failedTool := writeZstdFixtureTool(t, "zstd v1.5.7", "malformed benchmark output")
 	benchmarkFailure := runZstdBenchmarkWithAllowance(context.Background(), Environment{}, failedTool, corpus, contract, cpuAllowance{Visible: 1, Threads: 1})

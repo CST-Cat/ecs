@@ -10,9 +10,12 @@
 # curl --retry 的指数退避（NASA 持续 500 期间曾烧 CI 35 分钟，run
 # 34757858241；2026-09-13/14 曾临时走镜像回退，官方恢复后已回切）。
 
-ECS_NPB_VERSION=3.4.4
-ECS_NPB_URL="https://www.nas.nasa.gov/assets/npb/NPB3.4.4.tar.gz"
-ECS_NPB_SHA256="1ae219398e02a0a79ad51b7460fcffbf7b5df83a69d5d3d3a9dc2d8acf523549"
+ECS_NPB_VERSION=$(ecs_lock_tool_field npb-ep version) ||
+  ecs_freebsd_gnu_die "tools lock has no npb-ep version"
+ECS_NPB_URL=$(ecs_lock_tool_field npb-ep source_url) ||
+  ecs_freebsd_gnu_die "tools lock has no npb-ep source_url"
+ECS_NPB_SHA256=$(ecs_lock_tool_field npb-ep source_sha256) ||
+  ecs_freebsd_gnu_die "tools lock has no npb-ep source_sha256"
 ECS_NPB_CLASS=A
 ECS_NPB_RAND=randi8
 ECS_NPB_FFLAGS="-O3 -fopenmp"

@@ -101,7 +101,7 @@ ecs_freebsd_c_clone_tool() {
 # ---------------------------------------------------------------------------
 # Stage-level release post-processing for the C-tools stage.
 #
-# Runs ONCE, after all five tools are built and before provenance/SHA256SUMS
+# Runs ONCE, after all five tools are built and before provenance
 # are written: release post-processing is stage policy, not per-tool build
 # logic, so it must not be duplicated inside sysbench.sh/fio.sh/... . The
 # static FreeBSD ELF contract is checked after each final binary is stripped;

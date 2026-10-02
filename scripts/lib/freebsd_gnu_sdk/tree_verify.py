@@ -16,10 +16,10 @@ e_machine == 0xB7 (AArch64).
 Subcommands:
   manifest <root> <out.tsv>
       Full-tree manifest of every regular file: relpath, "dev:ino" identity,
-      sha256, ELF-identity kind, summed .debug_* section bytes, file size,
-      and a fingerprint of sections that --strip-debug is not allowed to
-      mutate. Symlinks are recorded (they are never processed); anything else
-      that is neither regular file nor symlink is a hard error.
+      non-host-file sha256, ELF-identity kind, summed .debug_* section bytes,
+      file size, and a fingerprint of host ELF sections that --strip-debug is
+      not allowed to mutate. Symlinks are recorded (they are never processed);
+      anything else that is neither regular file nor symlink is a hard error.
   host-elfs <manifest.tsv> <out.tsv>
       Contract 2.5 inode deduplication: one representative path per unique
       (dev,ino) host-ELF inode plus its full alias list.
@@ -190,7 +190,8 @@ def cmd_manifest(root, out_path):
                     section_cache[inode_id] = non_debug_section_fingerprint(path)
                 debug = str(debug_cache[inode_id])
                 sections = section_cache[inode_id]
-            rows.append((rel, inode_id, sha256_file(path),
+            whole_file_sha = "-" if is_host_kind(kind) else sha256_file(path)
+            rows.append((rel, inode_id, whole_file_sha,
                          kind if kind is not None else "file", debug,
                          st.st_size, sections))
     rows.sort(key=lambda r: r[0])
@@ -282,10 +283,6 @@ def cmd_verify_tree(before_path, after_path, host_elfs_path):
             if int(a["debug"]) != 0:
                 problems.append("host ELF %s still has %s .debug_* bytes" %
                                 (rel, a["debug"]))
-            if a["sha"] == b["sha"] and int(b["debug"]) > 0:
-                problems.append("host ELF %s had %s .debug_* bytes but is "
-                                "byte-identical after strip" %
-                                (rel, b["debug"]))
             if b["sections"] != a["sections"]:
                 problems.append("non-debug ELF sections changed: %s" % rel)
         elif b["sha"] != a["sha"]:

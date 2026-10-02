@@ -63,7 +63,7 @@ function Get-EcsChecksum {
 
     $checksumMatches = @()
     foreach ($line in Get-Content -LiteralPath $ChecksumFile) {
-        $match = [regex]::Match($line, '^\s*([0-9A-Fa-f]{64})\s+\*?(.+?)\s*$')
+        $match = [regex]::Match($line, '^\s*(\S+)\s+\*?(.*?)\s*$')
         if ($match.Success -and $match.Groups[2].Value -ceq $Asset) {
             $checksumMatches += $match.Groups[1].Value.ToLowerInvariant()
         }

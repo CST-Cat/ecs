@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('2022', '2025')][string]$Label,
-    [string]$ArtifactRoot = '',
-    [string]$GateInputsRoot = ''
+    [string]$ArtifactRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,32 +9,19 @@ Set-StrictMode -Version Latest
 if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
     $ArtifactRoot = Join-Path $PWD '.ci/windows-tools-dist'
 }
-if ([string]::IsNullOrWhiteSpace($GateInputsRoot)) {
-    $GateInputsRoot = Join-Path $PWD '.ci/windows-tools-gate-inputs'
-}
 $ArtifactRoot = [IO.Path]::GetFullPath($ArtifactRoot)
-$GateInputsRoot = [IO.Path]::GetFullPath($GateInputsRoot)
 
 $lock = Get-Content -Raw 'tools/lock.json' | ConvertFrom-Json
-$archiveItem = Get-ChildItem $artifactRoot -File -Filter 'ecs-tools_windows_amd64.zip' -Recurse | Select-Object -First 1
-if ($null -eq $archiveItem) { throw 'packaged Windows benchmark bundle is missing' }
-$archive = $archiveItem.FullName
-$bundle = Join-Path $PWD ('.ci/windows-bundle-' + $Label)
-Expand-Archive -LiteralPath $archive -DestinationPath $bundle -Force
-$stage = $bundle
-foreach ($tool in @('zstd.exe', 'npb-ep.exe', 'npb-ft.exe', 'stream.exe', 'openssl.exe', 'fio.exe', 'nexttrace-tiny.exe')) {
-  if (-not (Test-Path -LiteralPath (Join-Path $stage "bin\$tool") -PathType Leaf)) { throw "packaged workload is missing $tool" }
-}
-$corpusItem = Get-ChildItem $GateInputsRoot -File -Filter ([string]$lock.corpus.name) -Recurse | Select-Object -First 1
-$objdump = Join-Path $GateInputsRoot 'inspector\ucrt64\bin\objdump.exe'
-if ($null -eq $corpusItem -or -not (Test-Path -LiteralPath $objdump -PathType Leaf)) { throw 'packaged E2E gate inputs are incomplete' }
-$corpus = $corpusItem.FullName
-$objdump = [IO.Path]::GetFullPath($objdump)
-& ./scripts/ci/windows_tools_gate.ps1 -StageRoot $stage -ManifestPath (Join-Path $stage 'manifest.json') -LockPath (Join-Path $PWD 'tools/lock.json') -CorpusPath $corpus -ObjdumpPath $objdump
-Write-Output "E2E-$Label validated the seven-tool packaged bundle, including six real workloads with fio/windowsaio and NextTrace prebuilt metadata; performance_valid=false"
-
+$nexttraceLockEntries = @($lock.tools | Where-Object { [string]$_.name -ceq 'nexttrace-tiny' })
+if ($nexttraceLockEntries.Count -ne 1) { throw 'tools lock has no unique NextTrace entry' }
+$expectedNextTraceSha256 = [string]$nexttraceLockEntries[0].windows_asset_sha256.amd64
+if ([string]::IsNullOrWhiteSpace($expectedNextTraceSha256)) { throw 'tools lock has no NextTrace Windows AMD64 asset digest' }
 $label = $Label
 $artifactRoot = [IO.Path]::GetFullPath($ArtifactRoot)
+$runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$bundle = Join-Path $runnerTemp ("ecs-tools-packaged-E2E-$label-" + [guid]::NewGuid().ToString('N'))
+$mainExtract = $null
+$stage = $bundle
 $serverJob = $null
 $certificate = $null
 $installDirectory = $null
@@ -58,36 +44,49 @@ function Get-ArtifactFile {
   return $items[0]
 }
 
-function Get-ArtifactChecksum {
+function Assert-EcsBootstrapPlan {
   param(
-    [Parameter(Mandatory)][object]$ChecksumFile,
-    [Parameter(Mandatory)][string]$Asset
+    [Parameter(Mandatory)][object]$Plan,
+    [Parameter(Mandatory)][ValidateSet('route', 'backtrace')][string]$Module,
+    [Parameter(Mandatory)][string]$Family
   )
-  $checksumMatches = @(
-    foreach ($line in Get-Content -LiteralPath $ChecksumFile.FullName) {
-      $match = [regex]::Match($line, '^\s*([0-9A-Fa-f]{64})\s+\*?(.+?)\s*$')
-      if ($match.Success -and $match.Groups[2].Value -ceq $Asset) {
-        $match.Groups[1].Value.ToLowerInvariant()
-      }
-    }
-  )
-  if ($checksumMatches.Count -ne 1) { throw "checksums.txt has no unique entry for $Asset" }
-  return $checksumMatches[0]
+  if ([string]$Plan.schema_version -cne 'ecs.plan/v1') { throw "$Module plan schema is not ecs.plan/v1" }
+  $modules = @($Plan.modules)
+  if ($modules.Count -ne 1 -or [string]$modules[0].id -cne $Module) { throw "$Module plan selected modules are not exactly [$Module]" }
+  $requiredTools = @($Plan.required_tools)
+  if ($requiredTools.Count -ne 1 -or [string]$requiredTools[0] -cne 'nexttrace-tiny') { throw "$Module plan did not resolve exactly staged nexttrace-tiny" }
+  if ([string]$Plan.ip_version -cne $Family -or [string]$Plan.exposure -cne 'public') {
+    throw "$Module plan family/exposure is not the canonical public $Family contract"
+  }
 }
 
-function Assert-ArtifactChecksum {
-  param(
-    [Parameter(Mandatory)][object]$ChecksumFile,
-    [Parameter(Mandatory)][object]$AssetFile,
-    [Parameter(Mandatory)][string]$Asset
-  )
-  $expected = Get-ArtifactChecksum -ChecksumFile $ChecksumFile -Asset $Asset
-  $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetFile.FullName).Hash.ToLowerInvariant()
-  if ($actual -cne $expected) { throw "$Asset SHA-256 mismatch" }
+function Test-EcsGlobalIPv6Capability {
+  try {
+    $addresses = @(
+      Get-NetIPAddress -AddressFamily IPv6 -AddressState Preferred -ErrorAction Stop |
+        Where-Object {
+          $address = [string]$_.IPAddress
+          $address -notmatch '^(?i:fe80:|fc|fd|::1$|::$)'
+        }
+    )
+    $routes = @(
+      Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction Stop |
+        Where-Object { [string]$_.State -notin @('Dead', 'Invalid', 'Unreachable') }
+    )
+  } catch {
+    Write-Host "NextTrace IPv6 gate: not-tested capability=missing; IPv4 capability evidence is not applied to IPv6; reason=$($_.Exception.Message)"
+    return $false
+  }
+  if ($addresses.Count -eq 0 -or $routes.Count -eq 0) {
+    Write-Host ("NextTrace IPv6 gate: not-tested capability=missing; IPv4 capability evidence is not applied to IPv6; global_addresses={0} default_routes={1}" -f $addresses.Count, $routes.Count)
+    return $false
+  }
+  Write-Host ("NextTrace IPv6 capability detected: global_addresses={0}; default_routes={1}; running canonical IPv6 gates with strict actual responding-hop requirement; IPv4 capability evidence is not applied to IPv6" -f $addresses.Count, $routes.Count)
+  return $true
 }
 
 try {
-  & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken
+  & $icmpPrerequisite -Action Setup -Label "E2E-$label" -OwnerToken $icmpOwnerToken -CapabilityAwareIPv6
   $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
   if (-not (Test-Path -LiteralPath $runnerTemp -PathType Container)) { throw "E2E-$label RUNNER_TEMP is missing: $runnerTemp" }
   $capabilityID = [guid]::NewGuid().ToString('N')
@@ -112,35 +111,73 @@ try {
   $corpusArchive = Get-ArtifactFile -Root $bundleRoot -Filter 'ecs-corpus_silesia-v1.tar.gz'
   $runScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'run.ps1'
   $installScript = Get-ArtifactFile -Root (Join-Path $artifactRoot 'bootstrap') -Filter 'install.ps1'
-  Assert-ArtifactChecksum -ChecksumFile $mainChecksums -AssetFile $mainArchive -Asset 'ecs_windows_amd64.zip'
-  Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $bundleArchive -Asset 'ecs-tools_windows_amd64.zip'
-  Assert-ArtifactChecksum -ChecksumFile $bundleChecksums -AssetFile $corpusArchive -Asset 'ecs-corpus_silesia-v1.tar.gz'
-
-  $nextTraceStage = [IO.Path]::GetFullPath((Join-Path $runnerTemp ("ecs-nexttrace-packaged-E2E-$label-$capabilityID")))
-  Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $nextTraceStage -Force
-  $nextTracePath = [IO.Path]::GetFullPath((Join-Path $nextTraceStage 'bin\nexttrace-tiny.exe'))
+  Expand-Archive -LiteralPath $bundleArchive.FullName -DestinationPath $bundle -Force
+  & ./scripts/ci/windows_tools_gate.ps1 -CheckPackageContract -StageRoot $stage -LockPath (Join-Path $PWD 'tools/lock.json')
+  Write-Output "E2E-$label accepted the packaged seven-tool manifest, licenses, layout, and BUILD producer facts"
+  $nextTracePath = [IO.Path]::GetFullPath((Join-Path $stage 'bin\nexttrace-tiny.exe'))
   if (-not (Test-Path -LiteralPath $nextTracePath -PathType Leaf)) { throw "E2E-$label packaged NextTrace is missing: $nextTracePath" }
   if ([IO.Path]::GetFileName($nextTracePath) -cne 'nexttrace-tiny.exe') { throw "E2E-$label packaged NextTrace has an unexpected file name: $nextTracePath" }
-  $expectedNextTraceSha256 = '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
-  $nextTraceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextTracePath).Hash.ToLowerInvariant()
-  if ($nextTraceSha256 -cne $expectedNextTraceSha256) { throw "E2E-$label packaged NextTrace SHA-256 mismatch: got $nextTraceSha256" }
   & ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
   if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf)) { throw "E2E-$label NextTrace capability evidence is missing: $capabilityPath" }
+  . ./scripts/ci/windows_nexttrace_capability.ps1 -Family IPv4 -Target '1.1.1.1' -MaxHops 12 -NextTracePath $nextTracePath -ExpectedSha256 $expectedNextTraceSha256 -EvidencePath $capabilityPath
+  try {
+    $capabilityEvidence = Get-Content -Raw -LiteralPath $capabilityPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    throw "E2E-$label NextTrace capability evidence is invalid JSON: $($_.Exception.Message)"
+  }
+  $capability = Assert-EcsCapabilityEvidence -Evidence $capabilityEvidence `
+    -ExpectedEvidencePath $capabilityPath `
+    -ExpectedNextTracePath $nextTracePath `
+    -ExpectedFamilyName ipv4 `
+    -ExpectedSha256 $expectedNextTraceSha256 `
+    -ActualSha256 $expectedNextTraceSha256
+  . ./scripts/ci/windows_nexttrace_report_assert.ps1
+
+  & ./scripts/ci/windows_tools_integration.ps1 -Server $label -StageRoot $stage -CorpusArchivePath $corpusArchive.FullName
 
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $zip = [IO.Compression.ZipFile]::OpenRead($mainArchive.FullName)
   try { $mainMembers = @($zip.Entries | ForEach-Object { [string]$_.FullName }) } finally { $zip.Dispose() }
   $expectedMainMembers = @('ecs.exe', 'LICENSE', 'NOTICE', 'README.md', 'README_EN.md', 'SECURITY.md', 'THIRD_PARTY.md')
   if ((@($mainMembers | Sort-Object) -join "`n") -cne (@($expectedMainMembers | Sort-Object) -join "`n")) { throw 'main Windows ZIP member set changed' }
-  $mainExtract = Join-Path $env:RUNNER_TEMP ("ecs-bootstrap-main-$label")
+  $mainExtract = Join-Path $runnerTemp ("ecs-bootstrap-main-$label-" + [guid]::NewGuid().ToString('N'))
   Expand-Archive -LiteralPath $mainArchive.FullName -DestinationPath $mainExtract -Force
   $ecsPath = Join-Path $mainExtract 'ecs.exe'
   if (-not (Test-Path -LiteralPath $ecsPath -PathType Leaf)) { throw 'main Windows ZIP did not extract ecs.exe' }
+  & ./scripts/ci/windows_runtime_contract.ps1 -EcsPath $ecsPath -Label "E2E-$label" -RunNativeTests
+
   $planOutput = @(& $ecsPath plan --lang en --profile standard --only zstd --exposure any 2>&1)
   if ($LASTEXITCODE -ne 0) { throw 'current main ZIP plan failed' }
   $plan = ($planOutput -join "`n") | ConvertFrom-Json
   $requiredTools = @($plan.required_tools)
   if ($requiredTools.Count -ne 1 -or [string]$requiredTools[0] -cne 'zstd') { throw "only-required-tools plan drifted: $($requiredTools -join ',')" }
+
+  $hadPlanToolBin = Test-Path Env:ECS_TOOL_BIN
+  $oldPlanToolBin = [Environment]::GetEnvironmentVariable('ECS_TOOL_BIN', [EnvironmentVariableTarget]::Process)
+  $hadPlanPath = Test-Path Env:PATH
+  $oldPlanPath = [Environment]::GetEnvironmentVariable('PATH', [EnvironmentVariableTarget]::Process)
+  $hadPlanNoColor = Test-Path Env:NO_COLOR
+  $oldPlanNoColor = [Environment]::GetEnvironmentVariable('NO_COLOR', [EnvironmentVariableTarget]::Process)
+  try {
+    $env:ECS_TOOL_BIN = Join-Path $stage 'bin'
+    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+    $env:NO_COLOR = '1'
+    foreach ($planCase in @(
+      [pscustomobject]@{ Module = 'route'; Family = '4'; Arguments = @('--route-targets', 'gate=1.1.1.1') },
+      [pscustomobject]@{ Module = 'backtrace'; Family = '4'; Arguments = @('--backtrace-targets', 'telecom:gate=1.1.1.1') }
+    )) {
+      $planArguments = @('plan', '--lang', 'en', '--only', $planCase.Module, '--exposure', 'public', '--ip-version', $planCase.Family) + $planCase.Arguments
+      $modulePlanOutput = @(& $ecsPath @planArguments 2>&1)
+      if ($LASTEXITCODE -ne 0) { throw "E2E-$label ecs.exe plan --only $($planCase.Module) failed" }
+      try { $modulePlan = ($modulePlanOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop }
+      catch { throw "E2E-$label $($planCase.Module) plan returned invalid JSON: $($_.Exception.Message)" }
+      Assert-EcsBootstrapPlan -Plan $modulePlan -Module $planCase.Module -Family $planCase.Family
+    }
+  } finally {
+    [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', $(if ($hadPlanToolBin) { [string]$oldPlanToolBin } else { $null }), [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable('PATH', $(if ($hadPlanPath) { [string]$oldPlanPath } else { $null }), [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable('NO_COLOR', $(if ($hadPlanNoColor) { [string]$oldPlanNoColor } else { $null }), [EnvironmentVariableTarget]::Process)
+  }
 
   New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot 'main'), (Join-Path $fixtureRoot 'bundle') | Out-Null
   Copy-Item -LiteralPath $mainArchive.FullName -Destination (Join-Path $fixtureRoot 'main/ecs_windows_amd64.zip')
@@ -279,7 +316,14 @@ try {
     & $runScript.FullName --lang en --profile standard --only route --exposure public --ip-version 4 --route-targets "gate=$routeTarget4" --yes --format json --output $routeReportRoot --no-color
     if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 route bootstrap failed" }
     $routeReportItem = Get-ArtifactFile -Root $routeReportRoot -Filter '*.json'
-    & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $routeReportItem.FullName -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
+    try {
+      $routeReport = Get-Content -Raw -LiteralPath $routeReportItem.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+      throw "E2E-$label route bootstrap report is invalid JSON: $($_.Exception.Message)"
+    }
+    $routeAssertion = Assert-EcsCanonicalTraceReport -Report $routeReport -Module route -Family 4 -FamilyName ipv4 -MaxHops 12 -Target $routeTarget4 `
+      -CapabilityDecision $capability.Decision -CapabilityLiveNetworkNotProven $capability.LiveNetworkNotProven
+    Write-EcsBootstrapTraceReportResult -Assertion $routeAssertion -Capability $capability
     if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label route bootstrap did not restore ECS_TOOL_BIN" }
 
     $backtraceTarget4 = '1.1.1.1'
@@ -287,8 +331,51 @@ try {
     & $runScript.FullName --lang en --profile standard --only backtrace --exposure public --ip-version 4 --backtrace-targets "telecom:gate=$backtraceTarget4" --yes --format json --output $backtraceReportRoot --no-color
     if ($LASTEXITCODE -ne 0 -or -not $?) { throw "E2E-$label run.ps1 backtrace bootstrap failed" }
     $backtraceReportItem = Get-ArtifactFile -Root $backtraceReportRoot -Filter '*.json'
-    & ./scripts/ci/windows_nexttrace_report_assert.ps1 -ReportPath $backtraceReportItem.FullName -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 -CapabilityPath $capabilityPath -NextTracePath $nextTracePath
+    try {
+      $backtraceReport = Get-Content -Raw -LiteralPath $backtraceReportItem.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+      throw "E2E-$label backtrace bootstrap report is invalid JSON: $($_.Exception.Message)"
+    }
+    $backtraceAssertion = Assert-EcsCanonicalTraceReport -Report $backtraceReport -Module backtrace -Family 4 -FamilyName ipv4 -MaxHops 20 -Target $backtraceTarget4 `
+      -CapabilityDecision $capability.Decision -CapabilityLiveNetworkNotProven $capability.LiveNetworkNotProven
+    Write-EcsBootstrapTraceReportResult -Assertion $backtraceAssertion -Capability $capability
     if ([string]$env:ECS_TOOL_BIN -cne $sentinelToolBin) { throw "E2E-$label backtrace bootstrap did not restore ECS_TOOL_BIN" }
+
+    if (Test-EcsGlobalIPv6Capability) {
+      $hadTraceToolBin = Test-Path Env:ECS_TOOL_BIN
+      $oldTraceToolBin = [Environment]::GetEnvironmentVariable('ECS_TOOL_BIN', [EnvironmentVariableTarget]::Process)
+      $hadTracePath = Test-Path Env:PATH
+      $oldTracePath = [Environment]::GetEnvironmentVariable('PATH', [EnvironmentVariableTarget]::Process)
+      $hadTraceNoColor = Test-Path Env:NO_COLOR
+      $oldTraceNoColor = [Environment]::GetEnvironmentVariable('NO_COLOR', [EnvironmentVariableTarget]::Process)
+      try {
+        $env:ECS_TOOL_BIN = Join-Path $stage 'bin'
+        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+        $env:NO_COLOR = '1'
+        $target6 = '2606:4700:4700::1111'
+        $routeReportRoot6 = Join-Path $runnerTemp ("ecs-bootstrap-route-ipv6-report-$label")
+        $routeOutput6 = @(& $ecsPath run --lang en --only route --format json --exposure public --ip-version 6 --route-targets "gate=$target6" --yes --output $routeReportRoot6 --no-color 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "E2E-$label ecs.exe IPv6 route run failed: $($routeOutput6 -join "`n")" }
+        $routeReportItem6 = Get-ArtifactFile -Root $routeReportRoot6 -Filter '*.json'
+        try { $routeReport6 = Get-Content -Raw -LiteralPath $routeReportItem6.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw "E2E-$label IPv6 route report is invalid JSON: $($_.Exception.Message)" }
+        $routeAssertion6 = Assert-EcsCanonicalTraceReport -Report $routeReport6 -Module route -Family 6 -FamilyName ipv6 -MaxHops 12 -Target $target6
+        Write-Output ("E2E-$label IPv6 route report passed: schema=ecs.report/v1; status={0}; target={1}; responding_hops={2}" -f $routeAssertion6.Status, $routeAssertion6.Target, $routeAssertion6.RespondingHopCount)
+
+        $backtraceReportRoot6 = Join-Path $runnerTemp ("ecs-bootstrap-backtrace-ipv6-report-$label")
+        $backtraceOutput6 = @(& $ecsPath run --lang en --only backtrace --format json --exposure public --ip-version 6 --backtrace-targets "telecom:gate=$target6" --yes --output $backtraceReportRoot6 --no-color 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "E2E-$label ecs.exe IPv6 backtrace run failed: $($backtraceOutput6 -join "`n")" }
+        $backtraceReportItem6 = Get-ArtifactFile -Root $backtraceReportRoot6 -Filter '*.json'
+        try { $backtraceReport6 = Get-Content -Raw -LiteralPath $backtraceReportItem6.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw "E2E-$label IPv6 backtrace report is invalid JSON: $($_.Exception.Message)" }
+        $backtraceAssertion6 = Assert-EcsCanonicalTraceReport -Report $backtraceReport6 -Module backtrace -Family 6 -FamilyName ipv6 -MaxHops 20 -Target $target6
+        Write-Output ("E2E-$label IPv6 backtrace report passed: schema=ecs.report/v1; status={0}; target={1}; responding_hops={2}" -f $backtraceAssertion6.Status, $backtraceAssertion6.Target, $backtraceAssertion6.RespondingHopCount)
+      } finally {
+        [Environment]::SetEnvironmentVariable('ECS_TOOL_BIN', $(if ($hadTraceToolBin) { [string]$oldTraceToolBin } else { $null }), [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable('PATH', $(if ($hadTracePath) { [string]$oldTracePath } else { $null }), [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable('NO_COLOR', $(if ($hadTraceNoColor) { [string]$oldTraceNoColor } else { $null }), [EnvironmentVariableTarget]::Process)
+      }
+    }
 
     $runWorkAfter = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'ecs-run-*' | ForEach-Object { $_.FullName })
     if (@($runWorkAfter | Where-Object { $runWorkBefore -notcontains $_ }).Count -ne 0) { throw 'run.ps1 left private staging behind' }
@@ -340,7 +427,7 @@ try {
     Remove-Item -LiteralPath $installDirectory -Recurse -Force
     if (Test-Path -LiteralPath $installDirectory) { throw 'install E2E user directory cleanup failed' }
     $installDirectory = $null
-    Write-Output "E2E-$label verified current-commit SHA-256, ZIP extraction, HTTPS run.ps1/install.ps1, private staging, only required_tools=zstd, bootstrap route/backtrace ecs.report/v1 assertions using E2E-runner-generated capability evidence, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
+    Write-Output "E2E-$label verified packaged ZIP execution, HTTPS run.ps1/install.ps1 downloads, private staging, only required_tools=zstd, canonical IPv4 route/backtrace reports, ECS_TOOL_BIN restoration, user-directory install, and cleanup"
   } finally {
     try {
       if ($noProxyDefaultWasPresent) {
@@ -372,6 +459,21 @@ try {
   }
 } finally {
   $cleanupErrors = @()
+  foreach ($temporaryRoot in @(
+    [pscustomobject]@{ Label = 'packaged bundle extraction'; Path = $bundle },
+    [pscustomobject]@{ Label = 'main executable extraction'; Path = $mainExtract }
+  )) {
+    if ($null -ne $temporaryRoot.Path -and (Test-Path -LiteralPath $temporaryRoot.Path)) {
+      try {
+        Remove-Item -LiteralPath $temporaryRoot.Path -Recurse -Force -ErrorAction Stop
+      } catch {
+        $cleanupErrors += "$($temporaryRoot.Label) cleanup failed: $($_.Exception.Message)"
+      }
+    }
+    if ($null -ne $temporaryRoot.Path -and (Test-Path -LiteralPath $temporaryRoot.Path)) {
+      $cleanupErrors += "$($temporaryRoot.Label) remains: $($temporaryRoot.Path)"
+    }
+  }
   if ($null -ne $serverJob) {
     try {
       if ($serverJob.State -notin @('Completed', 'Failed', 'Stopped')) {

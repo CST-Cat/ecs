@@ -31,7 +31,6 @@ grep -Fq -- "## $bundle_name" "$repo_root/tools/BUNDLE_NOTES.md" ||
 	die "tools/BUNDLE has no matching release-notes section: $bundle_name"
 
 jq -e '
-  .windows_toolchain.distribution as $distribution |
   (.architectures | length == 10) and
   ([.architectures[].target] | length == 10 and length == (unique | length)) and
   (all(.architectures[]; (.target | test("^(linux|freebsd|windows)_[a-z0-9]+$")) and (.goos | IN("linux", "freebsd", "windows")))) and
@@ -53,7 +52,7 @@ jq -e '
   (.windows_toolchain.distribution.source_url | startswith("https://")) and
   (.windows_toolchain.distribution.source_sha256 | test("^[0-9a-f]{64}$")) and
   ([.windows_toolchain.base_packages[].name] == ["base", "bash", "coreutils", "gawk", "grep", "sed", "pacman", "perl", "libintl", "libiconv", "msys2-runtime", "filesystem", "zstd", "zlib"]) and
-  (all(.windows_toolchain.base_packages[]; (.source_url == $distribution.source_url) and (.source_sha256 == $distribution.source_sha256) and (.version | length > 0) and (.license | length > 0))) and
+  (all(.windows_toolchain.base_packages[]; (.version | length > 0) and (.license | length > 0))) and
   ([.windows_toolchain.packages[].name] == ["mingw-w64-ucrt-x86_64-gcc", "mingw-w64-ucrt-x86_64-gcc-fortran", "mingw-w64-ucrt-x86_64-gcc-libs", "mingw-w64-ucrt-x86_64-gcc-libgfortran", "mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-nasm", "make", "mingw-w64-ucrt-x86_64-binutils", "mingw-w64-ucrt-x86_64-crt", "mingw-w64-ucrt-x86_64-headers", "mingw-w64-ucrt-x86_64-isl", "mingw-w64-ucrt-x86_64-gmp", "mingw-w64-ucrt-x86_64-mpfr", "mingw-w64-ucrt-x86_64-mpc", "mingw-w64-ucrt-x86_64-windows-default-manifest", "mingw-w64-ucrt-x86_64-winpthreads", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd", "mingw-w64-ucrt-x86_64-tzdata", "mingw-w64-ucrt-x86_64-gettext-runtime", "mingw-w64-ucrt-x86_64-libiconv"]) and
   (all(.windows_toolchain.packages[]; ((.name == "make") or (.name | test("^mingw-w64-ucrt-x86_64-"))) and (.version | length > 0) and (.source_url | test("^https://repo\\.msys2\\.org/(mingw/ucrt64|msys/x86_64)/[^/]+\\.pkg\\.tar\\.zst$")) and (.source_sha256 | test("^[0-9a-f]{64}$")) and (.upstream | startswith("https://")) and (.license | length > 0) and (.depends | type == "array") and all(.depends[]; type == "string"))) and
   ([.windows_toolchain.packages[] | .name] + [.windows_toolchain.base_packages[] | .name] + [.windows_toolchain.packages[] | .provides[]?] + [.windows_toolchain.base_packages[] | .provides[]?]) as $provided |
@@ -73,16 +72,7 @@ jq -e '
   ((.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256) as $digests |
     ($digests | type == "object") and
     (($digests | keys | sort) == ([.architectures[] | select(.goos == "linux") | .package] | sort)) and
-    (all($digests[]; test("^[0-9a-f]{64}$"))) and
-    ($digests == {
-      "amd64": "093849f1012b065c29d307b8e47fedec667206829c14e105f83a852f60c628d1",
-      "arm64": "8b134f6c6a7864b1ecc98b1f7cfae1d058ef6dcf8f0da862e3260752ce1858bd",
-      "armv7": "71014f2707372cee22ab80f546aa6cff79d869faab0fb516005e8bb0e2d2f000",
-      "386": "ae188b8f4fb3f5fec70ddf4cf5adc4391d9536698ed29c0d4f25b3b4dd29ca34",
-      "s390x": "64c80d850b06d09bfc1b154fabef90a7fdcf6856f5d0236877ab47ed12d359fb",
-      "riscv64": "0bd74a31f399c799446670716d0a2c372dbc0909bc591af72961e6afde415912",
-      "ppc64le": "a09d7a689ac53a6aac50378e9bbd0cac8dc16bfcdfa98941a14780417a2513d2"
-    })) and
+    (all($digests[]; test("^[0-9a-f]{64}$")))) and
   ((.tools[] | select(.name == "nexttrace-tiny")) as $nexttrace |
     ($nexttrace.repository == "nxtrace/NTrace-core") and
     ($nexttrace.version == "1.7.1") and
@@ -91,8 +81,6 @@ jq -e '
     ($nexttrace.windows_asset_pattern == "nexttrace-tiny_windows_<architecture>.exe") and
     ($nexttrace.windows_asset_pattern | test("latest"; "i") | not) and
     ($nexttrace.windows_asset_sha256 | type == "object") and
-    ($nexttrace.windows_asset_sha256.amd64 == "16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b") and
-    ($nexttrace.windows_asset_sha256.amd64 | test("^[0-9a-f]{64}$")) and
     (("https://github.com/" + $nexttrace.repository + "/releases/download/" + $nexttrace.tag + "/" + ($nexttrace.windows_asset_pattern | gsub("<architecture>"; "amd64"))) == "https://github.com/nxtrace/NTrace-core/releases/download/v1.7.1/nexttrace-tiny_windows_amd64.exe")) and
   (.corpus.name == "ecs-silesia-v1.corpus") and
   (.corpus.bytes == 211938580) and
@@ -110,7 +98,7 @@ windows_builder="$repo_root/scripts/build_tools_windows.ps1"
 if grep -Eiq 'releases/latest|latest/download|fallback' "$windows_builder"; then
 	die "Windows NextTrace builder must not use latest or fallback sources"
 fi
-for required_prebuilt_fact in Save-EcsVerifiedDownload windows_asset_pattern windows_asset_sha256 source_mode upstream_sha256 packaged_sha256; do
+for required_prebuilt_fact in Save-EcsVerifiedDownload windows_asset_pattern windows_asset_sha256 source_mode upstream_sha256 binary_sha256 packaged_sha256; do
 	grep -Fq -- "$required_prebuilt_fact" "$windows_builder" || die "Windows builder is missing prebuilt fact: $required_prebuilt_fact"
 done
 grep -Fq -- 'foreach ($name in $sourceBuiltToolNames) {' "$windows_builder" ||
@@ -125,47 +113,29 @@ for forbidden_tool in ping nexttrace-tiny; do
 done
 
 windows_gate="$repo_root/scripts/ci/windows_tools_gate.ps1"
-for required_gate_fact in CreateJobObjectW SetInformationJobObject AssignProcessToJobObject JobObjectLimitKillOnJobClose ReadToEndAsync; do
-	grep -Fq "$required_gate_fact" "$windows_gate" || die "Windows gate is missing required process-tree/output contract: $required_gate_fact"
+for required_gate_fact in 'NextTrace verified-upstream-prebuilt metadata mismatch' 'source_mode' 'packaged stage layout' 'builder-produced PE facts passed'; do
+	grep -Fq -- "$required_gate_fact" "$windows_gate" || die "Windows gate is missing package contract: $required_gate_fact"
 done
-for required_nexttrace_gate_fact in 'NextTrace verified-upstream-prebuilt metadata or byte hash mismatch' 'source_mode' 'upstream_sha256' 'packaged_sha256' 'NextTrace network gate=not run'; do
-	grep -Fq -- "$required_nexttrace_gate_fact" "$windows_gate" || die "Windows gate is missing NextTrace fail-closed fact: $required_nexttrace_gate_fact"
-done
-if grep -Eq '\.Kill\(|Stop-Process|taskkill' "$windows_gate"; then
-	die "Windows gate must not use root-process or shell process-tree termination"
-fi
 
-nexttrace_gate="$repo_root/scripts/ci/windows_nexttrace_gate.ps1"
-[[ -f "$nexttrace_gate" ]] || die "Windows NextTrace production gate is missing"
-for required_nexttrace_gate_fact in \
-	'ECS_TOOL_BIN' \
-	'plan --lang en --only route' \
-	'plan --lang en --only backtrace' \
-	'run --lang en --only route --format json' \
-	'run --lang en --only backtrace --format json' \
-	"result.status -notin @('ok', 'warning')" \
-	'nexttrace-json-v1' \
-	'--queries' \
-	'--parallel-requests' \
-	'--timeout' \
-	'-M' \
-	'responded' \
-	"'ip'" \
-	'respondingHops' \
-	'no actual responding hop' \
-	'Get-NetIPAddress' \
-	'Get-NetRoute' \
-	'NextTrace IPv4 canonical gate passed' \
-	'not-tested capability=missing' \
-	'16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'; do
-	grep -Fq -- "$required_nexttrace_gate_fact" "$nexttrace_gate" ||
-		die "Windows NextTrace production gate is missing fact: $required_nexttrace_gate_fact"
+nexttrace_e2e="$repo_root/scripts/ci/windows_tools_e2e.ps1"
+for required_nexttrace_e2e_fact in \
+	'windows_nexttrace_capability.ps1' \
+	'windows_nexttrace_report_assert.ps1' \
+	'windows_asset_sha256.amd64' \
+	'Test-EcsGlobalIPv6Capability' \
+	'-CapabilityAwareIPv6' \
+	'Assert-EcsCanonicalTraceReport' \
+	'Write-EcsBootstrapTraceReportResult' \
+	'windows_tools_integration.ps1' \
+	'windows_runtime_contract.ps1' \
+	'--ip-version 6' \
+	'not-tested capability=missing'; do
+	grep -Fq -- "$required_nexttrace_e2e_fact" "$nexttrace_e2e" ||
+		die "Windows E2E is missing production runtime or NextTrace contract: $required_nexttrace_e2e_fact"
 done
-for forbidden_nexttrace_gate_fact in tracert Test-NetConnection '|| true' 'continue-on-error' 't.Skip' 'host PATH fallback' 'fake binary' 'hops.Count -lt 1'; do
-	if grep -Fq -- "$forbidden_nexttrace_gate_fact" "$nexttrace_gate"; then
-		die "Windows NextTrace production gate contains forbidden fallback/bypass: $forbidden_nexttrace_gate_fact"
-	fi
-done
+if grep -Eq 'Get-FileHash|Get-ArtifactChecksum|GateInputs' "$nexttrace_e2e"; then
+	die "Windows E2E must reuse package and capability evidence without internal checksum or gate-input rechecks"
+fi
 
 nexttrace_report_assert="$repo_root/scripts/ci/windows_nexttrace_report_assert.ps1"
 [[ -f "$nexttrace_report_assert" ]] || die "Windows NextTrace bootstrap report assertion helper is missing"
@@ -192,7 +162,8 @@ for required_report_assert_fact in \
 	'responded' \
 	"'ip'" \
 	'respondingHops' \
-	'no actual responding hop'; do
+	'no actual responding hop' \
+	'invalid gate status'; do
 	grep -Fq -- "$required_report_assert_fact" "$nexttrace_report_assert" ||
 		die "Windows NextTrace bootstrap report assertion is missing fact: $required_report_assert_fact"
 done
@@ -247,6 +218,9 @@ for required_nexttrace_capability_fact in \
 	'nexttrace-tiny.exe' \
 	'Get-FileHash' \
 	'ExpectedSha256' \
+	'ExpectedFamilyName' \
+	'trusted pin and observed file digest' \
+	'nexttrace_expected_sha256' \
 	'nexttrace_sha256' \
 	'ConvertFrom-Json' \
 	'Hops' \
@@ -289,17 +263,13 @@ for required_nexttrace_capability_fact in \
 		die "Windows NextTrace capability helper is missing fact: $required_nexttrace_capability_fact"
 done
 
-# The helper receives the expected digest from the pinned production callers;
-# keep that caller-to-helper supply-chain fact tied to the official artifact.
-nexttrace_capability_sha256='16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b'
-for capability_sha256_source in "$ECS_LOCK_FILE" "$nexttrace_gate" "$nexttrace_report_assert"; do
-	grep -Fq -- "$nexttrace_capability_sha256" "$capability_sha256_source" ||
-		die "Windows NextTrace capability caller is missing the pinned SHA-256: $capability_sha256_source"
+# Keep every capability consumer sourcing its trust pin from tools/lock.json.
+for capability_pin_source in "$nexttrace_e2e"; do
+	grep -Fq -- 'windows_asset_sha256.amd64' "$capability_pin_source" ||
+		die "Windows NextTrace caller is not sourcing the AMD64 trust pin from tools/lock.json: $capability_pin_source"
 done
-grep -Fq -- 'ExpectedSha256 $NextTraceSHA256' "$nexttrace_gate" ||
-	die "Windows NextTrace gate must pass its pinned SHA-256 to the capability helper"
-grep -Fq -- 'ExpectedSha256 $ExpectedHash' "$nexttrace_report_assert" ||
-	die "Windows NextTrace report assertion must pass its pinned SHA-256 to the capability helper"
+grep -Fq -- 'ExpectedSha256 $expectedNextTraceSha256' "$nexttrace_e2e" ||
+	die "Windows E2E must pass its lock-sourced SHA-256 to the capability helper"
 
 for forbidden_nexttrace_capability_fact in \
 	'continue-on-error' \

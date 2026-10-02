@@ -11,7 +11,6 @@ set -euo pipefail
 #   <stage-root>/<target>/bin/{sysbench,zstd,openssl,fio,iperf3}
 #   <stage-root>/<target>/LICENSES/
 #   <stage-root>/<target>/provenance.json
-#   <stage-root>/<target>/SHA256SUMS
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$ECS_REPO_ROOT"
@@ -182,7 +181,7 @@ ecs_freebsd_c_build_fio "$work" "$stage" "$jobs"
 ecs_freebsd_c_build_iperf3 "$work" "$stage" "$jobs"
 
 # Stage policy strip: all five final tools are stripped once BEFORE
-# provenance/SHA256SUMS describe them; each binary is then checked against the
+# provenance records them; each binary is then checked against the
 # static FreeBSD ELF contract. The downstream release-artifact verification
 # and real FreeBSD tools gate cover tree-level and runtime behavior.
 ecs_freebsd_c_strip_release_binaries "$stage"
@@ -204,17 +203,6 @@ for tool in sysbench zstd openssl fio iperf3; do
 done
 
 ecs_freebsd_c_write_provenance "$stage" "$target" "$triple"
-
-# Package-level checksum manifest over the whole fragment (bin, licenses and
-# provenance; SHA256SUMS itself is excluded by construction). The per-tool
-# sha256 values stay in provenance.json as record fields; the fragment's
-# integrity is asserted once with `sha256sum -c` at merge time instead of
-# being re-asserted tool by tool.
-(
-  cd "$stage"
-  find bin LICENSES provenance.json -type f -print0 | LC_ALL=C sort -z |
-    xargs -0 sha256sum >SHA256SUMS
-)
 
 # Hard contract checks: exactly the five C tools, no extras, no manifest yet.
 expected=(sysbench zstd openssl fio iperf3)

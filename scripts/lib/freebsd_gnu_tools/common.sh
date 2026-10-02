@@ -152,7 +152,7 @@ ecs_freebsd_gnu_assert_libgomp() {
 # Stage-level release post-processing for the GNU/OpenMP tools stage.
 #
 # Runs ONCE, after ecs_freebsd_gnu_build_npb / ecs_freebsd_gnu_build_stream
-# have finished and before provenance/SHA256SUMS are written. The per-tool
+# have finished and before provenance is written. The per-tool
 # builds already proved FreeBSD/static/arch and GOMP_ present / __kmpc_
 # absent (ecs_freebsd_gnu_assert_libgomp) while the symbol table still
 # exists; that proof must stay where it is, before the strip —
@@ -185,7 +185,7 @@ ecs_freebsd_gnu_strip_release_binaries() {
 # and SHA-256 (NPB for npb-ep/npb-ft, STREAM for stream).
 ecs_freebsd_gnu_write_provenance() {
   local stage=$1 target=$2 triple=$3 gcc_version=$4
-  local npb_url=$5 npb_sha=$6 stream_url=$7 stream_sha=$8
+  local npb_version=$5 npb_url=$6 npb_sha=$7 stream_url=$8 stream_sha=$9
   local bin="$stage/bin"
   local -a records=()
   local name sha source_json
@@ -194,8 +194,8 @@ ecs_freebsd_gnu_write_provenance() {
     sha=$(sha256sum "$bin/$name" | awk '{print $1}')
     case "$name" in
       npb-ep | npb-ft)
-        source_json=$(jq -cn --arg url "$npb_url" --arg sha "$npb_sha" \
-          '{name:"NPB",version:"3.4.4",url:$url,sha256:$sha}')
+        source_json=$(jq -cn --arg version "$npb_version" --arg url "$npb_url" --arg sha "$npb_sha" \
+          '{name:"NPB",version:$version,url:$url,sha256:$sha}')
         ;;
       stream)
         source_json=$(jq -cn --arg url "$stream_url" --arg sha "$stream_sha" \

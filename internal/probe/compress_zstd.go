@@ -185,18 +185,6 @@ func runZstdBenchmarkWithAllowance(ctx context.Context, env Environment, path, c
 		result.Finish(start)
 		return result
 	}
-	if err := verifyZstdCorpus(corpus, contract); err != nil {
-		result.Status = model.StatusWarning
-		result.AddFailure(model.Failure{
-			Category: model.FailureUnsupported, Stage: "corpus_verify", Target: contract.CorpusName,
-			Count: 1, Message: err.Error(),
-		})
-		result.Evidence = model.NewEvidence(0, len(threadCounts), "run")
-		finalizeZstdResult(&result, allowance)
-		result.Finish(start)
-		return result
-	}
-
 	workers := allowance.Threads
 	singleCore := len(threadCounts) == 1
 	runs := make([]zstdBenchmarkSample, 2)

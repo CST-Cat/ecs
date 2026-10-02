@@ -1,11 +1,8 @@
-[CmdletBinding(DefaultParameterSetName = 'FullGate')]
+[CmdletBinding(DefaultParameterSetName = 'PackageContract')]
 param(
-    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$StageRoot,
-    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$ManifestPath,
-    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$LockPath,
-    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$CorpusPath,
-    [Parameter(Mandatory, ParameterSetName = 'FullGate')][string]$ObjdumpPath,
-    [Parameter(ParameterSetName = 'FullGate')][int]$TimeoutSeconds = 180,
+    [Parameter(Mandatory, ParameterSetName = 'PackageContract')][switch]$CheckPackageContract,
+    [Parameter(Mandatory, ParameterSetName = 'PackageContract')][string]$StageRoot,
+    [Parameter(Mandatory, ParameterSetName = 'PackageContract')][string]$LockPath,
     [Parameter(Mandatory, ParameterSetName = 'NoAdminOperation')][switch]$CheckOrdinaryUser
 )
 
@@ -24,128 +21,6 @@ function Get-EcsGateJson {
     }
     try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
     catch { Stop-EcsWindowsGate "invalid JSON file $Path`: $($_.Exception.Message)" }
-}
-
-function ConvertTo-EcsProcessArgument {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
-    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
-    $builder = New-Object Text.StringBuilder
-    [void]$builder.Append('"')
-    $backslashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') {
-            $backslashes++
-            continue
-        }
-        if ($character -eq '"') {
-            for ($index = 0; $index -lt (2 * $backslashes + 1); $index++) { [void]$builder.Append('\') }
-            [void]$builder.Append('"')
-        } else {
-            for ($index = 0; $index -lt $backslashes; $index++) { [void]$builder.Append('\') }
-            [void]$builder.Append($character)
-        }
-        $backslashes = 0
-    }
-    for ($index = 0; $index -lt (2 * $backslashes); $index++) { [void]$builder.Append('\') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-function Ensure-EcsWindowsJobObjectType {
-    if ('EcsWindowsJobObject' -as [type]) { return }
-    Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-
-public static class EcsWindowsJobObject
-{
-    private const uint JobObjectExtendedLimitInformationClass = 9;
-    private const uint JobObjectLimitKillOnJobClose = 0x2000;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct JobObjectBasicLimitInformation
-    {
-        public long PerProcessUserTimeLimit;
-        public long PerJobUserTimeLimit;
-        public uint LimitFlags;
-        public UIntPtr MinimumWorkingSetSize;
-        public UIntPtr MaximumWorkingSetSize;
-        public uint ActiveProcessLimit;
-        public UIntPtr Affinity;
-        public uint PriorityClass;
-        public uint SchedulingClass;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct IoCounters
-    {
-        public ulong ReadOperationCount;
-        public ulong WriteOperationCount;
-        public ulong OtherOperationCount;
-        public ulong ReadTransferCount;
-        public ulong WriteTransferCount;
-        public ulong OtherTransferCount;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct JobObjectExtendedLimitInformation
-    {
-        public JobObjectBasicLimitInformation BasicLimitInformation;
-        public IoCounters IoInfo;
-        public UIntPtr ProcessMemoryLimit;
-        public UIntPtr JobMemoryLimit;
-        public UIntPtr PeakProcessMemoryUsed;
-        public UIntPtr PeakJobMemoryUsed;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern IntPtr CreateJobObjectW(IntPtr jobAttributes, string name);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetInformationJobObject(
-        IntPtr job,
-        uint informationClass,
-        ref JobObjectExtendedLimitInformation information,
-        uint informationLength);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr handle);
-
-    private static void ThrowLastWin32Error(string operation)
-    {
-        throw new Win32Exception(Marshal.GetLastWin32Error(), operation);
-    }
-
-    public static IntPtr CreateKillOnCloseJob()
-    {
-        IntPtr job = CreateJobObjectW(IntPtr.Zero, null);
-        if (job == IntPtr.Zero) ThrowLastWin32Error("CreateJobObjectW");
-        JobObjectExtendedLimitInformation information = new JobObjectExtendedLimitInformation();
-        information.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
-        uint length = (uint)Marshal.SizeOf(typeof(JobObjectExtendedLimitInformation));
-        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformationClass, ref information, length))
-        {
-            CloseHandle(job);
-            ThrowLastWin32Error("SetInformationJobObject");
-        }
-        return job;
-    }
-
-    public static void Assign(IntPtr job, IntPtr process)
-    {
-        if (!AssignProcessToJobObject(job, process)) ThrowLastWin32Error("AssignProcessToJobObject");
-    }
-
-    public static void Close(IntPtr job)
-    {
-        if (job != IntPtr.Zero && !CloseHandle(job)) ThrowLastWin32Error("CloseHandle(job)");
-    }
-}
-'@
 }
 
 function Ensure-EcsWindowsTokenType {
@@ -289,462 +164,152 @@ function Invoke-EcsNoAdminOperationCheck {
     }
 }
 
-function Assert-EcsGlobalPathUnchanged {
-    param([Parameter(Mandatory)][pscustomobject]$Evidence)
-    $machinePathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::Machine)
-    $userPathAfter = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
-    if ($Evidence.MachinePath -cne $machinePathAfter -or $Evidence.UserPath -cne $userPathAfter) {
-        Stop-EcsWindowsGate 'real workload changed the Machine or User PATH'
-    }
-    Write-Host 'no-admin-operation check: real workload Machine/User PATH remained unchanged'
-}
 
-function Invoke-EcsWindowsProcess {
+function Assert-EcsWindowsPackageContract {
     param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ArgumentList,
-        [Parameter(Mandatory)][string]$WorkingDirectory,
-        [hashtable]$Environment = @{},
-        [int]$Timeout = 180
+        [Parameter(Mandatory)][string]$PackageStage,
+        [Parameter(Mandatory)][object]$Lock
     )
 
-    Ensure-EcsWindowsJobObjectType
-    $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $FilePath
-    $start.Arguments = (($ArgumentList | ForEach-Object { ConvertTo-EcsProcessArgument $_ }) -join ' ')
-    $start.WorkingDirectory = $WorkingDirectory
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($key in $Environment.Keys) {
-        $start.EnvironmentVariables[$key] = [string]$Environment[$key]
+    $manifest = Get-EcsGateJson -Path (Join-Path $PackageStage 'manifest.json')
+    $expectedTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio', 'nexttrace-tiny')
+    if ([string]$Lock.schema_version -cne 'ecs.tools.lock/v1' -or (@($Lock.windows_tools) -join '|') -cne ($expectedTools -join '|')) {
+        Stop-EcsWindowsGate 'Windows tool set is not the frozen seven-tool contract'
     }
-    $process = New-Object Diagnostics.Process
-    $process.StartInfo = $start
-    $job = [IntPtr]::Zero
-    $stdoutTask = $null
-    $stderrTask = $null
-    $started = $false
-    $assigned = $false
-    try {
-        $job = [EcsWindowsJobObject]::CreateKillOnCloseJob()
-        if (-not $process.Start()) { Stop-EcsWindowsGate "could not start $FilePath" }
-        $started = $true
-        [EcsWindowsJobObject]::Assign($job, $process.Handle)
-        $assigned = $true
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($Timeout * 1000)) {
-            [EcsWindowsJobObject]::Close($job)
-            $job = [IntPtr]::Zero
-            $process.WaitForExit()
-            [void]$stdoutTask.GetAwaiter().GetResult()
-            [void]$stderrTask.GetAwaiter().GetResult()
-            Stop-EcsWindowsGate "$([IO.Path]::GetFileName($FilePath)) timed out after ${Timeout}s; Job Object terminated the process tree"
+    $targetFacts = @($Lock.architectures | Where-Object { [string]$_.target -ceq 'windows_amd64' })
+    if ($targetFacts.Count -ne 1 -or [string]$targetFacts[0].goos -cne 'windows' -or
+        [string]$targetFacts[0].goarch -cne 'amd64' -or [string]$targetFacts[0].package -cne 'amd64') {
+        Stop-EcsWindowsGate 'tools lock has no unique windows_amd64 target facts'
+    }
+    if (@($Lock.windows_dll_allowlist).Count -eq 0) {
+        Stop-EcsWindowsGate 'Windows DLL import allowlist is empty'
+    }
+
+    $nexttraceLocked = @($Lock.tools | Where-Object { [string]$_.name -ceq 'nexttrace-tiny' })
+    if ($nexttraceLocked.Count -ne 1) { Stop-EcsWindowsGate 'NextTrace lock identity is missing or duplicated' }
+    $nexttrace = $nexttraceLocked[0]
+    $nexttraceAssetPattern = [string]$nexttrace.windows_asset_pattern
+    if ([string]$nexttrace.upstream -cne 'https://github.com/nxtrace/NTrace-core' -or
+        [string]$nexttrace.repository -cne 'nxtrace/NTrace-core' -or
+        [string]$nexttrace.version -cne '1.7.1' -or [string]$nexttrace.tag -cne 'v1.7.1' -or
+        [string]$nexttrace.commit -cne 'c9919828fcd8c3103827d08bb26d69e9bf538299' -or
+        $nexttraceAssetPattern -cne 'nexttrace-tiny_windows_<architecture>.exe') {
+        Stop-EcsWindowsGate 'NextTrace lock identity is not the pinned v1.7.1 Windows asset'
+    }
+    $nexttraceAssetName = $nexttraceAssetPattern.Replace('<architecture>', [string]$targetFacts[0].package)
+    $nexttraceAssetUrl = "https://github.com/$($nexttrace.repository)/releases/download/$($nexttrace.tag)/$nexttraceAssetName"
+
+    if ([string]$manifest.schema_version -cne 'ecs-tools.manifest/v1' -or
+        [string]$manifest.target -cne 'windows_amd64' -or [string]$manifest.goos -cne 'windows' -or
+        [string]$manifest.goarch -cne 'amd64' -or [string]$manifest.architecture -cne 'amd64' -or
+        (@($manifest.supported_architectures) -join '|') -cne 'amd64' -or
+        (@($manifest.supported_targets) -join '|') -cne 'windows_amd64') {
+        Stop-EcsWindowsGate 'manifest target facts are not the frozen windows_amd64 contract'
+    }
+    if ([string]$manifest.build.toolchain_mode -cne 'native' -or
+        [string]$manifest.build.build_triplet -cne 'x86_64-w64-mingw32' -or
+        [string]$manifest.build.target_triplet -cne 'x86_64-w64-mingw32' -or
+        [string]$manifest.build.smoke_runner -cne 'direct' -or
+        [string]$manifest.build.validation.scope -cne 'functional' -or
+        [bool]$manifest.build.validation.performance_valid) {
+        Stop-EcsWindowsGate 'manifest build facts are not the frozen native functional contract'
+    }
+
+    $manifestTools = @($manifest.tools)
+    if (($manifestTools.name -join '|') -cne ($expectedTools -join '|')) {
+        Stop-EcsWindowsGate 'manifest tool set/order differs from tools lock'
+    }
+    $binDir = Join-Path $PackageStage 'bin'
+    $licenseDir = Join-Path $PackageStage 'LICENSES'
+    if (-not (Test-Path -LiteralPath $binDir -PathType Container) -or
+        -not (Test-Path -LiteralPath $licenseDir -PathType Container)) {
+        Stop-EcsWindowsGate 'package has no bin or LICENSES directory'
+    }
+    foreach ($license in @('ZSTD-LICENSE', 'ZSTD-COPYING', 'NPB-README.txt', 'NPB-LICENSE.txt', 'OPENSSL-LICENSE.txt', 'FIO-COPYING', 'NEXTTRACE-LICENSE', 'STREAM-LICENSE.txt')) {
+        $licensePath = Join-Path $licenseDir $license
+        if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf) -or (Get-Item -LiteralPath $licensePath).Length -eq 0) {
+            Stop-EcsWindowsGate "missing or empty license file: $license"
         }
-        $process.WaitForExit()
-        [EcsWindowsJobObject]::Close($job)
-        $job = [IntPtr]::Zero
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $stdout; Stderr = $stderr }
-    } finally {
-        if ($job -ne [IntPtr]::Zero) {
-            [EcsWindowsJobObject]::Close($job)
-            $job = [IntPtr]::Zero
-            if ($started -and $assigned) {
-                $process.WaitForExit()
+    }
+    $binEntries = @(Get-ChildItem -LiteralPath $binDir -Force)
+    if ($binEntries.Count -ne $expectedTools.Count -or @($binEntries | Where-Object { $_.PSIsContainer }).Count -ne 0) {
+        Stop-EcsWindowsGate 'package bin layout is not seven direct files'
+    }
+    foreach ($name in $expectedTools) {
+        $binary = Join-Path $binDir "$name.exe"
+        if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -LiteralPath $binary).Length -le 0) {
+            Stop-EcsWindowsGate "missing or empty binary $name.exe"
+        }
+    }
+    if (@(Get-ChildItem -LiteralPath $PackageStage -Recurse -File -Filter '*.dll').Count -ne 0) {
+        Stop-EcsWindowsGate 'bundle contains an external DLL'
+    }
+
+    foreach ($manifestTool in $manifestTools) {
+        $name = [string]$manifestTool.name
+        if ($name -eq 'nexttrace-tiny') {
+            $parameters = $manifestTool.parameters
+            if ([string]$manifestTool.upstream -cne [string]$nexttrace.upstream -or
+                [string]$manifestTool.version -cne [string]$nexttrace.version -or
+                [string]$manifestTool.tag_or_commit -cne [string]$nexttrace.tag -or
+                [string]$manifestTool.source -cne $nexttraceAssetUrl -or
+                [string]$manifestTool.architecture -cne 'amd64' -or
+                [string]$manifestTool.license -cne 'GPL-3.0-only' -or
+                [string]$parameters.repository -cne [string]$nexttrace.repository -or
+                [string]$parameters.tag -cne [string]$nexttrace.tag -or
+                [string]$parameters.release_commit -cne [string]$nexttrace.commit -or
+                [string]$parameters.provenance -cne 'upstream official release binary' -or
+                [string]$parameters.source_mode -cne 'verified-upstream-prebuilt' -or
+                @($parameters.dependency_allowlist).Count -eq 0 -or
+                (@($parameters.dependency_allowlist) -join '|') -cne (@($Lock.windows_dll_allowlist) -join '|')) {
+                Stop-EcsWindowsGate 'NextTrace verified-upstream-prebuilt metadata mismatch'
             }
-        }
-        $process.Dispose()
-    }
-}
-
-function Assert-EcsProcessSucceeded {
-    param(
-        [Parameter(Mandatory)][pscustomobject]$Result,
-        [Parameter(Mandatory)][string]$Description
-    )
-    if ($Result.ExitCode -ne 0) {
-        Stop-EcsWindowsGate "$Description failed with exit code $($Result.ExitCode): $($Result.Stderr.Trim())"
-    }
-}
-
-function Assert-EcsText {
-    param(
-        [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Pattern,
-        [Parameter(Mandatory)][string]$Description
-    )
-    if ($Text -notmatch $Pattern) {
-        Stop-EcsWindowsGate "$Description was not recognized"
-    }
-}
-
-function Get-EcsPeFacts {
-    param(
-        [Parameter(Mandatory)][string]$Objdump,
-        [Parameter(Mandatory)][string]$Binary,
-        [Parameter(Mandatory)][string[]]$Allowlist
-    )
-    $result = Invoke-EcsWindowsProcess -FilePath $Objdump -ArgumentList @('-p', $Binary) -WorkingDirectory (Split-Path -Parent $Binary) -Timeout 30
-    Assert-EcsProcessSucceeded -Result $result -Description "PE inspection of $([IO.Path]::GetFileName($Binary))"
-    $peText = $result.Stdout + $result.Stderr
-    $machineMatch = [regex]::Match($peText, '(?im)\bfile format\s+(?<machine>\S+)')
-    $machine = if ($machineMatch.Success) { $machineMatch.Groups['machine'].Value } else { '' }
-    if ($machine -ne 'pei-x86-64') {
-        Stop-EcsWindowsGate "$(Split-Path -Leaf $Binary) is not a PE x86-64 executable"
-    }
-    $imports = @([regex]::Matches($peText, '(?im)^\s*DLL Name:\s*(?<name>\S+)\s*$') | ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
-    $nonSystemImports = @(
-        foreach ($import in $imports) {
-            if (-not (Test-EcsAllowedImport -Name $import -Allowlist $Allowlist) -or
-                $import -match '(?i)^(libgcc|libgomp|libwinpthread|libstdc\+\+|libgfortran|libssl|libcrypto|cygwin|msys)') {
-                $import
+            foreach ($factName in @('pe_machine', 'pe_imports', 'imports_checked', 'fully_static', 'stripped')) {
+                if ($null -eq $parameters.PSObject.Properties[$factName]) {
+                    Stop-EcsWindowsGate "NextTrace manifest omits producer fact $factName"
+                }
             }
+            if ([string]$parameters.pe_machine -cne 'pei-x86-64' -or -not [bool]$parameters.imports_checked -or -not [bool]$parameters.fully_static) {
+                Stop-EcsWindowsGate 'NextTrace producer facts are incomplete'
+            }
+            continue
         }
-    )
-    $fullyStatic = $nonSystemImports.Count -eq 0
-    if (-not $fullyStatic) {
-        Stop-EcsWindowsGate "$(Split-Path -Leaf $Binary) imports non-self-contained DLLs: $($nonSystemImports -join ', ')"
-    }
-    $sections = Invoke-EcsWindowsProcess -FilePath $Objdump -ArgumentList @('-h', $Binary) -WorkingDirectory (Split-Path -Parent $Binary) -Timeout 30
-    Assert-EcsProcessSucceeded -Result $sections -Description "PE section inspection of $([IO.Path]::GetFileName($Binary))"
-    $symbols = Invoke-EcsWindowsProcess -FilePath $Objdump -ArgumentList @('-t', $Binary) -WorkingDirectory (Split-Path -Parent $Binary) -Timeout 30
-    Assert-EcsProcessSucceeded -Result $symbols -Description "PE symbol inspection of $([IO.Path]::GetFileName($Binary))"
-    $sectionText = $sections.Stdout + $sections.Stderr
-    $symbolText = $symbols.Stdout + $symbols.Stderr
-    $sectionNames = @(
-        [regex]::Matches($sectionText, '(?im)^\s*\d+\s+(?<name>\.[^\s]+)(?:\s|$)') |
-            ForEach-Object { $_.Groups['name'].Value }
-    )
-    $forbiddenSections = @($sectionNames | Where-Object {
-        $_ -match '^\.(?:debug|zdebug|stab|gnu_debug|symtab|strtab)'
-    })
-    $hasDebuggingSectionFlag = $sectionText -match '(?im)^\s+.*\bDEBUGGING\b'
-    $noSymbols = $symbolText -match '(?im)^\s*no symbols\s*$'
-    $stripped = ($forbiddenSections.Count -eq 0) -and (-not $hasDebuggingSectionFlag) -and $noSymbols
-    return [pscustomobject]@{
-        Machine = $machine
-        Imports = @($imports)
-        ImportsChecked = $true
-        FullyStatic = [bool]$fullyStatic
-        Stripped = [bool]$stripped
-    }
-}
 
-function Test-EcsAllowedImport {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string[]]$Allowlist
-    )
-    foreach ($pattern in $Allowlist) {
-        if ($Name -like $pattern) { return $true }
-    }
-    return $false
-}
-
-function New-EcsGateWorkDirectory {
-    $path = Join-Path ([IO.Path]::GetTempPath()) ("ecs-windows-tools-gate." + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Force -Path $path | Out-Null
-    return $path
-}
-
-function New-EcsFixedSample {
-    param(
-        [Parameter(Mandatory)][string]$Source,
-        [Parameter(Mandatory)][string]$Destination,
-        [int]$Bytes = 1048576
-    )
-    $input = [IO.File]::OpenRead($Source)
-    $output = [IO.File]::Open($Destination, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try {
-        $buffer = New-Object byte[] 65536
-        $remaining = $Bytes
-        while ($remaining -gt 0) {
-            $read = $input.Read($buffer, 0, [Math]::Min($buffer.Length, $remaining))
-            if ($read -le 0) { Stop-EcsWindowsGate "corpus is shorter than $Bytes bytes" }
-            $output.Write($buffer, 0, $read)
-            $remaining -= $read
+        $lockedName = if ($name -eq 'npb-ft') { 'npb-ep' } else { $name }
+        $lockedTools = @($Lock.tools | Where-Object { [string]$_.name -ceq $lockedName })
+        if ($lockedTools.Count -ne 1) { Stop-EcsWindowsGate "manifest identity mismatch for $name" }
+        $locked = $lockedTools[0]
+        $lockedVersion = if ($locked.PSObject.Properties.Name -contains 'version') { [string]$locked.version } else { '' }
+        $lockedTag = if ($locked.PSObject.Properties.Name -contains 'tag') { [string]$locked.tag } else { '' }
+        if (($lockedVersion -and [string]$manifestTool.version -cne $lockedVersion) -or
+            ($lockedTag -and [string]$manifestTool.tag_or_commit -cne $lockedTag) -or
+            (-not $lockedVersion -and [string]$manifestTool.version -eq '') -or
+            (-not $lockedTag -and [string]$manifestTool.tag_or_commit -eq '')) {
+            Stop-EcsWindowsGate "manifest identity mismatch for $name"
         }
-    } finally {
-        $input.Dispose()
-        $output.Dispose()
+        $expectedSource = if ($locked.PSObject.Properties.Name -contains 'repository') {
+            "git+https://github.com/$($locked.repository).git@$($locked.commit)"
+        } else {
+            [string]$locked.source_url
+        }
+        if ([string]$manifestTool.source -cne $expectedSource) {
+            Stop-EcsWindowsGate "manifest source mismatch for $name"
+        }
+        $parameters = $manifestTool.parameters
+        if ([string]$parameters.pe_machine -cne 'pei-x86-64' -or
+            -not [bool]$parameters.imports_checked -or -not [bool]$parameters.fully_static -or
+            -not [bool]$parameters.stripped -or
+            (@($parameters.dependency_allowlist) -join '|') -cne (@($Lock.windows_dll_allowlist) -join '|')) {
+            Stop-EcsWindowsGate "manifest producer facts are incomplete for $name"
+        }
     }
 }
 
 if ($CheckOrdinaryUser) {
     $null = Invoke-EcsNoAdminOperationCheck -StageRoot (Get-Location).Path
-    Write-Output 'windows-tools-gate: -CheckOrdinaryUser validates no-admin-operation only; ordinary-user token execution is not claimed; real workload gate remains required'
-    exit 0
-}
-
-$lock = Get-EcsGateJson $LockPath
-$manifest = Get-EcsGateJson $ManifestPath
-$expectedTools = @($lock.windows_tools)
-$frozenTools = @('zstd', 'npb-ep', 'npb-ft', 'openssl', 'stream', 'fio', 'nexttrace-tiny')
-if ([string]$lock.schema_version -ne 'ecs.tools.lock/v1') { Stop-EcsWindowsGate 'unexpected tools lock schema' }
-if (($expectedTools -join '|') -ne ($frozenTools -join '|')) { Stop-EcsWindowsGate 'Windows tool set is not the frozen seven-tool contract' }
-$targetFacts = @($lock.architectures | Where-Object { $_.target -eq 'windows_amd64' })
-if ($targetFacts.Count -ne 1 -or [string]$targetFacts[0].goos -ne 'windows' -or [string]$targetFacts[0].goarch -ne 'amd64' -or [string]$targetFacts[0].package -ne 'amd64') {
-    Stop-EcsWindowsGate 'tools lock has no unique windows_amd64 target facts'
-}
-if (@($lock.windows_dll_allowlist).Count -eq 0) { Stop-EcsWindowsGate 'Windows DLL import allowlist is empty' }
-$nexttraceLocked = @($lock.tools | Where-Object { $_.name -eq 'nexttrace-tiny' })
-if ($nexttraceLocked.Count -ne 1) { Stop-EcsWindowsGate 'NextTrace lock identity is missing or duplicated' }
-$nexttraceLockFields = @($nexttraceLocked[0].PSObject.Properties.Name)
-foreach ($requiredField in @('repository', 'version', 'tag', 'commit', 'windows_asset_pattern', 'windows_asset_sha256')) {
-    if ($requiredField -notin $nexttraceLockFields) { Stop-EcsWindowsGate "NextTrace lock is missing $requiredField" }
-}
-if ([string]$nexttraceLocked[0].upstream -ne 'https://github.com/nxtrace/NTrace-core' -or
-    [string]$nexttraceLocked[0].repository -ne 'nxtrace/NTrace-core' -or
-    [string]$nexttraceLocked[0].version -ne '1.7.1' -or
-    [string]$nexttraceLocked[0].tag -ne 'v1.7.1' -or
-    [string]$nexttraceLocked[0].commit -ne 'c9919828fcd8c3103827d08bb26d69e9bf538299') {
-    Stop-EcsWindowsGate 'NextTrace lock identity is not the pinned v1.7.1 upstream commit'
-}
-$nexttraceAssetPattern = [string]$nexttraceLocked[0].windows_asset_pattern
-if ($nexttraceAssetPattern -ne 'nexttrace-tiny_windows_<architecture>.exe') {
-    Stop-EcsWindowsGate 'NextTrace Windows asset pattern is not the pinned release pattern'
-}
-$nexttraceDigestProperties = @($nexttraceLocked[0].windows_asset_sha256.PSObject.Properties.Name)
-if ($nexttraceDigestProperties -notcontains 'amd64') { Stop-EcsWindowsGate 'NextTrace Windows AMD64 asset digest is missing' }
-$nexttraceExpectedSha256 = [string]$nexttraceLocked[0].windows_asset_sha256.amd64
-if ($nexttraceExpectedSha256 -ne '16e13532f6e8ee75f63db61a6a98fe1ca217b5431b76531c8c5d4bcdbe7e6f9b' -or
-    $nexttraceExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
-    Stop-EcsWindowsGate 'NextTrace Windows AMD64 asset digest is not the pinned SHA-256'
-}
-$nexttraceAssetName = ([string]$nexttraceAssetPattern).Replace('<architecture>', [string]$targetFacts[0].package)
-$nexttraceAssetUrl = "https://github.com/$($nexttraceLocked[0].repository)/releases/download/$($nexttraceLocked[0].tag)/$nexttraceAssetName"
-if ($nexttraceAssetName -ne 'nexttrace-tiny_windows_amd64.exe' -or
-    $nexttraceAssetUrl -ne 'https://github.com/nxtrace/NTrace-core/releases/download/v1.7.1/nexttrace-tiny_windows_amd64.exe') {
-    Stop-EcsWindowsGate 'NextTrace Windows asset URL is not derived from the pinned release tag and asset'
-}
-if ([string]$manifest.schema_version -ne 'ecs-tools.manifest/v1') { Stop-EcsWindowsGate 'manifest schema changed' }
-if ([string]$manifest.target -ne 'windows_amd64' -or [string]$manifest.goos -ne 'windows' -or [string]$manifest.goarch -ne 'amd64' -or [string]$manifest.architecture -ne 'amd64') {
-    Stop-EcsWindowsGate 'manifest target facts are not windows_amd64'
-}
-if ((@($manifest.supported_architectures) -join '|') -ne 'amd64' -or (@($manifest.supported_targets) -join '|') -ne 'windows_amd64') {
-    Stop-EcsWindowsGate 'manifest supported target lists are not the frozen Windows contract'
-}
-if ([string]$manifest.build.toolchain_mode -ne 'native' -or
-    [string]$manifest.build.build_triplet -ne 'x86_64-w64-mingw32' -or
-    [string]$manifest.build.target_triplet -ne 'x86_64-w64-mingw32' -or
-    [string]$manifest.build.smoke_runner -ne 'direct' -or
-    [string]$manifest.build.validation.scope -ne 'functional') {
-    Stop-EcsWindowsGate 'manifest build facts are not the frozen native functional contract'
-}
-if ([bool]$manifest.build.validation.performance_valid) { Stop-EcsWindowsGate 'performance_valid must remain false' }
-$manifestTools = @($manifest.tools)
-if (($manifestTools.name -join '|') -ne ($expectedTools -join '|')) { Stop-EcsWindowsGate 'manifest tool set/order differs from tools lock' }
-if (-not (Test-Path -LiteralPath $CorpusPath -PathType Leaf)) { Stop-EcsWindowsGate "missing fixed corpus: $CorpusPath" }
-if (-not (Test-Path -LiteralPath $ObjdumpPath -PathType Leaf)) { Stop-EcsWindowsGate "missing pinned PE inspector: $ObjdumpPath" }
-$corpusFile = Get-Item -LiteralPath $CorpusPath
-$corpusHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $CorpusPath).Hash.ToLowerInvariant()
-if ($corpusFile.Length -ne [int64]$lock.corpus.bytes -or $corpusHash -ne [string]$lock.corpus.sha256) {
-    Stop-EcsWindowsGate "fixed Silesia corpus mismatch: bytes=$($corpusFile.Length) sha256=$corpusHash"
-}
-
-$binDir = Join-Path $StageRoot 'bin'
-$licenseDir = Join-Path $StageRoot 'LICENSES'
-$manifestFile = Join-Path $StageRoot 'manifest.json'
-if (-not (Test-Path -LiteralPath $binDir -PathType Container)) { Stop-EcsWindowsGate 'bundle has no bin directory' }
-if (-not (Test-Path -LiteralPath $licenseDir -PathType Container)) { Stop-EcsWindowsGate 'bundle has no LICENSES directory' }
-if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) { Stop-EcsWindowsGate 'bundle has no manifest.json' }
-$requiredLicenses = @('ZSTD-LICENSE', 'ZSTD-COPYING', 'NPB-README.txt', 'NPB-LICENSE.txt', 'OPENSSL-LICENSE.txt', 'FIO-COPYING', 'NEXTTRACE-LICENSE', 'STREAM-LICENSE.txt')
-foreach ($license in $requiredLicenses) {
-    $licensePath = Join-Path $licenseDir $license
-    if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf) -or (Get-Item -LiteralPath $licensePath).Length -eq 0) {
-        Stop-EcsWindowsGate "missing or empty license file: $license"
-    }
-}
-$binEntries = @(Get-ChildItem -LiteralPath $binDir -Force)
-if ($binEntries.Count -ne $expectedTools.Count -or @($binEntries | Where-Object { $_.PSIsContainer }).Count -ne 0) {
-    Stop-EcsWindowsGate "bundle bin layout has $($binEntries.Count) direct entries or a nested directory; want exactly $($expectedTools.Count) files"
-}
-$binaries = @($binEntries | Where-Object { -not $_.PSIsContainer } | Sort-Object Name)
-foreach ($name in $expectedTools) {
-    $binary = Join-Path $binDir "$name.exe"
-    if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { Stop-EcsWindowsGate "missing binary $name.exe" }
-    if ((Get-Item -LiteralPath $binary).Length -le 0) { Stop-EcsWindowsGate "$name.exe is empty" }
-}
-foreach ($manifestTool in $manifestTools) {
-    $manifestBinary = Join-Path $binDir "$($manifestTool.name).exe"
-    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestBinary).Hash.ToLowerInvariant()
-    if ([string]$manifestTool.parameters.binary_sha256 -ne $actualHash) { Stop-EcsWindowsGate "manifest hash mismatch for $($manifestTool.name)" }
-    if ($manifestTool.name -eq 'nexttrace-tiny') {
-        $nexttraceParameters = $manifestTool.parameters
-        if ([string]$manifestTool.upstream -ne [string]$nexttraceLocked[0].upstream -or
-            [string]$manifestTool.version -ne [string]$nexttraceLocked[0].version -or
-            [string]$manifestTool.tag_or_commit -ne [string]$nexttraceLocked[0].tag -or
-            [string]$manifestTool.source -ne $nexttraceAssetUrl -or
-            [string]$manifestTool.architecture -ne 'amd64' -or
-            [string]$manifestTool.license -ne 'GPL-3.0-only' -or
-            [string]$nexttraceParameters.repository -ne [string]$nexttraceLocked[0].repository -or
-            [string]$nexttraceParameters.tag -ne [string]$nexttraceLocked[0].tag -or
-            [string]$nexttraceParameters.source_url -ne $nexttraceAssetUrl -or
-            [string]$nexttraceParameters.source_asset -ne $nexttraceAssetName -or
-            [string]$nexttraceParameters.asset_pattern -ne $nexttraceAssetPattern -or
-            [string]$nexttraceParameters.release_commit -ne [string]$nexttraceLocked[0].commit -or
-            [string]$nexttraceParameters.provenance -ne 'upstream official release binary' -or
-            [string]$nexttraceParameters.source_mode -ne 'verified-upstream-prebuilt' -or
-            [string]$nexttraceParameters.source_sha256 -ne $nexttraceExpectedSha256 -or
-            [string]$nexttraceParameters.original_sha256 -ne $nexttraceExpectedSha256 -or
-            [string]$nexttraceParameters.upstream_sha256 -ne $nexttraceExpectedSha256 -or
-            [string]$nexttraceParameters.binary_sha256 -ne $actualHash -or
-            [string]$nexttraceParameters.packaged_sha256 -ne $actualHash -or
-            $actualHash -ne $nexttraceExpectedSha256) {
-            Stop-EcsWindowsGate 'NextTrace verified-upstream-prebuilt metadata or byte hash mismatch'
-        }
-        if ([string]$nexttraceParameters.binary_sha256 -ne [string]$nexttraceParameters.packaged_sha256) {
-            Stop-EcsWindowsGate 'NextTrace binary_sha256 and packaged_sha256 differ'
-        }
-        if (@($nexttraceParameters.dependency_allowlist).Count -eq 0 -or
-            (@($nexttraceParameters.dependency_allowlist) -join '|') -ne (@($lock.windows_dll_allowlist) -join '|')) {
-            Stop-EcsWindowsGate 'NextTrace dependency allowlist is missing or changed'
-        }
-        continue
-    }
-    if ([string]$manifestTool.parameters.pe_machine -ne 'pei-x86-64' -or
-        -not [bool]$manifestTool.parameters.imports_checked -or
-        -not [bool]$manifestTool.parameters.fully_static -or
-        -not [bool]$manifestTool.parameters.stripped -or
-        (@($manifestTool.parameters.dependency_allowlist) -join '|') -ne (@($lock.windows_dll_allowlist) -join '|')) {
-        Stop-EcsWindowsGate "manifest build facts are incomplete for $($manifestTool.name)"
-    }
-    $locked = @($lock.tools | Where-Object { $_.name -eq $manifestTool.name })
-    if ($manifestTool.name -eq 'npb-ft') { $locked = @($lock.tools | Where-Object { $_.name -eq 'npb-ep' }) }
-    if ($locked.Count -ne 1) {
-        Stop-EcsWindowsGate "manifest identity mismatch for $($manifestTool.name)"
-    }
-    $lockedVersion = if ($locked[0].PSObject.Properties.Name -contains 'version') { [string]$locked[0].version } else { '' }
-    $lockedTag = if ($locked[0].PSObject.Properties.Name -contains 'tag') { [string]$locked[0].tag } else { '' }
-    if (($lockedVersion -and [string]$manifestTool.version -ne $lockedVersion) -or
-        ($lockedTag -and [string]$manifestTool.tag_or_commit -ne $lockedTag) -or
-        (-not $lockedVersion -and [string]$manifestTool.version -eq '') -or
-        (-not $lockedTag -and [string]$manifestTool.tag_or_commit -eq '')) {
-        Stop-EcsWindowsGate "manifest identity mismatch for $($manifestTool.name)"
-    }
-    $expectedSource = if ($locked[0].PSObject.Properties.Name -contains 'repository') {
-        "git+https://github.com/$($locked[0].repository).git@$($locked[0].commit)"
-    } else {
-        [string]$locked[0].source_url
-    }
-    if ([string]$manifestTool.source -ne $expectedSource) { Stop-EcsWindowsGate "manifest source mismatch for $($manifestTool.name)" }
-    if ($locked[0].PSObject.Properties.Name -contains 'source_sha256' -and
-        [string]$manifestTool.parameters.source_sha256 -ne [string]$locked[0].source_sha256) {
-        Stop-EcsWindowsGate "manifest source hash mismatch for $($manifestTool.name)"
-    }
-}
-if (@(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter '*.dll').Count -ne 0) {
-    Stop-EcsWindowsGate 'bundle contains a non-system DLL'
-}
-
-$noAdminEvidence = Invoke-EcsNoAdminOperationCheck -StageRoot $StageRoot
-
-foreach ($binaryFile in $binaries) {
-    $peFacts = Get-EcsPeFacts -Objdump $ObjdumpPath -Binary $binaryFile.FullName -Allowlist @($lock.windows_dll_allowlist)
-    $logicalName = [IO.Path]::GetFileNameWithoutExtension($binaryFile.Name)
-    $manifestTool = @($manifestTools | Where-Object { $_.name -eq $logicalName })
-    if ($manifestTool.Count -ne 1) {
-        Stop-EcsWindowsGate "manifest has no unique entry for $($binaryFile.Name)"
-    }
-    $manifestParameters = $manifestTool[0].parameters
-    if ([string]$manifestParameters.pe_machine -ne [string]$peFacts.Machine -or
-        (@($manifestParameters.pe_imports) -join '|') -ne (@($peFacts.Imports) -join '|') -or
-        [bool]$manifestParameters.imports_checked -ne [bool]$peFacts.ImportsChecked -or
-        [bool]$manifestParameters.fully_static -ne [bool]$peFacts.FullyStatic -or
-        (@($manifestParameters.dependency_allowlist) -join '|') -ne (@($lock.windows_dll_allowlist) -join '|') -or
-        ($logicalName -ne 'nexttrace-tiny' -and [bool]$manifestParameters.stripped -ne [bool]$peFacts.Stripped)) {
-        Stop-EcsWindowsGate "manifest PE facts do not match the inspected $($binaryFile.Name)"
-    }
-}
-
-$gateWork = New-EcsGateWorkDirectory
-$originalPath = $env:PATH
-$systemPath = "$env:SystemRoot\System32;$env:SystemRoot"
-try {
-    foreach ($root in Get-EcsProtectedInstallRoots) {
-        if (Test-EcsPathUnderRoot -Path $gateWork -Root $root) {
-            Stop-EcsWindowsGate "real workload directory is under protected Program Files root: $gateWork"
-        }
-    }
-    $env:PATH = $systemPath
-    $zstd = Join-Path $binDir 'zstd.exe'
-    $npbEP = Join-Path $binDir 'npb-ep.exe'
-    $npbFT = Join-Path $binDir 'npb-ft.exe'
-    $openssl = Join-Path $binDir 'openssl.exe'
-    $stream = Join-Path $binDir 'stream.exe'
-    $fio = Join-Path $binDir 'fio.exe'
-
-    $zstdVersion = [string](@($lock.tools | Where-Object { $_.name -eq 'zstd' })[0].version)
-    $zstdRun = Invoke-EcsWindowsProcess -FilePath $zstd -ArgumentList @('--version') -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $zstdRun -Description 'zstd --version'
-    Assert-EcsText -Text ($zstdRun.Stdout + $zstdRun.Stderr) -Pattern "v$([regex]::Escape($zstdVersion))([^0-9]|$)" -Description 'zstd version'
-    $sample = Join-Path $gateWork 'silesia-shortest.corpus'
-    New-EcsFixedSample -Source $CorpusPath -Destination $sample
-    $zstdBench = Invoke-EcsWindowsProcess -FilePath $zstd -ArgumentList @('-q', '-b3', '-i1', '-T1', $sample) -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $zstdBench -Description 'zstd shortest fixed Silesia benchmark'
-    Assert-EcsText -Text ($zstdBench.Stdout + $zstdBench.Stderr) -Pattern "bench $([regex]::Escape($zstdVersion)).*input 1048576 bytes, 1 seconds" -Description 'zstd shortest fixed benchmark output'
-    Assert-EcsText -Text ($zstdBench.Stdout + $zstdBench.Stderr) -Pattern '(?m)^-3\s+.*MB/s\s+.*MB/s' -Description 'zstd compression and decompression throughput output'
-
-    $npbVersion = [string](@($lock.tools | Where-Object { $_.name -eq 'npb-ep' })[0].version)
-    $ompEnvironment = @{ PATH = $systemPath; OMP_NUM_THREADS = '1'; OMP_DYNAMIC = 'FALSE'; OMP_PROC_BIND = 'close'; OMP_PLACES = 'cores'; OMP_SCHEDULE = 'static'; NPB_TIMER_FLAG = '0' }
-    foreach ($case in @([pscustomobject]@{ Name = 'EP'; Path = $npbEP }, [pscustomobject]@{ Name = 'FT'; Path = $npbFT })) {
-        $npbRunDir = Join-Path $gateWork ("npb-" + $case.Name.ToLowerInvariant())
-        New-Item -ItemType Directory -Force -Path $npbRunDir | Out-Null
-        $result = Invoke-EcsWindowsProcess -FilePath $case.Path -ArgumentList @() -WorkingDirectory $npbRunDir -Environment $ompEnvironment -Timeout $TimeoutSeconds
-        Assert-EcsProcessSucceeded -Result $result -Description "NPB $($case.Name) Class A smoke"
-        $text = $result.Stdout + $result.Stderr
-        Assert-EcsText -Text $text -Pattern "NAS Parallel Benchmarks \(NPB3\.4-OMP\) - $($case.Name) Benchmark" -Description "NPB $($case.Name) header"
-        Assert-EcsText -Text $text -Pattern '(?m)^\s*Class\s*=\s*A\s*$' -Description "NPB $($case.Name) Class A"
-        Assert-EcsText -Text $text -Pattern '(?m)^\s*Total threads\s*=\s*1\s*$' -Description "NPB $($case.Name) one-thread smoke"
-        Assert-EcsText -Text $text -Pattern '(?m)^\s*Verification\s*=\s*SUCCESSFUL\s*$' -Description "NPB $($case.Name) verification"
-        Assert-EcsText -Text $text -Pattern "(?m)^\s*Version\s*=\s*$([regex]::Escape($npbVersion))\s*$" -Description "NPB $($case.Name) version"
-    }
-
-    $streamRun = Invoke-EcsWindowsProcess -FilePath $stream -ArgumentList @() -WorkingDirectory $gateWork -Environment (@{ PATH = $systemPath; OMP_NUM_THREADS = '1' }) -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $streamRun -Description 'STREAM Copy/Scale/Add/Triad smoke'
-    foreach ($kernel in @('Copy', 'Scale', 'Add', 'Triad')) { Assert-EcsText -Text ($streamRun.Stdout + $streamRun.Stderr) -Pattern "(?m)^\s*${kernel}:" -Description "STREAM $kernel output" }
-    Assert-EcsText -Text ($streamRun.Stdout + $streamRun.Stderr) -Pattern 'Solution Validates' -Description 'STREAM validation'
-
-    $opensslVersion = [string](@($lock.tools | Where-Object { $_.name -eq 'openssl' })[0].version)
-    $opensslEnvironment = @{ PATH = $systemPath; OPENSSL_CONF = 'NUL' }
-    $opensslVersionRun = Invoke-EcsWindowsProcess -FilePath $openssl -ArgumentList @('version') -WorkingDirectory $gateWork -Environment $opensslEnvironment -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $opensslVersionRun -Description 'OpenSSL version'
-    Assert-EcsText -Text ($opensslVersionRun.Stdout + $opensslVersionRun.Stderr) -Pattern "^OpenSSL $([regex]::Escape($opensslVersion))([\s]|$)" -Description 'OpenSSL locked version'
-    foreach ($algorithm in @('aes-256-gcm', 'chacha20-poly1305', 'sha256')) {
-        $arguments = @('speed', '-elapsed', '-seconds', '1', '-bytes', '16384', '-mr', '-evp', $algorithm)
-        if ($algorithm -ne 'sha256') { $arguments += '-aead' }
-        $speed = Invoke-EcsWindowsProcess -FilePath $openssl -ArgumentList $arguments -WorkingDirectory $gateWork -Environment $opensslEnvironment -Timeout $TimeoutSeconds
-        Assert-EcsProcessSucceeded -Result $speed -Description "OpenSSL speed $algorithm"
-        $text = $speed.Stdout + $speed.Stderr
-        $label = if ($algorithm -eq 'aes-256-gcm') { 'AES-256-GCM' } elseif ($algorithm -eq 'chacha20-poly1305') { 'ChaCha20-Poly1305' } else { 'sha256' }
-        Assert-EcsText -Text $text -Pattern ("\+DT:{0}:1:16384" -f $label) -Description "OpenSSL speed $algorithm parameters"
-        Assert-EcsText -Text $text -Pattern ("(?m)^\+F:[0-9]+:{0}:[0-9]+(\.[0-9]+)?\s*$" -f [regex]::Escape($label)) -Description "OpenSSL speed $algorithm machine-readable output"
-    }
-
-    $fioData = Join-Path $gateWork 'fio-windowsaio.data'
-    [IO.File]::WriteAllBytes($fioData, (New-Object byte[] 4096))
-    $fioVersion = [string](@($lock.tools | Where-Object { $_.name -eq 'fio' })[0].version)
-    $fioVersionRun = Invoke-EcsWindowsProcess -FilePath $fio -ArgumentList @('--version') -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $fioVersionRun -Description 'fio version'
-    Assert-EcsText -Text ($fioVersionRun.Stdout + $fioVersionRun.Stderr) -Pattern "fio-$([regex]::Escape($fioVersion))([\s]|$)" -Description 'fio locked version'
-    $fioJson = Join-Path $gateWork 'fio-windowsaio.json'
-    $fioRun = Invoke-EcsWindowsProcess -FilePath $fio -ArgumentList @('--name=ecs-windowsaio-smoke', '--thread', "--filename=$fioData", '--rw=read', '--bs=4k', '--size=4k', '--ioengine=windowsaio', '--iodepth=1', '--numjobs=1', '--direct=1', '--output-format=json', "--output=$fioJson") -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $fioRun -Description 'fio windowsaio real I/O smoke'
-    if (-not (Test-Path -LiteralPath $fioJson -PathType Leaf)) { Stop-EcsWindowsGate 'fio did not produce JSON output' }
-    $fioResult = Get-EcsGateJson $fioJson
-    if (@($fioResult.jobs).Count -ne 1 -or [string]$fioResult.jobs[0].jobname -ne 'ecs-windowsaio-smoke') { Stop-EcsWindowsGate 'fio JSON job identity is invalid' }
-    if ([string]$fioResult.jobs[0].'job options'.ioengine -ne 'windowsaio' -or [int64]$fioResult.jobs[0].read.io_bytes -lt 4096) { Stop-EcsWindowsGate 'fio JSON did not prove a windowsaio read' }
-    $enghelp = Invoke-EcsWindowsProcess -FilePath $fio -ArgumentList @('--enghelp') -WorkingDirectory $gateWork -Environment @{ PATH = $systemPath } -Timeout $TimeoutSeconds
-    Assert-EcsProcessSucceeded -Result $enghelp -Description 'fio engine list'
-    Assert-EcsText -Text ($enghelp.Stdout + $enghelp.Stderr) -Pattern '(?im)^\s*windowsaio\b' -Description 'fio windowsaio engine'
-
-    Assert-EcsGlobalPathUnchanged -Evidence $noAdminEvidence
-    Write-Output "windows-tools-gate: exact seven-tool package, six real functional benchmark checks, and verified NextTrace prebuilt passed; performance_valid=false; canonical route/backtrace network gate is separate; NextTrace network gate=not run by package gate"
-} finally {
-    $env:PATH = $originalPath
-    if (Test-Path -LiteralPath $gateWork) { Remove-Item -LiteralPath $gateWork -Recurse -Force }
+    Write-Output 'windows-tools-gate: -CheckOrdinaryUser validates no-admin-operation only; ordinary-user token execution is not claimed; packaged E2E owns production workload checks'
+} else {
+    $lock = Get-EcsGateJson -Path $LockPath
+    Assert-EcsWindowsPackageContract -PackageStage ([IO.Path]::GetFullPath($StageRoot)) -Lock $lock
+    Write-Output 'windows-tools-gate: packaged stage layout, license files, manifest metadata, and builder-produced PE facts passed'
 }
