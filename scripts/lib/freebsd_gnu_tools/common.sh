@@ -188,10 +188,9 @@ ecs_freebsd_gnu_write_provenance() {
   local npb_version=$5 npb_url=$6 npb_sha=$7 stream_url=$8 stream_sha=$9
   local bin="$stage/bin"
   local -a records=()
-  local name sha source_json
+  local name source_json
   for name in npb-ep npb-ft stream; do
     [[ -x "$bin/$name" ]] || ecs_freebsd_gnu_die "provenance: missing binary $name"
-    sha=$(sha256sum "$bin/$name" | awk '{print $1}')
     case "$name" in
       npb-ep | npb-ft)
         source_json=$(jq -cn --arg version "$npb_version" --arg url "$npb_url" --arg sha "$npb_sha" \
@@ -203,9 +202,9 @@ ecs_freebsd_gnu_write_provenance() {
         ;;
     esac
     records+=("$(jq -cn \
-      --arg name "$name" --arg sha "$sha" --arg triple "$triple" \
+      --arg name "$name" --arg triple "$triple" \
       --arg gcc "$gcc_version" --argjson source "$source_json" \
-      '{name:$name,sha256:$sha,compiler_family:"gcc",compiler_version:$gcc,target_triple:$triple,build_host:"ubuntu-24.04",openmp_runtime:"libgomp",source:$source}')")
+      '{name:$name,compiler_family:"gcc",compiler_version:$gcc,target_triple:$triple,build_host:"ubuntu-24.04",openmp_runtime:"libgomp",source:$source}')")
   done
   jq -n \
     --arg target "$target" --arg triple "$triple" --arg gcc "$gcc_version" \

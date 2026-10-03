@@ -475,10 +475,8 @@
       "architecture": "amd64",
       "license": "GPL-3.0-only",
       "parameters": {
-        "illustrative": true,
-        "asset_digest": "unknown"
-      },
-      "fallback": "CI fails if the official Tiny asset is unavailable"
+        "illustrative": true
+      }
     },
     {
       "name": "ping",
@@ -518,8 +516,7 @@
       "parameters": {
         "illustrative": true,
         "source_commit": "unknown"
-      },
-      "fallback": "CI fails if official iputils ping cannot be built"
+      }
     }
   ]
 }

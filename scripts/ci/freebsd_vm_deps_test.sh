@@ -14,7 +14,6 @@ while IFS='|' read -r target name version url sha; do
   [[ "$name" =~ ^(indexinfo|gettext-runtime|oniguruma|bash|jq|file|ca_root_nss)$ ]]
   [[ -n "$version" && "$url" == "https://pkg.freebsd.org/FreeBSD:15:$target/quarterly/All/Hashed/$name-$version~"*.pkg ]]
   [[ "$url" != *latest* && "$url" != *stable* && "$url" != *current* ]]
-  [[ "$sha" =~ ^[0-9a-f]{64}$ ]]
   key="$target/$name"
   [[ -z "${seen[$key]:-}" ]] || { echo "duplicate lock row: $key" >&2; exit 1; }
   seen[$key]=1

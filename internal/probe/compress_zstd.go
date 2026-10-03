@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -97,32 +96,14 @@ func missingZstdResult(target string, err error) model.Result {
 }
 
 func findZstdCorpus(contract zstdBenchmarkContract) (string, error) {
-	candidates := make([]string, 0, 4)
-	if configured := strings.TrimSpace(os.Getenv("ECS_ZSTD_CORPUS")); configured != "" {
-		candidates = append(candidates, configured)
+	path := strings.TrimSpace(os.Getenv("ECS_ZSTD_CORPUS"))
+	if path == "" {
+		return "", fmt.Errorf("ECS_ZSTD_CORPUS 未设置固定 corpus 路径")
 	}
-	candidates = append(candidates,
-		filepath.Join("/usr/local/share/ecs/corpus", contract.CorpusName),
-		filepath.Join("/usr/share/ecs/corpus", contract.CorpusName),
-	)
-	seen := make(map[string]bool, len(candidates))
-	var diagnostics []string
-	for _, candidate := range candidates {
-		candidate = filepath.Clean(candidate)
-		if seen[candidate] {
-			continue
-		}
-		seen[candidate] = true
-		if err := verifyZstdCorpus(candidate, contract); err == nil {
-			return candidate, nil
-		} else if _, statErr := os.Stat(candidate); statErr == nil {
-			diagnostics = append(diagnostics, err.Error())
-		}
+	if err := verifyZstdCorpus(path, contract); err != nil {
+		return "", fmt.Errorf("固定 corpus 校验失败: %w", err)
 	}
-	if len(diagnostics) > 0 {
-		return "", fmt.Errorf("固定 corpus 校验失败: %s", strings.Join(diagnostics, "; "))
-	}
-	return "", fmt.Errorf("固定 corpus %s 不在 ECS_ZSTD_CORPUS 或系统 corpus 目录中", contract.CorpusName)
+	return path, nil
 }
 
 func verifyZstdCorpus(path string, contract zstdBenchmarkContract) error {
@@ -136,24 +117,30 @@ func verifyZstdCorpus(path string, contract zstdBenchmarkContract) error {
 	if info.Size() != contract.CorpusBytes {
 		return fmt.Errorf("corpus 大小为 %d bytes，期望 %d: %s", info.Size(), contract.CorpusBytes, path)
 	}
-	actual := zstdCorpusDigest(path)
+	actual, err := zstdCorpusDigest(path)
+	if err != nil {
+		return fmt.Errorf("corpus SHA-256 读取失败: %w", err)
+	}
 	if !strings.EqualFold(actual, contract.CorpusSHA256) {
-		return fmt.Errorf("corpus SHA-256 为 %s，期望 %s: %s", fallback(actual, "unavailable"), contract.CorpusSHA256, path)
+		return fmt.Errorf("corpus SHA-256 为 %s，期望 %s: %s", actual, contract.CorpusSHA256, path)
 	}
 	return nil
 }
 
-func zstdCorpusDigest(path string) string {
+func zstdCorpusDigest(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
-		return ""
+		_ = file.Close()
+		return "", fmt.Errorf("read %s: %w", path, err)
 	}
-	return fmt.Sprintf("%x", hash.Sum(nil))
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close %s: %w", path, err)
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 func runZstdBenchmark(ctx context.Context, env Environment, path, corpus string, contract zstdBenchmarkContract) model.Result {

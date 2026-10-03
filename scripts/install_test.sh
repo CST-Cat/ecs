@@ -214,6 +214,26 @@ set -e
 [[ ! -e "$http_wget_log" ]] || fail "wget was invoked for a rejected HTTP URL"
 [[ ! -e "$http_wget_unexpected" ]] || fail "wget-only HTTP case reached the downloader"
 
+https_wget_log="$test_root/https-wget-download.log"
+https_wget_unexpected="$test_root/https-wget-unexpected"
+https_wget_tmp="$test_root/https-wget-tmp"
+mkdir -p "$https_wget_tmp"
+set +e
+ECS_INSTALL_DIR="$test_root/https-wget-install" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
+  ECS_INSTALL_TEST_DOWNLOAD_LOG="$https_wget_log" ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$https_wget_unexpected" \
+  ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" ECS_INSTALL_TEST_RELEASE_ROOT="$remote_release" \
+  ECS_INSTALL_TEST_ASSET="$remote_asset" TMPDIR="$https_wget_tmp" PATH="$wget_path" \
+  sh "$repo_root/install.sh" \
+  >"$test_root/https-wget.stdout" 2>"$test_root/https-wget.stderr"
+https_wget_status=$?
+set -e
+[[ "$https_wget_status" -eq 1 ]] || fail "wget-only HTTPS URL returned $https_wget_status instead of 1"
+grep -F 'curl is required for downloads on Linux' "$test_root/https-wget.stderr" >/dev/null ||
+  fail "wget-only HTTPS URL did not identify missing Linux curl"
+[[ ! -e "$https_wget_log" ]] || fail "wget was invoked without Linux curl"
+[[ ! -e "$https_wget_unexpected" ]] || fail "wget-only HTTPS case reached an unexpected network path"
+assert_empty_dir "$https_wget_tmp" "wget-only HTTPS rejection"
+
 remote_install_dir="$test_root/remote-install"
 remote_log="$test_root/remote-download.log"
 remote_unexpected="$test_root/remote-unexpected"
@@ -245,6 +265,9 @@ awk '$0 == "--retry-max-time" { getline; if ($0 == "300") found=1 } END { exit !
 make_freebsd_install_path() {
   local path=$1 machine=$2
   make_command_path "$path"
+  # Never let a Linux harness run the host timeout against /usr/bin/fetch on a
+  # FreeBSD uname stub; the native artifact E2E exercises that real path.
+  rm -f "$path/timeout"
   # uname must be replaced, not symlinked: writing the stub through a symlink to
   # the real uname would try to overwrite the system binary.
   rm -f "$path/uname"
@@ -260,30 +283,29 @@ EOF
   write_downloader "$path" curl
 }
 
-freebsd_release="$test_root/freebsd-release"
-freebsd_asset="ecs_freebsd_${fixture_arch}.tar.gz"
-mkdir -p "$freebsd_release/archive"
-cp "$fixture_one" "$freebsd_release/archive/ecs"
-tar -czf "$freebsd_release/$freebsd_asset" -C "$freebsd_release/archive" ecs
-printf '%s  %s\n' "$(sha256sum "$freebsd_release/$freebsd_asset" | awk '{print $1}')" "$freebsd_asset" >"$freebsd_release/checksums.txt"
-
 freebsd_path="$test_root/freebsd-path"
 make_freebsd_install_path "$freebsd_path" "$fixture_arch"
 freebsd_install_dir="$test_root/freebsd-install"
 freebsd_log="$test_root/freebsd-download.log"
 freebsd_unexpected="$test_root/freebsd-unexpected"
-if ! ECS_INSTALL_DIR="$freebsd_install_dir" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
-    ECS_INSTALL_TEST_DOWNLOAD_LOG="$freebsd_log" ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$freebsd_unexpected" \
-    ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" \
-    ECS_INSTALL_TEST_RELEASE_ROOT="$freebsd_release" \
-    ECS_INSTALL_TEST_ASSET="$freebsd_asset" PATH="$freebsd_path" \
-    sh "$repo_root/install.sh" \
-    >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"; then
-  fail "FreeBSD fixture install failed: $(<"$test_root/freebsd.stderr")"
+set +e
+ECS_INSTALL_DIR="$freebsd_install_dir" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
+  ECS_INSTALL_TEST_DOWNLOAD_LOG="$freebsd_log" ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$freebsd_unexpected" \
+  PATH="$freebsd_path" \
+  sh "$repo_root/install.sh" \
+  >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"
+freebsd_status=$?
+set -e
+[[ "$freebsd_status" -eq 1 ]] || fail "FreeBSD fixture without canonical transport returned $freebsd_status instead of 1"
+if [ -x /usr/bin/fetch ]; then
+  grep -F 'FreeBSD fetch 路径需要 timeout' "$test_root/freebsd.stderr" >/dev/null ||
+    grep -F 'FreeBSD fetch requires timeout' "$test_root/freebsd.stderr" >/dev/null ||
+    fail "FreeBSD fixture did not preserve its timeout requirement"
+else
+  grep -F 'FreeBSD downloads require /usr/bin/fetch' "$test_root/freebsd.stderr" >/dev/null ||
+    fail "FreeBSD fixture did not identify missing canonical fetch"
 fi
-cmp -s "$fixture_one" "$freebsd_install_dir/ecs" || fail "FreeBSD fixture changed the binary contents"
-grep -F -x "https://fixture.invalid/releases/$freebsd_asset" "$freebsd_log" >/dev/null ||
-  fail "FreeBSD fixture did not request $freebsd_asset"
+[[ ! -e "$freebsd_log" ]] || fail "FreeBSD fixture used a noncanonical downloader"
 [[ ! -e "$freebsd_unexpected" ]] || fail "FreeBSD fixture reached an unexpected network path"
 
 # The tools lock carries only freebsd_amd64 and freebsd_arm64, so the installer
@@ -295,8 +317,6 @@ set +e
 ECS_INSTALL_DIR="$test_root/freebsd-bad-install" ECS_RELEASE_BASE="https://fixture.invalid/releases" \
   ECS_INSTALL_TEST_DOWNLOAD_LOG="$test_root/freebsd-bad-download.log" \
   ECS_INSTALL_TEST_UNEXPECTED_NETWORK="$test_root/freebsd-bad-unexpected" \
-  ECS_INSTALL_TEST_RELEASE_BASE="https://fixture.invalid/releases" \
-  ECS_INSTALL_TEST_RELEASE_ROOT="$freebsd_release" ECS_INSTALL_TEST_ASSET="$freebsd_asset" \
   PATH="$freebsd_bad_path" sh "$repo_root/install.sh" \
   >"$test_root/freebsd-bad.stdout" 2>"$test_root/freebsd-bad.stderr"
 freebsd_bad_status=$?

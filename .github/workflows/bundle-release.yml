@@ -8,8 +8,8 @@ name: bundle-release
 #
 # 唯一 DAG（FreeBSD 链与 Linux 七目标链并行；publish 硬依赖全部前置）：
 #   tools ×7（Linux，目标架构容器构建）
-#   FREEBSD BUILD（workflow_call 复用 freebsd-tools.yml：SYSROOT→C-DEPS→
-#     C-TOOLS ∥ GNU SDK→GNU BENCH→MERGE→VERIFY×2）
+#   FREEBSD BUILD（workflow_call 复用 freebsd-tools.yml：C-TOOLS（builder内部
+#     安装并探测SYSROOT、安装/校验immutable target deps）∥ GNU SDK→GNU BENCH→MERGE→VERIFY×2）
 #     ├─ REAL GATE AMD64 ∥ REAL GATE ARM64
 #     └─ PACKAGE（scripts/ci/freebsd_artifact_layout.sh 每个目标调用真
 #         scripts/package.sh）→ ARTIFACT E2E AMD64 ∥ ARTIFACT E2E ARM64
@@ -161,6 +161,11 @@ jobs:
         with:
           name: ecs-windows-tools-stage-windows_amd64
           path: tools-artifacts/ecs-windows-tools-stage-windows_amd64
+
+      - name: Install ZIP packager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
 
       - name: Normalize the downloaded tools stages
         run: |

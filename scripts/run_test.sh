@@ -357,15 +357,15 @@ make_wget_only_path "$wget_only_path"
 # run.sh resolves one OS token from uname -s and builds both the program asset
 # name and the tool-package asset name from it. This harness runs on Linux, so
 # the FreeBSD entry is exercised by placing a stub uname ahead of the real one
-# on PATH; the download, checksum, and staging fixtures stay unchanged. The
-# FreeBSD-specific tool filtering itself lives in the Go plan and is covered by
-# the platform-tagged tests in internal/app, not here.
+# on PATH. A Linux harness has no FreeBSD base fetch, so this case checks that
+# the wrapper rejects without substituting curl; native transport and tool
+# filtering are covered by the FreeBSD artifact E2E and platform-tagged tests.
 make_freebsd_path() {
   local path=$1 machine=$2 command_name target
   mkdir -p "$path"
   # uname is deliberately absent from this list: the stub below replaces it, and
   # symlinking the real one first would make the stub write through that link.
-  for command_name in sh tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm sed sort grep wc cat timeout; do
+  for command_name in sh tr mkdir mktemp cp chmod mv id awk sha256sum tar gzip rm sed sort grep wc cat; do
     target=$(command -v "$command_name") || fail "required command is missing: $command_name"
     ln -s "$target" "$path/$command_name"
   done
@@ -381,44 +381,32 @@ EOF
   chmod 0755 "$path/uname"
 }
 
-freebsd_release="$test_root/freebsd-release"
-freebsd_bundle_release="$test_root/freebsd-bundle-release"
-mkdir -p "$freebsd_release/archive" "$freebsd_bundle_release/tools/bin"
-cp "$fixture_release/archive/ecs" "$freebsd_release/archive/ecs"
-chmod 0755 "$freebsd_release/archive/ecs"
-freebsd_asset="ecs_freebsd_${fixture_arch}.tar.gz"
-tar -czf "$freebsd_release/$freebsd_asset" -C "$freebsd_release/archive" ecs
-printf '%s  %s\n' "$(sha256sum "$freebsd_release/$freebsd_asset" | awk '{print $1}')" "$freebsd_asset" >"$freebsd_release/checksums.txt"
-cp "$fixture_bundle_release/tools/bin/fixture-tool" "$freebsd_bundle_release/tools/bin/fixture-tool"
-freebsd_tools_asset="ecs-tools_freebsd_${fixture_arch}.tar.gz"
-tar -czf "$freebsd_bundle_release/$freebsd_tools_asset" -C "$freebsd_bundle_release/tools" bin
-printf '%s  %s\n' "$(sha256sum "$freebsd_bundle_release/$freebsd_tools_asset" | awk '{print $1}')" "$freebsd_tools_asset" >"$freebsd_bundle_release/checksums.txt"
-
 freebsd_path="$test_root/freebsd-path"
 make_freebsd_path "$freebsd_path" "$fixture_arch"
 
 freebsd_entry_logs="$fixture_logs/freebsd-entry"
 freebsd_entry_output="$test_root/freebsd-entry-output"
 mkdir -p "$freebsd_entry_logs" "$test_root/freebsd-entry-tmp"
-if ! ECS_LANG=en ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+set +e
+ECS_LANG=en ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
     ECS_AUTO_DEPS=1 TMPDIR="$test_root/freebsd-entry-tmp" PATH="$freebsd_path" \
     ECS_TEST_LOG_ROOT="$freebsd_entry_logs" \
     ECS_TEST_PLAN_TOOLS=fixture-tool ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
-    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
-    ECS_TEST_ASSET="$freebsd_asset" \
-    ECS_TEST_BUNDLE_RELEASE_URL="$bundle_release_url" \
-    ECS_TEST_BUNDLE_RELEASE_ROOT="$freebsd_bundle_release" \
-    ECS_TEST_TOOLS_ASSET="$freebsd_tools_asset" \
     sh "$repo_root/run.sh" --profile standard --only noop --output "$freebsd_entry_output" \
-    >"$test_root/freebsd-entry.stdout" 2>"$test_root/freebsd-entry.stderr"; then
-  fail "FreeBSD wrapper entry fixture returned a failure: $(<"$test_root/freebsd-entry.stderr")"
+    >"$test_root/freebsd-entry.stdout" 2>"$test_root/freebsd-entry.stderr"
+freebsd_entry_status=$?
+set -e
+[[ "$freebsd_entry_status" -eq 1 ]] || fail "FreeBSD wrapper entry without canonical transport returned $freebsd_entry_status instead of 1"
+if [ -x /usr/bin/fetch ]; then
+  grep -F 'FreeBSD fetch requires timeout' "$test_root/freebsd-entry.stderr" >/dev/null ||
+    fail "FreeBSD wrapper entry did not preserve its timeout requirement"
+else
+  grep -F 'FreeBSD downloads require /usr/bin/fetch' "$test_root/freebsd-entry.stderr" >/dev/null ||
+    fail "FreeBSD wrapper entry did not identify missing canonical fetch"
 fi
-[[ -f "$freebsd_entry_output/fixture.json" ]] || fail "FreeBSD wrapper entry produced no report"
-grep -Fx "$release_url/$freebsd_asset" "$freebsd_entry_logs/fetch.log" >/dev/null ||
-  fail "FreeBSD wrapper entry did not select $freebsd_asset"
-grep -Fx "$bundle_release_url/$freebsd_tools_asset" "$freebsd_entry_logs/fetch.log" >/dev/null ||
-  fail "FreeBSD wrapper entry did not select $freebsd_tools_asset"
+[[ ! -e "$freebsd_entry_logs/fetch.log" ]] || fail "FreeBSD wrapper entry used curl as a fallback"
 [[ ! -e "$freebsd_entry_logs/unexpected-network" ]] || fail "FreeBSD wrapper entry reached unexpected network"
+[[ ! -e "$freebsd_entry_output/fixture.json" ]] || fail "FreeBSD wrapper entry ran without canonical transport"
 
 # The tools lock carries only freebsd_amd64 and freebsd_arm64, so any other
 # architecture would name an asset that can never exist. The wrapper must
@@ -431,8 +419,6 @@ for freebsd_bad_machine in i386 armv7l s390x; do
     TMPDIR="$test_root/freebsd-bad-$freebsd_bad_machine-tmp" \
     PATH="$freebsd_bad_path" \
     ECS_TEST_LOG_ROOT="$fixture_logs/freebsd-bad-$freebsd_bad_machine" \
-    ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
-    ECS_TEST_ASSET="$freebsd_asset" \
     sh "$repo_root/run.sh" --profile standard --only noop \
       --output "$test_root/freebsd-bad-$freebsd_bad_machine-output" \
       >"$test_root/freebsd-bad-$freebsd_bad_machine.stdout" \
@@ -446,32 +432,9 @@ for freebsd_bad_machine in i386 armv7l s390x; do
     fail "FreeBSD $freebsd_bad_machine was not rejected with the architecture message"
 done
 
-# Ookla publishes no FreeBSD client and the FreeBSD frozen bundle ships no
-# speedtest, so a FreeBSD plan that still requires it must stop instead of
-# entering the Linux package-manager path that exists only for the signed
-# Ookla package. Failing closed keeps the "no local substitute" contract.
-freebsd_ookla_logs="$fixture_logs/freebsd-ookla"
-mkdir -p "$freebsd_ookla_logs" "$test_root/freebsd-ookla-tmp"
-set +e
-ECS_LANG=en ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
-  ECS_AUTO_DEPS=1 TMPDIR="$test_root/freebsd-ookla-tmp" PATH="$freebsd_path" \
-  ECS_TEST_LOG_ROOT="$freebsd_ookla_logs" \
-  ECS_TEST_PLAN_TOOLS=speedtest ECS_TEST_PLAN_EXPOSURE=thirdparty ECS_TEST_PLAN_REVEAL=true \
-  ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
-  ECS_TEST_ASSET="$freebsd_asset" \
-  ECS_TEST_BUNDLE_RELEASE_URL="$bundle_release_url" \
-  ECS_TEST_BUNDLE_RELEASE_ROOT="$freebsd_bundle_release" \
-  ECS_TEST_TOOLS_ASSET="$freebsd_tools_asset" \
-  sh "$repo_root/run.sh" --profile standard --only noop --output "$test_root/freebsd-ookla-output" \
-  >"$test_root/freebsd-ookla.stdout" 2>"$test_root/freebsd-ookla.stderr"
-freebsd_ookla_status=$?
-set -e
-[[ "$freebsd_ookla_status" -ne 0 ]] || fail "FreeBSD Ookla selection was accepted"
-grep -F 'Ookla speedtest is not available on FreeBSD' "$test_root/freebsd-ookla.stderr" >/dev/null ||
-  fail "FreeBSD Ookla selection did not fail closed with the FreeBSD message"
-[[ ! -e "$test_root/freebsd-ookla-output/fixture.json" ]] ||
-  fail "FreeBSD Ookla selection produced a report instead of stopping"
-
+# The platform-specific Ookla failure is exercised by the native FreeBSD
+# artifact E2E; this Linux fixture only confirms that the wrapper does not
+# silently substitute its curl fixture for FreeBSD's required fetch.
 # ECS checksums are scoped to the ECS release. A bad ECS digest must stop before
 # the downloaded binary is extracted or asked for its Bundle version.
 ecs_checksum_failure_release="$test_root/ecs-checksum-failure-release"
@@ -588,27 +551,29 @@ set -e
 [[ ! -e "$missing_bundle_logs/run.argv" ]] || fail "missing Bundle release invoked ecs"
 [[ ! -e "$missing_bundle_output/fixture.json" ]] || fail "missing Bundle release produced a report"
 
-# Wget-only HTTPS success proves fetch selects wget when curl is absent.
-wget_success_tmp="$test_root/wget-success-tmp"
-wget_success_logs="$fixture_logs/wget-success"
-wget_success_output="$test_root/wget-success-output"
-mkdir -p "$wget_success_tmp" "$wget_success_logs"
-if ! ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$wget_success_tmp" PATH="$wget_only_path" \
+# Linux downloads require curl even when wget is present.
+wget_only_tmp="$test_root/wget-only-tmp"
+wget_only_logs="$fixture_logs/wget-only"
+wget_only_output="$test_root/wget-only-output"
+mkdir -p "$wget_only_tmp" "$wget_only_logs"
+set +e
+ECS_LANG=en ECS_AUTO_DEPS=0 TMPDIR="$wget_only_tmp" PATH="$wget_only_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
-    ECS_TEST_LOG_ROOT="$wget_success_logs" ECS_TEST_REPORT_DIR="$wget_success_output" \
+    ECS_TEST_LOG_ROOT="$wget_only_logs" ECS_TEST_REPORT_DIR="$wget_only_output" \
     ECS_TEST_PLAN_EXPOSURE=public ECS_TEST_PLAN_REVEAL=true \
     ECS_TEST_RELEASE_URL="$release_url" ECS_TEST_RELEASE_ROOT="$fixture_release" \
     ECS_TEST_ASSET="$fixture_asset" \
-    sh "$repo_root/run.sh" --profile standard --only noop --output "$wget_success_output" \
-    >"$test_root/wget-success.stdout" 2>"$test_root/wget-success.stderr"; then
-  fail "wget-only HTTPS fixture returned a failure: $(<"$test_root/wget-success.stderr")"
-fi
-[[ ! -e "$wget_success_logs/unexpected-network" ]] || fail "wget-only HTTPS fixture reached unexpected network"
-[[ "$(wc -l <"$wget_success_logs/fetch.log")" -eq 2 ]] || fail "wget-only HTTPS fixture did not download twice"
-[[ -f "$wget_success_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced no report"
-wget_fetch_args=$(tr '\0' '\n' <"$wget_success_logs/fetch-args.log")
-grep -F -x -- '--tries=3' <<<"$wget_fetch_args" >/dev/null || fail "run wget omitted bounded retries"
-grep -F -x -- '--timeout=20' <<<"$wget_fetch_args" >/dev/null || fail "run wget omitted per-operation timeout"
+    sh "$repo_root/run.sh" --profile standard --only noop --output "$wget_only_output" \
+    >"$test_root/wget-only.stdout" 2>"$test_root/wget-only.stderr"
+wget_only_status=$?
+set -e
+[[ "$wget_only_status" -eq 1 ]] || fail "wget-only HTTPS fixture returned $wget_only_status instead of 1"
+grep -F 'curl is required for downloads on Linux' "$test_root/wget-only.stderr" >/dev/null ||
+  fail "wget-only HTTPS fixture did not identify missing Linux curl"
+[[ ! -e "$wget_only_logs/fetch.log" ]] || fail "run invoked wget without Linux curl"
+[[ ! -e "$wget_only_logs/unexpected-network" ]] || fail "wget-only HTTPS fixture reached unexpected network"
+[[ ! -e "$wget_only_output/fixture.json" ]] || fail "wget-only HTTPS fixture produced a report"
+assert_empty_dir "$wget_only_tmp" "wget-only HTTPS rejection"
 
 # Frozen tool staging is unconditional even when the host PATH already has a
 # same-named executable.

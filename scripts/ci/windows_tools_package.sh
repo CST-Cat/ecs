@@ -56,11 +56,16 @@ corpus_path=$(ecs_absolute_path "$corpus_path")
 corpus_name=$(ecs_lock_corpus_field name)
 [[ -f "$corpus_path" && -s "$corpus_path" ]] || die "verified build corpus is missing or empty: $corpus_path"
 [[ "$(basename "$corpus_path")" == "$corpus_name" ]] || die "corpus input must be named $corpus_name"
+
+if [[ -n "${SOURCE_DATE_EPOCH:-}" ]]; then
+  source_date_epoch=$SOURCE_DATE_EPOCH
+else
+  source_date_epoch=$(git -C "$ECS_REPO_ROOT" show -s --format=%ct HEAD) ||
+    die 'could not determine Git commit timestamp for reproducible corpus archive'
+fi
+[[ "$source_date_epoch" =~ ^[0-9]+$ ]] || die 'SOURCE_DATE_EPOCH must be an integer'
 mkdir -p "$output_dir"
 archive="$output_dir/$ECS_CORPUS_ARCHIVE"
-
-source_date_epoch=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}
-[[ "$source_date_epoch" =~ ^[0-9]+$ ]] || die 'SOURCE_DATE_EPOCH must be an integer'
 tar -C "$(dirname "$corpus_path")" --sort=name --mtime="@$source_date_epoch" \
   --owner=0 --group=0 --numeric-owner -czf "$archive" \
   "$corpus_name"

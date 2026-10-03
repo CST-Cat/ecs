@@ -135,12 +135,11 @@ case "$base_url" in
 esac
 
 command -v clang >/dev/null 2>&1 || die "clang is required"
-command -v llvm-readelf >/dev/null 2>&1 || command -v readelf >/dev/null 2>&1 ||
-  die "llvm-readelf or readelf is required"
+command -v llvm-readelf >/dev/null 2>&1 || die "llvm-readelf is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
-readelf_bin=$(command -v llvm-readelf || command -v readelf)
+readelf_bin=$(command -v llvm-readelf)
 
 echo "freebsd-sysroot: target=$target release=$release revision=$revision" >&2
 echo "freebsd-sysroot: triple=$triple" >&2
@@ -224,7 +223,7 @@ case "$file_out" in
   *) die "probe binary is not static: $file_out" ;;
 esac
 
-readelf_out=$("$readelf_bin" -h "$probe_dir/hello" || true)
+readelf_out=$("$readelf_bin" -h "$probe_dir/hello") || die "llvm-readelf could not inspect the static probe"
 echo "freebsd-sysroot: readelf header follows" >&2
 echo "$readelf_out" >&2
 case "$readelf_out" in
@@ -232,18 +231,10 @@ case "$readelf_out" in
   *) die "ELF OS/ABI is not FreeBSD" ;;
 esac
 
-needed=$("$readelf_bin" -d "$probe_dir/hello" 2>/dev/null || true)
-if [[ -n "$needed" ]] && grep -Eq 'NEEDED|Dynamic section' <<<"$needed"; then
-  if grep -q 'NEEDED' <<<"$needed"; then
-    die "static probe binary still has dynamic NEEDED entries"
-  fi
-fi
-
-# Prove the probe is a real static FreeBSD ELF, not a host Linux binary.
-if command -v readelf >/dev/null 2>&1; then
-  if readelf -d "$probe_dir/hello" 2>/dev/null | grep -q 'NEEDED'; then
-    die "probe binary has dynamic dependencies"
-  fi
+needed=$("$readelf_bin" -d "$probe_dir/hello" 2>/dev/null) ||
+  die "llvm-readelf could not inspect the static probe dynamic section"
+if grep -q 'NEEDED' <<<"$needed"; then
+  die "static probe binary still has dynamic NEEDED entries"
 fi
 
 echo "freebsd-sysroot: $target sysroot ready at $sysroot_dir" >&2

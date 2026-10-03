@@ -207,47 +207,46 @@ fetch() {
     https://*) ;;
     *) die "远程下载地址必须使用 HTTPS：$1" "remote download URL must use HTTPS: $1" ;;
   esac
-  if command -v curl >/dev/null 2>&1; then
-    # max-time applies per transfer; retry-max-time bounds the retry window.
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time "$fetch_max_time" \
-      --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time "$fetch_max_time" \
-      "$1" -o "$2"
-  elif command -v wget >/dev/null 2>&1; then
-    command -v timeout >/dev/null 2>&1 ||
-      die "wget 路径需要 timeout 来限制总下载时间" "the wget path requires timeout to bound total download time"
-    timeout "$fetch_max_time" wget -q --https-only --tries=3 --timeout=20 -O "$2" "$1"
-  elif [ "${OS:-}" = freebsd ] && [ -x /usr/bin/fetch ]; then
-    # FreeBSD base-system /usr/bin/fetch, the last resort after curl and wget.
-    #
-    # The path is absolute on purpose. This wrapper function is itself named
-    # fetch, and `command -v fetch` inside its own body resolves to the shell
-    # function rather than to the executable, so PATH lookup cannot be used to
-    # tell them apart. `timeout` is an external program as well, so it could
-    # not run a `command fetch ...` word anyway. FreeBSD owns /usr/bin/fetch
-    # exactly like it owns /sbin/ping and /usr/sbin/traceroute, so naming the
-    # base-system path is both unambiguous and consistent with the probes.
-    command -v timeout >/dev/null 2>&1 ||
-      die "fetch 路径需要 timeout 来限制总下载时间" "the fetch path requires timeout to bound total download time"
-    timeout "$fetch_max_time" /usr/bin/fetch -q -o "$2" "$1"
-  else
-    die "需要 curl、wget 或 FreeBSD fetch" "curl, wget, or FreeBSD fetch is required"
-  fi
+  case "${OS:-}" in
+    linux)
+      command -v curl >/dev/null 2>&1 ||
+        die "Linux 下载需要 curl" "curl is required for downloads on Linux"
+      # max-time applies per transfer; retry-max-time bounds the retry window.
+      curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-max-time "$fetch_max_time" \
+        --connect-timeout 10 --speed-limit 1024 --speed-time 30 --max-time "$fetch_max_time" \
+        "$1" -o "$2"
+      ;;
+    freebsd)
+      [ -x /usr/bin/fetch ] ||
+        die "FreeBSD 下载需要 /usr/bin/fetch" "FreeBSD downloads require /usr/bin/fetch"
+      command -v timeout >/dev/null 2>&1 ||
+        die "FreeBSD fetch 路径需要 timeout 来限制总下载时间" "FreeBSD fetch requires timeout to bound total download time"
+      timeout "$fetch_max_time" /usr/bin/fetch -q -o "$2" "$1"
+      ;;
+    *) die "无法为平台 ${OS:-unknown} 选择下载工具" "no downloader is defined for platform ${OS:-unknown}" ;;
+  esac
 }
 
 file_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
-  elif command -v sha256 >/dev/null 2>&1; then
-    # FreeBSD base-system /sbin/sha256. -q prints the digest alone, so the
-    # output already matches the "one lowercase hex line" contract above.
-    sha256 -q "$1" | tr '[:upper:]' '[:lower:]'
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "$1" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]'
-  else
-    return 1
-  fi
+  case "${OS:-}" in
+    linux)
+      command -v sha256sum >/dev/null 2>&1 || {
+        printf '%s\n' 'Linux 校验需要 sha256sum / sha256sum is required for verification on Linux' >&2
+        return 127
+      }
+      hash_output=$(sha256sum "$1") || return $?
+      ;;
+    freebsd)
+      command -v sha256 >/dev/null 2>&1 || {
+        printf '%s\n' 'FreeBSD 校验需要 sha256 / sha256 is required for verification on FreeBSD' >&2
+        return 127
+      }
+      hash_output=$(sha256 -q "$1") || return $?
+      ;;
+    *) return 1 ;;
+  esac
+  hash_value=${hash_output%%[[:space:]]*}
+  printf '%s\n' "$hash_value"
 }
 
 fetch "${release_base}/${asset}" "${work_dir}/${asset}"
@@ -255,10 +254,7 @@ fetch "${release_base}/checksums.txt" "${work_dir}/checksums.txt"
 
 expected_hash=$(awk -v file="$asset" '$2 == file {print $1; exit}' "${work_dir}/checksums.txt" | tr '[:upper:]' '[:lower:]')
 [ -n "$expected_hash" ] || { printf 'checksum entry missing for %s\n' "$asset" >&2; exit 1; }
-if ! actual_hash=$(file_sha256 "${work_dir}/${asset}"); then
-  printf '%s\n' "sha256sum, shasum, sha256, or openssl is required to verify the release" >&2
-  exit 1
-fi
+actual_hash=$(file_sha256 "${work_dir}/${asset}")
 [ "$actual_hash" = "$expected_hash" ] || { printf '%s\n' "SHA-256 verification failed" >&2; exit 1; }
 printf '%s\n' "SHA-256 verified"
 

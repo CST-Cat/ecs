@@ -149,6 +149,11 @@ jobs:
           check-latest: false
           cache: false
 
+      - name: Install ZIP packager for package regressions
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+
       - name: Run scripts/ci/check.sh
         run: bash scripts/ci/check.sh
 

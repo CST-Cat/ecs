@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,10 @@ func TestZstdParserAndCorpusContracts(t *testing.T) {
 	if _, err := executeZstdBenchmark(context.Background(), "unused", "unused", 0, contract); err == nil || !strings.Contains(err.Error(), "worker 数必须为正数") {
 		t.Fatalf("zstd invalid execute input = %v", err)
 	}
+	t.Setenv("ECS_ZSTD_CORPUS", " \t ")
+	if _, err := findZstdCorpus(contract); err == nil || !strings.Contains(err.Error(), "ECS_ZSTD_CORPUS") {
+		t.Fatalf("empty corpus setting diagnostic = %v", err)
+	}
 
 	directory := t.TempDir()
 	data := []byte("fixture corpus")
@@ -59,10 +64,7 @@ func TestZstdParserAndCorpusContracts(t *testing.T) {
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 	contract.CorpusBytes = int64(len(data))
 	contract.CorpusSHA256 = hash
-	if err := verifyZstdCorpus(path, contract); err != nil {
-		t.Fatalf("valid corpus rejected: %v", err)
-	}
-	t.Setenv("ECS_ZSTD_CORPUS", path)
+	t.Setenv("ECS_ZSTD_CORPUS", " \t"+path+"\n")
 	if found, err := findZstdCorpus(contract); err != nil || found != path {
 		t.Fatalf("configured corpus = %q/%v", found, err)
 	}
@@ -76,13 +78,14 @@ func TestZstdParserAndCorpusContracts(t *testing.T) {
 	}
 	wrongHash := contract
 	wrongHash.CorpusSHA256 = "deadbeef"
-	if err := verifyZstdCorpus(path, wrongHash); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+	t.Setenv("ECS_ZSTD_CORPUS", path)
+	if _, err := findZstdCorpus(wrongHash); err == nil || !strings.Contains(err.Error(), "SHA-256") {
 		t.Fatal("wrong-hash corpus accepted")
 	}
 	t.Setenv("ECS_ZSTD_CORPUS", filepath.Join(directory, "missing.corpus"))
 	missing := contract
 	missing.CorpusName = "ecs-test-missing-corpus"
-	if _, err := findZstdCorpus(missing); err == nil || !strings.Contains(err.Error(), "不在 ECS_ZSTD_CORPUS") {
+	if _, err := findZstdCorpus(missing); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing corpus diagnostic = %v", err)
 	}
 }

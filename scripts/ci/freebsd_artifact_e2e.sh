@@ -25,11 +25,10 @@ set -Eeuo pipefail
 # 网络传输替换掉。两者都覆盖 wrapper，但只有这里能证明"发布的字节确实能被
 # 真实 run.sh 消费并跑出真实报告"。
 #
-# 三条网络路径都显式覆盖，而不是依赖 CI 镜像恰好装了什么：
-#   A. curl 分支：把 curl shim 放在 PATH 最前。
-#   B. FreeBSD base 分支：PATH 里没有 curl/wget，只留 timeout shim 拦截
-#      `/usr/bin/fetch -q -o DEST URL`，断言这条分支真的被走到。
-#   C. Ookla 失败关闭：FreeBSD 没有 Ookla 客户端，选中必须直接终止。
+# FreeBSD 按平台 token 固定使用 `/usr/bin/fetch` 与 `sha256 -q`。
+# Case A 的 PATH 虽然含有 curl/wget decoy，FreeBSD 仍经 timeout shim 拦截
+# `/usr/bin/fetch -q -o DEST URL`；Case D 在 reduced PATH 下重复验证同一分支。
+# Case C 保留 Ookla 失败关闭验收：FreeBSD 没有 Ookla 客户端，选中必须直接终止。
 
 usage() {
   cat >&2 <<'USAGE'
@@ -205,9 +204,9 @@ export ECS_ARTIFACT_E2E_BUNDLE_DIR="$bundle_release_dir"
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-# 只暴露真实系统目录里被 wrapper 需要的命令，用来证明"没有 curl/wget 时走
-# base fetch 分支"。刻意不软链 curl 和 wget，也不软链 timeout——timeout 由
-# 本测试自己的 shim 提供。
+# 只暴露真实系统目录里被 wrapper 需要的命令。FreeBSD 的下载由绝对路径
+# `/usr/bin/fetch` 指定，PATH 不包含 curl/wget；sha256 是唯一暴露的哈希工具，
+# timeout 由本测试自己的 shim 提供。
 make_fetch_only_path() {
   local path=$1 command_name source
   mkdir -p "$path"
@@ -215,7 +214,7 @@ make_fetch_only_path() {
   # are linked, otherwise the reduced PATH would contain dangling links.
   for command_name in sh uname tr mkdir mktemp cp chmod mv id awk sed sort \
     grep wc cat rm ln dirname basename env date \
-    sha256 sha256sum shasum tar gzip; do
+    sha256 tar gzip; do
     source=$(command -v "$command_name" 2>/dev/null) || continue
     case "$source" in
       /*) ;;
@@ -321,13 +320,13 @@ expected_fetches=(
   "$bundle_base/$tools_asset"
 )
 
-# ---- Case A：curl 分支，真实归档 + 真实固定工具 + 真实基准 ----
+# ---- Case A：curl/wget decoy 在 PATH 时仍走 FreeBSD fetch ----
 case_a_log=$(reset_case_log case-a)
 case_a_tmp="$scratch/tmp-case-a"
 case_a_stderr="$scratch/case-a.stderr"
 if ! ECS_LANG=en ECS_REPOSITORY="$repo_slug" ECS_VERSION="$ecs_version" \
     ECS_AUTO_DEPS=1 ECS_KEEP=1 TMPDIR="$case_a_tmp" \
-    PATH="$shim_dir:$PATH" ECS_ARTIFACT_E2E_LOG="$case_a_log" \
+    PATH="$shim_dir:$fetch_only_path:$PATH" ECS_ARTIFACT_E2E_LOG="$case_a_log" \
     sh "$repo_root/run.sh" --only "$module" --yes --format json \
     >"$scratch/case-a.stdout" 2>"$case_a_stderr"; then
   cat "$case_a_stderr" >&2
@@ -359,7 +358,7 @@ case_a_report=$(find "$case_a_tmp" -mindepth 1 -maxdepth 1 -name 'ecs-report-*.j
 jq -e '.results[] | select(.id == "'"$module"'") | ((.measurements // []) | length > 0)' \
   "$case_a_report" >/dev/null ||
   fail "case A $module module produced no measurements"
-echo "freebsd-artifact-e2e: case A passed (released ecs, frozen stream, real report)"
+echo "freebsd-artifact-e2e: case A passed (FreeBSD fetch selected with curl/wget present, real report)"
 
 # ---- Case B：发布二进制自己的平台解析 ----
 plan_full="$scratch/plan-full.json"
@@ -410,7 +409,7 @@ if find "$case_c_tmp" -mindepth 1 -maxdepth 1 -name 'ecs-report-*' -print -quit 
 fi
 echo "freebsd-artifact-e2e: case C passed (Ookla fails closed)"
 
-# ---- Case D：没有 curl/wget 时走 FreeBSD base fetch ----
+# ---- Case D：reduced PATH 下仍走 FreeBSD base fetch ----
 case_d_log=$(reset_case_log case-d)
 case_d_tmp="$scratch/tmp-case-d"
 case_d_stderr="$scratch/case-d.stderr"
@@ -428,7 +427,7 @@ case_d_work=$(kept_work_dir "$case_d_stderr")
   fail "case D did not report a kept work directory"
 [[ -x "$case_d_work/bin/stream" ]] ||
   fail "case D did not stage the frozen stream binary through the base fetch path"
-echo "freebsd-artifact-e2e: case D passed (FreeBSD base /usr/bin/fetch branch)"
+echo "freebsd-artifact-e2e: case D passed (FreeBSD /usr/bin/fetch with reduced PATH)"
 
 # ---- Case E：bundle 归档内容（发布包完整性）验收 ---------------------------
 # Case A-D 证明真实 run.sh 能消费这份发布布局（且真实执行 stream）；case E

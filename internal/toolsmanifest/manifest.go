@@ -127,7 +127,6 @@ type Tool struct {
 	Architecture     string         `json:"architecture"`
 	License          string         `json:"license"`
 	Parameters       map[string]any `json:"parameters,omitempty"`
-	Fallback         string         `json:"fallback,omitempty"`
 }
 
 // Field lists mirror the json tags of the types below. They stay explicit
@@ -142,7 +141,7 @@ var (
 	toolFields       = []string{
 		"name", "upstream", "version", "tag_or_commit", "source",
 		"build_flags", "enabled_features", "disabled_features",
-		"architecture", "license", "parameters", "fallback",
+		"architecture", "license", "parameters",
 	}
 )
 
@@ -219,12 +218,6 @@ func Parse(data []byte) (Manifest, error) {
 		} {
 			if err := requireField(toolRaw, field); err != nil {
 				return Manifest{}, fmt.Errorf("tool %d: %w", index, err)
-			}
-		}
-		if value, ok := toolRaw["fallback"]; ok {
-			var fallback string
-			if err := json.Unmarshal(value, &fallback); err != nil || fallback == "" {
-				return Manifest{}, fmt.Errorf("tool %d: fallback must be a non-empty string when present", index)
 			}
 		}
 	}

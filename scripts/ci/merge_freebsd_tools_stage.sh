@@ -8,8 +8,7 @@ set -euo pipefail
 # complete FreeBSD tools stage and emits the final manifest.json.
 #
 # The merge is purely structural:
-#   - no binary is rebuilt, modified or re-linked; per-tool sha256 values
-#     survive as provenance/manifest record fields, copied verbatim;
+#   - no binary is rebuilt, modified or re-linked;
 #   - both fragments are strictly validated first: missing files, extra files
 #     and overlapping tool names are hard errors;
 #   - LICENSES/ is merged from both fragments; a filename collision is an error;
@@ -226,14 +225,6 @@ overlap=$(comm -12 \
   <(printf '%s\n' "${gnu_tools[@]}" | LC_ALL=C sort))
 [[ -z "$overlap" ]] || die "C and GNU fragments overlap on tools: $overlap"
 
-# prov_sha256 只做取值：per-tool sha256 是 provenance/manifest 里的构建记录字段。
-prov_sha256() {
-  local prov=$1 tool=$2
-  jq -er --arg tool "$tool" \
-    '.tools[] | select(.name == $tool) | .sha256' "$prov" ||
-    die "provenance has no sha256 for $tool"
-}
-
 # 工具名里的 "-" 不能出现在 bash 变量名里，动态变量统一用 "_" 代替。
 for tool in "${c_tools[@]}"; do
   [[ -f "$c_fragment/bin/$tool" && -s "$c_fragment/bin/$tool" ]] ||
@@ -241,7 +232,6 @@ for tool in "${c_tools[@]}"; do
   [[ $(jq -er --arg tool "$tool" \
     '.tools[] | select(.name == $tool) | .compiler_family' "$c_prov") == "clang" ]] ||
     die "C provenance $tool compiler_family is not clang"
-  printf -v "c_sha_${tool//-/_}" '%s' "$(prov_sha256 "$c_prov" "$tool")"
 done
 
 for tool in "${gnu_tools[@]}"; do
@@ -262,7 +252,6 @@ for tool in "${gnu_tools[@]}"; do
     die "GNU provenance $tool target_triple does not match $gnu_triple"
   build_host=$(jq -er '.build_host' <<<"$record")
   [[ -n "$build_host" ]] || die "GNU provenance $tool build_host is empty"
-  printf -v "gnu_sha_$key" '%s' "$(prov_sha256 "$gnu_prov" "$tool")"
   printf -v "gnu_compiler_version_$key" '%s' "$compiler_version"
   printf -v "gnu_build_host_$key" '%s' "$build_host"
 done
@@ -319,8 +308,7 @@ done
 #
 # 全局只记录 build.toolchain_mode=cross；编译器事实逐工具记录在
 # parameters.compiler_family / compiler_version / target_triple / build_host /
-# openmp_runtime / sha256。其中 sha256 是从 fragment provenance 原样带入的
-# 记录字段（schema 不变）。工具元数据（upstream/version/tag/source）与 Linux 发布构建一样
+# openmp_runtime。工具元数据（upstream/version/tag/source）与 Linux 发布构建一样
 # 取自 tools/lock.json。
 
 goos=$(ecs_lock_target_field "$target" goos) || die "tools lock has no goos for $target"
@@ -396,48 +384,40 @@ jq -n \
   --arg sysbench_tag "$sysbench_tag" \
   --arg sysbench_source "$(git_source "$(ecs_lock_tool_field sysbench repository)" "$sysbench_commit")" \
   --arg sysbench_commit "$sysbench_commit" \
-  --arg sysbench_sha256 "${c_sha_sysbench}" \
   --arg zstd_upstream "$zstd_upstream" \
   --arg zstd_version "$zstd_version" \
   --arg zstd_tag "$zstd_tag" \
   --arg zstd_source "$(git_source "$(ecs_lock_tool_field zstd repository)" "$zstd_commit")" \
   --arg zstd_commit "$zstd_commit" \
-  --arg zstd_sha256 "${c_sha_zstd}" \
   --arg openssl_upstream "$openssl_upstream" \
   --arg openssl_version "$openssl_version" \
   --arg openssl_tag "$openssl_tag" \
   --arg openssl_source "$(git_source "$(ecs_lock_tool_field openssl repository)" "$openssl_commit")" \
   --arg openssl_commit "$openssl_commit" \
   --arg openssl_target "$openssl_target" \
-  --arg openssl_sha256 "${c_sha_openssl}" \
   --arg fio_upstream "$fio_upstream" \
   --arg fio_version "$fio_version" \
   --arg fio_tag "$fio_tag" \
   --arg fio_source "$(git_source "$(ecs_lock_tool_field fio repository)" "$fio_commit")" \
   --arg fio_commit "$fio_commit" \
-  --arg fio_sha256 "${c_sha_fio}" \
   --arg iperf3_upstream "$iperf3_upstream" \
   --arg iperf3_version "$iperf3_version" \
   --arg iperf3_tag "$iperf3_tag" \
   --arg iperf3_source "$(git_source "$(ecs_lock_tool_field iperf3 repository)" "$iperf3_commit")" \
   --arg iperf3_commit "$iperf3_commit" \
-  --arg iperf3_sha256 "${c_sha_iperf3}" \
   --arg npb_upstream "$npb_upstream" \
   --arg npb_version "$npb_version" \
   --arg npb_tag "$npb_tag" \
   --arg npb_source "$npb_source_url" \
   --arg npb_source_sha256 "$npb_source_sha" \
-  --arg npb_ep_sha256 "${gnu_sha_npb_ep}" \
   --arg npb_ep_compiler_version "${gnu_compiler_version_npb_ep}" \
   --arg npb_ep_build_host "${gnu_build_host_npb_ep}" \
-  --arg npb_ft_sha256 "${gnu_sha_npb_ft}" \
   --arg npb_ft_compiler_version "${gnu_compiler_version_npb_ft}" \
   --arg npb_ft_build_host "${gnu_build_host_npb_ft}" \
   --arg stream_upstream "$stream_upstream" \
   --arg stream_version "$stream_version" \
   --arg stream_source "$stream_source_url" \
   --arg stream_source_sha256 "$stream_source_sha" \
-  --arg stream_sha256 "${gnu_sha_stream}" \
   --arg stream_compiler_version "${gnu_compiler_version_stream}" \
   --arg stream_build_host "${gnu_build_host_stream}" \
   --argjson npb_build_flags "$npb_build_flags_json" \
@@ -475,7 +455,7 @@ jq -n \
           disabled_features: ["mysql", "pgsql", "drizzle", "attachsql", "oracle"],
           architecture: $architecture,
           license: "GPL-2.0-only",
-          parameters: {source_commit: $sysbench_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $sysbench_sha256, fully_static: true, stripped: true}
+          parameters: {source_commit: $sysbench_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, fully_static: true, stripped: true}
         },
         {
           name: "zstd",
@@ -488,7 +468,7 @@ jq -n \
           disabled_features: ["zlib", "lzma", "lz4", "legacy-formats", "dictionary-builder", "trace"],
           architecture: $architecture,
           license: "BSD-3-Clause OR GPL-2.0-only",
-          parameters: {source_commit: $zstd_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $zstd_sha256, fully_static: true, stripped: true}
+          parameters: {source_commit: $zstd_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, fully_static: true, stripped: true}
         },
         {
           name: "npb-ep",
@@ -501,7 +481,7 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ep_compiler_version, target_triple: $target_triplet, build_host: $npb_ep_build_host, openmp_runtime: "libgomp", sha256: $npb_ep_sha256, fully_static: true, stripped: true}
+          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "EP", problem_class: "A", problem_size: "2^29 random numbers reported", compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ep_compiler_version, target_triple: $target_triplet, build_host: $npb_ep_build_host, openmp_runtime: "libgomp", fully_static: true, stripped: true}
         },
         {
           name: "npb-ft",
@@ -514,7 +494,7 @@ jq -n \
           disabled_features: ["MPI", "other NPB kernels", "other problem classes"],
           architecture: $architecture,
           license: "NASA-NPB-permissive",
-          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ft_compiler_version, target_triple: $target_triplet, build_host: $npb_ft_build_host, openmp_runtime: "libgomp", sha256: $npb_ft_sha256, fully_static: true, stripped: true}
+          parameters: {source_sha256: $npb_source_sha256, implementation: "NPB3.4-OMP", benchmark: "FT", problem_class: "A", dimensions: "256x256x128", iterations: 6, compiler_flags: "-O3 -fopenmp", linker_flags: "-O3 -fopenmp -static", random_generator: "randi8", thread_modes: ["1T", "NT"], ci_smoke_class: "none", compiler_family: "gcc", compiler_version: $npb_ft_compiler_version, target_triple: $target_triplet, build_host: $npb_ft_build_host, openmp_runtime: "libgomp", fully_static: true, stripped: true}
         },
         {
           name: "openssl",
@@ -527,7 +507,7 @@ jq -n \
           disabled_features: ["TLS/DTLS/QUIC", "network/HTTP", "shared libraries/modules/engines", "EC/DH/DSA/PQ families", "unrequested cipher/digest families", "tests/documentation"],
           architecture: $architecture,
           license: "Apache-2.0",
-          parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $openssl_sha256, fully_static: true, stripped: true}
+          parameters: {source_commit: $openssl_commit, configure_target: $openssl_target, generated_target: "build_generated", build_target: "apps/openssl", algorithms: ["aes-256-gcm", "chacha20-poly1305", "sha256"], compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, fully_static: true, stripped: true}
         },
         {
           name: "stream",
@@ -540,7 +520,7 @@ jq -n \
           disabled_features: [],
           architecture: $architecture,
           license: "STREAM-custom",
-          parameters: {source_sha256: $stream_source_sha256, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], compiler_family: "gcc", compiler_version: $stream_compiler_version, target_triple: $target_triplet, build_host: $stream_build_host, openmp_runtime: "libgomp", sha256: $stream_sha256, fully_static: true, stripped: true}
+          parameters: {source_sha256: $stream_source_sha256, array_size: $stream_array_size, ntimes: $stream_ntimes, thread_modes: ["1T", "NT"], compiler_family: "gcc", compiler_version: $stream_compiler_version, target_triple: $target_triplet, build_host: $stream_build_host, openmp_runtime: "libgomp", fully_static: true, stripped: true}
         },
         {
           name: "fio",
@@ -553,7 +533,7 @@ jq -n \
           disabled_features: ["io_uring", "libaio", "ceph", "rbd", "rados", "gluster", "gfapi", "rdma", "http", "pmem"],
           architecture: $architecture,
           license: "GPL-2.0-only",
-          parameters: {source_commit: $fio_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $fio_sha256, fully_static: true, stripped: true}
+          parameters: {source_commit: $fio_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, fully_static: true, stripped: true}
         },
         {
           name: "iperf3",
@@ -566,7 +546,7 @@ jq -n \
           disabled_features: ["sctp", "openssl/auth"],
           architecture: $architecture,
           license: "BSD-3-Clause",
-          parameters: {source_commit: $iperf3_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, sha256: $iperf3_sha256, fully_static: true, stripped: true}
+          parameters: {source_commit: $iperf3_commit, compiler_family: "clang", compiler_version: $c_compiler_version, target_triple: $target_triplet, build_host: $c_build_host, openmp_runtime: "none", linker: $c_linker, fully_static: true, stripped: true}
         }
       ]
     }' | jq . >"$manifest"

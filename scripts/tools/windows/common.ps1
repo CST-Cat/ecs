@@ -80,20 +80,33 @@ function Save-EcsVerifiedDownload {
     $parent = Split-Path -Parent $Destination
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $lastError = $null
+    $downloaded = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
-            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
-            if ($actual -eq $Sha256.ToLowerInvariant()) {
-                return
-            }
-            $lastError = "SHA-256 mismatch: expected $Sha256, got $actual"
+            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination -ErrorAction Stop
+            $downloaded = $true
+            break
         } catch {
             $lastError = $_.Exception.Message
+            Remove-Item -Force -LiteralPath $Destination -ErrorAction SilentlyContinue
         }
-        Remove-Item -Force -LiteralPath $Destination -ErrorAction SilentlyContinue
     }
-    throw "$Description failed after three attempts: $lastError"
+    if (-not $downloaded) {
+        throw "$Description failed after three download attempts: $lastError"
+    }
+
+    try {
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination -ErrorAction Stop).Hash.ToLowerInvariant()
+    } catch {
+        $hashError = $_.Exception.Message
+        Remove-Item -Force -LiteralPath $Destination -ErrorAction SilentlyContinue
+        throw "$Description SHA-256 calculation failed: $hashError"
+    }
+    if ($actual -eq $Sha256.ToLowerInvariant()) {
+        return
+    }
+    Remove-Item -Force -LiteralPath $Destination -ErrorAction SilentlyContinue
+    throw "$Description SHA-256 mismatch: expected $Sha256, got $actual"
 }
 
 function Get-EcsLockedTool {

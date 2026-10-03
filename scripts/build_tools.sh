@@ -78,6 +78,13 @@ if [[ -n "$cross_prefix" || -n "$target_runner" ]]; then
     die "--cross-prefix and --target-runner must be provided together"
 fi
 
+jobs=${JOBS:-}
+if [[ -z "$jobs" ]]; then
+  command -v getconf >/dev/null 2>&1 || die "getconf is required to determine the default job count"
+  jobs=$(getconf _NPROCESSORS_ONLN) || die "getconf could not determine the default job count"
+fi
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "JOBS must be a positive integer"
+
 for command_name in \
   curl git jq sha256sum gcc make readelf strip tar meson ninja autoconf automake \
   libtoolize perl pkg-config unzip; do
@@ -358,15 +365,11 @@ ecs_build_silesia_corpus "$work" "$zstd_corpus_path" ||
 nexttrace_asset_name="nexttrace-tiny_linux_${arch}"
 nexttrace_asset_url=$(jq -er --arg name "$nexttrace_asset_name" \
   '.assets[] | select(.name == $name) | .browser_download_url' "$nexttrace_release")
-nexttrace_asset_digest=$(jq -r --arg name "$nexttrace_asset_name" \
-  '.assets[] | select(.name == $name) | .digest // empty' "$nexttrace_release")
 [[ -n "$nexttrace_asset_url" ]] || die "official NextTrace release has no $nexttrace_asset_name asset"
 nexttrace_download="$work/nexttrace-tiny"
 curl "${curl_options[@]}" "$nexttrace_asset_url" -o "$nexttrace_download"
 chmod 0755 "$nexttrace_download"
 nexttrace_sha=$(sha256sum "$nexttrace_download" | awk '{print $1}')
-jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}
-[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=2
 
 ecs_tool_build_sysbench
 ecs_tool_build_zstd
@@ -381,7 +384,7 @@ ecs_tool_build_openssl
 ecs_tool_build_nexttrace
 
 # Remove compiler/debug sections from binaries built in this job. The official
-# NextTrace asset is kept byte-for-byte so its GitHub release digest remains
+# NextTrace asset is kept byte-for-byte so its lock-pinned SHA-256 remains
 # independently verifiable.
 for tool in "${ECS_TOOL_NAMES[@]}"; do
   [[ "$tool" == nexttrace-tiny ]] && continue
@@ -568,7 +571,6 @@ jq -n \
   --arg nexttrace_asset_source "$nexttrace_asset_url" \
   --arg nexttrace_version "$nexttrace_version" \
   --arg nexttrace_tag "$nexttrace_tag" \
-  --arg nexttrace_release_digest "$nexttrace_asset_digest" \
   --arg nexttrace_commit "$nexttrace_commit" \
   --arg iputils_version "$iputils_version" \
   --arg iputils_tag "$iputils_tag" \
@@ -710,7 +712,7 @@ jq -n \
           disabled_features: ["full", "mtr", "globalping", "webui"],
           architecture: $architecture,
           license: "GPL-3.0-only",
-          parameters: {release_commit: $nexttrace_commit, github_asset_digest: $nexttrace_release_digest}
+          parameters: {release_commit: $nexttrace_commit}
         },
         {
           name: "ping",

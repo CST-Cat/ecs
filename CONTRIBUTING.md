@@ -46,6 +46,8 @@ go test -race ./...
 
 `make integration` 还会按 `tools/lock.json` 下载并校验 Linux NextTrace，使用当前 ECS 对 `127.0.0.1` 实跑 route/backtrace；需要 `jq`、`curl`、`sha256sum`、`setcap`，以及仅为本次临时 NextTrace 文件授予 `CAP_NET_RAW` 和 `CAP_NET_ADMIN` 的权限。
 
+SHA/build 输入使用固定工具：Linux 下载与摘要使用 `curl`/`sha256sum`；FreeBSD 用户入口下载使用 `/usr/bin/fetch`/`sha256 -q`（Ubuntu cross-builder 仍使用 `curl`）。Windows 资产 ZIP 打包使用 `zip`；FreeBSD target dependencies 使用 `bsdtar`（Ubuntu 包 `libarchive-tools`），SDK ELF 检查使用 `llvm-readelf`（包 `llvm`），from-source SDK 需要 `makeinfo`（包 `texinfo`）。zstd 只读取 `ECS_ZSTD_CORPUS`；Git epoch 或 CPU 数量检测失败即停止，分别不改用时钟或 `2`。错误缓存、SHA 不符或 SHA 读取错误都立即失败，不重下或换用其他输入。apt update 设 `APT::Update::Error-Mode=any`，不改写镜像或复用旧索引。
+
 `make check` 与 CI 的 `quality` job、Release 的 preflight 共用 `scripts/ci/check.sh`。它检查 Go 格式，
 在默认、`integration` 两种 build tag 组合下运行 `go vet` 与固定版本的 `staticcheck`，并检查工具 manifest 示例、
 shell 语法、发布彩排/正式发布边界、发布中间目录忽略规则、工具包布局回归和各架构构建定义。首次构建 `staticcheck` 时可能下载

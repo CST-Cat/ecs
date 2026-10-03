@@ -23,6 +23,7 @@ trap 'rm -rf -- "$test_root"' EXIT
 # repository copy instead of risking pre-existing release artifacts.
 mkdir -p \
   "$package_repo/scripts/lib" \
+  "$package_repo/scripts/ci" \
   "$package_repo/tools" \
   "$binary_root" \
   "$stage_root" \
@@ -33,6 +34,9 @@ cp -a \
 cp -a \
   "$repo_root/scripts/lib/common.sh" \
   "$package_repo/scripts/lib/"
+cp -a \
+  "$repo_root/scripts/ci/windows_tools_package.sh" \
+  "$package_repo/scripts/ci/"
 cp -a \
   "$repo_root/tools/lock.json" \
   "$package_repo/tools/"
@@ -81,6 +85,75 @@ package_env=(
   SOURCE_DATE_EPOCH=946684800
 )
 
+make_tool_path() {
+  local destination=$1
+  shift
+  mkdir -p "$destination"
+  local tool real_tool
+  for tool in "$@"; do
+    real_tool=$(command -v "$tool") || fail "required real command is unavailable for PATH test: $tool"
+    ln -s "$real_tool" "$destination/$tool"
+  done
+}
+
+assert_zip_epoch() {
+  local archive=$1 timestamps
+  timestamps=$(TZ=UTC unzip -Z -v "$archive" |
+    awk -F ': ' '/file last modified on \(DOS date\/time\):/ {timestamp=$2; sub(/^ +/, "", timestamp); print timestamp}' |
+    sort -u)
+  [[ "$timestamps" == '2000 Jan 1 00:00:00' ]] ||
+    fail "$archive ZIP member timestamp = $timestamps, want SOURCE_DATE_EPOCH"
+}
+
+assert_tar_epoch() {
+  local archive=$1 expected=${2:-'2000-01-01 00:00:00'} timestamps
+  timestamps=$(TZ=UTC tar --list --verbose --full-time -z -f "$archive" |
+    awk '{print $4 " " $5}' | sort -u)
+  [[ "$timestamps" == "$expected" ]] ||
+    fail "$archive tar member timestamp = $timestamps, want SOURCE_DATE_EPOCH"
+}
+
+# A checkout without a Git commit must not silently substitute the wall clock.
+if env -u SOURCE_DATE_EPOCH bash "$package_repo/scripts/package.sh" \
+  --binaries-dir "$binary_root" --target freebsd_amd64 \
+  >"$test_root/git-epoch-failure.out" 2>&1; then
+  fail "package.sh accepted a missing Git commit timestamp"
+fi
+grep -F 'could not determine Git commit timestamp' "$test_root/git-epoch-failure.out" >/dev/null ||
+  fail "package.sh did not report the missing Git commit timestamp"
+echo "package tools stage tests: missing Git timestamp rejected"
+
+# Real shasum and 7z executables are present in these restricted PATHs. The
+# canonical package commands must still reject a missing sha256sum or zip.
+canonical_path_root="$test_root/canonical-paths"
+no_sha256sum_path="$canonical_path_root/no-sha256sum"
+no_sha256sum_tools=(dirname jq)
+command -v shasum >/dev/null 2>&1 && no_sha256sum_tools+=(shasum)
+make_tool_path "$no_sha256sum_path" "${no_sha256sum_tools[@]}"
+if env PATH="$no_sha256sum_path" SOURCE_DATE_EPOCH=946684800 \
+  /bin/bash "$package_repo/scripts/package.sh" \
+  --binaries-dir "$binary_root" --target freebsd_amd64 \
+  >"$test_root/sha256sum-missing.out" 2>&1; then
+  fail "package.sh accepted shasum without sha256sum"
+fi
+grep -F 'checksums require sha256sum' "$test_root/sha256sum-missing.out" >/dev/null ||
+  fail "package.sh did not require sha256sum"
+echo "package tools stage tests: shasum without sha256sum rejected"
+
+no_zip_path="$canonical_path_root/no-zip"
+no_zip_tools=(dirname jq sha256sum rm mkdir mktemp find cp chmod)
+command -v 7z >/dev/null 2>&1 && no_zip_tools+=(7z)
+make_tool_path "$no_zip_path" "${no_zip_tools[@]}"
+if env PATH="$no_zip_path" SOURCE_DATE_EPOCH=946684800 \
+  /bin/bash "$package_repo/scripts/package.sh" \
+  --binaries-dir "$binary_root" --target windows_amd64 \
+  >"$test_root/zip-missing.out" 2>&1; then
+  fail "package.sh accepted 7z without zip"
+fi
+grep -F 'Windows ZIP packaging requires zip' "$test_root/zip-missing.out" >/dev/null ||
+  fail "package.sh did not require zip"
+echo "package tools stage tests: 7z without zip rejected"
+
 assert_archives() {
   local prefix=$1 expected_count=$2
   local -a assets=()
@@ -104,6 +177,7 @@ if ! package_output=$(env "${package_env[@]}" bash "$package_repo/scripts/packag
 fi
 assert_archives ecs_ "${#ECS_LINUX_TARGETS[@]}"
 assert_checksums "${#ECS_LINUX_TARGETS[@]}"
+assert_tar_epoch "$dist_root/ecs_linux_amd64.tar.gz"
 [[ -z "$(find "$dist_root" -mindepth 1 -maxdepth 1 -type f -name 'ecs-tools_*.tar.gz' -print -quit)" ]] ||
   fail "ECS package unexpectedly wrote tools archives"
 [[ ! -e "$dist_root/$ECS_CORPUS_ARCHIVE" ]] ||
@@ -219,6 +293,7 @@ done
 if grep -F -x ecs <<<"$windows_listing" >/dev/null; then
   fail "Windows ECS ZIP used the Unix ecs member name"
 fi
+assert_zip_epoch "$dist_root/ecs_windows_amd64.zip"
 
 # Case D: --all-targets is how release and bundle wiring promote every platform
 # target, including the two FreeBSD stages and the Windows stage, in one
@@ -262,6 +337,33 @@ done
 if grep -F -x 'bin/zstd' <<<"$windows_tools_listing" >/dev/null; then
   fail "Windows tools ZIP used a non-.exe tool member"
 fi
+assert_zip_epoch "$dist_root/ecs-tools_windows_amd64.zip"
+
+# The separate Windows corpus packager uses the same explicit reproducible
+# timestamp and the same SHA256 command contract.
+corpus_input_dir="$test_root/windows-corpus-input"
+mkdir -p "$corpus_input_dir"
+printf '%s\n' 'Windows corpus package fixture' >"$corpus_input_dir/$ECS_CORPUS_NAME"
+windows_corpus_dist="$test_root/windows-corpus-dist"
+if ! windows_package_output=$(env "${package_env[@]}" TZ=UTC \
+  bash "$package_repo/scripts/ci/windows_tools_package.sh" \
+  --output-dir "$windows_corpus_dist" \
+  --corpus-path "$corpus_input_dir/$ECS_CORPUS_NAME" 2>&1); then
+  fail "Windows corpus package invocation failed:\n$windows_package_output"
+fi
+corpus_timestamp=$(TZ=UTC tar --list --verbose --full-time \
+  -zf "$windows_corpus_dist/$ECS_CORPUS_ARCHIVE" | awk '{print $4 " " $5}')
+[[ "$corpus_timestamp" == '2000-01-01 00:00:00' ]] ||
+  fail "Windows corpus archive timestamp = $corpus_timestamp, want SOURCE_DATE_EPOCH"
+if env -u SOURCE_DATE_EPOCH bash "$package_repo/scripts/ci/windows_tools_package.sh" \
+  --output-dir "$test_root/no-git-windows-dist" \
+  --corpus-path "$corpus_input_dir/$ECS_CORPUS_NAME" \
+  >"$test_root/windows-git-epoch-failure.out" 2>&1; then
+  fail "Windows corpus packager accepted a missing Git commit timestamp"
+fi
+grep -F 'could not determine Git commit timestamp' "$test_root/windows-git-epoch-failure.out" >/dev/null ||
+  fail "Windows corpus packager did not report the missing Git commit timestamp"
+echo "package tools stage tests: Windows corpus timestamp and Git failure verified"
 
 # --all-targets and --target answer the same question; asking both is ambiguous
 # input rather than a union, and must not silently pick one interpretation.
@@ -282,5 +384,23 @@ if env "${package_env[@]}" bash "$package_repo/scripts/package.sh" \
 fi
 grep -F 'target may only be supplied once: freebsd_amd64' "$test_root/duplicate-selector.out" >/dev/null ||
   fail "package.sh did not diagnose the duplicate target selector"
+
+# A real isolated Git commit supplies the deterministic epoch when the caller
+# does not set SOURCE_DATE_EPOCH.
+git_date='2000-01-01T00:00:00Z'
+git -C "$package_repo" init -q
+git -C "$package_repo" add -A
+GIT_AUTHOR_DATE="$git_date" GIT_COMMITTER_DATE="$git_date" \
+  git -C "$package_repo" -c user.name='Package Fixture' \
+  -c user.email='package-fixture@example.invalid' commit -q -m 'package epoch fixture'
+git_commit_epoch=$(git -C "$package_repo" show -s --format=%ct HEAD)
+git_commit_timestamp=$(date -u -d "@$git_commit_epoch" '+%Y-%m-%d %H:%M:%S')
+if ! package_output=$(env -u SOURCE_DATE_EPOCH \
+  bash "$package_repo/scripts/package.sh" --binaries-dir "$binary_root" \
+  --target linux_amd64 2>&1); then
+  fail "Git-epoch package invocation failed:\n$package_output"
+fi
+assert_tar_epoch "$dist_root/ecs_linux_amd64.tar.gz" "$git_commit_timestamp"
+echo "package tools stage tests: Git commit timestamp fallback verified"
 
 echo "package tools stage tests passed"

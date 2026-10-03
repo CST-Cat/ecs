@@ -183,10 +183,10 @@ ecs_freebsd_gnu_build_npb "$work" "$stage" "$wrap_bin" "$file_machine"
 ecs_freebsd_gnu_build_stream "$work" "$stage" "$wrap_bin" "$file_machine"
 
 # Stage policy strip: both builds and their pre-strip GOMP_/__kmpc_ proofs are
-# done, so strip each final release binary once BEFORE provenance computes the
-# final-byte SHA-256s; each binary is then checked against the static FreeBSD
-# ELF contract. The downstream release-artifact verification and real FreeBSD
-# tools gate cover tree-level and runtime behavior.
+# complete, so strip each final release binary once before recording stage
+# provenance and checking the static FreeBSD ELF contract. The downstream
+# release-artifact verification and real FreeBSD tools gate cover tree-level
+# and runtime behavior.
 ecs_freebsd_gnu_strip_release_binaries "$stage" "$sdk_prefix" "$triple" "$file_machine"
 
 ecs_freebsd_gnu_write_provenance "$stage" "$target" "$triple" "$gcc_version" \

@@ -140,11 +140,9 @@ ecs_freebsd_c_write_provenance() {
     local first=1 name
     for name in sysbench zstd openssl fio iperf3; do
       [[ -x "$bin/$name" ]] || continue
-      local sha
-      sha=$(sha256sum "$bin/$name" | awk '{print $1}')
       if [[ $first -eq 0 ]]; then echo ','; fi
       first=0
-      printf '    {"name":"%s","sha256":"%s","compiler_family":"clang"}' "$name" "$sha"
+      printf '    {"name":"%s","compiler_family":"clang"}' "$name"
     done
     echo
     echo '  ]'

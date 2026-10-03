@@ -25,21 +25,30 @@ ECS_STREAM_COMPILE_FLAGS=(
 # 2026-09-13 起在原 3 次尝试上加 2 次短重试并整体限时（同批 NPB 官方渠道
 # 500 的教训：长重试烧 CI），19.5 KiB 文件 60s 上限绰绰有余。
 ecs_stream_download() {
-  local output=$1 attempt actual
+  local output=$1 attempt actual hash_status
   mkdir -p "$(dirname "$output")"
 
   for attempt in 1 2 3 4 5; do
     if curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 30 --max-time 60 \
       "$ECS_STREAM_URL" -o "$output"; then
-      actual=$(sha256sum "$output" | awk '{print $1}')
+      if actual=$(sha256sum "$output"); then
+        actual=${actual%%[[:space:]]*}
+      else
+        hash_status=$?
+        rm -f -- "$output"
+        echo "stream: SHA-256 command failed" >&2
+        return "$hash_status"
+      fi
       if [[ "$actual" == "$ECS_STREAM_SOURCE_SHA256" ]]; then
         return 0
       fi
-      echo "stream: SHA-256 mismatch on attempt $attempt/5: expected $ECS_STREAM_SOURCE_SHA256, got $actual" >&2
+      echo "stream: SHA-256 mismatch: expected $ECS_STREAM_SOURCE_SHA256, got $actual" >&2
+      rm -f -- "$output"
+      return 1
     else
       echo "stream: download failed on attempt $attempt/5" >&2
+      rm -f -- "$output"
     fi
-    rm -f -- "$output"
   done
 
   return 1

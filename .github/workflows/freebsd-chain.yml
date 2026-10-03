@@ -2,15 +2,15 @@ name: freebsd-chain
 
 # per-target FreeBSD 工具链构建链：由 freebsd-tools.yml 并行调用两次
 # （target=freebsd_amd64 与 freebsd_arm64）。每个目标内部保持两条真正独立的
-# 支路并行：C-TOOLS（SYSROOT → C-DEPS → C build）∥ GNU（SDK gate → bench），
-# 最后 MERGE → VERIFY。C-DEPS 与 GNU BENCH 不再作为只为传递状态而存在的独立
-# job；其 lock/下载/验证步骤仍在同一 build job 内完整执行并复用工作目录。
+# 支路并行：C-TOOLS（builder 内安装并探测 SYSROOT、安装 immutable target deps）∥
+# GNU（SDK gate → bench），最后 MERGE → VERIFY。C builder 是 sysroot 与 target
+# deps 安装/验证的唯一执行者；workflow 保留 release pin 与 snapshot 断言门禁。
 #
 # per-target FreeBSD toolchain chain, called in parallel for amd64 and arm64.
-# The two independent branches remain parallel: C-TOOLS (SYSROOT → C-DEPS →
-# C build) ∥ GNU (SDK gate → benchmark), followed by MERGE → VERIFY. The
-# original lock and verification gates remain, but no longer create a second
-# job only to wait and download the same inputs.
+# The two independent branches remain parallel: C-TOOLS (the builder installs
+# and probes its SYSROOT and installs/verifies immutable target dependencies)
+# ∥ GNU (SDK gate → benchmark), followed by MERGE → VERIFY. The builder owns
+# those operations; workflow release-pin and snapshot assertions remain as gates.
 # 静态检查与整体依赖（legacy-absent / linux-static / workflow-static）由调用方
 # freebsd-tools.yml 承担。
 # VERIFY 之后的 REAL GATE 由 freebsd-gate.yml 负责。把 VM gate 从本链拆出后，
@@ -62,14 +62,6 @@ jobs:
             autoconf automake libtool libtool-bin pkg-config \
             make git curl jq perl
 
-      - name: Install and probe FreeBSD sysroot (${{ inputs.target }})
-        run: |
-          set -euo pipefail
-          bash scripts/ci/freebsd_sysroot.sh \
-            --target ${{ inputs.target }} \
-            --sysroot-dir "$FREEBSD_C_SYSROOT_DIR" \
-            --work-dir "$FREEBSD_C_SYSROOT_WORK_DIR"
-
       - name: Assert the sysroot lock is release-pinned
         run: |
           set -euo pipefail
@@ -88,14 +80,6 @@ jobs:
                 ;;
             esac
           done
-
-      - name: Fetch and verify immutable target dependencies (${{ inputs.target }})
-        run: |
-          set -euo pipefail
-          bash scripts/ci/freebsd_target_deps.sh \
-            --target ${{ inputs.target }} \
-            --prefix "$FREEBSD_C_DEPS_PREFIX" \
-            --work-dir "$FREEBSD_C_DEPS_WORK_DIR"
 
       - name: Assert target dependencies use the immutable snapshot
         run: |

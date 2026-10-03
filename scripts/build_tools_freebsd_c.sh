@@ -33,7 +33,7 @@ USAGE
 target=""
 stage_root=""
 print_params=0
-jobs="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
+jobs="${JOBS:-}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --target)
@@ -108,6 +108,12 @@ fi
   usage
   die "--stage-root is required"
 }
+
+if [[ -z "$jobs" ]]; then
+  command -v nproc >/dev/null 2>&1 || die "nproc is required to determine the default job count"
+  jobs=$(nproc) || die "nproc could not determine the default job count"
+fi
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs and JOBS must be a positive integer"
 
 stage_root=$(ecs_absolute_path "$stage_root")
 
@@ -186,20 +192,17 @@ ecs_freebsd_c_build_iperf3 "$work" "$stage" "$jobs"
 # and real FreeBSD tools gate cover tree-level and runtime behavior.
 ecs_freebsd_c_strip_release_binaries "$stage"
 
-# Licenses: copy upstream LICENSE files when present.
+# Copy the exact license path confirmed at each lock-pinned upstream commit.
 for tool in sysbench zstd openssl fio iperf3; do
   src="$work/src-$tool"
   mkdir -p "$stage/LICENSES"
-  if [[ -f "$src/LICENSE" ]]; then
-    cp "$src/LICENSE" "$stage/LICENSES/$tool.LICENSE"
-  elif [[ -f "$src/COPYING" ]]; then
-    cp "$src/COPYING" "$stage/LICENSES/$tool.LICENSE"
-  elif [[ -f "$src/LICENSE.txt" ]]; then
-    cp "$src/LICENSE.txt" "$stage/LICENSES/$tool.LICENSE"
-  else
-    # OpenSSL and others may use different names; leave a pointer file.
-    echo "See upstream repository for $tool license terms." >"$stage/LICENSES/$tool.LICENSE"
-  fi
+  case "$tool" in
+    sysbench | fio) license_name=COPYING ;;
+    zstd | iperf3) license_name=LICENSE ;;
+    openssl) license_name=LICENSE.txt ;;
+  esac
+  [[ -f "$src/$license_name" ]] || die "locked upstream license is missing: $tool/$license_name"
+  cp "$src/$license_name" "$stage/LICENSES/$tool.LICENSE"
 done
 
 ecs_freebsd_c_write_provenance "$stage" "$target" "$triple"

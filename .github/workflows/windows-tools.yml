@@ -38,7 +38,9 @@ jobs:
       - name: LOCK/CHECK pinned Windows tool contract
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           & ./scripts/ci/windows_tools_prepare.ps1
+          & ./scripts/ci/windows_download_test.ps1
 
   build:
     name: BUILD windows_amd64
@@ -108,6 +110,11 @@ jobs:
         with:
           name: ecs-windows-tools-corpus-windows_amd64
           path: corpus-artifact
+
+      - name: Install ZIP packager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
 
       - name: Normalize the verified Windows stage
         run: |

@@ -440,26 +440,34 @@ ecs_devtool() {
 # ecs_download_sha256 URL EXPECTED_SHA OUTPUT LABEL
 #
 # 带重试的下载 + 摘要校验：这是跨越信任边界的那一次校验，所有从互联网取回的
-# 第三方源码与二进制都走这里。摘要不符时删除产物重试，三次都失败才失败。
+# 第三方源码与二进制都走这里。只重试网络失败；下载成功后的 SHA-256 不符时立即失败。
 ecs_download_sha256() {
   local url=$1 expected_sha=$2 output=$3 label=$4
-  local attempt actual_sha actual_bytes
+  local attempt actual_sha hash_status
 
   for attempt in 1 2 3; do
     if curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 \
       --max-time 900 "$url" -o "$output"; then
-      actual_sha=$(sha256sum "$output" | awk '{print $1}')
+      if actual_sha=$(sha256sum "$output"); then
+        actual_sha=${actual_sha%%[[:space:]]*}
+      else
+        hash_status=$?
+        rm -f -- "$output"
+        echo "ecs: $label SHA-256 command failed" >&2
+        return "$hash_status"
+      fi
       if [[ "$actual_sha" == "$expected_sha" ]]; then
         return 0
       fi
-      actual_bytes=$(stat -c %s "$output")
-      echo "ecs: $label SHA-256 mismatch on attempt $attempt/3: expected $expected_sha, got $actual_sha ($actual_bytes bytes)" >&2
+      echo "ecs: $label SHA-256 mismatch: expected $expected_sha, got $actual_sha" >&2
+      rm -f -- "$output"
+      return 1
     else
       echo "ecs: $label download failed on attempt $attempt/3" >&2
+      rm -f -- "$output"
     fi
-    rm -f -- "$output"
   done
 
-  echo "ecs: $label did not match its pinned SHA-256 after 3 attempts" >&2
+  echo "ecs: $label failed after 3 download attempts" >&2
   return 1
 }

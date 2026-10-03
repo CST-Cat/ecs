@@ -133,15 +133,12 @@ function Get-EcsJsonFile {
 function Copy-EcsLicense {
     param(
         [Parameter(Mandatory)][string]$Destination,
-        [Parameter(Mandatory)][string[]]$Candidates
+        [Parameter(Mandatory)][string]$SourcePath
     )
-    foreach ($candidate in $Candidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            Copy-Item -LiteralPath $candidate -Destination $Destination -Force
-            return
-        }
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        Stop-EcsWindowsBuild "upstream license file is missing: $SourcePath"
     }
-    Stop-EcsWindowsBuild "upstream license file is missing: $($Candidates -join ', ')"
+    Copy-Item -LiteralPath $SourcePath -Destination $Destination -Force
 }
 
 function Test-EcsWindowsAllowedImport {
@@ -238,7 +235,6 @@ function New-EcsManifestTool {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][pscustomobject]$Tool,
         [Parameter(Mandatory)][System.Collections.IDictionary]$Fact,
-        [Parameter(Mandatory)][string]$BinaryPath,
         [Parameter(Mandatory)][string[]]$EnabledFeatures,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$DisabledFeatures,
         [Parameter(Mandatory)][string]$License,
@@ -246,9 +242,7 @@ function New-EcsManifestTool {
         [Parameter(Mandatory)][System.Collections.IDictionary]$PeFacts
     )
 
-    $binaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $BinaryPath).Hash.ToLowerInvariant()
     $parameters = [ordered]@{
-        binary_sha256 = $binaryHash
         pe_machine = [string]$PeFacts['pe_machine']
         pe_imports = @($PeFacts['imports'])
         dependency_allowlist = @($DependencyAllowlist)
@@ -429,7 +423,6 @@ try {
 
     $nexttraceDownload = Join-Path $downloadRoot $nexttraceAssetName
     Save-EcsVerifiedDownload -Uri $nexttraceAssetUrl -Sha256 $nexttraceExpectedSha256 -Destination $nexttraceDownload -Description 'official NextTrace Tiny Windows AMD64 release asset'
-    $nexttraceDownloadedSha256 = $nexttraceExpectedSha256
 
     # The pinned checkout is used only for the upstream license text. The
     # packaged executable always comes from the verified official release asset.
@@ -707,14 +700,14 @@ $($objdumpCommand) --version | sed -n '1p'
     }
 
     $licenseRoot = Join-Path $stage 'LICENSES'
-    Copy-EcsLicense (Join-Path $licenseRoot 'ZSTD-LICENSE') @((Join-Path $context.Sources['zstd'] 'LICENSE'))
-    Copy-EcsLicense (Join-Path $licenseRoot 'ZSTD-COPYING') @((Join-Path $context.Sources['zstd'] 'COPYING'))
-    Copy-EcsLicense (Join-Path $licenseRoot 'NPB-README.txt') @((Join-Path $context.Sources['npb'] 'README'))
+    Copy-EcsLicense (Join-Path $licenseRoot 'ZSTD-LICENSE') (Join-Path $context.Sources['zstd'] 'LICENSE')
+    Copy-EcsLicense (Join-Path $licenseRoot 'ZSTD-COPYING') (Join-Path $context.Sources['zstd'] 'COPYING')
+    Copy-EcsLicense (Join-Path $licenseRoot 'NPB-README.txt') (Join-Path $context.Sources['npb'] 'README')
     $npbLicense = Join-Path $licenseRoot 'NPB-LICENSE.txt'
     Get-Content -LiteralPath (Join-Path $context.Sources['npb'] 'NPB3.4-OMP\EP\ep.f90') -TotalCount 31 | Set-Content -LiteralPath $npbLicense -Encoding ascii
-    Copy-EcsLicense (Join-Path $licenseRoot 'OPENSSL-LICENSE.txt') @((Join-Path $context.Sources['openssl'] 'LICENSE.txt'))
-    Copy-EcsLicense (Join-Path $licenseRoot 'FIO-COPYING') @((Join-Path $context.Sources['fio'] 'COPYING'))
-    Copy-EcsLicense (Join-Path $licenseRoot 'NEXTTRACE-LICENSE') @((Join-Path $context.Sources['nexttrace'] 'LICENSE'))
+    Copy-EcsLicense (Join-Path $licenseRoot 'OPENSSL-LICENSE.txt') (Join-Path $context.Sources['openssl'] 'LICENSE.txt')
+    Copy-EcsLicense (Join-Path $licenseRoot 'FIO-COPYING') (Join-Path $context.Sources['fio'] 'COPYING')
+    Copy-EcsLicense (Join-Path $licenseRoot 'NEXTTRACE-LICENSE') (Join-Path $context.Sources['nexttrace'] 'LICENSE')
     $streamLicense = Join-Path $licenseRoot 'STREAM-LICENSE.txt'
     $streamHeader = Get-Content -LiteralPath $streamSource
     $headerEnd = [Array]::IndexOf([string[]]$streamHeader, ' */')
@@ -743,7 +736,6 @@ $($objdumpCommand) --version | sed -n '1p'
     foreach ($name in $windowToolNames) {
         if ($name -eq 'nexttrace-tiny') {
             $nexttracePeFacts = $peFactsByTool[$name]
-            $nexttracePackagedSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $context.Binaries[$name]).Hash.ToLowerInvariant()
             $nexttraceManifestParameters = [ordered]@{
                 repository = [string]$nexttraceTool.repository
                 tag = [string]$nexttraceTool.tag
@@ -752,10 +744,6 @@ $($objdumpCommand) --version | sed -n '1p'
                 source_asset = $nexttraceAssetName
                 asset_pattern = $nexttraceAssetPattern
                 source_sha256 = $nexttraceExpectedSha256
-                original_sha256 = $nexttraceDownloadedSha256
-                upstream_sha256 = $nexttraceDownloadedSha256
-                binary_sha256 = $nexttracePackagedSha256
-                packaged_sha256 = $nexttracePackagedSha256
                 provenance = 'upstream official release binary'
                 source_mode = 'verified-upstream-prebuilt'
                 pe_machine = [string]$nexttracePeFacts['pe_machine']
@@ -780,7 +768,7 @@ $($objdumpCommand) --version | sed -n '1p'
             }
             continue
         }
-        $manifestTool = New-EcsManifestTool -Name $name -Tool $context.Tools[$name] -Fact $context.BuildFacts[$name] -BinaryPath $context.Binaries[$name] -EnabledFeatures $featureMap[$name] -DisabledFeatures $disabledMap[$name] -License ([string]$context.BuildFacts[$name]['license']) -DependencyAllowlist $allowlist -PeFacts $peFactsByTool[$name]
+        $manifestTool = New-EcsManifestTool -Name $name -Tool $context.Tools[$name] -Fact $context.BuildFacts[$name] -EnabledFeatures $featureMap[$name] -DisabledFeatures $disabledMap[$name] -License ([string]$context.BuildFacts[$name]['license']) -DependencyAllowlist $allowlist -PeFacts $peFactsByTool[$name]
         $manifestTools += $manifestTool
     }
     $manifest = [ordered]@{

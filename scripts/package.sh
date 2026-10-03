@@ -57,11 +57,19 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 repo_root=$ECS_REPO_ROOT
 dist_dir="$repo_root/dist"
-source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" show -s --format=%ct HEAD 2>/dev/null || date -u +%s)}"
-if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
-  echo "SOURCE_DATE_EPOCH must be an integer" >&2
+
+die() {
+  echo "ecs-tools: $*" >&2
   exit 1
+}
+
+if [[ -n "${SOURCE_DATE_EPOCH:-}" ]]; then
+  source_date_epoch=$SOURCE_DATE_EPOCH
+else
+  source_date_epoch=$(git -C "$repo_root" show -s --format=%ct HEAD) ||
+    die "could not determine Git commit timestamp for reproducible archives"
 fi
+[[ "$source_date_epoch" =~ ^[0-9]+$ ]] || die "SOURCE_DATE_EPOCH must be an integer"
 if [[ -n "$tools_stage_root" && "$tools_stage_root" != /* ]]; then
   tools_stage_root="$repo_root/$tools_stage_root"
 fi
@@ -69,21 +77,15 @@ if [[ -n "$binaries_dir" && "$binaries_dir" != /* ]]; then
   binaries_dir="$repo_root/$binaries_dir"
 fi
 
-die() {
-  echo "ecs-tools: $*" >&2
-  exit 1
-}
-
 zip_stage() {
   local archive=$1 stage=$2
   shift 2
-  if command -v zip >/dev/null 2>&1; then
-    (cd "$stage" && zip -X -q -r "$archive" "$@")
-  elif command -v 7z >/dev/null 2>&1; then
-    (cd "$stage" && 7z a -bd -mtc=off -tzip "$archive" "$@" >/dev/null)
-  else
-    die "Windows ZIP packaging requires zip or 7z"
-  fi
+  command -v zip >/dev/null 2>&1 || die "Windows ZIP packaging requires zip"
+  local member
+  for member in "$@"; do
+    find "$stage/$member" -exec touch -h -d "@$source_date_epoch" -- {} +
+  done
+  (cd "$stage" && TZ=UTC zip -X -o -q -r "$archive" "$@")
 }
 
 # The default stays the seven Linux targets so an unqualified local packaging
@@ -117,6 +119,8 @@ else
     done
   fi
 fi
+
+command -v sha256sum >/dev/null 2>&1 || die "checksums require sha256sum"
 
 temp_stages=()
 new_temp_stage_path=""
@@ -259,11 +263,7 @@ fi
 
 (
   cd "$dist_dir"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "${assets[@]}" > checksums.txt
-  else
-    shasum -a 256 "${assets[@]}" > checksums.txt
-  fi
+  sha256sum "${assets[@]}" > checksums.txt
 )
 
 echo "release assets written to $dist_dir"

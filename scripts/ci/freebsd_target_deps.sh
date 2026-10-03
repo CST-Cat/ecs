@@ -100,7 +100,7 @@ fi
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
-command -v tar >/dev/null 2>&1 || die "tar is required"
+command -v bsdtar >/dev/null 2>&1 || die "bsdtar is required (install libarchive-tools on Ubuntu)"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
 mkdir -p "$work_dir" "$prefix"
@@ -127,31 +127,30 @@ for encoded in "${packages[@]}"; do
   esac
 
   archive="$work_dir/$asset"
-  if [[ -s "$archive" ]] && [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$sha" ]]; then
+  if [[ -e "$archive" || -L "$archive" ]]; then
+    if actual_output=$(sha256sum "$archive"); then
+      actual=${actual_output%%[[:space:]]*}
+    else
+      die "cannot compute SHA256 for cached package $asset"
+    fi
+    [[ "$actual" == "$sha" ]] ||
+      die "cached package SHA256 mismatch for $asset: expected=$sha actual=$actual"
     echo "freebsd-target-deps: reusing verified $asset" >&2
   else
-    rm -f "$archive"
     echo "freebsd-target-deps: downloading $asset" >&2
     curl -fsSL --retry 4 --retry-delay 2 -o "$archive" "$url"
-    actual=$(sha256sum "$archive" | awk '{print $1}')
+    if actual_output=$(sha256sum "$archive"); then
+      actual=${actual_output%%[[:space:]]*}
+    else
+      die "cannot compute SHA256 for downloaded package $asset"
+    fi
     [[ "$actual" == "$sha" ]] ||
       die "SHA256 mismatch for $asset: expected=$sha actual=$actual"
   fi
 
   echo "freebsd-target-deps: extracting $name $version into $prefix" >&2
-  # FreeBSD .pkg is a tar.zst (or legacy txz). Prefer bsdtar which handles both.
-  if command -v bsdtar >/dev/null 2>&1; then
-    bsdtar -x -f "$archive" -C "$prefix"
-  else
-    # Try zstd+tar; fall back to xz tar.
-    if tar --use-compress-program=unzstd -xf "$archive" -C "$prefix" 2>/dev/null; then
-      :
-    elif tar -xJf "$archive" -C "$prefix" 2>/dev/null; then
-      :
-    else
-      die "cannot extract FreeBSD package $asset; install bsdtar or zstd"
-    fi
-  fi
+  # FreeBSD .pkg archives are handled by the canonical libarchive extractor.
+  bsdtar -x -f "$archive" -C "$prefix"
 done
 
 # Target prefix must expose luajit and ck to pkg-config for sysbench.

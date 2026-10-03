@@ -265,6 +265,7 @@ ecs --config ecs.json
 ## 工具与平台边界
 
 标准 `run.sh` 每次都为选中的模块准备当前架构的冻结 `ecs-tools` 工具。路由与回程在 Linux 上使用固定 NextTrace Tiny；FreeBSD 改用 base-system 的 `/sbin/ping`、`/usr/sbin/traceroute`，不从工具包下载特权网络程序，FreeBSD 的 `ecs-tools` 归档也不含 `ping` 与 `nexttrace-tiny`。Ookla 只有 Linux 有官方客户端，FreeBSD 上选中 `ookla` 会直接失败。工具包准备失败时直接终止，不复用用户 `PATH` 中的同名程序或生成降级报告。
+Linux 下载使用 `curl` 和 `sha256sum`；FreeBSD 用户入口下载要求 `/usr/bin/fetch` 与 `sha256 -q`。zstd 语料只使用显式设置的 `ECS_ZSTD_CORPUS` 路径，不搜索宿主目录。
 
 ### Windows Server 2022+ x64
 

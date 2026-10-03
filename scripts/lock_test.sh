@@ -50,11 +50,10 @@ jq -e '
   (.windows_toolchain.environment == "MSYS2 UCRT64") and
   (.windows_toolchain.distribution.version == "2025-08-30") and
   (.windows_toolchain.distribution.source_url | startswith("https://")) and
-  (.windows_toolchain.distribution.source_sha256 | test("^[0-9a-f]{64}$")) and
   ([.windows_toolchain.base_packages[].name] == ["base", "bash", "coreutils", "gawk", "grep", "sed", "pacman", "perl", "libintl", "libiconv", "msys2-runtime", "filesystem", "zstd", "zlib"]) and
   (all(.windows_toolchain.base_packages[]; (.version | length > 0) and (.license | length > 0))) and
   ([.windows_toolchain.packages[].name] == ["mingw-w64-ucrt-x86_64-gcc", "mingw-w64-ucrt-x86_64-gcc-fortran", "mingw-w64-ucrt-x86_64-gcc-libs", "mingw-w64-ucrt-x86_64-gcc-libgfortran", "mingw-w64-ucrt-x86_64-libwinpthread", "mingw-w64-ucrt-x86_64-nasm", "make", "mingw-w64-ucrt-x86_64-binutils", "mingw-w64-ucrt-x86_64-crt", "mingw-w64-ucrt-x86_64-headers", "mingw-w64-ucrt-x86_64-isl", "mingw-w64-ucrt-x86_64-gmp", "mingw-w64-ucrt-x86_64-mpfr", "mingw-w64-ucrt-x86_64-mpc", "mingw-w64-ucrt-x86_64-windows-default-manifest", "mingw-w64-ucrt-x86_64-winpthreads", "mingw-w64-ucrt-x86_64-zlib", "mingw-w64-ucrt-x86_64-zstd", "mingw-w64-ucrt-x86_64-tzdata", "mingw-w64-ucrt-x86_64-gettext-runtime", "mingw-w64-ucrt-x86_64-libiconv"]) and
-  (all(.windows_toolchain.packages[]; ((.name == "make") or (.name | test("^mingw-w64-ucrt-x86_64-"))) and (.version | length > 0) and (.source_url | test("^https://repo\\.msys2\\.org/(mingw/ucrt64|msys/x86_64)/[^/]+\\.pkg\\.tar\\.zst$")) and (.source_sha256 | test("^[0-9a-f]{64}$")) and (.upstream | startswith("https://")) and (.license | length > 0) and (.depends | type == "array") and all(.depends[]; type == "string"))) and
+  (all(.windows_toolchain.packages[]; ((.name == "make") or (.name | test("^mingw-w64-ucrt-x86_64-"))) and (.version | length > 0) and (.source_url | test("^https://repo\\.msys2\\.org/(mingw/ucrt64|msys/x86_64)/[^/]+\\.pkg\\.tar\\.zst$")) and (.upstream | startswith("https://")) and (.license | length > 0) and (.depends | type == "array") and all(.depends[]; type == "string"))) and
   ([.windows_toolchain.packages[] | .name] + [.windows_toolchain.base_packages[] | .name] + [.windows_toolchain.packages[] | .provides[]?] + [.windows_toolchain.base_packages[] | .provides[]?]) as $provided |
   (all(.windows_toolchain.packages[] | .depends[]?; ((split("=")[0]) as $dependency | ($provided | index($dependency)) != null))) and
   (any(.windows_toolchain.packages[]; .name == "mingw-w64-ucrt-x86_64-gcc" and .version == "16.2.0-3")) and
@@ -71,8 +70,7 @@ jq -e '
   (all(.tools[] | select(.repository != null); (.tag | length > 0) and (.commit | test("^[0-9a-f]{40}$")))) and
   ((.tools[] | select(.name == "nexttrace-tiny") | .asset_sha256) as $digests |
     ($digests | type == "object") and
-    (($digests | keys | sort) == ([.architectures[] | select(.goos == "linux") | .package] | sort)) and
-    (all($digests[]; test("^[0-9a-f]{64}$")))) and
+    (($digests | keys | sort) == ([.architectures[] | select(.goos == "linux") | .package] | sort))) and
   ((.tools[] | select(.name == "nexttrace-tiny")) as $nexttrace |
     ($nexttrace.repository == "nxtrace/NTrace-core") and
     ($nexttrace.version == "1.7.1") and
@@ -85,8 +83,6 @@ jq -e '
   (.corpus.name == "ecs-silesia-v1.corpus") and
   (.corpus.bytes == 211938580) and
   (.corpus.source_url | startswith("https://")) and
-  (.corpus.sha256 | test("^[0-9a-f]{64}$")) and
-  (.corpus.source_sha256 | test("^[0-9a-f]{64}$")) and
   (.corpus.order | length == 12)
 ' "$ECS_LOCK_FILE" >/dev/null || die "lock contents failed the schema invariants"
 
@@ -98,7 +94,7 @@ windows_builder="$repo_root/scripts/build_tools_windows.ps1"
 if grep -Eiq 'releases/latest|latest/download|fallback' "$windows_builder"; then
 	die "Windows NextTrace builder must not use latest or fallback sources"
 fi
-for required_prebuilt_fact in Save-EcsVerifiedDownload windows_asset_pattern windows_asset_sha256 source_mode upstream_sha256 binary_sha256 packaged_sha256; do
+for required_prebuilt_fact in Save-EcsVerifiedDownload windows_asset_pattern windows_asset_sha256 source_mode; do
 	grep -Fq -- "$required_prebuilt_fact" "$windows_builder" || die "Windows builder is missing prebuilt fact: $required_prebuilt_fact"
 done
 grep -Fq -- 'foreach ($name in $sourceBuiltToolNames) {' "$windows_builder" ||

@@ -60,7 +60,7 @@ work_dir=""
 print_lock=0
 from_source=0
 acquire_only=0
-jobs="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
+jobs="${JOBS:-}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --target)
@@ -157,6 +157,14 @@ else
   sdk_mode="prebuilt"
 fi
 
+if [[ -n "$jobs" ]]; then
+  [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs and JOBS must be a positive integer"
+elif [[ "$sdk_mode" == "from-source" ]]; then
+  command -v nproc >/dev/null 2>&1 || die "nproc is required to determine the default job count"
+  jobs=$(nproc) || die "nproc could not determine the default job count"
+  [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "nproc returned an invalid job count: $jobs"
+fi
+
 [[ -n "$prefix" ]] || {
   usage
   die "--prefix is required"
@@ -171,13 +179,13 @@ if [[ "$acquire_only" -eq 1 ]]; then
   required_commands=(curl sha256sum tar)
 else
   required_commands=(curl sha256sum tar make gcc g++ flex bison file strip readelf python3)
+  if [[ "$sdk_mode" == "from-source" ]]; then
+    required_commands+=(makeinfo)
+  fi
 fi
 for cmd in "${required_commands[@]}"; do
   command -v "$cmd" >/dev/null 2>&1 || die "required command is missing: $cmd"
 done
-if ! command -v makeinfo >/dev/null 2>&1; then
-  export MAKEINFO=true
-fi
 
 export LC_ALL=C
 export TZ=UTC
@@ -193,14 +201,24 @@ sysroot="$work_dir/sysroot"
 
 fetch_verify() {
   local url=$1 sha=$2 dest=$3
-  if [[ -s "$dest" && "$(sha256sum "$dest" | awk '{print $1}')" == "$sha" ]]; then
+  local actual_output actual
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    if actual_output=$(sha256sum "$dest"); then
+      actual=${actual_output%%[[:space:]]*}
+    else
+      die "cannot compute SHA256 for cached SDK input $dest"
+    fi
+    [[ "$actual" == "$sha" ]] ||
+      die "cached SDK input SHA256 mismatch for $dest: expected=$sha actual=$actual"
     return 0
   fi
-  rm -f "$dest"
   echo "freebsd-gnu-openmp-sdk: downloading $(basename "$dest")" >&2
   curl -fL --retry 4 --retry-delay 2 --connect-timeout 30 -o "$dest" "$url"
-  local actual
-  actual=$(sha256sum "$dest" | awk '{print $1}')
+  if actual_output=$(sha256sum "$dest"); then
+    actual=${actual_output%%[[:space:]]*}
+  else
+    die "cannot compute SHA256 for downloaded SDK input $dest"
+  fi
   [[ "$actual" == "$sha" ]] || die "SHA256 mismatch for $url expected=$sha actual=$actual"
 }
 
@@ -398,7 +416,7 @@ else
   mkdir -p "$build_root/binutils"
   (
     cd "$build_root/binutils"
-    MAKEINFO=true "$src_root/binutils-$binutils_version/configure" \
+    "$src_root/binutils-$binutils_version/configure" \
       --target="$gnu_triple" \
       --prefix="$prefix" \
       --with-sysroot="$sysroot" \
@@ -406,8 +424,8 @@ else
       --disable-werror \
       --disable-multilib \
       --with-native-system-header-dir=/include
-    MAKEINFO=true make -j"$jobs"
-    MAKEINFO=true make install
+    make -j"$jobs"
+    make install
   )
 
   echo "freebsd-gnu-openmp-sdk: building gcc (c,fortran only)" >&2
@@ -442,8 +460,8 @@ else
     # probe fails on aarch64, so upstream does not build libquadmath for
     # arm64 and its all/install are no-ops there. languages=c,fortran keeps
     # libstdc++ out of the graph.
-    MAKEINFO=true make -j"$jobs" all
-    MAKEINFO=true make install
+    make -j"$jobs" all
+    make install
   )
 
   # Stage 5 (contract 5.2): drop exactly the two documentation directories

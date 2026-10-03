@@ -369,9 +369,37 @@ done
 [[ ! -e "$normal_logs/unexpected-network" ]] || fail "valid fixture attempted unexpected network access"
 assert_empty_dir "$normal_tmp" "valid comparison"
 
+# Linux downloads require curl even when a wget executable is present.
+wget_only_path="$test_root/wget-only-path"
+mkdir -p "$wget_only_path"
+for command_name in sh uname tr mkdir mktemp rm awk tar chmod; do
+  target=$(command -v "$command_name") || fail "required command is missing: $command_name"
+  ln -s "$target" "$wget_only_path/$command_name"
+done
+ln -s "$fixture_bin/wget" "$wget_only_path/wget"
+wget_only_tmp="$test_root/wget-only-tmp"
+wget_only_logs="$fixture_logs/wget-only"
+wget_only_output="$test_root/wget-only-output"
+mkdir -p "$wget_only_tmp" "$wget_only_logs"
+set +e
+ECS_LANG=en TMPDIR="$wget_only_tmp" PATH="$wget_only_path" \
+  ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
+  ECS_TEST_LOG_ROOT="$wget_only_logs" ECS_TEST_RELEASE_ROOT="$fixture_release" \
+  sh "$repo_root/compare.sh" --output "$wget_only_output" "$report_one" "$report_two" \
+  >"$test_root/wget-only.stdout" 2>"$test_root/wget-only.stderr"
+wget_only_status=$?
+set -e
+[[ "$wget_only_status" -eq 1 ]] || fail "wget-only compare returned $wget_only_status instead of 1"
+grep -F 'curl is required for downloads on Linux' "$test_root/wget-only.stderr" >/dev/null ||
+  fail "wget-only compare did not identify missing Linux curl"
+[[ ! -e "$wget_only_logs/unexpected-network" ]] || fail "compare invoked wget without Linux curl"
+[[ ! -e "$wget_only_logs/fetch.log" ]] || fail "wget-only compare attempted a fixture download"
+assert_empty_dir "$wget_only_tmp" "wget-only compare rejection"
+
 # compare.sh derives the release asset name from uname -s, so the FreeBSD entry
-# is exercised with a stub uname ahead of the real one. This harness runs on
-# Linux; compare.sh needs the OS token only for the asset name.
+# is exercised with a stub uname ahead of the real one. This Linux harness
+# confirms the fixed platform entry rejects without FreeBSD's canonical fetch;
+# native FreeBSD transport is exercised by the artifact E2E.
 freebsd_stub_bin="$test_root/freebsd-stub-bin"
 mkdir -p "$freebsd_stub_bin"
 cat >"$freebsd_stub_bin/uname" <<EOF
@@ -383,37 +411,34 @@ case "\$1" in
 esac
 EOF
 chmod 0755 "$freebsd_stub_bin/uname"
-freebsd_path="$freebsd_stub_bin:$fixture_bin:$PATH"
-
-freebsd_release="$test_root/freebsd-release"
-freebsd_asset="ecs_freebsd_${fixture_arch}.tar.gz"
-mkdir -p "$freebsd_release/archive"
-cp "$fixture_release/archive/ecs" "$freebsd_release/archive/ecs"
-tar -czf "$freebsd_release/$freebsd_asset" -C "$freebsd_release/archive" ecs
-printf '%s  %s\n' "$(sha256sum "$freebsd_release/$freebsd_asset" | awk '{print $1}')" "$freebsd_asset" >"$freebsd_release/checksums.txt"
+ln -s "$fixture_bin/curl" "$freebsd_stub_bin/curl"
+# The system timeout is deliberately absent so a native /usr/bin/fetch, if
+# present, cannot leave this local fixture and contact the network.
+freebsd_path="$freebsd_stub_bin:$wget_only_path"
 
 freebsd_tmp="$test_root/freebsd-tmp"
 freebsd_logs="$fixture_logs/freebsd"
 freebsd_output="$test_root/freebsd-output"
 mkdir -p "$freebsd_tmp" "$freebsd_logs"
-if ! ECS_LANG=en TMPDIR="$freebsd_tmp" PATH="$freebsd_path" \
+set +e
+ECS_LANG=en TMPDIR="$freebsd_tmp" PATH="$freebsd_path" \
     ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
-    ECS_TEST_LOG_ROOT="$freebsd_logs" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
-    ECS_TEST_ASSET="$freebsd_asset" \
+    ECS_TEST_LOG_ROOT="$freebsd_logs" \
     sh "$repo_root/compare.sh" --output "$freebsd_output" "$report_one" "$report_two" \
-    >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"; then
-  fail "FreeBSD compare fixture returned a failure: $(<"$test_root/freebsd.stderr")"
+    >"$test_root/freebsd.stdout" 2>"$test_root/freebsd.stderr"
+freebsd_status=$?
+set -e
+[[ "$freebsd_status" -eq 1 ]] || fail "FreeBSD fixture without canonical transport returned $freebsd_status instead of 1"
+if [ -x /usr/bin/fetch ]; then
+  grep -F 'FreeBSD fetch requires timeout' "$test_root/freebsd.stderr" >/dev/null ||
+    fail "FreeBSD fixture did not preserve its timeout requirement"
+else
+  grep -F 'FreeBSD downloads require /usr/bin/fetch' "$test_root/freebsd.stderr" >/dev/null ||
+    fail "FreeBSD fixture did not identify missing canonical fetch"
 fi
-[[ -f "$freebsd_output/comparison.json" ]] || fail "FreeBSD fixture did not execute fake ecs"
-mapfile -t freebsd_fetches <"$freebsd_logs/fetch.log"
-expected_freebsd_fetches=("$release_url/$freebsd_asset" "$release_url/checksums.txt")
-[[ "${#freebsd_fetches[@]}" -eq "${#expected_freebsd_fetches[@]}" ]] ||
-  fail "FreeBSD fixture fetched an unexpected number of URLs"
-for i in "${!expected_freebsd_fetches[@]}"; do
-  [[ "${freebsd_fetches[$i]}" == "${expected_freebsd_fetches[$i]}" ]] ||
-    fail "FreeBSD fixture fetch $i changed: ${freebsd_fetches[$i]}"
-done
+[[ ! -e "$freebsd_logs/fetch.log" ]] || fail "FreeBSD fixture used curl or wget as a fallback"
 [[ ! -e "$freebsd_logs/unexpected-network" ]] || fail "FreeBSD fixture attempted unexpected network access"
+[[ ! -e "$freebsd_output/comparison.json" ]] || fail "FreeBSD fixture ran ecs without canonical fetch"
 assert_empty_dir "$freebsd_tmp" "FreeBSD comparison"
 
 # The tools lock carries only freebsd_amd64 and freebsd_arm64, so compare.sh
@@ -435,8 +460,7 @@ mkdir -p "$freebsd_bad_logs"
 set +e
 ECS_LANG=en TMPDIR="$test_root/freebsd-bad-tmp" PATH="$freebsd_bad_stub_bin:$fixture_bin:$PATH" \
   ECS_REPOSITORY=example/ecs ECS_VERSION=v-test \
-  ECS_TEST_LOG_ROOT="$freebsd_bad_logs" ECS_TEST_RELEASE_ROOT="$freebsd_release" \
-  ECS_TEST_ASSET="$freebsd_asset" \
+  ECS_TEST_LOG_ROOT="$freebsd_bad_logs" \
   sh "$repo_root/compare.sh" --output "$test_root/freebsd-bad-output" "$report_one" "$report_two" \
   >"$test_root/freebsd-bad.stdout" 2>"$test_root/freebsd-bad.stderr"
 freebsd_bad_status=$?
