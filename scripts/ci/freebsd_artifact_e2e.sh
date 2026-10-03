@@ -395,14 +395,19 @@ case_c_stderr="$scratch/case-c.stderr"
 set +e
 ECS_LANG=en ECS_REPOSITORY="$repo_slug" ECS_VERSION="$ecs_version" \
   ECS_AUTO_DEPS=1 TMPDIR="$case_c_tmp" \
-  PATH="$shim_dir:$PATH" ECS_ARTIFACT_E2E_LOG="$case_c_log" \
+  PATH="$shim_dir:$fetch_only_path:$PATH" ECS_ARTIFACT_E2E_LOG="$case_c_log" \
   sh "$repo_root/run.sh" --only ookla --exposure thirdparty --yes \
   >"$scratch/case-c.stdout" 2>"$case_c_stderr"
 case_c_status=$?
 set -e
-[[ "$case_c_status" -ne 0 ]] || fail "case C accepted an Ookla run on FreeBSD"
-grep -F 'Ookla speedtest is not available on FreeBSD' "$case_c_stderr" >/dev/null ||
+[[ "$case_c_status" -ne 0 ]] || {
+  cat "$case_c_stderr" >&2
+  fail "case C accepted an Ookla run on FreeBSD"
+}
+grep -F 'Ookla speedtest is not available on FreeBSD' "$case_c_stderr" >/dev/null || {
+  cat "$case_c_stderr" >&2
   fail "case C did not fail closed with the FreeBSD Ookla message"
+}
 [[ ! -e "$case_c_log/unexpected-network" ]] || fail "case C reached unexpected network access"
 if find "$case_c_tmp" -mindepth 1 -maxdepth 1 -name 'ecs-report-*' -print -quit | grep -q .; then
   fail "case C produced a report instead of stopping"
