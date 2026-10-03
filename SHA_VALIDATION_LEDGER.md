@@ -1,12 +1,36 @@
 # SHA 校验精简账本：当前代码与基线历史
 
-本账本“当前代码”计数针对基线 commit `93b3b4c3435752aa5d9f00f6e62e463757d8040e` 之上本轮已验收的 Phase 1–4 改动，按源表达式静态展开，没有使用 instrumentation。Phase 5A 更新文档计数，Phase 5B 本地验收与 Phase 6 Actions rehearsal 尚待执行。下面列出的 Actions 运行来自明确标出的旧 commit，只是历史证据，不能证明本轮代码。正常下载路径按首次成功冷下载统计；仅下载失败可按原有界策略重试，成功下载后的 SHA mismatch 与 SHA 读取错误立即失败。字段比较、格式守卫、文件 SHA 读取和摘要生成分开；条件路径另列，不编造未观察的缓存、SDK 树或宿主状态。
+本账本“当前代码”计数针对基线 commit `93b3b4c3435752aa5d9f00f6e62e463757d8040e` 之上本轮已验收的 Phase 1–4 改动，按源表达式静态展开，没有使用 instrumentation。Phase 5A 更新文档计数；Phase 5B 的 `make check` 与 `go test ./...` 在提交前工作树上各执行一次并通过，该工作树内容随后记入 commit `c623729c7d8bdad3cc0c084c302fbebf039319be`。Phase 6 本轮 Actions 结果见下节，逐条注明 run 的冻结 commit。正常下载路径按首次成功冷下载统计；仅下载失败可按原有界策略重试，成功下载后的 SHA mismatch 与 SHA 读取错误立即失败。字段比较、格式守卫、文件 SHA 读取和摘要生成分开；条件路径另列，不编造未观察的缓存、SDK 树或宿主状态。
 
 当前账本保留完整的本轮逐次事件表；原始 3,544 行账本保留在文末，作为 commit `64f101e9654a96f528ac5933dbf25c80a1f35d87` 的**历史快照**，其行数不能解释为本轮代码的检查数或一次 workflow 实测。历史链接均固定指向该 commit。
 
+## 本轮本地与 GitHub Actions 验证（2026-10-03）
+
+| 验证 | run / HEAD | 结果 |
+|---|---|---|
+| 本地 Phase 5B | 提交前工作树，随后记入 commit `c623729c7d8bdad3cc0c084c302fbebf039319be` | Go `1.27.1 linux/arm64`；`make check` 与 `go test ./...` 各运行一次并通过；完整输出见忽略日志 `.ci/sha-simplification-round2/phase5b-validation.log`。 |
+| CI | [run 37101846911](https://github.com/CST-Cat/ecs/actions/runs/37101846911)；commit `c623729c7d8bdad3cc0c084c302fbebf039319be` | `workflow_dispatch`；21/21 jobs 成功。 |
+| Bundle 首轮 | [run 37103232343](https://github.com/CST-Cat/ecs/actions/runs/37103232343)；commit `c623729c7d8bdad3cc0c084c302fbebf039319be` | 仅 FreeBSD artifact E2E 两架构的 Case C 失败：测试 PATH 未包含已有 `fetch_only_path`，而生产 FreeBSD 下载使用绝对路径 `/usr/bin/fetch`；Case A/B 通过，其余已执行 jobs 成功；依赖失败的 assemble/rehearsal 跳过。 |
+| Bundle 修复后 | [run 37104603680](https://github.com/CST-Cat/ecs/actions/runs/37104603680)；commit `74f05840aa5369fd1f17be03ac80cdfcae785e40` | 30 jobs 成功，`publish` 跳过。FreeBSD AMD64/ARM64 各 8/8 工具与 artifact E2E Case A–E 全部通过；Windows 双 runner E2E、十目标 assemble 与 check-only 验收通过。 |
+| Release rehearsal | [run 37105988711](https://github.com/CST-Cat/ecs/actions/runs/37105988711)；commit `74f05840aa5369fd1f17be03ac80cdfcae785e40` | 15 jobs 成功，`publish` 跳过；冻结 `version=dev`，十目标构建确认 Go `1.27.1` 与 revision，check-only 校验 11 个资产。 |
+| FreeBSD SDK rehearsal | [run 37106188849](https://github.com/CST-Cat/ecs/actions/runs/37106188849)；commit `74f05840aa5369fd1f17be03ac80cdfcae785e40` | 5 jobs 成功，`publish` 跳过；AMD64 与 ARM64 两目标 from-source 构建、host-strip/tree invariants、driver/consumer 与 package 检查通过。 |
+
+首轮 Bundle 后仅修复 E2E 测试夹具 PATH 并同步账本，提交 `74f05840aa5369fd1f17be03ac80cdfcae785e40` 未修改生产代码；因此未在该提交上重跑 CI，专用 Bundle artifact E2E、Release 与 SDK rehearsal 分别按表验证。表中 run 使用各自显示的 commit，不代表四条成功结果来自同一 SHA。
+
+两次 Windows runner 的公网 IPv4 均为 0 个 responding hops、标记为 `not-testable`；缺少 `::/0` 默认路由，因此公网 IPv6 未测。真实本地 runtime、integration 与 HTTPS bootstrap/install 检查通过；未声称这些结果证明普通用户 token 权限行为。所有 rehearsal 的 `publish` 均跳过，未创建 tag/Release，未改变软件版本、`tools/BUNDLE` 或 lock 文件，也未做用户下载验证。
+
+SDK 两目标 runner 的 tree verifier 记录下列 runner-specific observation；它们不属于固定 SHA 预算：
+
+| Target | Manifest entries `N_t` | Host ELF paths / unique host inodes | Host debug bytes after strip | Additional observation |
+|---|---:|---:|---:|---|
+| FreeBSD AMD64 | 903 | 44 / 32 | 0 | `N_t` 包含 symlink。 |
+| FreeBSD ARM64 | 736 | 44 / 32 | 0 | verifier 的 all-ELF debug-byte sum 从 770,072,982 降至 828；剩余 828 字节属于允许保留 debug 内容的 non-host target entries。 |
+
+manifest entry 总数包含 symlink，不能当作 regular-file 集合 `R_t`；host ELF 路径/host inode 观测也不提供 all-ELF inode 数 `E_t` 或 section 数 `Q_t`。原有 `R_t/H_t/E_t/Q_t` 参数公式保留，不把这些 runner 观测代入固定行数。host-strip invariant 强制 host ELF debug 字节为零；ARM64 的 all-ELF 总和不表示整个 SDK tree 的 debug 字节为零。
+
 ## 此前 GitHub Actions 彩排证据（旧 commit；非本轮验证）
 
-以下旧运行使用三个不同的冻结 commit；它们分别证明对应旧 commit 上的 workflow 执行结果，不是同一 HEAD 上的一次合并运行，也没有对 SHA 事件次数做 instrumentation。本轮 Phase 6 Actions 状态仍为 PENDING。
+以下旧运行使用三个不同的冻结 commit；它们分别证明对应旧 commit 上的 workflow 执行结果，不是同一 HEAD 上的一次合并运行，也没有对 SHA 事件次数做 instrumentation。本轮验证结果见上节。
 
 | Workflow 彩排 | 冻结 commit | 结果与实际覆盖 |
 |---|---|---|
@@ -16,7 +40,7 @@
 
 三条链的必要修复均不改变 SHA 事件口径。6A 首次 CI 失败是两项非摘要条件：PowerShell 将原本不存在的进程环境变量设为 null 后仍留下空变量，且 FreeBSD 250ms deadline 可能早于首个 hop 的 stdout；修复保留精确环境恢复，只移除不成立的 deadline/stdout 必然关系。6B 首次 Bundle assemble 失败是单件 `pattern` 下载将 artifact 内容落到根目录，而 normalizer 需要命名子目录；修复使用精确 artifact 名称和显式路径。Release 前一次 [run 37012280094](https://github.com/CST-Cat/ecs/actions/runs/37012280094) 因 freeze 把 dispatch commit 错误地与 `main` 比较而未输出 SHA/version，`tee` 又吞掉脚本失败，导致 assemble 收到空 `VERSION`。最终版本仅对正式 tag push 比较 `main`，并让 freeze 管道传播失败；这些修复只恢复正确的彩排路径，不改变账本中的 SHA 比较事件。
 
-未验证边界：CI/Bundle Windows runner 的公网 IPv4 仍为 0 个响应 hop，公网 IPv6 因缺少 `::/0` 路由未测；未宣称已证明普通用户 token 的权限行为。FreeBSD SDK 动态树的实际文件数未测，仍按参数公式记录。ECS Release 仅做 check-only 彩排，未创建软件 tag/Release，也未完成用户下载验证。
+历史 run 的未验证边界：CI/Bundle Windows runner 的公网 IPv4 为 0 个响应 hop，公网 IPv6 因缺少 `::/0` 路由未测；未宣称已证明普通用户 token 的权限行为。FreeBSD SDK runner 的观测与仍未观测的 `R_t/E_t/Q_t` 边界见上节；动态比较数继续按参数公式记录。ECS Release 仅做 check-only 彩排，未创建软件 tag/Release，也未完成用户下载验证。
 
 ## 当前计数总览
 
